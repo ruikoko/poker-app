@@ -2,7 +2,6 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-
 from app.routers import health, auth, import_, tournaments, hands, villains
 
 load_dotenv()
