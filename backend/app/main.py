@@ -9,18 +9,16 @@ load_dotenv()
 
 app = FastAPI(title="Poker App API", version="0.1.0")
 
-# ── CORS ─────────────────────────────────────────────────────────────────────
 allowed_origin = os.getenv("ALLOWED_ORIGIN", "http://localhost:5173")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[allowed_origin],
-    allow_credentials=True,          # necessário para cookies
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(import_.router)
