@@ -138,17 +138,17 @@ except Exception as exc:
 finally:
     conn.close()
 
-    return {
-        "import_id":     import_id,
-        "site":          detected_site,
-        "filename":      filename,
-        "status":        status,
-        "records_found": records_found,
-        "inserted":      inserted,
-        "skipped":       skipped,
-        "errors":        len(parse_errors),
-        "error_log":     parse_errors[:20],
-    }
+return {
+    "import_id":     import_id,
+    "site":          detected_site,
+    "filename":      filename,
+    "status":        status,
+    "records_found": records_found,
+    "inserted":      inserted,
+    "skipped":       skipped,
+    "errors":        len(parse_errors),
+    "error_log":     parse_errors[:20],
+}
 
 
 @router.get("/logs")
@@ -163,4 +163,4 @@ def import_logs(current_user=Depends(require_auth)):
         LIMIT 50
         """
     )
-    return list(rows)
+return list(rows)
