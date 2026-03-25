@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
 from app.parsers import winamax, ggpoker
+from app.services.entry_classifier import classify_entry
+from app.services.entry_service import create_entry
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 
@@ -83,9 +85,29 @@ async def import_file(
     current_user=Depends(require_auth)
 ):
     content = await file.read()
-    filename = file.filename or "upload"
+filename = file.filename or "upload"
 
-    detected_site = site or _detect_site(filename, content)
+content_text = content.decode("utf-8", errors="ignore")
+
+classification = classify_entry(filename, content_text)
+
+entry = create_entry(
+    source=classification["source"],
+    entry_type=classification["entry_type"],
+    site=classification.get("site"),
+    file_name=filename,
+    external_id=classification.get("external_id"),
+    raw_text=content_text,
+    raw_json=None,
+    status="new",
+    notes=None,
+    import_log_id=None,
+)
+
+entry_id = entry["id"]
+
+detected_site = site or _detect_site(filename, content)
+
     if not detected_site or detected_site not in SITE_PARSERS:
         raise HTTPException(
             status_code=400,
