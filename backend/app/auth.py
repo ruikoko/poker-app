@@ -1,41 +1,31 @@
 import os
-from datetime import datetime, timezone
-from passlib.context import CryptContext
+import bcrypt
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import Cookie, HTTPException, status
 from app.db import query, execute_returning
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 def _serializer():
     secret = os.getenv("SESSION_SECRET")
     if not secret:
-        raise RuntimeError("SESSION_SECRET não definido no .env")
+        raise RuntimeError("SESSION_SECRET não definido")
     return URLSafeTimedSerializer(secret, salt="poker-session")
 
-# ── Passwords ────────────────────────────────────────────────────────────────
-
 def hash_password(plain: str) -> str:
-    return pwd_ctx.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_ctx.verify(plain, hashed)
-
-# ── Session token ────────────────────────────────────────────────────────────
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 def create_session_token(user_id: int) -> str:
     return _serializer().dumps({"uid": user_id})
 
 def decode_session_token(token: str, max_age: int = 86400 * 7) -> dict:
-    """Lança HTTPException se token inválido ou expirado."""
     try:
         return _serializer().loads(token, max_age=max_age)
     except SignatureExpired:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão expirada")
     except BadSignature:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão inválida")
-
-# ── User helpers ─────────────────────────────────────────────────────────────
 
 def get_user_by_email(email: str):
     rows = query("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
@@ -47,10 +37,7 @@ def create_user(email: str, password: str):
         (email, hash_password(password))
     )
 
-# ── Dependency ───────────────────────────────────────────────────────────────
-
 def require_auth(session: str | None = Cookie(default=None)):
-    """FastAPI dependency — injeta em qualquer router que precise de auth."""
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autenticado")
     payload = decode_session_token(session)
