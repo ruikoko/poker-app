@@ -122,20 +122,21 @@ try:
     with conn.cursor() as cur:
         import_id = _create_log(cur, detected_site, filename, records_found)
 
-        inserted, skipped = _run_import(conn, records, import_id)
+    inserted, skipped = _run_import(conn, records, import_id)
 
-        status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
+    status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
 
     with conn.cursor() as cur:
         _update_log(cur, import_id, status, inserted, skipped, parse_errors)
 
-        conn.commit()
+    conn.commit()
 
-    except Exception as exc:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Rollback efectuado: {exc}")
-    finally:
-        conn.close()
+except Exception as exc:
+    conn.rollback()
+    raise HTTPException(status_code=500, detail=f"Rollback efectuado: {exc}")
+
+finally:
+    conn.close()
 
     return {
         "import_id":     import_id,
