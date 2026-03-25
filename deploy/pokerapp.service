@@ -1,0 +1,31 @@
+[Unit]
+Description=Poker App — FastAPI backend
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+
+WorkingDirectory=/var/www/pokerapp/backend
+EnvironmentFile=/var/www/pokerapp/backend/.env
+Environment="PATH=/var/www/pokerapp/backend/venv/bin"
+
+ExecStart=/var/www/pokerapp/backend/venv/bin/uvicorn \
+    app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --no-access-log
+
+# Reiniciar automaticamente em caso de crash
+Restart=always
+RestartSec=5
+
+# Segurança mínima
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

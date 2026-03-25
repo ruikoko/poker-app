@@ -1,0 +1,47 @@
+import { Outlet, NavLink } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
+
+const NAV = [
+  { to: '/',        label: 'Dashboard' },
+  { to: '/pnl',     label: 'P&L' },
+  { to: '/hands',   label: 'Mãos' },
+  { to: '/villains',label: 'Vilões' },
+]
+
+export default function Shell() {
+  const { user, logout } = useAuth()
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-logo">poker<span>app</span></div>
+
+        <nav>
+          {NAV.map(({ to, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/'}
+              className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+            >
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div style={{ marginTop: 'auto', padding: '0 20px' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+            {user?.email}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={logout} style={{ width: '100%' }}>
+            Sair
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
