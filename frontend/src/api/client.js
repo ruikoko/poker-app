@@ -1,4 +1,10 @@
-const BASE = '/api'
+const API_ROOT = import.meta.env.VITE_API_URL
+
+if (!API_ROOT) {
+  throw new Error('VITE_API_URL não definida no build do frontend')
+}
+
+const BASE = `${API_ROOT}/api`
 
 async function req(method, path, body) {
   const opts = {
@@ -79,9 +85,9 @@ export const imports = {
   upload: (file, site) => {
     const form = new FormData()
     form.append('file', file)
-    const url = site ? `/api/import?site=${site}` : '/api/import'
-    return fetch(url, { method: 'POST', credentials: 'include', body: form })
-      .then(r => r.json())
+    const url = site ? `${BASE}/import?site=${site}` : `${BASE}/import`
+return fetch(url, { method: 'POST', credentials: 'include', body: form })
+  .then(r => r.json())
   },
   logs: () => req('GET', '/import/logs'),
 }
