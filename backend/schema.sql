@@ -111,3 +111,89 @@ ALTER TABLE hands
     FOREIGN KEY (import_id) REFERENCES import_logs(id)
     ON DELETE SET NULL
     DEFERRABLE INITIALLY DEFERRED;
+
+CREATE TABLE IF NOT EXISTS entries (
+    id BIGSERIAL PRIMARY KEY,
+
+    source TEXT NOT NULL CHECK (
+        source IN (
+            'discord',
+            'hm',
+            'gg_backoffice',
+            'hh_text',
+            'summary',
+            'report',
+            'manual'
+        )
+    ),
+
+    entry_type TEXT NOT NULL CHECK (
+        entry_type IN (
+            'hand_history',
+            'tournament_summary',
+            'tabular_report',
+            'image',
+            'replayer_link',
+            'note',
+            'text'
+        )
+    ),
+
+    site TEXT,
+    file_name TEXT,
+    external_id TEXT,
+
+    raw_text TEXT,
+    raw_json JSONB,
+
+    status TEXT NOT NULL DEFAULT 'new' CHECK (
+        status IN ('new', 'processed', 'partial', 'failed', 'archived')
+    ),
+
+    notes TEXT,
+
+    import_log_id BIGINT REFERENCES import_logs(id) ON DELETE SET NULL,
+
+    discord_server TEXT,
+    discord_channel TEXT,
+    discord_message_id TEXT,
+    discord_message_url TEXT,
+    discord_author TEXT,
+    discord_posted_at TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
+CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(entry_type);
+CREATE INDEX IF NOT EXISTS idx_entries_site ON entries(site);
+CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status);
+CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_discord_channel ON entries(discord_server, discord_channel);
+CREATE INDEX IF NOT EXISTS idx_entries_external_id ON entries(external_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_entries_discord_message
+    ON entries(discord_message_id)
+    WHERE discord_message_id IS NOT NULL;
+
+ALTER TABLE hands
+ADD COLUMN IF NOT EXISTS entry_id BIGINT REFERENCES entries(id) ON DELETE SET NULL;
+
+ALTER TABLE hands
+ADD COLUMN IF NOT EXISTS study_state TEXT NOT NULL DEFAULT 'new' CHECK (
+    study_state IN ('new', 'review', 'studying', 'resolved')
+);
+
+ALTER TABLE hands
+ADD COLUMN IF NOT EXISTS viewed_at TIMESTAMPTZ;
+
+ALTER TABLE hands
+ADD COLUMN IF NOT EXISTS studied_at TIMESTAMPTZ;
+
+ALTER TABLE hands
+ADD COLUMN IF NOT EXISTS confidence_level TEXT CHECK (
+    confidence_level IN ('high', 'medium', 'low', 'inferred')
+);
+
+CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id);
+CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state);
