@@ -27,9 +27,9 @@ CREATE TABLE IF NOT EXISTS tournaments (
     speed       TEXT NOT NULL CHECK (speed IN ('normal','turbo','hyper')),
     currency    TEXT NOT NULL CHECK (currency IN ('€','$')),
     import_id   INTEGER,                       -- FK para import_logs
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- deduplicação: ver índices abaixo
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+    -- deduplicação: ver índices abaixo
 
 CREATE INDEX IF NOT EXISTS idx_tournaments_site  ON tournaments(site);
 CREATE INDEX IF NOT EXISTS idx_tournaments_date  ON tournaments(date);
