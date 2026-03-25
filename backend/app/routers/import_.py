@@ -12,17 +12,20 @@ SITE_PARSERS = {
     "ggpoker": ggpoker.parse_file,
 }
 
+
 def _detect_site(filename: str, content: bytes) -> str | None:
     fn = filename.lower()
     if "winamax" in fn:
         return "winamax"
     if "ggpoker" in fn or fn.startswith("gg"):
         return "ggpoker"
+
     sample = content[:2000].decode("utf-8", errors="replace").lower()
     if "winamax" in sample:
         return "winamax"
     if "ggpoker" in sample or "gg poker" in sample:
         return "ggpoker"
+
     return None
 
 
@@ -30,6 +33,7 @@ def _run_import(conn, records: list[dict], import_id: int) -> tuple[int, int]:
     """Insere torneios na transaccao aberta. Lanca excepcao se falhar."""
     inserted = 0
     skipped = 0
+
     with conn.cursor() as cur:
         for r in records:
             cur.execute(
@@ -42,12 +46,14 @@ def _run_import(conn, records: list[dict], import_id: int) -> tuple[int, int]:
                      %(position)s, %(players)s, %(type)s, %(speed)s, %(currency)s, %(import_id)s)
                 ON CONFLICT DO NOTHING
                 """,
-                {**r, "import_id": import_id}
+                {**r, "import_id": import_id},
             )
+
             if cur.rowcount:
                 inserted += 1
             else:
                 skipped += 1
+
     return inserted, skipped
 
 
@@ -60,7 +66,7 @@ def _create_log(cur, detected_site, filename, records_found):
         VALUES (%s, %s, 'partial', %s, 0, 0, 0, '')
         RETURNING id
         """,
-        (detected_site, filename, records_found)
+        (detected_site, filename, records_found),
     )
     return cur.fetchone()["id"]
 
@@ -73,8 +79,14 @@ def _update_log(cur, import_id, status, inserted, skipped, parse_errors):
             records_error=%s, log=%s
         WHERE id=%s
         """,
-        (status, inserted, skipped, len(parse_errors),
-         "\n".join(parse_errors) if parse_errors else "", import_id)
+        (
+            status,
+            inserted,
+            skipped,
+            len(parse_errors),
+            "\n".join(parse_errors) if parse_errors else "",
+            import_id,
+        ),
     )
 
 
@@ -82,73 +94,73 @@ def _update_log(cur, import_id, status, inserted, skipped, parse_errors):
 async def import_file(
     file: UploadFile = File(...),
     site: str | None = None,
-    current_user=Depends(require_auth)
+    current_user=Depends(require_auth),
 ):
     content = await file.read()
-filename = file.filename or "upload"
+    filename = file.filename or "upload"
 
-content_text = content.decode("utf-8", errors="ignore")
+    content_text = content.decode("utf-8", errors="ignore")
 
-classification = classify_entry(filename, content_text)
+    classification = classify_entry(filename, content_text)
 
-entry = create_entry(
-    source=classification["source"],
-    entry_type=classification["entry_type"],
-    site=classification.get("site"),
-    file_name=filename,
-    external_id=classification.get("external_id"),
-    raw_text=content_text,
-    raw_json=None,
-    status="new",
-    notes=None,
-    import_log_id=None,
-)
-
-entry_id = entry["id"]
-
-detected_site = site or _detect_site(filename, content)
-
-if not detected_site or detected_site not in SITE_PARSERS:
-    raise HTTPException(
-        status_code=400,
-        detail="Sala nao reconhecida. Usa ?site=winamax ou ?site=ggpoker"
+    entry = create_entry(
+        source=classification["source"],
+        entry_type=classification["entry_type"],
+        site=classification.get("site"),
+        file_name=filename,
+        external_id=classification.get("external_id"),
+        raw_text=content_text,
+        raw_json=None,
+        status="new",
+        notes=None,
+        import_log_id=None,
     )
 
-records, parse_errors = SITE_PARSERS[detected_site](content, filename)
-records_found = len(records)
+    entry_id = entry["id"]
 
-conn = get_conn()
-try:
-    with conn.cursor() as cur:
-        import_id = _create_log(cur, detected_site, filename, records_found)
+    detected_site = site or _detect_site(filename, content)
+    if not detected_site or detected_site not in SITE_PARSERS:
+        raise HTTPException(
+            status_code=400,
+            detail="Sala nao reconhecida. Usa ?site=winamax ou ?site=ggpoker",
+        )
 
-    inserted, skipped = _run_import(conn, records, import_id)
+    records, parse_errors = SITE_PARSERS[detected_site](content, filename)
+    records_found = len(records)
 
-    status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            import_id = _create_log(cur, detected_site, filename, records_found)
 
-    with conn.cursor() as cur:
-        _update_log(cur, import_id, status, inserted, skipped, parse_errors)
+        inserted, skipped = _run_import(conn, records, import_id)
 
-    conn.commit()
+        status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
 
-except Exception as exc:
-    conn.rollback()
-    raise HTTPException(status_code=500, detail=f"Rollback efectuado: {exc}")
+        with conn.cursor() as cur:
+            _update_log(cur, import_id, status, inserted, skipped, parse_errors)
 
-finally:
-    conn.close()
+        conn.commit()
 
-return {
-    "import_id":     import_id,
-    "site":          detected_site,
-    "filename":      filename,
-    "status":        status,
-    "records_found": records_found,
-    "inserted":      inserted,
-    "skipped":       skipped,
-    "errors":        len(parse_errors),
-    "error_log":     parse_errors[:20],
-}
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Rollback efectuado: {exc}")
+
+    finally:
+        conn.close()
+
+    return {
+        "import_id": import_id,
+        "entry_id": entry_id,
+        "site": detected_site,
+        "filename": filename,
+        "status": status,
+        "records_found": records_found,
+        "inserted": inserted,
+        "skipped": skipped,
+        "errors": len(parse_errors),
+        "error_log": parse_errors[:20],
+    }
 
 
 @router.get("/logs")
@@ -163,4 +175,4 @@ def import_logs(current_user=Depends(require_auth)):
         LIMIT 50
         """
     )
-return list(rows)
+    return list(rows)
