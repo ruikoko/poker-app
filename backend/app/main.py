@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from app.routers import health, auth, import_, tournaments, hands, villains
+from app.routers.entries import router as entries_router
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ app.include_router(import_.router)
 app.include_router(tournaments.router)
 app.include_router(hands.router)
 app.include_router(villains.router)
+app.include_router(entries_router)
 
 @app.get("/")
 def root():
