@@ -108,26 +108,26 @@ entry_id = entry["id"]
 
 detected_site = site or _detect_site(filename, content)
 
-    if not detected_site or detected_site not in SITE_PARSERS:
-        raise HTTPException(
-            status_code=400,
-            detail="Sala nao reconhecida. Usa ?site=winamax ou ?site=ggpoker"
-        )
+if not detected_site or detected_site not in SITE_PARSERS:
+    raise HTTPException(
+        status_code=400,
+        detail="Sala nao reconhecida. Usa ?site=winamax ou ?site=ggpoker"
+    )
 
-    records, parse_errors = SITE_PARSERS[detected_site](content, filename)
-    records_found = len(records)
+records, parse_errors = SITE_PARSERS[detected_site](content, filename)
+records_found = len(records)
 
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            import_id = _create_log(cur, detected_site, filename, records_found)
+conn = get_conn()
+try:
+    with conn.cursor() as cur:
+        import_id = _create_log(cur, detected_site, filename, records_found)
 
         inserted, skipped = _run_import(conn, records, import_id)
 
         status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
 
-        with conn.cursor() as cur:
-            _update_log(cur, import_id, status, inserted, skipped, parse_errors)
+    with conn.cursor() as cur:
+        _update_log(cur, import_id, status, inserted, skipped, parse_errors)
 
         conn.commit()
 
