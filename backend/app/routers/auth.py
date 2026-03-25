@@ -34,7 +34,7 @@ def login(body: LoginBody, response: Response):
         value=token,
         httponly=True,
         secure=is_prod,          # HTTPS em produção
-        samesite="strict",
+        samesite="none",
         max_age=COOKIE_MAX_AGE,
         path="/"
     )
@@ -62,7 +62,7 @@ def register(body: RegisterBody, response: Response):
         value=token,
         httponly=True,
         secure=is_prod,
-        samesite="strict",
+        samesite="none",
         max_age=COOKIE_MAX_AGE,
         path="/"
     )
