@@ -512,21 +512,36 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     try:
         with conn.cursor() as cur:
             # Actualizar a mão com nomes reais e screenshot_url
-            cur.execute(
-                """
-                UPDATE hands
-                SET player_names = %s,
-                    all_players_actions = %s
-                    {}
-                WHERE id = %s
-                """.format(", screenshot_url = %s" if screenshot_url else ""),
-                (
-                    json.dumps(player_names_json),
-                    json.dumps(enriched_actions),
-                    *(screenshot_url,) if screenshot_url else (),
-                    hand_db_id,
+            if screenshot_url:
+                cur.execute(
+                    """
+                    UPDATE hands
+                    SET player_names = %s,
+                        all_players_actions = %s,
+                        screenshot_url = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        json.dumps(player_names_json),
+                        json.dumps(enriched_actions),
+                        screenshot_url,
+                        hand_db_id,
+                    )
                 )
-            )
+            else:
+                cur.execute(
+                    """
+                    UPDATE hands
+                    SET player_names = %s,
+                        all_players_actions = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        json.dumps(player_names_json),
+                        json.dumps(enriched_actions),
+                        hand_db_id,
+                    )
+                )
             # Marcar entry como resolvida
             cur.execute("UPDATE entries SET status = 'resolved' WHERE id = %s", (entry_id,))
         conn.commit()
