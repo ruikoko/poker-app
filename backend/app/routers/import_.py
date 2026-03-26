@@ -9,6 +9,7 @@ from app.parsers.gg_hands import parse_hands
 from app.services.entry_classifier import classify_entry
 from app.services.entry_service import create_entry
 from app.services.hand_service import process_entry_to_hands, _insert_hand
+from app.routers.screenshot import _enrich_hand_from_orphan_entry
 
 logger = logging.getLogger("import")
 
@@ -235,21 +236,17 @@ async def import_file(
                         (f"GG-{tm_digits}",)
                     )
                     if hand_rows:
-                        conn2 = get_conn()
-                        try:
-                            with conn2.cursor() as cur2:
-                                cur2.execute(
-                                    "UPDATE entries SET status = 'resolved' WHERE id = %s",
-                                    (orphan["id"],)
-                                )
-                            conn2.commit()
-                            rematched.append({"entry_id": orphan["id"], "tm": tm, "hand_id": hand_rows[0]["id"]})
-                            logger.info(f"Auto-rematch: screenshot {orphan['id']} matched to GG-{tm_digits}")
-                        except Exception as e2:
-                            conn2.rollback()
-                            logger.error(f"Auto-rematch error for entry {orphan['id']}: {e2}")
-                        finally:
-                            conn2.close()
+                        enrich_result = _enrich_hand_from_orphan_entry(
+                            orphan["id"], hand_rows[0]["id"], raw
+                        )
+                        rematched.append({
+                            "entry_id": orphan["id"],
+                            "tm": tm,
+                            "hand_id": hand_rows[0]["id"],
+                            "players_mapped": enrich_result.get("players_mapped", 0),
+                            "enrich_status": enrich_result.get("status"),
+                        })
+                        logger.info(f"Auto-rematch: entry {orphan['id']} enriched for GG-{tm_digits}, {enrich_result.get('players_mapped', 0)} players mapped")
             except Exception as e:
                 logger.error(f"Auto-rematch query error: {e}")
 

@@ -471,6 +471,81 @@ async def upload_screenshot(
     }
 
 
+def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dict) -> dict:
+    """
+    Função partilhada: dado um entry de screenshot órfão e o id da mão na BD,
+    aplica o enriquecimento completo (nomes reais, bounty, country) à mão
+    e marca o entry como 'resolved'.
+    Devolve um dict com o resultado do enriquecimento.
+    """
+    vision_players = raw_json.get("players_by_position", {})
+    hero_name = raw_json.get("hero")
+    file_meta = raw_json.get("file_meta", {})
+    screenshot_url = raw_json.get("screenshot_url")
+
+    # Buscar a mão completa para enriquecimento
+    hand_rows = query(
+        "SELECT id, hand_id, all_players_actions, position FROM hands WHERE id = %s",
+        (hand_db_id,)
+    )
+    if not hand_rows:
+        return {"status": "hand_not_found"}
+
+    matched_hand = dict(hand_rows[0])
+    all_players_raw = matched_hand.get("all_players_actions") or {}
+
+    # Construir mapa anon → nome real por posição
+    anon_map = _build_anon_to_real_map(matched_hand, vision_players)
+
+    # Enriquecer all_players_actions com nomes reais + bounty + country
+    enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, vision_players)
+
+    # Metadata completa para player_names
+    player_names_json = {
+        "players_by_position": vision_players,
+        "hero": hero_name,
+        "anon_map": anon_map,
+        "file_meta": file_meta,
+    }
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Actualizar a mão com nomes reais e screenshot_url
+            cur.execute(
+                """
+                UPDATE hands
+                SET player_names = %s,
+                    all_players_actions = %s
+                    {}
+                WHERE id = %s
+                """.format(", screenshot_url = %s" if screenshot_url else ""),
+                (
+                    json.dumps(player_names_json),
+                    json.dumps(enriched_actions),
+                    *(screenshot_url,) if screenshot_url else (),
+                    hand_db_id,
+                )
+            )
+            # Marcar entry como resolvida
+            cur.execute("UPDATE entries SET status = 'resolved' WHERE id = %s", (entry_id,))
+        conn.commit()
+        logger.info(f"Enriched hand {hand_db_id} from orphan entry {entry_id}: {len(anon_map)} mappings")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error enriching hand {hand_db_id} from entry {entry_id}: {e}")
+        return {"status": "error", "error": str(e)}
+    finally:
+        conn.close()
+
+    return {
+        "status": "enriched",
+        "hand_id": hand_db_id,
+        "players_mapped": len([k for k, v in anon_map.items() if k != "Hero"]),
+        "anon_map": anon_map,
+    }
+
+
 @router.post("/orphans/{entry_id}/rematch")
 def rematch_orphan(entry_id: int, current_user=Depends(require_auth)):
     """Tenta novamente o match de um screenshot órfão com a HH já importada."""
@@ -494,19 +569,14 @@ def rematch_orphan(entry_id: int, current_user=Depends(require_auth)):
     if not hand_rows:
         return {"status": "no_match", "message": f"HH do torneio {tm_number} ainda não importada"}
 
-    # Match encontrado — marcar entry como resolvida
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE entries SET status = 'resolved' WHERE id = %s", (entry_id,))
-        conn.commit()
-    finally:
-        conn.close()
-
+    # Match encontrado — enriquecer a mão com nomes reais
+    result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], raw)
     return {
-        "status": "matched",
+        "status": result.get("status", "matched"),
         "hand_id": hand_rows[0]["id"],
         "hand_hand_id": hand_rows[0]["hand_id"],
+        "players_mapped": result.get("players_mapped", 0),
+        "anon_map": result.get("anon_map", {}),
     }
 
 
