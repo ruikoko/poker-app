@@ -115,6 +115,8 @@ export default function InboxPage() {
   // Orphan screenshots state
   const [orphans, setOrphans] = useState([])
   const [orphansLoading, setOrphansLoading] = useState(false)
+  const [orphansExpanded, setOrphansExpanded] = useState(false)
+  const [expandedTMs, setExpandedTMs] = useState({})
 
   const loadOrphans = useCallback(() => {
     setOrphansLoading(true)
@@ -420,65 +422,144 @@ export default function InboxPage() {
       {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
 
       {/* ── Orphan Screenshots ── */}
-      {(orphansLoading || orphans.length > 0) && (
-        <div style={{
-          background: '#1a1d27', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10,
-          overflow: 'hidden', marginBottom: 20,
-        }}>
+      {(orphansLoading || orphans.length > 0) && (() => {
+        // Agrupar órfãos por TM number
+        const byTM = {}
+        orphans.forEach(o => {
+          const tm = (o.raw_json && o.raw_json.tm) || 'sem-tm'
+          if (!byTM[tm]) byTM[tm] = []
+          byTM[tm].push(o)
+        })
+        const tmGroups = Object.entries(byTM)
+
+        return (
           <div style={{
-            padding: '10px 16px', borderBottom: '1px solid rgba(245,158,11,0.15)',
-            display: 'flex', alignItems: 'center', gap: 8,
+            background: '#1a1d27', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10,
+            overflow: 'hidden', marginBottom: 20,
           }}>
-            <span style={{ color: '#f59e0b', fontSize: 13 }}>&#9888;</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#f59e0b' }}>
-              Screenshots sem HH ({orphans.length})
-            </span>
-            <span style={{ fontSize: 11, color: '#64748b', marginLeft: 4 }}>
-              — importa a HH do torneio para fazer o match automático
-            </span>
+            {/* Cabeçalho colapsável */}
+            <div
+              onClick={() => setOrphansExpanded(v => !v)}
+              style={{
+                padding: '10px 16px',
+                borderBottom: orphansExpanded ? '1px solid rgba(245,158,11,0.15)' : 'none',
+                display: 'flex', alignItems: 'center', gap: 8,
+                cursor: 'pointer', userSelect: 'none',
+              }}
+            >
+              <span style={{ color: '#f59e0b', fontSize: 13 }}>&#9888;</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#f59e0b' }}>
+                Screenshots sem HH
+              </span>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                minWidth: 20, height: 18, padding: '0 6px', borderRadius: 9,
+                background: 'rgba(245,158,11,0.15)', color: '#f59e0b',
+                fontSize: 10, fontWeight: 700,
+              }}>{orphans.length}</span>
+              <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 2 }}>
+                {tmGroups.length} torneio{tmGroups.length !== 1 ? 's' : ''}
+              </span>
+              <span style={{ marginLeft: 'auto', color: '#4b5563', fontSize: 12, transition: 'transform 0.2s', display: 'inline-block', transform: orphansExpanded ? 'rotate(180deg)' : 'none' }}>&#9660;</span>
+            </div>
+
+            {/* Conteúdo expansível */}
+            {orphansLoading ? (
+              <div style={{ padding: '16px', color: '#4b5563', fontSize: 12 }}>A carregar...</div>
+            ) : orphansExpanded && (
+              <div>
+                {tmGroups.map(([tm, entries]) => {
+                  const isOpen = expandedTMs[tm] !== false // aberto por defeito se só 1 entry
+                  const firstMeta = (entries[0].raw_json && entries[0].raw_json.file_meta) || {}
+                  return (
+                    <div key={tm} style={{ borderBottom: '1px solid #1e2130' }}>
+                      {/* Cabeçalho do grupo TM */}
+                      <div
+                        onClick={() => setExpandedTMs(prev => ({ ...prev, [tm]: !isOpen }))}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '8px 16px', cursor: 'pointer',
+                          background: 'rgba(245,158,11,0.04)',
+                          borderBottom: isOpen ? '1px solid rgba(245,158,11,0.08)' : 'none',
+                        }}
+                      >
+                        <span style={{ color: '#f59e0b', fontSize: 10, transition: 'transform 0.15s', display: 'inline-block', transform: isOpen ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0', fontFamily: 'monospace' }}>{tm}</span>
+                        <span style={{ fontSize: 11, color: '#64748b' }}>{firstMeta.date || ''}</span>
+                        <span style={{
+                          marginLeft: 4,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          minWidth: 18, height: 16, padding: '0 5px', borderRadius: 8,
+                          background: 'rgba(99,102,241,0.15)', color: '#818cf8',
+                          fontSize: 10, fontWeight: 700,
+                        }}>{entries.length}</span>
+                        <span style={{ fontSize: 11, color: '#4b5563' }}>mão{entries.length !== 1 ? 's' : ''}</span>
+                        {/* Rematch all */}
+                        <button
+                          onClick={e => { e.stopPropagation(); entries.forEach(o => handleRematch(o.id)) }}
+                          style={{
+                            marginLeft: 'auto', padding: '3px 9px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            background: 'rgba(99,102,241,0.12)', color: '#818cf8',
+                            border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
+                          }}
+                        >Rematch todos</button>
+                      </div>
+
+                      {/* Linhas individuais */}
+                      {isOpen && entries.map(o => {
+                        const meta = (o.raw_json && o.raw_json.file_meta) || {}
+                        const players = (o.raw_json && o.raw_json.players_by_position) || {}
+                        const visionDone = o.raw_json && o.raw_json.vision_done
+                        return (
+                          <div key={o.id} style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '7px 16px 7px 36px', fontSize: 11,
+                            borderBottom: '1px solid rgba(30,33,48,0.6)',
+                          }}>
+                            <span style={{ color: visionDone ? '#22c55e' : '#f59e0b', fontSize: 10 }}>{visionDone ? '●' : '○'}</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>
+                                {meta.time || '—'}
+                              </span>
+                              <span style={{ color: '#4b5563', marginLeft: 8 }}>
+                                blinds {meta.blinds || '—'}
+                              </span>
+                              {visionDone && Object.keys(players).length > 0 && (
+                                <span style={{ color: '#22c55e', marginLeft: 8 }}>
+                                  {Object.keys(players).length} jogadores
+                                </span>
+                              )}
+                              {!visionDone && (
+                                <span style={{ color: '#f59e0b', marginLeft: 8, fontSize: 10 }}>Vision a processar...</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleRematch(o.id)}
+                              style={{
+                                padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                                background: 'rgba(99,102,241,0.1)', color: '#818cf8',
+                                border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
+                              }}
+                            >Rematch</button>
+                            <button
+                              onClick={() => handleDismiss(o.id)}
+                              style={{
+                                padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                                background: 'transparent', color: '#374151',
+                                border: '1px solid #1e2130', cursor: 'pointer',
+                              }}
+                            >&#10005;</button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
-          {orphansLoading ? (
-            <div style={{ padding: '16px', color: '#4b5563', fontSize: 12 }}>A carregar...</div>
-          ) : (
-            orphans.map(o => {
-              const meta = (o.raw_json && o.raw_json.file_meta) || {}
-              const players = (o.raw_json && o.raw_json.players_by_position) || {}
-              return (
-                <div key={o.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '10px 16px', borderBottom: '1px solid #1e2130', fontSize: 12,
-                }}>
-                  <span style={{ color: '#f59e0b', fontSize: 16 }}>&#9632;</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: '#e2e8f0', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {(o.raw_json && o.raw_json.tm) || o.file_name || '—'}
-                    </div>
-                    <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                      {meta.date || '—'} {meta.time || ''} &middot; blinds {meta.blinds || '—'} &middot; {Object.keys(players).length} jogadores detectados
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRematch(o.id)}
-                    style={{
-                      padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
-                      background: 'rgba(99,102,241,0.12)', color: '#818cf8',
-                      border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
-                    }}
-                  >Rematch</button>
-                  <button
-                    onClick={() => handleDismiss(o.id)}
-                    style={{
-                      padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
-                      background: 'transparent', color: '#4b5563',
-                      border: '1px solid #2a2d3a', cursor: 'pointer',
-                    }}
-                  >Ignorar</button>
-                </div>
-              )
-            })
-          )}
-        </div>
-      )}
+        )
+      })()}
 
       {/* ── Hands table ── */}
       <div style={{
