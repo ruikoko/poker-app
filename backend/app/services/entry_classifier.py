@@ -57,7 +57,17 @@ def classify_entry(file_name: str, content: str) -> dict:
     head = "\\n".join(lines[:20]).lower()
     site = _detect_site(file_name, text)
 
+    # Se comeca com Poker Hand #, pode ser uma mao OU um summary que lista a ultima mao
     if stripped.startswith("Poker Hand #"):
+        # Se tiver "Buy-in" ou "Prize" nas primeiras 10 linhas, e um summary
+        if any(m in head for m in ["buy-in", "prize", "cashout", "received"]):
+            return {
+                "source": "summary",
+                "entry_type": "tournament_summary",
+                "site": site or "GGPoker",
+                "external_id": _extract_external_id(file_name, text, site or "GGPoker"),
+                "confidence_level": "high",
+            }
         return {
             "source": "hh_text",
             "entry_type": "hand_history",

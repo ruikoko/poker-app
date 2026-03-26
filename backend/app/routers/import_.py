@@ -1,3 +1,5 @@
+import zipfile
+import io
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -28,6 +30,54 @@ def _detect_site(filename: str, content: bytes) -> str | None:
     if "ggpoker" in sample or "gg poker" in sample:
         return "ggpoker"
 
+    return None
+
+
+def _detect_zip_content_type(content: bytes) -> str:
+    """Abre o ZIP e le o primeiro ficheiro .txt para determinar o tipo de conteudo."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            for name in zf.namelist():
+                if not name.lower().endswith(".txt"):
+                    continue
+                text = zf.read(name).decode("utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                # Tournament summary: comeca com "Tournament #" e tem "Buy-in"
+                first_lines = "\n".join(text.splitlines()[:10]).lower()
+                if "buy-in" in first_lines and "tournament" in first_lines:
+                    return "tournament_summary"
+                # Hand history: comeca com "Poker Hand #" e tem "HOLE CARDS"
+                if text.startswith("Poker Hand #") and "hole cards" in text.lower():
+                    return "hand_history"
+                # Se tem "Tournament #" no inicio e "You finished" -> summary
+                if text.startswith("Tournament #") and "you finished" in text.lower():
+                    return "tournament_summary"
+                # Fallback: se tem "Poker Hand #" provavelmente e HH
+                if "poker hand #" in first_lines:
+                    return "hand_history"
+                # Se tem "buy-in" provavelmente e summary
+                if "buy-in" in first_lines:
+                    return "tournament_summary"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _detect_site_from_zip(content: bytes) -> str | None:
+    """Tenta detectar a sala a partir dos nomes dos ficheiros dentro do ZIP."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            for name in zf.namelist():
+                fn = name.lower()
+                if fn.startswith("gg") or "ggpoker" in fn:
+                    return "ggpoker"
+                if "winamax" in fn:
+                    return "winamax"
+                if "pokerstars" in fn:
+                    return "pokerstars"
+    except Exception:
+        pass
     return None
 
 
@@ -100,51 +150,113 @@ async def import_file(
 ):
     content = await file.read()
     filename = file.filename or "upload"
+    is_zip = filename.lower().endswith(".zip")
 
-    content_text = content.decode("utf-8", errors="ignore")
+    # ── Detectar sala ──
+    detected_site = site or _detect_site(filename, content)
+    if not detected_site and is_zip:
+        detected_site = _detect_site_from_zip(content)
 
-    # Classificar a entry
-    classification = classify_entry(filename, content_text)
+    # ── Classificar o conteudo ──
+    if is_zip:
+        # Para ZIPs, nao podemos classificar pelo content_text (e binario)
+        # Abrimos o ZIP e inspeccionamos o primeiro ficheiro
+        content_type = _detect_zip_content_type(content)
+    else:
+        content_text = content.decode("utf-8", errors="ignore")
+        classification = classify_entry(filename, content_text)
+        content_type = classification["entry_type"]
+
+    # ── Criar entry para rastreabilidade ──
+    raw_text = None if is_zip else content.decode("utf-8", errors="ignore")
+    entry_source = "hh_text" if content_type == "hand_history" else "summary"
+    entry_site_label = None
+    if detected_site == "ggpoker":
+        entry_site_label = "GGPoker"
+    elif detected_site == "winamax":
+        entry_site_label = "Winamax"
 
     entry = create_entry(
-        source=classification["source"],
-        entry_type=classification["entry_type"],
-        site=classification.get("site"),
+        source=entry_source,
+        entry_type=content_type if content_type != "unknown" else "text",
+        site=entry_site_label,
         file_name=filename,
-        external_id=classification.get("external_id"),
-        raw_text=content_text,
+        external_id=None,
+        raw_text=raw_text,
         raw_json=None,
         status="new",
-        notes=None,
+        notes=f"ZIP com {content_type}" if is_zip else None,
         import_log_id=None,
     )
-
     entry_id = entry["id"]
-    entry_type = classification["entry_type"]
 
-    detected_site = site or _detect_site(filename, content)
+    # ── HAND HISTORY → vai para hands ──
+    if content_type == "hand_history":
+        if is_zip:
+            # Para ZIPs de HH, precisamos de extrair e processar cada ficheiro
+            from app.parsers.gg_hands import parse_hands
+            total_inserted = 0
+            total_skipped = 0
+            all_errors = []
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                    for name in zf.namelist():
+                        if not name.lower().endswith(".txt"):
+                            continue
+                        file_content = zf.read(name)
+                        hands_parsed, errors = parse_hands(file_content, name)
+                        all_errors.extend(errors)
+                        from app.services.hand_service import _insert_hand
+                        from app.db import get_conn as gc
+                        cn = gc()
+                        try:
+                            for h in hands_parsed:
+                                ok = _insert_hand(cn, h, entry_id)
+                                if ok:
+                                    total_inserted += 1
+                                else:
+                                    total_skipped += 1
+                            cn.commit()
+                        except Exception:
+                            cn.rollback()
+                            raise
+                        finally:
+                            cn.close()
+            except Exception as e:
+                all_errors.append(str(e))
 
-    # ── HAND HISTORY → vai para hands, NÃO para tournaments ──
-    if entry_type == "hand_history":
-        result = process_entry_to_hands(entry_id)
-        return {
-            "import_type": "hands",
-            "entry_id": entry_id,
-            "site": detected_site or classification.get("site"),
-            "filename": filename,
-            "status": "ok" if result["inserted"] > 0 else "error",
-            "hands_found": result["inserted"] + result["skipped"],
-            "hands_inserted": result["inserted"],
-            "hands_skipped": result["skipped"],
-            "errors": len(result["errors"]),
-            "error_log": result["errors"][:20],
-        }
+            return {
+                "import_type": "hands",
+                "entry_id": entry_id,
+                "site": entry_site_label or detected_site,
+                "filename": filename,
+                "status": "ok" if total_inserted > 0 else "error",
+                "hands_found": total_inserted + total_skipped,
+                "hands_inserted": total_inserted,
+                "hands_skipped": total_skipped,
+                "errors": len(all_errors),
+                "error_log": all_errors[:20],
+            }
+        else:
+            result = process_entry_to_hands(entry_id)
+            return {
+                "import_type": "hands",
+                "entry_id": entry_id,
+                "site": entry_site_label or detected_site,
+                "filename": filename,
+                "status": "ok" if result["inserted"] > 0 else "error",
+                "hands_found": result["inserted"] + result["skipped"],
+                "hands_inserted": result["inserted"],
+                "hands_skipped": result["skipped"],
+                "errors": len(result["errors"]),
+                "error_log": result["errors"][:20],
+            }
 
     # ── TOURNAMENT SUMMARY / REPORT → vai para tournaments (P&L) ──
     if not detected_site or detected_site not in SUMMARY_PARSERS:
         raise HTTPException(
             status_code=400,
-            detail="Sala nao reconhecida. Usa ?site=winamax ou ?site=ggpoker",
+            detail=f"Sala nao reconhecida ({detected_site}). Usa ?site=winamax ou ?site=ggpoker",
         )
 
     records, parse_errors = SUMMARY_PARSERS[detected_site](content, filename)

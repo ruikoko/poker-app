@@ -71,8 +71,10 @@ def _parse_one(text: str, filename: str = "") -> dict | None:
     prize_m = re.search(r"(?:You received|Prize|Won)\s*:?\s*\$?([\d,.]+)", text, re.I)
     cashout = float(prize_m.group(1).replace(",", "")) if prize_m else 0.0
 
-    # Posição
-    pos_m = re.search(r"You finished\s+(?:in\s+)?(\d+)(?:st|nd|rd|th)?", text, re.I)
+    # Posição — vários formatos GG
+    pos_m = re.search(r"You finished\s+(?:the tournament\s+)?(?:in\s+)?(\d+)(?:st|nd|rd|th)", text, re.I)
+    if not pos_m:
+        pos_m = re.search(r"(\d+)(?:st|nd|rd|th)\s*:\s*Hero", text, re.I)
     position = int(pos_m.group(1)) if pos_m else None
 
     # Jogadores
