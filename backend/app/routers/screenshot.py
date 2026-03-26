@@ -319,15 +319,20 @@ def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | No
 
 # ── Endpoint principal ───────────────────────────────────────────────────────
 
+# Semáforo global — máximo 2 chamadas Vision em paralelo
+_vision_sem = asyncio.Semaphore(2)
+
 async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 tm_number: str, file_meta: dict, img_b64: str):
     """
     Processa Vision em background para um entry já guardado na BD.
+    Usa asyncio.to_thread para não bloquear o event loop.
     Actualiza raw_json com players_by_position, hero, board e vision_done=True.
     Se houver match com HH, enriquece a mão com nomes reais.
     """
     try:
-        vision_text = _extract_hand_data_from_image(content, mime_type)
+        async with _vision_sem:
+            vision_text = await asyncio.to_thread(_extract_hand_data_from_image, content, mime_type)
         vision_data = _parse_vision_response(vision_text)
         tm_final = tm_number or vision_data.get("tm")
         vision_players = vision_data.get("players_by_position", {})
@@ -335,47 +340,51 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
         board = vision_data.get("board", [])
         logger.info(f"[bg] Vision OK entry {entry_id} — TM: {tm_final}, players: {list(vision_players.keys())}")
 
-        # Actualizar entry com dados do Vision
-        conn = get_conn()
-        try:
-            with conn.cursor() as cur:
-                raw_json_str = json.dumps({
-                        "tm": tm_final,
-                        "file_meta": file_meta,
-                        "mime_type": mime_type,
-                        "img_b64": img_b64,
+        # Actualizar entry com dados do Vision (em thread para não bloquear)
+        def _db_update():
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    raw_json_str = json.dumps({
+                            "tm": tm_final,
+                            "file_meta": file_meta,
+                            "mime_type": mime_type,
+                            "img_b64": img_b64,
+                            "players_by_position": vision_players,
+                            "hero": hero_name,
+                            "board": board,
+                            "raw_vision": vision_text,
+                            "vision_done": True,
+                        })
+                    cur.execute(
+                        "UPDATE entries SET raw_json = %s WHERE id = %s",
+                        (raw_json_str, entry_id)
+                    )
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"[bg] Erro ao actualizar entry {entry_id} com Vision: {e}")
+            finally:
+                conn.close()
+        await asyncio.to_thread(_db_update)
+
+        # Tentar match com HH se tiver TM (em thread)
+        if tm_final and vision_players:
+            def _try_match():
+                tm_digits = tm_final.replace("TM", "")
+                hand_rows = query(
+                    "SELECT id, hand_id, all_players_actions, position FROM hands WHERE hand_id = %s LIMIT 1",
+                    (f"GG-{tm_digits}",)
+                )
+                if hand_rows:
+                    raw_for_enrich = {
                         "players_by_position": vision_players,
                         "hero": hero_name,
-                        "board": board,
-                        "raw_vision": vision_text,
-                        "vision_done": True,
-                    })
-                cur.execute(
-                    "UPDATE entries SET raw_json = %s WHERE id = %s",
-                    (raw_json_str, entry_id)
-                )
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"[bg] Erro ao actualizar entry {entry_id} com Vision: {e}")
-        finally:
-            conn.close()
-
-        # Tentar match com HH se tiver TM
-        if tm_final and vision_players:
-            tm_digits = tm_final.replace("TM", "")
-            hand_rows = query(
-                "SELECT id, hand_id, all_players_actions, position FROM hands WHERE hand_id = %s LIMIT 1",
-                (f"GG-{tm_digits}",)
-            )
-            if hand_rows:
-                raw_for_enrich = {
-                    "players_by_position": vision_players,
-                    "hero": hero_name,
-                    "file_meta": file_meta,
-                }
-                result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], raw_for_enrich)
-                logger.info(f"[bg] Match entry {entry_id} → hand {hand_rows[0]['id']}: {result}")
+                        "file_meta": file_meta,
+                    }
+                    result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], raw_for_enrich)
+                    logger.info(f"[bg] Match entry {entry_id} \u2192 hand {hand_rows[0]['id']}: {result}")
+            await asyncio.to_thread(_try_match)
 
     except Exception as e:
         logger.error(f"[bg] Vision falhou para entry {entry_id}: {e}")
@@ -601,13 +610,16 @@ async def _backfill_worker(entry_ids: list):
     """
     Worker assíncrono que processa entries 1 a 1 sequencialmente.
     Busca cada imagem da BD individualmente para não sobrecarregar a memória.
+    Todas as operações síncronas correm em threads para não bloquear o event loop.
     """
     for eid in entry_ids:
         try:
-            rows = query(
-                "SELECT id, raw_json FROM entries WHERE id = %s",
-                (eid,)
-            )
+            def _fetch_entry(entry_id):
+                return query(
+                    "SELECT id, raw_json FROM entries WHERE id = %s",
+                    (entry_id,)
+                )
+            rows = await asyncio.to_thread(_fetch_entry, eid)
             if not rows:
                 continue
             raw = rows[0].get("raw_json") or {}
@@ -621,7 +633,7 @@ async def _backfill_worker(entry_ids: list):
             file_meta = raw.get("file_meta", {})
 
             await _run_vision_for_entry(eid, content, mime_type, tm_number, file_meta, img_b64)
-            await asyncio.sleep(0.5)  # Pequena pausa entre chamadas
+            await asyncio.sleep(1)  # Pausa entre chamadas para não sobrecarregar
         except Exception as e:
             logger.error(f"[backfill] Erro no entry {eid}: {e}")
 
@@ -636,26 +648,30 @@ async def vision_backfill(
     Busca apenas os IDs e lança um worker assíncrono em background.
     Responde imediatamente.
     """
-    rows = query(
-        """SELECT id
-           FROM entries
-           WHERE entry_type = 'screenshot'
-             AND status = 'new'
-             AND (raw_json->>'vision_done')::boolean = false
-           ORDER BY id ASC
-           LIMIT %s""",
-        (limit,)
-    )
+    def _fetch_pending_ids(lim):
+        return query(
+            """SELECT id
+               FROM entries
+               WHERE entry_type = 'screenshot'
+                 AND status = 'new'
+                 AND (raw_json->>'vision_done')::boolean = false
+               ORDER BY id ASC
+               LIMIT %s""",
+            (lim,)
+        )
+    rows = await asyncio.to_thread(_fetch_pending_ids, limit)
 
     entry_ids = [r["id"] for r in rows]
 
     if entry_ids:
         asyncio.create_task(_backfill_worker(entry_ids))
 
-    total_pending = query(
-        "SELECT COUNT(*) as n FROM entries WHERE entry_type='screenshot' AND (raw_json->>'vision_done')::boolean = false",
-        ()
-    )[0]["n"]
+    def _count_pending():
+        return query(
+            "SELECT COUNT(*) as n FROM entries WHERE entry_type='screenshot' AND (raw_json->>'vision_done')::boolean = false",
+            ()
+        )[0]["n"]
+    total_pending = await asyncio.to_thread(_count_pending)
 
     return {
         "queued": len(entry_ids),
