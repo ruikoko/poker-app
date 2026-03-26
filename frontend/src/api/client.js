@@ -98,7 +98,12 @@ export const entries = {
 export const discord = {
   status:    ()  => req('GET',  '/discord/status'),
   syncState: ()  => req('GET',  '/discord/sync-state'),
-  stats:     ()  => req('GET',  '/discord/stats'),
+  stats:     (params = {})  => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/discord/stats${qs ? '?' + qs : ''}`)
+  },
   sync:      ()  => req('POST', '/discord/sync'),
 }
 

@@ -82,42 +82,48 @@ async def trigger_sync(current_user=Depends(require_auth)):
 
 
 @router.get("/stats")
-def discord_stats(current_user=Depends(require_auth)):
+def discord_stats(date_from: str = None, current_user=Depends(require_auth)):
     """Estatísticas de extracção do Discord."""
+    date_filter = ""
+    date_params = {}
+    if date_from:
+        date_filter = " AND created_at >= %(date_from)s"
+        date_params = {"date_from": date_from}
+
     # Total de entries do Discord
-    rows = query("""
+    rows = query(f"""
         SELECT
             COUNT(*) AS total_entries,
             COUNT(*) FILTER (WHERE status = 'new') AS pending,
             COUNT(*) FILTER (WHERE status = 'processed') AS processed,
             COUNT(*) FILTER (WHERE status = 'error') AS errors
         FROM entries
-        WHERE source = 'discord_bot'
-    """)
+        WHERE source = 'discord_bot'{date_filter}
+    """, date_params)
     entry_stats = dict(rows[0]) if rows else {}
 
     # Por tipo de conteúdo
-    type_rows = query("""
+    type_rows = query(f"""
         SELECT
             entry_type,
             COUNT(*) AS count
         FROM entries
-        WHERE source = 'discord_bot'
+        WHERE source = 'discord_bot'{date_filter}
         GROUP BY entry_type
         ORDER BY count DESC
-    """)
+    """, date_params)
 
     # Por canal (do raw_json)
-    channel_rows = query("""
+    channel_rows = query(f"""
         SELECT
             raw_json->>'channel_name' AS channel,
             COUNT(*) AS count
         FROM entries
-        WHERE source = 'discord_bot' AND raw_json IS NOT NULL
+        WHERE source = 'discord_bot' AND raw_json IS NOT NULL{date_filter}
         GROUP BY raw_json->>'channel_name'
         ORDER BY count DESC
         LIMIT 20
-    """)
+    """, date_params)
 
     # Sync state
     sync_rows = query("""

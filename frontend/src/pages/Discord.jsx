@@ -1,5 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { discord } from '../api/client'
+
+const DATE_FILTERS = [
+  { label: 'Todas', value: '' },
+  { label: 'Hoje', fn: () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10) } },
+  { label: '3 dias', fn: () => { const d = new Date(); d.setDate(d.getDate()-3); return d.toISOString().slice(0,10) } },
+  { label: 'Semana', fn: () => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10) } },
+  { label: 'Mês', fn: () => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10) } },
+]
 
 export default function DiscordPage() {
   const [status, setStatus] = useState(null)
@@ -8,14 +16,16 @@ export default function DiscordPage() {
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
 
-  const load = () => {
+  const load = useCallback(() => {
     discord.status().then(setStatus).catch(e => setError(e.message))
-    discord.stats().then(setStats).catch(() => {})
+    const params = dateFrom ? { date_from: dateFrom } : {}
+    discord.stats(params).then(setStats).catch(() => {})
     discord.syncState().then(setSyncState).catch(() => {})
-  }
+  }, [dateFrom])
 
-  useEffect(load, [])
+  useEffect(() => { load() }, [load])
 
   const triggerSync = async () => {
     setSyncing(true)
@@ -50,6 +60,28 @@ export default function DiscordPage() {
 
       {error && <div className="error-msg" style={{ marginBottom: 16 }}>{error}</div>}
       {msg && <div style={{ background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: 'var(--accent)' }}>{msg}</div>}
+
+      {/* ── Filtros Temporais ── */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+        {DATE_FILTERS.map(({ label, value, fn }) => {
+          const filterValue = fn ? fn() : (value ?? '')
+          const isActive = dateFrom === filterValue
+          return (
+            <button
+              key={label}
+              onClick={() => setDateFrom(filterValue)}
+              style={{
+                padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                border: '1px solid',
+                borderColor: isActive ? '#6366f1' : '#2a2d3a',
+                background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+                color: isActive ? '#818cf8' : '#64748b',
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}
+            >{label}</button>
+          )
+        })}
+      </div>
 
       {/* ── Estado do Bot ── */}
       <div className="stat-grid" style={{ marginBottom: 24 }}>
