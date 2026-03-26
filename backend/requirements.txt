@@ -7,3 +7,4 @@ itsdangerous==2.2.0
 python-multipart==0.0.20
 discord.py==2.4.0
 audioop-lts==0.2.1
+openai>=1.30.0
