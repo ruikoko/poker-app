@@ -97,8 +97,13 @@ def ensure_entries_schema():
         ALTER TABLE hands
         ADD COLUMN IF NOT EXISTS player_names JSONB
         """,
+        """
+        ALTER TABLE hands
+        ADD COLUMN IF NOT EXISTS tournament_id BIGINT
+        """,
         "CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id)",
         "CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state)",
+        "CREATE INDEX IF NOT EXISTS idx_hands_tournament_id ON hands(tournament_id)",
     ]
 
     conn = get_conn()

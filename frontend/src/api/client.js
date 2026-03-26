@@ -48,6 +48,12 @@ export const tournaments = {
     return req('GET', `/tournaments${qs ? '?' + qs : ''}`)
   },
   summary: () => req('GET', '/tournaments/summary'),
+  hands: (id, params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/tournaments/${id}/hands${qs ? '?' + qs : ''}`)
+  },
 }
 
 // ── Hands ────────────────────────────────────────────────────────────────────

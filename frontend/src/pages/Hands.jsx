@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { hands } from '../api/client'
 
+// A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
+
 // ── Constantes ──────────────────────────────────────────────────────────────
 
 const STATES = [
@@ -780,7 +782,8 @@ export default function HandsPage() {
     if (viewMode !== 'tags') return
     setLoading(true)
     setError('')
-    const params = { ...filters }
+    // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo)
+    const params = { ...filters, exclude_mtt_only: true }
     if (!params.date_from) delete params.date_from
     hands.tagGroups(params)
       .then(setTagGroupsData)
@@ -793,7 +796,8 @@ export default function HandsPage() {
     if (viewMode === 'tags') return
     setLoading(true)
     setError('')
-    const params = { ...filters, page, page_size: 200 }
+    // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo)
+    const params = { ...filters, page, page_size: 200, exclude_mtt_only: true }
     if (!params.date_from) delete params.date_from
     hands.list(params)
       .then(setData)
@@ -839,7 +843,7 @@ export default function HandsPage() {
         <div>
           <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>Mãos</div>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 3 }}>
-            {totalHands} mãos registadas
+            {totalHands} mãos de estudo &middot; <span style={{ fontSize: 11, color: '#4b5563' }}>mãos de torneio (bulk) em Torneios</span>
           </div>
         </div>
         {/* Toggle views */}
@@ -950,7 +954,7 @@ export default function HandsPage() {
         <div style={{ textAlign: 'center', padding: '64px 0', color: '#64748b' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>&#127183;</div>
           <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 6 }}>Sem mãos</div>
-          <div style={{ fontSize: 13 }}>Importa ficheiros HH na página P&amp;L ou sincroniza o Discord.</div>
+          <div style={{ fontSize: 13 }}>Marca mãos com tags (#icm, #pko, #nota...) para aparecerem aqui. Mãos de torneio (bulk) estão na página Torneios.</div>
         </div>
       )}
 

@@ -30,18 +30,11 @@ class HandUpdate(BaseModel):
     study_state: Optional[str] = None
 
 
-@router.get("")
-def list_hands(
-    site:        Optional[str] = Query(None),
-    tag:         Optional[str] = Query(None, description="Filtrar por tag"),
-    study_state: Optional[str] = Query(None, description="Filtrar por estado de estudo"),
-    position:    Optional[str] = Query(None, description="Filtrar por posição"),
-    search:      Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
-    date_from:   Optional[str] = Query(None, description="Filtrar por data (ISO date, ex: 2026-03-20)"),
-    page:        int = Query(1, ge=1),
-    page_size:   int = Query(50, ge=1, le=200),
-    current_user=Depends(require_auth)
+def _build_conditions(
+    site, tag, study_state, position, search, date_from,
+    exclude_mtt_only: bool = False
 ):
+    """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
     params = []
 
@@ -73,9 +66,41 @@ def list_hands(
         conditions.append("h.played_at >= %s")
         params.append(date_from)
 
+    if exclude_mtt_only:
+        # Excluir mãos que têm APENAS a tag 'mtt' (bulk HH sem marcação de estudo)
+        # Inclui: mãos sem tags, mãos com outras tags, mãos com mtt + outras tags
+        conditions.append(
+            "NOT (h.tags = ARRAY['mtt']::text[] OR h.tags = '{mtt}')"
+        )
+
+    return conditions, params
+
+
+@router.get("")
+def list_hands(
+    site:             Optional[str] = Query(None),
+    tag:              Optional[str] = Query(None, description="Filtrar por tag"),
+    study_state:      Optional[str] = Query(None, description="Filtrar por estado de estudo"),
+    position:         Optional[str] = Query(None, description="Filtrar por posição"),
+    search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
+    date_from:        Optional[str] = Query(None, description="Filtrar por data (ISO date, ex: 2026-03-20)"),
+    exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
+    page:             int = Query(1, ge=1),
+    page_size:        int = Query(50, ge=1, le=200),
+    current_user=Depends(require_auth)
+):
+    conditions, params = _build_conditions(
+        site, tag, study_state, position, search, date_from, exclude_mtt_only
+    )
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    total = query(f"SELECT COUNT(*) AS total FROM hands h LEFT JOIN entries e ON h.entry_id = e.id LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id {where}", params)[0]["total"]
+    total = query(
+        f"""SELECT COUNT(*) AS total FROM hands h
+            LEFT JOIN entries e ON h.entry_id = e.id
+            LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
+            {where}""",
+        params
+    )[0]["total"]
     offset = (page - 1) * page_size
 
     rows = query(
@@ -107,34 +132,18 @@ def list_hands(
 
 @router.get("/tag-groups")
 def tag_groups(
-    site:        Optional[str] = Query(None),
-    study_state: Optional[str] = Query(None),
-    position:    Optional[str] = Query(None),
-    search:      Optional[str] = Query(None),
-    date_from:   Optional[str] = Query(None),
+    site:             Optional[str] = Query(None),
+    study_state:      Optional[str] = Query(None),
+    position:         Optional[str] = Query(None),
+    search:           Optional[str] = Query(None),
+    date_from:        Optional[str] = Query(None),
+    exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB."""
-    conditions = []
-    params = []
-
-    if site:
-        conditions.append("h.site = %s")
-        params.append(site)
-    if study_state:
-        conditions.append("h.study_state = %s")
-        params.append(study_state)
-    if position:
-        conditions.append("h.position = %s")
-        params.append(position)
-    if search:
-        conditions.append("(h.notes ILIKE %s OR h.raw ILIKE %s OR h.hand_id ILIKE %s OR h.stakes ILIKE %s)")
-        like = f"%{search}%"
-        params.extend([like, like, like, like])
-    if date_from:
-        conditions.append("h.played_at >= %s")
-        params.append(date_from)
-
+    conditions, params = _build_conditions(
+        site, None, study_state, position, search, date_from, exclude_mtt_only
+    )
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     # Fetch all matching hands (only id, tags, result) — no pagination

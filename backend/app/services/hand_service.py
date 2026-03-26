@@ -7,7 +7,25 @@ from app.db import get_conn, query, execute_returning
 from app.parsers.gg_hands import parse_hands
 
 
-def _insert_hand(conn, h: dict, entry_id: int | None) -> bool:
+def _get_or_create_tournament_pk(conn, tournament_id_str: str, site: str) -> int | None:
+    """
+    Dado o tournament_id string do parser (ex: "1234567"),
+    devolve o PK da tabela tournaments (ou None se não existir).
+    """
+    if not tournament_id_str:
+        return None
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM tournaments WHERE tid = %s AND site ILIKE %s",
+            (tournament_id_str, f"%{site}%")
+        )
+        row = cur.fetchone()
+        if row:
+            return row["id"]
+    return None
+
+
+def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None) -> bool:
     """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
     with conn.cursor() as cur:
         if h["hand_id"]:
@@ -18,16 +36,21 @@ def _insert_hand(conn, h: dict, entry_id: int | None) -> bool:
         all_actions = h.get("all_players_actions")
         all_actions_json = json.dumps(all_actions) if all_actions else None
 
+        # Resolve tournament_pk from the hand's tournament_id string if not provided
+        t_pk = tournament_pk
+        if t_pk is None and h.get("tournament_id"):
+            t_pk = _get_or_create_tournament_pk(conn, h["tournament_id"], h.get("site", ""))
+
         cur.execute(
             """
             INSERT INTO hands
                 (site, hand_id, played_at, stakes, position,
                  hero_cards, board, result, currency,
-                 raw, entry_id, study_state, all_players_actions)
+                 raw, entry_id, study_state, all_players_actions, tournament_id)
             VALUES
                 (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
                  %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
-                 %(raw)s, %(entry_id)s, 'new', %(all_players_actions)s)
+                 %(raw)s, %(entry_id)s, 'new', %(all_players_actions)s, %(tournament_id)s)
             """,
             {
                 "site": h["site"],
@@ -42,6 +65,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None) -> bool:
                 "raw": h.get("raw", ""),
                 "entry_id": entry_id,
                 "all_players_actions": all_actions_json,
+                "tournament_id": t_pk,
             },
         )
         return True

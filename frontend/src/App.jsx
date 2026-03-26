@@ -8,6 +8,7 @@ import PnlPage from './pages/Pnl'
 import HandsPage from './pages/Hands'
 import VillainsPage from './pages/Villains'
 import DiscordPage from './pages/Discord'
+import TournamentsPage from './pages/Tournaments'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="villains" element={<VillainsPage />} />
         <Route path="pnl" element={<PnlPage />} />
         <Route path="discord" element={<DiscordPage />} />
+        <Route path="tournaments" element={<TournamentsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
