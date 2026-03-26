@@ -339,9 +339,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
         conn = get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE entries SET raw_json = %s WHERE id = %s",
-                    (json.dumps({
+                raw_json_str = json.dumps({
                         "tm": tm_final,
                         "file_meta": file_meta,
                         "mime_type": mime_type,
@@ -351,7 +349,10 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                         "board": board,
                         "raw_vision": vision_text,
                         "vision_done": True,
-                    }),)
+                    })
+                cur.execute(
+                    "UPDATE entries SET raw_json = %s WHERE id = %s",
+                    (raw_json_str, entry_id)
                 )
             conn.commit()
         except Exception as e:
