@@ -50,8 +50,11 @@ def list_hands(
         params.append(site)
 
     if tag:
-        conditions.append("%s = ANY(h.tags)")
-        params.append(tag)
+        if tag == '__none__':
+            conditions.append("(h.tags IS NULL OR h.tags = '{}')")
+        else:
+            conditions.append("%s = ANY(h.tags)")
+            params.append(tag)
 
     if study_state:
         conditions.append("h.study_state = %s")
@@ -100,6 +103,76 @@ def list_hands(
         "pages":     (total + page_size - 1) // page_size,
         "data":      [dict(r) for r in rows],
     }
+
+
+@router.get("/tag-groups")
+def tag_groups(
+    site:        Optional[str] = Query(None),
+    study_state: Optional[str] = Query(None),
+    position:    Optional[str] = Query(None),
+    search:      Optional[str] = Query(None),
+    date_from:   Optional[str] = Query(None),
+    current_user=Depends(require_auth)
+):
+    """Devolve grupos de tags com contagens, wins/losses e resultado total em BB."""
+    conditions = []
+    params = []
+
+    if site:
+        conditions.append("h.site = %s")
+        params.append(site)
+    if study_state:
+        conditions.append("h.study_state = %s")
+        params.append(study_state)
+    if position:
+        conditions.append("h.position = %s")
+        params.append(position)
+    if search:
+        conditions.append("(h.notes ILIKE %s OR h.raw ILIKE %s OR h.hand_id ILIKE %s OR h.stakes ILIKE %s)")
+        like = f"%{search}%"
+        params.extend([like, like, like, like])
+    if date_from:
+        conditions.append("h.played_at >= %s")
+        params.append(date_from)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    # Fetch all matching hands (only id, tags, result) — no pagination
+    rows = query(
+        f"SELECT h.id, h.tags, h.result, h.study_state FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST",
+        params
+    )
+
+    # Group by sorted tag combination
+    groups = {}  # tagKey -> {tags, count, wins, losses, total_bb}
+    no_tag = {"tags": [], "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
+
+    for r in rows:
+        tags = r["tags"] or []
+        result = float(r["result"] or 0.0)
+        win = 1 if result > 0 else 0
+        loss = 1 if result < 0 else 0
+
+        if not tags:
+            no_tag["count"] += 1
+            no_tag["wins"] += win
+            no_tag["losses"] += loss
+            no_tag["total_bb"] += result
+        else:
+            key = "+".join(sorted(tags))
+            if key not in groups:
+                groups[key] = {"tags": sorted(tags), "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
+            groups[key]["count"] += 1
+            groups[key]["wins"] += win
+            groups[key]["losses"] += loss
+            groups[key]["total_bb"] += result
+
+    # Sort by count desc
+    sorted_groups = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+    if no_tag["count"] > 0:
+        sorted_groups.append(no_tag)
+
+    return {"groups": sorted_groups, "total": len(rows)}
 
 
 @router.get("/stats")

@@ -63,6 +63,12 @@ export const hands = {
   update: (id, body)    => req('PATCH',  `/hands/${id}`, body),
   delete: (id)          => req('DELETE', `/hands/${id}`),
   stats:  ()            => req('GET',    '/hands/stats'),
+  tagGroups: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/hands/tag-groups${qs ? '?' + qs : ''}`)
+  },
 }
 // ── Villains ────────────────────────────────────────────────────────────────────
 export const villains = {

@@ -618,13 +618,48 @@ function HandRow({ hand, onClick, onDelete }) {
 
 // ── Componente: Tag Group (colapsável) ──────────────────────────────────────
 
-function TagGroup({ tag, tagHands, onOpenDetail, onDeleteHand, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen)
+// TagGroup recebe metadados do endpoint tag-groups e faz lazy-load das mãos ao expandir
+function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenDetail, onDeleteHand }) {
+  const [open, setOpen] = useState(false)
+  const [tagHands, setTagHands] = useState([])
+  const [loadingHands, setLoadingHands] = useState(false)
 
-  const wins = tagHands.filter(h => h.result != null && Number(h.result) > 0).length
-  const losses = tagHands.filter(h => h.result != null && Number(h.result) < 0).length
-  const totalBB = tagHands.reduce((sum, h) => sum + (Number(h.result) || 0), 0)
+  async function expand() {
+    if (!open && tagHands.length === 0) {
+      setLoadingHands(true)
+      try {
+        // Fetch mãos deste grupo específico
+        const params = { ...filters, page_size: 500, page: 1 }
+        if (!params.date_from) delete params.date_from
+        if (tags.length === 0) {
+          // sem-tag: buscar mãos sem tags
+          params.tag = '__none__'
+        } else {
+          // Para grupos com tags, filtrar pela tag principal (combinação)
+          // Usamos a primeira tag como filtro e depois filtramos no frontend
+          params.tag = tags[0]
+        }
+        const result = await hands.list(params)
+        let fetched = result.data || []
+        // Se o grupo tem múltiplas tags, filtrar para só mostrar mãos com exactamente essas tags
+        if (tags.length > 1) {
+          const keySet = tags.sort().join('+')
+          fetched = fetched.filter(h => h.tags && h.tags.sort().join('+') === keySet)
+        } else if (tags.length === 0) {
+          fetched = fetched.filter(h => !h.tags || h.tags.length === 0)
+        }
+        setTagHands(fetched)
+      } catch (e) {
+        console.error('Erro ao carregar mãos do grupo:', e)
+      } finally {
+        setLoadingHands(false)
+      }
+    }
+    setOpen(o => !o)
+  }
 
+  // Cor baseada na primeira tag
+  const tag = tags.length > 0 ? tags[0] : 'sem-tag'
   const colors = {
     icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e',
     bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b',
@@ -643,7 +678,7 @@ function TagGroup({ tag, tagHands, onOpenDetail, onDeleteHand, defaultOpen = fal
     }}>
       {/* Header colapsável */}
       <div
-        onClick={() => setOpen(!open)}
+        onClick={expand}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '12px 16px',
@@ -663,17 +698,28 @@ function TagGroup({ tag, tagHands, onOpenDetail, onDeleteHand, defaultOpen = fal
             transition: 'transform 0.2s',
           }}>&#9654;</span>
 
-          {/* Tag badge */}
-          <span style={{
-            display: 'inline-block', padding: '3px 12px', borderRadius: 999,
-            fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
-            color: tagColor, background: `${tagColor}20`,
-            border: `1px solid ${tagColor}40`,
-          }}>#{tag}</span>
+          {/* Tag badges */}
+          <div style={{ display: 'flex', gap: 4 }}>
+            {tags.length === 0 ? (
+              <span style={{
+                display: 'inline-block', padding: '3px 12px', borderRadius: 999,
+                fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                color: '#64748b', background: 'rgba(100,116,139,0.15)',
+                border: '1px solid rgba(100,116,139,0.3)',
+              }}>#sem-tag</span>
+            ) : tags.map(t => (
+              <span key={t} style={{
+                display: 'inline-block', padding: '3px 10px', borderRadius: 999,
+                fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                color: tagColor, background: `${tagColor}20`,
+                border: `1px solid ${tagColor}40`,
+              }}>#{t}</span>
+            ))}
+          </div>
 
           {/* Contagem */}
           <span style={{ fontSize: 12, color: '#64748b' }}>
-            {tagHands.length} {tagHands.length === 1 ? 'mão' : 'mãos'}
+            {count} {count === 1 ? 'mão' : 'mãos'}
           </span>
         </div>
 
@@ -693,14 +739,24 @@ function TagGroup({ tag, tagHands, onOpenDetail, onDeleteHand, defaultOpen = fal
       {/* Conteúdo expandido */}
       {open && (
         <div>
-          {tagHands.map(h => (
-            <HandRow
-              key={h.id}
-              hand={h}
-              onClick={() => onOpenDetail(h.id)}
-              onDelete={() => onDeleteHand(h.id)}
-            />
-          ))}
+          {loadingHands ? (
+            <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', fontSize: 12 }}>
+              A carregar mãos...
+            </div>
+          ) : tagHands.length === 0 ? (
+            <div style={{ padding: '16px', textAlign: 'center', color: '#4b5563', fontSize: 12 }}>
+              Sem mãos neste grupo
+            </div>
+          ) : (
+            tagHands.map(h => (
+              <HandRow
+                key={h.id}
+                hand={h}
+                onClick={() => onOpenDetail(h.id)}
+                onDelete={() => onDeleteHand(h.id)}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
@@ -710,15 +766,31 @@ function TagGroup({ tag, tagHands, onOpenDetail, onDeleteHand, defaultOpen = fal
 // ── Página Principal ─────────────────────────────────────────────────────────
 
 export default function HandsPage() {
-  const [data, setData]       = useState({ data: [], total: 0, pages: 1 })
-  const [page, setPage]       = useState(1)
-  const [filters, setFilters] = useState({ study_state: '', site: '', position: '', search: '', date_from: '' })
-  const [error, setError]     = useState('')
-  const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState(null)
-  const [viewMode, setViewMode] = useState('tags') // 'tags' | 'grid' | 'table'
+  const [data, setData]           = useState({ data: [], total: 0, pages: 1 })
+  const [tagGroupsData, setTagGroupsData] = useState({ groups: [], total: 0 })
+  const [page, setPage]           = useState(1)
+  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '' })
+  const [error, setError]         = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [selected, setSelected]   = useState(null)
+  const [viewMode, setViewMode]   = useState('tags') // 'tags' | 'grid' | 'table'
 
-  const load = useCallback(() => {
+  // Para a vista por tags: usa o endpoint tag-groups (sem paginação, só metadados)
+  const loadTagGroups = useCallback(() => {
+    if (viewMode !== 'tags') return
+    setLoading(true)
+    setError('')
+    const params = { ...filters }
+    if (!params.date_from) delete params.date_from
+    hands.tagGroups(params)
+      .then(setTagGroupsData)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [filters, viewMode])
+
+  // Para as vistas grid/tabela: usa o endpoint paginado normal
+  const loadList = useCallback(() => {
+    if (viewMode === 'tags') return
     setLoading(true)
     setError('')
     const params = { ...filters, page, page_size: 200 }
@@ -727,9 +799,10 @@ export default function HandsPage() {
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [page, filters])
+  }, [page, filters, viewMode])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { loadTagGroups() }, [loadTagGroups])
+  useEffect(() => { loadList() }, [loadList])
 
   function set(key, val) {
     setFilters(f => ({ ...f, [key]: val }))
@@ -749,33 +822,15 @@ export default function HandsPage() {
     if (!confirm('Apagar esta mão?')) return
     try {
       await hands.delete(id)
-      load()
+      loadTagGroups()
+      loadList()
     } catch (e) {
       setError(e.message)
     }
   }
 
   const rows = data.data || []
-
-  // Agrupar mãos por tag
-  const tagGroups = {}
-  const noTagHands = []
-  rows.forEach(h => {
-    if (h.tags && h.tags.length > 0) {
-      // Usar a primeira tag como grupo principal
-      // Mas também adicionar a combinação de tags como chave
-      const tagKey = h.tags.sort().join('+')
-      if (!tagGroups[tagKey]) {
-        tagGroups[tagKey] = { tags: h.tags, hands: [] }
-      }
-      tagGroups[tagKey].hands.push(h)
-    } else {
-      noTagHands.push(h)
-    }
-  })
-
-  // Ordenar grupos por número de mãos (maior primeiro)
-  const sortedGroups = Object.entries(tagGroups).sort((a, b) => b[1].hands.length - a[1].hands.length)
+  const totalHands = viewMode === 'tags' ? tagGroupsData.total : data.total
 
   return (
     <>
@@ -784,7 +839,7 @@ export default function HandsPage() {
         <div>
           <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>Mãos</div>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 3 }}>
-            {data.total} mãos registadas
+            {totalHands} mãos registadas
           </div>
         </div>
         {/* Toggle views */}
@@ -891,7 +946,7 @@ export default function HandsPage() {
       )}
 
       {/* Empty */}
-      {!loading && rows.length === 0 && (
+      {!loading && rows.length === 0 && viewMode !== 'tags' && (
         <div style={{ textAlign: 'center', padding: '64px 0', color: '#64748b' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>&#127183;</div>
           <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 6 }}>Sem mãos</div>
@@ -899,28 +954,26 @@ export default function HandsPage() {
         </div>
       )}
 
-      {/* Tags View (default) — mãos agrupadas por tags, colapsáveis */}
-      {!loading && rows.length > 0 && viewMode === 'tags' && (
+      {/* Tags View (default) — grupos com contagens reais, lazy-load ao expandir */}
+      {!loading && viewMode === 'tags' && tagGroupsData.groups.length > 0 && (
         <div style={{ marginBottom: 24 }}>
-          {sortedGroups.map(([tagKey, group]) => (
-            <TagGroup
-              key={tagKey}
-              tag={tagKey}
-              tagHands={group.hands}
-              onOpenDetail={openDetail}
-              onDeleteHand={deleteHand}
-              defaultOpen={false}
-            />
-          ))}
-          {noTagHands.length > 0 && (
-            <TagGroup
-              tag="sem-tag"
-              tagHands={noTagHands}
-              onOpenDetail={openDetail}
-              onDeleteHand={deleteHand}
-              defaultOpen={false}
-            />
-          )}
+          {tagGroupsData.groups.map((group, i) => {
+            const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.sort().join('+')
+            return (
+              <TagGroup
+                key={tagKey + i}
+                tagKey={tagKey}
+                tags={group.tags}
+                count={group.count}
+                wins={group.wins}
+                losses={group.losses}
+                totalBB={group.total_bb}
+                filters={filters}
+                onOpenDetail={openDetail}
+                onDeleteHand={deleteHand}
+              />
+            )
+          })}
         </div>
       )}
 
