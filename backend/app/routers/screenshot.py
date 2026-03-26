@@ -325,7 +325,9 @@ async def upload_screenshot(
 ):
     """
     Upload de screenshot do replayer GG.
-    Pipeline: filename parse → Vision → match HH → enrich all_players_actions.
+    Pipeline NOVO: guardar imediatamente → Vision → match HH → enrich.
+    O screenshot é sempre guardado na BD antes de chamar o Vision,
+    para garantir que não se perde mesmo que o Vision falhe ou dê timeout.
     """
     content = await file.read()
     filename = file.filename or "screenshot.png"
@@ -334,29 +336,97 @@ async def upload_screenshot(
     if not mime_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Ficheiro deve ser uma imagem (PNG/JPG)")
 
-    # 1. Extrair dados do nome do ficheiro (fonte primária)
+    # 1. Extrair dados do nome do ficheiro (fonte primária — rápido, sem rede)
     file_meta = _parse_filename(filename)
+    tm_number = file_meta.get("tm")
     logger.info(f"Filename parsed: {file_meta}")
 
-    # 2. Extrair dados via Vision
-    vision_text = _extract_hand_data_from_image(content, mime_type)
-    vision_data = _parse_vision_response(vision_text)
+    # 2. Guardar imediatamente como entry órfão (antes do Vision)
+    #    Imagem guardada em base64 no raw_json para persistência
+    import base64 as _b64
+    img_b64 = _b64.b64encode(content).decode("utf-8")
 
-    # TM: preferir nome do ficheiro, fallback para Vision
-    tm_number = file_meta.get("tm") or vision_data.get("tm")
-    vision_players = vision_data.get("players_by_position", {})
-    hero_name = vision_data.get("hero")
-    board = vision_data.get("board", [])
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO entries (source, entry_type, site, file_name, status, notes, raw_json)
+                VALUES ('screenshot', 'screenshot', 'GGPoker', %s, 'new', %s, %s)
+                RETURNING id
+                """,
+                (
+                    filename,
+                    f"Screenshot — TM: {tm_number or 'não detectado'}",
+                    json.dumps({
+                        "tm": tm_number,
+                        "file_meta": file_meta,
+                        "mime_type": mime_type,
+                        "img_b64": img_b64,
+                        "players_by_position": {},
+                        "hero": None,
+                        "vision_done": False,
+                    }),
+                )
+            )
+            entry_id = cur.fetchone()["id"]
+        conn.commit()
+        logger.info(f"Screenshot guardado como entry {entry_id} (TM: {tm_number})")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erro ao guardar entry de screenshot: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao guardar screenshot: {e}")
+    finally:
+        conn.close()
 
-    logger.info(f"TM: {tm_number}, players: {list(vision_players.keys())}, hero: {hero_name}")
+    # 3. Chamar o Vision (pode falhar — o entry já está guardado)
+    vision_text = None
+    vision_players = {}
+    hero_name = None
+    board = []
+    try:
+        vision_text = _extract_hand_data_from_image(content, mime_type)
+        vision_data = _parse_vision_response(vision_text)
+        # TM: preferir nome do ficheiro, fallback para Vision
+        tm_number = tm_number or vision_data.get("tm")
+        vision_players = vision_data.get("players_by_position", {})
+        hero_name = vision_data.get("hero")
+        board = vision_data.get("board", [])
+        logger.info(f"Vision OK — TM: {tm_number}, players: {list(vision_players.keys())}, hero: {hero_name}")
 
-    # 3. Guardar screenshot
-    screenshot_url = _upload_screenshot_to_storage(content, filename)
+        # Actualizar entry com dados do Vision
+        conn2 = get_conn()
+        try:
+            with conn2.cursor() as cur:
+                cur.execute(
+                    "UPDATE entries SET raw_json = %s WHERE id = %s",
+                    (
+                        json.dumps({
+                            "tm": tm_number,
+                            "file_meta": file_meta,
+                            "mime_type": mime_type,
+                            "img_b64": img_b64,
+                            "players_by_position": vision_players,
+                            "hero": hero_name,
+                            "board": board,
+                            "raw_vision": vision_text,
+                            "vision_done": True,
+                        }),
+                    )
+                )
+            conn2.commit()
+        except Exception as e2:
+            conn2.rollback()
+            logger.error(f"Erro ao actualizar entry com Vision: {e2}")
+        finally:
+            conn2.close()
+
+    except Exception as e:
+        logger.error(f"Vision falhou para entry {entry_id}: {e} — entry guardado sem Vision")
 
     # 4. Tentar match com HH na BD pelo TM number
     matched_hand = None
     if tm_number:
-        # O hand_id no HH é "GG-{TM_number_sem_TM_prefix}"
         tm_digits = tm_number.replace("TM", "")
         hand_id_value = f"GG-{tm_digits}"
         rows = query(
@@ -369,16 +439,11 @@ async def upload_screenshot(
             matched_hand = dict(rows[0])
 
     # 5. Se fez match, enriquecer a mão com nomes reais
-    if matched_hand:
+    if matched_hand and vision_players:
         all_players_raw = matched_hand.get("all_players_actions") or {}
-
-        # Construir mapa anon → nome real por posição
         anon_map = _build_anon_to_real_map(matched_hand, vision_players)
-
-        # Enriquecer all_players_actions com nomes reais + bounty + country
         enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, vision_players)
 
-        # Metadata do screenshot para guardar
         player_names_json = {
             "players_by_position": vision_players,
             "hero": hero_name,
@@ -388,85 +453,57 @@ async def upload_screenshot(
             "raw_vision": vision_text,
         }
 
-        conn = get_conn()
+        conn3 = get_conn()
         try:
-            with conn.cursor() as cur:
+            with conn3.cursor() as cur:
                 cur.execute(
                     """
                     UPDATE hands
-                    SET screenshot_url = %s,
-                        player_names = %s,
+                    SET player_names = %s,
                         all_players_actions = %s
                     WHERE id = %s
                     """,
                     (
-                        screenshot_url,
                         json.dumps(player_names_json),
                         json.dumps(enriched_actions),
                         matched_hand["id"],
                     )
                 )
-            conn.commit()
+                # Marcar entry como resolvido
+                cur.execute(
+                    "UPDATE entries SET status = 'resolved' WHERE id = %s",
+                    (entry_id,)
+                )
+            conn3.commit()
             logger.info(f"Hand {matched_hand['id']} enriched with {len(anon_map)} player name mappings")
         except Exception as e:
-            conn.rollback()
+            conn3.rollback()
             logger.error(f"Error updating hand: {e}")
         finally:
-            conn.close()
+            conn3.close()
 
         return {
             "status": "matched",
             "tm_number": tm_number,
             "hand_id": matched_hand["id"],
             "hand_hand_id": matched_hand["hand_id"],
-            "screenshot_url": screenshot_url,
             "players_mapped": len([k for k, v in anon_map.items() if k != "Hero"]),
             "players_total": len(vision_players),
             "hero": hero_name,
             "anon_map": anon_map,
             "file_meta": file_meta,
+            "entry_id": entry_id,
         }
 
-    # 6. Sem match — guardar como screenshot órfão
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO entries (source, entry_type, site, file_name, status, notes, raw_json)
-                VALUES ('screenshot', 'screenshot', 'GGPoker', %s, 'new', %s, %s)
-                RETURNING id
-                """,
-                (
-                    filename,
-                    f"Screenshot órfão — TM: {tm_number or 'não detectado'} — importa a HH primeiro",
-                    json.dumps({
-                        "tm": tm_number,
-                        "players_by_position": vision_players,
-                        "hero": hero_name,
-                        "file_meta": file_meta,
-                        "screenshot_url": screenshot_url,
-                    }),
-                )
-            )
-            entry_id = cur.fetchone()["id"]
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Error creating orphan entry: {e}")
-        entry_id = None
-    finally:
-        conn.close()
-
+    # 6. Sem match (ou sem Vision) — entry já guardado, devolver status
     return {
         "status": "no_match",
         "tm_number": tm_number,
-        "screenshot_url": screenshot_url,
         "players_found": len(vision_players),
         "players": list(vision_players.keys()),
         "hero": hero_name,
         "file_meta": file_meta,
-        "message": "Screenshot guardado mas sem match com HH. Importa a HH deste torneio primeiro.",
+        "message": "Screenshot guardado. Importa a HH deste torneio para fazer o match.",
         "entry_id": entry_id,
     }
 
