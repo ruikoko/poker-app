@@ -46,43 +46,48 @@ def list_hands(
     params = []
 
     if site:
-        conditions.append("site = %s")
+        conditions.append("h.site = %s")
         params.append(site)
 
     if tag:
-        conditions.append("%s = ANY(tags)")
+        conditions.append("%s = ANY(h.tags)")
         params.append(tag)
 
     if study_state:
-        conditions.append("study_state = %s")
+        conditions.append("h.study_state = %s")
         params.append(study_state)
 
     if position:
-        conditions.append("position = %s")
+        conditions.append("h.position = %s")
         params.append(position)
 
     if search:
-        conditions.append("(notes ILIKE %s OR raw ILIKE %s OR hand_id ILIKE %s OR stakes ILIKE %s)")
+        conditions.append("(h.notes ILIKE %s OR h.raw ILIKE %s OR h.hand_id ILIKE %s OR h.stakes ILIKE %s)")
         like = f"%{search}%"
         params.extend([like, like, like, like])
 
     if date_from:
-        conditions.append("played_at >= %s")
+        conditions.append("h.played_at >= %s")
         params.append(date_from)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    total = query(f"SELECT COUNT(*) AS total FROM hands {where}", params)[0]["total"]
+    total = query(f"SELECT COUNT(*) AS total FROM hands h LEFT JOIN entries e ON h.entry_id = e.id LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id {where}", params)[0]["total"]
     offset = (page - 1) * page_size
 
     rows = query(
         f"""
-        SELECT id, site, hand_id, played_at, stakes, position,
-               hero_cards, board, result, currency, notes, tags,
-               study_state, entry_id, viewed_at, studied_at, created_at
-        FROM hands
+        SELECT h.id, h.site, h.hand_id, h.played_at, h.stakes, h.position,
+               h.hero_cards, h.board, h.result, h.currency, h.notes, h.tags,
+               h.study_state, h.entry_id, h.viewed_at, h.studied_at, h.created_at,
+               h.all_players_actions,
+               e.discord_channel, e.discord_posted_at,
+               d.channel_name AS discord_channel_name
+        FROM hands h
+        LEFT JOIN entries e ON h.entry_id = e.id
+        LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
         {where}
-        ORDER BY played_at DESC NULLS LAST, id DESC
+        ORDER BY h.played_at DESC NULLS LAST, h.id DESC
         LIMIT %s OFFSET %s
         """,
         params + [page_size, offset]
@@ -116,7 +121,14 @@ def hand_stats(current_user=Depends(require_auth)):
 
 @router.get("/{hand_pk}")
 def get_hand(hand_pk: int, current_user=Depends(require_auth)):
-    rows = query("SELECT * FROM hands WHERE id = %s", (hand_pk,))
+    rows = query("""
+        SELECT h.*, e.discord_channel, e.discord_posted_at,
+               d.channel_name AS discord_channel_name
+        FROM hands h
+        LEFT JOIN entries e ON h.entry_id = e.id
+        LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
+        WHERE h.id = %s
+    """, (hand_pk,))
     if not rows:
         raise HTTPException(status_code=404, detail="Mão não encontrada")
 
