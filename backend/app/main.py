@@ -11,6 +11,7 @@ from app.routers import health, auth, import_, tournaments, hands, villains
 from app.routers.entries import router as entries_router
 from app.routers.discord import router as discord_router
 from app.routers.screenshot import router as screenshot_router
+from app.routers.mtt import router as mtt_router, ensure_mtt_schema
 
 load_dotenv()
 
@@ -155,6 +156,7 @@ async def lifespan(app: FastAPI):
     # Startup
     ensure_entries_schema()
     ensure_discord_sync_table()
+    ensure_mtt_schema()
 
     # Arrancar bot Discord em background
     from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
@@ -194,6 +196,7 @@ app.include_router(villains.router)
 app.include_router(entries_router)
 app.include_router(discord_router)
 app.include_router(screenshot_router)
+app.include_router(mtt_router)
 
 # Serve uploaded screenshots as static files
 import os

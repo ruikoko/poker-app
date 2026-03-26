@@ -133,6 +133,26 @@ export const imports = {
   logs: () => req('GET', '/import/logs'),
 }
 
+// ── MTT ──────────────────────────────────────────────────────────────────────
+export const mtt = {
+  import: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/mtt/import`, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
+  },
+  hands: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/mtt/hands${qs ? '?' + qs : ''}`)
+  },
+  hand: (id) => req('GET', `/mtt/hands/${id}`),
+  stats: () => req('GET', '/mtt/stats'),
+  orphans: () => req('GET', '/mtt/orphan-screenshots'),
+  rematch: () => req('POST', '/mtt/rematch'),
+}
+
 // ── Screenshots ───────────────────────────────────────────────────────────────
 export const screenshots = {
   upload: (file) => {
