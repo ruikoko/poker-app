@@ -10,6 +10,7 @@ from app.db import get_conn
 from app.routers import health, auth, import_, tournaments, hands, villains
 from app.routers.entries import router as entries_router
 from app.routers.discord import router as discord_router
+from app.routers.screenshot import router as screenshot_router
 
 load_dotenv()
 
@@ -87,6 +88,14 @@ def ensure_entries_schema():
         """
         ALTER TABLE hands
         ADD COLUMN IF NOT EXISTS confidence_level TEXT
+        """,
+        """
+        ALTER TABLE hands
+        ADD COLUMN IF NOT EXISTS screenshot_url TEXT
+        """,
+        """
+        ALTER TABLE hands
+        ADD COLUMN IF NOT EXISTS player_names JSONB
         """,
         "CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id)",
         "CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state)",
@@ -179,6 +188,13 @@ app.include_router(hands.router)
 app.include_router(villains.router)
 app.include_router(entries_router)
 app.include_router(discord_router)
+app.include_router(screenshot_router)
+
+# Serve uploaded screenshots as static files
+import os
+from fastapi.staticfiles import StaticFiles
+os.makedirs("/tmp/poker_screenshots", exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory="/tmp/poker_screenshots"), name="screenshots")
 
 
 @app.get("/")

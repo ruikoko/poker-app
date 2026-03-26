@@ -154,12 +154,88 @@ function Tag({ t, onClick, active }) {
 
 // ── Componente: Acções de Todos os Jogadores ────────────────────────────────
 
+// Normalise all_players_actions coming from the DB.
+// Two formats exist:
+//   A) { players: [...], hero_name } — old vision pipeline
+//   B) { "PlayerName": { seat, position, actions: { preflop: [...], ... }, is_hero, cards, stack_bb } } — HH import
+function normaliseActions(raw) {
+  if (!raw) return null
+  // Format A — already normalised
+  if (Array.isArray(raw.players)) {
+    return raw.players.map(p => ({
+      name: p.name || 'Player',
+      position: p.position,
+      isHero: p.name === raw.hero_name,
+      cards: p.cards || null,
+      stackBB: p.stack_bb ?? null,
+      actions: Object.fromEntries(
+        Object.entries(p.actions || {}).map(([street, val]) => [
+          street,
+          Array.isArray(val) ? val : (val && val !== '-' && val !== 'None') ? [val] : [],
+        ])
+      ),
+    }))
+  }
+  // Format B — dict keyed by player name
+  const SEAT_ORDER = ['SB', 'BB', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN']
+  return Object.entries(raw)
+    .map(([name, info]) => ({
+      name,
+      position: info.position || '',
+      isHero: !!info.is_hero,
+      cards: info.cards || null,
+      stackBB: info.stack_bb ?? null,
+      actions: Object.fromEntries(
+        Object.entries(info.actions || {}).map(([street, val]) => [
+          street,
+          Array.isArray(val) ? val : (val && val !== '-' && val !== 'None') ? [val] : [],
+        ])
+      ),
+    }))
+    .sort((a, b) => {
+      const ia = SEAT_ORDER.indexOf(a.position)
+      const ib = SEAT_ORDER.indexOf(b.position)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
+}
+
+const ACTION_COLORS = {
+  fold: { color: '#64748b', bg: 'rgba(100,116,139,0.10)' },
+  check: { color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
+  call: { color: '#22c55e', bg: 'rgba(34,197,94,0.10)' },
+  bet: { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)' },
+  raise: { color: '#f97316', bg: 'rgba(249,115,22,0.10)' },
+  allin: { color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+}
+
+function actionStyle(text) {
+  const t = (text || '').toLowerCase()
+  if (t.includes('all-in') || t.includes('allin') || t.includes('all in')) return ACTION_COLORS.allin
+  if (t.startsWith('raise') || t.startsWith('re-raise')) return ACTION_COLORS.raise
+  if (t.startsWith('bet')) return ACTION_COLORS.bet
+  if (t.startsWith('call')) return ACTION_COLORS.call
+  if (t.startsWith('check')) return ACTION_COLORS.check
+  if (t.startsWith('fold')) return ACTION_COLORS.fold
+  return { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' }
+}
+
+function ActionBadge({ text }) {
+  const s = actionStyle(text)
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+      fontSize: 10, fontWeight: 600, fontFamily: 'monospace',
+      color: s.color, background: s.bg, border: `1px solid ${s.color}25`,
+      whiteSpace: 'nowrap',
+    }}>{text}</span>
+  )
+}
+
 function AllPlayersActions({ actions }) {
-  if (!actions || !actions.players || actions.players.length === 0) return null
+  const players = normaliseActions(actions)
+  if (!players || players.length === 0) return null
 
   const streets = ['preflop', 'flop', 'turn', 'river']
-  const players = actions.players || []
-  const heroName = actions.hero_name || ''
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -171,15 +247,12 @@ function AllPlayersActions({ actions }) {
       </div>
 
       {streets.map(street => {
-        // Verificar se há acções nesta street
-        const hasActions = players.some(p => p.actions?.[street] && p.actions[street] !== '-' && p.actions[street] !== 'None')
+        const hasActions = players.some(p => p.actions?.[street]?.length > 0)
         if (!hasActions) return null
 
         return (
           <div key={street} style={{ marginBottom: 12 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
-            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <span style={{
                 fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
                 color: STREET_COLORS[street], textTransform: 'uppercase',
@@ -189,33 +262,37 @@ function AllPlayersActions({ actions }) {
               }}>{STREET_LABELS[street]}</span>
             </div>
             <div style={{
-              display: 'flex', flexDirection: 'column', gap: 3,
-              background: '#0f1117', borderRadius: 8, padding: '8px 12px',
+              display: 'flex', flexDirection: 'column', gap: 0,
+              background: '#0f1117', borderRadius: 8, padding: '6px 12px',
               border: '1px solid #1e2130',
             }}>
               {players.map((player, i) => {
-                const action = player.actions?.[street]
-                if (!action || action === '-' || action === 'None') return null
-                const isHero = player.name === heroName
+                const acts = player.actions?.[street] || []
+                if (acts.length === 0) return null
                 return (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '3px 0',
-                    borderBottom: i < players.length - 1 ? '1px solid #1a1d27' : 'none',
+                    padding: '5px 0',
+                    borderBottom: '1px solid #1a1d27',
                   }}>
                     <PosBadge pos={player.position} />
                     <span style={{
-                      fontSize: 11, color: isHero ? '#818cf8' : '#94a3b8',
-                      fontWeight: isHero ? 600 : 400,
+                      fontSize: 11,
+                      color: player.isHero ? '#818cf8' : '#94a3b8',
+                      fontWeight: player.isHero ? 600 : 400,
                       minWidth: 80,
                     }}>
-                      {player.name || 'Player'}
-                      {isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                      {player.name}
+                      {player.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
                     </span>
-                    <span style={{
-                      fontSize: 11, fontFamily: 'monospace', color: '#e2e8f0',
-                      fontWeight: 500,
-                    }}>{action}</span>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {acts.map((a, j) => <ActionBadge key={j} text={a} />)}
+                    </div>
+                    {player.stackBB != null && (
+                      <span style={{ fontSize: 9, color: '#4b5563', marginLeft: 'auto', fontFamily: 'monospace' }}>
+                        {player.stackBB.toFixed(1)} BB
+                      </span>
+                    )}
                   </div>
                 )
               })}
@@ -375,6 +452,19 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           ? <AllPlayersActions actions={hand.all_players_actions} />
           : <HeroActionsFromNotes notes={hand.notes} />
         }
+
+        {/* Screenshot inline */}
+        {hand.screenshot_url && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Screenshot</div>
+            <img
+              src={hand.screenshot_url}
+              alt="Screenshot da mão"
+              style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #2a2d3a', cursor: 'pointer' }}
+              onClick={() => window.open(hand.screenshot_url, '_blank')}
+            />
+          </div>
+        )}
 
         {/* Replayer link */}
         {isGG && (

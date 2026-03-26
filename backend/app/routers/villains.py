@@ -134,3 +134,55 @@ def delete_villain(villain_id: int, current_user=Depends(require_auth)):
     if not rows:
         raise HTTPException(status_code=404, detail="Vilão não encontrado")
     return {"ok": True}
+
+
+@router.get("/search/hands")
+def villain_hands(
+    nick: str = Query(..., description="Nick do vilão"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user=Depends(require_auth)
+):
+    """
+    Encontra mãos onde o vilão aparece em all_players_actions.
+    Pesquisa pelo nick exacto (case-insensitive) nas chaves do JSONB.
+    """
+    offset = (page - 1) * page_size
+
+    # Search in all_players_actions keys (player names)
+    # Also search in player_names JSONB
+    rows = query(
+        """
+        SELECT h.id, h.hand_id, h.played_at, h.stakes, h.position,
+               h.hero_cards, h.board, h.result, h.study_state,
+               h.all_players_actions, h.screenshot_url, h.player_names
+        FROM hands h
+        WHERE (
+            h.all_players_actions ? %s
+            OR h.player_names::text ILIKE %s
+        )
+        ORDER BY h.played_at DESC NULLS LAST
+        LIMIT %s OFFSET %s
+        """,
+        (nick, f"%{nick}%", page_size, offset)
+    )
+
+    total_rows = query(
+        """
+        SELECT COUNT(*) AS total FROM hands h
+        WHERE (
+            h.all_players_actions ? %s
+            OR h.player_names::text ILIKE %s
+        )
+        """,
+        (nick, f"%{nick}%")
+    )
+    total = total_rows[0]["total"] if total_rows else 0
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": (total + page_size - 1) // page_size,
+        "data": [dict(r) for r in rows],
+    }

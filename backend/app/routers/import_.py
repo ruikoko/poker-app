@@ -4,9 +4,10 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
 from app.parsers import winamax, ggpoker
+from app.parsers.gg_hands import parse_hands
 from app.services.entry_classifier import classify_entry
 from app.services.entry_service import create_entry
-from app.services.hand_service import process_entry_to_hands
+from app.services.hand_service import process_entry_to_hands, _insert_hand
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 
@@ -43,20 +44,15 @@ def _detect_zip_content_type(content: bytes) -> str:
                 text = zf.read(name).decode("utf-8", errors="replace").strip()
                 if not text:
                     continue
-                # Tournament summary: comeca com "Tournament #" e tem "Buy-in"
                 first_lines = "\n".join(text.splitlines()[:10]).lower()
                 if "buy-in" in first_lines and "tournament" in first_lines:
                     return "tournament_summary"
-                # Hand history: comeca com "Poker Hand #" e tem "HOLE CARDS"
                 if text.startswith("Poker Hand #") and "hole cards" in text.lower():
                     return "hand_history"
-                # Se tem "Tournament #" no inicio e "You finished" -> summary
                 if text.startswith("Tournament #") and "you finished" in text.lower():
                     return "tournament_summary"
-                # Fallback: se tem "Poker Hand #" provavelmente e HH
                 if "poker hand #" in first_lines:
                     return "hand_history"
-                # Se tem "buy-in" provavelmente e summary
                 if "buy-in" in first_lines:
                     return "tournament_summary"
     except Exception:
@@ -159,8 +155,6 @@ async def import_file(
 
     # ── Classificar o conteudo ──
     if is_zip:
-        # Para ZIPs, nao podemos classificar pelo content_text (e binario)
-        # Abrimos o ZIP e inspeccionamos o primeiro ficheiro
         content_type = _detect_zip_content_type(content)
     else:
         content_text = content.decode("utf-8", errors="ignore")
@@ -193,8 +187,6 @@ async def import_file(
     # ── HAND HISTORY → vai para hands ──
     if content_type == "hand_history":
         if is_zip:
-            # Para ZIPs de HH, precisamos de extrair e processar cada ficheiro
-            from app.parsers.gg_hands import parse_hands
             total_inserted = 0
             total_skipped = 0
             all_errors = []
@@ -206,22 +198,20 @@ async def import_file(
                         file_content = zf.read(name)
                         hands_parsed, errors = parse_hands(file_content, name)
                         all_errors.extend(errors)
-                        from app.services.hand_service import _insert_hand
-                        from app.db import get_conn as gc
-                        cn = gc()
+                        conn = get_conn()
                         try:
                             for h in hands_parsed:
-                                ok = _insert_hand(cn, h, entry_id)
+                                ok = _insert_hand(conn, h, entry_id)
                                 if ok:
                                     total_inserted += 1
                                 else:
                                     total_skipped += 1
-                            cn.commit()
+                            conn.commit()
                         except Exception:
-                            cn.rollback()
+                            conn.rollback()
                             raise
                         finally:
-                            cn.close()
+                            conn.close()
             except Exception as e:
                 all_errors.append(str(e))
 

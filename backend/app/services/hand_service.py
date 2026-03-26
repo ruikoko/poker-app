@@ -2,8 +2,49 @@
 Serviço de processamento de mãos.
 Liga entries a hands: extrai mãos de uma entry e insere-as na tabela hands.
 """
+import json
 from app.db import get_conn, query, execute_returning
 from app.parsers.gg_hands import parse_hands
+
+
+def _insert_hand(conn, h: dict, entry_id: int | None) -> bool:
+    """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
+    with conn.cursor() as cur:
+        if h["hand_id"]:
+            cur.execute("SELECT id FROM hands WHERE hand_id = %s", (h["hand_id"],))
+            if cur.fetchone():
+                return False
+
+        all_actions = h.get("all_players_actions")
+        all_actions_json = json.dumps(all_actions) if all_actions else None
+
+        cur.execute(
+            """
+            INSERT INTO hands
+                (site, hand_id, played_at, stakes, position,
+                 hero_cards, board, result, currency,
+                 raw, entry_id, study_state, all_players_actions)
+            VALUES
+                (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
+                 %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
+                 %(raw)s, %(entry_id)s, 'new', %(all_players_actions)s)
+            """,
+            {
+                "site": h["site"],
+                "hand_id": h["hand_id"],
+                "played_at": h["played_at"],
+                "stakes": h["stakes"],
+                "position": h["position"],
+                "hero_cards": h["hero_cards"] or [],
+                "board": h["board"] or [],
+                "result": h["result"],
+                "currency": h["currency"],
+                "raw": h.get("raw", ""),
+                "entry_id": entry_id,
+                "all_players_actions": all_actions_json,
+            },
+        )
+        return True
 
 
 def process_entry_to_hands(entry_id: int) -> dict:
@@ -22,65 +63,27 @@ def process_entry_to_hands(entry_id: int) -> dict:
 
     raw_text = entry.get("raw_text") or ""
     file_name = entry.get("file_name") or "unknown"
-    site = entry.get("site") or "GGPoker"
 
     content = raw_text.encode("utf-8")
-
-    # Parsear as mãos
-    if "ggpoker" in site.lower() or "gg" in site.lower():
-        parsed_hands, parse_errors = parse_hands(content, file_name)
-    else:
-        # Fallback: tentar GG parser
-        parsed_hands, parse_errors = parse_hands(content, file_name)
+    parsed_hands, parse_errors = parse_hands(content, file_name)
 
     inserted = 0
     skipped = 0
 
     conn = get_conn()
     try:
-        with conn.cursor() as cur:
-            for h in parsed_hands:
-                # Verificar duplicado por hand_id
-                if h["hand_id"]:
-                    cur.execute(
-                        "SELECT id FROM hands WHERE hand_id = %s",
-                        (h["hand_id"],)
-                    )
-                    if cur.fetchone():
-                        skipped += 1
-                        continue
-
-                cur.execute(
-                    """
-                    INSERT INTO hands
-                        (site, hand_id, played_at, stakes, position,
-                         hero_cards, board, result, currency,
-                         raw, entry_id, study_state)
-                    VALUES
-                        (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
-                         %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
-                         %(raw)s, %(entry_id)s, 'new')
-                    """,
-                    {
-                        "site": h["site"],
-                        "hand_id": h["hand_id"],
-                        "played_at": h["played_at"],
-                        "stakes": h["stakes"],
-                        "position": h["position"],
-                        "hero_cards": h["hero_cards"] or [],
-                        "board": h["board"] or [],
-                        "result": h["result"],
-                        "currency": h["currency"],
-                        "raw": h["raw"],
-                        "entry_id": entry_id,
-                    },
-                )
+        for h in parsed_hands:
+            ok = _insert_hand(conn, h, entry_id)
+            if ok:
                 inserted += 1
+            else:
+                skipped += 1
 
-            # Actualizar o estado da entry
-            new_status = "processed" if not parse_errors else (
-                "partial" if inserted > 0 else "failed"
-            )
+        # Actualizar o estado da entry
+        new_status = "processed" if not parse_errors else (
+            "partial" if inserted > 0 else "failed"
+        )
+        with conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET status = %s WHERE id = %s",
                 (new_status, entry_id)

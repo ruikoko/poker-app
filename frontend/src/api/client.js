@@ -1,8 +1,6 @@
-const API_ROOT = import.meta.env.VITE_API_URL
-
-if (!API_ROOT) {
-  throw new Error('VITE_API_URL não definida no build do frontend')
-}
+// Use relative path — in dev, Vite proxy forwards /api → backend.
+// In production, the reverse proxy (nginx/railway) does the same.
+const API_ROOT = import.meta.env.VITE_API_URL || ''
 
 const BASE = `${API_ROOT}/api`
 
@@ -66,8 +64,7 @@ export const hands = {
   delete: (id)          => req('DELETE', `/hands/${id}`),
   stats:  ()            => req('GET',    '/hands/stats'),
 }
-
-// ── Villains ──────────────────────────────────────────────────────────────────
+// ── Villains ────────────────────────────────────────────────────────────────────
 export const villains = {
   list:   (params = {}) => {
     const qs = new URLSearchParams(
@@ -79,8 +76,13 @@ export const villains = {
   create: (body)        => req('POST',   '/villains', body),
   update: (id, body)    => req('PATCH',  `/villains/${id}`, body),
   delete: (id)          => req('DELETE', `/villains/${id}`),
+  searchHands: (nick, params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries({ nick, ...params }).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/villains/search/hands?${qs}`)
+  },
 }
-
 // ── Entries ──────────────────────────────────────────────────────────────────
 export const entries = {
   list: (params = {}) => {
@@ -117,4 +119,15 @@ export const imports = {
       .then(r => r.json())
   },
   logs: () => req('GET', '/import/logs'),
+}
+
+// ── Screenshots ───────────────────────────────────────────────────────────────
+export const screenshots = {
+  upload: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/screenshots`, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
+  },
+  getForHand: (handId) => req('GET', `/screenshots/hand/${handId}`),
 }
