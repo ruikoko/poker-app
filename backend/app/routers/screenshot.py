@@ -15,8 +15,9 @@ import re
 import base64
 import json
 import logging
+import asyncio
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from app.auth import require_auth
 from app.db import get_conn, query
 
@@ -318,16 +319,77 @@ def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | No
 
 # ── Endpoint principal ───────────────────────────────────────────────────────
 
+async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
+                                tm_number: str, file_meta: dict, img_b64: str):
+    """
+    Processa Vision em background para um entry já guardado na BD.
+    Actualiza raw_json com players_by_position, hero, board e vision_done=True.
+    Se houver match com HH, enriquece a mão com nomes reais.
+    """
+    try:
+        vision_text = _extract_hand_data_from_image(content, mime_type)
+        vision_data = _parse_vision_response(vision_text)
+        tm_final = tm_number or vision_data.get("tm")
+        vision_players = vision_data.get("players_by_position", {})
+        hero_name = vision_data.get("hero")
+        board = vision_data.get("board", [])
+        logger.info(f"[bg] Vision OK entry {entry_id} — TM: {tm_final}, players: {list(vision_players.keys())}")
+
+        # Actualizar entry com dados do Vision
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE entries SET raw_json = %s WHERE id = %s",
+                    (json.dumps({
+                        "tm": tm_final,
+                        "file_meta": file_meta,
+                        "mime_type": mime_type,
+                        "img_b64": img_b64,
+                        "players_by_position": vision_players,
+                        "hero": hero_name,
+                        "board": board,
+                        "raw_vision": vision_text,
+                        "vision_done": True,
+                    }),)
+                )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"[bg] Erro ao actualizar entry {entry_id} com Vision: {e}")
+        finally:
+            conn.close()
+
+        # Tentar match com HH se tiver TM
+        if tm_final and vision_players:
+            tm_digits = tm_final.replace("TM", "")
+            hand_rows = query(
+                "SELECT id, hand_id, all_players_actions, position FROM hands WHERE hand_id = %s LIMIT 1",
+                (f"GG-{tm_digits}",)
+            )
+            if hand_rows:
+                raw_for_enrich = {
+                    "players_by_position": vision_players,
+                    "hero": hero_name,
+                    "file_meta": file_meta,
+                }
+                result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], raw_for_enrich)
+                logger.info(f"[bg] Match entry {entry_id} → hand {hand_rows[0]['id']}: {result}")
+
+    except Exception as e:
+        logger.error(f"[bg] Vision falhou para entry {entry_id}: {e}")
+
+
 @router.post("")
 async def upload_screenshot(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     current_user=Depends(require_auth),
 ):
     """
     Upload de screenshot do replayer GG.
-    Pipeline NOVO: guardar imediatamente → Vision → match HH → enrich.
-    O screenshot é sempre guardado na BD antes de chamar o Vision,
-    para garantir que não se perde mesmo que o Vision falhe ou dê timeout.
+    Pipeline: guardar imediatamente → responder → Vision em background.
+    O screenshot é sempre guardado na BD antes de chamar o Vision.
     """
     content = await file.read()
     filename = file.filename or "screenshot.png"
@@ -342,7 +404,6 @@ async def upload_screenshot(
     logger.info(f"Filename parsed: {file_meta}")
 
     # 2. Guardar imediatamente como entry órfão (antes do Vision)
-    #    Imagem guardada em base64 no raw_json para persistência
     import base64 as _b64
     img_b64 = _b64.b64encode(content).decode("utf-8")
 
@@ -379,131 +440,22 @@ async def upload_screenshot(
     finally:
         conn.close()
 
-    # 3. Chamar o Vision (pode falhar — o entry já está guardado)
-    vision_text = None
-    vision_players = {}
-    hero_name = None
-    board = []
-    try:
-        vision_text = _extract_hand_data_from_image(content, mime_type)
-        vision_data = _parse_vision_response(vision_text)
-        # TM: preferir nome do ficheiro, fallback para Vision
-        tm_number = tm_number or vision_data.get("tm")
-        vision_players = vision_data.get("players_by_position", {})
-        hero_name = vision_data.get("hero")
-        board = vision_data.get("board", [])
-        logger.info(f"Vision OK — TM: {tm_number}, players: {list(vision_players.keys())}, hero: {hero_name}")
-
-        # Actualizar entry com dados do Vision
-        conn2 = get_conn()
-        try:
-            with conn2.cursor() as cur:
-                cur.execute(
-                    "UPDATE entries SET raw_json = %s WHERE id = %s",
-                    (
-                        json.dumps({
-                            "tm": tm_number,
-                            "file_meta": file_meta,
-                            "mime_type": mime_type,
-                            "img_b64": img_b64,
-                            "players_by_position": vision_players,
-                            "hero": hero_name,
-                            "board": board,
-                            "raw_vision": vision_text,
-                            "vision_done": True,
-                        }),
-                    )
-                )
-            conn2.commit()
-        except Exception as e2:
-            conn2.rollback()
-            logger.error(f"Erro ao actualizar entry com Vision: {e2}")
-        finally:
-            conn2.close()
-
-    except Exception as e:
-        logger.error(f"Vision falhou para entry {entry_id}: {e} — entry guardado sem Vision")
-
-    # 4. Tentar match com HH na BD pelo TM number
-    matched_hand = None
-    if tm_number:
-        tm_digits = tm_number.replace("TM", "")
-        hand_id_value = f"GG-{tm_digits}"
-        rows = query(
-            """SELECT id, hand_id, position, hero_cards, board, all_players_actions,
-                      played_at, result, stakes
-               FROM hands WHERE hand_id = %s LIMIT 1""",
-            (hand_id_value,)
+    # 3. Lançar Vision em background (não bloqueia o response)
+    if background_tasks is not None:
+        background_tasks.add_task(
+            _run_vision_for_entry, entry_id, content, mime_type, tm_number, file_meta, img_b64
         )
-        if rows:
-            matched_hand = dict(rows[0])
+    else:
+        asyncio.create_task(
+            _run_vision_for_entry(entry_id, content, mime_type, tm_number, file_meta, img_b64)
+        )
 
-    # 5. Se fez match, enriquecer a mão com nomes reais
-    if matched_hand and vision_players:
-        all_players_raw = matched_hand.get("all_players_actions") or {}
-        anon_map = _build_anon_to_real_map(matched_hand, vision_players)
-        enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, vision_players)
-
-        player_names_json = {
-            "players_by_position": vision_players,
-            "hero": hero_name,
-            "board_vision": board,
-            "anon_map": anon_map,
-            "file_meta": file_meta,
-            "raw_vision": vision_text,
-        }
-
-        conn3 = get_conn()
-        try:
-            with conn3.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE hands
-                    SET player_names = %s,
-                        all_players_actions = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        json.dumps(player_names_json),
-                        json.dumps(enriched_actions),
-                        matched_hand["id"],
-                    )
-                )
-                # Marcar entry como resolvido
-                cur.execute(
-                    "UPDATE entries SET status = 'resolved' WHERE id = %s",
-                    (entry_id,)
-                )
-            conn3.commit()
-            logger.info(f"Hand {matched_hand['id']} enriched with {len(anon_map)} player name mappings")
-        except Exception as e:
-            conn3.rollback()
-            logger.error(f"Error updating hand: {e}")
-        finally:
-            conn3.close()
-
-        return {
-            "status": "matched",
-            "tm_number": tm_number,
-            "hand_id": matched_hand["id"],
-            "hand_hand_id": matched_hand["hand_id"],
-            "players_mapped": len([k for k, v in anon_map.items() if k != "Hero"]),
-            "players_total": len(vision_players),
-            "hero": hero_name,
-            "anon_map": anon_map,
-            "file_meta": file_meta,
-            "entry_id": entry_id,
-        }
-
-    # 6. Sem match (ou sem Vision) — entry já guardado, devolver status
+    # 4. Responder imediatamente — Vision e match correm em background
     return {
-        "status": "no_match",
+        "status": "queued",
         "tm_number": tm_number,
-        "players_found": len(vision_players),
-        "players": list(vision_players.keys()),
-        "hero": hero_name,
         "file_meta": file_meta,
-        "message": "Screenshot guardado. Importa a HH deste torneio para fazer o match.",
+        "message": "Screenshot guardado. Vision a processar em background.",
         "entry_id": entry_id,
     }
 
@@ -642,3 +594,70 @@ def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     if not rows:
         raise HTTPException(status_code=404, detail="Mão não encontrada")
     return dict(rows[0])
+
+
+@router.post("/vision/backfill")
+async def vision_backfill(
+    background_tasks: BackgroundTasks,
+    limit: int = 50,
+    current_user=Depends(require_auth),
+):
+    """
+    Reprocessa screenshots com vision_done=false.
+    Lança o Vision em background para cada um (máx. `limit` por chamada).
+    """
+    rows = query(
+        """SELECT id, file_name, raw_json
+           FROM entries
+           WHERE entry_type = 'screenshot'
+             AND status = 'new'
+             AND (raw_json->>'vision_done')::boolean = false
+             AND raw_json->>'img_b64' IS NOT NULL
+           ORDER BY id ASC
+           LIMIT %s""",
+        (limit,)
+    )
+
+    queued = 0
+    for row in rows:
+        raw = row.get("raw_json") or {}
+        img_b64 = raw.get("img_b64", "")
+        if not img_b64:
+            continue
+
+        content = base64.b64decode(img_b64)
+        mime_type = raw.get("mime_type", "image/png")
+        tm_number = raw.get("tm")
+        file_meta = raw.get("file_meta", {})
+
+        background_tasks.add_task(
+            _run_vision_for_entry,
+            row["id"], content, mime_type, tm_number, file_meta, img_b64
+        )
+        queued += 1
+
+    total_pending = query(
+        "SELECT COUNT(*) as n FROM entries WHERE entry_type='screenshot' AND (raw_json->>'vision_done')::boolean = false",
+        ()
+    )[0]["n"]
+
+    return {
+        "queued": queued,
+        "total_pending": total_pending,
+        "message": f"{queued} screenshots enviados para Vision em background.",
+    }
+
+
+@router.get("/vision/status")
+def vision_status(current_user=Depends(require_auth)):
+    """Estado do processamento Vision: quantos feitos vs pendentes."""
+    rows = query(
+        """SELECT
+             COUNT(*) FILTER (WHERE (raw_json->>'vision_done')::boolean = true) as done,
+             COUNT(*) FILTER (WHERE (raw_json->>'vision_done')::boolean = false) as pending,
+             COUNT(*) as total
+           FROM entries WHERE entry_type = 'screenshot'""",
+        ()
+    )
+    r = rows[0] if rows else {"done": 0, "pending": 0, "total": 0}
+    return {"done": r["done"], "pending": r["pending"], "total": r["total"]}
