@@ -351,7 +351,7 @@ export default function InboxPage() {
                         : '#22c55e'
                     }}>
                       {item.result.import_type === 'hands'
-                        ? `${item.result.hands_inserted} mãos arquivadas em MTT`
+                        ? `${item.result.hands_inserted} mãos arquivadas em MTT${item.result.rematched_screenshots > 0 ? ` · ${item.result.rematched_screenshots} screenshot(s) matched` : ''}`
                         : item.result.import_type === 'tournaments'
                           ? `${item.result.inserted} torneios → MTT`
                           : item.result.status === 'matched'

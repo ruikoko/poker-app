@@ -1,5 +1,6 @@
 import zipfile
 import io
+import logging
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -8,6 +9,8 @@ from app.parsers.gg_hands import parse_hands
 from app.services.entry_classifier import classify_entry
 from app.services.entry_service import create_entry
 from app.services.hand_service import process_entry_to_hands, _insert_hand
+
+logger = logging.getLogger("import")
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 
@@ -215,6 +218,41 @@ async def import_file(
             except Exception as e:
                 all_errors.append(str(e))
 
+            # ── Auto-rematch de screenshots órfãos ──
+            rematched = []
+            try:
+                orphan_rows = query(
+                    "SELECT id, raw_json FROM entries WHERE entry_type = 'screenshot' AND status = 'new'"
+                )
+                for orphan in orphan_rows:
+                    raw = orphan.get("raw_json") or {}
+                    tm = raw.get("tm")
+                    if not tm:
+                        continue
+                    tm_digits = tm.replace("TM", "")
+                    hand_rows = query(
+                        "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                        (f"GG-{tm_digits}",)
+                    )
+                    if hand_rows:
+                        conn2 = get_conn()
+                        try:
+                            with conn2.cursor() as cur2:
+                                cur2.execute(
+                                    "UPDATE entries SET status = 'resolved' WHERE id = %s",
+                                    (orphan["id"],)
+                                )
+                            conn2.commit()
+                            rematched.append({"entry_id": orphan["id"], "tm": tm, "hand_id": hand_rows[0]["id"]})
+                            logger.info(f"Auto-rematch: screenshot {orphan['id']} matched to GG-{tm_digits}")
+                        except Exception as e2:
+                            conn2.rollback()
+                            logger.error(f"Auto-rematch error for entry {orphan['id']}: {e2}")
+                        finally:
+                            conn2.close()
+            except Exception as e:
+                logger.error(f"Auto-rematch query error: {e}")
+
             return {
                 "import_type": "hands",
                 "entry_id": entry_id,
@@ -226,6 +264,8 @@ async def import_file(
                 "hands_skipped": total_skipped,
                 "errors": len(all_errors),
                 "error_log": all_errors[:20],
+                "rematched_screenshots": len(rematched),
+                "rematched": rematched,
             }
         else:
             result = process_entry_to_hands(entry_id)
