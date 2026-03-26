@@ -96,7 +96,8 @@ def list_entries(
     SELECT
         id, source, entry_type, site, file_name, external_id,
         status, notes, created_at,
-        discord_server, discord_channel, discord_message_id
+        discord_server, discord_channel, discord_message_id,
+        raw_json
     FROM entries
     {where_sql}
     ORDER BY created_at DESC

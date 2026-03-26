@@ -112,6 +112,43 @@ export default function InboxPage() {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef(null)
 
+  // Orphan screenshots state
+  const [orphans, setOrphans] = useState([])
+  const [orphansLoading, setOrphansLoading] = useState(false)
+
+  const loadOrphans = useCallback(() => {
+    setOrphansLoading(true)
+    screenshots.orphans()
+      .then(d => setOrphans(d.data || []))
+      .catch(() => setOrphans([]))
+      .finally(() => setOrphansLoading(false))
+  }, [])
+
+  useEffect(() => { loadOrphans() }, [loadOrphans])
+
+  async function handleRematch(entryId) {
+    try {
+      const res = await screenshots.rematch(entryId)
+      if (res.status === 'matched') {
+        loadOrphans()
+        load()
+      } else {
+        alert(res.message)
+      }
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
+  async function handleDismiss(entryId) {
+    try {
+      await screenshots.dismiss(entryId)
+      loadOrphans()
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
   const load = useCallback(() => {
     setLoading(true)
     setError('')
@@ -195,6 +232,7 @@ export default function InboxPage() {
 
     setUploading(false)
     load() // Refresh the inbox
+    loadOrphans() // Refresh orphan screenshots
   }
 
   function clearCompleted() {
@@ -380,6 +418,67 @@ export default function InboxPage() {
       </div>
 
       {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
+
+      {/* ── Orphan Screenshots ── */}
+      {(orphansLoading || orphans.length > 0) && (
+        <div style={{
+          background: '#1a1d27', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10,
+          overflow: 'hidden', marginBottom: 20,
+        }}>
+          <div style={{
+            padding: '10px 16px', borderBottom: '1px solid rgba(245,158,11,0.15)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ color: '#f59e0b', fontSize: 13 }}>&#9888;</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#f59e0b' }}>
+              Screenshots sem HH ({orphans.length})
+            </span>
+            <span style={{ fontSize: 11, color: '#64748b', marginLeft: 4 }}>
+              — importa a HH do torneio para fazer o match automático
+            </span>
+          </div>
+          {orphansLoading ? (
+            <div style={{ padding: '16px', color: '#4b5563', fontSize: 12 }}>A carregar...</div>
+          ) : (
+            orphans.map(o => {
+              const meta = (o.raw_json && o.raw_json.file_meta) || {}
+              const players = (o.raw_json && o.raw_json.players_by_position) || {}
+              return (
+                <div key={o.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 16px', borderBottom: '1px solid #1e2130', fontSize: 12,
+                }}>
+                  <span style={{ color: '#f59e0b', fontSize: 16 }}>&#9632;</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: '#e2e8f0', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {(o.raw_json && o.raw_json.tm) || o.file_name || '—'}
+                    </div>
+                    <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                      {meta.date || '—'} {meta.time || ''} &middot; blinds {meta.blinds || '—'} &middot; {Object.keys(players).length} jogadores detectados
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRematch(o.id)}
+                    style={{
+                      padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+                      background: 'rgba(99,102,241,0.12)', color: '#818cf8',
+                      border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
+                    }}
+                  >Rematch</button>
+                  <button
+                    onClick={() => handleDismiss(o.id)}
+                    style={{
+                      padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+                      background: 'transparent', color: '#4b5563',
+                      border: '1px solid #2a2d3a', cursor: 'pointer',
+                    }}
+                  >Ignorar</button>
+                </div>
+              )
+            })
+          )}
+        </div>
+      )}
 
       {/* ── Hands table ── */}
       <div style={{

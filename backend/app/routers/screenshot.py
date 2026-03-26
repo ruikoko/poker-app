@@ -471,6 +471,45 @@ async def upload_screenshot(
     }
 
 
+@router.post("/orphans/{entry_id}/rematch")
+def rematch_orphan(entry_id: int, current_user=Depends(require_auth)):
+    """Tenta novamente o match de um screenshot órfão com a HH já importada."""
+    rows = query(
+        "SELECT id, raw_json FROM entries WHERE id = %s AND entry_type = 'screenshot' AND status = 'new'",
+        (entry_id,)
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Screenshot órfão não encontrado")
+
+    raw = rows[0].get("raw_json") or {}
+    tm_number = raw.get("tm")
+    if not tm_number:
+        return {"status": "no_tm", "message": "TM number não detectado neste screenshot"}
+
+    tm_digits = tm_number.replace("TM", "")
+    hand_rows = query(
+        "SELECT id, hand_id FROM hands WHERE hand_id = %s LIMIT 1",
+        (f"GG-{tm_digits}",)
+    )
+    if not hand_rows:
+        return {"status": "no_match", "message": f"HH do torneio {tm_number} ainda não importada"}
+
+    # Match encontrado — marcar entry como resolvida
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE entries SET status = 'resolved' WHERE id = %s", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "status": "matched",
+        "hand_id": hand_rows[0]["id"],
+        "hand_hand_id": hand_rows[0]["hand_id"],
+    }
+
+
 @router.get("/hand/{hand_id}")
 def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     """Devolve o screenshot_url e player_names de uma mão."""

@@ -142,4 +142,12 @@ export const screenshots = {
       .then(r => r.json())
   },
   getForHand: (handId) => req('GET', `/screenshots/hand/${handId}`),
+  orphans: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries({ entry_type: 'screenshot', status: 'new', page_size: 100, ...params }).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/entries?${qs}`)
+  },
+  rematch: (entryId) => req('POST', `/screenshots/orphans/${entryId}/rematch`),
+  dismiss: (entryId) => req('PATCH', `/entries/${entryId}`, { status: 'resolved' }),
 }
