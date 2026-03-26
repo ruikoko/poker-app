@@ -7,6 +7,7 @@ const NAV = [
   { to: '/hands',    label: 'Mãos' },
   { to: '/villains', label: 'Vilões' },
   { to: '/pnl',      label: 'P&L' },
+  { to: '/discord',   label: 'Discord' },
 ]
 
 export default function Shell() {

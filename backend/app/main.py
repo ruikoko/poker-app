@@ -1,4 +1,7 @@
 import os
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -6,19 +9,13 @@ from dotenv import load_dotenv
 from app.db import get_conn
 from app.routers import health, auth, import_, tournaments, hands, villains
 from app.routers.entries import router as entries_router
+from app.routers.discord import router as discord_router
 
 load_dotenv()
 
-app = FastAPI(title="Poker App API", version="0.1.0")
-
-allowed_origin = os.getenv("ALLOWED_ORIGIN", "http://localhost:5173")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[allowed_origin],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
 )
 
 
@@ -33,29 +30,8 @@ def ensure_entries_schema():
         CREATE TABLE IF NOT EXISTS entries (
             id BIGSERIAL PRIMARY KEY,
 
-            source TEXT NOT NULL CHECK (
-                source IN (
-                    'discord',
-                    'hm',
-                    'gg_backoffice',
-                    'hh_text',
-                    'summary',
-                    'report',
-                    'manual'
-                )
-            ),
-
-            entry_type TEXT NOT NULL CHECK (
-                entry_type IN (
-                    'hand_history',
-                    'tournament_summary',
-                    'tabular_report',
-                    'image',
-                    'replayer_link',
-                    'note',
-                    'text'
-                )
-            ),
+            source TEXT NOT NULL,
+            entry_type TEXT NOT NULL,
 
             site TEXT,
             file_name TEXT,
@@ -64,13 +40,11 @@ def ensure_entries_schema():
             raw_text TEXT,
             raw_json JSONB,
 
-            status TEXT NOT NULL DEFAULT 'new' CHECK (
-                status IN ('new', 'processed', 'partial', 'failed', 'archived')
-            ),
+            status TEXT NOT NULL DEFAULT 'new',
 
             notes TEXT,
 
-            import_log_id BIGINT REFERENCES import_logs(id) ON DELETE SET NULL,
+            import_log_id BIGINT,
 
             discord_server TEXT,
             discord_channel TEXT,
@@ -96,7 +70,7 @@ def ensure_entries_schema():
         """,
         """
         ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS entry_id BIGINT REFERENCES entries(id) ON DELETE SET NULL
+        ADD COLUMN IF NOT EXISTS entry_id BIGINT
         """,
         """
         ALTER TABLE hands
@@ -122,7 +96,13 @@ def ensure_entries_schema():
     try:
         with conn.cursor() as cur:
             for sql in statements:
-                cur.execute(sql)
+                try:
+                    cur.execute(sql)
+                except Exception as e:
+                    # Ignorar erros de "already exists" ou constraints
+                    conn.rollback()
+                    logging.getLogger("schema").warning(f"Schema statement skipped: {e}")
+                    continue
         conn.commit()
     except Exception:
         conn.rollback()
@@ -131,10 +111,65 @@ def ensure_entries_schema():
         conn.close()
 
 
-@app.on_event("startup")
-def startup_event():
-    ensure_entries_schema()
+def ensure_discord_sync_table():
+    """Cria a tabela de estado de sync do Discord."""
+    from app.db import execute
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS discord_sync_state (
+                channel_id TEXT PRIMARY KEY,
+                server_id TEXT NOT NULL,
+                channel_name TEXT,
+                last_message_id TEXT,
+                last_sync_at TIMESTAMPTZ DEFAULT NOW(),
+                messages_synced INTEGER DEFAULT 0
+            )
+        """)
+    except Exception as e:
+        logging.getLogger("schema").warning(f"discord_sync_state: {e}")
 
+
+# ── Lifespan (startup + shutdown) ────────────────────────────────────────────
+
+_bot_task = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _bot_task
+
+    # Startup
+    ensure_entries_schema()
+    ensure_discord_sync_table()
+
+    # Arrancar bot Discord em background
+    from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
+    if DISCORD_TOKEN and MONITORED_SERVERS:
+        _bot_task = asyncio.create_task(start_bot())
+        logging.getLogger("main").info("Bot Discord a arrancar em background...")
+    else:
+        logging.getLogger("main").info("Bot Discord desactivado (sem token ou server IDs)")
+
+    yield
+
+    # Shutdown
+    from app.discord_bot import stop_bot
+    await stop_bot()
+    if _bot_task:
+        _bot_task.cancel()
+
+
+app = FastAPI(title="Poker App API", version="0.2.0", lifespan=lifespan)
+
+allowed_origin = os.getenv("ALLOWED_ORIGIN", "http://localhost:5173")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[allowed_origin],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(health.router)
 app.include_router(auth.router)
@@ -143,8 +178,9 @@ app.include_router(tournaments.router)
 app.include_router(hands.router)
 app.include_router(villains.router)
 app.include_router(entries_router)
+app.include_router(discord_router)
 
 
 @app.get("/")
 def root():
-    return {"app": "poker-app", "version": "0.1.0"}
+    return {"app": "poker-app", "version": "0.2.0"}

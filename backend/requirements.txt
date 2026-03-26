@@ -5,3 +5,4 @@ python-dotenv==1.0.1
 bcrypt==4.2.1
 itsdangerous==2.2.0
 python-multipart==0.0.20
+discord.py==2.4.0

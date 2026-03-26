@@ -94,6 +94,14 @@ export const entries = {
   reprocess: (id)          => req('POST',  `/entries/${id}/reprocess`),
 }
 
+// ── Discord ──────────────────────────────────────────────────────────────────
+export const discord = {
+  status:    ()  => req('GET',  '/discord/status'),
+  syncState: ()  => req('GET',  '/discord/sync-state'),
+  stats:     ()  => req('GET',  '/discord/stats'),
+  sync:      ()  => req('POST', '/discord/sync'),
+}
+
 // ── Import ────────────────────────────────────────────────────────────────────
 export const imports = {
   upload: (file, site) => {
