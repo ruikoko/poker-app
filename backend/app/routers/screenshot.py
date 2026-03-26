@@ -597,45 +597,60 @@ def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     return dict(rows[0])
 
 
+async def _backfill_worker(entry_ids: list):
+    """
+    Worker assíncrono que processa entries 1 a 1 sequencialmente.
+    Busca cada imagem da BD individualmente para não sobrecarregar a memória.
+    """
+    for eid in entry_ids:
+        try:
+            rows = query(
+                "SELECT id, raw_json FROM entries WHERE id = %s",
+                (eid,)
+            )
+            if not rows:
+                continue
+            raw = rows[0].get("raw_json") or {}
+            img_b64 = raw.get("img_b64", "")
+            if not img_b64:
+                continue
+
+            content = base64.b64decode(img_b64)
+            mime_type = raw.get("mime_type", "image/png")
+            tm_number = raw.get("tm")
+            file_meta = raw.get("file_meta", {})
+
+            await _run_vision_for_entry(eid, content, mime_type, tm_number, file_meta, img_b64)
+            await asyncio.sleep(0.5)  # Pequena pausa entre chamadas
+        except Exception as e:
+            logger.error(f"[backfill] Erro no entry {eid}: {e}")
+
+
 @router.post("/vision/backfill")
 async def vision_backfill(
-    background_tasks: BackgroundTasks,
     limit: int = 50,
     current_user=Depends(require_auth),
 ):
     """
     Reprocessa screenshots com vision_done=false.
-    Lança o Vision em background para cada um (máx. `limit` por chamada).
+    Busca apenas os IDs e lança um worker assíncrono em background.
+    Responde imediatamente.
     """
     rows = query(
-        """SELECT id, file_name, raw_json
+        """SELECT id
            FROM entries
            WHERE entry_type = 'screenshot'
              AND status = 'new'
              AND (raw_json->>'vision_done')::boolean = false
-             AND raw_json->>'img_b64' IS NOT NULL
            ORDER BY id ASC
            LIMIT %s""",
         (limit,)
     )
 
-    queued = 0
-    for row in rows:
-        raw = row.get("raw_json") or {}
-        img_b64 = raw.get("img_b64", "")
-        if not img_b64:
-            continue
+    entry_ids = [r["id"] for r in rows]
 
-        content = base64.b64decode(img_b64)
-        mime_type = raw.get("mime_type", "image/png")
-        tm_number = raw.get("tm")
-        file_meta = raw.get("file_meta", {})
-
-        background_tasks.add_task(
-            _run_vision_for_entry,
-            row["id"], content, mime_type, tm_number, file_meta, img_b64
-        )
-        queued += 1
+    if entry_ids:
+        asyncio.create_task(_backfill_worker(entry_ids))
 
     total_pending = query(
         "SELECT COUNT(*) as n FROM entries WHERE entry_type='screenshot' AND (raw_json->>'vision_done')::boolean = false",
@@ -643,9 +658,9 @@ async def vision_backfill(
     )[0]["n"]
 
     return {
-        "queued": queued,
+        "queued": len(entry_ids),
         "total_pending": total_pending,
-        "message": f"{queued} screenshots enviados para Vision em background.",
+        "message": f"{len(entry_ids)} screenshots a processar sequencialmente em background.",
     }
 
 
