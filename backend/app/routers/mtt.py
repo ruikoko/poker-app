@@ -53,7 +53,7 @@ MTT_SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_mtt_hands_tm ON mtt_hands(tm_number)",
     "CREATE INDEX IF NOT EXISTS idx_mtt_hands_played_at ON mtt_hands(played_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_mtt_hands_has_screenshot ON mtt_hands(has_screenshot)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_mtt_hands_tm ON mtt_hands(tm_number)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_mtt_hands_tm_time ON mtt_hands(tm_number, played_at)",
     """
     CREATE TABLE IF NOT EXISTS hand_villains (
         id BIGSERIAL PRIMARY KEY,
@@ -362,34 +362,111 @@ def _parse_mtt_file(content: bytes, filename: str) -> tuple[list[dict], list[str
 
 # ── Match com screenshots ─────────────────────────────────────────────────────
 
-def _match_screenshot(tm_number: str) -> dict | None:
+def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None) -> dict | None:
     """
-    Procura um screenshot órfão pelo TM number.
+    Procura um screenshot órfão pelo TM number + hora + blinds.
+    
+    Estratégia:
+      1. Filtrar por TM number (identifica o torneio)
+      2. Se houver múltiplos, filtrar por blinds
+      3. Se ainda houver múltiplos, filtrar por hora (±2 min)
     Retorna os dados do Vision (players_by_position, hero) ou None.
     """
     tm_digits = tm_number.replace("TM", "")
     
-    # Procurar na tabela entries por screenshots com este TM
+    # Buscar todos os screenshots deste TM com Vision concluído
     rows = query(
         """SELECT id, raw_json 
            FROM entries 
            WHERE entry_type = 'screenshot' 
              AND raw_json->>'tm' LIKE %s
-           LIMIT 1""",
+             AND (raw_json->>'vision_done')::boolean = true
+           ORDER BY id""",
         (f"%{tm_digits}%",)
     )
     
     if not rows:
         return None
     
-    raw = rows[0].get("raw_json") or {}
-    vision_done = raw.get("vision_done", False)
+    # Se só há 1, usar directamente
+    if len(rows) == 1:
+        raw = rows[0].get("raw_json") or {}
+        return {
+            "entry_id": rows[0]["id"],
+            "players_by_position": raw.get("players_by_position", {}),
+            "hero": raw.get("hero"),
+            "board": raw.get("board", []),
+        }
     
-    if not vision_done:
-        return None
+    # Múltiplos screenshots do mesmo TM — filtrar por blinds + hora
+    def _normalise_blinds(b: str | None) -> str:
+        """Normaliza blinds para comparação: remove espaços e vírgulas."""
+        if not b:
+            return ""
+        return re.sub(r"[,\s]", "", b).lower()
     
+    hh_blinds_norm = _normalise_blinds(blinds)
+    
+    # Filtrar por blinds primeiro
+    candidates = []
+    for row in rows:
+        raw = row.get("raw_json") or {}
+        file_meta = raw.get("file_meta") or {}
+        ss_blinds = file_meta.get("blinds") or raw.get("blinds") or ""
+        ss_blinds_norm = _normalise_blinds(ss_blinds)
+        if hh_blinds_norm and ss_blinds_norm and hh_blinds_norm == ss_blinds_norm:
+            candidates.append(row)
+    
+    # Se filtro por blinds não ajudou, usar todos
+    if not candidates:
+        candidates = rows
+    
+    # Se só 1 candidato após filtro de blinds, usar
+    if len(candidates) == 1:
+        raw = candidates[0].get("raw_json") or {}
+        return {
+            "entry_id": candidates[0]["id"],
+            "players_by_position": raw.get("players_by_position", {}),
+            "hero": raw.get("hero"),
+            "board": raw.get("board", []),
+        }
+    
+    # Filtrar por hora (±2 minutos)
+    if played_at:
+        try:
+            hh_dt = datetime.fromisoformat(played_at.replace("Z", "+00:00"))
+            best = None
+            best_diff = float("inf")
+            for row in candidates:
+                raw = row.get("raw_json") or {}
+                file_meta = raw.get("file_meta") or {}
+                ss_time_str = file_meta.get("time")  # "HH:MM" em 24h
+                ss_date_str = file_meta.get("date")  # "YYYY-MM-DD"
+                if ss_time_str and ss_date_str:
+                    try:
+                        ss_dt = datetime.fromisoformat(f"{ss_date_str}T{ss_time_str}:00")
+                        diff = abs((hh_dt.replace(tzinfo=None) - ss_dt).total_seconds())
+                        if diff < best_diff:
+                            best_diff = diff
+                            best = row
+                    except Exception:
+                        pass
+            # Aceitar match se diferença < 5 minutos
+            if best and best_diff < 300:
+                raw = best.get("raw_json") or {}
+                return {
+                    "entry_id": best["id"],
+                    "players_by_position": raw.get("players_by_position", {}),
+                    "hero": raw.get("hero"),
+                    "board": raw.get("board", []),
+                }
+        except Exception as e:
+            logger.warning(f"Erro ao comparar horas no match: {e}")
+    
+    # Fallback: usar o primeiro candidato
+    raw = candidates[0].get("raw_json") or {}
     return {
-        "entry_id": rows[0]["id"],
+        "entry_id": candidates[0]["id"],
         "players_by_position": raw.get("players_by_position", {}),
         "hero": raw.get("hero"),
         "board": raw.get("board", []),
@@ -504,17 +581,17 @@ async def import_mtt(
     try:
         with conn.cursor() as cur:
             for h in all_hands:
-                # Verificar duplicado
+                # Verificar duplicado (TM + hora)
                 cur.execute(
-                    "SELECT id FROM mtt_hands WHERE tm_number = %s",
-                    (h["tm_number"],)
+                    "SELECT id FROM mtt_hands WHERE tm_number = %s AND played_at = %s",
+                    (h["tm_number"], h.get("played_at"))
                 )
                 if cur.fetchone():
                     skipped += 1
                     continue
                 
-                # Procurar screenshot match
-                screenshot = _match_screenshot(h["tm_number"])
+                # Procurar screenshot match (TM + hora + blinds)
+                screenshot = _match_screenshot(h["tm_number"], h.get("played_at"), h.get("blinds"))
                 has_screenshot = screenshot is not None
                 screenshot_entry_id = screenshot["entry_id"] if screenshot else None
                 
