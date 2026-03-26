@@ -37,6 +37,7 @@ def list_hands(
     study_state: Optional[str] = Query(None, description="Filtrar por estado de estudo"),
     position:    Optional[str] = Query(None, description="Filtrar por posição"),
     search:      Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
+    date_from:   Optional[str] = Query(None, description="Filtrar por data (ISO date, ex: 2026-03-20)"),
     page:        int = Query(1, ge=1),
     page_size:   int = Query(50, ge=1, le=200),
     current_user=Depends(require_auth)
@@ -64,6 +65,10 @@ def list_hands(
         conditions.append("(notes ILIKE %s OR raw ILIKE %s OR hand_id ILIKE %s OR stakes ILIKE %s)")
         like = f"%{search}%"
         params.extend([like, like, like, like])
+
+    if date_from:
+        conditions.append("played_at >= %s")
+        params.append(date_from)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

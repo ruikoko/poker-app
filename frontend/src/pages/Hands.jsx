@@ -491,7 +491,7 @@ function HandCard({ hand, onClick, onDelete }) {
 export default function HandsPage() {
   const [data, setData]       = useState({ data: [], total: 0, pages: 1 })
   const [page, setPage]       = useState(1)
-  const [filters, setFilters] = useState({ study_state: '', site: '', position: '', search: '' })
+  const [filters, setFilters] = useState({ study_state: '', site: '', position: '', search: '', date_from: '' })
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -501,6 +501,8 @@ export default function HandsPage() {
     setLoading(true)
     setError('')
     const params = { ...filters, page, page_size: 30 }
+    // Remove empty date_from
+    if (!params.date_from) delete params.date_from
     hands.list(params)
       .then(setData)
       .catch(e => setError(e.message))
@@ -557,9 +559,10 @@ export default function HandsPage() {
             { mode: 'grid', icon: '⊞', label: 'Cards' },
             { mode: 'table', icon: '≡', label: 'Tabela' },
           ].map(({ mode, icon, label }) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
+        <button
+          key={mode}
+          onClick={() => setViewMode(mode)}
+          title={label}
               style={{
                 padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
                 border: 'none', cursor: 'pointer',
@@ -579,6 +582,32 @@ export default function HandsPage() {
           {error}
         </div>
       )}
+
+      {/* Filtros temporais rápidos */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Todas', value: '' },
+          { label: 'Hoje', value: (() => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10) })() },
+          { label: '3 dias', value: (() => { const d = new Date(); d.setDate(d.getDate()-3); return d.toISOString().slice(0,10) })() },
+          { label: 'Semana', value: (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10) })() },
+          { label: 'Mês', value: (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10) })() },
+        ].map(({ label, value }) => (
+          <button
+            key={label}
+            onClick={() => { set('date_from', value) }}
+            style={{
+              padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+              border: '1px solid',
+              borderColor: filters.date_from === value ? '#6366f1' : '#2a2d3a',
+              background: filters.date_from === value ? 'rgba(99,102,241,0.15)' : 'transparent',
+              color: filters.date_from === value ? '#818cf8' : '#64748b',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* Filtros */}
       <div style={{
@@ -628,9 +657,9 @@ export default function HandsPage() {
         />
 
         {/* Limpar */}
-        {(filters.study_state || filters.site || filters.position || filters.search) && (
+        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from) && (
           <button
-            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '' }); setPage(1) }}
+            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '' }); setPage(1) }}
             style={{
               padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
               background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer',
