@@ -64,6 +64,7 @@ export const hands = {
   create: (body)        => req('POST',   '/hands', body),
   update: (id, body)    => req('PATCH',  `/hands/${id}`, body),
   delete: (id)          => req('DELETE', `/hands/${id}`),
+  stats:  ()            => req('GET',    '/hands/stats'),
 }
 
 // ── Villains ──────────────────────────────────────────────────────────────────
@@ -80,14 +81,27 @@ export const villains = {
   delete: (id)          => req('DELETE', `/villains/${id}`),
 }
 
+// ── Entries ──────────────────────────────────────────────────────────────────
+export const entries = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/entries${qs ? '?' + qs : ''}`)
+  },
+  get:       (id)          => req('GET',   `/entries/${id}`),
+  update:    (id, body)    => req('PATCH', `/entries/${id}`, body),
+  reprocess: (id)          => req('POST',  `/entries/${id}/reprocess`),
+}
+
 // ── Import ────────────────────────────────────────────────────────────────────
 export const imports = {
   upload: (file, site) => {
     const form = new FormData()
     form.append('file', file)
     const url = site ? `${BASE}/import?site=${site}` : `${BASE}/import`
-return fetch(url, { method: 'POST', credentials: 'include', body: form })
-  .then(r => r.json())
+    return fetch(url, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
   },
   logs: () => req('GET', '/import/logs'),
 }

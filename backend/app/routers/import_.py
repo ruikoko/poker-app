@@ -4,10 +4,12 @@ from app.db import get_conn, query
 from app.parsers import winamax, ggpoker
 from app.services.entry_classifier import classify_entry
 from app.services.entry_service import create_entry
+from app.services.hand_service import process_entry_to_hands
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 
-SITE_PARSERS = {
+# Parsers de summaries/torneios (P&L)
+SUMMARY_PARSERS = {
     "winamax": winamax.parse_file,
     "ggpoker": ggpoker.parse_file,
 }
@@ -29,8 +31,8 @@ def _detect_site(filename: str, content: bytes) -> str | None:
     return None
 
 
-def _run_import(conn, records: list[dict], import_id: int) -> tuple[int, int]:
-    """Insere torneios na transaccao aberta. Lanca excepcao se falhar."""
+def _run_tournament_import(conn, records: list[dict], import_id: int) -> tuple[int, int]:
+    """Insere torneios na transaccao aberta."""
     inserted = 0
     skipped = 0
 
@@ -101,6 +103,7 @@ async def import_file(
 
     content_text = content.decode("utf-8", errors="ignore")
 
+    # Classificar a entry
     classification = classify_entry(filename, content_text)
 
     entry = create_entry(
@@ -117,15 +120,34 @@ async def import_file(
     )
 
     entry_id = entry["id"]
+    entry_type = classification["entry_type"]
 
     detected_site = site or _detect_site(filename, content)
-    if not detected_site or detected_site not in SITE_PARSERS:
+
+    # ── HAND HISTORY → vai para hands, NÃO para tournaments ──
+    if entry_type == "hand_history":
+        result = process_entry_to_hands(entry_id)
+        return {
+            "import_type": "hands",
+            "entry_id": entry_id,
+            "site": detected_site or classification.get("site"),
+            "filename": filename,
+            "status": "ok" if result["inserted"] > 0 else "error",
+            "hands_found": result["inserted"] + result["skipped"],
+            "hands_inserted": result["inserted"],
+            "hands_skipped": result["skipped"],
+            "errors": len(result["errors"]),
+            "error_log": result["errors"][:20],
+        }
+
+    # ── TOURNAMENT SUMMARY / REPORT → vai para tournaments (P&L) ──
+    if not detected_site or detected_site not in SUMMARY_PARSERS:
         raise HTTPException(
             status_code=400,
             detail="Sala nao reconhecida. Usa ?site=winamax ou ?site=ggpoker",
         )
 
-    records, parse_errors = SITE_PARSERS[detected_site](content, filename)
+    records, parse_errors = SUMMARY_PARSERS[detected_site](content, filename)
     records_found = len(records)
 
     conn = get_conn()
@@ -133,7 +155,7 @@ async def import_file(
         with conn.cursor() as cur:
             import_id = _create_log(cur, detected_site, filename, records_found)
 
-        inserted, skipped = _run_import(conn, records, import_id)
+        inserted, skipped = _run_tournament_import(conn, records, import_id)
 
         status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
 
@@ -150,6 +172,7 @@ async def import_file(
         conn.close()
 
     return {
+        "import_type": "tournaments",
         "import_id": import_id,
         "entry_id": entry_id,
         "site": detected_site,

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 from app.auth import require_auth
 from app.db import query, execute, execute_returning
 
@@ -23,17 +24,21 @@ class HandCreate(BaseModel):
 
 
 class HandUpdate(BaseModel):
-    notes:    Optional[str] = None
-    tags:     Optional[list[str]] = None
-    position: Optional[str] = None
+    notes:       Optional[str] = None
+    tags:        Optional[list[str]] = None
+    position:    Optional[str] = None
+    study_state: Optional[str] = None
 
 
 @router.get("")
 def list_hands(
-    site:      Optional[str] = Query(None),
-    tag:       Optional[str] = Query(None, description="Filtrar por tag"),
-    page:      int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    site:        Optional[str] = Query(None),
+    tag:         Optional[str] = Query(None, description="Filtrar por tag"),
+    study_state: Optional[str] = Query(None, description="Filtrar por estado de estudo"),
+    position:    Optional[str] = Query(None, description="Filtrar por posição"),
+    search:      Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
+    page:        int = Query(1, ge=1),
+    page_size:   int = Query(50, ge=1, le=200),
     current_user=Depends(require_auth)
 ):
     conditions = []
@@ -47,6 +52,19 @@ def list_hands(
         conditions.append("%s = ANY(tags)")
         params.append(tag)
 
+    if study_state:
+        conditions.append("study_state = %s")
+        params.append(study_state)
+
+    if position:
+        conditions.append("position = %s")
+        params.append(position)
+
+    if search:
+        conditions.append("(notes ILIKE %s OR raw ILIKE %s OR hand_id ILIKE %s)")
+        like = f"%{search}%"
+        params.extend([like, like, like])
+
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total = query(f"SELECT COUNT(*) AS total FROM hands {where}", params)[0]["total"]
@@ -55,7 +73,8 @@ def list_hands(
     rows = query(
         f"""
         SELECT id, site, hand_id, played_at, stakes, position,
-               hero_cards, board, result, currency, notes, tags, created_at
+               hero_cards, board, result, currency, notes, tags,
+               study_state, entry_id, viewed_at, studied_at, created_at
         FROM hands
         {where}
         ORDER BY played_at DESC NULLS LAST, id DESC
@@ -73,12 +92,40 @@ def list_hands(
     }
 
 
-@router.get("/{hand_id}")
-def get_hand(hand_id: int, current_user=Depends(require_auth)):
-    rows = query("SELECT * FROM hands WHERE id = %s", (hand_id,))
+@router.get("/stats")
+def hand_stats(current_user=Depends(require_auth)):
+    """Estatísticas globais das mãos."""
+    rows = query("""
+        SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE study_state = 'new') AS new,
+            COUNT(*) FILTER (WHERE study_state = 'review') AS review,
+            COUNT(*) FILTER (WHERE study_state = 'studying') AS studying,
+            COUNT(*) FILTER (WHERE study_state = 'resolved') AS resolved,
+            COUNT(DISTINCT site) AS sites,
+            COUNT(DISTINCT position) FILTER (WHERE position IS NOT NULL) AS positions
+        FROM hands
+    """)
+    return dict(rows[0]) if rows else {}
+
+
+@router.get("/{hand_pk}")
+def get_hand(hand_pk: int, current_user=Depends(require_auth)):
+    rows = query("SELECT * FROM hands WHERE id = %s", (hand_pk,))
     if not rows:
         raise HTTPException(status_code=404, detail="Mão não encontrada")
-    return dict(rows[0])
+
+    hand = dict(rows[0])
+
+    # Marcar como vista se ainda não foi
+    if not hand.get("viewed_at"):
+        execute(
+            "UPDATE hands SET viewed_at = NOW() WHERE id = %s",
+            (hand_pk,)
+        )
+        hand["viewed_at"] = datetime.utcnow().isoformat()
+
+    return hand
 
 
 @router.post("")
@@ -87,11 +134,11 @@ def create_hand(body: HandCreate, current_user=Depends(require_auth)):
         """
         INSERT INTO hands
             (site, hand_id, played_at, stakes, position, hero_cards,
-             board, result, currency, notes, tags, raw)
+             board, result, currency, notes, tags, raw, study_state)
         VALUES
             (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
              %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
-             %(notes)s, %(tags)s, %(raw)s)
+             %(notes)s, %(tags)s, %(raw)s, 'new')
         RETURNING id, created_at
         """,
         body.model_dump()
@@ -99,27 +146,27 @@ def create_hand(body: HandCreate, current_user=Depends(require_auth)):
     return {"id": row["id"], "created_at": row["created_at"]}
 
 
-@router.patch("/{hand_id}")
-def update_hand(hand_id: int, body: HandUpdate, current_user=Depends(require_auth)):
+@router.patch("/{hand_pk}")
+def update_hand(hand_pk: int, body: HandUpdate, current_user=Depends(require_auth)):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="Nada para actualizar")
 
-    set_clause = ", ".join(f"{k} = %({k})s" for k in updates)
-    updates["hand_id_pk"] = hand_id
+    # Se mudar para 'resolved', registar studied_at
+    if updates.get("study_state") == "resolved":
+        updates["studied_at"] = datetime.utcnow()
 
-    rows = execute(
-        f"UPDATE hands SET {set_clause} WHERE id = %(hand_id_pk)s",
+    set_clause = ", ".join(f"{k} = %({k})s" for k in updates)
+    updates["hand_pk"] = hand_pk
+
+    execute(
+        f"UPDATE hands SET {set_clause} WHERE id = %(hand_pk)s",
         updates
     )
-    if not rows:
-        raise HTTPException(status_code=404, detail="Mão não encontrada")
     return {"ok": True}
 
 
-@router.delete("/{hand_id}")
-def delete_hand(hand_id: int, current_user=Depends(require_auth)):
-    rows = execute("DELETE FROM hands WHERE id = %s", (hand_id,))
-    if not rows:
-        raise HTTPException(status_code=404, detail="Mão não encontrada")
+@router.delete("/{hand_pk}")
+def delete_hand(hand_pk: int, current_user=Depends(require_auth)):
+    execute("DELETE FROM hands WHERE id = %s", (hand_pk,))
     return {"ok": True}

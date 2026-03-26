@@ -3,6 +3,7 @@ import { useAuth } from './hooks/useAuth'
 import Shell from './components/Shell'
 import LoginPage from './pages/Login'
 import DashboardPage from './pages/Dashboard'
+import InboxPage from './pages/Inbox'
 import PnlPage from './pages/Pnl'
 import HandsPage from './pages/Hands'
 import VillainsPage from './pages/Villains'
@@ -26,9 +27,10 @@ export default function App() {
         </RequireAuth>
       }>
         <Route index element={<DashboardPage />} />
-        <Route path="pnl" element={<PnlPage />} />
+        <Route path="inbox" element={<InboxPage />} />
         <Route path="hands" element={<HandsPage />} />
         <Route path="villains" element={<VillainsPage />} />
+        <Route path="pnl" element={<PnlPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
