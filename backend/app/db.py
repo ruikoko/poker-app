@@ -1,6 +1,10 @@
 import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg2.extras
+from psycopg2.extras import RealDictCursor, Json
+
+# Register JSON adapter so Python dicts are auto-converted to JSONB
+psycopg2.extensions.register_adapter(dict, Json)
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
