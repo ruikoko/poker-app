@@ -1,13 +1,12 @@
 """
-Parser de Hand Histories da GGPoker (v2 — melhorado).
-Extrai mãos individuais de ficheiros .txt de HH.
-Devolve lista de dicts prontos para inserção em hands.
+Parser de Hand Histories da GGPoker (v3 — nomes reais nas acções).
 
-Melhorias sobre v1:
-- Posições correctas baseadas em seat/button (não em regex frágil)
-- all_players_actions com acções de todos os jogadores por street
-- Resultado em BB (net chips / bb_size)
-- Cartas do showdown
+O HH da GGPoker usa dois identificadores distintos:
+  - Seats:   "Seat 2: NomeReal (18100 in chips)"  → nome real
+  - Acções:  "89ef4cba: raises 18100 to 18100"    → ID anónimo (hash)
+
+Este parser constrói um mapa  id_anónimo → nome_real  a partir dos seats
+e substitui os IDs nas acções pelos nomes reais antes de os guardar.
 """
 import re
 import json
@@ -18,14 +17,14 @@ from collections import defaultdict
 # ── Position Logic ───────────────────────────────────────────────────────────
 
 POSITION_MAPS = {
-    2: ["SB", "BB"],
-    3: ["BTN", "SB", "BB"],
-    4: ["CO", "BTN", "SB", "BB"],
-    5: ["UTG", "CO", "BTN", "SB", "BB"],
-    6: ["UTG", "MP", "CO", "BTN", "SB", "BB"],
-    7: ["UTG", "UTG1", "MP", "CO", "BTN", "SB", "BB"],
-    8: ["UTG", "UTG1", "MP", "MP1", "CO", "BTN", "SB", "BB"],
-    9: ["UTG", "UTG1", "MP", "MP1", "HJ", "CO", "BTN", "SB", "BB"],
+    2:  ["SB", "BB"],
+    3:  ["BTN", "SB", "BB"],
+    4:  ["CO", "BTN", "SB", "BB"],
+    5:  ["UTG", "CO", "BTN", "SB", "BB"],
+    6:  ["UTG", "MP", "CO", "BTN", "SB", "BB"],
+    7:  ["UTG", "UTG1", "MP", "CO", "BTN", "SB", "BB"],
+    8:  ["UTG", "UTG1", "MP", "MP1", "CO", "BTN", "SB", "BB"],
+    9:  ["UTG", "UTG1", "MP", "MP1", "HJ", "CO", "BTN", "SB", "BB"],
     10: ["UTG", "UTG1", "UTG2", "MP", "MP1", "HJ", "CO", "BTN", "SB", "BB"],
 }
 
@@ -35,10 +34,7 @@ def _get_position(seat_num: int, button_seat: int, all_seats: list[int], num_pla
     sorted_seats = sorted(all_seats)
 
     if num_players == 2:
-        if seat_num == button_seat:
-            return "SB"
-        else:
-            return "BB"
+        return "SB" if seat_num == button_seat else "BB"
 
     btn_idx = sorted_seats.index(button_seat)
     ordered = sorted_seats[btn_idx + 1:] + sorted_seats[:btn_idx + 1]
@@ -63,8 +59,7 @@ def _get_position(seat_num: int, button_seat: int, all_seats: list[int], num_pla
         mid_idx = player_idx - 2
         if mid_idx < len(middle_positions):
             return middle_positions[mid_idx]
-        else:
-            return "?"
+        return "?"
 
 
 # ── Card Parser ──────────────────────────────────────────────────────────────
@@ -77,7 +72,7 @@ def _parse_cards(s: str) -> list[str]:
     return [c.strip() for c in s.split() if c.strip()]
 
 
-# ── Action Parser ────────────────────────────────────────────────────────────
+# ── Action Normaliser ────────────────────────────────────────────────────────
 
 def _normalize_action(action_text: str, bb_size: float) -> str | None:
     """Normaliza uma acção para formato legível."""
@@ -88,25 +83,25 @@ def _normalize_action(action_text: str, bb_size: float) -> str | None:
     elif action_text == "checks":
         return "Check"
     elif action_text.startswith("calls"):
-        amount_m = re.search(r"calls\s+([\d,]+)", action_text)
-        if amount_m:
-            amount = float(amount_m.group(1).replace(",", ""))
+        m = re.search(r"calls\s+([\d,]+)", action_text)
+        if m:
+            amount = float(m.group(1).replace(",", ""))
             bb_amount = round(amount / bb_size, 1) if bb_size > 0 else amount
             suffix = " (All-In)" if "all-in" in action_text.lower() else ""
             return f"Call {bb_amount} BB{suffix}"
         return "Call"
     elif action_text.startswith("bets"):
-        amount_m = re.search(r"bets\s+([\d,]+)", action_text)
-        if amount_m:
-            amount = float(amount_m.group(1).replace(",", ""))
+        m = re.search(r"bets\s+([\d,]+)", action_text)
+        if m:
+            amount = float(m.group(1).replace(",", ""))
             bb_amount = round(amount / bb_size, 1) if bb_size > 0 else amount
             suffix = " (All-In)" if "all-in" in action_text.lower() else ""
             return f"Bet {bb_amount} BB{suffix}"
         return "Bet"
     elif action_text.startswith("raises"):
-        to_m = re.search(r"to\s+([\d,]+)", action_text)
-        if to_m:
-            amount = float(to_m.group(1).replace(",", ""))
+        m = re.search(r"to\s+([\d,]+)", action_text)
+        if m:
+            amount = float(m.group(1).replace(",", ""))
             bb_amount = round(amount / bb_size, 1) if bb_size > 0 else amount
             suffix = " (All-In)" if "all-in" in action_text.lower() else ""
             return f"Raise {bb_amount} BB{suffix}"
@@ -115,8 +110,109 @@ def _normalize_action(action_text: str, bb_size: float) -> str | None:
     return None
 
 
+# ── Anonymous ID → Real Name Mapper ─────────────────────────────────────────
+
+def _build_anon_map(block: str, seats: dict) -> dict[str, str]:
+    """
+    Constrói um mapa  id_anónimo → nome_real  a partir do bloco HH.
+
+    O GGPoker usa IDs anónimos nas linhas de acção (ex: "89ef4cba: raises ...").
+    Estes IDs aparecem também nas linhas de seat de forma implícita — o padrão
+    é que cada jogador tem um ID único de 8 caracteres hex que aparece nas acções.
+
+    Estratégia: para cada nome real dos seats, procurar no bloco qual ID anónimo
+    está associado a ele. O GGPoker inclui uma linha de mapeamento no formato:
+      "PlayerName [ME]" ou simplesmente o nome aparece junto ao ID em certas versões.
+
+    Abordagem robusta: varrer todas as linhas de acção e tentar fazer match
+    com os nomes reais dos seats por exclusão / contexto.
+    """
+    real_names = {info["name"] for info in seats.values()}
+    anon_map = {}  # anon_id → real_name
+
+    # Padrão 1: linha explícita de mapeamento (algumas versões do GGPoker)
+    # "  89ef4cba (NomeReal)"  ou  "NomeReal: [89ef4cba]"
+    for name in real_names:
+        # Procurar padrão: ID hex seguido do nome entre parênteses ou vice-versa
+        m = re.search(
+            r"\b([0-9a-f]{6,12})\b.*?\b" + re.escape(name) + r"\b",
+            block, re.IGNORECASE
+        )
+        if m:
+            anon_map[m.group(1)] = name
+            continue
+        m = re.search(
+            r"\b" + re.escape(name) + r"\b.*?\b([0-9a-f]{6,12})\b",
+            block, re.IGNORECASE
+        )
+        if m:
+            anon_map[m.group(1)] = name
+
+    # Padrão 2: se não encontrou mapeamento explícito, tentar por processo de
+    # eliminação — os nomes reais que aparecem directamente nas acções ficam
+    # como estão; os que não aparecem são substituídos pelos IDs anónimos.
+    # Recolher todos os "actores" únicos nas linhas de acção
+    action_actors = set()
+    for line in block.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("***") or line.startswith("Table") or line.startswith("Seat"):
+            continue
+        m = re.match(r"^([^:]+):\s+(.+)$", line)
+        if m:
+            actor = m.group(1).strip()
+            action_text = m.group(2).strip()
+            # Só contar se for uma acção de jogo (não posts, dealt, etc.)
+            if any(action_text.startswith(k) for k in
+                   ["folds", "checks", "calls", "bets", "raises", "shows", "mucks"]):
+                action_actors.add(actor)
+
+    # Os actores que são nomes reais já estão correctos
+    # Os actores que parecem IDs hex (8 chars hex) precisam de mapeamento
+    hex_pattern = re.compile(r'^[0-9a-f]{6,12}$', re.IGNORECASE)
+    anon_actors = {a for a in action_actors if hex_pattern.match(a)}
+    real_actors = {a for a in action_actors if not hex_pattern.match(a)}
+
+    # Nomes reais dos seats que NÃO aparecem directamente nas acções
+    # são os que estão "escondidos" atrás de IDs anónimos
+    unmapped_names = real_names - real_actors - {"Hero"}
+    unmapped_anons = anon_actors - set(anon_map.keys())
+
+    # Se só há um nome e um ID por mapear, é match directo
+    if len(unmapped_names) == 1 and len(unmapped_anons) == 1:
+        anon_map[unmapped_anons.pop()] = unmapped_names.pop()
+
+    # Se há múltiplos, tentar por ordem de seat (os IDs anónimos aparecem
+    # pela primeira vez na ordem dos seats)
+    elif len(unmapped_names) > 1 and len(unmapped_anons) > 0:
+        # Ordenar IDs pela primeira ocorrência no bloco
+        def first_occurrence(anon_id):
+            idx = block.find(anon_id + ":")
+            return idx if idx >= 0 else len(block)
+
+        sorted_anons = sorted(unmapped_anons, key=first_occurrence)
+        # Ordenar nomes pela ordem dos seats
+        seat_order = sorted(seats.keys())
+        sorted_names = [
+            seats[s]["name"] for s in seat_order
+            if seats[s]["name"] in unmapped_names
+        ]
+
+        for anon_id, real_name in zip(sorted_anons, sorted_names):
+            anon_map[anon_id] = real_name
+
+    return anon_map
+
+
+# ── Action Parser ────────────────────────────────────────────────────────────
+
 def _parse_actions(block: str, seats: dict, hero_name: str, bb_size: float) -> dict:
-    """Extrai acções de todos os jogadores, organizadas por street."""
+    """
+    Extrai acções de todos os jogadores, organizadas por street.
+    Substitui IDs anónimos pelos nomes reais dos seats.
+    """
+    # Construir mapa de IDs anónimos → nomes reais
+    anon_map = _build_anon_map(block, seats)
+
     street = "preflop"
     lines = block.split("\n")
 
@@ -147,23 +243,29 @@ def _parse_actions(block: str, seats: dict, hero_name: str, bb_size: float) -> d
         if not action_m:
             continue
 
-        player_name = action_m.group(1).strip()
+        raw_actor = action_m.group(1).strip()
         action_text = action_m.group(2).strip()
 
         if "posts the ante" in action_text or "posts small blind" in action_text or "posts big blind" in action_text:
             continue
 
+        # Resolver nome real: se o actor é um ID anónimo, substituir
+        player_name = anon_map.get(raw_actor, raw_actor)
+
         action_norm = _normalize_action(action_text, bb_size)
         if action_norm:
             actions_by_player[player_name][street].append(action_norm)
 
-    # Cartas do showdown
+    # Cartas do showdown — também resolver IDs anónimos
     for m in re.finditer(r"(\S+):\s+shows\s+\[(.+?)\]", block):
-        cards_by_player[m.group(1).strip()] = _parse_cards(m.group(2))
+        raw_actor = m.group(1).strip()
+        player_name = anon_map.get(raw_actor, raw_actor)
+        cards_by_player[player_name] = _parse_cards(m.group(2))
 
     return {
         "actions_by_player": dict(actions_by_player),
         "cards_by_player": cards_by_player,
+        "anon_map": anon_map,  # guardar para debug
     }
 
 
@@ -190,7 +292,7 @@ def _parse_single_hand(block: str) -> dict | None:
         "all_players_actions": None,
     }
 
-    # ── Hand ID (TM number) ──
+    # ── Hand ID ──
     hid_m = re.search(r"Hand\s*#(?:TM|RC)?(\d+)", block)
     if hid_m:
         result["hand_id"] = f"GG-{hid_m.group(1)}"
@@ -219,7 +321,6 @@ def _parse_single_hand(block: str) -> dict | None:
 
     # ── Blinds / Level ──
     level_m = re.search(r"Level\s*\d+\s*\(([\d,]+)/([\d,]+)(?:\(([\d,]+)\))?\)", block)
-    sb_size = 0
     bb_size = 0
     if level_m:
         sb_size = float(level_m.group(1).replace(",", ""))
@@ -248,7 +349,7 @@ def _parse_single_hand(block: str) -> dict | None:
 
     num_players = len(all_seat_nums)
 
-    # ── Calcular posições ──
+    # ── Posições ──
     if button_seat and all_seat_nums:
         for seat_num in all_seat_nums:
             pos = _get_position(seat_num, button_seat, all_seat_nums, num_players)
@@ -287,9 +388,9 @@ def _parse_single_hand(block: str) -> dict | None:
         sb_m = re.search(r"Hero:\s+posts small blind\s+([\d,]+)", block)
         if sb_m:
             hero_invested += float(sb_m.group(1).replace(",", ""))
-        bb_m = re.search(r"Hero:\s+posts big blind\s+([\d,]+)", block)
-        if bb_m:
-            hero_invested += float(bb_m.group(1).replace(",", ""))
+        bb_m_r = re.search(r"Hero:\s+posts big blind\s+([\d,]+)", block)
+        if bb_m_r:
+            hero_invested += float(bb_m_r.group(1).replace(",", ""))
 
         for am in re.finditer(r"Hero:\s+(?:calls|bets)\s+([\d,]+)", block):
             hero_invested += float(am.group(1).replace(",", ""))
@@ -306,8 +407,8 @@ def _parse_single_hand(block: str) -> dict | None:
         net = hero_won - hero_invested
         result["result"] = round(net / bb_size, 2)
 
-    # ── All players actions ──
-    if bb_size > 0:
+    # ── All players actions (com nomes reais) ──
+    if bb_size > 0 and seats:
         actions_data = _parse_actions(block, seats, "Hero", bb_size)
 
         all_players = {}
@@ -316,11 +417,7 @@ def _parse_single_hand(block: str) -> dict | None:
             pos = seat_info.get("position", "?")
             stack_bb = round(seat_info["stack"] / bb_size, 1)
 
-            player_actions = {}
-            raw_actions = actions_data["actions_by_player"].get(name, {})
-            for st, acts in raw_actions.items():
-                player_actions[st] = acts
-
+            player_actions = dict(actions_data["actions_by_player"].get(name, {}))
             cards = actions_data["cards_by_player"].get(name)
 
             all_players[name] = {
