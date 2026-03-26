@@ -73,6 +73,10 @@ def _build_conditions(
             "NOT (h.tags = ARRAY['mtt']::text[] OR h.tags = '{mtt}')"
         )
 
+    # Por defeito, excluir sempre mãos de arquivo MTT (study_state='mtt_archive')
+    # a menos que seja pedido explicitamente (via study_state='mtt_archive')
+    # Esta condição é gerida no caller
+
     return conditions, params
 
 
@@ -85,6 +89,7 @@ def list_hands(
     search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
     date_from:        Optional[str] = Query(None, description="Filtrar por data (ISO date, ex: 2026-03-20)"),
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
+    include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT (mtt_archive)"),
     page:             int = Query(1, ge=1),
     page_size:        int = Query(50, ge=1, le=200),
     current_user=Depends(require_auth)
@@ -92,6 +97,9 @@ def list_hands(
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only
     )
+    # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
+    if not include_archive and study_state != 'mtt_archive':
+        conditions.append("h.study_state != 'mtt_archive'")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total = query(
@@ -138,12 +146,16 @@ def tag_groups(
     search:           Optional[str] = Query(None),
     date_from:        Optional[str] = Query(None),
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
+    include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT"),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB."""
     conditions, params = _build_conditions(
         site, None, study_state, position, search, date_from, exclude_mtt_only
     )
+    # Excluir arquivo MTT por defeito
+    if not include_archive and study_state != 'mtt_archive':
+        conditions.append("h.study_state != 'mtt_archive'")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     # Fetch all matching hands (only id, tags, result) — no pagination
@@ -186,16 +198,17 @@ def tag_groups(
 
 @router.get("/stats")
 def hand_stats(current_user=Depends(require_auth)):
-    """Estatísticas globais das mãos."""
+    """Estatísticas globais das mãos (exclui arquivo MTT)."""
     rows = query("""
         SELECT
-            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE study_state != 'mtt_archive') AS total,
             COUNT(*) FILTER (WHERE study_state = 'new') AS new,
             COUNT(*) FILTER (WHERE study_state = 'review') AS review,
             COUNT(*) FILTER (WHERE study_state = 'studying') AS studying,
             COUNT(*) FILTER (WHERE study_state = 'resolved') AS resolved,
-            COUNT(DISTINCT site) AS sites,
-            COUNT(DISTINCT position) FILTER (WHERE position IS NOT NULL) AS positions
+            COUNT(*) FILTER (WHERE study_state = 'mtt_archive') AS mtt_archive,
+            COUNT(DISTINCT site) FILTER (WHERE study_state != 'mtt_archive') AS sites,
+            COUNT(DISTINCT position) FILTER (WHERE position IS NOT NULL AND study_state != 'mtt_archive') AS positions
         FROM hands
     """)
     return dict(rows[0]) if rows else {}

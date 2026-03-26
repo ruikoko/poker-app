@@ -25,7 +25,7 @@ def _get_or_create_tournament_pk(conn, tournament_id_str: str, site: str) -> int
     return None
 
 
-def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None) -> bool:
+def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None, study_state: str = 'mtt_archive') -> bool:
     """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
     with conn.cursor() as cur:
         if h["hand_id"]:
@@ -50,7 +50,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
             VALUES
                 (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
                  %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
-                 %(raw)s, %(entry_id)s, 'new', %(all_players_actions)s, %(tournament_id)s)
+                 %(raw)s, %(entry_id)s, %(study_state)s, %(all_players_actions)s, %(tournament_id)s)
             """,
             {
                 "site": h["site"],
@@ -64,6 +64,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 "currency": h["currency"],
                 "raw": h.get("raw", ""),
                 "entry_id": entry_id,
+                "study_state": study_state,
                 "all_players_actions": all_actions_json,
                 "tournament_id": t_pk,
             },

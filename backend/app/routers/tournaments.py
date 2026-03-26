@@ -51,14 +51,17 @@ def _build_query(
     offset = (page - 1) * page_size
     sql_data = f"""
         SELECT
-            id, site, tid, name, date,
-            buyin, cashout, result,
-            position, players,
-            type, speed, currency,
-            import_id, created_at
-        FROM tournaments
-        {where}
-        ORDER BY date DESC, id DESC
+            t.id, t.site, t.tid, t.name, t.date,
+            t.buyin, t.cashout, t.result,
+            t.position, t.players,
+            t.type, t.speed, t.currency,
+            t.import_id, t.created_at,
+            COUNT(h.id) AS hand_count
+        FROM tournaments t
+        LEFT JOIN hands h ON h.tournament_id = t.id
+        {where.replace('WHERE ', 'WHERE t.') if where else ''}
+        GROUP BY t.id
+        ORDER BY t.date DESC, t.id DESC
         LIMIT %s OFFSET %s
     """
     return sql_data, sql_count, params, offset, page_size

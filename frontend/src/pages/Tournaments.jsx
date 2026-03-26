@@ -486,8 +486,22 @@ function TournamentHandsPanel({ tournament, onClose }) {
                   {/* Resultado */}
                   <ResultBadge result={hand.result} />
 
-                  {/* Tags */}
-                  <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  {/* Tags + badge de estudo */}
+                  <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {hand.screenshot_url && (
+                      <span title="Tem screenshot" style={{
+                        fontSize: 9, padding: '1px 5px', borderRadius: 999,
+                        color: '#22c55e', background: 'rgba(34,197,94,0.12)',
+                        border: '1px solid rgba(34,197,94,0.25)',
+                      }}>★</span>
+                    )}
+                    {hand.study_state && hand.study_state !== 'mtt_archive' && (
+                      <span title={`Estudo: ${hand.study_state}`} style={{
+                        fontSize: 9, padding: '1px 5px', borderRadius: 999,
+                        color: '#818cf8', background: 'rgba(99,102,241,0.12)',
+                        border: '1px solid rgba(99,102,241,0.25)',
+                      }}>{hand.study_state}</span>
+                    )}
                     {(hand.tags || []).filter(t => t !== 'mtt').map(t => (
                       <span key={t} style={{
                         fontSize: 9, padding: '1px 5px', borderRadius: 999,
@@ -565,8 +579,8 @@ export default function TournamentsPage() {
       {/* Header */}
       <div className="page-header">
         <div>
-          <div className="page-title">Torneios</div>
-          <div className="page-subtitle">{data.total} torneios importados · clique para ver mãos</div>
+          <div className="page-title">MTT</div>
+          <div className="page-subtitle">{data.total} torneios arquivados · clique para ver mãos</div>
         </div>
       </div>
 
@@ -604,15 +618,16 @@ export default function TournamentsPage() {
                 <th>Buy-in</th>
                 <th>Cashout</th>
                 <th>Pos.</th>
+                <th>Mãos</th>
                 <th>Resultado</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>A carregar…</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>A carregar…</td></tr>
               )}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={8}><div className="empty-state">Sem resultados.</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">Sem resultados.</div></td></tr>
               )}
               {!loading && rows.map(t => {
                 const res = Number(t.result)
@@ -639,6 +654,9 @@ export default function TournamentsPage() {
                     <td>{cur}{Number(t.buyin).toFixed(2)}</td>
                     <td>{t.cashout > 0 ? `${cur}${Number(t.cashout).toFixed(2)}` : '—'}</td>
                     <td className="muted">{t.position ?? '—'}</td>
+                    <td className="muted" style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                      {t.hand_count != null ? t.hand_count : '—'}
+                    </td>
                     <td className={res >= 0 ? 'green' : 'red'}>
                       {res >= 0 ? '+' : ''}{cur}{Math.abs(res).toFixed(2)}
                     </td>
@@ -652,6 +670,7 @@ export default function TournamentsPage() {
                   <td colSpan={4} style={{ color: '#64748b', fontSize: 11 }}>Total ({rows.length} torneios)</td>
                   <td>${pageTotalBuyin.toFixed(2)}</td>
                   <td>${pageTotalCashout.toFixed(2)}</td>
+                  <td></td>
                   <td></td>
                   <td className={pageTotalResult >= 0 ? 'green' : 'red'}>
                     {pageTotalResult >= 0 ? '+' : ''}${Math.abs(pageTotalResult).toFixed(2)}

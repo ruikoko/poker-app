@@ -843,7 +843,7 @@ export default function HandsPage() {
         <div>
           <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>Mãos</div>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 3 }}>
-            {totalHands} mãos de estudo &middot; <span style={{ fontSize: 11, color: '#4b5563' }}>mãos de torneio (bulk) em Torneios</span>
+            {totalHands} mãos de estudo &middot; <span style={{ fontSize: 11, color: '#4b5563' }}>mãos de torneio (bulk) em MTT</span>
           </div>
         </div>
         {/* Toggle views */}
