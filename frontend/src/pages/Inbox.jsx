@@ -260,7 +260,7 @@ export default function InboxPage() {
               {dragOver ? 'Largar ficheiros aqui' : 'Arrastar ficheiros ou clicar para seleccionar'}
             </div>
             <div style={{ fontSize: 12, color: '#4b5563' }}>
-              Hand Histories (.zip/.txt) &middot; Tournament Summaries (.zip/.txt) &middot; Screenshots (.png/.jpg)
+              Screenshots (.png/.jpg) → Mãos de estudo &middot; HH &amp; Summaries (.zip/.txt) → Arquivo MTT
             </div>
           </>
         ) : (
@@ -313,9 +313,9 @@ export default function InboxPage() {
                         : '#22c55e'
                     }}>
                       {item.result.import_type === 'hands'
-                        ? `${item.result.hands_inserted} mãos`
+                        ? `${item.result.hands_inserted} mãos arquivadas em MTT`
                         : item.result.import_type === 'tournaments'
-                          ? `${item.result.inserted} torneios`
+                          ? `${item.result.inserted} torneios → MTT`
                           : item.result.status === 'matched'
                             ? `✓ Match: mão #${item.result.hand_id}`
                             : item.result.tm_number
