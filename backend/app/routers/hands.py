@@ -61,9 +61,9 @@ def list_hands(
         params.append(position)
 
     if search:
-        conditions.append("(notes ILIKE %s OR raw ILIKE %s OR hand_id ILIKE %s)")
+        conditions.append("(notes ILIKE %s OR raw ILIKE %s OR hand_id ILIKE %s OR stakes ILIKE %s)")
         like = f"%{search}%"
-        params.extend([like, like, like])
+        params.extend([like, like, like, like])
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
