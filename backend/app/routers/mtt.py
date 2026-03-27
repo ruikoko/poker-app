@@ -1014,50 +1014,73 @@ async def rematch_screenshots(
     current_user=Depends(require_auth),
 ):
     """
-    Re-tenta match de screenshots órfãos com mãos de MTT existentes.
-    Útil após importar novas HH.
+    Re-tenta match de screenshots com mãos de MTT.
+    Itera pelos SCREENSHOTS (poucos) e procura mãos correspondentes,
+    em vez de iterar pelas mãos (25k+) — muito mais eficiente.
     """
-    # Buscar mãos sem screenshot
-    hands_without = query(
-        "SELECT id, tm_number FROM mtt_hands WHERE has_screenshot = false"
+    # Buscar screenshots com Vision concluído
+    screenshot_entries = query(
+        """SELECT id, raw_json 
+           FROM entries 
+           WHERE entry_type = 'screenshot' 
+             AND (raw_json->>'vision_done')::boolean = true
+           ORDER BY id"""
     )
+    
+    if not screenshot_entries:
+        return {"matched": 0, "villains_created": 0, "total_screenshots": 0}
     
     matched = 0
     villains_created = 0
+    promoted = 0
     
     conn = get_conn()
     try:
-        for h in hands_without:
-            screenshot = _match_screenshot(h["tm_number"])
-            if not screenshot:
+        for ss_entry in screenshot_entries:
+            raw = ss_entry.get("raw_json") or {}
+            tm = raw.get("tm")
+            if not tm:
                 continue
             
+            tm_digits = tm.replace("TM", "")
+            
+            # Verificar se já há match para este screenshot
+            existing = query(
+                "SELECT id FROM mtt_hands WHERE screenshot_entry_id = %s LIMIT 1",
+                (ss_entry["id"],)
+            )
+            if existing:
+                continue  # já tem match
+            
+            # Procurar mão na mtt_hands por TM number
+            mtt_rows = query(
+                "SELECT id, tm_number, raw FROM mtt_hands WHERE tm_number = %s AND has_screenshot = false LIMIT 1",
+                (f"TM{tm_digits}",)
+            )
+            if not mtt_rows:
+                continue
+            
+            mtt_hand = mtt_rows[0]
+            screenshot_data = _extract_screenshot_data(raw, ss_entry["id"])
+            
+            # Marcar mão como tendo screenshot
             with conn.cursor() as cur:
                 cur.execute(
-                    """UPDATE mtt_hands 
-                       SET has_screenshot = true, screenshot_entry_id = %s 
-                       WHERE id = %s""",
-                    (screenshot["entry_id"], h["id"])
+                    "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
+                    (ss_entry["id"], mtt_hand["id"])
                 )
             
-            # Buscar dados completos da mão para criar villains
-            hand_rows = query(
-                "SELECT * FROM mtt_hands WHERE id = %s",
-                (h["id"],)
-            )
-            if hand_rows:
-                hand_data = dict(hand_rows[0])
-                # Reconstruir vpip_seats a partir do raw
-                raw = hand_data.get("raw", "")
-                if raw:
-                    parsed = _parse_mtt_hand(raw)
-                    if parsed:
-                        if parsed.get("vpip_seats"):
-                            n = _create_villains_for_hand(conn, h["id"], parsed, screenshot)
-                            villains_created += n
-                        # Promover para Inbox/Mãos
-                        seat_to_name = _build_seat_to_name_map(parsed, screenshot)
-                        _promote_to_study(conn, h["id"], parsed, screenshot, seat_to_name)
+            # Parsear a mão para extrair VPIP e criar villains
+            parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
+            if parsed:
+                if parsed.get("vpip_seats"):
+                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                    villains_created += n
+                
+                # Promover para Inbox/Mãos
+                seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
+                _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
+                promoted += 1
             
             matched += 1
         
@@ -1072,5 +1095,6 @@ async def rematch_screenshots(
     return {
         "matched": matched,
         "villains_created": villains_created,
-        "total_without_screenshot": len(hands_without),
+        "promoted_to_study": promoted,
+        "total_screenshots": len(screenshot_entries),
     }
