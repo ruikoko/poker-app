@@ -104,6 +104,7 @@ function classifyFile(file) {
 // ── Orphan Screenshot Row (componente separado para usar useState) ───────────
 function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
   const [showImg, setShowImg] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
   const meta = (o.raw_json && o.raw_json.file_meta) || {}
   const players = (o.raw_json && o.raw_json.players_by_position) || {}
   const playersList = (o.raw_json && o.raw_json.players_list) || []
@@ -114,6 +115,7 @@ function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
   const visionSb = o.raw_json && o.raw_json.vision_sb
   const visionBb = o.raw_json && o.raw_json.vision_bb
   const playersCount = playersList.length || Object.keys(players).length
+  const imgSrc = imgB64 ? `data:${mimeType};base64,${imgB64}` : null
 
   return (
     <div style={{
@@ -167,13 +169,27 @@ function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
           }}
         >&#10005;</button>
       </div>
-      {showImg && imgB64 && (
+      {showImg && imgSrc && (
         <div style={{ marginTop: 8, marginBottom: 4 }}>
           <img
-            src={`data:${mimeType};base64,${imgB64}`}
+            src={imgSrc}
             alt="Screenshot"
-            style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 6, border: '1px solid #2a2d3a' }}
+            style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'pointer' }}
+            onClick={() => setFullscreen(true)}
           />
+        </div>
+      )}
+      {fullscreen && imgSrc && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+            cursor: 'pointer',
+          }}
+          onClick={() => setFullscreen(false)}
+        >
+          <img src={imgSrc} alt="Screenshot" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
+          <button onClick={() => setFullscreen(false)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}>✕</button>
         </div>
       )}
     </div>
