@@ -783,68 +783,101 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
 // ── Componente: Hand Row (compacto dentro de tag group) ─────────────────────
 
-function HandRow({ hand, onClick, onDelete }) {
-  const isWin = hand.result != null && Number(hand.result) > 0
-  const isLose = hand.result != null && Number(hand.result) < 0
+function extractLevel(raw) {
+  if (!raw) return null
+  // Winamax: "level: 6"
+  const wn = raw.match(/level:\s*(\d+)/i)
+  if (wn) return `Lv ${wn[1]}`
+  // PokerStars: "Level V" or "Level XV" (roman) or "Level 5"
+  const ps = raw.match(/Level\s+([IVXLCDM]+|\d+)/i)
+  if (ps) {
+    const v = ps[1]
+    // Convert roman to number
+    const roman = { I:1, V:5, X:10, L:50, C:100, D:500, M:1000 }
+    if (/^[IVXLCDM]+$/i.test(v)) {
+      let num = 0
+      for (let i = 0; i < v.length; i++) {
+        const cur = roman[v[i].toUpperCase()] || 0
+        const next = roman[v[i+1]?.toUpperCase()] || 0
+        num += cur < next ? -cur : cur
+      }
+      return `Lv ${num}`
+    }
+    return `Lv ${v}`
+  }
+  return null
+}
+
+function HandRow({ hand, onClick, onDelete, idx }) {
+  const level = extractLevel(hand.raw)
+  const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
 
   return (
     <div
       onClick={onClick}
       style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: '10px 16px',
-        background: '#1a1d27',
-        borderBottom: '1px solid #1e2130',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 16px',
+        background: zebra,
+        borderBottom: '1px solid rgba(255,255,255,0.03)',
         cursor: 'pointer',
         transition: 'background 0.1s',
       }}
-      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
-      onMouseLeave={e => e.currentTarget.style.background = '#1a1d27'}
+      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
+      onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
       {/* Estado */}
-      <div style={{ minWidth: 60 }}>
+      <div style={{ minWidth: 55 }}>
         <StateBadge state={hand.study_state} />
       </div>
 
-      {/* Posição */}
-      <div style={{ minWidth: 50 }}>
-        <PosBadge pos={hand.position} />
-      </div>
-
       {/* Cartas do hero */}
-      <div style={{ display: 'flex', gap: 3, minWidth: 60 }}>
+      <div style={{ display: 'flex', gap: 3, minWidth: 58 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>
         }
       </div>
 
-      {/* Board */}
-      <div style={{ minWidth: 140, flex: 0 }}>
-        <BoardCards board={hand.board} size="sm" />
+      {/* Posição */}
+      <div style={{ minWidth: 42 }}>
+        <PosBadge pos={hand.position} />
       </div>
 
       {/* Resultado */}
-      <div style={{ minWidth: 80 }}>
+      <div style={{ minWidth: 70 }}>
         <ResultBadge result={hand.result} />
       </div>
 
-      {/* Torneio */}
+      {/* Torneio + BI */}
       <div style={{
-        flex: 1, fontSize: 11, color: '#64748b',
+        minWidth: 140, maxWidth: 220, fontSize: 11, color: '#64748b',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       }}>
         {hand.stakes || ''}
       </div>
 
+      {/* Board inline */}
+      <div style={{ display: 'flex', gap: 2, minWidth: 120 }}>
+        {hand.board?.length > 0
+          ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
+          : <span style={{ color: '#374151', fontSize: 10 }}>&mdash;</span>
+        }
+      </div>
+
+      {/* Level */}
+      <div style={{ minWidth: 38, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+        {level || ''}
+      </div>
+
       {/* Data */}
-      <div style={{ fontSize: 11, color: '#4b5563', minWidth: 70 }}>
+      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 62 }}>
         {hand.played_at ? hand.played_at.slice(0, 10) : ''}
       </div>
 
       {/* Delete */}
       <button
-        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
+        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', marginLeft: 'auto' }}
         onClick={e => { e.stopPropagation(); onDelete() }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
         onMouseLeave={e => e.currentTarget.style.color = '#374151'}
@@ -985,10 +1018,11 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
               Sem mãos neste grupo
             </div>
           ) : (
-            tagHands.map(h => (
+            tagHands.map((h, idx) => (
               <HandRow
                 key={h.id}
                 hand={h}
+                idx={idx}
                 onClick={() => onOpenDetail(h.id)}
                 onDelete={() => onDeleteHand(h.id)}
               />
@@ -1247,12 +1281,12 @@ export default function HandsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(h => (
+                {rows.map((h, idx) => (
                   <tr key={h.id}
-                    style={{ borderBottom: '1px solid #1e2130', cursor: 'pointer', transition: 'background 0.1s' }}
+                    style={{ borderBottom: '1px solid #1e2130', cursor: 'pointer', transition: 'background 0.1s', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}
                     onClick={() => openDetail(h.id)}
                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'}
                   >
                     <td style={{ padding: '10px 14px' }}><StateBadge state={h.study_state} /></td>
                     <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>{h.played_at ? h.played_at.slice(0, 10) : '&mdash;'}</td>
