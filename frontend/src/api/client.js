@@ -1,212 +1,189 @@
-import os
-import asyncio
-import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
+// Use relative path — in dev, Vite proxy forwards /api → backend.
+// In production, the reverse proxy (nginx/railway) does the same.
+const API_ROOT = import.meta.env.VITE_API_URL || ''
 
-from app.db import get_conn
-from app.routers import health, auth, import_, tournaments, hands, villains
-from app.routers.entries import router as entries_router
-from app.routers.discord import router as discord_router
-from app.routers.screenshot import router as screenshot_router
-from app.routers.mtt import router as mtt_router, ensure_mtt_schema
-from app.routers.hm3 import router as hm3_router
+const BASE = `${API_ROOT}/api`
 
-load_dotenv()
+async function req(method, path, body) {
+  const opts = {
+    method,
+    credentials: 'include',   // envia cookie HttpOnly automaticamente
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+  }
+  if (body) opts.body = JSON.stringify(body)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
+  const res = await fetch(BASE + path, opts)
 
+  if (res.status === 401) {
+    // Sessão expirada — redireciona para login sem loop
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login'
+    }
+    throw new Error('Não autenticado')
+  }
 
-def ensure_entries_schema():
-    """
-    Cria só a tabela entries e as novas colunas de hands.
-    Não reaplica o schema inteiro, por isso não volta a rebentar
-    com constraints antigas como fk_tournaments_import.
-    """
-    statements = [
-        """
-        CREATE TABLE IF NOT EXISTS entries (
-            id BIGSERIAL PRIMARY KEY,
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Erro ${res.status}`)
+  }
 
-            source TEXT NOT NULL,
-            entry_type TEXT NOT NULL,
+  // 204 No Content
+  if (res.status === 204) return null
+  return res.json()
+}
 
-            site TEXT,
-            file_name TEXT,
-            external_id TEXT,
+// ── Auth ─────────────────────────────────────────────────────────────────────
+export const auth = {
+  login:  (email, password) => req('POST', '/auth/login', { email, password }),
+  logout: ()                => req('POST', '/auth/logout'),
+  me:     ()                => req('GET',  '/auth/me'),
+}
 
-            raw_text TEXT,
-            raw_json JSONB,
+// ── Tournaments ───────────────────────────────────────────────────────────────
+export const tournaments = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/tournaments${qs ? '?' + qs : ''}`)
+  },
+  summary: () => req('GET', '/tournaments/summary'),
+  hands: (id, params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/tournaments/${id}/hands${qs ? '?' + qs : ''}`)
+  },
+}
 
-            status TEXT NOT NULL DEFAULT 'new',
+// ── Hands ────────────────────────────────────────────────────────────────────
+export const hands = {
+  list:   (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/hands${qs ? '?' + qs : ''}`)
+  },
+  get:    (id)          => req('GET',    `/hands/${id}`),
+  create: (body)        => req('POST',   '/hands', body),
+  update: (id, body)    => req('PATCH',  `/hands/${id}`, body),
+  delete: (id)          => req('DELETE', `/hands/${id}`),
+  screenshot: (id)      => req('GET',    `/hands/${id}/screenshot`),
+  stats:  ()            => req('GET',    '/hands/stats'),
+  tagGroups: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/hands/tag-groups${qs ? '?' + qs : ''}`)
+  },
+}
+// ── Villains ────────────────────────────────────────────────────────────────────
+export const villains = {
+  list:   (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/villains${qs ? '?' + qs : ''}`)
+  },
+  get:    (id)          => req('GET',    `/villains/${id}`),
+  create: (body)        => req('POST',   '/villains', body),
+  update: (id, body)    => req('PATCH',  `/villains/${id}`, body),
+  delete: (id)          => req('DELETE', `/villains/${id}`),
+  searchHands: (nick, params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries({ nick, ...params }).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/villains/search/hands?${qs}`)
+  },
+}
+// ── Entries ──────────────────────────────────────────────────────────────────
+export const entries = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/entries${qs ? '?' + qs : ''}`)
+  },
+  get:       (id)          => req('GET',   `/entries/${id}`),
+  update:    (id, body)    => req('PATCH', `/entries/${id}`, body),
+  reprocess: (id)          => req('POST',  `/entries/${id}/reprocess`),
+}
 
-            notes TEXT,
+// ── Discord ──────────────────────────────────────────────────────────────────
+export const discord = {
+  status:    ()  => req('GET',  '/discord/status'),
+  syncState: ()  => req('GET',  '/discord/sync-state'),
+  stats:     (params = {})  => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/discord/stats${qs ? '?' + qs : ''}`)
+  },
+  sync:      ()  => req('POST', '/discord/sync'),
+}
 
-            import_log_id BIGINT,
+// ── Import ────────────────────────────────────────────────────────────────────
+export const imports = {
+  upload: (file, site) => {
+    const form = new FormData()
+    form.append('file', file)
+    const url = site ? `${BASE}/import?site=${site}` : `${BASE}/import`
+    return fetch(url, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
+  },
+  logs: () => req('GET', '/import/logs'),
+}
 
-            discord_server TEXT,
-            discord_channel TEXT,
-            discord_message_id TEXT,
-            discord_message_url TEXT,
-            discord_author TEXT,
-            discord_posted_at TIMESTAMPTZ,
+// ── MTT ──────────────────────────────────────────────────────────────────────
+export const mtt = {
+  import: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/mtt/import`, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
+  },
+  hands: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/mtt/hands${qs ? '?' + qs : ''}`)
+  },
+  hand: (id) => req('GET', `/mtt/hands/${id}`),
+  stats: () => req('GET', '/mtt/stats'),
+  orphans: () => req('GET', '/mtt/orphan-screenshots'),
+  rematch: () => req('POST', '/mtt/rematch'),
+  resetMatches: () => req('POST', '/mtt/reset-matches'),
+  cleanup: () => req('POST', '/mtt/cleanup'),
+  deleteHand: (id) => req('DELETE', `/mtt/hands/${id}`),
+  deleteScreenshot: (entryId) => req('DELETE', `/mtt/screenshot/${entryId}`),
+}
 
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source)",
-        "CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(entry_type)",
-        "CREATE INDEX IF NOT EXISTS idx_entries_site ON entries(site)",
-        "CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status)",
-        "CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries(created_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_entries_discord_channel ON entries(discord_server, discord_channel)",
-        "CREATE INDEX IF NOT EXISTS idx_entries_external_id ON entries(external_id)",
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uniq_entries_discord_message
-        ON entries(discord_message_id)
-        WHERE discord_message_id IS NOT NULL
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS entry_id BIGINT
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS study_state TEXT NOT NULL DEFAULT 'new'
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS viewed_at TIMESTAMPTZ
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS studied_at TIMESTAMPTZ
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS confidence_level TEXT
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS screenshot_url TEXT
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS player_names JSONB
-        """,
-        """
-        ALTER TABLE hands
-        ADD COLUMN IF NOT EXISTS tournament_id BIGINT
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id)",
-        "CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state)",
-        "CREATE INDEX IF NOT EXISTS idx_hands_tournament_id ON hands(tournament_id)",
-    ]
+// ── HM3 Import ───────────────────────────────────────────────────────────────
+export const hm3 = {
+  import: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/hm3/import`, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
+  },
+  stats: () => req('GET', '/hm3/stats'),
+}
 
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            for sql in statements:
-                try:
-                    cur.execute(sql)
-                except Exception as e:
-                    # Ignorar erros de "already exists" ou constraints
-                    conn.rollback()
-                    logging.getLogger("schema").warning(f"Schema statement skipped: {e}")
-                    continue
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-def ensure_discord_sync_table():
-    """Cria a tabela de estado de sync do Discord."""
-    from app.db import execute
-    try:
-        execute("""
-            CREATE TABLE IF NOT EXISTS discord_sync_state (
-                channel_id TEXT PRIMARY KEY,
-                server_id TEXT NOT NULL,
-                channel_name TEXT,
-                last_message_id TEXT,
-                last_sync_at TIMESTAMPTZ DEFAULT NOW(),
-                messages_synced INTEGER DEFAULT 0
-            )
-        """)
-    except Exception as e:
-        logging.getLogger("schema").warning(f"discord_sync_state: {e}")
-
-
-# ── Lifespan (startup + shutdown) ────────────────────────────────────────────
-
-_bot_task = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _bot_task
-
-    # Startup
-    ensure_entries_schema()
-    ensure_discord_sync_table()
-    ensure_mtt_schema()
-
-    # Arrancar bot Discord em background
-    from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
-    if DISCORD_TOKEN and MONITORED_SERVERS:
-        _bot_task = asyncio.create_task(start_bot())
-        logging.getLogger("main").info("Bot Discord a arrancar em background...")
-    else:
-        logging.getLogger("main").info("Bot Discord desactivado (sem token ou server IDs)")
-
-    yield
-
-    # Shutdown
-    from app.discord_bot import stop_bot
-    await stop_bot()
-    if _bot_task:
-        _bot_task.cancel()
-
-
-app = FastAPI(title="Poker App API", version="0.2.0", lifespan=lifespan)
-
-allowed_origin = os.getenv("ALLOWED_ORIGIN", "http://localhost:5173")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[allowed_origin],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(health.router)
-app.include_router(auth.router)
-app.include_router(import_.router)
-app.include_router(tournaments.router)
-app.include_router(hands.router)
-app.include_router(villains.router)
-app.include_router(entries_router)
-app.include_router(discord_router)
-app.include_router(screenshot_router)
-app.include_router(mtt_router)
-app.include_router(hm3_router)
-
-# Serve uploaded screenshots as static files
-import os
-from fastapi.staticfiles import StaticFiles
-os.makedirs("/tmp/poker_screenshots", exist_ok=True)
-app.mount("/screenshots", StaticFiles(directory="/tmp/poker_screenshots"), name="screenshots")
-
-
-@app.get("/")
-def root():
-    return {"app": "poker-app", "version": "0.2.0"}
+// ── Screenshots ───────────────────────────────────────────────────────────────
+export const screenshots = {
+  upload: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/screenshots`, { method: 'POST', credentials: 'include', body: form })
+      .then(r => r.json())
+  },
+  getForHand: (handId) => req('GET', `/screenshots/hand/${handId}`),
+  orphans: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries({ entry_type: 'screenshot', status: 'new', page_size: 100, ...params }).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/entries?${qs}`)
+  },
+  rematch: (entryId) => req('POST', `/screenshots/orphans/${entryId}/rematch`),
+  dismiss: (entryId) => req('PATCH', `/entries/${entryId}`, { status: 'resolved' }),
+}
