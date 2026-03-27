@@ -1098,3 +1098,98 @@ async def rematch_screenshots(
         "promoted_to_study": promoted,
         "total_screenshots": len(screenshot_entries),
     }
+
+
+@router.post("/reset-matches")
+async def reset_and_rematch(
+    current_user=Depends(require_auth),
+):
+    """
+    Reset completo: apaga villains, mãos promovidas, e refaz todos os matches.
+    Usa screenshots como iterador (rápido).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM hand_villains")
+            cur.execute("DELETE FROM hands WHERE study_state = 'new'")
+            cur.execute("UPDATE mtt_hands SET has_screenshot = false, screenshot_entry_id = NULL")
+        conn.commit()
+        logger.info("Reset-matches: cleared villains, study hands, and screenshot flags")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Reset-matches cleanup error: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no reset: {e}")
+    finally:
+        conn.close()
+
+    # Agora correr o rematch
+    # Buscar screenshots com Vision concluído
+    screenshot_entries = query(
+        """SELECT id, raw_json 
+           FROM entries 
+           WHERE entry_type = 'screenshot' 
+             AND (raw_json->>'vision_done')::boolean = true
+           ORDER BY id"""
+    )
+
+    if not screenshot_entries:
+        return {"reset": True, "matched": 0, "villains_created": 0, "promoted": 0, "total_screenshots": 0}
+
+    matched = 0
+    villains_created = 0
+    promoted = 0
+
+    conn = get_conn()
+    try:
+        for ss_entry in screenshot_entries:
+            raw = ss_entry.get("raw_json") or {}
+            tm = raw.get("tm")
+            if not tm:
+                continue
+
+            tm_digits = tm.replace("TM", "")
+
+            mtt_rows = query(
+                "SELECT id, tm_number, raw FROM mtt_hands WHERE tm_number = %s LIMIT 1",
+                (f"TM{tm_digits}",)
+            )
+            if not mtt_rows:
+                continue
+
+            mtt_hand = mtt_rows[0]
+            screenshot_data = _extract_screenshot_data(raw, ss_entry["id"])
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
+                    (ss_entry["id"], mtt_hand["id"])
+                )
+
+            parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
+            if parsed:
+                if parsed.get("vpip_seats"):
+                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                    villains_created += n
+
+                seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
+                _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
+                promoted += 1
+
+            matched += 1
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Reset-matches rematch error: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no rematch: {e}")
+    finally:
+        conn.close()
+
+    return {
+        "reset": True,
+        "matched": matched,
+        "villains_created": villains_created,
+        "promoted": promoted,
+        "total_screenshots": len(screenshot_entries),
+    }
