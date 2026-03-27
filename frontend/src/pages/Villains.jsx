@@ -1,22 +1,23 @@
 import { useEffect, useState } from 'react'
-import { villains } from '../api/client'
+import { villains, hands as handsApi } from '../api/client'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
 const SUIT_COLORS  = { h: '#ef4444', d: '#f97316', c: '#22c55e', s: '#e2e8f0' }
+const SUIT_BG      = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
 const SUIT_SYMBOLS = { h: '♥', d: '♦', c: '♣', s: '♠' }
 
 function MiniCard({ card }) {
   if (!card || card.length < 2) return <span style={{ color: '#4b5563' }}>?</span>
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
-  const color = SUIT_COLORS[suit] || '#e2e8f0'
+  const bg = SUIT_BG[suit] || '#1e2130'
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: 22, height: 30, background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)',
+      width: 22, height: 30, background: bg, border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: 9,
-      fontWeight: 700, color, lineHeight: 1, flexDirection: 'column', gap: 0,
+      fontWeight: 700, color: '#fff', lineHeight: 1, flexDirection: 'column', gap: 0,
     }}>
       <span>{rank}</span>
       <span style={{ fontSize: 7 }}>{SUIT_SYMBOLS[suit]}</span>
@@ -61,6 +62,8 @@ function VillainProfile({ villain, onClose, onSave }) {
   const [handsTotal, setHandsTotal] = useState(0)
   const [handsLoading, setHandsLoading] = useState(false)
   const [handsPage, setHandsPage] = useState(1)
+  const [expandedHand, setExpandedHand] = useState(null)
+  const [ssCache, setSsCache] = useState({}) // hand_id -> data_url
 
   useEffect(() => {
     loadHands(1)
@@ -205,36 +208,131 @@ function VillainProfile({ villain, onClose, onSave }) {
                 {hands.map((h, i) => {
                   const villainActions = h.all_players_actions?.[villain.nick]
                   const villainPos = villainActions?.position || '?'
+                  const isExpanded = expandedHand === h.id
+
+                  function toggleExpand() {
+                    if (isExpanded) {
+                      setExpandedHand(null)
+                    } else {
+                      setExpandedHand(h.id)
+                      // Load screenshot if not cached
+                      if (!ssCache[h.id] && (h.entry_id || h.player_names?.screenshot_entry_id)) {
+                        handsApi.screenshot(h.id)
+                          .then(data => {
+                            if (data?.data_url) setSsCache(prev => ({...prev, [h.id]: data.data_url}))
+                          })
+                          .catch(() => {})
+                      }
+                    }
+                  }
+
+                  // Parse all_players_actions for display
+                  const allPlayers = h.all_players_actions || {}
+                  const SEAT_ORDER = ['SB', 'BB', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN']
+                  const sortedPlayers = Object.entries(allPlayers)
+                    .map(([name, info]) => ({ name, ...info }))
+                    .sort((a, b) => {
+                      const ia = SEAT_ORDER.indexOf(a.position)
+                      const ib = SEAT_ORDER.indexOf(b.position)
+                      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+                    })
+
                   return (
-                    <div key={h.id} style={{
-                      padding: '10px 14px',
-                      borderBottom: i < hands.length - 1 ? '1px solid #1a1d27' : 'none',
-                      display: 'flex', alignItems: 'center', gap: 10,
-                    }}>
-                      {/* Data */}
-                      <span style={{ fontSize: 10, color: '#4b5563', minWidth: 48 }}>
-                        {h.played_at ? h.played_at.slice(5, 10) : '—'}
-                      </span>
-
-                      {/* Hero pos + cards */}
-                      <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                        <PosBadge pos={h.position} />
-                        {h.hero_cards?.map((c, j) => <MiniCard key={j} card={c} />)}
+                    <div key={h.id} style={{ borderBottom: i < hands.length - 1 ? '1px solid #1a1d27' : 'none' }}>
+                      {/* Summary row */}
+                      <div
+                        onClick={toggleExpand}
+                        style={{
+                          padding: '10px 14px',
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <span style={{ color: '#4b5563', fontSize: 10 }}>{isExpanded ? '▼' : '▶'}</span>
+                        <span style={{ fontSize: 10, color: '#4b5563', minWidth: 48 }}>
+                          {h.played_at ? h.played_at.slice(5, 10) : '—'}
+                        </span>
+                        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                          <PosBadge pos={h.position} />
+                          {h.hero_cards?.map((c, j) => <MiniCard key={j} card={c} />)}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 10, color: '#4b5563' }}>vs</span>
+                          <PosBadge pos={villainPos} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 2, flex: 1 }}>
+                          {h.board?.slice(0, 5).map((c, j) => <MiniCard key={j} card={c} />)}
+                        </div>
+                        <ResultBadge result={h.result} />
+                        {h.stakes && (
+                          <span style={{ fontSize: 9, color: '#4b5563', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {h.stakes}
+                          </span>
+                        )}
                       </div>
 
-                      {/* Villain pos */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 10, color: '#4b5563' }}>vs</span>
-                        <PosBadge pos={villainPos} />
-                      </div>
+                      {/* Expanded detail */}
+                      {isExpanded && (
+                        <div style={{ padding: '8px 14px 16px 30px', background: 'rgba(255,255,255,0.01)' }}>
+                          {/* Tournament info */}
+                          {h.stakes && (
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
+                              {h.stakes} • {h.played_at ? new Date(h.played_at).toLocaleString('pt-PT') : ''}
+                            </div>
+                          )}
 
-                      {/* Board */}
-                      <div style={{ display: 'flex', gap: 2, flex: 1 }}>
-                        {h.board?.slice(0, 5).map((c, j) => <MiniCard key={j} card={c} />)}
-                      </div>
+                          {/* All players table */}
+                          {sortedPlayers.length > 0 && (
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>
+                                Mesa ({sortedPlayers.length} jogadores)
+                              </div>
+                              <div style={{ background: '#0f1117', borderRadius: 6, padding: '4px 8px', border: '1px solid #1e2130' }}>
+                                {sortedPlayers.map((p, pi) => (
+                                  <div key={pi} style={{
+                                    display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0',
+                                    borderBottom: pi < sortedPlayers.length - 1 ? '1px solid #1a1d27' : 'none',
+                                  }}>
+                                    <PosBadge pos={p.position} />
+                                    <span style={{
+                                      fontSize: 11, minWidth: 100,
+                                      color: p.is_hero ? '#818cf8' : p.name === villain.nick ? '#f59e0b' : '#94a3b8',
+                                      fontWeight: p.is_hero || p.name === villain.nick ? 600 : 400,
+                                    }}>
+                                      {p.real_name || p.name}
+                                      {p.is_hero && <span style={{ fontSize: 8, color: '#6366f1', marginLeft: 3 }}>HERO</span>}
+                                      {p.name === villain.nick && <span style={{ fontSize: 8, color: '#f59e0b', marginLeft: 3 }}>★</span>}
+                                    </span>
+                                    {p.stack_bb != null && (
+                                      <span style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace' }}>
+                                        {p.stack_bb.toFixed(1)} BB
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
-                      {/* Resultado */}
-                      <ResultBadge result={h.result} />
+                          {/* Screenshot */}
+                          {ssCache[h.id] && (
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>Screenshot</div>
+                              <img
+                                src={ssCache[h.id]}
+                                alt="Screenshot"
+                                style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'pointer' }}
+                                onClick={() => window.open(ssCache[h.id], '_blank')}
+                              />
+                            </div>
+                          )}
+                          {!ssCache[h.id] && (h.entry_id || h.player_names?.screenshot_entry_id) && (
+                            <div style={{ fontSize: 10, color: '#f59e0b', marginBottom: 8 }}>A carregar screenshot...</div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
