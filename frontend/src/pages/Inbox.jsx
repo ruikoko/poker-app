@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { hands, imports, screenshots } from '../api/client'
+import { hands, imports, screenshots, hm3 } from '../api/client'
 
 const STATE_COLORS = {
   new:       '#3b82f6',
@@ -228,6 +228,28 @@ export default function InboxPage() {
       loadOrphans()
     } catch (e) {
       alert(e.message)
+    }
+  }
+
+  // HM3 import state
+  const [hm3Importing, setHm3Importing] = useState(false)
+  const [hm3Result, setHm3Result] = useState(null)
+  const hm3Ref = useRef(null)
+
+  async function handleHm3Import(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setHm3Importing(true)
+    setHm3Result(null)
+    try {
+      const res = await hm3.import(file)
+      setHm3Result(res)
+      if (res.inserted > 0) load()
+    } catch (err) {
+      setHm3Result({ status: 'error', message: err.message })
+    } finally {
+      setHm3Importing(false)
     }
   }
 
@@ -556,6 +578,46 @@ export default function InboxPage() {
       </div>
 
       {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
+
+      {/* ── HM3 Import ── */}
+      <div style={{
+        background: '#1a1d27', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 10,
+        padding: '12px 16px', marginBottom: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 15 }}>&#128202;</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#8b5cf6' }}>Importar HM3</span>
+          <span style={{ fontSize: 11, color: '#4b5563' }}>CSV exportado do Holdem Manager 3</span>
+          <label style={{
+            marginLeft: 'auto', padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+            background: hm3Importing ? '#4b5563' : 'rgba(139,92,246,0.15)', color: '#8b5cf6',
+            border: '1px solid rgba(139,92,246,0.3)', cursor: hm3Importing ? 'not-allowed' : 'pointer',
+          }}>
+            {hm3Importing ? 'A importar...' : 'Seleccionar CSV'}
+            <input ref={hm3Ref} type="file" accept=".csv" onChange={handleHm3Import} style={{ display: 'none' }} disabled={hm3Importing} />
+          </label>
+        </div>
+        {hm3Result && hm3Result.status === 'ok' && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ color: '#22c55e', fontWeight: 600 }}>{hm3Result.inserted} mãos importadas</span>
+            {hm3Result.skipped_duplicates > 0 && <span style={{ color: '#f59e0b' }}>{hm3Result.skipped_duplicates} duplicadas</span>}
+            {hm3Result.errors > 0 && <span style={{ color: '#ef4444' }}>{hm3Result.errors} erros</span>}
+            {hm3Result.top_tags && (
+              <div style={{ width: '100%', marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {hm3Result.top_tags.slice(0, 10).map(([tag, cnt]) => (
+                  <span key={tag} style={{
+                    padding: '1px 7px', borderRadius: 999, fontSize: 10, fontWeight: 600,
+                    color: '#8b5cf6', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)',
+                  }}>#{tag} ({cnt})</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {hm3Result && hm3Result.status === 'error' && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#ef4444' }}>{hm3Result.message || 'Erro na importação'}</div>
+        )}
+      </div>
 
       {/* ── Orphan Screenshots ── */}
       {(orphansLoading || orphans.length > 0) && (() => {
