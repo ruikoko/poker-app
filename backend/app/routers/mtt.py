@@ -688,6 +688,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
         "vision_sb": screenshot_data.get("vision_sb"),
         "vision_bb": screenshot_data.get("vision_bb"),
         "seat_to_name": {str(k): v for k, v in seat_to_name.items()},
+        "screenshot_entry_id": screenshot_data.get("entry_id"),
         "match_method": "mtt_promote_v2",
     }
 
@@ -697,7 +698,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                (site, hand_id, played_at, stakes, position,
                 hero_cards, board, result, currency,
                 raw, study_state, all_players_actions, player_names,
-                screenshot_url)
+                entry_id)
             VALUES
                (%s, %s, %s, %s, %s,
                 %s, %s, %s, %s,
@@ -718,7 +719,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                 "new",
                 json.dumps(all_players),
                 json.dumps(player_names),
-                None,
+                screenshot_data.get("entry_id"),
             )
         )
     logger.info(f"Promoted {hand_id} to study (Inbox)")
