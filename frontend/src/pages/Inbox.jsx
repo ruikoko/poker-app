@@ -330,6 +330,62 @@ export default function InboxPage() {
     }
   }
 
+  async function deleteHand(id) {
+    try {
+      await hands.delete(id)
+      load()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState(new Set())
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll() {
+    const ids = (data.data || []).map(h => h.id)
+    setSelectedIds(prev => {
+      if (prev.size === ids.length) return new Set() // deselect all
+      return new Set(ids)
+    })
+  }
+
+  async function bulkDelete() {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Apagar ${selectedIds.size} mão(s) da inbox?`)) return
+    try {
+      for (const id of selectedIds) {
+        await hands.delete(id)
+      }
+      setSelectedIds(new Set())
+      load()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  async function bulkChangeState(newState) {
+    if (selectedIds.size === 0) return
+    try {
+      for (const id of selectedIds) {
+        await hands.update(id, { study_state: newState })
+      }
+      setSelectedIds(new Set())
+      load()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   const rows = data.data || []
   const pendingCount = uploadQueue.filter(i => i.status === 'pending').length
   const doneCount = uploadQueue.filter(i => i.status === 'done').length
@@ -615,12 +671,24 @@ export default function InboxPage() {
           <span style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>
             Mãos novas ({data.total})
           </span>
+          {selectedIds.size > 0 && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: '#818cf8', fontWeight: 600 }}>{selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}</span>
+              <button onClick={() => bulkChangeState('review')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer' }}>Revisão</button>
+              <button onClick={() => bulkChangeState('studying')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(139,92,246,0.1)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.25)', cursor: 'pointer' }}>Estudar</button>
+              <button onClick={() => bulkChangeState('resolved')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}>Resolver</button>
+              <button onClick={bulkDelete} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer' }}>Apagar</button>
+            </div>
+          )}
         </div>
 
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #1e2130' }}>
+                <th style={{ padding: '8px 8px 8px 12px', width: 28 }}>
+                  <input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === rows.length} onChange={selectAll} style={{ cursor: 'pointer', accentColor: '#6366f1' }} />
+                </th>
                 {['Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Acções'].map(h => (
                   <th key={h} style={{
                     padding: '8px 12px', textAlign: 'left', color: '#4b5563',
@@ -631,16 +699,19 @@ export default function InboxPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: '#4b5563' }}>A carregar...</td></tr>
+                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: '#4b5563' }}>A carregar...</td></tr>
               )}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#4b5563' }}>
+                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 48, color: '#4b5563' }}>
                   <div style={{ fontSize: 28, marginBottom: 8 }}>&#127183;</div>
                   Inbox vazia. Importa ficheiros HH acima.
                 </td></tr>
               )}
               {!loading && rows.map(h => (
-                <tr key={h.id} style={{ borderBottom: '1px solid #1e2130' }}>
+                <tr key={h.id} style={{ borderBottom: '1px solid #1e2130', background: selectedIds.has(h.id) ? 'rgba(99,102,241,0.06)' : 'transparent' }}>
+                  <td style={{ padding: '8px 8px 8px 12px' }}>
+                    <input type="checkbox" checked={selectedIds.has(h.id)} onChange={() => toggleSelect(h.id)} style={{ cursor: 'pointer', accentColor: '#6366f1' }} />
+                  </td>
                   <td style={{ padding: '8px 12px', color: '#64748b', whiteSpace: 'nowrap', fontSize: 11 }}>
                     {h.played_at ? h.played_at.slice(5, 10) : '—'}
                   </td>
@@ -685,6 +756,16 @@ export default function InboxPage() {
                         }}
                         onClick={() => quickAction(h.id, 'resolved')}
                       >&#10003;</button>
+                      <button
+                        style={{
+                          padding: '3px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                          background: 'transparent', color: '#374151',
+                          border: '1px solid #1e2130', cursor: 'pointer',
+                        }}
+                        onClick={() => { if (confirm('Apagar esta mão?')) deleteHand(h.id) }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#374151'}
+                      >&#10005;</button>
                     </div>
                   </td>
                 </tr>
