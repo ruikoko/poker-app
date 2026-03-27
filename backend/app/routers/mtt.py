@@ -659,19 +659,13 @@ def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_
 
 def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: dict, seat_to_name: dict):
     """
-    Quando uma mão MTT tem screenshot, copia-a para a tabela hands
+    Quando uma mão MTT tem screenshot, garante que existe na tabela hands
     com study_state='new' para aparecer na Inbox/Mãos.
-    Inclui nomes reais, ações enriquecidas e referência ao screenshot.
+    Se já existir (ex: como mtt_archive), apaga e recria.
     """
     tm_number = hh_hand.get("tm_number", "")
     tm_digits = tm_number.replace("TM", "")
     hand_id = f"GG-{tm_digits}"
-
-    # Verificar se já existe na tabela hands
-    with conn.cursor() as cur:
-        cur.execute("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
-        if cur.fetchone():
-            return  # já existe, não duplicar
 
     # Construir all_players_actions com nomes reais
     seats = hh_hand.get("seats", {})
@@ -703,70 +697,46 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
         "match_method": "mtt_promote_v2",
     }
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO hands
-               (site, hand_id, played_at, stakes, position,
-                hero_cards, board, result, currency,
-                raw, study_state, all_players_actions, player_names,
-                entry_id)
-            VALUES
-               (%s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s)
-            ON CONFLICT (hand_id) DO NOTHING""",
-            (
-                "GGPoker",
-                hand_id,
-                hh_hand.get("played_at"),
-                hh_hand.get("tournament_name") or hh_hand.get("blinds", ""),
-                hh_hand.get("hero_position"),
-                hh_hand.get("hero_cards", []),
-                hh_hand.get("board", []),
-                hh_hand.get("hero_result"),
-                "$",
-                hh_hand.get("raw", ""),
-                "new",
-                json.dumps(all_players),
-                json.dumps(player_names),
-                screenshot_data.get("entry_id"),
-            )
-        )
-    
-    # UPDATE separado — garantir que study_state muda mesmo para mãos existentes
+    # DELETE + INSERT — garante que study_state = 'new'
     conn2 = get_conn()
     try:
         with conn2.cursor() as cur:
+            cur.execute("DELETE FROM hands WHERE hand_id = %s", (hand_id,))
             cur.execute(
-                """UPDATE hands SET
-                    study_state = 'new',
-                    all_players_actions = %s,
-                    player_names = %s,
-                    entry_id = %s
-                WHERE hand_id = %s
-                RETURNING id, study_state""",
+                """INSERT INTO hands
+                   (site, hand_id, played_at, stakes, position,
+                    hero_cards, board, result, currency,
+                    raw, study_state, all_players_actions, player_names,
+                    entry_id)
+                VALUES
+                   (%s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s)""",
                 (
+                    "GGPoker",
+                    hand_id,
+                    hh_hand.get("played_at"),
+                    hh_hand.get("tournament_name") or hh_hand.get("blinds", ""),
+                    hh_hand.get("hero_position"),
+                    hh_hand.get("hero_cards", []),
+                    hh_hand.get("board", []),
+                    hh_hand.get("hero_result"),
+                    "$",
+                    hh_hand.get("raw", ""),
+                    "new",
                     json.dumps(all_players),
                     json.dumps(player_names),
                     screenshot_data.get("entry_id"),
-                    hand_id,
                 )
             )
-            result = cur.fetchone()
-            if result:
-                logger.info(f"Promote UPDATE OK: {hand_id} -> id={result['id']}, state={result['study_state']}")
-            else:
-                logger.warning(f"Promote UPDATE: no rows matched for {hand_id}")
         conn2.commit()
-        logger.info(f"Promote COMMIT OK for {hand_id}")
+        logger.info(f"Promoted {hand_id} to study (Inbox)")
     except Exception as e:
         conn2.rollback()
-        logger.error(f"Promote UPDATE failed for {hand_id}: {e}")
+        logger.error(f"Promote failed for {hand_id}: {e}")
     finally:
         conn2.close()
-    
-    logger.info(f"Promoted {hand_id} to study (Inbox)")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
