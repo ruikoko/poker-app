@@ -362,7 +362,20 @@ def _parse_mtt_file(content: bytes, filename: str) -> tuple[list[dict], list[str
 
 # ── Match com screenshots ─────────────────────────────────────────────────────
 
-def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None) -> dict | None:
+def _extract_screenshot_data(raw: dict, entry_id: int) -> dict:
+    """Extrai dados relevantes de um entry de screenshot."""
+    return {
+        "entry_id": entry_id,
+        "players_by_position": raw.get("players_by_position", {}),
+        "players_list": raw.get("players_list", []),
+        "hero": raw.get("hero"),
+        "board": raw.get("board", []),
+        "vision_sb": raw.get("vision_sb"),
+        "vision_bb": raw.get("vision_bb"),
+    }
+
+
+def _match_screenshot(tm_number: str, played_at: str | None = None, blinds: str | None = None) -> dict | None:
     """
     Procura um screenshot órfão pelo TM number + hora + blinds.
     
@@ -370,11 +383,10 @@ def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None)
       1. Filtrar por TM number (identifica o torneio)
       2. Se houver múltiplos, filtrar por blinds
       3. Se ainda houver múltiplos, filtrar por hora (±2 min)
-    Retorna os dados do Vision (players_by_position, hero) ou None.
+    Retorna dados do Vision incluindo players_list e vision_sb/bb.
     """
     tm_digits = tm_number.replace("TM", "")
     
-    # Buscar todos os screenshots deste TM com Vision concluído
     rows = query(
         """SELECT id, raw_json 
            FROM entries 
@@ -388,26 +400,18 @@ def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None)
     if not rows:
         return None
     
-    # Se só há 1, usar directamente
     if len(rows) == 1:
         raw = rows[0].get("raw_json") or {}
-        return {
-            "entry_id": rows[0]["id"],
-            "players_by_position": raw.get("players_by_position", {}),
-            "hero": raw.get("hero"),
-            "board": raw.get("board", []),
-        }
+        return _extract_screenshot_data(raw, rows[0]["id"])
     
     # Múltiplos screenshots do mesmo TM — filtrar por blinds + hora
     def _normalise_blinds(b: str | None) -> str:
-        """Normaliza blinds para comparação: remove espaços e vírgulas."""
         if not b:
             return ""
         return re.sub(r"[,\s]", "", b).lower()
     
     hh_blinds_norm = _normalise_blinds(blinds)
     
-    # Filtrar por blinds primeiro
     candidates = []
     for row in rows:
         raw = row.get("raw_json") or {}
@@ -417,21 +421,14 @@ def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None)
         if hh_blinds_norm and ss_blinds_norm and hh_blinds_norm == ss_blinds_norm:
             candidates.append(row)
     
-    # Se filtro por blinds não ajudou, usar todos
     if not candidates:
         candidates = rows
     
-    # Se só 1 candidato após filtro de blinds, usar
     if len(candidates) == 1:
         raw = candidates[0].get("raw_json") or {}
-        return {
-            "entry_id": candidates[0]["id"],
-            "players_by_position": raw.get("players_by_position", {}),
-            "hero": raw.get("hero"),
-            "board": raw.get("board", []),
-        }
+        return _extract_screenshot_data(raw, candidates[0]["id"])
     
-    # Filtrar por hora (±2 minutos)
+    # Filtrar por hora (±5 minutos)
     if played_at:
         try:
             hh_dt = datetime.fromisoformat(played_at.replace("Z", "+00:00"))
@@ -440,8 +437,8 @@ def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None)
             for row in candidates:
                 raw = row.get("raw_json") or {}
                 file_meta = raw.get("file_meta") or {}
-                ss_time_str = file_meta.get("time")  # "HH:MM" em 24h
-                ss_date_str = file_meta.get("date")  # "YYYY-MM-DD"
+                ss_time_str = file_meta.get("time")
+                ss_date_str = file_meta.get("date")
                 if ss_time_str and ss_date_str:
                     try:
                         ss_dt = datetime.fromisoformat(f"{ss_date_str}T{ss_time_str}:00")
@@ -451,81 +448,205 @@ def _match_screenshot(tm_number: str, played_at: str | None, blinds: str | None)
                             best = row
                     except Exception:
                         pass
-            # Aceitar match se diferença < 5 minutos
             if best and best_diff < 300:
                 raw = best.get("raw_json") or {}
-                return {
-                    "entry_id": best["id"],
-                    "players_by_position": raw.get("players_by_position", {}),
-                    "hero": raw.get("hero"),
-                    "board": raw.get("board", []),
-                }
+                return _extract_screenshot_data(raw, best["id"])
         except Exception as e:
             logger.warning(f"Erro ao comparar horas no match: {e}")
     
-    # Fallback: usar o primeiro candidato
     raw = candidates[0].get("raw_json") or {}
-    return {
-        "entry_id": candidates[0]["id"],
-        "players_by_position": raw.get("players_by_position", {}),
-        "hero": raw.get("hero"),
-        "board": raw.get("board", []),
-    }
+    return _extract_screenshot_data(raw, candidates[0]["id"])
+
+
+def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
+    """
+    Constrói mapa seat_num → nome_real usando o algoritmo v2:
+    1. Âncoras fixas: Hero, SB (do painel), BB (do painel)
+    2. Fold players: stack_hh - ante ≈ stack_vision (<2%)
+    3. Eliminação: restantes
+
+    A HH mostra stacks ANTES de antes/blinds.
+    O screenshot mostra stacks no FINAL da mão.
+    Para fold players: stack_screenshot = stack_hh - ante
+    """
+    seats = hh_hand.get("seats", {})
+    vision_list = screenshot_data.get("players_list", [])
+    vision_sb = screenshot_data.get("vision_sb")
+    vision_bb = screenshot_data.get("vision_bb")
+    hero_name_vision = screenshot_data.get("hero")
+
+    # Ante da HH
+    ante = hh_hand.get("ante_size", 0)
+
+    seat_to_name = {}  # seat_num → nome_real
+    used_vision = set()
+    hero_names = ["lauro dermio", "koumpounophobia", "lauro derm"]
+
+    # ── Fase 1: Âncoras fixas ────────────────────────────────────────
+
+    for seat_num, info in seats.items():
+        pos = info.get("position", "")
+        name = info.get("name", "")
+
+        # Hero
+        if name == "Hero":
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                if any(h in vp["name"].lower() for h in hero_names):
+                    seat_to_name[seat_num] = vp["name"]
+                    used_vision.add(i)
+                    break
+            if seat_num not in seat_to_name:
+                seat_to_name[seat_num] = hero_name_vision or "Hero"
+            continue
+
+        # SB
+        if pos == "SB" and vision_sb:
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                if vp["name"].lower().startswith(vision_sb.lower()[:6]):
+                    seat_to_name[seat_num] = vp["name"]
+                    used_vision.add(i)
+                    break
+            if seat_num not in seat_to_name:
+                seat_to_name[seat_num] = vision_sb
+            continue
+
+        # BB
+        if pos == "BB" and vision_bb:
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                if vp["name"].lower().startswith(vision_bb.lower()[:6]):
+                    seat_to_name[seat_num] = vp["name"]
+                    used_vision.add(i)
+                    break
+            if seat_num not in seat_to_name:
+                seat_to_name[seat_num] = vision_bb
+            continue
+
+    # ── Fase 2: Fold players — match por stack esperado ──────────────
+
+    # Determinar quem foldou preflop (reparse do raw)
+    raw = hh_hand.get("raw", "")
+    preflop_folders = set()
+    if raw:
+        preflop_start = raw.find("*** HOLE CARDS ***")
+        preflop_end = len(raw)
+        for marker in ["*** FLOP ***", "*** SUMMARY ***", "*** SHOWDOWN ***"]:
+            idx = raw.find(marker, preflop_start if preflop_start >= 0 else 0)
+            if idx != -1 and idx < preflop_end:
+                preflop_end = idx
+
+        if preflop_start >= 0:
+            preflop_section = raw[preflop_start:preflop_end]
+            for line in preflop_section.split("\n"):
+                line = line.strip()
+                m = re.match(r"^(.+?):\s+folds", line)
+                if m:
+                    preflop_folders.add(m.group(1).strip())
+
+    for seat_num, info in seats.items():
+        if seat_num in seat_to_name:
+            continue
+
+        name = info.get("name", "")
+        stack = info.get("stack", 0)
+
+        # Verificar se este jogador foldou preflop
+        is_folder = name in preflop_folders
+        if not is_folder:
+            continue
+
+        # Stack esperado no screenshot = stack_inicial - ante
+        stack_esperado = stack - ante
+
+        best_i = None
+        best_diff = float("inf")
+        for i, vp in enumerate(vision_list):
+            if i in used_vision:
+                continue
+            diff = abs(stack_esperado - vp["stack"])
+            pct = (diff / stack_esperado * 100) if stack_esperado > 0 else 999
+            if pct < 2.0 and diff < best_diff:
+                best_diff = diff
+                best_i = i
+
+        if best_i is not None:
+            seat_to_name[seat_num] = vision_list[best_i]["name"]
+            used_vision.add(best_i)
+
+    # ── Fase 3: Eliminação ───────────────────────────────────────────
+
+    unmapped_seats = [s for s in seats if s not in seat_to_name]
+    unmapped_vision = [i for i in range(len(vision_list)) if i not in used_vision]
+
+    if len(unmapped_seats) == 1 and len(unmapped_vision) == 1:
+        seat_to_name[unmapped_seats[0]] = vision_list[unmapped_vision[0]]["name"]
+    elif len(unmapped_seats) > 0 and len(unmapped_vision) > 0:
+        still_unmapped = set(unmapped_vision)
+        for seat_num in unmapped_seats:
+            stack = seats[seat_num].get("stack", 0)
+            best_i = None
+            best_diff = float("inf")
+            for i in still_unmapped:
+                diff = abs(stack - vision_list[i]["stack"])
+                if diff < best_diff:
+                    best_diff = diff
+                    best_i = i
+            if best_i is not None:
+                seat_to_name[seat_num] = vision_list[best_i]["name"]
+                still_unmapped.discard(best_i)
+
+    return seat_to_name
 
 
 def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: dict):
     """
     Cria registos hand_villains para jogadores com VPIP.
-    Nomes vêm SEMPRE do screenshot (Vision).
+    Nomes vêm do screenshot via match por stack (algoritmo v2).
     Posições e VPIP vêm da HH.
     """
     vpip_seats = hh_hand.get("vpip_seats", {})
     if not vpip_seats:
         return 0
-    
+
     seats = hh_hand.get("seats", {})
-    ss_players = screenshot_data.get("players_by_position", {})
-    
-    # Construir mapa posição → nome do screenshot
-    ss_name_by_position = {}
-    for pos, pdata in ss_players.items():
-        if isinstance(pdata, dict):
-            ss_name_by_position[pos] = pdata.get("name", "")
-        elif isinstance(pdata, str):
-            ss_name_by_position[pos] = pdata
-    
+
+    # Construir mapa seat → nome real usando match por stack
+    seat_to_name = _build_seat_to_name_map(hh_hand, screenshot_data)
+
+    # Lookup para bounty/country a partir da vision_list
+    vision_by_name = {}
+    for vp in screenshot_data.get("players_list", []):
+        vision_by_name[vp["name"].lower()] = vp
+
     created = 0
     with conn.cursor() as cur:
         for seat_num, vpip_action in vpip_seats.items():
             seat_num = int(seat_num)
             seat_info = seats.get(seat_num, {})
             position = seat_info.get("position", "?")
-            
-            # Nome vem do screenshot pela posição
-            player_name = ss_name_by_position.get(position, seat_info.get("name", "Unknown"))
-            
-            # Stack do screenshot se disponível, senão da HH
-            ss_player = ss_players.get(position, {})
-            stack = None
-            bounty_pct = None
-            country = None
-            
-            if isinstance(ss_player, dict):
-                stack = ss_player.get("stack") or ss_player.get("stack_chips")
-                bounty_pct = ss_player.get("bounty_pct") or ss_player.get("bounty")
-                country = ss_player.get("country_flag") or ss_player.get("country")
-            
-            if stack is None:
-                stack = seat_info.get("stack")
-            
+
+            # Nome real vem do match por stack
+            player_name = seat_to_name.get(seat_num, seat_info.get("name", "Unknown"))
+
+            # Bounty/country do Vision
+            vision_info = vision_by_name.get(player_name.lower(), {})
+            stack = vision_info.get("stack") or seat_info.get("stack")
+            bounty_pct = vision_info.get("bounty_pct")
+            country = vision_info.get("country")
+
             cur.execute(
-                """INSERT INTO hand_villains 
+                """INSERT INTO hand_villains
                    (mtt_hand_id, player_name, position, stack, bounty_pct, country, vpip_action)
                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (mtt_hand_id, player_name, position, stack, bounty_pct, country, vpip_action)
             )
             created += 1
-    
+
     return created
 
 
