@@ -16,8 +16,10 @@ import base64
 import json
 import logging
 import asyncio
+import io
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from PIL import Image
 from app.auth import require_auth
 from app.db import get_conn, query
 
@@ -301,8 +303,44 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_player
 
     return enriched
 
+# ── Compressão de imagem ────────────────────────────────────────────────────────────────
 
-# ── Storage ──────────────────────────────────────────────────────────────────
+def _compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 85) -> tuple[str, str]:
+    """
+    Comprime imagem: redimensiona para max_width e converte para JPEG quality.
+    Devolve (img_b64_compressed, mime_type).
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        # Converter RGBA/P para RGB (JPEG não suporta alpha)
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        # Redimensionar se largura > max_width
+        if img.width > max_width:
+            ratio = max_width / img.width
+            new_height = int(img.height * ratio)
+            img = img.resize((max_width, new_height), Image.LANCZOS)
+
+        # Guardar como JPEG
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        compressed_bytes = buf.getvalue()
+        compressed_b64 = base64.b64encode(compressed_bytes).decode("utf-8")
+
+        original_kb = len(image_bytes) / 1024
+        compressed_kb = len(compressed_bytes) / 1024
+        logger.info(f"Compressão: {original_kb:.0f}KB → {compressed_kb:.0f}KB ({img.width}x{img.height}) "
+                    f"ratio: {compressed_kb/original_kb*100:.0f}%")
+
+        return compressed_b64, "image/jpeg"
+    except Exception as e:
+        logger.error(f"Erro na compressão: {e}. A usar imagem original.")
+        return base64.b64encode(image_bytes).decode("utf-8"), "image/png"
+
+# ── Storage ──────────────────────────────────────────────────────────────────────────
 
 def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | None:
     import hashlib
@@ -338,9 +376,12 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
         vision_players = vision_data.get("players_by_position", {})
         hero_name = vision_data.get("hero")
         board = vision_data.get("board", [])
-        logger.info(f"[bg] Vision OK entry {entry_id} — TM: {tm_final}, players: {list(vision_players.keys())}")
+        logger.info(f"[bg] Vision OK entry {entry_id} \u2014 TM: {tm_final}, players: {list(vision_players.keys())}")
 
-        # Actualizar entry com dados do Vision (em thread para não bloquear)
+        # Comprimir imagem DEPOIS do Vision (Vision j\u00e1 recebeu original)
+        compressed_b64, compressed_mime = await asyncio.to_thread(_compress_image, content)
+
+        # Actualizar entry com dados do Vision + imagem comprimida
         def _db_update():
             conn = get_conn()
             try:
@@ -348,8 +389,8 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                     raw_json_str = json.dumps({
                             "tm": tm_final,
                             "file_meta": file_meta,
-                            "mime_type": mime_type,
-                            "img_b64": img_b64,
+                            "mime_type": compressed_mime,
+                            "img_b64": compressed_b64,
                             "players_by_position": vision_players,
                             "hero": hero_name,
                             "board": board,
@@ -413,9 +454,10 @@ async def upload_screenshot(
     tm_number = file_meta.get("tm")
     logger.info(f"Filename parsed: {file_meta}")
 
-    # 2. Guardar imediatamente como entry órfão (antes do Vision)
-    import base64 as _b64
-    img_b64 = _b64.b64encode(content).decode("utf-8")
+    # 2. Comprimir imagem para guardar na BD (original vai para Vision)
+    compressed_b64, compressed_mime = _compress_image(content)
+    # Manter original em memória para Vision (não guardar na BD)
+    img_b64_original = base64.b64encode(content).decode("utf-8")
 
     conn = get_conn()
     try:
@@ -428,12 +470,12 @@ async def upload_screenshot(
                 """,
                 (
                     filename,
-                    f"Screenshot — TM: {tm_number or 'não detectado'}",
+                    f"Screenshot \u2014 TM: {tm_number or 'n\u00e3o detectado'}",
                     json.dumps({
                         "tm": tm_number,
                         "file_meta": file_meta,
-                        "mime_type": mime_type,
-                        "img_b64": img_b64,
+                        "mime_type": compressed_mime,
+                        "img_b64": compressed_b64,
                         "players_by_position": {},
                         "hero": None,
                         "vision_done": False,
@@ -442,7 +484,7 @@ async def upload_screenshot(
             )
             entry_id = cur.fetchone()["id"]
         conn.commit()
-        logger.info(f"Screenshot guardado como entry {entry_id} (TM: {tm_number})")
+        logger.info(f"Screenshot guardado como entry {entry_id} (TM: {tm_number}, comprimido)")
     except Exception as e:
         conn.rollback()
         logger.error(f"Erro ao guardar entry de screenshot: {e}")
@@ -451,13 +493,14 @@ async def upload_screenshot(
         conn.close()
 
     # 3. Lançar Vision em background (não bloqueia o response)
+    # Nota: passa content (original) para Vision ter melhor qualidade
     if background_tasks is not None:
         background_tasks.add_task(
-            _run_vision_for_entry, entry_id, content, mime_type, tm_number, file_meta, img_b64
+            _run_vision_for_entry, entry_id, content, mime_type, tm_number, file_meta, img_b64_original
         )
     else:
         asyncio.create_task(
-            _run_vision_for_entry(entry_id, content, mime_type, tm_number, file_meta, img_b64)
+            _run_vision_for_entry(entry_id, content, mime_type, tm_number, file_meta, img_b64_original)
         )
 
     # 4. Responder imediatamente — Vision e match correm em background
