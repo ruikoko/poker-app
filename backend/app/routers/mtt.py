@@ -646,6 +646,84 @@ def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_
     return created
 
 
+def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: dict, seat_to_name: dict):
+    """
+    Quando uma mão MTT tem screenshot, copia-a para a tabela hands
+    com study_state='new' para aparecer na Inbox/Mãos.
+    Inclui nomes reais, ações enriquecidas e referência ao screenshot.
+    """
+    tm_number = hh_hand.get("tm_number", "")
+    tm_digits = tm_number.replace("TM", "")
+    hand_id = f"GG-{tm_digits}"
+
+    # Verificar se já existe na tabela hands
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
+        if cur.fetchone():
+            return  # já existe, não duplicar
+
+    # Construir all_players_actions com nomes reais
+    seats = hh_hand.get("seats", {})
+    bb_size = hh_hand.get("bb_size", 1)
+
+    all_players = {}
+    for seat_num, info in seats.items():
+        name = info.get("name", "")
+        pos = info.get("position", "?")
+        stack_bb = round(info.get("stack", 0) / bb_size, 1) if bb_size > 0 else 0
+        real_name = seat_to_name.get(seat_num, name)
+
+        all_players[real_name] = {
+            "seat": seat_num,
+            "position": pos,
+            "stack_bb": stack_bb,
+            "real_name": real_name,
+            "is_hero": name == "Hero",
+        }
+
+    # Player names metadata
+    player_names = {
+        "players_list": screenshot_data.get("players_list", []),
+        "hero": screenshot_data.get("hero"),
+        "vision_sb": screenshot_data.get("vision_sb"),
+        "vision_bb": screenshot_data.get("vision_bb"),
+        "seat_to_name": {str(k): v for k, v in seat_to_name.items()},
+        "match_method": "mtt_promote_v2",
+    }
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO hands
+               (site, hand_id, played_at, stakes, position,
+                hero_cards, board, result, currency,
+                raw, study_state, all_players_actions, player_names,
+                screenshot_url)
+            VALUES
+               (%s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s)
+            ON CONFLICT (hand_id) DO NOTHING""",
+            (
+                "GGPoker",
+                hand_id,
+                hh_hand.get("played_at"),
+                hh_hand.get("tournament_name") or hh_hand.get("blinds", ""),
+                hh_hand.get("hero_position"),
+                hh_hand.get("hero_cards", []),
+                hh_hand.get("board", []),
+                hh_hand.get("hero_result"),
+                "$",
+                hh_hand.get("raw", ""),
+                "new",
+                json.dumps(all_players),
+                json.dumps(player_names),
+                None,
+            )
+        )
+    logger.info(f"Promoted {hand_id} to study (Inbox)")
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/import")
@@ -738,6 +816,11 @@ async def import_mtt(
                     villains_created += n
                     if n > 0:
                         matched += 1
+                
+                # Promover para Inbox/Mãos se houver screenshot
+                if has_screenshot:
+                    seat_to_name = _build_seat_to_name_map(h, screenshot)
+                    _promote_to_study(conn, mtt_hand_id, h, screenshot, seat_to_name)
         
         conn.commit()
     except Exception as e:
@@ -967,9 +1050,13 @@ async def rematch_screenshots(
                 raw = hand_data.get("raw", "")
                 if raw:
                     parsed = _parse_mtt_hand(raw)
-                    if parsed and parsed.get("vpip_seats"):
-                        n = _create_villains_for_hand(conn, h["id"], parsed, screenshot)
-                        villains_created += n
+                    if parsed:
+                        if parsed.get("vpip_seats"):
+                            n = _create_villains_for_hand(conn, h["id"], parsed, screenshot)
+                            villains_created += n
+                        # Promover para Inbox/Mãos
+                        seat_to_name = _build_seat_to_name_map(parsed, screenshot)
+                        _promote_to_study(conn, h["id"], parsed, screenshot, seat_to_name)
             
             matched += 1
         
