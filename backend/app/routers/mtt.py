@@ -715,11 +715,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                 %s, %s, %s, %s,
                 %s, %s, %s, %s,
                 %s)
-            ON CONFLICT (hand_id) DO UPDATE SET
-                study_state = 'new',
-                all_players_actions = EXCLUDED.all_players_actions,
-                player_names = EXCLUDED.player_names,
-                entry_id = EXCLUDED.entry_id""",
+            ON CONFLICT (hand_id) DO NOTHING""",
             (
                 "GGPoker",
                 hand_id,
@@ -735,6 +731,21 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                 json.dumps(all_players),
                 json.dumps(player_names),
                 screenshot_data.get("entry_id"),
+            )
+        )
+        # Sempre actualizar — cobre o caso ON CONFLICT e mtt_archive
+        cur.execute(
+            """UPDATE hands SET
+                study_state = 'new',
+                all_players_actions = %s,
+                player_names = %s,
+                entry_id = %s
+            WHERE hand_id = %s""",
+            (
+                json.dumps(all_players),
+                json.dumps(player_names),
+                screenshot_data.get("entry_id"),
+                hand_id,
             )
         )
     logger.info(f"Promoted {hand_id} to study (Inbox)")
