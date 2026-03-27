@@ -733,21 +733,32 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                 screenshot_data.get("entry_id"),
             )
         )
-        # Sempre actualizar — cobre o caso ON CONFLICT e mtt_archive
-        cur.execute(
-            """UPDATE hands SET
-                study_state = 'new',
-                all_players_actions = %s,
-                player_names = %s,
-                entry_id = %s
-            WHERE hand_id = %s""",
-            (
-                json.dumps(all_players),
-                json.dumps(player_names),
-                screenshot_data.get("entry_id"),
-                hand_id,
+    
+    # UPDATE separado — garantir que study_state muda mesmo para mãos existentes
+    conn2 = get_conn()
+    try:
+        with conn2.cursor() as cur:
+            cur.execute(
+                """UPDATE hands SET
+                    study_state = 'new',
+                    all_players_actions = %s,
+                    player_names = %s,
+                    entry_id = %s
+                WHERE hand_id = %s""",
+                (
+                    json.dumps(all_players),
+                    json.dumps(player_names),
+                    screenshot_data.get("entry_id"),
+                    hand_id,
+                )
             )
-        )
+        conn2.commit()
+    except Exception as e:
+        conn2.rollback()
+        logger.error(f"Promote UPDATE failed for {hand_id}: {e}")
+    finally:
+        conn2.close()
+    
     logger.info(f"Promoted {hand_id} to study (Inbox)")
 
 
@@ -1273,3 +1284,4 @@ async def cleanup_mtt(
         "kept": with_ss,
         "after": after,
     }
+
