@@ -348,6 +348,22 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
   const [notes, setNotes] = useState(hand.notes || '')
   const [tags, setTags]   = useState((hand.tags || []).join(', '))
   const [saving, setSaving] = useState(false)
+  const [screenshotUrl, setScreenshotUrl] = useState(hand.screenshot_url || null)
+  const [ssLoading, setSsLoading] = useState(false)
+
+  // Carregar screenshot se a mão tem entry_id (screenshot associado)
+  useEffect(() => {
+    if (screenshotUrl) return  // já tem
+    const entryId = hand.entry_id || hand.player_names?.screenshot_entry_id
+    if (!entryId) return
+    setSsLoading(true)
+    hands.screenshot(hand.id)
+      .then(data => {
+        if (data?.data_url) setScreenshotUrl(data.data_url)
+      })
+      .catch(() => {})
+      .finally(() => setSsLoading(false))
+  }, [hand.id])
 
   async function save() {
     setSaving(true)
@@ -456,14 +472,17 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         }
 
         {/* Screenshot inline */}
-        {hand.screenshot_url && (
+        {ssLoading && (
+          <div style={{ marginBottom: 20, color: '#f59e0b', fontSize: 12 }}>A carregar screenshot...</div>
+        )}
+        {screenshotUrl && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Screenshot</div>
             <img
-              src={hand.screenshot_url}
+              src={screenshotUrl}
               alt="Screenshot da mão"
               style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #2a2d3a', cursor: 'pointer' }}
-              onClick={() => window.open(hand.screenshot_url, '_blank')}
+              onClick={() => window.open(screenshotUrl, '_blank')}
             />
           </div>
         )}
