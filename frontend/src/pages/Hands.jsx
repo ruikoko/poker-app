@@ -25,6 +25,9 @@ const STATE_META = {
 const SUIT_COLORS = {
   h: '#ef4444', d: '#f97316', c: '#22c55e', s: '#e2e8f0',
 }
+const SUIT_BG = {
+  h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b',
+}
 const SUIT_SYMBOLS = {
   h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660',
 }
@@ -59,7 +62,7 @@ function PokerCard({ card, size = 'md' }) {
   }
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
-  const color = SUIT_COLORS[suit] || '#e2e8f0'
+  const bg = SUIT_BG[suit] || '#1e2130'
   const symbol = SUIT_SYMBOLS[suit] || suit
 
   return (
@@ -67,10 +70,10 @@ function PokerCard({ card, size = 'md' }) {
       display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       width: size === 'sm' ? 26 : size === 'lg' ? 38 : 34,
       height: size === 'sm' ? 36 : size === 'lg' ? 50 : 46,
-      background: '#1e2130', border: '1px solid rgba(255,255,255,0.12)',
+      background: bg, border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 4, fontFamily: "'Fira Code', monospace",
       fontSize: size === 'sm' ? 10 : size === 'lg' ? 14 : 12,
-      fontWeight: 700, color, lineHeight: 1, gap: 1, userSelect: 'none',
+      fontWeight: 700, color: '#fff', lineHeight: 1, gap: 1, userSelect: 'none',
       boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
     }}>
       <span>{rank}</span>
