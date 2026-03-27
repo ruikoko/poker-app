@@ -70,7 +70,7 @@ def _build_conditions(
         # Excluir mãos que têm APENAS a tag 'mtt' (bulk HH sem marcação de estudo)
         # Inclui: mãos sem tags, mãos com outras tags, mãos com mtt + outras tags
         conditions.append(
-            "NOT (h.tags = ARRAY['mtt']::text[] OR h.tags = '{mtt}')"
+            "(h.tags IS NULL OR h.tags = '{}' OR NOT (h.tags = ARRAY['mtt']::text[]))"
         )
 
     # Por defeito, excluir sempre mãos de arquivo MTT (study_state='mtt_archive')
