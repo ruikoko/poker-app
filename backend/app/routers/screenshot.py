@@ -637,6 +637,8 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
         if tm_final and vision_players:
             def _try_match():
                 tm_digits = tm_final.replace("TM", "")
+                
+                # 1. Tentar match na tabela hands (fluxo antigo)
                 hand_rows = query(
                     "SELECT id, hand_id, all_players_actions, position, raw "
                     "FROM hands WHERE hand_id = %s LIMIT 1",
@@ -652,6 +654,58 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                         "file_meta": file_meta,
                     })
                     logger.info(f"[bg] Match entry {entry_id} -> hand {hand_rows[0]['id']}: {result}")
+                
+                # 2. Tentar match na tabela mtt_hands (auto-rematch bidirecional)
+                try:
+                    mtt_rows = query(
+                        "SELECT id, tm_number, raw FROM mtt_hands "
+                        "WHERE tm_number = %s AND has_screenshot = false LIMIT 1",
+                        (f"TM{tm_digits}",)
+                    )
+                    if mtt_rows:
+                        from app.routers.mtt import (
+                            _parse_mtt_hand, _create_villains_for_hand,
+                            _build_seat_to_name_map, _promote_to_study
+                        )
+                        
+                        screenshot_data = {
+                            "entry_id": entry_id,
+                            "players_list": vision_players,
+                            "players_by_position": {},
+                            "hero": hero_name,
+                            "vision_sb": vision_sb,
+                            "vision_bb": vision_bb,
+                            "file_meta": file_meta,
+                        }
+                        
+                        mtt_hand = mtt_rows[0]
+                        parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
+                        
+                        if parsed:
+                            conn = get_conn()
+                            try:
+                                with conn.cursor() as cur:
+                                    cur.execute(
+                                        "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
+                                        (entry_id, mtt_hand["id"])
+                                    )
+                                
+                                if parsed.get("vpip_seats"):
+                                    _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                                
+                                seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
+                                _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
+                                
+                                conn.commit()
+                                logger.info(f"[bg] MTT auto-match: entry {entry_id} -> mtt_hand {mtt_hand['id']} (TM{tm_digits})")
+                            except Exception as e:
+                                conn.rollback()
+                                logger.error(f"[bg] MTT auto-match error: {e}")
+                            finally:
+                                conn.close()
+                except Exception as e:
+                    logger.error(f"[bg] MTT auto-match failed for TM{tm_digits}: {e}")
+            
             await asyncio.to_thread(_try_match)
 
     except Exception as e:
