@@ -64,6 +64,7 @@ function VillainProfile({ villain, onClose, onSave }) {
   const [handsPage, setHandsPage] = useState(1)
   const [expandedHand, setExpandedHand] = useState(null)
   const [ssCache, setSsCache] = useState({}) // hand_id -> data_url
+  const [ssFullscreen, setSsFullscreen] = useState(null) // data_url for fullscreen
 
   useEffect(() => {
     loadHands(1)
@@ -324,7 +325,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                                 src={ssCache[h.id]}
                                 alt="Screenshot"
                                 style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'pointer' }}
-                                onClick={() => window.open(ssCache[h.id], '_blank')}
+                                onClick={() => setSsFullscreen(ssCache[h.id])}
                               />
                             </div>
                           )}
@@ -367,6 +368,21 @@ function VillainProfile({ villain, onClose, onSave }) {
             )}
           </div>
         </div>
+
+        {/* Screenshot fullscreen modal */}
+        {ssFullscreen && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+              cursor: 'pointer',
+            }}
+            onClick={() => setSsFullscreen(null)}
+          >
+            <img src={ssFullscreen} alt="Screenshot" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
+            <button onClick={() => setSsFullscreen(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}>✕</button>
+          </div>
+        )}
       </div>
     </div>
   )
