@@ -309,6 +309,204 @@ function AllPlayersActions({ actions }) {
   )
 }
 
+// ── Componente: Hand History Parseada (raw → acções por street com nomes reais) ──
+
+function parseRawHH(raw, playerNames) {
+  if (!raw) return null
+
+  // Build name map: anon hash → real name
+  const seatToName = playerNames?.seat_to_name || {}
+  // Also build hash→real from seats in raw
+  const nameMap = {}
+  const seatLines = raw.match(/Seat (\d+): (.+?) \(([\d,]+) in chips\)/g) || []
+  for (const line of seatLines) {
+    const m = line.match(/Seat (\d+): (.+?) \(([\d,]+) in chips\)/)
+    if (m) {
+      const seatNum = m[1]
+      const anonName = m[2].trim()
+      const realName = seatToName[seatNum] || anonName
+      nameMap[anonName] = realName
+    }
+  }
+
+  // Extract positions from all_players_actions or from seat info
+  const posMap = {} // realName → position
+
+  // Parse streets
+  const streets = []
+  const streetMarkers = [
+    { key: 'preflop', start: '*** HOLE CARDS ***', end: ['*** FLOP ***', '*** SUMMARY ***', '*** SHOWDOWN ***'] },
+    { key: 'flop', start: '*** FLOP ***', end: ['*** TURN ***', '*** SUMMARY ***', '*** SHOWDOWN ***'] },
+    { key: 'turn', start: '*** TURN ***', end: ['*** RIVER ***', '*** SUMMARY ***', '*** SHOWDOWN ***'] },
+    { key: 'river', start: '*** RIVER ***', end: ['*** SUMMARY ***', '*** SHOWDOWN ***'] },
+  ]
+
+  // Extract board cards per street
+  const boardByStreet = {}
+  const flopM = raw.match(/\*\*\* FLOP \*\*\* \[(.+?)\]/)
+  if (flopM) boardByStreet.flop = flopM[1].trim().split(/\s+/)
+  const turnM = raw.match(/\*\*\* TURN \*\*\* \[.+?\] \[(.+?)\]/)
+  if (turnM) boardByStreet.turn = turnM[1].trim().split(/\s+/)
+  const riverM = raw.match(/\*\*\* RIVER \*\*\* \[.+?\] \[(.+?)\]/)
+  if (riverM) boardByStreet.river = riverM[1].trim().split(/\s+/)
+
+  // Showdown
+  const showdownStart = raw.indexOf('*** SHOWDOWN ***')
+  const showdownEnd = raw.indexOf('*** SUMMARY ***')
+  let showdownActions = []
+  if (showdownStart !== -1) {
+    const sdSection = raw.slice(showdownStart, showdownEnd !== -1 ? showdownEnd : undefined)
+    for (const line of sdSection.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('***')) continue
+      // "Player: shows [Xx Xx]" or "Player collected XXXX from pot"
+      const showM = trimmed.match(/^(.+?):\s+shows\s+\[(.+?)\](.*)/)
+      const collectM = trimmed.match(/^(.+?)\s+collected\s+([\d,]+)\s+from/)
+      if (showM) {
+        const anonName = showM[1].trim()
+        const realName = nameMap[anonName] || anonName
+        const cards = showM[2].trim().split(/\s+/)
+        const rest = showM[3] ? showM[3].trim() : ''
+        showdownActions.push({ name: realName, action: `shows [${showM[2].trim()}]${rest ? ' ' + rest : ''}`, cards })
+      } else if (collectM) {
+        const anonName = collectM[1].trim()
+        const realName = nameMap[anonName] || anonName
+        showdownActions.push({ name: realName, action: `collected ${collectM[2]}` })
+      }
+    }
+  }
+
+  for (const { key, start, end } of streetMarkers) {
+    const startIdx = raw.indexOf(start)
+    if (startIdx === -1) continue
+
+    let endIdx = raw.length
+    for (const marker of end) {
+      const idx = raw.indexOf(marker, startIdx + start.length)
+      if (idx !== -1 && idx < endIdx) endIdx = idx
+    }
+
+    const section = raw.slice(startIdx + start.length, endIdx)
+    const actions = []
+
+    for (const line of section.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('***') || trimmed.startsWith('Dealt')) continue
+
+      const m = trimmed.match(/^(.+?):\s+(.+)$/)
+      if (!m) continue
+
+      const anonName = m[1].trim()
+      const actionText = m[2].trim()
+      const realName = nameMap[anonName] || anonName
+      const isHero = anonName === 'Hero'
+
+      actions.push({ name: realName, action: actionText, isHero })
+    }
+
+    if (actions.length > 0) {
+      streets.push({ key, actions, board: boardByStreet[key] || null })
+    }
+  }
+
+  if (showdownActions.length > 0) {
+    streets.push({ key: 'showdown', actions: showdownActions, board: null })
+  }
+
+  return streets.length > 0 ? streets : null
+}
+
+const STREET_LABELS_HH = {
+  preflop: 'Pre-Flop',
+  flop: 'Flop',
+  turn: 'Turn',
+  river: 'River',
+  showdown: 'Showdown',
+}
+const STREET_COLORS_HH = {
+  preflop: '#6366f1',
+  flop: '#22c55e',
+  turn: '#f59e0b',
+  river: '#ef4444',
+  showdown: '#8b5cf6',
+}
+
+function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
+  const streets = parseRawHH(raw, playerNames)
+  if (!streets) return null
+
+  // Build position map from allPlayersActions
+  const posMap = {}
+  if (allPlayersActions && typeof allPlayersActions === 'object') {
+    for (const [name, info] of Object.entries(allPlayersActions)) {
+      if (info?.position) posMap[name] = info.position
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{
+        fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5,
+        marginBottom: 10, textTransform: 'uppercase',
+      }}>
+        Hand History
+      </div>
+
+      {streets.map(({ key, actions, board }) => {
+        const color = STREET_COLORS_HH[key] || '#94a3b8'
+        return (
+          <div key={key} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                color, textTransform: 'uppercase',
+                padding: '2px 8px', borderRadius: 4,
+                background: `${color}15`,
+                border: `1px solid ${color}30`,
+              }}>{STREET_LABELS_HH[key]}</span>
+              {board && (
+                <div style={{ display: 'flex', gap: 3 }}>
+                  {board.map((c, i) => <PokerCard key={i} card={c} size="sm" />)}
+                </div>
+              )}
+            </div>
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 0,
+              background: '#0f1117', borderRadius: 8, padding: '4px 12px',
+              border: '1px solid #1e2130',
+            }}>
+              {actions.map((a, i) => {
+                const pos = posMap[a.name]
+                return (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '4px 0',
+                    borderBottom: i < actions.length - 1 ? '1px solid #1a1d27' : 'none',
+                  }}>
+                    {pos && <PosBadge pos={pos} />}
+                    <span style={{
+                      fontSize: 11,
+                      color: a.isHero ? '#818cf8' : '#94a3b8',
+                      fontWeight: a.isHero ? 600 : 400,
+                      minWidth: 90,
+                    }}>
+                      {a.name}
+                      {a.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                    </span>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <ActionBadge text={a.action} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Componente: Acções do Hero (fallback das notas) ─────────────────────────
 
 function HeroActionsFromNotes({ notes }) {
@@ -470,10 +668,12 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           ))}
         </div>
 
-        {/* Acções de todos os jogadores (se disponível) ou fallback hero */}
-        {hand.all_players_actions
-          ? <AllPlayersActions actions={hand.all_players_actions} />
-          : <HeroActionsFromNotes notes={hand.notes} />
+        {/* Acções — prioridade: HH parseada (raw) > all_players_actions > fallback notas */}
+        {hand.raw
+          ? <ParsedHandHistory raw={hand.raw} playerNames={hand.player_names} allPlayersActions={hand.all_players_actions} />
+          : hand.all_players_actions
+            ? <AllPlayersActions actions={hand.all_players_actions} />
+            : <HeroActionsFromNotes notes={hand.notes} />
         }
 
         {/* Screenshot inline */}
@@ -1113,7 +1313,7 @@ export default function HandsPage() {
         <HandDetailModal
           hand={selected}
           onClose={() => setSelected(null)}
-          onUpdate={() => { setSelected(null); load() }}
+          onUpdate={() => { setSelected(null); loadTagGroups(); loadList() }}
         />
       )}
     </>
