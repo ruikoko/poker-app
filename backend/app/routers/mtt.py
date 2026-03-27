@@ -643,6 +643,17 @@ def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_
             )
             created += 1
 
+            # Auto-populate villain_notes
+            if player_name and player_name != "Unknown" and player_name != "Hero":
+                cur.execute(
+                    """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                       VALUES ('GGPoker', %s, 1, NOW())
+                       ON CONFLICT (site, nick) DO UPDATE SET
+                           hands_seen = villain_notes.hands_seen + 1,
+                           updated_at = NOW()""",
+                    (player_name,)
+                )
+
     return created
 
 
@@ -704,7 +715,11 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                 %s, %s, %s, %s,
                 %s, %s, %s, %s,
                 %s)
-            ON CONFLICT (hand_id) DO NOTHING""",
+            ON CONFLICT (hand_id) DO UPDATE SET
+                study_state = 'new',
+                all_players_actions = EXCLUDED.all_players_actions,
+                player_names = EXCLUDED.player_names,
+                entry_id = EXCLUDED.entry_id""",
             (
                 "GGPoker",
                 hand_id,
@@ -1112,10 +1127,11 @@ async def reset_and_rematch(
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM hand_villains")
-            cur.execute("DELETE FROM hands WHERE study_state = 'new'")
+            # Reverter mãos promovidas para mtt_archive (não apagar)
+            cur.execute("UPDATE hands SET study_state = 'mtt_archive', all_players_actions = NULL, player_names = NULL, entry_id = NULL WHERE study_state = 'new'")
             cur.execute("UPDATE mtt_hands SET has_screenshot = false, screenshot_entry_id = NULL")
         conn.commit()
-        logger.info("Reset-matches: cleared villains, study hands, and screenshot flags")
+        logger.info("Reset-matches: cleared villains, reverted study hands, and screenshot flags")
     except Exception as e:
         conn.rollback()
         logger.error(f"Reset-matches cleanup error: {e}")
@@ -1192,4 +1208,57 @@ async def reset_and_rematch(
         "villains_created": villains_created,
         "promoted": promoted,
         "total_screenshots": len(screenshot_entries),
+    }
+
+
+@router.post("/cleanup")
+async def cleanup_mtt(
+    current_user=Depends(require_auth),
+):
+    """
+    Liberta espaço: apaga mãos MTT sem screenshot e faz VACUUM.
+    Mantém apenas as mãos que têm match com screenshots.
+    """
+    # Contar antes
+    before = query("SELECT COUNT(*) as n FROM mtt_hands")[0]["n"]
+    with_ss = query("SELECT COUNT(*) as n FROM mtt_hands WHERE has_screenshot = true")[0]["n"]
+    
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Apagar villains de mãos sem screenshot
+            cur.execute(
+                "DELETE FROM hand_villains WHERE mtt_hand_id IN "
+                "(SELECT id FROM mtt_hands WHERE has_screenshot = false)"
+            )
+            # Apagar mãos sem screenshot
+            cur.execute("DELETE FROM mtt_hands WHERE has_screenshot = false")
+            deleted = cur.rowcount
+        conn.commit()
+        
+        # VACUUM para recuperar espaço
+        conn2 = get_conn()
+        conn2.autocommit = True
+        try:
+            with conn2.cursor() as cur:
+                cur.execute("VACUUM FULL mtt_hands")
+        except Exception as e:
+            logger.warning(f"VACUUM failed (non-critical): {e}")
+        finally:
+            conn2.close()
+        
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Cleanup error: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no cleanup: {e}")
+    finally:
+        conn.close()
+    
+    after = query("SELECT COUNT(*) as n FROM mtt_hands")[0]["n"]
+    
+    return {
+        "before": before,
+        "deleted": deleted,
+        "kept": with_ss,
+        "after": after,
     }
