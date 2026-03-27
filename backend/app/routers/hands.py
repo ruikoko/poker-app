@@ -91,7 +91,7 @@ def list_hands(
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT (mtt_archive)"),
     page:             int = Query(1, ge=1),
-    page_size:        int = Query(50, ge=1, le=200),
+    page_size:        int = Query(50, ge=1, le=500),
     current_user=Depends(require_auth)
 ):
     conditions, params = _build_conditions(
