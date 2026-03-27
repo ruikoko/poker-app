@@ -282,3 +282,44 @@ def update_hand(hand_pk: int, body: HandUpdate, current_user=Depends(require_aut
 def delete_hand(hand_pk: int, current_user=Depends(require_auth)):
     execute("DELETE FROM hands WHERE id = %s", (hand_pk,))
     return {"ok": True}
+
+
+@router.get("/{hand_pk}/screenshot")
+def get_hand_screenshot(hand_pk: int, current_user=Depends(require_auth)):
+    """Devolve a imagem do screenshot associado a uma mão (como data URL)."""
+    rows = query(
+        "SELECT entry_id, player_names FROM hands WHERE id = %s",
+        (hand_pk,)
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Mão não encontrada")
+
+    hand = dict(rows[0])
+    entry_id = hand.get("entry_id")
+    player_names = hand.get("player_names") or {}
+
+    # Fallback: entry_id pode estar no player_names
+    if not entry_id:
+        entry_id = player_names.get("screenshot_entry_id")
+
+    if not entry_id:
+        raise HTTPException(status_code=404, detail="Sem screenshot associado")
+
+    entry_rows = query(
+        "SELECT raw_json FROM entries WHERE id = %s",
+        (entry_id,)
+    )
+    if not entry_rows:
+        raise HTTPException(status_code=404, detail="Entry do screenshot não encontrado")
+
+    raw = entry_rows[0].get("raw_json") or {}
+    img_b64 = raw.get("img_b64", "")
+    mime_type = raw.get("mime_type", "image/png")
+
+    if not img_b64:
+        raise HTTPException(status_code=404, detail="Imagem não disponível")
+
+    return {
+        "data_url": f"data:{mime_type};base64,{img_b64}",
+        "entry_id": entry_id,
+    }
