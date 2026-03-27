@@ -217,7 +217,7 @@ function VillainRow({ v }) {
 
 // ── Hand Row (inside tournament group) ───────────────────────────────────────
 
-function HandRow({ hand, expanded, onToggle }) {
+function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot }) {
   return (
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       {/* Summary row */}
@@ -251,8 +251,20 @@ function HandRow({ hand, expanded, onToggle }) {
         {hand.has_screenshot && (
           <span style={{ fontSize: 10, color: '#22c55e' }}>SS</span>
         )}
-        <span style={{ marginLeft: 'auto', color: '#4b5563', fontSize: 11 }}>
-          {expanded ? '▼' : '▶'}
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            title="Apagar mão MTT"
+            onClick={(e) => { e.stopPropagation(); onDeleteHand(hand.id) }}
+            style={{
+              background: 'transparent', border: 'none', color: '#374151',
+              cursor: 'pointer', fontSize: 11, padding: '0 3px', lineHeight: 1,
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+            onMouseLeave={(e) => e.currentTarget.style.color = '#374151'}
+          >✕</button>
+          <span style={{ color: '#4b5563', fontSize: 11 }}>
+            {expanded ? '▼' : '▶'}
+          </span>
         </span>
       </div>
 
@@ -304,6 +316,28 @@ function HandRow({ hand, expanded, onToggle }) {
               Sem dados adicionais
             </div>
           )}
+
+          {/* Delete actions */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+            {hand.has_screenshot && hand.screenshot_entry_id && (
+              <button
+                onClick={() => onDeleteScreenshot(hand.screenshot_entry_id)}
+                style={{
+                  padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                  background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                  border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
+                }}
+              >Apagar Screenshot</button>
+            )}
+            <button
+              onClick={() => onDeleteHand(hand.id)}
+              style={{
+                padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
+              }}
+            >Apagar Mão</button>
+          </div>
         </div>
       )}
     </div>
@@ -312,7 +346,7 @@ function HandRow({ hand, expanded, onToggle }) {
 
 // ── Tournament Group ─────────────────────────────────────────────────────────
 
-function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggleHand }) {
+function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot }) {
   const [open, setOpen] = useState(false)
   const ssCount = hands.filter(h => h.has_screenshot).length
   const totalVillains = hands.reduce((a, h) => a + (h.villain_count || 0), 0)
@@ -362,6 +396,8 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
               hand={h}
               expanded={expandedHands.has(h.id)}
               onToggle={() => toggleHand(h.id)}
+              onDeleteHand={onDeleteHand}
+              onDeleteScreenshot={onDeleteScreenshot}
             />
           ))}
         </div>
@@ -372,7 +408,7 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
 
 // ── Date Group ───────────────────────────────────────────────────────────────
 
-function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand }) {
+function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot }) {
   const [open, setOpen] = useState(false)
   const tmKeys = Object.keys(tournaments)
   const totalHands = tmKeys.reduce((a, k) => a + tournaments[k].hands.length, 0)
@@ -415,6 +451,8 @@ function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand 
               hands={tournaments[tm].hands}
               expandedHands={expandedHands}
               toggleHand={toggleHand}
+              onDeleteHand={onDeleteHand}
+              onDeleteScreenshot={onDeleteScreenshot}
             />
           ))}
         </div>
@@ -471,6 +509,28 @@ export default function TournamentsPage() {
   const handleImported = () => {
     loadHands()
     loadStats()
+  }
+
+  const handleDeleteHand = async (handId) => {
+    if (!confirm('Apagar esta mão MTT e vilões associados?')) return
+    try {
+      await mtt.deleteHand(handId)
+      loadHands()
+      loadStats()
+    } catch (e) {
+      alert('Erro ao apagar: ' + e.message)
+    }
+  }
+
+  const handleDeleteScreenshot = async (entryId) => {
+    if (!confirm('Apagar screenshot e reverter match? A mão volta a ficar sem screenshot.')) return
+    try {
+      await mtt.deleteScreenshot(entryId)
+      loadHands()
+      loadStats()
+    } catch (e) {
+      alert('Erro ao apagar screenshot: ' + e.message)
+    }
   }
 
   // Agrupar por data > torneio
@@ -540,6 +600,8 @@ export default function TournamentsPage() {
               tournaments={grouped[dateKey]}
               expandedHands={expandedHands}
               toggleHand={toggleHand}
+              onDeleteHand={handleDeleteHand}
+              onDeleteScreenshot={handleDeleteScreenshot}
             />
           ))}
         </div>
