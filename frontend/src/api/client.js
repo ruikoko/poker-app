@@ -68,6 +68,7 @@ export const hands = {
   create: (body)        => req('POST',   '/hands', body),
   update: (id, body)    => req('PATCH',  `/hands/${id}`, body),
   delete: (id)          => req('DELETE', `/hands/${id}`),
+  screenshot: (id)      => req('GET',    `/hands/${id}/screenshot`),
   stats:  ()            => req('GET',    '/hands/stats'),
   tagGroups: (params = {}) => {
     const qs = new URLSearchParams(
