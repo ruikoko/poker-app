@@ -99,6 +99,11 @@ def _detect_vpip_players(block: str, seats: dict, hero_name: str = "Hero") -> di
     Analisa a secção preflop de uma mão e devolve os jogadores que fizeram VPIP.
     VPIP = qualquer acção voluntária (call, raise, bet, all-in) que não seja post de blinds.
     
+    NOTA: No GGPoker, os nomes nos seats (ex: "539b5a64") são os MESMOS que aparecem
+    nas linhas de acção. Não há tradução necessária — o raw_actor É o nome do seat.
+    O _build_anon_map do gg_hands.py tentava mapear entre dois sistemas de IDs
+    mas neste contexto baralha tudo. Usamos mapeamento directo.
+    
     Retorna: { seat_num: "action_description", ... } para jogadores com VPIP (excluindo hero)
     """
     vpip_players = {}
@@ -116,18 +121,12 @@ def _detect_vpip_players(block: str, seats: dict, hero_name: str = "Hero") -> di
     
     preflop_section = block[preflop_start:preflop_end]
     
-    # Construir mapa nome → seat_num
+    # Construir mapa nome → seat_num (directo, sem anon_map)
     name_to_seat = {}
     for seat_num, info in seats.items():
         name_to_seat[info["name"]] = seat_num
     
-    # Construir mapa de IDs anónimos (reutilizar lógica do gg_hands)
-    from app.parsers.gg_hands import _build_anon_map
-    anon_map = _build_anon_map(block, seats)
-    
     # Analisar cada linha de acção no preflop
-    vpip_actions = {"calls", "raises", "bets"}
-    
     for line in preflop_section.split("\n"):
         line = line.strip()
         if not line or line.startswith("***") or line.startswith("Dealt"):
@@ -144,11 +143,8 @@ def _detect_vpip_players(block: str, seats: dict, hero_name: str = "Hero") -> di
         if "posts" in action_text:
             continue
         
-        # Resolver nome real
-        player_name = anon_map.get(raw_actor, raw_actor)
-        
         # Ignorar hero
-        if player_name == hero_name:
+        if raw_actor == hero_name:
             continue
         
         # Verificar se é VPIP
@@ -168,8 +164,8 @@ def _detect_vpip_players(block: str, seats: dict, hero_name: str = "Hero") -> di
             is_vpip = True
             action_desc = "all-in"
         
-        if is_vpip and player_name in name_to_seat:
-            seat = name_to_seat[player_name]
+        if is_vpip and raw_actor in name_to_seat:
+            seat = name_to_seat[raw_actor]
             if seat not in vpip_players:
                 vpip_players[seat] = action_desc
     
