@@ -9,19 +9,20 @@ const STATE_COLORS = {
 }
 
 const SUIT_COLORS = { h: '#ef4444', d: '#f97316', c: '#22c55e', s: '#e2e8f0' }
+const SUIT_BG     = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 
 function MiniCard({ card }) {
   if (!card || card.length < 2) return <span style={{ color: '#4b5563' }}>?</span>
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
-  const color = SUIT_COLORS[suit] || '#e2e8f0'
+  const bg = SUIT_BG[suit] || '#1e2130'
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: 24, height: 32, background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)',
+      width: 24, height: 32, background: bg, border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: 10,
-      fontWeight: 700, color, lineHeight: 1, gap: 0,
+      fontWeight: 700, color: '#fff', lineHeight: 1, gap: 0,
     }}>
       <span>{rank}</span>
       <span style={{ fontSize: 8 }}>{SUIT_SYMBOLS[suit]}</span>
@@ -98,6 +99,85 @@ function classifyFile(file) {
   if (name.startsWith('gg') || name.includes('hand') || name.includes('hh')) return 'hh'
   if (name.endsWith('.zip') || name.endsWith('.txt')) return 'hh' // default for text/zip
   return 'unknown'
+}
+
+// ── Orphan Screenshot Row (componente separado para usar useState) ───────────
+function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
+  const [showImg, setShowImg] = useState(false)
+  const meta = (o.raw_json && o.raw_json.file_meta) || {}
+  const players = (o.raw_json && o.raw_json.players_by_position) || {}
+  const playersList = (o.raw_json && o.raw_json.players_list) || []
+  const visionDone = o.raw_json && o.raw_json.vision_done
+  const imgB64 = o.raw_json && o.raw_json.img_b64
+  const mimeType = (o.raw_json && o.raw_json.mime_type) || 'image/png'
+  const heroName = o.raw_json && o.raw_json.hero
+  const visionSb = o.raw_json && o.raw_json.vision_sb
+  const visionBb = o.raw_json && o.raw_json.vision_bb
+  const playersCount = playersList.length || Object.keys(players).length
+
+  return (
+    <div style={{
+      padding: '7px 16px 7px 36px', fontSize: 11,
+      borderBottom: '1px solid rgba(30,33,48,0.6)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ color: visionDone ? '#22c55e' : '#f59e0b', fontSize: 10 }}>{visionDone ? '●' : '○'}</span>
+        <div
+          style={{ flex: 1, minWidth: 0, cursor: imgB64 ? 'pointer' : 'default' }}
+          onClick={() => imgB64 && setShowImg(v => !v)}
+        >
+          <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>
+            {meta.time || '—'}
+          </span>
+          <span style={{ color: '#4b5563', marginLeft: 8 }}>
+            blinds {meta.blinds || '—'}
+          </span>
+          {visionDone && playersCount > 0 && (
+            <span style={{ color: '#22c55e', marginLeft: 8 }}>
+              {playersCount} jogadores
+            </span>
+          )}
+          {heroName && (
+            <span style={{ color: '#818cf8', marginLeft: 8, fontSize: 10 }}>Hero: {heroName}</span>
+          )}
+          {visionSb && (
+            <span style={{ color: '#f59e0b', marginLeft: 8, fontSize: 10 }}>SB: {visionSb}</span>
+          )}
+          {!visionDone && (
+            <span style={{ color: '#f59e0b', marginLeft: 8, fontSize: 10 }}>Vision a processar...</span>
+          )}
+          {imgB64 && (
+            <span style={{ color: '#6366f1', marginLeft: 8, fontSize: 10 }}>{showImg ? '▼ fechar' : '▶ ver SS'}</span>
+          )}
+        </div>
+        <button
+          onClick={() => onRematch(o.id)}
+          style={{
+            padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+            background: 'rgba(99,102,241,0.1)', color: '#818cf8',
+            border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
+          }}
+        >Rematch</button>
+        <button
+          onClick={() => onDismiss(o.id)}
+          style={{
+            padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+            background: 'transparent', color: '#374151',
+            border: '1px solid #1e2130', cursor: 'pointer',
+          }}
+        >&#10005;</button>
+      </div>
+      {showImg && imgB64 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <img
+            src={`data:${mimeType};base64,${imgB64}`}
+            alt="Screenshot"
+            style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 6, border: '1px solid #2a2d3a' }}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function InboxPage() {
@@ -506,52 +586,14 @@ export default function InboxPage() {
                       </div>
 
                       {/* Linhas individuais */}
-                      {isOpen && entries.map(o => {
-                        const meta = (o.raw_json && o.raw_json.file_meta) || {}
-                        const players = (o.raw_json && o.raw_json.players_by_position) || {}
-                        const visionDone = o.raw_json && o.raw_json.vision_done
-                        return (
-                          <div key={o.id} style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '7px 16px 7px 36px', fontSize: 11,
-                            borderBottom: '1px solid rgba(30,33,48,0.6)',
-                          }}>
-                            <span style={{ color: visionDone ? '#22c55e' : '#f59e0b', fontSize: 10 }}>{visionDone ? '●' : '○'}</span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>
-                                {meta.time || '—'}
-                              </span>
-                              <span style={{ color: '#4b5563', marginLeft: 8 }}>
-                                blinds {meta.blinds || '—'}
-                              </span>
-                              {visionDone && Object.keys(players).length > 0 && (
-                                <span style={{ color: '#22c55e', marginLeft: 8 }}>
-                                  {Object.keys(players).length} jogadores
-                                </span>
-                              )}
-                              {!visionDone && (
-                                <span style={{ color: '#f59e0b', marginLeft: 8, fontSize: 10 }}>Vision a processar...</span>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => handleRematch(o.id)}
-                              style={{
-                                padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                                background: 'rgba(99,102,241,0.1)', color: '#818cf8',
-                                border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
-                              }}
-                            >Rematch</button>
-                            <button
-                              onClick={() => handleDismiss(o.id)}
-                              style={{
-                                padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                                background: 'transparent', color: '#374151',
-                                border: '1px solid #1e2130', cursor: 'pointer',
-                              }}
-                            >&#10005;</button>
-                          </div>
-                        )
-                      })}
+                      {isOpen && entries.map(o => (
+                        <OrphanScreenshotRow
+                          key={o.id}
+                          o={o}
+                          onRematch={handleRematch}
+                          onDismiss={handleDismiss}
+                        />
+                      ))}
                     </div>
                   )
                 })}
