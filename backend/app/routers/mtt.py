@@ -744,7 +744,8 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                     all_players_actions = %s,
                     player_names = %s,
                     entry_id = %s
-                WHERE hand_id = %s""",
+                WHERE hand_id = %s
+                RETURNING id, study_state""",
                 (
                     json.dumps(all_players),
                     json.dumps(player_names),
@@ -752,7 +753,13 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                     hand_id,
                 )
             )
+            result = cur.fetchone()
+            if result:
+                logger.info(f"Promote UPDATE OK: {hand_id} -> id={result['id']}, state={result['study_state']}")
+            else:
+                logger.warning(f"Promote UPDATE: no rows matched for {hand_id}")
         conn2.commit()
+        logger.info(f"Promote COMMIT OK for {hand_id}")
     except Exception as e:
         conn2.rollback()
         logger.error(f"Promote UPDATE failed for {hand_id}: {e}")
@@ -1284,4 +1291,3 @@ async def cleanup_mtt(
         "kept": with_ss,
         "after": after,
     }
-
