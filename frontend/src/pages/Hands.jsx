@@ -353,10 +353,11 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
   const [saving, setSaving] = useState(false)
   const [screenshotUrl, setScreenshotUrl] = useState(hand.screenshot_url || null)
   const [ssLoading, setSsLoading] = useState(false)
+  const [ssFullscreen, setSsFullscreen] = useState(false)
 
   // Carregar screenshot se a mão tem entry_id (screenshot associado)
   useEffect(() => {
-    if (screenshotUrl) return  // já tem
+    if (screenshotUrl) return
     const entryId = hand.entry_id || hand.player_names?.screenshot_entry_id
     if (!entryId) return
     setSsLoading(true)
@@ -367,6 +368,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
       .catch(() => {})
       .finally(() => setSsLoading(false))
   }, [hand.id])
+
+  // Extrair TM number para link GG
+  const tmNumber = hand.hand_id ? hand.hand_id.replace('GG-', '') : null
 
   async function save() {
     setSaving(true)
@@ -389,8 +393,6 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
       alert(e.message)
     }
   }
-
-  const isGG = (hand.raw || '').includes('gg.gl')
 
   return (
     <div style={{
@@ -485,24 +487,35 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
               src={screenshotUrl}
               alt="Screenshot da mão"
               style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #2a2d3a', cursor: 'pointer' }}
-              onClick={() => window.open(screenshotUrl, '_blank')}
+              onClick={() => setSsFullscreen(true)}
             />
           </div>
         )}
 
-        {/* Replayer link */}
-        {isGG && (
-          <div style={{ marginBottom: 16 }}>
-            <a href={hand.raw} target="_blank" rel="noopener noreferrer" style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500,
-              background: 'rgba(99,102,241,0.12)', color: '#818cf8',
-              border: '1px solid rgba(99,102,241,0.25)', textDecoration: 'none',
-            }}>
-              &#9654; Abrir Replayer GG
-            </a>
+        {/* Screenshot fullscreen modal */}
+        {ssFullscreen && screenshotUrl && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+              cursor: 'pointer',
+            }}
+            onClick={() => setSsFullscreen(false)}
+          >
+            <img src={screenshotUrl} alt="Screenshot" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
+            <button onClick={() => setSsFullscreen(false)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}>✕</button>
           </div>
         )}
+
+        {/* Source info */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          {tmNumber && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, fontSize: 11, background: 'rgba(99,102,241,0.08)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', fontFamily: 'monospace' }}>TM{tmNumber}</span>
+          )}
+          {hand.site === 'GGPoker' && tmNumber && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 11, background: 'rgba(34,197,94,0.08)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)' }}>&#9654; GG Replayer</span>
+          )}
+        </div>
 
         {/* Notes */}
         <div style={{ marginBottom: 14 }}>
