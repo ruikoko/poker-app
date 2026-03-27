@@ -152,6 +152,10 @@ export const mtt = {
   stats: () => req('GET', '/mtt/stats'),
   orphans: () => req('GET', '/mtt/orphan-screenshots'),
   rematch: () => req('POST', '/mtt/rematch'),
+  resetMatches: () => req('POST', '/mtt/reset-matches'),
+  cleanup: () => req('POST', '/mtt/cleanup'),
+  deleteHand: (id) => req('DELETE', `/mtt/hands/${id}`),
+  deleteScreenshot: (entryId) => req('DELETE', `/mtt/screenshot/${entryId}`),
 }
 
 // ── Screenshots ───────────────────────────────────────────────────────────────
