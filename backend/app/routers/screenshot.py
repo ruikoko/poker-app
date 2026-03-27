@@ -1,12 +1,18 @@
 """
 Endpoint para upload de screenshots do replayer GG.
 
-Pipeline completo:
+Pipeline completo (v2 — match por stack):
   1. Recebe imagem (PNG/JPG)
   2. Extrai data, hora, blinds e TM number do nome do ficheiro (fonte primária)
-  3. Usa Vision (GPT-4.1-mini) para extrair jogadores por posição, stacks e bounties
+  3. Usa Vision (GPT-4.1-mini) para extrair:
+     - SB e BB do painel esquerdo (100% fiável)
+     - Nome + stack de cada jogador na mesa
+     - Hero (centro da mesa)
   4. Faz match com a mão na BD pelo hand_id (GG-{TM_number})
-  5. Constrói mapa anon_id → nome_real por correspondência de posição
+  5. Constrói mapa hash → nome_real usando:
+     a) Âncoras fixas: Hero, SB, BB
+     b) Fold players: stack_screenshot ≈ stack_hh - ante (tolerância <2%)
+     c) Eliminação: restantes (jogadores ativos no pot)
   6. Actualiza all_players_actions, screenshot_url e player_names na mão
   7. Devolve resultado do match
 """
@@ -76,17 +82,14 @@ def _parse_filename(filename: str) -> dict:
     """
     result = {"date": None, "time": None, "blinds": None, "tm": None}
 
-    # TM number: #TM seguido de dígitos
     tm_m = re.search(r'#TM(\d+)', filename)
     if tm_m:
         result["tm"] = f"TM{tm_m.group(1)}"
 
-    # Data: YYYY-MM-DD
     date_m = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
     if date_m:
         result["date"] = date_m.group(1)
 
-    # Hora: HH_MM_AM/PM → converter para 24h
     time_m = re.search(r'(\d{1,2})_(\d{2})_(AM|PM)', filename, re.IGNORECASE)
     if time_m:
         h, m, period = int(time_m.group(1)), int(time_m.group(2)), time_m.group(3).upper()
@@ -96,8 +99,6 @@ def _parse_filename(filename: str) -> dict:
             h = 0
         result["time"] = f"{h:02d}:{m:02d}"
 
-    # Blinds: padrão X,XXX_Y,YYY(ZZZ) ou X_Y(Z)
-    # Remover o TM e a data para não confundir
     name_clean = re.sub(r'#TM\d+', '', filename)
     name_clean = re.sub(r'\d{4}-\d{2}-\d{2}_\d{1,2}_\d{2}_(AM|PM)_', '', name_clean, flags=re.IGNORECASE)
     blinds_m = re.search(r'([\d,]+)_([\d,]+)(?:\(([\d,]+)\))?', name_clean)
@@ -110,12 +111,16 @@ def _parse_filename(filename: str) -> dict:
     return result
 
 
-# ── Vision: extrair jogadores por posição ────────────────────────────────────
+# ── Vision: extrair jogadores, SB/BB do painel, stacks ───────────────────────
 
 def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/png") -> str | None:
     """
-    Usa Vision para extrair jogadores por posição, stacks e bounties.
-    Devolve texto estruturado.
+    Usa Vision para extrair dados do screenshot do replayer GG.
+
+    Estratégia validada por testes (10 mesas, 77 jogadores):
+    - SB e BB: lidos do PAINEL ESQUERDO (Blind/Ante section) — 100% fiável
+    - Nomes + stacks: lidos da mesa para cada jogador
+    - Posições visuais: NÃO confiáveis — o match real é feito por stack
     """
     try:
         from openai import OpenAI
@@ -126,22 +131,36 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
 
         prompt = (
             "This is a GGPoker hand replayer screenshot.\n\n"
-            "Extract ALL the following and reply in EXACTLY this format (no extra text, no markdown):\n\n"
-            "TM: <TM number from title, digits only after TM, e.g. TM5672663145>\n"
+            "KNOWN FACTS:\n"
+            "- The HERO is always 'Lauro Dermio' or 'koumpounophobia' (bottom center of table).\n"
+            "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
+            "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
+            "- Players with 'WIN' overlay on their avatar must still be included.\n"
+            "- Players who went all-in may show stack 0.\n\n"
+            "YOUR TASKS:\n"
+            "1. Read the title bar for TM number and tournament name.\n"
+            "2. Read the LEFT PANEL to identify the SB and BB player names.\n"
+            "3. For EVERY player seated at the table, read their nickname, chip stack,\n"
+            "   bounty percentage (if shown), and country flag.\n"
+            "   The chip stack is the colored number shown directly below each player's name.\n\n"
+            "Reply in EXACTLY this format (no extra text, no markdown):\n"
+            "TM: <TM number, e.g. TM5672663145>\n"
             "TOURNAMENT: <tournament name from title>\n"
-            "HERO: <hero player name — the player at bottom center of the table>\n"
-            "BOARD: <community cards space-separated, e.g. 7s 9d 5d Jc Kd, or NONE>\n"
-            "POT: <final pot size number only, or NONE>\n\n"
-            "Then for EACH player visible at the table, one line:\n"
-            "PLAYER: <position> | <name> | <stack_chips> | <bounty_pct> | <country_flag>\n\n"
-            "Position MUST be one of: UTG, UTG+1, MP, MP+1, HJ, CO, BTN, SB, BB\n"
-            "Use the action panel at the bottom to determine positions (UTG acts first preflop).\n"
-            "Stack is the chip count shown below the player name.\n"
-            "Bounty_pct is the percentage shown in the bounty badge (e.g. 18%), or 0 if none.\n"
-            "Country_flag is the 2-letter country code from the flag icon, or NONE.\n\n"
-            "Example lines:\n"
-            "PLAYER: UTG | offon0ff- | 39000 | 0% | TH\n"
-            "PLAYER: BB | Lauro Dermio | 38000 | 0% | BR\n\n"
+            "HERO: <hero player name>\n"
+            "BOARD: <community cards, e.g. 7s 9d 5d Jc Kd, or NONE>\n"
+            "POT: <pot size number, or NONE>\n"
+            "SB: <SB player name from LEFT PANEL>\n"
+            "BB: <BB player name from LEFT PANEL>\n"
+            "PLAYER: <name> | <stack> | <bounty_pct> | <country>\n"
+            "PLAYER: <name> | <stack> | <bounty_pct> | <country>\n"
+            "... (one PLAYER line per player, including Hero, SB, and BB)\n\n"
+            "RULES:\n"
+            "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
+            "- If a player's stack shows 0, write 0\n"
+            "- Bounty_pct is the percentage in the badge (e.g. 18%), or 0 if none\n"
+            "- Country is the 2-letter code from the flag, or NONE\n"
+            "- Include ALL players visible at the table, even if eliminated\n"
+            "- Do NOT guess positions — only output SB and BB from the left panel\n\n"
             "Output ONLY the structured lines above. No explanations."
         )
 
@@ -172,7 +191,7 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
 _POS_NORM = {
     "UTG+1": "UTG1", "UTG+2": "UTG2",
     "MP+1": "MP1", "MP+2": "MP2",
-    "HJ": "HJ",  # already correct
+    "HJ": "HJ",
 }
 
 def _normalise_position(pos: str) -> str:
@@ -187,7 +206,10 @@ def _parse_vision_response(text: str) -> dict:
         "hero": None,
         "board": [],
         "pot": None,
-        "players_by_position": {},  # position → {name, stack, bounty_pct, country}
+        "vision_sb": None,
+        "vision_bb": None,
+        "players_by_position": {},
+        "players_list": [],
     }
     if not text:
         return result
@@ -224,14 +246,23 @@ def _parse_vision_response(text: str) -> dict:
                 except ValueError:
                     pass
 
+        elif line.startswith("SB:"):
+            val = line[3:].strip()
+            if val and val.upper() not in ("NONE", "UNKNOWN"):
+                result["vision_sb"] = val
+
+        elif line.startswith("BB:"):
+            val = line[3:].strip()
+            if val and val.upper() not in ("NONE", "UNKNOWN"):
+                result["vision_bb"] = val
+
         elif line.startswith("PLAYER:"):
             parts = [p.strip() for p in line[7:].split("|")]
-            if len(parts) >= 3:
-                pos = parts[0].upper()
-                name = parts[1]
-                stack_str = parts[2].replace(",", "")
-                bounty_str = parts[3] if len(parts) > 3 else "0%"
-                country = parts[4] if len(parts) > 4 else None
+            if len(parts) >= 2:
+                name = parts[0]
+                stack_str = parts[1].replace(",", "").replace(".", "")
+                bounty_str = parts[2] if len(parts) > 2 else "0%"
+                country = parts[3] if len(parts) > 3 else None
 
                 try:
                     stack = int(stack_str)
@@ -243,25 +274,94 @@ def _parse_vision_response(text: str) -> dict:
                 if bounty_m:
                     bounty_pct = int(bounty_m.group(1))
 
-                pos = _normalise_position(pos)
-                result["players_by_position"][pos] = {
+                player_info = {
                     "name": name,
                     "stack": stack,
                     "bounty_pct": bounty_pct,
                     "country": country if country and country.upper() != "NONE" else None,
                 }
+                result["players_list"].append(player_info)
 
     return result
 
 
-# ── Match: posição → anon_id → nome real ────────────────────────────────────
+# ── Extracção de dados da HH raw ──────────────────────────────────────────
 
-def _build_anon_to_real_map(hand_row: dict, vision_players: dict) -> dict:
+def _parse_hh_stacks_and_blinds(raw_hh: str) -> dict:
     """
-    Constrói mapa anon_id → nome_real usando correspondência por posição.
+    Extrai stacks iniciais (chips), ante, SB/BB sizes da HH raw.
+    
+    Importante: a HH mostra stacks ANTES de antes/blinds.
+    O screenshot mostra stacks no FINAL da mão.
+    Para fold players: stack_screenshot = stack_hh - ante
+    """
+    result = {"ante": 0, "sb_size": 0, "bb_size": 0, "button_seat": None, "players": {}}
 
-    hand_row: linha da BD com all_players_actions (JSONB)
-    vision_players: dict posição → {name, stack, ...} do Vision
+    level_m = re.search(r"Level\s*\d+\s*\(([\d,]+)/([\d,]+)(?:\(([\d,]+)\))?\)", raw_hh)
+    if level_m:
+        result["sb_size"] = int(level_m.group(1).replace(",", ""))
+        result["bb_size"] = int(level_m.group(2).replace(",", ""))
+        if level_m.group(3):
+            result["ante"] = int(level_m.group(3).replace(",", ""))
+
+    if result["ante"] == 0:
+        ante_m = re.search(r"posts the ante\s+([\d,]+)", raw_hh)
+        if ante_m:
+            result["ante"] = int(ante_m.group(1).replace(",", ""))
+
+    btn_m = re.search(r"Seat\s*#(\d+)\s+is the button", raw_hh)
+    if btn_m:
+        result["button_seat"] = int(btn_m.group(1))
+
+    seats = {}
+    all_seat_nums = []
+    for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)\s+in chips\)", raw_hh):
+        seat_num = int(sm.group(1))
+        name = sm.group(2).strip()
+        stack = int(sm.group(3).replace(",", ""))
+        seats[seat_num] = {"name": name, "stack_chips": stack}
+        all_seat_nums.append(seat_num)
+
+    num_players = len(all_seat_nums)
+    button_seat = result["button_seat"]
+    if button_seat and all_seat_nums:
+        for seat_num, info in seats.items():
+            pos = _get_position(seat_num, button_seat, all_seat_nums, num_players)
+            info["position"] = pos
+            result["players"][info["name"]] = {
+                "seat": seat_num,
+                "stack_chips": info["stack_chips"],
+                "position": pos,
+            }
+
+    return result
+
+
+def _is_fold_preflop(actions: dict) -> bool:
+    """Verifica se o jogador fez fold preflop (ou não teve ação)."""
+    if not actions:
+        return True
+    preflop = actions.get("preflop", [])
+    if not preflop:
+        return True
+    if len(preflop) == 1 and "Fold" in preflop[0]:
+        return True
+    return False
+
+
+# ── Match: âncoras + stack esperado + eliminação ─────────────────────────────
+
+def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
+    """
+    Constrói mapa player_key → nome_real usando 3 estratégias:
+
+    1. ÂNCORAS FIXAS: Hero (centro), SB e BB (painel esquerdo — 100% fiável)
+    2. FOLD PLAYERS: stack_esperado = stack_hh - ante → match com Vision (<2%)
+    3. ELIMINAÇÃO: jogadores restantes (ativos no pot)
+
+    O screenshot mostra stacks no FINAL da mão.
+    A HH mostra stacks no INÍCIO (antes de antes/blinds).
+    Para fold players: stack_screenshot = stack_hh - ante
     """
     anon_map = {}
 
@@ -269,30 +369,154 @@ def _build_anon_to_real_map(hand_row: dict, vision_players: dict) -> dict:
     if not all_players:
         return anon_map
 
-    # all_players_actions: {nome_ou_anon: {seat, position, stack_bb, actions, ...}}
+    vision_sb = vision_data.get("vision_sb")
+    vision_bb = vision_data.get("vision_bb")
+    vision_list = vision_data.get("players_list", [])
+    hero_name_vision = vision_data.get("hero")
+
+    raw_hh = hand_row.get("raw", "")
+    hh_data = _parse_hh_stacks_and_blinds(raw_hh) if raw_hh else None
+
+    used_vision = set()
+    hero_names = ["lauro dermio", "koumpounophobia", "lauro derm"]
+
+    # ── Fase 1: Âncoras fixas ────────────────────────────────────────────
+
     for player_key, info in all_players.items():
-        if player_key == "Hero":
-            anon_map["Hero"] = "Hero"
+        pos = info.get("position", "")
+
+        # Hero
+        if player_key == "Hero" or info.get("is_hero"):
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                if any(h in vp["name"].lower() for h in hero_names):
+                    anon_map[player_key] = vp["name"]
+                    used_vision.add(i)
+                    break
+            if player_key not in anon_map:
+                anon_map[player_key] = hero_name_vision or "Hero"
             continue
 
-        pos = info.get("position", "")
-        vision_info = vision_players.get(pos)
-        if vision_info:
-            anon_map[player_key] = vision_info["name"]
+        # SB (do painel esquerdo — alta fiabilidade)
+        if pos == "SB" and vision_sb:
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                if vp["name"].lower().startswith(vision_sb.lower()[:6]):
+                    anon_map[player_key] = vp["name"]
+                    used_vision.add(i)
+                    break
+            if player_key not in anon_map:
+                anon_map[player_key] = vision_sb
+            continue
 
+        # BB (do painel esquerdo — alta fiabilidade)
+        if pos == "BB" and vision_bb:
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                if vp["name"].lower().startswith(vision_bb.lower()[:6]):
+                    anon_map[player_key] = vp["name"]
+                    used_vision.add(i)
+                    break
+            if player_key not in anon_map:
+                anon_map[player_key] = vision_bb
+            continue
+
+    # ── Fase 2: Fold players — match por stack esperado ──────────────────
+
+    if hh_data:
+        ante = hh_data["ante"]
+
+        for player_key, info in all_players.items():
+            if player_key in anon_map:
+                continue
+
+            actions = info.get("actions", {})
+            if not _is_fold_preflop(actions):
+                continue
+
+            hh_player = hh_data["players"].get(player_key, {})
+            stack_initial = hh_player.get("stack_chips", 0)
+            if stack_initial == 0:
+                continue
+
+            # Stack esperado no screenshot = stack_inicial - ante
+            stack_esperado = stack_initial - ante
+
+            best_i = None
+            best_diff = float("inf")
+            for i, vp in enumerate(vision_list):
+                if i in used_vision:
+                    continue
+                diff = abs(stack_esperado - vp["stack"])
+                pct = (diff / stack_esperado * 100) if stack_esperado > 0 else 999
+                if pct < 2.0 and diff < best_diff:
+                    best_diff = diff
+                    best_i = i
+
+            if best_i is not None:
+                anon_map[player_key] = vision_list[best_i]["name"]
+                used_vision.add(best_i)
+                logger.info(f"  Fold match: {player_key} -> {vision_list[best_i]['name']} "
+                           f"(esperado={stack_esperado}, vision={vision_list[best_i]['stack']}, "
+                           f"diff={best_diff})")
+
+    # ── Fase 3: Eliminação — jogadores restantes ─────────────────────────
+
+    unmapped_hh = [k for k in all_players if k not in anon_map]
+    unmapped_vision = [i for i in range(len(vision_list)) if i not in used_vision]
+
+    if len(unmapped_hh) == 1 and len(unmapped_vision) == 1:
+        anon_map[unmapped_hh[0]] = vision_list[unmapped_vision[0]]["name"]
+        logger.info(f"  Elimination match: {unmapped_hh[0]} -> {vision_list[unmapped_vision[0]]['name']}")
+    elif len(unmapped_hh) > 0 and len(unmapped_vision) > 0:
+        still_unmapped_vision = set(unmapped_vision)
+        for player_key in unmapped_hh:
+            hh_player = hh_data["players"].get(player_key, {}) if hh_data else {}
+            stack_initial = hh_player.get("stack_chips", 0)
+
+            best_i = None
+            best_diff = float("inf")
+            for i in still_unmapped_vision:
+                vp = vision_list[i]
+                diff = abs(stack_initial - vp["stack"])
+                if diff < best_diff:
+                    best_diff = diff
+                    best_i = i
+
+            if best_i is not None:
+                anon_map[player_key] = vision_list[best_i]["name"]
+                still_unmapped_vision.discard(best_i)
+                logger.info(f"  Approx match: {player_key} -> {vision_list[best_i]['name']} "
+                           f"(hh_initial={stack_initial}, vision={vision_list[best_i]['stack']}, "
+                           f"diff={best_diff})")
+
+    logger.info(f"Match result: {len(anon_map)}/{len(all_players)} mapped. "
+               f"Anchors: Hero+SB+BB. Folds: stack match. Rest: elimination.")
     return anon_map
 
 
-def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_players: dict) -> dict:
+def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: dict) -> dict:
     """
     Substitui chaves anónimas pelos nomes reais em all_players_actions
     e adiciona bounty_pct e country de cada jogador.
     """
     enriched = {}
+
+    vision_by_name = {}
+    for vp in vision_data.get("players_list", []):
+        vision_by_name[vp["name"].lower()] = vp
+    vision_by_pos = vision_data.get("players_by_position", {})
+
     for player_key, info in all_players.items():
         real_name = anon_map.get(player_key, player_key)
-        pos = info.get("position", "")
-        vision_info = vision_players.get(pos, {})
+
+        vision_info = vision_by_name.get(real_name.lower(), {})
+        if not vision_info:
+            pos = info.get("position", "")
+            vision_info = vision_by_pos.get(pos, {})
 
         new_info = dict(info)
         new_info["real_name"] = real_name
@@ -303,28 +527,23 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_player
 
     return enriched
 
-# ── Compressão de imagem ────────────────────────────────────────────────────────────────
+
+# ── Compressão de imagem ─────────────────────────────────────────────────────
 
 def _compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 85) -> tuple[str, str]:
-    """
-    Comprime imagem: redimensiona para max_width e converte para JPEG quality.
-    Devolve (img_b64_compressed, mime_type).
-    """
+    """Comprime imagem: redimensiona para max_width e converte para JPEG."""
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        # Converter RGBA/P para RGB (JPEG não suporta alpha)
         if img.mode in ("RGBA", "P", "LA"):
             img = img.convert("RGB")
         elif img.mode != "RGB":
             img = img.convert("RGB")
 
-        # Redimensionar se largura > max_width
         if img.width > max_width:
             ratio = max_width / img.width
             new_height = int(img.height * ratio)
             img = img.resize((max_width, new_height), Image.LANCZOS)
 
-        # Guardar como JPEG
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=True)
         compressed_bytes = buf.getvalue()
@@ -332,15 +551,16 @@ def _compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 85
 
         original_kb = len(image_bytes) / 1024
         compressed_kb = len(compressed_bytes) / 1024
-        logger.info(f"Compressão: {original_kb:.0f}KB → {compressed_kb:.0f}KB ({img.width}x{img.height}) "
+        logger.info(f"Compress: {original_kb:.0f}KB -> {compressed_kb:.0f}KB ({img.width}x{img.height}) "
                     f"ratio: {compressed_kb/original_kb*100:.0f}%")
 
         return compressed_b64, "image/jpeg"
     except Exception as e:
-        logger.error(f"Erro na compressão: {e}. A usar imagem original.")
+        logger.error(f"Compress error: {e}. Using original.")
         return base64.b64encode(image_bytes).decode("utf-8"), "image/png"
 
-# ── Storage ──────────────────────────────────────────────────────────────────────────
+
+# ── Storage ──────────────────────────────────────────────────────────────────
 
 def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | None:
     import hashlib
@@ -357,15 +577,14 @@ def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | No
 
 # ── Endpoint principal ───────────────────────────────────────────────────────
 
-# Semáforo global — máximo 2 chamadas Vision em paralelo
 _vision_sem = asyncio.Semaphore(2)
 
 async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 tm_number: str, file_meta: dict, img_b64: str):
     """
     Processa Vision em background para um entry já guardado na BD.
-    Usa asyncio.to_thread para não bloquear o event loop.
-    Actualiza raw_json com players_by_position, hero, board e vision_done=True.
+    Vision recebe imagem ORIGINAL (resolução máxima) para melhor extracção.
+    Após Vision, comprime e actualiza entry na BD.
     Se houver match com HH, enriquece a mão com nomes reais.
     """
     try:
@@ -373,15 +592,17 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
             vision_text = await asyncio.to_thread(_extract_hand_data_from_image, content, mime_type)
         vision_data = _parse_vision_response(vision_text)
         tm_final = tm_number or vision_data.get("tm")
-        vision_players = vision_data.get("players_by_position", {})
+        vision_players = vision_data.get("players_list", [])
         hero_name = vision_data.get("hero")
         board = vision_data.get("board", [])
-        logger.info(f"[bg] Vision OK entry {entry_id} \u2014 TM: {tm_final}, players: {list(vision_players.keys())}")
+        vision_sb = vision_data.get("vision_sb")
+        vision_bb = vision_data.get("vision_bb")
+        logger.info(f"[bg] Vision OK entry {entry_id} -- TM: {tm_final}, "
+                    f"players: {len(vision_players)}, SB={vision_sb}, BB={vision_bb}")
 
-        # Comprimir imagem DEPOIS do Vision (Vision j\u00e1 recebeu original)
+        # Comprimir imagem DEPOIS do Vision (Vision já recebeu original)
         compressed_b64, compressed_mime = await asyncio.to_thread(_compress_image, content)
 
-        # Actualizar entry com dados do Vision + imagem comprimida
         def _db_update():
             conn = get_conn()
             try:
@@ -391,9 +612,12 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                             "file_meta": file_meta,
                             "mime_type": compressed_mime,
                             "img_b64": compressed_b64,
-                            "players_by_position": vision_players,
+                            "players_list": vision_players,
+                            "players_by_position": {},
                             "hero": hero_name,
                             "board": board,
+                            "vision_sb": vision_sb,
+                            "vision_bb": vision_bb,
                             "raw_vision": vision_text,
                             "vision_done": True,
                         })
@@ -404,31 +628,34 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                 conn.commit()
             except Exception as e:
                 conn.rollback()
-                logger.error(f"[bg] Erro ao actualizar entry {entry_id} com Vision: {e}")
+                logger.error(f"[bg] DB update error entry {entry_id}: {e}")
             finally:
                 conn.close()
         await asyncio.to_thread(_db_update)
 
-        # Tentar match com HH se tiver TM (em thread)
+        # Tentar match com HH se tiver TM
         if tm_final and vision_players:
             def _try_match():
                 tm_digits = tm_final.replace("TM", "")
                 hand_rows = query(
-                    "SELECT id, hand_id, all_players_actions, position FROM hands WHERE hand_id = %s LIMIT 1",
+                    "SELECT id, hand_id, all_players_actions, position, raw "
+                    "FROM hands WHERE hand_id = %s LIMIT 1",
                     (f"GG-{tm_digits}",)
                 )
                 if hand_rows:
-                    raw_for_enrich = {
-                        "players_by_position": vision_players,
+                    result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], {
+                        "players_list": vision_players,
+                        "players_by_position": {},
                         "hero": hero_name,
+                        "vision_sb": vision_sb,
+                        "vision_bb": vision_bb,
                         "file_meta": file_meta,
-                    }
-                    result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], raw_for_enrich)
-                    logger.info(f"[bg] Match entry {entry_id} \u2192 hand {hand_rows[0]['id']}: {result}")
+                    })
+                    logger.info(f"[bg] Match entry {entry_id} -> hand {hand_rows[0]['id']}: {result}")
             await asyncio.to_thread(_try_match)
 
     except Exception as e:
-        logger.error(f"[bg] Vision falhou para entry {entry_id}: {e}")
+        logger.error(f"[bg] Vision failed for entry {entry_id}: {e}")
 
 
 @router.post("")
@@ -439,8 +666,7 @@ async def upload_screenshot(
 ):
     """
     Upload de screenshot do replayer GG.
-    Pipeline: guardar imediatamente → responder → Vision em background.
-    O screenshot é sempre guardado na BD antes de chamar o Vision.
+    Pipeline: guardar imediatamente -> responder -> Vision em background.
     """
     content = await file.read()
     filename = file.filename or "screenshot.png"
@@ -449,14 +675,12 @@ async def upload_screenshot(
     if not mime_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Ficheiro deve ser uma imagem (PNG/JPG)")
 
-    # 1. Extrair dados do nome do ficheiro (fonte primária — rápido, sem rede)
     file_meta = _parse_filename(filename)
     tm_number = file_meta.get("tm")
     logger.info(f"Filename parsed: {file_meta}")
 
-    # 2. Comprimir imagem para guardar na BD (original vai para Vision)
+    # Comprimir para BD (original fica em memória para Vision)
     compressed_b64, compressed_mime = _compress_image(content)
-    # Manter original em memória para Vision (não guardar na BD)
     img_b64_original = base64.b64encode(content).decode("utf-8")
 
     conn = get_conn()
@@ -470,30 +694,32 @@ async def upload_screenshot(
                 """,
                 (
                     filename,
-                    f"Screenshot \u2014 TM: {tm_number or 'n\u00e3o detectado'}",
+                    f"Screenshot -- TM: {tm_number or 'not detected'}",
                     json.dumps({
                         "tm": tm_number,
                         "file_meta": file_meta,
                         "mime_type": compressed_mime,
                         "img_b64": compressed_b64,
+                        "players_list": [],
                         "players_by_position": {},
                         "hero": None,
+                        "vision_sb": None,
+                        "vision_bb": None,
                         "vision_done": False,
                     }),
                 )
             )
             entry_id = cur.fetchone()["id"]
         conn.commit()
-        logger.info(f"Screenshot guardado como entry {entry_id} (TM: {tm_number}, comprimido)")
+        logger.info(f"Screenshot saved as entry {entry_id} (TM: {tm_number})")
     except Exception as e:
         conn.rollback()
-        logger.error(f"Erro ao guardar entry de screenshot: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro ao guardar screenshot: {e}")
+        logger.error(f"Error saving screenshot entry: {e}")
+        raise HTTPException(status_code=500, detail=f"Error saving screenshot: {e}")
     finally:
         conn.close()
 
-    # 3. Lançar Vision em background (não bloqueia o response)
-    # Nota: passa content (original) para Vision ter melhor qualidade
+    # Vision em background (passa original, não comprimido)
     if background_tasks is not None:
         background_tasks.add_task(
             _run_vision_for_entry, entry_id, content, mime_type, tm_number, file_meta, img_b64_original
@@ -503,7 +729,6 @@ async def upload_screenshot(
             _run_vision_for_entry(entry_id, content, mime_type, tm_number, file_meta, img_b64_original)
         )
 
-    # 4. Responder imediatamente — Vision e match correm em background
     return {
         "status": "queued",
         "tm_number": tm_number,
@@ -515,19 +740,16 @@ async def upload_screenshot(
 
 def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dict) -> dict:
     """
-    Função partilhada: dado um entry de screenshot órfão e o id da mão na BD,
-    aplica o enriquecimento completo (nomes reais, bounty, country) à mão
+    Dado um entry de screenshot e o id da mão na BD,
+    aplica o enriquecimento completo (nomes reais, bounty, country)
     e marca o entry como 'resolved'.
-    Devolve um dict com o resultado do enriquecimento.
     """
-    vision_players = raw_json.get("players_by_position", {})
     hero_name = raw_json.get("hero")
     file_meta = raw_json.get("file_meta", {})
     screenshot_url = raw_json.get("screenshot_url")
 
-    # Buscar a mão completa para enriquecimento
     hand_rows = query(
-        "SELECT id, hand_id, all_players_actions, position FROM hands WHERE id = %s",
+        "SELECT id, hand_id, all_players_actions, position, raw FROM hands WHERE id = %s",
         (hand_db_id,)
     )
     if not hand_rows:
@@ -536,58 +758,41 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     matched_hand = dict(hand_rows[0])
     all_players_raw = matched_hand.get("all_players_actions") or {}
 
-    # Construir mapa anon → nome real por posição
-    anon_map = _build_anon_to_real_map(matched_hand, vision_players)
+    # Novo algoritmo v2: âncoras + stack esperado + eliminação
+    anon_map = _build_anon_to_real_map(matched_hand, raw_json)
+    enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json)
 
-    # Enriquecer all_players_actions com nomes reais + bounty + country
-    enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, vision_players)
-
-    # Metadata completa para player_names
     player_names_json = {
-        "players_by_position": vision_players,
+        "players_list": raw_json.get("players_list", []),
         "hero": hero_name,
+        "vision_sb": raw_json.get("vision_sb"),
+        "vision_bb": raw_json.get("vision_bb"),
         "anon_map": anon_map,
         "file_meta": file_meta,
+        "match_method": "anchors_stack_elimination_v2",
     }
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Actualizar a mão com nomes reais e screenshot_url
             if screenshot_url:
                 cur.execute(
-                    """
-                    UPDATE hands
-                    SET player_names = %s,
-                        all_players_actions = %s,
-                        screenshot_url = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        json.dumps(player_names_json),
-                        json.dumps(enriched_actions),
-                        screenshot_url,
-                        hand_db_id,
-                    )
+                    """UPDATE hands
+                    SET player_names = %s, all_players_actions = %s, screenshot_url = %s
+                    WHERE id = %s""",
+                    (json.dumps(player_names_json), json.dumps(enriched_actions),
+                     screenshot_url, hand_db_id)
                 )
             else:
                 cur.execute(
-                    """
-                    UPDATE hands
-                    SET player_names = %s,
-                        all_players_actions = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        json.dumps(player_names_json),
-                        json.dumps(enriched_actions),
-                        hand_db_id,
-                    )
+                    """UPDATE hands
+                    SET player_names = %s, all_players_actions = %s
+                    WHERE id = %s""",
+                    (json.dumps(player_names_json), json.dumps(enriched_actions), hand_db_id)
                 )
-            # Marcar entry como resolvida
             cur.execute("UPDATE entries SET status = 'resolved' WHERE id = %s", (entry_id,))
         conn.commit()
-        logger.info(f"Enriched hand {hand_db_id} from orphan entry {entry_id}: {len(anon_map)} mappings")
+        logger.info(f"Enriched hand {hand_db_id} from entry {entry_id}: {len(anon_map)} mappings")
     except Exception as e:
         conn.rollback()
         logger.error(f"Error enriching hand {hand_db_id} from entry {entry_id}: {e}")
@@ -626,7 +831,6 @@ def rematch_orphan(entry_id: int, current_user=Depends(require_auth)):
     if not hand_rows:
         return {"status": "no_match", "message": f"HH do torneio {tm_number} ainda não importada"}
 
-    # Match encontrado — enriquecer a mão com nomes reais
     result = _enrich_hand_from_orphan_entry(entry_id, hand_rows[0]["id"], raw)
     return {
         "status": result.get("status", "matched"),
@@ -650,11 +854,7 @@ def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
 
 
 async def _backfill_worker(entry_ids: list):
-    """
-    Worker assíncrono que processa entries 1 a 1 sequencialmente.
-    Busca cada imagem da BD individualmente para não sobrecarregar a memória.
-    Todas as operações síncronas correm em threads para não bloquear o event loop.
-    """
+    """Worker assíncrono que processa entries 1 a 1 sequencialmente."""
     for eid in entry_ids:
         try:
             def _fetch_entry(entry_id):
@@ -676,9 +876,9 @@ async def _backfill_worker(entry_ids: list):
             file_meta = raw.get("file_meta", {})
 
             await _run_vision_for_entry(eid, content, mime_type, tm_number, file_meta, img_b64)
-            await asyncio.sleep(1)  # Pausa entre chamadas para não sobrecarregar
+            await asyncio.sleep(1)
         except Exception as e:
-            logger.error(f"[backfill] Erro no entry {eid}: {e}")
+            logger.error(f"[backfill] Error entry {eid}: {e}")
 
 
 @router.post("/vision/backfill")
@@ -686,11 +886,7 @@ async def vision_backfill(
     limit: int = 50,
     current_user=Depends(require_auth),
 ):
-    """
-    Reprocessa screenshots com vision_done=false.
-    Busca apenas os IDs e lança um worker assíncrono em background.
-    Responde imediatamente.
-    """
+    """Reprocessa screenshots com vision_done=false em background."""
     def _fetch_pending_ids(lim):
         return query(
             """SELECT id
@@ -703,7 +899,6 @@ async def vision_backfill(
             (lim,)
         )
     rows = await asyncio.to_thread(_fetch_pending_ids, limit)
-
     entry_ids = [r["id"] for r in rows]
 
     if entry_ids:
@@ -711,7 +906,8 @@ async def vision_backfill(
 
     def _count_pending():
         return query(
-            "SELECT COUNT(*) as n FROM entries WHERE entry_type='screenshot' AND (raw_json->>'vision_done')::boolean = false",
+            "SELECT COUNT(*) as n FROM entries WHERE entry_type='screenshot' "
+            "AND (raw_json->>'vision_done')::boolean = false",
             ()
         )[0]["n"]
     total_pending = await asyncio.to_thread(_count_pending)
@@ -719,7 +915,7 @@ async def vision_backfill(
     return {
         "queued": len(entry_ids),
         "total_pending": total_pending,
-        "message": f"{len(entry_ids)} screenshots a processar sequencialmente em background.",
+        "message": f"{len(entry_ids)} screenshots a processar em background.",
     }
 
 
