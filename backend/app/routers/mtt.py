@@ -1261,3 +1261,79 @@ async def cleanup_mtt(
         "kept": with_ss,
         "after": after,
     }
+
+
+@router.delete("/hands/{hand_id}")
+def delete_mtt_hand(hand_id: int, current_user=Depends(require_auth)):
+    """Apaga uma mão MTT e seus villains associados."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Apagar villains associados
+            cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (hand_id,))
+            # Buscar TM number para apagar da tabela hands também
+            cur.execute("SELECT tm_number FROM mtt_hands WHERE id = %s", (hand_id,))
+            row = cur.fetchone()
+            if row:
+                tm_digits = row["tm_number"].replace("TM", "")
+                cur.execute("DELETE FROM hands WHERE hand_id = %s", (f"GG-{tm_digits}",))
+            # Apagar a mão MTT
+            cur.execute("DELETE FROM mtt_hands WHERE id = %s", (hand_id,))
+            deleted = cur.rowcount
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao apagar: {e}")
+    finally:
+        conn.close()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Mão não encontrada")
+    return {"ok": True, "deleted": deleted}
+
+
+@router.delete("/screenshot/{entry_id}")
+def delete_screenshot_and_revert(entry_id: int, current_user=Depends(require_auth)):
+    """
+    Apaga um screenshot e reverte o match:
+    - Remove villains associados
+    - Reverte a mão MTT para has_screenshot=false
+    - Reverte a mão promovida na tabela hands para mtt_archive
+    - Apaga o entry do screenshot
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Encontrar mão MTT associada
+            cur.execute(
+                "SELECT id, tm_number FROM mtt_hands WHERE screenshot_entry_id = %s",
+                (entry_id,)
+            )
+            mtt_hand = cur.fetchone()
+
+            if mtt_hand:
+                # Apagar villains
+                cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (mtt_hand["id"],))
+                # Reverter mão MTT
+                cur.execute(
+                    "UPDATE mtt_hands SET has_screenshot = false, screenshot_entry_id = NULL WHERE id = %s",
+                    (mtt_hand["id"],)
+                )
+                # Reverter mão promovida
+                tm_digits = mtt_hand["tm_number"].replace("TM", "")
+                cur.execute(
+                    "UPDATE hands SET study_state = 'mtt_archive', player_names = NULL, all_players_actions = NULL, entry_id = NULL WHERE hand_id = %s",
+                    (f"GG-{tm_digits}",)
+                )
+
+            # Apagar o entry do screenshot
+            cur.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
+
+        conn.commit()
+        logger.info(f"Deleted screenshot entry {entry_id} and reverted match")
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao apagar screenshot: {e}")
+    finally:
+        conn.close()
+
+    return {"ok": True, "reverted_mtt_hand": mtt_hand["id"] if mtt_hand else None}
