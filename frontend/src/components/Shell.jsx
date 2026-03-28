@@ -6,6 +6,7 @@ const NAV = [
   { to: '/inbox',       label: 'Inbox' },
   { to: '/hands',       label: 'Mãos' },
   { to: '/hm3',         label: 'HM3' },
+  { to: '/stats',       label: 'Stats' },
   { to: '/tournaments', label: 'MTT' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/pnl',         label: 'P&L' },
