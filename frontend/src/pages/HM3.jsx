@@ -350,37 +350,37 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 function HM3HandRow({ hand, onClick, onDelete, idx }) {
   const level = extractLevel(hand.raw)
   const meta = hand.all_players_actions?._meta
-  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : null
+  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}` : null
   const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
-  const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : hand.site === 'WPN' ? 'WPN' : hand.site
+  const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : 'WPN'
 
   return (
     <div onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 16px',
+      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
       background: zebra, borderBottom: '1px solid rgba(255,255,255,0.03)',
       cursor: 'pointer', transition: 'background 0.1s',
     }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      <div style={{ minWidth: 52, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
+      <div style={{ minWidth: 48, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
+      <div style={{ display: 'flex', gap: 2, minWidth: 50, flexShrink: 0 }}>
         {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>}
       </div>
-      <div style={{ minWidth: 40, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ minWidth: 65, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ flex: 1, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hand.stakes || ''}</div>
+      <div style={{ minWidth: 36, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ minWidth: 60, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ minWidth: 100, maxWidth: 180, fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{hand.stakes || ''}</div>
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
         {hand.board?.length > 0 ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#374151', fontSize: 10 }}>&mdash;</span>}
       </div>
-      <div style={{ minWidth: 75, flexShrink: 0, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+      <div style={{ minWidth: 55, flexShrink: 0, fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ minWidth: 28, flexShrink: 0, fontSize: 10, color: '#4b5563' }}>{siteShort}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, minWidth: 60, flexShrink: 0 }}>
-        {hand.tags?.slice(0, 2).map(t => <Tag key={t} t={t} />)}
+      <div style={{ minWidth: 22, flexShrink: 0, fontSize: 9, color: '#4b5563' }}>{siteShort}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, flex: 1, minWidth: 0 }}>
+        {hand.tags?.slice(0, 3).map(t => <Tag key={t} t={t} />)}
       </div>
-      <button style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
+      <button style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 11, padding: '0 3px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete(hand.id) }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
         onMouseLeave={e => e.currentTarget.style.color = '#374151'}>&#10005;</button>
@@ -430,7 +430,7 @@ function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDeta
 export default function HM3Page() {
   const [data, setData] = useState({ data: [], total: 0, pages: 1 })
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState({ study_state: '', site: '', search: '', date_from: '', tag: '' })
+  const [filters, setFilters] = useState({ study_state: '', site: '', search: '', date_from: '', tag: '', result_min: '', result_max: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
@@ -447,6 +447,8 @@ export default function HM3Page() {
     if (!params.tag) delete params.tag
     if (!params.search) delete params.search
     if (!params.study_state) delete params.study_state
+    if (!params.result_min) delete params.result_min
+    if (!params.result_max) delete params.result_max
     hands.list(params)
       .then(d => {
         // Filter to HM3 sites only
@@ -578,9 +580,11 @@ export default function HM3Page() {
           <option value="PokerStars">PokerStars</option>
           <option value="WPN">WPN</option>
         </select>
-        <input type="text" placeholder="Pesquisar torneio, tag..." value={filters.search} onChange={e => set('search', e.target.value)} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 12px', fontSize: 12, flex: 1, minWidth: 180 }} />
-        {(filters.study_state || filters.site || filters.search || filters.date_from || filters.tag) && (
-          <button onClick={() => { setFilters({ study_state: '', site: '', search: '', date_from: '', tag: '' }); setPage(1) }} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }}>&#10005; Limpar</button>
+        <input type="text" placeholder="Pesquisar torneio, tag..." value={filters.search} onChange={e => set('search', e.target.value)} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 12px', fontSize: 12, flex: 1, minWidth: 140 }} />
+        <input type="number" placeholder="BB min" value={filters.result_min} onChange={e => set('result_min', e.target.value)} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 8px', fontSize: 12, width: 65 }} />
+        <input type="number" placeholder="BB max" value={filters.result_max} onChange={e => set('result_max', e.target.value)} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 8px', fontSize: 12, width: 65 }} />
+        {(filters.study_state || filters.site || filters.search || filters.date_from || filters.tag || filters.result_min || filters.result_max) && (
+          <button onClick={() => { setFilters({ study_state: '', site: '', search: '', date_from: '', tag: '', result_min: '', result_max: '' }); setPage(1) }} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }}>&#10005; Limpar</button>
         )}
       </div>
 
