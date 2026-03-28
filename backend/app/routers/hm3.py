@@ -268,6 +268,85 @@ def _parse_hand(hh_text, site_name):
 
         result["result"] = round((hero_won - hero_invested) / bb_size, 2)
 
+    # ── Build all_players_actions with stacks, positions, level, blinds ──
+    all_players = {}
+    if button_seat and all_seat_nums:
+        for seat_num in all_seat_nums:
+            try:
+                pos = _normalise_position(
+                    _get_position(seat_num, button_seat, all_seat_nums, num_players)
+                )
+            except (ValueError, IndexError):
+                pos = "?"
+            info = seats.get(seat_num, {})
+            name = info.get("name", f"Seat{seat_num}")
+            stack = info.get("stack", 0)
+            stack_bb = round(stack / bb_size, 1) if bb_size > 0 else 0
+            is_hero = (seat_num == hero_seat)
+            all_players[name] = {
+                "seat": seat_num,
+                "position": pos,
+                "stack": stack,
+                "stack_bb": stack_bb,
+                "is_hero": is_hero,
+            }
+
+    # Extract level number
+    level_num = None
+    if site_name == "Winamax":
+        lm = re.search(r"level:\s*(\d+)", hh_text, re.I)
+        if lm:
+            level_num = int(lm.group(1))
+    else:
+        lm = re.search(r"Level\s+([IVXLCDM]+|\d+)", hh_text, re.I)
+        if lm:
+            v = lm.group(1)
+            roman = {"I":1,"V":5,"X":10,"L":50,"C":100,"D":500,"M":1000}
+            if re.match(r"^[IVXLCDM]+$", v, re.I):
+                level_num = 0
+                for ci in range(len(v)):
+                    cur = roman.get(v[ci].upper(), 0)
+                    nxt = roman.get(v[ci+1].upper(), 0) if ci+1 < len(v) else 0
+                    level_num += -cur if cur < nxt else cur
+            else:
+                try:
+                    level_num = int(v)
+                except ValueError:
+                    pass
+
+    # Extract sb_size if not already found
+    sb_size = 0
+    if site_name == "Winamax":
+        lm2 = re.search(r"\((\d+)/(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\)", hh_text)
+        if lm2:
+            sb_size = float(lm2.group(2))
+        else:
+            lm2 = re.search(r"\((\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\)", hh_text)
+            if lm2:
+                sb_size = float(lm2.group(1))
+    else:
+        lm2 = re.search(r"Level\s+\S+\s*\(([\d,]+)/([\d,]+)\)", hh_text)
+        if lm2:
+            sb_size = float(lm2.group(1).replace(",", ""))
+
+    # Ante
+    ante_size = 0
+    if site_name == "Winamax":
+        ante_m = re.search(r"\((\d+)/(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\)", hh_text)
+        if ante_m:
+            ante_size = float(ante_m.group(1))
+    else:
+        ante_m = re.search(r"posts the ante ([\d,]+)", hh_text)
+        if ante_m:
+            ante_size = float(ante_m.group(1).replace(",", ""))
+
+    result["all_players"] = all_players
+    result["level"] = level_num
+    result["sb_size"] = sb_size
+    result["bb_size"] = bb_size
+    result["ante_size"] = ante_size
+    result["num_players"] = num_players
+
     return result
 
 
@@ -332,17 +411,29 @@ async def import_hm3(
                     skipped += 1
                     continue
 
+                # Build all_players_actions JSON with blinds metadata
+                import json
+                all_players = parsed.get("all_players", {})
+                all_players["_meta"] = {
+                    "level": parsed.get("level"),
+                    "sb": parsed.get("sb_size", 0),
+                    "bb": parsed.get("bb_size", 0),
+                    "ante": parsed.get("ante_size", 0),
+                    "num_players": parsed.get("num_players", 0),
+                }
+
                 cur.execute(
                     """INSERT INTO hands
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
-                        notes, tags, raw, study_state)
+                        notes, tags, raw, study_state, all_players_actions)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s, 'new')
+                        %s, %s, %s, 'new', %s)
                     ON CONFLICT (hand_id) DO UPDATE SET
-                        tags = EXCLUDED.tags
+                        tags = EXCLUDED.tags,
+                        all_players_actions = EXCLUDED.all_players_actions
                     RETURNING id""",
                     (
                         parsed["site"],
@@ -357,6 +448,7 @@ async def import_hm3(
                         None,
                         tags_clean,
                         parsed["raw"],
+                        json.dumps(all_players),
                     )
                 )
                 inserted += 1
