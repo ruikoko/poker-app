@@ -332,3 +332,64 @@ def get_hand_screenshot(hand_pk: int, current_user=Depends(require_auth)):
         "data_url": f"data:{mime_type};base64,{img_b64}",
         "entry_id": entry_id,
     }
+
+
+# ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@router.post("/admin/reset-all")
+def admin_reset_all(current_user=Depends(require_auth)):
+    """Apaga TODAS as mãos, entries, e vilões. Reset total."""
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM hand_villains")
+            cur.execute("DELETE FROM hands")
+            cur.execute("DELETE FROM entries")
+            cur.execute("DELETE FROM villain_notes")
+        conn.commit()
+        return {"ok": True, "message": "BD limpa — todas as mãos, entries e vilões apagados"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/admin/reset-hm3")
+def admin_reset_hm3(current_user=Depends(require_auth)):
+    """Apaga apenas mãos HM3 (Winamax, PokerStars, WPN)."""
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM hands WHERE site IN ('Winamax', 'PokerStars', 'WPN')")
+            deleted = cur.rowcount
+        conn.commit()
+        return {"ok": True, "deleted": deleted, "message": f"{deleted} mãos HM3 apagadas"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/admin/reset-gg")
+def admin_reset_gg(current_user=Depends(require_auth)):
+    """Apaga mãos GGPoker e entries/screenshots associados."""
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM hand_villains")
+            cur.execute("DELETE FROM hands WHERE site = 'GGPoker'")
+            deleted_hands = cur.rowcount
+            cur.execute("DELETE FROM entries")
+            deleted_entries = cur.rowcount
+        conn.commit()
+        return {"ok": True, "deleted_hands": deleted_hands, "deleted_entries": deleted_entries}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()

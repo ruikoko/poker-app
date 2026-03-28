@@ -250,6 +250,7 @@ export default function InboxPage() {
   // HM3 import state
   const [hm3Importing, setHm3Importing] = useState(false)
   const [hm3Result, setHm3Result] = useState(null)
+  const [newHandsOpen, setNewHandsOpen] = useState(false)
   const hm3Ref = useRef(null)
 
   async function handleHm3Import(e) {
@@ -745,10 +746,14 @@ export default function InboxPage() {
         <div style={{
           padding: '12px 16px', borderBottom: '1px solid #2a2d3a',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>
-            Mãos novas ({data.total})
-          </span>
+          cursor: 'pointer', userSelect: 'none',
+        }} onClick={() => setNewHandsOpen(!newHandsOpen)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: '#6366f1', transform: newHandsOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>
+              Mãos novas ({data.total})
+            </span>
+          </div>
           {selectedIds.size > 0 && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: '#818cf8', fontWeight: 600 }}>{selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}</span>
@@ -760,6 +765,7 @@ export default function InboxPage() {
           )}
         </div>
 
+        {newHandsOpen && (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
@@ -881,6 +887,7 @@ export default function InboxPage() {
               }}
             >&#8594;</button>
           </div>
+        )}
         )}
       </div>
     </>

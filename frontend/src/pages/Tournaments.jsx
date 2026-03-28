@@ -533,16 +533,17 @@ export default function TournamentsPage() {
     }
   }
 
-  // Agrupar por data > torneio
+  // Agrupar por data > torneio (por nome, não por TM number)
   const grouped = {}
   for (const h of hands) {
     const dateKey = formatDateKey(h.played_at)
     if (!grouped[dateKey]) grouped[dateKey] = {}
-    const tm = h.tm_number || 'unknown'
-    if (!grouped[dateKey][tm]) {
-      grouped[dateKey][tm] = { name: h.tournament_name, hands: [] }
+    // Group by tournament name (or TM number as fallback)
+    const tourneyKey = h.tournament_name || h.tm_number || 'unknown'
+    if (!grouped[dateKey][tourneyKey]) {
+      grouped[dateKey][tourneyKey] = { name: h.tournament_name, hands: [] }
     }
-    grouped[dateKey][tm].hands.push(h)
+    grouped[dateKey][tourneyKey].hands.push(h)
   }
 
   // Ordenar datas descendente

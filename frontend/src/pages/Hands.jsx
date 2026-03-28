@@ -316,11 +316,12 @@ function parseRawHH(raw, playerNames) {
 
   // Build name map: anon hash → real name
   const seatToName = playerNames?.seat_to_name || {}
-  // Also build hash→real from seats in raw
   const nameMap = {}
-  const seatLines = raw.match(/Seat (\d+): (.+?) \(([\d,]+) in chips\)/g) || []
+  // PokerStars: Seat 1: PlayerName (12345 in chips)
+  // Winamax: Seat 1: PlayerName (12345)
+  const seatLines = raw.match(/Seat \d+: .+? \([\d,.]+(?:\s+in chips)?\)/g) || []
   for (const line of seatLines) {
-    const m = line.match(/Seat (\d+): (.+?) \(([\d,]+) in chips\)/)
+    const m = line.match(/Seat (\d+): (.+?) \(([\d,.]+)/)
     if (m) {
       const seatNum = m[1]
       const anonName = m[2].trim()
@@ -334,15 +335,23 @@ function parseRawHH(raw, playerNames) {
 
   // Parse streets
   const streets = []
+
+  // Detect format: Winamax uses "*** PRE-FLOP ***", PokerStars uses "*** HOLE CARDS ***"
+  const isWinamax = raw.includes('*** PRE-FLOP ***')
+  const preflopMarker = isWinamax ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***'
+  const showdownMarker = raw.includes('*** SHOW DOWN ***') ? '*** SHOW DOWN ***' : '*** SHOWDOWN ***'
+  const summaryMarker = '*** SUMMARY ***'
+
   const streetMarkers = [
-    { key: 'preflop', start: '*** HOLE CARDS ***', end: ['*** FLOP ***', '*** SUMMARY ***', '*** SHOWDOWN ***'] },
-    { key: 'flop', start: '*** FLOP ***', end: ['*** TURN ***', '*** SUMMARY ***', '*** SHOWDOWN ***'] },
-    { key: 'turn', start: '*** TURN ***', end: ['*** RIVER ***', '*** SUMMARY ***', '*** SHOWDOWN ***'] },
-    { key: 'river', start: '*** RIVER ***', end: ['*** SUMMARY ***', '*** SHOWDOWN ***'] },
+    { key: 'preflop', start: preflopMarker, end: ['*** FLOP ***', summaryMarker, showdownMarker] },
+    { key: 'flop', start: '*** FLOP ***', end: ['*** TURN ***', summaryMarker, showdownMarker] },
+    { key: 'turn', start: '*** TURN ***', end: ['*** RIVER ***', summaryMarker, showdownMarker] },
+    { key: 'river', start: '*** RIVER ***', end: [summaryMarker, showdownMarker] },
   ]
 
-  // Extract board cards per street
+  // Extract board cards per street (support both formats)
   const boardByStreet = {}
+  // Winamax: *** FLOP *** [Xx Xx Xx]   PokerStars: *** FLOP *** [Xx Xx Xx]
   const flopM = raw.match(/\*\*\* FLOP \*\*\* \[(.+?)\]/)
   if (flopM) boardByStreet.flop = flopM[1].trim().split(/\s+/)
   const turnM = raw.match(/\*\*\* TURN \*\*\* \[.+?\] \[(.+?)\]/)
@@ -350,8 +359,9 @@ function parseRawHH(raw, playerNames) {
   const riverM = raw.match(/\*\*\* RIVER \*\*\* \[.+?\] \[(.+?)\]/)
   if (riverM) boardByStreet.river = riverM[1].trim().split(/\s+/)
 
-  // Showdown
-  const showdownStart = raw.indexOf('*** SHOWDOWN ***')
+  // Showdown (support both "*** SHOWDOWN ***" and "*** SHOW DOWN ***")
+  let showdownStart = raw.indexOf('*** SHOWDOWN ***')
+  if (showdownStart === -1) showdownStart = raw.indexOf('*** SHOW DOWN ***')
   const showdownEnd = raw.indexOf('*** SUMMARY ***')
   let showdownActions = []
   if (showdownStart !== -1) {
@@ -359,19 +369,23 @@ function parseRawHH(raw, playerNames) {
     for (const line of sdSection.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed || trimmed.startsWith('***')) continue
-      // "Player: shows [Xx Xx]" or "Player collected XXXX from pot"
-      const showM = trimmed.match(/^(.+?):\s+shows\s+\[(.+?)\](.*)/)
-      const collectM = trimmed.match(/^(.+?)\s+collected\s+([\d,]+)\s+from/)
+      // "Player: shows [Xx Xx]" or "Player shows [Xx Xx]" or "Player collected/wins XXXX"
+      const showM = trimmed.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\](.*)/)
+      const collectM = trimmed.match(/^(.+?)(?::)?\s+(?:collected|wins)\s+([\d,]+)/)
       if (showM) {
         const anonName = showM[1].trim()
         const realName = nameMap[anonName] || anonName
         const cards = showM[2].trim().split(/\s+/)
         const rest = showM[3] ? showM[3].trim() : ''
-        showdownActions.push({ name: realName, action: `shows [${showM[2].trim()}]${rest ? ' ' + rest : ''}`, cards })
+        const heroNames = ['hero', 'schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver', 'flightrisk', 'karluz', 'koumpounophobia', 'lauro dermio']
+        const isHero = heroNames.some(h => anonName.toLowerCase() === h || realName.toLowerCase() === h)
+        showdownActions.push({ name: realName, action: `shows [${showM[2].trim()}]${rest ? ' ' + rest : ''}`, cards, isHero })
       } else if (collectM) {
         const anonName = collectM[1].trim()
         const realName = nameMap[anonName] || anonName
-        showdownActions.push({ name: realName, action: `collected ${collectM[2]}` })
+        const heroNames = ['hero', 'schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver', 'flightrisk', 'karluz', 'koumpounophobia', 'lauro dermio']
+        const isHero = heroNames.some(h => anonName.toLowerCase() === h || realName.toLowerCase() === h)
+        showdownActions.push({ name: realName, action: `collected ${collectM[2]}`, isHero })
       }
     }
   }
@@ -391,15 +405,19 @@ function parseRawHH(raw, playerNames) {
 
     for (const line of section.split('\n')) {
       const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('***') || trimmed.startsWith('Dealt')) continue
+      if (!trimmed || trimmed.startsWith('***') || trimmed.startsWith('Dealt') || trimmed.startsWith('Board:')) continue
 
-      const m = trimmed.match(/^(.+?):\s+(.+)$/)
+      // Match "Name: action" or "Name action" (Winamax often omits colon)
+      const m = trimmed.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises|posts|collected|wins|is all-in|and is all-in)(.*)$/i)
       if (!m) continue
 
       const anonName = m[1].trim()
-      const actionText = m[2].trim()
+      const actionText = (m[2] + (m[3] || '')).trim()
       const realName = nameMap[anonName] || anonName
-      const isHero = anonName === 'Hero'
+
+      // Detect hero by multiple methods
+      const heroNames = ['hero', 'schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver', 'flightrisk', 'karluz', 'koumpounophobia', 'lauro dermio']
+      const isHero = heroNames.some(h => anonName.toLowerCase() === h || realName.toLowerCase() === h)
 
       actions.push({ name: realName, action: actionText, isHero })
     }
@@ -448,6 +466,50 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
 
   const meta = allPlayersActions?._meta
 
+  // Calculate pot size per street from raw
+  const potByStreet = {}
+  if (raw) {
+    let runningPot = 0
+    const numRe = /[\d,]+(?:\.\d+)?/
+    // Count antes + blinds
+    const anteMatches = raw.match(/posts the ante ([\d,]+)/g) || []
+    for (const am of anteMatches) { const n = am.match(numRe); if (n) runningPot += parseFloat(n[0].replace(/,/g, '')) }
+    const sbMatch = raw.match(/posts small blind ([\d,]+)/)
+    if (sbMatch) runningPot += parseFloat(sbMatch[1].replace(/,/g, ''))
+    const bbMatch = raw.match(/posts big blind ([\d,]+)/)
+    if (bbMatch) runningPot += parseFloat(bbMatch[1].replace(/,/g, ''))
+    potByStreet.preflop_start = runningPot
+
+    // Parse each street's contributions
+    const streetSections = [
+      { key: 'preflop', start: raw.includes('*** PRE-FLOP ***') ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***', end: '*** FLOP ***' },
+      { key: 'flop', start: '*** FLOP ***', end: '*** TURN ***' },
+      { key: 'turn', start: '*** TURN ***', end: '*** RIVER ***' },
+      { key: 'river', start: '*** RIVER ***', end: '*** SHOW' },
+    ]
+    for (const { key, start, end } of streetSections) {
+      const si = raw.indexOf(start)
+      if (si === -1) { potByStreet[key] = runningPot; continue }
+      let ei = raw.indexOf(end, si + start.length)
+      if (ei === -1) ei = raw.indexOf('*** SUMMARY ***', si)
+      if (ei === -1) ei = raw.length
+      const section = raw.slice(si, ei)
+      // Sum calls, bets, raises (take the "to X" amount for raises)
+      for (const line of section.split('\n')) {
+        const callM = line.match(/calls ([\d,]+)/)
+        const betM = line.match(/bets ([\d,]+)/)
+        const raiseM = line.match(/raises [\d,]+ to ([\d,]+)/)
+        if (callM) runningPot += parseFloat(callM[1].replace(/,/g, ''))
+        else if (raiseM) runningPot += parseFloat(raiseM[1].replace(/,/g, ''))
+        else if (betM) runningPot += parseFloat(betM[1].replace(/,/g, ''))
+      }
+      // Subtract uncalled bets
+      const uncalled = section.match(/Uncalled bet \(([\d,]+)\)/)
+      if (uncalled) runningPot -= parseFloat(uncalled[1].replace(/,/g, ''))
+      potByStreet[key] = runningPot
+    }
+  }
+
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{
@@ -480,6 +542,11 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
                 <div style={{ display: 'flex', gap: 3 }}>
                   {board.map((c, i) => <PokerCard key={i} card={c} size="sm" />)}
                 </div>
+              )}
+              {potByStreet[key] > 0 && (
+                <span style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+                  Pot: {Math.round(potByStreet[key]).toLocaleString()}{meta?.bb ? ` (${(potByStreet[key] / meta.bb).toFixed(1)}bb)` : ''}
+                </span>
               )}
             </div>
             <div style={{
@@ -915,8 +982,8 @@ function HandRow({ hand, onClick, onDelete, idx }) {
     <div
       onClick={onClick}
       style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '7px 12px',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 14px',
         background: zebra,
         borderBottom: '1px solid rgba(255,255,255,0.03)',
         cursor: 'pointer',
@@ -925,16 +992,16 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      <div style={{ minWidth: 48, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ display: 'flex', gap: 2, minWidth: 50, flexShrink: 0 }}>
+      <div style={{ minWidth: 52, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
+      <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>
         }
       </div>
-      <div style={{ minWidth: 36, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ minWidth: 60, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ minWidth: 100, maxWidth: 200, fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>
+      <div style={{ minWidth: 40, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ minWidth: 65, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ minWidth: 120, maxWidth: 240, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>
         {hand.stakes || ''}
       </div>
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
@@ -943,10 +1010,10 @@ function HandRow({ hand, onClick, onDelete, idx }) {
           : <span style={{ color: '#374151', fontSize: 10 }}>&mdash;</span>
         }
       </div>
-      <div style={{ minWidth: 55, flexShrink: 0, fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+      <div style={{ minWidth: 65, flexShrink: 0, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 9, color: '#4b5563', minWidth: 58, flexShrink: 0 }}>
+      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 80, flexShrink: 0 }}>
         {hand.played_at ? (() => {
           const d = hand.played_at.slice(0, 10)
           const t = hand.played_at.slice(11, 16)
@@ -954,7 +1021,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
         })() : ''}
       </div>
       <button
-        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 11, padding: '0 3px', flexShrink: 0 }}
+        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete() }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
         onMouseLeave={e => e.currentTarget.style.color = '#374151'}

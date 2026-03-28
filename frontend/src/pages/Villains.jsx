@@ -231,6 +231,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                   const allPlayers = h.all_players_actions || {}
                   const SEAT_ORDER = ['SB', 'BB', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN']
                   const sortedPlayers = Object.entries(allPlayers)
+                    .filter(([k]) => k !== '_meta')
                     .map(([name, info]) => ({ name, ...info }))
                     .sort((a, b) => {
                       const ia = SEAT_ORDER.indexOf(a.position)
@@ -255,13 +256,15 @@ function VillainProfile({ villain, onClose, onSave }) {
                         <span style={{ fontSize: 10, color: '#4b5563', minWidth: 48 }}>
                           {h.played_at ? h.played_at.slice(5, 10) : '—'}
                         </span>
+                        {/* Villain position + cards first */}
                         <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                          <PosBadge pos={h.position} />
-                          {h.hero_cards?.map((c, j) => <MiniCard key={j} card={c} />)}
+                          <PosBadge pos={villainPos} />
+                          <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>{villain.nick}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span style={{ fontSize: 10, color: '#4b5563' }}>vs</span>
-                          <PosBadge pos={villainPos} />
+                          <PosBadge pos={h.position} />
+                          {h.hero_cards?.map((c, j) => <MiniCard key={j} card={c} />)}
                         </div>
                         <div style={{ display: 'flex', gap: 2, flex: 1 }}>
                           {h.board?.slice(0, 5).map((c, j) => <MiniCard key={j} card={c} />)}
