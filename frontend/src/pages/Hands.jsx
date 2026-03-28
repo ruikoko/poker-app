@@ -614,7 +614,20 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
               <StateBadge state={hand.study_state} />
               {hand.result != null && <ResultBadge result={hand.result} />}
             </div>
-            {hand.stakes && <div style={{ fontSize: 12, color: '#64748b' }}>{hand.stakes}</div>}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              {hand.stakes && <span style={{ fontSize: 12, color: '#64748b' }}>{hand.stakes}</span>}
+              {(() => {
+                const m = hand.all_players_actions?._meta
+                const lvl = extractLevel(hand.raw)
+                if (m || lvl) {
+                  return <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+                    {lvl || ''}{m ? ` · ${Math.round(m.sb)}/${Math.round(m.bb)}${m.ante ? `(${Math.round(m.ante)})` : ''}` : ''}
+                  </span>
+                }
+                return null
+              })()}
+              <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.site} &middot; {hand.played_at ? hand.played_at.slice(0, 10) : ''}</span>
+            </div>
           </div>
           <button
             style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18, padding: 4 }}
@@ -647,6 +660,53 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             </div>
           )}
         </div>
+
+        {/* Players table — stacks & positions */}
+        {hand.all_players_actions && (() => {
+          const SEAT_ORDER = ['BTN', 'SB', 'BB', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO']
+          const players = Object.entries(hand.all_players_actions)
+            .filter(([k]) => k !== '_meta')
+            .map(([name, info]) => ({ name, ...info }))
+            .sort((a, b) => {
+              const ia = SEAT_ORDER.indexOf(a.position)
+              const ib = SEAT_ORDER.indexOf(b.position)
+              return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+            })
+          if (players.length === 0) return null
+          const meta = hand.all_players_actions._meta
+          return (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
+                Mesa ({players.length} jogadores)
+              </div>
+              <div style={{ background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130', overflow: 'hidden' }}>
+                {players.map((p, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '5px 12px',
+                    background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)',
+                    borderBottom: i < players.length - 1 ? '1px solid #1a1d27' : 'none',
+                  }}>
+                    <div style={{ minWidth: 40 }}><PosBadge pos={p.position} /></div>
+                    <span style={{
+                      fontSize: 12, minWidth: 110,
+                      color: p.is_hero ? '#818cf8' : '#94a3b8',
+                      fontWeight: p.is_hero ? 600 : 400,
+                    }}>
+                      {p.name}{p.is_hero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', minWidth: 70 }}>
+                      {p.stack ? Number(p.stack).toLocaleString() : '—'}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>
+                      {p.stack_bb ? `${p.stack_bb} BB` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Info grid */}
         <div style={{
@@ -810,6 +870,8 @@ function extractLevel(raw) {
 
 function HandRow({ hand, onClick, onDelete, idx }) {
   const level = extractLevel(hand.raw)
+  const meta = hand.all_players_actions?._meta
+  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : null
   const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
 
   return (
@@ -827,12 +889,12 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
       {/* Estado */}
-      <div style={{ minWidth: 55 }}>
+      <div style={{ minWidth: 55, flexShrink: 0 }}>
         <StateBadge state={hand.study_state} />
       </div>
 
       {/* Cartas do hero */}
-      <div style={{ display: 'flex', gap: 3, minWidth: 58 }}>
+      <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>
@@ -840,44 +902,44 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       </div>
 
       {/* Posição */}
-      <div style={{ minWidth: 42 }}>
+      <div style={{ minWidth: 40, flexShrink: 0 }}>
         <PosBadge pos={hand.position} />
       </div>
 
       {/* Resultado */}
-      <div style={{ minWidth: 70 }}>
+      <div style={{ minWidth: 70, flexShrink: 0 }}>
         <ResultBadge result={hand.result} />
       </div>
 
       {/* Torneio + BI */}
       <div style={{
-        minWidth: 140, maxWidth: 220, fontSize: 11, color: '#64748b',
+        flex: 1, fontSize: 11, color: '#64748b',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       }}>
         {hand.stakes || ''}
       </div>
 
       {/* Board inline */}
-      <div style={{ display: 'flex', gap: 2, minWidth: 120 }}>
+      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#374151', fontSize: 10 }}>&mdash;</span>
         }
       </div>
 
-      {/* Level */}
-      <div style={{ minWidth: 38, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
-        {level || ''}
+      {/* Level + Blinds */}
+      <div style={{ minWidth: 80, flexShrink: 0, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+        {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
 
       {/* Data */}
-      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 62 }}>
+      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 62, flexShrink: 0 }}>
         {hand.played_at ? hand.played_at.slice(0, 10) : ''}
       </div>
 
       {/* Delete */}
       <button
-        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', marginLeft: 'auto' }}
+        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete() }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
         onMouseLeave={e => e.currentTarget.style.color = '#374151'}
