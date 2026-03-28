@@ -435,25 +435,37 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
   const streets = parseRawHH(raw, playerNames)
   if (!streets) return null
 
-  // Build position map from allPlayersActions
+  // Build position map and stack map from allPlayersActions
   const posMap = {}
+  const stackMap = {}
   if (allPlayersActions && typeof allPlayersActions === 'object') {
     for (const [name, info] of Object.entries(allPlayersActions)) {
+      if (name === '_meta') continue
       if (info?.position) posMap[name] = info.position
+      if (info?.stack) stackMap[name] = { chips: info.stack, bb: info.stack_bb }
     }
   }
+
+  const meta = allPlayersActions?._meta
 
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
         fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5,
         marginBottom: 10, textTransform: 'uppercase',
       }}>
-        Hand History
+        <span>Hand History</span>
+        {meta && (
+          <span style={{ fontFamily: 'monospace', color: '#4b5563', fontWeight: 600, fontSize: 10 }}>
+            {meta.sb && meta.bb ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : ''}
+          </span>
+        )}
       </div>
 
       {streets.map(({ key, actions, board }) => {
         const color = STREET_COLORS_HH[key] || '#94a3b8'
+        const isShowdown = key === 'showdown'
         return (
           <div key={key} style={{ marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -472,16 +484,22 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
             </div>
             <div style={{
               display: 'flex', flexDirection: 'column', gap: 0,
-              background: '#0f1117', borderRadius: 8, padding: '4px 12px',
-              border: '1px solid #1e2130',
+              background: isShowdown ? '#0d1020' : '#0f1117',
+              borderRadius: 8, padding: isShowdown ? '8px 12px' : '4px 12px',
+              border: `1px solid ${isShowdown ? '#2a2050' : '#1e2130'}`,
             }}>
               {actions.map((a, i) => {
                 const pos = posMap[a.name]
+                const stack = stackMap[a.name]
+                // Parse showdown cards for visual rendering
+                const showCards = a.cards || []
+                const isShow = showCards.length > 0
+
                 return (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '4px 0',
-                    borderBottom: i < actions.length - 1 ? '1px solid #1a1d27' : 'none',
+                    padding: isShowdown ? '6px 0' : '4px 0',
+                    borderBottom: i < actions.length - 1 ? `1px solid ${isShowdown ? '#1e1840' : '#1a1d27'}` : 'none',
                   }}>
                     {pos && <PosBadge pos={pos} />}
                     <span style={{
@@ -493,8 +511,27 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
                       {a.name}
                       {a.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
                     </span>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      <ActionBadge text={a.action} />
+                    {stack && !isShowdown && (
+                      <span style={{ fontSize: 9, color: '#374151', fontFamily: 'monospace', minWidth: 50 }}>
+                        {stack.bb ? `${stack.bb}bb` : ''}
+                      </span>
+                    )}
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {isShow ? (
+                        <>
+                          <span style={{ fontSize: 10, color: '#8b5cf6', fontWeight: 600 }}>shows</span>
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            {showCards.map((c, ci) => <PokerCard key={ci} card={c} size="md" />)}
+                          </div>
+                          {a.action.includes('(') && (
+                            <span style={{ fontSize: 10, color: '#4b5563', fontStyle: 'italic' }}>
+                              {a.action.match(/\((.+)\)/)?.[1] || ''}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <ActionBadge text={a.action} />
+                      )}
                     </div>
                   </div>
                 )
@@ -909,8 +946,12 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       <div style={{ minWidth: 55, flexShrink: 0, fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 58, flexShrink: 0 }}>
-        {hand.played_at ? hand.played_at.slice(0, 10) : ''}
+      <div style={{ fontSize: 9, color: '#4b5563', minWidth: 58, flexShrink: 0 }}>
+        {hand.played_at ? (() => {
+          const d = hand.played_at.slice(0, 10)
+          const t = hand.played_at.slice(11, 16)
+          return <>{d}{t ? <span style={{ color: '#374151', marginLeft: 3 }}>{t}</span> : ''}</>
+        })() : ''}
       </div>
       <button
         style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 11, padding: '0 3px', flexShrink: 0 }}
