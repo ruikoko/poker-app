@@ -481,11 +481,39 @@ async def import_hm3(
                 if existing:
                     existing_tags = existing["tags"] or []
                     merged = list(set(existing_tags + tags_clean))
-                    if set(merged) != set(existing_tags):
-                        cur.execute(
-                            "UPDATE hands SET tags = %s WHERE id = %s",
-                            (merged, existing["id"])
-                        )
+
+                    # Build all_players_actions for update
+                    import json
+                    all_players = parsed.get("all_players", {})
+                    all_players["_meta"] = {
+                        "level": parsed.get("level"),
+                        "sb": parsed.get("sb_size", 0),
+                        "bb": parsed.get("bb_size", 0),
+                        "ante": parsed.get("ante_size", 0),
+                        "num_players": parsed.get("num_players", 0),
+                    }
+
+                    cur.execute(
+                        "UPDATE hands SET tags = %s, all_players_actions = %s WHERE id = %s",
+                        (merged, json.dumps(all_players), existing["id"])
+                    )
+
+                    # Extract villains for nota++ hands (existing too)
+                    if "nota++" in tags_clean:
+                        dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
+                        hero = dealt_m.group(1) if dealt_m else None
+                        vpip_players = _detect_vpip_hm3(parsed.get("raw", ""), hero)
+                        for vp_name in vpip_players:
+                            cur.execute(
+                                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                                   VALUES (%s, %s, 1, NOW())
+                                   ON CONFLICT (site, nick) DO UPDATE SET
+                                       hands_seen = villain_notes.hands_seen + 1,
+                                       updated_at = NOW()""",
+                                (site_name, vp_name)
+                            )
+                            villains_created += 1
+
                     skipped += 1
                     continue
 
