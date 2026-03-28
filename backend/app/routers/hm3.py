@@ -350,6 +350,81 @@ def _parse_hand(hh_text, site_name):
     return result
 
 
+# ── VPIP Detection for HM3 hands ──────────────────────────────────────────────
+
+def _detect_vpip_hm3(raw_text, hero_name=None):
+    """
+    Detects players who made VPIP preflop from raw HH text.
+    Returns { player_name: "action_desc", ... } excluding hero.
+    Works for Winamax, PokerStars, and WPN formats.
+    """
+    vpip_players = {}
+    if not raw_text:
+        return vpip_players
+
+    # Find preflop section
+    preflop_start = -1
+    for marker in ["*** HOLE CARDS ***", "*** PRE-FLOP ***"]:
+        idx = raw_text.find(marker)
+        if idx != -1:
+            preflop_start = idx
+            break
+    if preflop_start == -1:
+        return vpip_players
+
+    preflop_end = len(raw_text)
+    for marker in ["*** FLOP ***", "*** SUMMARY ***", "*** SHOW DOWN ***"]:
+        idx = raw_text.find(marker, preflop_start)
+        if idx != -1 and idx < preflop_end:
+            preflop_end = idx
+
+    preflop_section = raw_text[preflop_start:preflop_end]
+
+    for line in preflop_section.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("***") or line.startswith("Dealt"):
+            continue
+
+        m = re.match(r"^(.+?)(?::)?\s+(.+)$", line)
+        if not m:
+            continue
+
+        actor = m.group(1).strip()
+        action_text = m.group(2).strip().lower()
+
+        # Skip posts (antes/blinds)
+        if "posts" in action_text:
+            continue
+
+        # Skip hero
+        if hero_name and actor == hero_name:
+            continue
+        if actor.lower() in HERO_NAMES:
+            continue
+
+        # Check VPIP
+        is_vpip = False
+        action_desc = ""
+        if action_text.startswith("calls"):
+            is_vpip = True
+            action_desc = "call"
+        elif action_text.startswith("raises"):
+            is_vpip = True
+            action_desc = "raise"
+        elif action_text.startswith("bets"):
+            is_vpip = True
+            action_desc = "bet"
+        elif "all-in" in action_text or "all in" in action_text:
+            if not action_text.startswith("folds"):
+                is_vpip = True
+                action_desc = "all-in"
+
+        if is_vpip and actor not in vpip_players:
+            vpip_players[actor] = action_desc
+
+    return vpip_players
+
+
 # ── CSV Import ────────────────────────────────────────────────────────────────
 
 @router.post("/import")
@@ -377,6 +452,7 @@ async def import_hm3(
     inserted = 0
     skipped = 0
     errors = []
+    villains_created = 0
 
     conn = get_conn()
     try:
@@ -451,7 +527,29 @@ async def import_hm3(
                         json.dumps(all_players),
                     )
                 )
+                hand_db_id = cur.fetchone()["id"]
                 inserted += 1
+
+                # Extract villains for nota++ hands
+                if "nota++" in tags_clean:
+                    hero_name = parsed.get("raw", "")
+                    dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
+                    hero = dealt_m.group(1) if dealt_m else None
+                    vpip_players = _detect_vpip_hm3(parsed.get("raw", ""), hero)
+                    for vp_name, vp_action in vpip_players.items():
+                        # Get position from all_players
+                        vp_info = all_players.get(vp_name, {})
+                        vp_pos = vp_info.get("position", "?") if isinstance(vp_info, dict) else "?"
+                        # Auto-populate villain_notes
+                        cur.execute(
+                            """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                               VALUES (%s, %s, 1, NOW())
+                               ON CONFLICT (site, nick) DO UPDATE SET
+                                   hands_seen = villain_notes.hands_seen + 1,
+                                   updated_at = NOW()""",
+                            (site_name, vp_name)
+                        )
+                        villains_created += 1
 
         conn.commit()
     except Exception as e:
@@ -466,6 +564,7 @@ async def import_hm3(
         "total_rows": len(hands_map),
         "inserted": inserted,
         "skipped_duplicates": skipped,
+        "villains_created": villains_created,
         "errors": len(errors),
         "error_log": errors[:20],
         "sites": {
