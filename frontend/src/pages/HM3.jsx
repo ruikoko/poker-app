@@ -169,7 +169,10 @@ function parseRawHH(raw) {
       if (!trimmed || trimmed.startsWith('***')) continue
       const showM = trimmed.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\](.*)/)
       const collectM = trimmed.match(/^(.+?)\s+collected\s+([\d,]+)/)
-      if (showM) actions.push({ name: showM[1].trim(), action: `shows [${showM[2]}]${showM[3] ? ' ' + showM[3].trim() : ''}`, isHero: heroName && showM[1].trim() === heroName })
+      if (showM) {
+        const cards = showM[2].trim().split(/\s+/)
+        actions.push({ name: showM[1].trim(), action: `shows [${showM[2]}]${showM[3] ? ' ' + showM[3].trim() : ''}`, cards, isHero: heroName && showM[1].trim() === heroName })
+      }
       else if (collectM) actions.push({ name: collectM[1].trim(), action: `collected ${collectM[2]}`, isHero: heroName && collectM[1].trim() === heroName })
     }
     if (actions.length > 0) streets.push({ key: 'showdown', actions })
@@ -299,21 +302,52 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         {/* Parsed HH Actions */}
         {streets && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 10, textTransform: 'uppercase' }}>Hand History</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 10, textTransform: 'uppercase' }}>
+              <span>Hand History</span>
+              {(() => {
+                const m = hand.all_players_actions?._meta
+                return m ? <span style={{ fontFamily: 'monospace', color: '#4b5563', fontWeight: 600, fontSize: 10 }}>
+                  {m.sb && m.bb ? `${Math.round(m.sb)}/${Math.round(m.bb)}${m.ante ? `(${Math.round(m.ante)})` : ''}` : ''}
+                </span> : null
+              })()}
+            </div>
             {streets.map(({ key, actions }) => {
               const color = STREET_COLORS[key] || '#94a3b8'
+              const isShowdown = key === 'showdown'
               return (
                 <div key={key} style={{ marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color, textTransform: 'uppercase', padding: '2px 8px', borderRadius: 4, background: `${color}15`, border: `1px solid ${color}30` }}>{STREET_LABELS[key]}</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', background: '#0f1117', borderRadius: 8, padding: '4px 12px', border: '1px solid #1e2130', marginTop: 6 }}>
-                    {actions.map((a, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', borderBottom: i < actions.length - 1 ? '1px solid #1a1d27' : 'none' }}>
-                        <span style={{ fontSize: 11, color: a.isHero ? '#818cf8' : '#94a3b8', fontWeight: a.isHero ? 600 : 400, minWidth: 100 }}>
-                          {a.name}{a.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
-                        </span>
-                        <ActionBadge text={a.action} />
-                      </div>
-                    ))}
+                  <div style={{ display: 'flex', flexDirection: 'column', background: isShowdown ? '#0d1020' : '#0f1117', borderRadius: 8, padding: isShowdown ? '8px 12px' : '4px 12px', border: `1px solid ${isShowdown ? '#2a2050' : '#1e2130'}`, marginTop: 6 }}>
+                    {actions.map((a, i) => {
+                      const showCards = a.cards || []
+                      const isShow = showCards.length > 0
+                      const playerInfo = hand.all_players_actions?.[a.name]
+                      const pos = playerInfo?.position
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: isShowdown ? '6px 0' : '3px 0', borderBottom: i < actions.length - 1 ? `1px solid ${isShowdown ? '#1e1840' : '#1a1d27'}` : 'none' }}>
+                          {pos && <PosBadge pos={pos} />}
+                          <span style={{ fontSize: 11, color: a.isHero ? '#818cf8' : '#94a3b8', fontWeight: a.isHero ? 600 : 400, minWidth: 100 }}>
+                            {a.name}{a.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                          </span>
+                          {playerInfo?.stack_bb && !isShowdown && (
+                            <span style={{ fontSize: 9, color: '#374151', fontFamily: 'monospace', minWidth: 40 }}>{playerInfo.stack_bb}bb</span>
+                          )}
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                            {isShow ? (
+                              <>
+                                <span style={{ fontSize: 10, color: '#8b5cf6', fontWeight: 600 }}>shows</span>
+                                <div style={{ display: 'flex', gap: 3 }}>
+                                  {showCards.map((c, ci) => <PokerCard key={ci} card={c} size="md" />)}
+                                </div>
+                                {a.action.includes('(') && <span style={{ fontSize: 10, color: '#4b5563', fontStyle: 'italic' }}>{a.action.match(/\((.+)\)/)?.[1] || ''}</span>}
+                              </>
+                            ) : (
+                              <ActionBadge text={a.action} />
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )
@@ -377,6 +411,9 @@ function HM3HandRow({ hand, onClick, onDelete, idx }) {
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
       <div style={{ minWidth: 22, flexShrink: 0, fontSize: 9, color: '#4b5563' }}>{siteShort}</div>
+      <div style={{ minWidth: 32, flexShrink: 0, fontSize: 9, color: '#374151', fontFamily: 'monospace' }}>
+        {hand.played_at ? hand.played_at.slice(11, 16) : ''}
+      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, flex: 1, minWidth: 0 }}>
         {hand.tags?.slice(0, 3).map(t => <Tag key={t} t={t} />)}
       </div>
