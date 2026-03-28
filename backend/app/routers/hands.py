@@ -32,7 +32,9 @@ class HandUpdate(BaseModel):
 
 def _build_conditions(
     site, tag, study_state, position, search, date_from,
-    exclude_mtt_only: bool = False
+    exclude_mtt_only: bool = False,
+    result_min: float = None,
+    result_max: float = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
@@ -66,16 +68,18 @@ def _build_conditions(
         conditions.append("h.played_at >= %s")
         params.append(date_from)
 
+    if result_min is not None:
+        conditions.append("h.result >= %s")
+        params.append(result_min)
+
+    if result_max is not None:
+        conditions.append("h.result <= %s")
+        params.append(result_max)
+
     if exclude_mtt_only:
-        # Excluir mãos que têm APENAS a tag 'mtt' (bulk HH sem marcação de estudo)
-        # Inclui: mãos sem tags, mãos com outras tags, mãos com mtt + outras tags
         conditions.append(
             "(h.tags IS NULL OR h.tags = '{}' OR NOT (h.tags = ARRAY['mtt']::text[]))"
         )
-
-    # Por defeito, excluir sempre mãos de arquivo MTT (study_state='mtt_archive')
-    # a menos que seja pedido explicitamente (via study_state='mtt_archive')
-    # Esta condição é gerida no caller
 
     return conditions, params
 
@@ -88,6 +92,8 @@ def list_hands(
     position:         Optional[str] = Query(None, description="Filtrar por posição"),
     search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
     date_from:        Optional[str] = Query(None, description="Filtrar por data (ISO date, ex: 2026-03-20)"),
+    result_min:       Optional[float] = Query(None, description="Resultado mínimo em BB"),
+    result_max:       Optional[float] = Query(None, description="Resultado máximo em BB"),
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT (mtt_archive)"),
     page:             int = Query(1, ge=1),
@@ -95,7 +101,8 @@ def list_hands(
     current_user=Depends(require_auth)
 ):
     conditions, params = _build_conditions(
-        site, tag, study_state, position, search, date_from, exclude_mtt_only
+        site, tag, study_state, position, search, date_from, exclude_mtt_only,
+        result_min, result_max
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':
