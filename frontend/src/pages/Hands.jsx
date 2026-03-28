@@ -871,15 +871,15 @@ function extractLevel(raw) {
 function HandRow({ hand, onClick, onDelete, idx }) {
   const level = extractLevel(hand.raw)
   const meta = hand.all_players_actions?._meta
-  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : null
+  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}` : null
   const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
 
   return (
     <div
       onClick={onClick}
       style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '8px 16px',
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 12px',
         background: zebra,
         borderBottom: '1px solid rgba(255,255,255,0.03)',
         cursor: 'pointer',
@@ -888,58 +888,32 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      {/* Estado */}
-      <div style={{ minWidth: 55, flexShrink: 0 }}>
-        <StateBadge state={hand.study_state} />
-      </div>
-
-      {/* Cartas do hero */}
-      <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
+      <div style={{ minWidth: 48, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
+      <div style={{ display: 'flex', gap: 2, minWidth: 50, flexShrink: 0 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>
         }
       </div>
-
-      {/* Posição */}
-      <div style={{ minWidth: 40, flexShrink: 0 }}>
-        <PosBadge pos={hand.position} />
-      </div>
-
-      {/* Resultado */}
-      <div style={{ minWidth: 70, flexShrink: 0 }}>
-        <ResultBadge result={hand.result} />
-      </div>
-
-      {/* Torneio + BI */}
-      <div style={{
-        flex: 1, fontSize: 11, color: '#64748b',
-        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-      }}>
+      <div style={{ minWidth: 36, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ minWidth: 60, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ minWidth: 100, maxWidth: 200, fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>
         {hand.stakes || ''}
       </div>
-
-      {/* Board inline */}
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#374151', fontSize: 10 }}>&mdash;</span>
         }
       </div>
-
-      {/* Level + Blinds */}
-      <div style={{ minWidth: 80, flexShrink: 0, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+      <div style={{ minWidth: 55, flexShrink: 0, fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-
-      {/* Data */}
-      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 62, flexShrink: 0 }}>
+      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 58, flexShrink: 0 }}>
         {hand.played_at ? hand.played_at.slice(0, 10) : ''}
       </div>
-
-      {/* Delete */}
       <button
-        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
+        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 11, padding: '0 3px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete() }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
         onMouseLeave={e => e.currentTarget.style.color = '#374151'}
