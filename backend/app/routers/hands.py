@@ -69,12 +69,14 @@ def _build_conditions(
         params.append(date_from)
 
     if result_min is not None:
-        conditions.append("h.result >= %s")
+        conditions.append("(h.result >= %s OR h.result <= %s)")
         params.append(result_min)
+        params.append(-abs(result_min))
 
     if result_max is not None:
-        conditions.append("h.result <= %s")
+        conditions.append("(h.result <= %s AND h.result >= %s)")
         params.append(result_max)
+        params.append(-abs(result_max))
 
     if exclude_mtt_only:
         conditions.append(
