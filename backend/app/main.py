@@ -13,6 +13,7 @@ from app.routers.discord import router as discord_router
 from app.routers.screenshot import router as screenshot_router
 from app.routers.mtt import router as mtt_router, ensure_mtt_schema
 from app.routers.hm3 import router as hm3_router
+from app.routers.stats import router as stats_router
 
 load_dotenv()
 
@@ -199,6 +200,7 @@ app.include_router(discord_router)
 app.include_router(screenshot_router)
 app.include_router(mtt_router)
 app.include_router(hm3_router)
+app.include_router(stats_router)
 
 # Serve uploaded screenshots as static files
 import os
