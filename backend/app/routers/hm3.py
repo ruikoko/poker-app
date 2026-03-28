@@ -40,6 +40,8 @@ HERO_NAMES = {
     "schadenfreud", "thinvalium", "sapz",
     "misterpoker1973",
     "cringemeariver",
+    "flightrisk", "karluz",
+    "koumpounophobia", "lauro dermio",
 }
 
 # ── Position Logic ────────────────────────────────────────────────────────────
