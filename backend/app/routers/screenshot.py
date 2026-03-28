@@ -85,6 +85,11 @@ def _parse_filename(filename: str) -> dict:
     tm_m = re.search(r'#TM(\d+)', filename)
     if tm_m:
         result["tm"] = f"TM{tm_m.group(1)}"
+    else:
+        # Also try format: #NUMBER (without TM prefix)
+        tm_m2 = re.search(r'#(\d{8,})', filename)
+        if tm_m2:
+            result["tm"] = f"TM{tm_m2.group(1)}"
 
     date_m = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
     if date_m:
@@ -132,7 +137,7 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
         prompt = (
             "This is a GGPoker hand replayer screenshot.\n\n"
             "KNOWN FACTS:\n"
-            "- The HERO is always 'Lauro Dermio' or 'koumpounophobia' (bottom center of table).\n"
+            "- The HERO is always 'Lauro Dermio', 'koumpounophobia', 'FlightRisk', or 'Karluz' (bottom center of table).\n"
             "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
             "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
             "- Players with 'WIN' overlay on their avatar must still be included.\n"
@@ -378,7 +383,7 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
     hh_data = _parse_hh_stacks_and_blinds(raw_hh) if raw_hh else None
 
     used_vision = set()
-    hero_names = ["lauro dermio", "koumpounophobia", "lauro derm"]
+    hero_names = ["lauro dermio", "koumpounophobia", "lauro derm", "flightrisk", "karluz"]
 
     # ── Fase 1: Âncoras fixas ────────────────────────────────────────────
 
