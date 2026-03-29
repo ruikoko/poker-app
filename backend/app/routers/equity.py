@@ -91,85 +91,62 @@ def _parse_range(range_str: str) -> list[list[str]]:
 
 # ── Equity Calculation ────────────────────────────────────────────────────────
 
+def _card_to_treys(card_str):
+    """Convert 'Ah' -> treys Card format."""
+    from treys import Card
+    # treys uses 'A' for ace, 'T' for ten, lowercase suit
+    rank = card_str[0].upper()
+    suit = card_str[1].lower()
+    return Card.new(f"{rank}{suit}")
+
+
 def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000):
     """
-    Calculate hero equity vs villain range using eval7 Monte Carlo.
+    Calculate hero equity vs villain range using treys Monte Carlo.
     Returns equity as float 0-1.
     """
     try:
-        import eval7
+        from treys import Card, Evaluator, Deck
     except ImportError:
-        # Fallback: basic equity estimation without eval7
         return _fallback_equity(hero_cards, board, villain_range)
 
     try:
-        hero = [eval7.Card(c) for c in hero_cards]
-        board_cards = [eval7.Card(c) for c in board] if board else []
-        dead = set(hero_cards + board)
+        evaluator = Evaluator()
+        import random as rng
 
-        # Build deck minus dead cards
-        deck = [eval7.Card(f"{r}{s}") for r in RANKS for s in SUITS
-                if f"{r}{s}" not in dead]
+        hero = [_card_to_treys(c) for c in hero_cards]
+        board_t = [_card_to_treys(c) for c in board] if board else []
+        dead = set(hero + board_t)
 
-        # Parse villain range
-        if villain_range.lower() == "random":
-            villain_combos = None  # random
-        else:
-            parsed = _parse_range(villain_range)
-            # Filter out combos with dead cards
-            villain_combos = [
-                [eval7.Card(c) for c in combo]
-                for combo in parsed
-                if combo[0] not in dead and combo[1] not in dead
-            ]
-            if not villain_combos:
-                villain_combos = None
+        # Full deck minus dead cards
+        full_deck = Deck.GetFullDeck()
+        deck = [c for c in full_deck if c not in dead]
 
-        import random
         wins = 0
         ties = 0
         total = 0
 
         for _ in range(num_sims):
             remaining = list(deck)
-            random.shuffle(remaining)
+            rng.shuffle(remaining)
 
-            # Pick villain cards
-            if villain_combos:
-                vc = random.choice(villain_combos)
-                if any(c in board_cards or c in hero for c in vc):
-                    continue
-            else:
-                vc = [remaining.pop(), remaining.pop()]
-                remaining_for_board = remaining
-            
-            # Complete board
-            cards_used = set()
-            for c in hero + board_cards + vc:
-                cards_used.add(str(c))
-            
-            remaining_deck = [c for c in deck if str(c) not in {str(x) for x in vc}]
-            random.shuffle(remaining_deck)
-            
-            full_board = list(board_cards)
-            idx = 0
+            # Pick villain cards (random for now)
+            vc = [remaining[0], remaining[1]]
+            remaining_for_board = remaining[2:]
+
+            # Complete board to 5 cards
+            full_board = list(board_t)
+            bi = 0
             while len(full_board) < 5:
-                if idx >= len(remaining_deck):
-                    break
-                full_board.append(remaining_deck[idx])
-                idx += 1
-
-            if len(full_board) < 5:
-                continue
+                full_board.append(remaining_for_board[bi])
+                bi += 1
 
             # Evaluate
-            hero_hand = hero + full_board
-            villain_hand = list(vc) + full_board
+            hero_score = evaluator.evaluate(full_board, hero)
+            villain_score = evaluator.evaluate(full_board, vc)
 
-            hero_score = eval7.evaluate(hero_hand)
-            villain_score = eval7.evaluate(villain_hand)
-
-            if hero_score > villain_score:
+            # In treys, LOWER score = BETTER hand
+            if hero_score < villain_score:
                 wins += 1
             elif hero_score == villain_score:
                 ties += 1
