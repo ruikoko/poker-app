@@ -141,3 +141,67 @@ def discord_stats(date_from: str = None, current_user=Depends(require_auth)):
         "by_channel": [dict(r) for r in channel_rows],
         "sync": sync_stats,
     }
+
+
+@router.post("/resolve-replayers")
+async def resolve_replayers(current_user=Depends(require_auth)):
+    """
+    Re-processa entries de gg_replayer que não têm imagem extraída.
+    Faz fetch dos links gg.gl e extrai as imagens PNG.
+    """
+    from app.db import get_conn
+    from app.discord_bot import _extract_gg_replayer_image
+    import json
+
+    # Find entries with gg_replayer content that don't have image
+    rows = query("""
+        SELECT e.id, h.id as hand_id, h.raw as url
+        FROM entries e
+        JOIN hands h ON h.entry_id = e.id
+        WHERE e.entry_type = 'replayer_link'
+          AND e.site = 'GGPoker'
+          AND (e.raw_json->>'gg_replayer_resolved' IS NULL OR e.raw_json->>'gg_replayer_resolved' = 'false')
+          AND h.raw LIKE 'https://gg.gl/%'
+    """)
+
+    resolved = 0
+    errors = []
+
+    conn = get_conn()
+    try:
+        for row in rows:
+            url = row["url"]
+            entry_id = row["id"]
+            hand_id = row["hand_id"]
+
+            img_data = _extract_gg_replayer_image(url)
+            if img_data:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE entries SET raw_json = COALESCE(raw_json, '{}'::jsonb) || %s WHERE id = %s",
+                        (
+                            json.dumps({
+                                "img_url": img_data.get("img_url"),
+                                "img_b64": img_data.get("img_b64"),
+                                "mime_type": "image/png",
+                                "gg_replayer_resolved": True,
+                            }),
+                            entry_id,
+                        ),
+                    )
+                    cur.execute(
+                        "UPDATE hands SET screenshot_url = %s WHERE id = %s",
+                        (img_data.get("img_url"), hand_id),
+                    )
+                resolved += 1
+            else:
+                errors.append(f"Failed: {url}")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        errors.append(str(e))
+    finally:
+        conn.close()
+
+    return {"ok": True, "resolved": resolved, "errors": errors[:10], "total_pending": len(rows)}
