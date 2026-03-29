@@ -765,7 +765,7 @@ export default function InboxPage() {
           )}
         </div>
 
-        {newHandsOpen && (
+        {newHandsOpen && (<>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
@@ -888,7 +888,7 @@ export default function InboxPage() {
             >&#8594;</button>
           </div>
         )}
-        )}
+        </>)}
       </div>
     </>
   )
