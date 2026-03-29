@@ -16,7 +16,7 @@ function MiniCard({ card }) {
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: 22, height: 30, background: bg, border: '1px solid rgba(255,255,255,0.2)',
-      borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: 9,
+      borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: 11,
       fontWeight: 700, color: '#fff', lineHeight: 1, flexDirection: 'column', gap: 0,
     }}>
       <span>{rank}</span>
@@ -37,7 +37,7 @@ function PosBadge({ pos }) {
   return (
     <span style={{
       display: 'inline-block', padding: '1px 6px', borderRadius: 3,
-      fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+      fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
       color: c, background: `${c}18`, border: `1px solid ${c}30`,
     }}>{pos}</span>
   )
@@ -200,7 +200,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                 background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130',
               }}>
                 Sem mãos em comum na BD.<br />
-                <span style={{ fontSize: 11, color: '#374151' }}>Importa HH ou faz match de screenshots.</span>
+                <span style={{ fontSize: 11, color: '#4b5563' }}>Importa HH ou faz match de screenshots.</span>
               </div>
             )}
 
@@ -253,16 +253,16 @@ function VillainProfile({ villain, onClose, onSave }) {
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
                         <span style={{ color: '#4b5563', fontSize: 10 }}>{isExpanded ? '▼' : '▶'}</span>
-                        <span style={{ fontSize: 10, color: '#4b5563', minWidth: 48 }}>
+                        <span style={{ fontSize: 11, color: '#4b5563', minWidth: 48 }}>
                           {h.played_at ? h.played_at.slice(5, 10) : '—'}
                         </span>
                         {/* Villain position + cards first */}
                         <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                           <PosBadge pos={villainPos} />
-                          <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>{villain.nick}</span>
+                          <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>{villain.nick}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: 10, color: '#4b5563' }}>vs</span>
+                          <span style={{ fontSize: 11, color: '#4b5563' }}>vs</span>
                           <PosBadge pos={h.position} />
                           {h.hero_cards?.map((c, j) => <MiniCard key={j} card={c} />)}
                         </div>
@@ -271,7 +271,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                         </div>
                         <ResultBadge result={h.result} />
                         {h.stakes && (
-                          <span style={{ fontSize: 9, color: '#4b5563', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: 11, color: '#4b5563', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {h.stakes}
                           </span>
                         )}
@@ -290,7 +290,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                           {/* All players table */}
                           {sortedPlayers.length > 0 && (
                             <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>
+                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>
                                 Mesa ({sortedPlayers.length} jogadores)
                               </div>
                               <div style={{ background: '#0f1117', borderRadius: 6, padding: '4px 8px', border: '1px solid #1e2130' }}>
@@ -310,7 +310,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                                       {p.name === villain.nick && <span style={{ fontSize: 8, color: '#f59e0b', marginLeft: 3 }}>★</span>}
                                     </span>
                                     {p.stack_bb != null && (
-                                      <span style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace' }}>
+                                      <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace' }}>
                                         {p.stack_bb.toFixed(1)} BB
                                       </span>
                                     )}
@@ -323,7 +323,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                           {/* Screenshot */}
                           {ssCache[h.id] && (
                             <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>Screenshot</div>
+                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>Screenshot</div>
                               <img
                                 src={ssCache[h.id]}
                                 alt="Screenshot"
@@ -333,7 +333,7 @@ function VillainProfile({ villain, onClose, onSave }) {
                             </div>
                           )}
                           {!ssCache[h.id] && (h.entry_id || h.player_names?.screenshot_entry_id) && (
-                            <div style={{ fontSize: 10, color: '#f59e0b', marginBottom: 8 }}>A carregar screenshot...</div>
+                            <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 8 }}>A carregar screenshot...</div>
                           )}
                         </div>
                       )}
@@ -397,6 +397,8 @@ export default function VillainsPage() {
   const [data, setData]       = useState({ data: [], total: 0, pages: 1 })
   const [page, setPage]       = useState(1)
   const [search, setSearch]   = useState('')
+  const [siteFilter, setSiteFilter] = useState('')
+  const [sortBy, setSortBy]   = useState('hands_desc')
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -410,13 +412,13 @@ export default function VillainsPage() {
 
   function load(p = page, s = search) {
     setLoading(true)
-    villains.list({ page: p, page_size: 50, search: s || undefined })
+    villains.list({ page: p, page_size: 50, search: s || undefined, site: siteFilter || undefined, sort: sortBy || undefined })
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [page])
+  useEffect(() => { load() }, [page, siteFilter, sortBy])
 
   function handleSearch(e) {
     e.preventDefault()
@@ -499,7 +501,7 @@ export default function VillainsPage() {
       {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
 
       <div style={{ marginBottom: 12 }}>
-        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8 }}>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -508,6 +510,20 @@ export default function VillainsPage() {
           />
           <button type="submit" className="btn btn-ghost btn-sm">Buscar</button>
           {search && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); load(1, '') }}>✕</button>}
+          <select value={siteFilter} onChange={e => { setSiteFilter(e.target.value); setPage(1) }} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 11px', fontSize: 12 }}>
+            <option value="">Todas as salas</option>
+            <option value="GGPoker">GGPoker</option>
+            <option value="Winamax">Winamax</option>
+            <option value="PokerStars">PokerStars</option>
+            <option value="WPN">WPN</option>
+          </select>
+          <select value={sortBy} onChange={e => { setSortBy(e.target.value); setPage(1) }} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 11px', fontSize: 12 }}>
+            <option value="hands_desc">Mais mãos</option>
+            <option value="hands_asc">Menos mãos</option>
+            <option value="updated_desc">Actualizado recente</option>
+            <option value="updated_asc">Actualizado antigo</option>
+            <option value="nick_asc">Nick A-Z</option>
+          </select>
         </form>
       </div>
 
@@ -545,7 +561,7 @@ export default function VillainsPage() {
                   <td className="muted">{v.site || '—'}</td>
                   <td style={{ minWidth: 200, maxWidth: 300 }}>
                     <span className="muted" style={{ fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {v.note || <em style={{ color: '#374151' }}>Sem nota</em>}
+                      {v.note || <em style={{ color: '#4b5563' }}>Sem nota</em>}
                     </span>
                   </td>
                   <td>
