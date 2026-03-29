@@ -26,6 +26,7 @@ def list_villains(
     site:      Optional[str] = Query(None),
     tag:       Optional[str] = Query(None),
     search:    Optional[str] = Query(None, description="Busca por nick (ILIKE)"),
+    sort:      Optional[str] = Query(None, description="Ordenação: hands_desc, hands_asc, updated_desc, updated_asc, nick_asc"),
     page:      int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     current_user=Depends(require_auth)
@@ -47,6 +48,16 @@ def list_villains(
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+    # Sort
+    sort_map = {
+        "hands_desc": "hands_seen DESC NULLS LAST",
+        "hands_asc": "hands_seen ASC NULLS LAST",
+        "updated_desc": "updated_at DESC",
+        "updated_asc": "updated_at ASC",
+        "nick_asc": "nick ASC",
+    }
+    order_by = sort_map.get(sort, "hands_seen DESC NULLS LAST")
+
     total = query(f"SELECT COUNT(*) AS total FROM villain_notes {where}", params)[0]["total"]
     offset = (page - 1) * page_size
 
@@ -55,7 +66,7 @@ def list_villains(
         SELECT id, site, nick, note, tags, hands_seen, created_at, updated_at
         FROM villain_notes
         {where}
-        ORDER BY updated_at DESC
+        ORDER BY {order_by}
         LIMIT %s OFFSET %s
         """,
         params + [page_size, offset]
