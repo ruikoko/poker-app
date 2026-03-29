@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { hands, equity } from '../api/client'
+import Replayer from '../components/Replayer'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -944,9 +945,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           </div>
         )}
 
-        {/* Hand Analysis — Pot Odds, MDF, MBF */}
-        {hand.raw && hand.hero_cards?.length === 2 && (
-          <HandAnalysisPanel handId={hand.id} />
+        {/* Replayer */}
+        {hand.raw && hand.all_players_actions && (
+          <Replayer hand={hand} />
         )}
 
         {/* Source info */}
