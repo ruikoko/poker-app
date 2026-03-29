@@ -805,6 +805,11 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                     <span style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>
                       {p.stack_bb ? `${p.stack_bb} BB` : ''}
                     </span>
+                    {p.bounty != null && (
+                      <span style={{ fontSize: 10, color: '#f59e0b', fontFamily: 'monospace' }}>
+                        {p.bounty}€
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
