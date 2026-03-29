@@ -162,28 +162,46 @@ def _parse_hand(hh_text, site_name):
     table_m = re.search(r"Seat\s*#(\d+)\s+is the button", hh_text)
     button_seat = int(table_m.group(1)) if table_m else None
 
-    # ── Seats ──
+    # ── Seats + Bounties ──
     seats = {}
     all_seat_nums = []
     hero_seat = None
     hero_name = None
 
     if site_name == "Winamax":
-        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d.]+)(?:,\s*[^)]+)?\)", hh_text):
+        # Winamax: Seat 1: thinvalium (12379, 20€ bounty)  or  Seat 1: name (12379)
+        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d.]+)(?:,\s*([^)]+))?\)", hh_text):
             seat_num = int(sm.group(1))
             name = sm.group(2).strip()
             stack = float(sm.group(3).replace(",", ""))
-            seats[seat_num] = {"name": name, "stack": stack}
+            bounty = None
+            extra = sm.group(4)
+            if extra:
+                bm = re.search(r"([\d.]+)\s*[€$]?\s*bounty", extra, re.I)
+                if bm:
+                    bounty = float(bm.group(1))
+                else:
+                    bm2 = re.search(r"[€$]([\d.]+)\s*bounty", extra, re.I)
+                    if bm2:
+                        bounty = float(bm2.group(1))
+            seats[seat_num] = {"name": name, "stack": stack, "bounty": bounty}
             all_seat_nums.append(seat_num)
             if name.lower() in HERO_NAMES:
                 hero_seat = seat_num
                 hero_name = name
     else:
-        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)\s+in chips", hh_text):
+        # PokerStars/WPN: Seat 1: name (24500 in chips, $25 bounty)
+        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)\s+in chips(?:,\s*([^)]+))?\)", hh_text):
             seat_num = int(sm.group(1))
             name = sm.group(2).strip()
             stack = float(sm.group(3).replace(",", ""))
-            seats[seat_num] = {"name": name, "stack": stack}
+            bounty = None
+            extra = sm.group(4)
+            if extra:
+                bm = re.search(r"\$([\d.]+)\s*bounty", extra, re.I)
+                if bm:
+                    bounty = float(bm.group(1))
+            seats[seat_num] = {"name": name, "stack": stack, "bounty": bounty}
             all_seat_nums.append(seat_num)
             if name.lower() in HERO_NAMES:
                 hero_seat = seat_num
@@ -291,6 +309,7 @@ def _parse_hand(hh_text, site_name):
                 "stack": stack,
                 "stack_bb": stack_bb,
                 "is_hero": is_hero,
+                "bounty": info.get("bounty"),
             }
 
     # Extract level number
