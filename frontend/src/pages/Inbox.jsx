@@ -21,7 +21,7 @@ function MiniCard({ card }) {
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: 24, height: 32, background: bg, border: '1px solid rgba(255,255,255,0.2)',
-      borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: 10,
+      borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: 11,
       fontWeight: 700, color: '#fff', lineHeight: 1, gap: 0,
     }}>
       <span>{rank}</span>
@@ -42,7 +42,7 @@ function PosBadge({ pos }) {
   return (
     <span style={{
       display: 'inline-block', padding: '1px 6px', borderRadius: 3,
-      fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+      fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
       color: c, background: `${c}18`, border: `1px solid ${c}30`,
     }}>{pos}</span>
   )
@@ -59,7 +59,7 @@ function StateBadge({ state }) {
   return (
     <span style={{
       display: 'inline-block', padding: '2px 8px', borderRadius: 999,
-      fontSize: 10, fontWeight: 600, color: m.color, background: m.bg,
+      fontSize: 11, fontWeight: 600, color: m.color, background: m.bg,
     }}>{m.label}</span>
   )
 }
@@ -155,7 +155,7 @@ function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
         <button
           onClick={() => onRematch(o.id)}
           style={{
-            padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+            padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
             background: 'rgba(99,102,241,0.1)', color: '#818cf8',
             border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
           }}
@@ -163,8 +163,8 @@ function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
         <button
           onClick={() => onDismiss(o.id)}
           style={{
-            padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-            background: 'transparent', color: '#374151',
+            padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+            background: 'transparent', color: '#4b5563',
             border: '1px solid #1e2130', cursor: 'pointer',
           }}
         >&#10005;</button>
@@ -495,7 +495,7 @@ export default function InboxPage() {
                     <div style={{ fontSize: 12, fontWeight: 500, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.file.name}
                     </div>
-                    <div style={{ fontSize: 10, color: '#4b5563' }}>
+                    <div style={{ fontSize: 11, color: '#4b5563' }}>
                       {(item.file.size / 1024).toFixed(0)} KB
                     </div>
                   </div>
@@ -508,7 +508,7 @@ export default function InboxPage() {
                       onClick={e => e.stopPropagation()}
                       style={{
                         background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 4,
-                        color: '#94a3b8', padding: '3px 6px', fontSize: 10,
+                        color: '#94a3b8', padding: '3px 6px', fontSize: 11,
                       }}
                     >
                       <option value="hh">Hand History</option>
@@ -623,7 +623,7 @@ export default function InboxPage() {
               <div style={{ width: '100%', marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {hm3Result.top_tags.slice(0, 10).map(([tag, cnt]) => (
                   <span key={tag} style={{
-                    padding: '1px 7px', borderRadius: 999, fontSize: 10, fontWeight: 600,
+                    padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600,
                     color: '#8b5cf6', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)',
                   }}>#{tag} ({cnt})</span>
                 ))}
@@ -670,7 +670,7 @@ export default function InboxPage() {
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 minWidth: 20, height: 18, padding: '0 6px', borderRadius: 9,
                 background: 'rgba(245,158,11,0.15)', color: '#f59e0b',
-                fontSize: 10, fontWeight: 700,
+                fontSize: 11, fontWeight: 700,
               }}>{orphans.length}</span>
               <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 2 }}>
                 {tmGroups.length} torneio{tmGroups.length !== 1 ? 's' : ''}
@@ -698,7 +698,7 @@ export default function InboxPage() {
                           borderBottom: isOpen ? '1px solid rgba(245,158,11,0.08)' : 'none',
                         }}
                       >
-                        <span style={{ color: '#f59e0b', fontSize: 10, transition: 'transform 0.15s', display: 'inline-block', transform: isOpen ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
+                        <span style={{ color: '#f59e0b', fontSize: 11, transition: 'transform 0.15s', display: 'inline-block', transform: isOpen ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
                         <span style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0', fontFamily: 'monospace' }}>{tm}</span>
                         <span style={{ fontSize: 11, color: '#64748b' }}>{firstMeta.date || ''}</span>
                         <span style={{
@@ -706,14 +706,14 @@ export default function InboxPage() {
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                           minWidth: 18, height: 16, padding: '0 5px', borderRadius: 8,
                           background: 'rgba(99,102,241,0.15)', color: '#818cf8',
-                          fontSize: 10, fontWeight: 700,
+                          fontSize: 11, fontWeight: 700,
                         }}>{entries.length}</span>
                         <span style={{ fontSize: 11, color: '#4b5563' }}>mão{entries.length !== 1 ? 's' : ''}</span>
                         {/* Rematch all */}
                         <button
                           onClick={e => { e.stopPropagation(); entries.forEach(o => handleRematch(o.id)) }}
                           style={{
-                            marginLeft: 'auto', padding: '3px 9px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            marginLeft: 'auto', padding: '3px 9px', borderRadius: 5, fontSize: 11, fontWeight: 600,
                             background: 'rgba(99,102,241,0.12)', color: '#818cf8',
                             border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
                           }}
@@ -749,7 +749,7 @@ export default function InboxPage() {
           cursor: 'pointer', userSelect: 'none',
         }} onClick={() => setNewHandsOpen(!newHandsOpen)}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: '#6366f1', transform: newHandsOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
+            <span style={{ fontSize: 11, color: '#6366f1', transform: newHandsOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>
               Mãos novas ({data.total})
             </span>
@@ -757,10 +757,10 @@ export default function InboxPage() {
           {selectedIds.size > 0 && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: '#818cf8', fontWeight: 600 }}>{selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}</span>
-              <button onClick={() => bulkChangeState('review')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer' }}>Revisão</button>
-              <button onClick={() => bulkChangeState('studying')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(139,92,246,0.1)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.25)', cursor: 'pointer' }}>Estudar</button>
-              <button onClick={() => bulkChangeState('resolved')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}>Resolver</button>
-              <button onClick={bulkDelete} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer' }}>Apagar</button>
+              <button onClick={() => bulkChangeState('review')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer' }}>Revisão</button>
+              <button onClick={() => bulkChangeState('studying')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: 'rgba(139,92,246,0.1)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.25)', cursor: 'pointer' }}>Estudar</button>
+              <button onClick={() => bulkChangeState('resolved')} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}>Resolver</button>
+              <button onClick={bulkDelete} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer' }}>Apagar</button>
             </div>
           )}
         </div>
@@ -776,7 +776,7 @@ export default function InboxPage() {
                 {['Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Acções'].map(h => (
                   <th key={h} style={{
                     padding: '8px 12px', textAlign: 'left', color: '#4b5563',
-                    fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4,
+                    fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4,
                   }}>{h}</th>
                 ))}
               </tr>
@@ -805,12 +805,12 @@ export default function InboxPage() {
                   <td style={{ padding: '8px 12px' }}><PosBadge pos={h.position} /></td>
                   <td style={{ padding: '8px 12px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
-                      {h.hero_cards?.length > 0 ? h.hero_cards.map((c, i) => <MiniCard key={i} card={c} />) : <span style={{ color: '#374151' }}>&mdash;</span>}
+                      {h.hero_cards?.length > 0 ? h.hero_cards.map((c, i) => <MiniCard key={i} card={c} />) : <span style={{ color: '#4b5563' }}>&mdash;</span>}
                     </div>
                   </td>
                   <td style={{ padding: '8px 12px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
-                      {h.board?.length > 0 ? h.board.slice(0, 5).map((c, i) => <MiniCard key={i} card={c} />) : <span style={{ color: '#374151' }}>&mdash;</span>}
+                      {h.board?.length > 0 ? h.board.slice(0, 5).map((c, i) => <MiniCard key={i} card={c} />) : <span style={{ color: '#4b5563' }}>&mdash;</span>}
                     </div>
                   </td>
                   <td style={{ padding: '8px 12px' }}><ResultBadge result={h.result} /></td>
@@ -818,7 +818,7 @@ export default function InboxPage() {
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button
                         style={{
-                          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                          padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                           background: 'rgba(245,158,11,0.1)', color: '#f59e0b',
                           border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer',
                         }}
@@ -826,7 +826,7 @@ export default function InboxPage() {
                       >Revisão</button>
                       <button
                         style={{
-                          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                          padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                           background: 'rgba(139,92,246,0.1)', color: '#8b5cf6',
                           border: '1px solid rgba(139,92,246,0.25)', cursor: 'pointer',
                         }}
@@ -834,7 +834,7 @@ export default function InboxPage() {
                       >Estudar</button>
                       <button
                         style={{
-                          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                          padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                           background: 'rgba(34,197,94,0.1)', color: '#22c55e',
                           border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer',
                         }}
@@ -842,8 +842,8 @@ export default function InboxPage() {
                       >&#10003;</button>
                       <button
                         style={{
-                          padding: '3px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                          background: 'transparent', color: '#374151',
+                          padding: '3px 6px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                          background: 'transparent', color: '#4b5563',
                           border: '1px solid #1e2130', cursor: 'pointer',
                         }}
                         onClick={() => { if (confirm('Apagar esta mão?')) deleteHand(h.id) }}
