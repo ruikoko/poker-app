@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { hands } from '../api/client'
+import { hands, equity } from '../api/client'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -103,7 +103,7 @@ function StateBadge({ state }) {
   return (
     <span style={{
       display: 'inline-block', padding: '2px 9px', borderRadius: 999,
-      fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
+      fontSize: 11, fontWeight: 600, letterSpacing: 0.3,
       color: meta.color, background: meta.bg,
     }}>{meta.label}</span>
   )
@@ -148,7 +148,7 @@ function Tag({ t, onClick, active }) {
       onClick={onClick}
       style={{
         display: 'inline-block', padding: '1px 7px', borderRadius: 999,
-        fontSize: 10, fontWeight: 600, marginRight: 3, marginBottom: 2,
+        fontSize: 11, fontWeight: 600, marginRight: 3, marginBottom: 2,
         color: c, background: active ? `${c}30` : `${c}18`,
         border: `1px solid ${active ? c : `${c}30`}`,
         cursor: onClick ? 'pointer' : 'default',
@@ -229,7 +229,7 @@ function ActionBadge({ text }) {
   return (
     <span style={{
       display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-      fontSize: 10, fontWeight: 600, fontFamily: 'monospace',
+      fontSize: 11, fontWeight: 600, fontFamily: 'monospace',
       color: s.color, background: s.bg, border: `1px solid ${s.color}25`,
       whiteSpace: 'nowrap',
     }}>{text}</span>
@@ -259,7 +259,7 @@ function AllPlayersActions({ actions }) {
           <div key={street} style={{ marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
                 color: STREET_COLORS[street], textTransform: 'uppercase',
                 padding: '2px 8px', borderRadius: 4,
                 background: `${STREET_COLORS[street]}15`,
@@ -288,13 +288,13 @@ function AllPlayersActions({ actions }) {
                       minWidth: 80,
                     }}>
                       {player.name}
-                      {player.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                      {player.isHero && <span style={{ fontSize: 11, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
                     </span>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {acts.map((a, j) => <ActionBadge key={j} text={a} />)}
                     </div>
                     {player.stackBB != null && (
-                      <span style={{ fontSize: 9, color: '#4b5563', marginLeft: 'auto', fontFamily: 'monospace' }}>
+                      <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 'auto', fontFamily: 'monospace' }}>
                         {player.stackBB.toFixed(1)} BB
                       </span>
                     )}
@@ -532,7 +532,7 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
           <div key={key} style={{ marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
                 color, textTransform: 'uppercase',
                 padding: '2px 8px', borderRadius: 4,
                 background: `${color}15`,
@@ -544,7 +544,7 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
                 </div>
               )}
               {potByStreet[key] > 0 && (
-                <span style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
                   Pot: {Math.round(potByStreet[key]).toLocaleString()}{meta?.bb ? ` (${(potByStreet[key] / meta.bb).toFixed(1)}bb)` : ''}
                 </span>
               )}
@@ -576,22 +576,22 @@ function ParsedHandHistory({ raw, playerNames, allPlayersActions }) {
                       minWidth: 90,
                     }}>
                       {a.name}
-                      {a.isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                      {a.isHero && <span style={{ fontSize: 11, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
                     </span>
                     {stack && !isShowdown && (
-                      <span style={{ fontSize: 9, color: '#374151', fontFamily: 'monospace', minWidth: 50 }}>
+                      <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', minWidth: 50 }}>
                         {stack.bb ? `${stack.bb}bb` : ''}
                       </span>
                     )}
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                       {isShow ? (
                         <>
-                          <span style={{ fontSize: 10, color: '#8b5cf6', fontWeight: 600 }}>shows</span>
+                          <span style={{ fontSize: 11, color: '#8b5cf6', fontWeight: 600 }}>shows</span>
                           <div style={{ display: 'flex', gap: 3 }}>
                             {showCards.map((c, ci) => <PokerCard key={ci} card={c} size="md" />)}
                           </div>
                           {a.action.includes('(') && (
-                            <span style={{ fontSize: 10, color: '#4b5563', fontStyle: 'italic' }}>
+                            <span style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>
                               {a.action.match(/\((.+)\)/)?.[1] || ''}
                             </span>
                           )}
@@ -637,7 +637,7 @@ function HeroActionsFromNotes({ notes }) {
               background: '#0f1117', borderRadius: 6, padding: '6px 12px',
               fontSize: 12, border: '1px solid #2a2d3a',
             }}>
-              <span style={{ color: '#64748b', fontSize: 10, fontWeight: 600 }}>{street}: </span>
+              <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600 }}>{street}: </span>
               <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{action}</span>
             </div>
           )
@@ -648,6 +648,74 @@ function HeroActionsFromNotes({ notes }) {
 }
 
 // ── Componente: Modal de Detalhe ─────────────────────────────────────────────
+
+// ── Hand Analysis Panel (Pot Odds, MDF, MBF) ────────────────────────────────
+
+function HandAnalysisPanel({ handId }) {
+  const [analysis, setAnalysis] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  async function load() {
+    if (analysis) { setOpen(!open); return }
+    setLoading(true)
+    try {
+      const data = await equity.handAnalysis(handId)
+      setAnalysis(data)
+      setOpen(true)
+    } catch (e) {
+      console.error('Analysis error:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const SC = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', river: '#ef4444' }
+  const SL = { preflop: 'Pre-Flop', flop: 'Flop', turn: 'Turn', river: 'River' }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <button onClick={load} style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px',
+        borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        background: open ? 'rgba(99,102,241,0.12)' : '#1a1d27',
+        color: open ? '#818cf8' : '#64748b',
+        border: `1px solid ${open ? 'rgba(99,102,241,0.3)' : '#2a2d3a'}`,
+        width: '100%', justifyContent: 'center',
+      }}>
+        {loading ? 'A calcular...' : open ? '▼ Análise de Decisões' : '▶ Análise (Pot Odds · MDF · MBF)'}
+      </button>
+      {open && analysis && analysis.analysis?.length > 0 && (
+        <div style={{ marginTop: 8, background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130', overflow: 'hidden' }}>
+          {analysis.analysis.map((a, i) => {
+            const color = SC[a.street] || '#94a3b8'
+            const isBet = a.action?.includes('bet') || a.action?.includes('raise')
+            return (
+              <div key={i} style={{ padding: '10px 14px', borderBottom: i < analysis.analysis.length - 1 ? '1px solid #1a1d27' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase', padding: '1px 6px', borderRadius: 3, background: `${color}15`, border: `1px solid ${color}30` }}>{SL[a.street]}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: a.action?.includes('fold') ? '#ef4444' : a.action?.includes('call') ? '#22c55e' : '#f59e0b' }}>Hero {a.action}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {a.pot_before != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>POT</div><div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{a.pot_before.toLocaleString()}{a.pot_bb ? <span style={{ fontSize: 11, color: '#4b5563' }}> {a.pot_bb}bb</span> : ''}</div></div>}
+                  {a.facing_bet != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>BET</div><div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', fontFamily: 'monospace' }}>{a.facing_bet.toLocaleString()}{a.bet_bb ? <span style={{ fontSize: 11, color: '#4b5563' }}> {a.bet_bb}bb</span> : ''}</div></div>}
+                  {a.bet_size != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>BET</div><div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', fontFamily: 'monospace' }}>{a.bet_size.toLocaleString()}{a.bet_bb ? <span style={{ fontSize: 11, color: '#4b5563' }}> {a.bet_bb}bb</span> : ''}</div></div>}
+                  {a.pot_odds != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>POT ODDS</div><div style={{ fontSize: 13, fontWeight: 700, color: '#3b82f6', fontFamily: 'monospace' }}>{a.pot_odds}%</div></div>}
+                  {a.mdf != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>MDF</div><div style={{ fontSize: 13, fontWeight: 700, color: '#8b5cf6', fontFamily: 'monospace' }}>{a.mdf}%</div></div>}
+                  {a.mbf != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>MBF</div><div style={{ fontSize: 13, fontWeight: 700, color: '#ec4899', fontFamily: 'monospace' }}>{a.mbf}%</div></div>}
+                  {a.bet_to_pot != null && <div style={{ background: '#1a1d27', borderRadius: 6, padding: '4px 10px' }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>BET/POT</div><div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e', fontFamily: 'monospace' }}>{a.bet_to_pot}%</div></div>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {open && analysis && (!analysis.analysis || analysis.analysis.length === 0) && (
+        <div style={{ marginTop: 8, padding: 16, textAlign: 'center', color: '#4b5563', fontSize: 12, background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130' }}>Sem decisões do Hero para analisar</div>
+      )}
+    </div>
+  )
+}
 
 function HandDetailModal({ hand, onClose, onUpdate }) {
   const [notes, setNotes] = useState(hand.notes || '')
@@ -745,7 +813,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           marginBottom: 20, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap',
         }}>
           <div>
-            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
+            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
               Hero &middot; <PosBadge pos={hand.position} />
             </div>
             <div style={{ display: 'flex', gap: 5 }}>
@@ -757,7 +825,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           </div>
           {hand.board?.length > 0 && (
             <div>
-              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Board</div>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Board</div>
               <div style={{ display: 'flex', gap: 5 }}>
                 {hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="lg" />)}
               </div>
@@ -797,16 +865,16 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                       color: p.is_hero ? '#818cf8' : '#94a3b8',
                       fontWeight: p.is_hero ? 600 : 400,
                     }}>
-                      {p.name}{p.is_hero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
+                      {p.name}{p.is_hero && <span style={{ fontSize: 11, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
                     </span>
                     <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', minWidth: 70 }}>
                       {p.stack ? Number(p.stack).toLocaleString() : '—'}
                     </span>
-                    <span style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace' }}>
                       {p.stack_bb ? `${p.stack_bb} BB` : ''}
                     </span>
                     {p.bounty != null && (
-                      <span style={{ fontSize: 10, color: '#f59e0b', fontFamily: 'monospace' }}>
+                      <span style={{ fontSize: 11, color: '#f59e0b', fontFamily: 'monospace' }}>
                         {p.bounty}€
                       </span>
                     )}
@@ -831,7 +899,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             { l: 'Hand ID', v: hand.hand_id ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{hand.hand_id.slice(-12)}</span> : null },
           ].map(({ l, v }) => (
             <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '8px 12px' }}>
-              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
               <div>{v || <span style={{ color: '#4b5563' }}>&mdash;</span>}</div>
             </div>
           ))}
@@ -874,6 +942,11 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             <img src={screenshotUrl} alt="Screenshot" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
             <button onClick={() => setSsFullscreen(false)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}>✕</button>
           </div>
+        )}
+
+        {/* Hand Analysis — Pot Odds, MDF, MBF */}
+        {hand.raw && hand.hero_cards?.length === 2 && (
+          <HandAnalysisPanel handId={hand.id} />
         )}
 
         {/* Source info */}
@@ -1001,7 +1074,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
-          : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>
+          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>
         }
       </div>
       <div style={{ minWidth: 40, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
@@ -1012,21 +1085,21 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
-          : <span style={{ color: '#374151', fontSize: 10 }}>&mdash;</span>
+          : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>
         }
       </div>
-      <div style={{ minWidth: 65, flexShrink: 0, fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+      <div style={{ minWidth: 65, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 80, flexShrink: 0 }}>
+      <div style={{ fontSize: 11, color: '#4b5563', minWidth: 80, flexShrink: 0 }}>
         {hand.played_at ? (() => {
           const d = hand.played_at.slice(0, 10)
           const t = hand.played_at.slice(11, 16)
-          return <>{d}{t ? <span style={{ color: '#374151', marginLeft: 3 }}>{t}</span> : ''}</>
+          return <>{d}{t ? <span style={{ color: '#4b5563', marginLeft: 3 }}>{t}</span> : ''}</>
         })() : ''}
       </div>
       <button
-        style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
+        style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete() }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
         onMouseLeave={e => e.currentTarget.style.color = '#374151'}
@@ -1112,7 +1185,7 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* Seta */}
           <span style={{
-            display: 'inline-block', fontSize: 10, color: tagColor,
+            display: 'inline-block', fontSize: 11, color: tagColor,
             transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
             transition: 'transform 0.2s',
           }}>&#9654;</span>
@@ -1332,6 +1405,8 @@ export default function HandsPage() {
           <option value="">Todas as salas</option>
           <option value="GGPoker">GGPoker</option>
           <option value="Winamax">Winamax</option>
+          <option value="PokerStars">PokerStars</option>
+          <option value="WPN">WPN</option>
         </select>
 
         <select value={filters.position} onChange={e => set('position', e.target.value)}
@@ -1340,7 +1415,7 @@ export default function HandsPage() {
           {POSITIONS.filter(p => p).map(p => <option key={p} value={p}>{p}</option>)}
         </select>
 
-        <input type="text" placeholder="Pesquisar torneio, tag..."
+        <input type="text" placeholder="Pesquisar torneio, tag, vilão..."
           value={filters.search} onChange={e => set('search', e.target.value)}
           style={{
             background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6,
@@ -1425,7 +1500,7 @@ export default function HandsPage() {
               <thead>
                 <tr style={{ borderBottom: '1px solid #2a2d3a' }}>
                   {['Estado', 'Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Tags', ''].map(h => (
-                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1443,7 +1518,7 @@ export default function HandsPage() {
                     <td style={{ padding: '10px 14px' }}><PosBadge pos={h.position} /></td>
                     <td style={{ padding: '10px 14px' }}>
                       <div style={{ display: 'flex', gap: 3 }}>
-                        {h.hero_cards?.length > 0 ? h.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#374151' }}>&mdash;</span>}
+                        {h.hero_cards?.length > 0 ? h.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563' }}>&mdash;</span>}
                       </div>
                     </td>
                     <td style={{ padding: '10px 14px' }}><BoardCards board={h.board} size="sm" /></td>
@@ -1454,7 +1529,7 @@ export default function HandsPage() {
                       </div>
                     </td>
                     <td style={{ padding: '10px 14px' }}>
-                      <button style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 12 }}
+                      <button style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12 }}
                         onClick={e => { e.stopPropagation(); deleteHand(h.id) }}
                         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
                         onMouseLeave={e => e.currentTarget.style.color = '#374151'}
@@ -1529,7 +1604,7 @@ function HandCard({ hand, onClick, onDelete }) {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <ResultBadge result={hand.result} />
-          <button style={{ background: 'transparent', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 13, padding: '0 2px', lineHeight: 1 }}
+          <button style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 13, padding: '0 2px', lineHeight: 1 }}
             onClick={e => { e.stopPropagation(); onDelete() }}
             onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
             onMouseLeave={e => e.currentTarget.style.color = '#374151'}
@@ -1539,11 +1614,11 @@ function HandCard({ hand, onClick, onDelete }) {
       <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="md" />)
-          : <span style={{ color: '#374151', fontSize: 12, fontStyle: 'italic' }}>cartas não visíveis</span>
+          : <span style={{ color: '#4b5563', fontSize: 12, fontStyle: 'italic' }}>cartas não visíveis</span>
         }
       </div>
       {hand.board?.length > 0 && <div style={{ marginBottom: 10 }}><BoardCards board={hand.board} size="sm" /></div>}
-      {hand.stakes && <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hand.stakes}</div>}
+      {hand.stakes && <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hand.stakes}</div>}
       {hand.tags?.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>{hand.tags.map(t => <Tag key={t} t={t} />)}</div>}
     </div>
   )
