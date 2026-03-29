@@ -12,6 +12,7 @@ import TournamentsPage from './pages/Tournaments'
 import HM3Page from './pages/HM3'
 import StatsPage from './pages/Stats'
 import ReplayerPage from './pages/ReplayerPage'
+import HandDetailPage from './pages/HandDetailPage'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -31,6 +32,13 @@ export default function App() {
           <ReplayerPage />
         </RequireAuth>
       } />
+      <Route path="/hand/:id" element={
+        <RequireAuth>
+          <Shell />
+        </RequireAuth>
+      }>
+        <Route index element={<HandDetailPage />} />
+      </Route>
       <Route path="/" element={
         <RequireAuth>
           <Shell />

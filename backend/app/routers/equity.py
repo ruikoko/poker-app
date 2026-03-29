@@ -89,64 +89,86 @@ def _parse_range(range_str: str) -> list[list[str]]:
     return combos
 
 
-# ── Equity Calculation ────────────────────────────────────────────────────────
-
-def _card_to_treys(card_str):
-    """Convert 'Ah' -> treys Card format."""
-    from treys import Card
-    # treys uses 'A' for ace, 'T' for ten, lowercase suit
-    rank = card_str[0].upper()
-    suit = card_str[1].lower()
-    return Card.new(f"{rank}{suit}")
-
+# ── Equity Calculation (pyeval7) ─────────────────────────────────────────────
 
 def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000):
     """
-    Calculate hero equity vs villain range using treys Monte Carlo.
+    Calculate hero equity vs villain range using pyeval7 Monte Carlo.
+    ~50ms for 10k sims. Supports specific ranges like "TT+,AKs,AKo".
     Returns equity as float 0-1.
     """
     try:
-        from treys import Card, Evaluator, Deck
+        import eval7
     except ImportError:
-        return _fallback_equity(hero_cards, board, villain_range)
+        logger.warning("pyeval7 not installed, trying treys fallback")
+        return _calculate_equity_treys(hero_cards, board, villain_range, num_sims)
 
     try:
-        evaluator = Evaluator()
         import random as rng
 
-        hero = [_card_to_treys(c) for c in hero_cards]
-        board_t = [_card_to_treys(c) for c in board] if board else []
-        dead = set(hero + board_t)
+        hero = [eval7.Card(c) for c in hero_cards]
+        board_cards = [eval7.Card(c) for c in board] if board else []
+        dead = set(str(c) for c in hero + board_cards)
 
-        # Full deck minus dead cards
-        full_deck = Deck.GetFullDeck()
-        deck = [c for c in full_deck if c not in dead]
+        # Build full deck minus dead cards
+        all_cards = [eval7.Card(s) for s in
+            [f"{r}{su}" for r in "23456789TJQKA" for su in "cdhs"]]
+        deck = [c for c in all_cards if str(c) not in dead]
+
+        # Parse villain range into combos
+        range_combos = _parse_range(villain_range)
+
+        # Filter combos that conflict with dead cards
+        if range_combos:
+            valid_combos = []
+            for combo in range_combos:
+                c1, c2 = combo[0], combo[1]
+                if c1 not in dead and c2 not in dead and c1 != c2:
+                    try:
+                        valid_combos.append([eval7.Card(c1), eval7.Card(c2)])
+                    except Exception:
+                        pass
+            if not valid_combos:
+                return 0.5  # No valid combos in range
+        else:
+            valid_combos = None  # random = any 2 cards
 
         wins = 0
         ties = 0
         total = 0
 
         for _ in range(num_sims):
-            remaining = list(deck)
-            rng.shuffle(remaining)
-
-            # Pick villain cards (random for now)
-            vc = [remaining[0], remaining[1]]
-            remaining_for_board = remaining[2:]
+            if valid_combos:
+                # Pick random combo from villain's range
+                villain = rng.choice(valid_combos)
+                # Check no overlap with board
+                v_strs = {str(v) for v in villain}
+                if v_strs & dead:
+                    continue
+                remaining = [c for c in deck if str(c) not in v_strs]
+            else:
+                # Random villain hand
+                rng.shuffle(deck)
+                villain = [deck[0], deck[1]]
+                remaining = deck[2:]
 
             # Complete board to 5 cards
-            full_board = list(board_t)
+            rng.shuffle(remaining)
+            full_board = list(board_cards)
             bi = 0
             while len(full_board) < 5:
-                full_board.append(remaining_for_board[bi])
+                full_board.append(remaining[bi])
                 bi += 1
 
-            # Evaluate
-            hero_score = evaluator.evaluate(full_board, hero)
-            villain_score = evaluator.evaluate(full_board, vc)
+            # Evaluate 7-card hands
+            hero_hand = hero + full_board
+            villain_hand = villain + full_board
 
-            # In treys, LOWER score = BETTER hand
-            if hero_score < villain_score:
+            hero_score = eval7.evaluate(hero_hand)
+            villain_score = eval7.evaluate(villain_hand)
+
+            # In eval7, HIGHER score = BETTER hand
+            if hero_score > villain_score:
                 wins += 1
             elif hero_score == villain_score:
                 ties += 1
@@ -158,7 +180,60 @@ def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000)
         return (wins + ties * 0.5) / total
 
     except Exception as e:
-        logger.error(f"Equity calc error: {e}")
+        logger.error(f"pyeval7 equity calc error: {e}")
+        return _calculate_equity_treys(hero_cards, board, villain_range, num_sims)
+
+
+def _calculate_equity_treys(hero_cards, board, villain_range="random", num_sims=10000):
+    """Fallback: Calculate equity using treys if pyeval7 not available."""
+    try:
+        from treys import Card, Evaluator, Deck
+    except ImportError:
+        return _fallback_equity(hero_cards, board, villain_range)
+
+    def _card_to_treys(card_str):
+        return Card.new(f"{card_str[0].upper()}{card_str[1].lower()}")
+
+    try:
+        evaluator = Evaluator()
+        import random as rng
+
+        hero = [_card_to_treys(c) for c in hero_cards]
+        board_t = [_card_to_treys(c) for c in board] if board else []
+        dead = set(hero + board_t)
+        full_deck = Deck.GetFullDeck()
+        deck = [c for c in full_deck if c not in dead]
+
+        wins = 0
+        ties = 0
+        total = 0
+
+        for _ in range(num_sims):
+            remaining = list(deck)
+            rng.shuffle(remaining)
+            vc = [remaining[0], remaining[1]]
+            remaining_for_board = remaining[2:]
+            full_board = list(board_t)
+            bi = 0
+            while len(full_board) < 5:
+                full_board.append(remaining_for_board[bi])
+                bi += 1
+
+            hero_score = evaluator.evaluate(full_board, hero)
+            villain_score = evaluator.evaluate(full_board, vc)
+
+            if hero_score < villain_score:
+                wins += 1
+            elif hero_score == villain_score:
+                ties += 1
+            total += 1
+
+        if total == 0:
+            return 0.5
+        return (wins + ties * 0.5) / total
+
+    except Exception as e:
+        logger.error(f"Treys equity calc error: {e}")
         return _fallback_equity(hero_cards, board, villain_range)
 
 
