@@ -23,7 +23,7 @@ function PokerCard({ card, size = 'sm' }) {
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: 24, height: 34,
         background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 3, fontSize: 10, color: '#4b5563',
+        borderRadius: 3, fontSize: 11, color: '#4b5563',
       }}>?</span>
     )
   }
@@ -37,7 +37,7 @@ function PokerCard({ card, size = 'sm' }) {
       width: 24, height: 34,
       background: bg, border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 3, fontFamily: "'Fira Code', monospace",
-      fontSize: 10, fontWeight: 700, color: '#fff', lineHeight: 1, gap: 0,
+      fontSize: 11, fontWeight: 700, color: '#fff', lineHeight: 1, gap: 0,
       boxShadow: '0 1px 2px rgba(0,0,0,0.3)', userSelect: 'none',
     }}>
       <span>{rank}</span>
@@ -52,7 +52,7 @@ function PosBadge({ pos }) {
   return (
     <span style={{
       display: 'inline-block', padding: '1px 6px', borderRadius: 3,
-      fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+      fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
       color: c, background: `${c}20`, border: `1px solid ${c}40`,
     }}>{pos}</span>
   )
@@ -196,18 +196,18 @@ function VillainRow({ v }) {
         {v.player_name}
       </span>
       {v.stack && (
-        <span style={{ fontSize: 10, color: '#64748b' }}>
+        <span style={{ fontSize: 11, color: '#64748b' }}>
           {Number(v.stack).toLocaleString()}
         </span>
       )}
       {v.bounty_pct && (
-        <span style={{ fontSize: 10, color: '#f59e0b' }}>{v.bounty_pct}</span>
+        <span style={{ fontSize: 11, color: '#f59e0b' }}>{v.bounty_pct}</span>
       )}
       {v.country && (
-        <span style={{ fontSize: 10, color: '#64748b' }}>{v.country}</span>
+        <span style={{ fontSize: 11, color: '#64748b' }}>{v.country}</span>
       )}
       <span style={{
-        fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 3,
+        fontSize: 11, fontWeight: 600, padding: '1px 5px', borderRadius: 3,
         color: v.vpip_action === 'call' ? '#22c55e' : v.vpip_action === 'raise' ? '#f97316' : '#ef4444',
         background: v.vpip_action === 'call' ? 'rgba(34,197,94,0.1)' : v.vpip_action === 'raise' ? 'rgba(249,115,22,0.1)' : 'rgba(239,68,68,0.1)',
       }}>{v.vpip_action}</span>
@@ -240,23 +240,23 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
         <div style={{ display: 'flex', gap: 2 }}>
           {(hand.board || []).map((c, i) => <PokerCard key={i} card={c} />)}
           {(!hand.board || hand.board.length === 0) && (
-            <span style={{ fontSize: 10, color: '#4b5563', fontStyle: 'italic' }}>preflop</span>
+            <span style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>preflop</span>
           )}
         </div>
         <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.blinds}</span>
         <ResultBadge result={hand.hero_result} />
         {hand.villain_count > 0 && (
-          <span style={{ fontSize: 10, color: '#8b5cf6' }}>{hand.villain_count}V</span>
+          <span style={{ fontSize: 11, color: '#8b5cf6' }}>{hand.villain_count}V</span>
         )}
         {hand.has_screenshot && (
-          <span style={{ fontSize: 10, color: '#22c55e' }}>SS</span>
+          <span style={{ fontSize: 11, color: '#22c55e' }}>SS</span>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
             title="Apagar mão MTT"
             onClick={(e) => { e.stopPropagation(); onDeleteHand(hand.id) }}
             style={{
-              background: 'transparent', border: 'none', color: '#374151',
+              background: 'transparent', border: 'none', color: '#4b5563',
               cursor: 'pointer', fontSize: 11, padding: '0 3px', lineHeight: 1,
             }}
             onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
@@ -274,7 +274,7 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
           {/* Villains */}
           {hand.villains && hand.villains.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
                 Villains (VPIP)
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -286,7 +286,7 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
           {/* Screenshot players */}
           {hand.screenshot_players && Object.keys(hand.screenshot_players).length > 0 && (
             <div>
-              <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
                 Mesa (Screenshot)
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -323,7 +323,7 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
               <button
                 onClick={() => onDeleteScreenshot(hand.screenshot_entry_id)}
                 style={{
-                  padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                  padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                   background: 'rgba(239,68,68,0.08)', color: '#ef4444',
                   border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
                 }}
@@ -332,7 +332,7 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
             <button
               onClick={() => onDeleteHand(hand.id)}
               style={{
-                padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                 background: 'rgba(239,68,68,0.08)', color: '#ef4444',
                 border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
               }}
