@@ -185,6 +185,15 @@ export const stats = {
   initSchema:   () => req('POST', '/stats/init-schema'),
 }
 
+// ── Equity Calculator ────────────────────────────────────────────────────────
+export const equity = {
+  calculate: (heroCards, board, villainRange = 'random', numSims = 10000) =>
+    req('POST', '/equity/calculate', { hero_cards: heroCards, board, villain_range: villainRange, num_simulations: numSims }),
+  potAnalysis: (potSize, betSize, heroCards = [], board = [], villainRange = 'random') =>
+    req('POST', '/equity/pot-analysis', { pot_size: potSize, bet_size: betSize, hero_cards: heroCards, board, villain_range: villainRange }),
+  handAnalysis: (handId) => req('POST', `/equity/hand-analysis/${handId}`),
+}
+
 // ── Screenshots ───────────────────────────────────────────────────────────────
 export const screenshots = {
   upload: (file) => {
