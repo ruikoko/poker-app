@@ -285,6 +285,11 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                     <span style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>
                       {p.stack_bb ? `${p.stack_bb} BB` : ''}
                     </span>
+                    {p.bounty != null && (
+                      <span style={{ fontSize: 10, color: '#f59e0b', fontFamily: 'monospace' }}>
+                        {p.bounty}€
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -308,15 +313,66 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                 const m = hand.all_players_actions?._meta
                 return m ? <span style={{ fontFamily: 'monospace', color: '#4b5563', fontWeight: 600, fontSize: 10 }}>
                   {m.sb && m.bb ? `${Math.round(m.sb)}/${Math.round(m.bb)}${m.ante ? `(${Math.round(m.ante)})` : ''}` : ''}
+                  {m.level != null ? ` Lv ${m.level}` : ''}
                 </span> : null
               })()}
             </div>
-            {streets.map(({ key, actions }) => {
+            {(() => {
+              // Calculate pot per street from raw
+              const potByStreet = {}
+              const raw = hand.raw
+              const meta = hand.all_players_actions?._meta
+              if (raw) {
+                let pot = 0
+                const numRe = /[\d,]+(?:\.\d+)?/
+                const anteMs = raw.match(/posts the ante ([\d,]+)/g) || []
+                for (const am of anteMs) { const n = am.match(numRe); if (n) pot += parseFloat(n[0].replace(/,/g, '')) }
+                const sbM = raw.match(/posts small blind ([\d,]+)/)
+                if (sbM) pot += parseFloat(sbM[1].replace(/,/g, ''))
+                const bbM = raw.match(/posts big blind ([\d,]+)/)
+                if (bbM) pot += parseFloat(bbM[1].replace(/,/g, ''))
+                const sects = [
+                  { key: 'preflop', start: raw.includes('*** PRE-FLOP ***') ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***', end: '*** FLOP ***' },
+                  { key: 'flop', start: '*** FLOP ***', end: '*** TURN ***' },
+                  { key: 'turn', start: '*** TURN ***', end: '*** RIVER ***' },
+                  { key: 'river', start: '*** RIVER ***', end: '*** SHOW' },
+                ]
+                for (const { key, start, end } of sects) {
+                  const si = raw.indexOf(start)
+                  if (si === -1) { potByStreet[key] = pot; continue }
+                  let ei = raw.indexOf(end, si + start.length)
+                  if (ei === -1) ei = raw.indexOf('*** SUMMARY ***', si)
+                  if (ei === -1) ei = raw.length
+                  const section = raw.slice(si, ei)
+                  for (const line of section.split('\n')) {
+                    const cM = line.match(/calls ([\d,]+)/)
+                    const bM = line.match(/bets ([\d,]+)/)
+                    const rM = line.match(/raises [\d,]+ to ([\d,]+)/)
+                    if (cM) pot += parseFloat(cM[1].replace(/,/g, ''))
+                    else if (rM) pot += parseFloat(rM[1].replace(/,/g, ''))
+                    else if (bM) pot += parseFloat(bM[1].replace(/,/g, ''))
+                  }
+                  const unc = section.match(/Uncalled bet \(([\d,]+)\)/)
+                  if (unc) pot -= parseFloat(unc[1].replace(/,/g, ''))
+                  potByStreet[key] = pot
+                }
+              }
+
+              return streets.map(({ key, actions }) => {
               const color = STREET_COLORS[key] || '#94a3b8'
               const isShowdown = key === 'showdown'
+              const potVal = potByStreet[key]
+              const bbSize = hand.all_players_actions?._meta?.bb
               return (
                 <div key={key} style={{ marginBottom: 10 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color, textTransform: 'uppercase', padding: '2px 8px', borderRadius: 4, background: `${color}15`, border: `1px solid ${color}30` }}>{STREET_LABELS[key]}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color, textTransform: 'uppercase', padding: '2px 8px', borderRadius: 4, background: `${color}15`, border: `1px solid ${color}30` }}>{STREET_LABELS[key]}</span>
+                    {potVal > 0 && !isShowdown && (
+                      <span style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+                        Pot: {Math.round(potVal).toLocaleString()}{bbSize ? ` (${(potVal / bbSize).toFixed(1)}bb)` : ''}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', flexDirection: 'column', background: isShowdown ? '#0d1020' : '#0f1117', borderRadius: 8, padding: isShowdown ? '8px 12px' : '4px 12px', border: `1px solid ${isShowdown ? '#2a2050' : '#1e2130'}`, marginTop: 6 }}>
                     {actions.map((a, i) => {
                       const showCards = a.cards || []
@@ -351,7 +407,8 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                   </div>
                 </div>
               )
-            })}
+            })
+            })()}
           </div>
         )}
 
