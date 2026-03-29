@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { hands, hm3 } from '../api/client'
+import Replayer from '../components/Replayer'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -410,6 +411,11 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             })
             })()}
           </div>
+        )}
+
+        {/* Replayer */}
+        {hand.raw && hand.all_players_actions && (
+          <Replayer hand={hand} />
         )}
 
         {/* Notes */}
