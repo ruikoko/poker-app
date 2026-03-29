@@ -10,6 +10,7 @@ O nome do canal serve como tag automática para a mão.
 """
 import os
 import re
+import json
 import logging
 import asyncio
 import discord
@@ -235,20 +236,163 @@ def _create_placeholder_hand(
 
     notes = f"[{type_labels.get(content_type, content_type)}] #{channel_name}\n{content}"
 
+    # For GG replayer links, try to extract the image
+    screenshot_url = None
+    if content_type == "gg_replayer":
+        img_data = _extract_gg_replayer_image(content)
+        if img_data:
+            screenshot_url = img_data.get("screenshot_url")
+            # Update the entry with the image data
+            try:
+                from app.db import get_conn
+                conn = get_conn()
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE entries SET raw_json = raw_json || %s WHERE id = %s",
+                        (
+                            json.dumps({
+                                "img_url": img_data.get("img_url"),
+                                "img_b64": img_data.get("img_b64"),
+                                "mime_type": "image/png",
+                                "gg_replayer_resolved": True,
+                            }),
+                            entry_id,
+                        ),
+                    )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Erro ao guardar imagem GG replayer: {e}")
+
     try:
         execute_returning(
             """
             INSERT INTO hands
-                (site, hand_id, played_at, notes, tags, raw, entry_id, study_state)
+                (site, hand_id, played_at, notes, tags, raw, entry_id, study_state, screenshot_url)
             VALUES
-                (%s, %s, %s, %s, %s, %s, %s, 'new')
+                (%s, %s, %s, %s, %s, %s, %s, 'new', %s)
             ON CONFLICT (hand_id) DO NOTHING
             RETURNING id
             """,
-            (site, hand_id, played_at, notes, tags, content, entry_id),
+            (site, hand_id, played_at, notes, tags, content, entry_id, screenshot_url),
         )
     except Exception as e:
         logger.error(f"Erro ao criar placeholder hand: {e}")
+
+
+def _extract_gg_replayer_image(url: str) -> dict | None:
+    """
+    Extrai a imagem PNG de um link do replayer GG.
+    
+    Fluxo:
+    1. Fetch do link gg.gl/xxxxx → segue redirect → pokercraft page
+    2. Extrai URL da imagem do HTML (og:image ou img tag)
+    3. Download do PNG
+    4. Retorna URL + base64
+    """
+    import base64
+    try:
+        import httpx
+    except ImportError:
+        try:
+            import urllib.request
+            # Fallback to urllib
+            return _extract_gg_replayer_image_urllib(url)
+        except Exception as e:
+            logger.error(f"GG replayer extract failed (no httpx): {e}")
+            return None
+
+    try:
+        # Follow redirects to get the actual page
+        with httpx.Client(follow_redirects=True, timeout=15) as client:
+            resp = client.get(url)
+            if resp.status_code != 200:
+                logger.warning(f"GG replayer fetch failed: {resp.status_code} for {url}")
+                return None
+
+            html = resp.text
+
+            # Extract image URL from HTML
+            # Look for og:image meta tag or direct img src to gg CDN
+            img_url = None
+
+            # Try og:image
+            import re
+            og_m = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\'](https://[^"\']+)["\']', html)
+            if og_m:
+                img_url = og_m.group(1)
+
+            # Try direct img src to GG CDN
+            if not img_url:
+                cdn_m = re.search(r'(https://user\.gg-global-cdn\.com/[^"\'<>\s]+\.png)', html)
+                if cdn_m:
+                    img_url = cdn_m.group(1)
+
+            # Try any img with TourneyResult
+            if not img_url:
+                tr_m = re.search(r'(https://[^"\'<>\s]*TourneyResult[^"\'<>\s]*\.png)', html)
+                if tr_m:
+                    img_url = tr_m.group(1)
+
+            if not img_url:
+                logger.warning(f"GG replayer: no image URL found in HTML for {url}")
+                return None
+
+            # Download the image
+            img_resp = client.get(img_url)
+            if img_resp.status_code != 200:
+                logger.warning(f"GG replayer image download failed: {img_resp.status_code}")
+                return None
+
+            img_bytes = img_resp.content
+            img_b64 = base64.b64encode(img_bytes).decode('ascii')
+
+            logger.info(f"GG replayer image extracted: {len(img_bytes)} bytes from {url}")
+
+            return {
+                "img_url": img_url,
+                "img_b64": img_b64,
+                "screenshot_url": img_url,
+            }
+
+    except Exception as e:
+        logger.error(f"GG replayer extract error: {e}")
+        return None
+
+
+def _extract_gg_replayer_image_urllib(url: str) -> dict | None:
+    """Fallback using urllib for GG replayer image extraction."""
+    import base64
+    import re
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode('utf-8', errors='replace')
+
+        img_url = None
+        og_m = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\'](https://[^"\']+)["\']', html)
+        if og_m:
+            img_url = og_m.group(1)
+        if not img_url:
+            cdn_m = re.search(r'(https://user\.gg-global-cdn\.com/[^"\'<>\s]+\.png)', html)
+            if cdn_m:
+                img_url = cdn_m.group(1)
+
+        if not img_url:
+            return None
+
+        img_req = urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(img_req, timeout=15) as img_resp:
+            img_bytes = img_resp.read()
+
+        img_b64 = base64.b64encode(img_bytes).decode('ascii')
+        return {"img_url": img_url, "img_b64": img_b64, "screenshot_url": img_url}
+
+    except Exception as e:
+        logger.error(f"GG replayer urllib extract error: {e}")
+        return None
 
 
 # ── Tabela de sync state ────────────────────────────────────────────────────
