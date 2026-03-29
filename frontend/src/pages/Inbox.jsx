@@ -773,7 +773,7 @@ export default function InboxPage() {
                 <th style={{ padding: '8px 8px 8px 12px', width: 28 }}>
                   <input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === rows.length} onChange={selectAll} style={{ cursor: 'pointer', accentColor: '#6366f1' }} />
                 </th>
-                {['Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Acções'].map(h => (
+                {['Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', '', 'Acções'].map(h => (
                   <th key={h} style={{
                     padding: '8px 12px', textAlign: 'left', color: '#4b5563',
                     fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4,
@@ -814,6 +814,20 @@ export default function InboxPage() {
                     </div>
                   </td>
                   <td style={{ padding: '8px 12px' }}><ResultBadge result={h.result} /></td>
+                  <td style={{ padding: '8px 8px' }}>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {h.raw && h.all_players_actions && (
+                        <a href={`/replayer/${h.id}`} target="_blank" rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}
+                        >&#9654;</a>
+                      )}
+                      {((h.raw || '').includes('gg.gl') || (h.notes || '').includes('gg.gl')) && (() => {
+                        const m = (h.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (h.notes || '').match(/https?:\/\/gg\.gl\/\S+/)
+                        return m ? <a href={m[0]} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: '#f59e0b', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', fontWeight: 600 }}>GG</a> : null
+                      })()}
+                    </div>
+                  </td>
                   <td style={{ padding: '8px 12px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button

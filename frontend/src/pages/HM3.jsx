@@ -415,7 +415,16 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
         {/* Replayer */}
         {hand.raw && hand.all_players_actions && (
-          <Replayer hand={hand} />
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+              <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer" style={{
+                fontSize: 11, fontWeight: 600, color: '#818cf8', textDecoration: 'none',
+                padding: '4px 12px', borderRadius: 5, background: 'rgba(99,102,241,0.1)',
+                border: '1px solid rgba(99,102,241,0.25)', display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}>&#9654; Fullscreen</a>
+            </div>
+            <Replayer hand={hand} />
+          </>
         )}
 
         {/* Notes */}
@@ -453,33 +462,39 @@ function HM3HandRow({ hand, onClick, onDelete, idx }) {
 
   return (
     <div onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px',
+      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
       background: zebra, borderBottom: '1px solid rgba(255,255,255,0.03)',
       cursor: 'pointer', transition: 'background 0.1s',
     }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      <div style={{ minWidth: 52, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
-        {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
+      <div style={{ minWidth: 56, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
+      <div style={{ display: 'flex', gap: 3, minWidth: 58, flexShrink: 0 }}>
+        {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 12 }}>&mdash;</span>}
       </div>
-      <div style={{ minWidth: 40, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ minWidth: 65, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ minWidth: 120, maxWidth: 220, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{hand.stakes || ''}</div>
-      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-        {hand.board?.length > 0 ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>}
+      <div style={{ minWidth: 44, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ minWidth: 72, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ minWidth: 140, maxWidth: 240, fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{hand.stakes || ''}</div>
+      <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+        {hand.board?.length > 0 ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
       </div>
-      <div style={{ minWidth: 70, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+      <div style={{ minWidth: 80, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ minWidth: 24, flexShrink: 0, fontSize: 11, color: '#4b5563' }}>{siteShort}</div>
-      <div style={{ minWidth: 36, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace' }}>
+      <div style={{ minWidth: 28, flexShrink: 0, fontSize: 12, color: '#4b5563' }}>{siteShort}</div>
+      <div style={{ minWidth: 42, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace' }}>
         {hand.played_at ? hand.played_at.slice(11, 16) : ''}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1, minWidth: 0 }}>
         {hand.tags?.slice(0, 3).map(t => <Tag key={t} t={t} />)}
       </div>
+      {hand.raw && hand.all_players_actions && (
+        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', flexShrink: 0, fontWeight: 600 }}
+        >&#9654;</a>
+      )}
       <button style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete(hand.id) }}
         onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}

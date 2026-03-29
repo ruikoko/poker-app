@@ -49,8 +49,8 @@ function parseHH(raw, apa) {
   const pfm = isW ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***'
   const bc = []
   const fm = raw.match(/\*\*\* FLOP \*\*\* \[(.+?)\]/); if (fm) bc.push(...fm[1].split(' '))
-  const tm = raw.match(/\*\*\* TURN \*\*\* \[.+?\] \[(.+?)\]/); if (tm) bc.push(...tm[1].split(' '))
-  const rm = raw.match(/\*\*\* RIVER \*\*\* \[.+?\] \[(.+?)\]/); if (rm) bc.push(...rm[1].split(' '))
+  const tmW = raw.match(/\*\*\* TURN \*\*\* \[.+?\]\s*\[(.+?)\]/); if (tmW) bc.push(...tmW[1].split(' '))
+  const rmW = raw.match(/\*\*\* RIVER \*\*\* \[.+?\]\s*\[(.+?)\]/); if (rmW) bc.push(...rmW[1].split(' '))
 
   let pot = 0
   const antes = raw.match(/posts the ante ([\d,]+)/g) || []
@@ -189,7 +189,7 @@ export default function Replayer({ hand }) {
                 <div style={{ fontSize: 9, fontWeight: 700, color: p.isHero ? '#818cf8' : '#94a3b8' }}>{p.position}</div>
                 <div style={{ fontSize: 11, fontWeight: p.isHero ? 700 : 500, color: p.isHero ? '#c7d2fe' : '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 85 }}>{p.name}</div>
                 <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace' }}>{p.stackBB}BB</div>
-                {p.bounty != null && <div style={{ fontSize: 9, color: '#f59e0b' }}>{p.bounty}\u20ac</div>}
+                {p.bounty != null && <div style={{ fontSize: 9, color: '#f59e0b' }}>{typeof p.bounty === 'string' ? p.bounty.replace('€', ' EUR') : `${p.bounty} EUR`}</div>}
               </div>
             </div>
           )

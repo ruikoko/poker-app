@@ -81,16 +81,18 @@ function TagBadge({ t }) {
 // ── Hand Row (dentro de tag group) ──────────────────────────────────────────
 
 function HandRow({ hand, onClick }) {
-  const isGG = (hand.raw || '').includes('gg.gl')
-  const ggLink = isGG ? hand.raw : null
+  // Extract gg.gl link from raw or notes
+  const ggMatch = (hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/)
+  const ggLink = ggMatch ? ggMatch[0] : null
+
+  const discordDate = hand.discord_posted_at ? new Date(hand.discord_posted_at).toLocaleDateString('pt-PT') : '—'
+  const importDate = hand.created_at ? new Date(hand.created_at).toLocaleDateString('pt-PT') : '—'
+
   return (
     <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: '#1a1d27', borderBottom: '1px solid #1e2130', cursor: 'pointer', transition: 'background 0.1s' }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
       onMouseLeave={e => e.currentTarget.style.background = '#1a1d27'}>
       <div style={{ minWidth: 55 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ fontSize: 11, color: '#64748b', minWidth: 70 }}>
-        {hand.played_at ? hand.played_at.slice(0, 10) : hand.discord_posted_at ? new Date(hand.discord_posted_at).toLocaleDateString('pt-PT') : '—'}
-      </div>
       <div style={{ minWidth: 40 }}><PosBadge pos={hand.position} /></div>
       <div style={{ display: 'flex', gap: 3, minWidth: 55 }}>
         {hand.hero_cards?.length > 0
@@ -104,12 +106,20 @@ function HandRow({ hand, onClick }) {
       </div>
       <div style={{ minWidth: 65 }}><ResultBadge result={hand.result} /></div>
       <div style={{ flex: 1, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hand.stakes || ''}</div>
+      <div style={{ fontSize: 11, color: '#64748b', minWidth: 70, textAlign: 'right' }}>{discordDate}</div>
+      <div style={{ fontSize: 11, color: '#64748b', minWidth: 70, textAlign: 'right' }}>{importDate}</div>
+      {hand.raw && hand.all_players_actions && (
+        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          style={{ fontSize: 10, color: '#22c55e', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', flexShrink: 0, fontWeight: 600 }}
+        >&#9654;</a>
+      )}
       {ggLink && (
         <a href={ggLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{
           fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '2px 8px',
           borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
           whiteSpace: 'nowrap', flexShrink: 0,
-        }}>&#9654; SS</a>
+        }}>&#9654; GG</a>
       )}
       {hand.screenshot_url && !ggLink && (
         <a href={hand.screenshot_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{
@@ -178,7 +188,8 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
 // ── Hand Detail Modal ───────────────────────────────────────────────────────
 
 function HandDetailModal({ hand, onClose }) {
-  const isGG = (hand.raw || '').includes('gg.gl')
+  const ggMatch = (hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/)
+  const ggLink = ggMatch ? ggMatch[0] : null
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }} onClick={onClose}>
@@ -235,11 +246,19 @@ function HandDetailModal({ hand, onClose }) {
         </div>
 
         {/* Replayer link */}
-        {isGG && (
+        {ggLink && (
           <div style={{ marginBottom: 16 }}>
-            <a href={hand.raw} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', textDecoration: 'none' }}>
+            <a href={ggLink} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', textDecoration: 'none' }}>
               &#9654; Abrir Replayer GG
             </a>
+          </div>
+        )}
+
+        {/* Screenshot image */}
+        {hand.screenshot_url && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Screenshot</div>
+            <img src={hand.screenshot_url} alt="Screenshot" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, border: '1px solid #2a2d3a' }} />
           </div>
         )}
 
@@ -287,7 +306,7 @@ export default function DiscordPage() {
 
   const loadHands = useCallback(() => {
     setLoadingHands(true)
-    const params = { page_size: 200 }
+    const params = { page_size: 200, source: 'discord' }
     if (dateFrom) params.date_from = dateFrom
     handsApi.list(params)
       .then(r => setHandsList(r.data || []))

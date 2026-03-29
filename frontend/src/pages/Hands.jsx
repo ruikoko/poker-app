@@ -947,7 +947,16 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
         {/* Replayer */}
         {hand.raw && hand.all_players_actions && (
-          <Replayer hand={hand} />
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+              <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer" style={{
+                fontSize: 11, fontWeight: 600, color: '#818cf8', textDecoration: 'none',
+                padding: '4px 12px', borderRadius: 5, background: 'rgba(99,102,241,0.1)',
+                border: '1px solid rgba(99,102,241,0.25)', display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}>&#9654; Fullscreen</a>
+            </div>
+            <Replayer hand={hand} />
+          </>
         )}
 
         {/* Source info */}
@@ -1099,6 +1108,12 @@ function HandRow({ hand, onClick, onDelete, idx }) {
           return <>{d}{t ? <span style={{ color: '#4b5563', marginLeft: 3 }}>{t}</span> : ''}</>
         })() : ''}
       </div>
+      {hand.raw && hand.all_players_actions && (
+        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', flexShrink: 0, fontWeight: 600 }}
+        >&#9654;</a>
+      )}
       <button
         style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete() }}
@@ -1263,7 +1278,7 @@ export default function HandsPage() {
   const [data, setData]           = useState({ data: [], total: 0, pages: 1 })
   const [tagGroupsData, setTagGroupsData] = useState({ groups: [], total: 0 })
   const [page, setPage]           = useState(1)
-  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '' })
+  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '' })
   const [error, setError]         = useState('')
   const [loading, setLoading]     = useState(false)
   const [selected, setSelected]   = useState(null)
@@ -1416,17 +1431,25 @@ export default function HandsPage() {
           {POSITIONS.filter(p => p).map(p => <option key={p} value={p}>{p}</option>)}
         </select>
 
-        <input type="text" placeholder="Pesquisar torneio, tag, vilão..."
+        <input type="text" placeholder="Pesquisar torneio, tag..."
           value={filters.search} onChange={e => set('search', e.target.value)}
           style={{
             background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6,
-            color: '#e2e8f0', padding: '6px 12px', fontSize: 12, minWidth: 200, flex: 1,
+            color: '#e2e8f0', padding: '6px 12px', fontSize: 12, minWidth: 160, flex: 1,
           }}
         />
 
-        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from) && (
+        <input type="text" placeholder="Vilão (nick)"
+          value={filters.villain || ''} onChange={e => set('villain', e.target.value)}
+          style={{
+            background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6,
+            color: '#f59e0b', padding: '6px 12px', fontSize: 12, minWidth: 120,
+          }}
+        />
+
+        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from || filters.villain) && (
           <button
-            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '' }); setPage(1) }}
+            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '' }); setPage(1) }}
             style={{
               padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
               background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer',

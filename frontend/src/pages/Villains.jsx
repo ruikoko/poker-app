@@ -335,6 +335,22 @@ function VillainProfile({ villain, onClose, onSave }) {
                           {!ssCache[h.id] && (h.entry_id || h.player_names?.screenshot_entry_id) && (
                             <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 8 }}>A carregar screenshot...</div>
                           )}
+
+                          {/* Links para mão */}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                            {h.raw && h.all_players_actions && (
+                              <a href={`/replayer/${h.id}`} target="_blank" rel="noopener noreferrer" style={{
+                                fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '4px 10px',
+                                borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
+                                fontWeight: 600,
+                              }}>&#9654; Replayer</a>
+                            )}
+                            <a href={`/hands?search=${h.hand_id || h.id}`} style={{
+                              fontSize: 11, color: '#22c55e', textDecoration: 'none', padding: '4px 10px',
+                              borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)',
+                              fontWeight: 600,
+                            }}>Abrir Mão</a>
+                          </div>
                         </div>
                       )}
                     </div>

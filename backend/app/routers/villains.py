@@ -166,7 +166,8 @@ def villain_hands(
         """
         SELECT h.id, h.hand_id, h.played_at, h.stakes, h.position,
                h.hero_cards, h.board, h.result, h.study_state,
-               h.all_players_actions, h.screenshot_url, h.player_names
+               h.all_players_actions, h.screenshot_url, h.player_names,
+               h.entry_id, h.raw, h.site
         FROM hands h
         WHERE (
             h.all_players_actions ? %s
@@ -202,25 +203,35 @@ def villain_hands(
 @router.post("/recalculate-hands")
 def recalculate_hands_seen(current_user=Depends(require_auth)):
     """
-    Recalcula hands_seen para todos os vilões a partir da tabela hand_villains.
-    Corrige contagens inflacionadas por reimports/rematches.
+    Recalcula hands_seen para todos os vilões.
+    Conta mãos de AMBAS as fontes:
+    - hand_villains (MTT hands)
+    - all_players_actions JSONB nas hands de estudo
+    Usa UNION para evitar duplicados entre as duas fontes.
     """
     from app.db import get_conn
     conn = get_conn()
     updated = 0
     try:
         with conn.cursor() as cur:
-            # Count actual distinct hands per villain from hand_villains
             cur.execute("""
                 UPDATE villain_notes vn SET
                     hands_seen = COALESCE(sub.cnt, 0),
                     updated_at = NOW()
                 FROM (
-                    SELECT player_name, COUNT(DISTINCT mtt_hand_id) as cnt
-                    FROM hand_villains
-                    GROUP BY player_name
+                    SELECT nick, COUNT(DISTINCT hand_ref) as cnt
+                    FROM (
+                        SELECT player_name AS nick, mtt_hand_id::text AS hand_ref
+                        FROM hand_villains
+                        UNION
+                        SELECT key AS nick, h.id::text AS hand_ref
+                        FROM hands h, jsonb_object_keys(h.all_players_actions) AS key
+                        WHERE h.all_players_actions IS NOT NULL
+                          AND key != '_meta'
+                    ) combined
+                    GROUP BY nick
                 ) sub
-                WHERE vn.nick = sub.player_name
+                WHERE vn.nick = sub.nick
             """)
             updated = cur.rowcount
         conn.commit()

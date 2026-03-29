@@ -35,6 +35,8 @@ def _build_conditions(
     exclude_mtt_only: bool = False,
     result_min: float = None,
     result_max: float = None,
+    source: str = None,
+    villain: str = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
@@ -60,9 +62,9 @@ def _build_conditions(
         params.append(position)
 
     if search:
-        conditions.append("(h.notes ILIKE %s OR h.raw ILIKE %s OR h.hand_id ILIKE %s OR h.stakes ILIKE %s)")
+        conditions.append("(h.notes ILIKE %s OR h.raw ILIKE %s OR h.hand_id ILIKE %s OR h.stakes ILIKE %s OR h.all_players_actions::text ILIKE %s)")
         like = f"%{search}%"
-        params.extend([like, like, like, like])
+        params.extend([like, like, like, like, like])
 
     if date_from:
         conditions.append("h.played_at >= %s")
@@ -83,6 +85,14 @@ def _build_conditions(
             "(h.tags IS NULL OR h.tags = '{}' OR NOT (h.tags = ARRAY['mtt']::text[]))"
         )
 
+    if source:
+        conditions.append("e.source = %s")
+        params.append(source)
+
+    if villain:
+        conditions.append("h.all_players_actions ? %s")
+        params.append(villain)
+
     return conditions, params
 
 
@@ -98,13 +108,15 @@ def list_hands(
     result_max:       Optional[float] = Query(None, description="Resultado máximo em BB"),
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT (mtt_archive)"),
+    source:           Optional[str] = Query(None, description="Filtrar por source da entry (ex: discord)"),
+    villain:          Optional[str] = Query(None, description="Filtrar por vilão (nick exacto em all_players_actions)"),
     page:             int = Query(1, ge=1),
     page_size:        int = Query(50, ge=1, le=500),
     current_user=Depends(require_auth)
 ):
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only,
-        result_min, result_max
+        result_min, result_max, source=source, villain=villain
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':

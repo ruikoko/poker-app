@@ -11,6 +11,7 @@ import DiscordPage from './pages/Discord'
 import TournamentsPage from './pages/Tournaments'
 import HM3Page from './pages/HM3'
 import StatsPage from './pages/Stats'
+import ReplayerPage from './pages/ReplayerPage'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -25,6 +26,11 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/replayer/:id" element={
+        <RequireAuth>
+          <ReplayerPage />
+        </RequireAuth>
+      } />
       <Route path="/" element={
         <RequireAuth>
           <Shell />
