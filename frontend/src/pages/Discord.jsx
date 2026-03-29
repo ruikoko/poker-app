@@ -40,7 +40,7 @@ const TAG_COLORS = {
 // ── Mini Componentes ────────────────────────────────────────────────────────
 
 function PokerCard({ card, size = 'sm' }) {
-  if (!card || card.length < 2) return <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 36, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, fontSize: 10, color: '#4b5563' }}>?</span>
+  if (!card || card.length < 2) return <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 36, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, fontSize: 11, color: '#4b5563' }}>?</span>
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
   const color = SUIT_COLORS[suit] || '#e2e8f0'
@@ -55,7 +55,7 @@ function PokerCard({ card, size = 'sm' }) {
 
 function StateBadge({ state }) {
   const meta = STATE_META[state] || { label: state, color: '#666', bg: 'rgba(100,100,100,0.15)' }
-  return <span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 999, fontSize: 10, fontWeight: 600, letterSpacing: 0.3, color: meta.color, background: meta.bg }}>{meta.label}</span>
+  return <span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 0.3, color: meta.color, background: meta.bg }}>{meta.label}</span>
 }
 
 function PosBadge({ pos }) {
@@ -75,36 +75,49 @@ function ResultBadge({ result }) {
 
 function TagBadge({ t }) {
   const c = TAG_COLORS[t] || '#64748b'
-  return <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 10, fontWeight: 600, marginRight: 3, color: c, background: `${c}18`, border: `1px solid ${c}30` }}>#{t}</span>
+  return <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, marginRight: 3, color: c, background: `${c}18`, border: `1px solid ${c}30` }}>#{t}</span>
 }
 
 // ── Hand Row (dentro de tag group) ──────────────────────────────────────────
 
 function HandRow({ hand, onClick }) {
+  const isGG = (hand.raw || '').includes('gg.gl')
+  const ggLink = isGG ? hand.raw : null
   return (
-    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#1a1d27', borderBottom: '1px solid #1e2130', cursor: 'pointer', transition: 'background 0.1s' }}
+    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: '#1a1d27', borderBottom: '1px solid #1e2130', cursor: 'pointer', transition: 'background 0.1s' }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
       onMouseLeave={e => e.currentTarget.style.background = '#1a1d27'}>
-      <div style={{ minWidth: 60 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ minWidth: 50 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 60 }}>
+      <div style={{ minWidth: 55 }}><StateBadge state={hand.study_state} /></div>
+      <div style={{ fontSize: 11, color: '#64748b', minWidth: 70 }}>
+        {hand.played_at ? hand.played_at.slice(0, 10) : hand.discord_posted_at ? new Date(hand.discord_posted_at).toLocaleDateString('pt-PT') : '—'}
+      </div>
+      <div style={{ minWidth: 40 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ display: 'flex', gap: 3, minWidth: 55 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} />)
-          : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>}
+          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
       </div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 140 }}>
+      <div style={{ display: 'flex', gap: 2, minWidth: 120 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} />)
-          : <span style={{ color: '#374151', fontSize: 11 }}>&mdash;</span>}
+          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
       </div>
-      <div style={{ minWidth: 80 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ minWidth: 65 }}><ResultBadge result={hand.result} /></div>
       <div style={{ flex: 1, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hand.stakes || ''}</div>
-      <div style={{ fontSize: 10, color: '#4b5563', minWidth: 60, textAlign: 'right' }}>
-        {hand.discord_posted_at ? new Date(hand.discord_posted_at).toLocaleDateString('pt-PT') : ''}
-      </div>
-      <div style={{ fontSize: 10, color: '#374151', minWidth: 60, textAlign: 'right' }}>
-        {hand.created_at ? new Date(hand.created_at).toLocaleDateString('pt-PT') : ''}
-      </div>
+      {ggLink && (
+        <a href={ggLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{
+          fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '2px 8px',
+          borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
+          whiteSpace: 'nowrap', flexShrink: 0,
+        }}>&#9654; SS</a>
+      )}
+      {hand.screenshot_url && !ggLink && (
+        <a href={hand.screenshot_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{
+          fontSize: 11, color: '#22c55e', textDecoration: 'none', padding: '2px 8px',
+          borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)',
+          whiteSpace: 'nowrap', flexShrink: 0,
+        }}>&#128247; SS</a>
+      )}
     </div>
   )
 }
@@ -128,7 +141,7 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
         onMouseEnter={e => { if (!open) e.currentTarget.style.background = '#1e2130' }}
         onMouseLeave={e => { if (!open) e.currentTarget.style.background = '#1a1d27' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ display: 'inline-block', fontSize: 10, color: tagColor, transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
+          <span style={{ display: 'inline-block', fontSize: 11, color: tagColor, transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
           <div style={{ display: 'flex', gap: 4 }}>
             {tagKey.split('+').map(t => <TagBadge key={t} t={t} />)}
           </div>
@@ -143,7 +156,7 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
       {open && (
         <div>
           {/* Header das colunas */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 16px', borderBottom: '1px solid #1e2130', fontSize: 9, color: '#4b5563', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 16px', borderBottom: '1px solid #1e2130', fontSize: 11, color: '#4b5563', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
             <div style={{ minWidth: 60 }}>Estado</div>
             <div style={{ minWidth: 50 }}>Pos</div>
             <div style={{ minWidth: 60 }}>Cartas</div>
@@ -186,7 +199,7 @@ function HandDetailModal({ hand, onClose }) {
         {/* Cartas + Board */}
         <div style={{ background: '#0f1117', borderRadius: 10, padding: '16px 20px', marginBottom: 20, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero &middot; <PosBadge pos={hand.position} /></div>
+            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero &middot; <PosBadge pos={hand.position} /></div>
             <div style={{ display: 'flex', gap: 5 }}>
               {hand.hero_cards?.length > 0
                 ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="md" />)
@@ -195,7 +208,7 @@ function HandDetailModal({ hand, onClose }) {
           </div>
           {hand.board?.length > 0 && (
             <div>
-              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Board</div>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Board</div>
               <div style={{ display: 'flex', gap: 5 }}>{hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="md" />)}</div>
             </div>
           )}
@@ -215,7 +228,7 @@ function HandDetailModal({ hand, onClose }) {
             { l: 'Tags', v: hand.tags?.length > 0 ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>{hand.tags.map(t => <TagBadge key={t} t={t} />)}</div> : null },
           ].map(({ l, v }) => (
             <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '8px 12px' }}>
-              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
               <div>{v || <span style={{ color: '#4b5563' }}>&mdash;</span>}</div>
             </div>
           ))}
