@@ -1,0 +1,13 @@
+[phases.setup]
+aptPkgs = ["gcc", "g++", "python3-dev", "build-essential"]
+
+[phases.install]
+cmds = ["pip install Cython>=3.0.0 && pip install -r requirements.txt"]
+```
+
+**Passo 2 — Confirma o `requirements.txt`**
+
+O teu `backend/requirements.txt` deve ter estas duas linhas (no final, depois do `treys`):
+```
+Cython>=3.0.0
+eval7>=0.1.0
