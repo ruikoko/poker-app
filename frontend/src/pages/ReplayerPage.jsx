@@ -133,6 +133,86 @@ function parseHH(raw, apa) {
   return { steps, heroIdx }
 }
 
+// ── Range Grid Component ─────────────────────────────────────────────────────
+const RANKS_GRID = ['A','K','Q','J','T','9','8','7','6','5','4','3','2']
+
+function cellLabel(r, c) {
+  if (r === c) return RANKS_GRID[r] + RANKS_GRID[c]  // pair
+  if (c > r) return RANKS_GRID[r] + RANKS_GRID[c] + 's'  // suited (above diagonal)
+  return RANKS_GRID[c] + RANKS_GRID[r] + 'o'  // offsuit (below diagonal) — show higher rank first
+}
+
+function cellKey(r, c) {
+  // Normalize: pairs = "AA", suited = "AKs", offsuit = "AKo"
+  if (r === c) return RANKS_GRID[r] + RANKS_GRID[c]
+  if (c > r) return RANKS_GRID[r] + RANKS_GRID[c] + 's'
+  return RANKS_GRID[c] + RANKS_GRID[r] + 'o'
+}
+
+function selectedToRangeStr(selected) {
+  if (selected.size === 0) return 'random'
+  return [...selected].sort().join(',')
+}
+
+function RangeGrid({ selected, onToggle, onClear, onSelectAll }) {
+  const [dragging, setDragging] = useState(false)
+  const [dragMode, setDragMode] = useState(true) // true = selecting, false = deselecting
+
+  function handleMouseDown(key) {
+    const newMode = !selected.has(key)
+    setDragging(true)
+    setDragMode(newMode)
+    onToggle(key, newMode)
+  }
+  function handleMouseEnter(key) {
+    if (dragging) onToggle(key, dragMode)
+  }
+  function handleMouseUp() { setDragging(false) }
+
+  const pct = selected.size > 0 ? ((selected.size / 169) * 100).toFixed(1) : '0'
+
+  return (
+    <div onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ userSelect: 'none' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>Range: {pct}%</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={onSelectAll} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer' }}>Todas</button>
+          <button onClick={onClear} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer' }}>Limpar</button>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(13, 1fr)', gap: 1 }}>
+        {RANKS_GRID.map((_, r) =>
+          RANKS_GRID.map((_, c) => {
+            const key = cellKey(r, c)
+            const label = cellLabel(r, c)
+            const isSuited = c > r
+            const isPair = r === c
+            const isSelected = selected.has(key)
+            return (
+              <div
+                key={key}
+                onMouseDown={() => handleMouseDown(key)}
+                onMouseEnter={() => handleMouseEnter(key)}
+                style={{
+                  width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 9, fontWeight: 600, fontFamily: 'monospace', cursor: 'pointer',
+                  background: isSelected
+                    ? (isPair ? '#ca8a04' : isSuited ? '#2563eb' : '#0891b2')
+                    : (isPair ? 'rgba(202,138,4,0.08)' : isSuited ? 'rgba(37,99,235,0.06)' : 'rgba(8,145,178,0.06)'),
+                  color: isSelected ? '#fff' : '#4b5563',
+                  borderRadius: 2,
+                  border: `1px solid ${isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.04)'}`,
+                  transition: 'background 0.05s',
+                }}
+              >{label}</div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PRow({ l, v, c }) {
   return <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ fontSize: 11, color: '#64748b' }}>{l}</span><span style={{ fontSize: 13, fontWeight: 700, color: c, fontFamily: 'monospace' }}>{v}</span></div>
 }
@@ -150,6 +230,9 @@ export default function ReplayerPage() {
   const [villainRange, setVillainRange] = useState('random')
   const [rangeInput, setRangeInput] = useState('')
   const [lastBoard, setLastBoard] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [showRangeGrid, setShowRangeGrid] = useState(false)
+  const [selectedCells, setSelectedCells] = useState(new Set())
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
@@ -198,6 +281,9 @@ export default function ReplayerPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {hand.stakes && <span style={{ fontSize: 12, color: '#4b5563', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hand.stakes}</span>}
           <a href={`/hand/${hand.id}`} style={{ fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '3px 10px', borderRadius: 5, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', fontWeight: 600 }}>Detalhe</a>
+          {hand.raw && (
+            <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 5, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)', color: copied ? '#22c55e' : '#f59e0b', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.25)'}`, cursor: 'pointer' }}>{copied ? '✓ Copiado' : 'Copiar HH'}</button>
+          )}
           <span style={{ fontSize: 13, fontWeight: 600, color: STREET_COLORS[step.street], padding: '3px 10px', borderRadius: 5, background: `${STREET_COLORS[step.street]}15`, border: `1px solid ${STREET_COLORS[step.street]}30`, textTransform: 'uppercase' }}>{step.label}</span>
         </div>
       </div>
@@ -218,9 +304,12 @@ export default function ReplayerPage() {
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: '#4b5563', marginBottom: 4, textTransform: 'uppercase' }}>Range vilão</div>
             <input type="text" value={rangeInput} onChange={e => setRangeInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') applyRange() }} placeholder="random" style={{ width: '100%', fontSize: 11, background: '#0a0c14', border: '1px solid #2a2d3a', borderRadius: 4, color: '#e2e8f0', padding: '5px 8px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
-            <button onClick={applyRange} style={{ width: '100%', marginTop: 4, fontSize: 10, fontWeight: 600, padding: '4px 0', borderRadius: 4, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}>Calcular</button>
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+              <button onClick={applyRange} style={{ flex: 1, fontSize: 10, fontWeight: 600, padding: '4px 0', borderRadius: 4, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}>Calcular</button>
+              <button onClick={() => setShowRangeGrid(true)} style={{ flex: 1, fontSize: 10, fontWeight: 600, padding: '4px 0', borderRadius: 4, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer' }}>Grelha</button>
+            </div>
           </div>
-          <div style={{ fontSize: 9, color: '#374151', lineHeight: 1.5 }}>Ex: TT+,AKs,AKo<br/>22+,A2s+,KQo<br/>random = qualquer 2 cartas</div>
+          <div style={{ fontSize: 9, color: '#374151', lineHeight: 1.5 }}>Clica "Grelha" para seleccionar visualmente ou escreve: TT+,AKs,AKo</div>
         </div>
 
         {/* Center — Table */}
@@ -285,63 +374,4 @@ export default function ReplayerPage() {
           <div style={{ padding: '8px 20px', background: '#0d0f18', borderTop: '1px solid #1e2130', display: 'flex', alignItems: 'center', gap: 10, minHeight: 38, flexShrink: 0 }}>
             {step.actor ? <>
               <span style={{ fontSize: 13, fontWeight: 600, color: step.isHero ? '#818cf8' : '#94a3b8' }}>{step.actor}</span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: step.action.includes('fold') ? '#ef4444' : step.action.includes('call') || step.action.includes('check') ? '#22c55e' : '#f59e0b' }}>{step.action}</span>
-            </> : <span style={{ fontSize: 13, color: '#4b5563' }}>{step.action}</span>}
-          </div>
-
-          {/* Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 20px', background: '#111420', borderTop: '1px solid #1e2130', flexShrink: 0 }}>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <button onClick={() => setSi(0)} style={btnS}>{'\u23EE'}</button>
-              <button onClick={() => setSi(i => Math.max(0, i-1))} style={btnS}>{'\u25C0'}</button>
-              <button onClick={() => setPlaying(!playing)} style={{ ...btnS, background: playing ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)', color: playing ? '#ef4444' : '#22c55e', minWidth: 40 }}>{playing ? '\u23F8' : '\u25B6'}</button>
-              <button onClick={() => setSi(i => Math.min(steps.length-1, i+1))} style={btnS}>{'\u25B6'}</button>
-              <button onClick={() => setSi(steps.length-1)} style={btnS}>{'\u23ED'}</button>
-              <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', marginLeft: 8 }}>{si+1}/{steps.length}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 5 }}>
-              {streets.filter(s => s !== 'showdown').map(s => (
-                <button key={s} onClick={() => { const idx = steps.findIndex(st => st.street === s); if (idx >= 0) setSi(idx) }} style={{ ...btnS, color: step.street === s ? STREET_COLORS[s] : '#4b5563', background: step.street === s ? `${STREET_COLORS[s]}15` : 'transparent', border: `1px solid ${step.street === s ? `${STREET_COLORS[s]}40` : '#2a2d3a'}`, fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{s === 'preflop' ? 'PF' : s.charAt(0).toUpperCase() + s.slice(1)}</button>
-              ))}
-              {streets.includes('showdown') && (
-                <button onClick={() => setSi(steps.length - 1)} style={{ ...btnS, color: step.street === 'showdown' ? STREET_COLORS.showdown : '#4b5563', background: step.street === 'showdown' ? `${STREET_COLORS.showdown}15` : 'transparent', border: `1px solid ${step.street === 'showdown' ? `${STREET_COLORS.showdown}40` : '#2a2d3a'}`, fontSize: 11, fontWeight: 600 }}>SD</button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Panel */}
-        <div style={{ width: 190, padding: '16px 14px', borderLeft: '1px solid #1e2130', background: '#0d0f18', overflowY: 'auto', flexShrink: 0 }}>
-          {step.analysis && (
-            <div style={{ marginBottom: 20 }}>
-              {step.analysis.type === 'facing' ? <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>{step.isHero ? 'Hero Decision' : 'Hero Faces'}</div>
-                <PRow l="Pot Odds" v={step.analysis.potOdds + '%'} c="#3b82f6" />
-                <PRow l="MDF" v={step.analysis.mdf + '%'} c="#8b5cf6" />
-                <PRow l="To Call" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
-                <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
-              </> : <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero Bet</div>
-                <PRow l="Bet/Pot" v={step.analysis.betToPot + '%'} c="#22c55e" />
-                <PRow l="MBF" v={step.analysis.mbf + '%'} c="#ec4899" />
-                <PRow l="Size" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
-                <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
-              </>}
-            </div>
-          )}
-          {step.villainAnalysis && (
-            <div style={{ marginBottom: 20, padding: '10px', background: 'rgba(245,158,11,0.06)', borderRadius: 6, border: '1px solid rgba(245,158,11,0.15)' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Villain Must Defend</div>
-              <PRow l="MDF" v={step.villainAnalysis.villainMDF + '%'} c="#f59e0b" />
-              <PRow l="vs Bet" v={Math.round(step.villainAnalysis.heroBet).toLocaleString()} c="#64748b" />
-            </div>
-          )}
-          {!step.analysis && !step.villainAnalysis && (
-            <div style={{ fontSize: 11, color: '#374151', textAlign: 'center', padding: '20px 0' }}>Navega para uma acção para ver análise</div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
+              <span style={{ fontSize: 14, fontWeight: 600, color: step.action.includes('fold') ? '#ef4444' : st
