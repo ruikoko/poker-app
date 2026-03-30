@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { hands, imports, screenshots, hm3 } from '../api/client'
+import { hands, imports, screenshots, hm3, mtt } from '../api/client'
 
 const STATE_COLORS = {
   new:       '#3b82f6',
@@ -343,7 +343,15 @@ export default function InboxPage() {
           continue
         }
 
-        // For HH and summaries, use the existing import endpoint
+        // For HH files (.txt/.zip), use MTT import endpoint (matches with screenshots)
+        const isHH = queue[i].type === 'hh'
+        if (isHH) {
+          const res = await mtt.import(queue[i].file)
+          setUploadQueue(prev => prev.map((item, j) => j === i ? { ...item, status: 'done', result: res } : item))
+          continue
+        }
+
+        // For other files, use the existing import endpoint
         const res = await imports.upload(queue[i].file)
         setUploadQueue(prev => prev.map((item, j) => j === i ? { ...item, status: 'done', result: res } : item))
       } catch (err) {
@@ -675,7 +683,26 @@ export default function InboxPage() {
               <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 2 }}>
                 {tmGroups.length} torneio{tmGroups.length !== 1 ? 's' : ''}
               </span>
-              <span style={{ marginLeft: 'auto', color: '#4b5563', fontSize: 12, transition: 'transform 0.2s', display: 'inline-block', transform: orphansExpanded ? 'rotate(180deg)' : 'none' }}>&#9660;</span>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  if (!confirm(`Rematch global: tentar ligar todos os ${orphans.length} screenshots às mãos MTT?`)) return
+                  try {
+                    const res = await mtt.rematch()
+                    alert(`Rematch concluído!\n\n${res.matched || 0} screenshots ligados\n${res.villains_created || 0} villains criados\n${res.promoted_to_study || 0} mãos promovidas`)
+                    loadOrphans()
+                    load()
+                  } catch (err) {
+                    alert('Erro no rematch: ' + err.message)
+                  }
+                }}
+                style={{
+                  marginLeft: 'auto', padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                  background: 'rgba(34,197,94,0.15)', color: '#22c55e',
+                  border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer',
+                }}
+              >&#x1F504; Rematch Global</button>
+              <span style={{ color: '#4b5563', fontSize: 12, transition: 'transform 0.2s', display: 'inline-block', transform: orphansExpanded ? 'rotate(180deg)' : 'none' }}>&#9660;</span>
             </div>
 
             {/* Conteúdo expansível */}
