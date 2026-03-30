@@ -155,39 +155,77 @@ def villain_hands(
     current_user=Depends(require_auth)
 ):
     """
-    Encontra mãos onde o vilão aparece em all_players_actions.
-    Pesquisa pelo nick exacto (case-insensitive) nas chaves do JSONB.
+    Encontra mãos onde o vilão aparece e fez VPIP (não apenas fold preflop).
+    Pesquisa em all_players_actions e hand_villains.
     """
     offset = (page - 1) * page_size
 
     # Search in all_players_actions keys (player names)
-    # Also search in player_names JSONB
+    # Filter: player must have actions beyond just preflop fold
+    # Also include hands from hand_villains (MTT pipeline, already VPIP-filtered)
     rows = query(
         """
-        SELECT h.id, h.hand_id, h.played_at, h.stakes, h.position,
+        SELECT DISTINCT h.id, h.hand_id, h.played_at, h.stakes, h.position,
                h.hero_cards, h.board, h.result, h.study_state,
                h.all_players_actions, h.screenshot_url, h.player_names,
                h.entry_id, h.raw, h.site
         FROM hands h
         WHERE (
-            h.all_players_actions ? %s
-            OR h.player_names::text ILIKE %s
+            (
+                h.all_players_actions ? %s
+                AND (
+                    -- Has actions beyond just preflop fold
+                    h.all_players_actions->%s->'actions' IS NULL
+                    OR h.all_players_actions->%s->'actions'->>'flop' IS NOT NULL
+                    OR h.all_players_actions->%s->'actions'->>'turn' IS NOT NULL
+                    OR h.all_players_actions->%s->'actions'->>'river' IS NOT NULL
+                    OR (
+                        h.all_players_actions->%s->'actions'->>'preflop' IS NOT NULL
+                        AND h.all_players_actions->%s->'actions'->>'preflop' NOT LIKE '%%fold%%'
+                    )
+                )
+            )
+            OR EXISTS (
+                SELECT 1 FROM hand_villains hv
+                JOIN mtt_hands mh ON hv.mtt_hand_id = mh.id
+                WHERE hv.player_name = %s
+                  AND mh.tm_number IS NOT NULL
+                  AND h.hand_id = 'GG-' || regexp_replace(mh.tm_number, '[^0-9]', '', 'g')
+            )
         )
         ORDER BY h.played_at DESC NULLS LAST
         LIMIT %s OFFSET %s
         """,
-        (nick, f"%{nick}%", page_size, offset)
+        (nick, nick, nick, nick, nick, nick, nick, nick, page_size, offset)
     )
 
     total_rows = query(
         """
-        SELECT COUNT(*) AS total FROM hands h
+        SELECT COUNT(DISTINCT h.id) AS total FROM hands h
         WHERE (
-            h.all_players_actions ? %s
-            OR h.player_names::text ILIKE %s
+            (
+                h.all_players_actions ? %s
+                AND (
+                    h.all_players_actions->%s->'actions' IS NULL
+                    OR h.all_players_actions->%s->'actions'->>'flop' IS NOT NULL
+                    OR h.all_players_actions->%s->'actions'->>'turn' IS NOT NULL
+                    OR h.all_players_actions->%s->'actions'->>'river' IS NOT NULL
+                    OR (
+                        h.all_players_actions->%s->'actions'->>'preflop' IS NOT NULL
+                        AND h.all_players_actions->%s->'actions'->>'preflop' NOT LIKE '%%fold%%'
+                    )
+                )
+            )
+            OR EXISTS (
+                SELECT 1 FROM hand_villains hv
+                JOIN mtt_hands mh ON hv.mtt_hand_id = mh.id
+                WHERE hv.player_name = %s
+                  AND mh.tm_number IS NOT NULL
+                  AND h.hand_id = 'GG-' || regexp_replace(mh.tm_number, '[^0-9]', '', 'g')
+            )
         )
         """,
-        (nick, f"%{nick}%")
+        (nick, nick, nick, nick, nick, nick, nick, nick)
     )
     total = total_rows[0]["total"] if total_rows else 0
 
@@ -225,9 +263,18 @@ def recalculate_hands_seen(current_user=Depends(require_auth)):
                         FROM hand_villains
                         UNION
                         SELECT key AS nick, h.id::text AS hand_ref
-                        FROM hands h, jsonb_object_keys(h.all_players_actions) AS key
+                        FROM hands h, jsonb_each(h.all_players_actions) AS kv(key, val)
                         WHERE h.all_players_actions IS NOT NULL
                           AND key != '_meta'
+                          AND (
+                              val->'actions'->>'flop' IS NOT NULL
+                              OR val->'actions'->>'turn' IS NOT NULL
+                              OR val->'actions'->>'river' IS NOT NULL
+                              OR (
+                                  val->'actions'->>'preflop' IS NOT NULL
+                                  AND val->'actions'->>'preflop' NOT LIKE '%%fold%%'
+                              )
+                          )
                     ) combined
                     GROUP BY nick
                 ) sub
