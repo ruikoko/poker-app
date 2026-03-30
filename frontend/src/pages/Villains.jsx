@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { villains, hands as handsApi, mtt } from '../api/client'
+import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -503,6 +503,17 @@ export default function VillainsPage() {
               }}
               style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer' }}
             >&#x1F9E0; Re-enrich</button>
+            <button
+              onClick={async () => {
+                if (!confirm('Re-parse: extrair acções de todas as mãos na BD? Pode demorar.')) return
+                try {
+                  const res = await hm3.reParse()
+                  alert(`Re-parse concluído!\n\n${res.processed || 0} mãos processadas\n${res.updated || 0} actualizadas\n${res.errors || 0} erros`)
+                  load()
+                } catch (err) { alert('Erro: ' + err.message) }
+              }}
+              style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}
+            >&#x1F4BE; Re-parse DB</button>
             <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(s => !s)}>
               {showCreate ? 'Cancelar' : '+ Novo'}
             </button>
