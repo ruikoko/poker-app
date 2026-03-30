@@ -702,6 +702,25 @@ export default function InboxPage() {
                   border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer',
                 }}
               >&#x1F504; Rematch Global</button>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  if (!confirm('Re-enrich: re-processar TODOS os screenshots e criar villains?')) return
+                  try {
+                    const res = await mtt.reEnrich()
+                    alert(`Re-enrich concluído!\n\n${res.processed || 0} mãos processadas\n${res.villains_created || 0} villains criados\n${res.errors || 0} erros`)
+                    loadOrphans()
+                    load()
+                  } catch (err) {
+                    alert('Erro no re-enrich: ' + err.message)
+                  }
+                }}
+                style={{
+                  padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                  background: 'rgba(245,158,11,0.15)', color: '#f59e0b',
+                  border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer',
+                }}
+              >&#x1F9E0; Re-enrich</button>
               <span style={{ color: '#4b5563', fontSize: 12, transition: 'transform 0.2s', display: 'inline-block', transform: orphansExpanded ? 'rotate(180deg)' : 'none' }}>&#9660;</span>
             </div>
 
