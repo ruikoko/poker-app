@@ -233,6 +233,11 @@ export default function ReplayerPage() {
               <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 2 }}>POT</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", textShadow: '0 0 12px rgba(251,191,36,0.3)' }}>{step.potBB}BB</div>
               <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>{step.pot?.toLocaleString()}</div>
+              {meta.sb && meta.bb && (
+                <div style={{ marginTop: 4, fontSize: 11, color: '#64748b', fontFamily: 'monospace', background: 'rgba(0,0,0,0.4)', padding: '2px 10px', borderRadius: 4, display: 'inline-block' }}>
+                  SB {Math.round(meta.sb)} / BB {Math.round(meta.bb)}{meta.ante ? ` / Ante ${Math.round(meta.ante)}` : ''}
+                </div>
+              )}
             </div>
 
             {/* Board */}
@@ -244,7 +249,7 @@ export default function ReplayerPage() {
 
             {/* Dealer button */}
             {btnPlayerIdx >= 0 && positions[btnPlayerIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[btnPlayerIdx].x + (positions[btnPlayerIdx].x > 50 ? -5 : 5)}%`, top: `${positions[btnPlayerIdx].y + (positions[btnPlayerIdx].y > 50 ? -4 : 4)}%`, width: 22, height: 22, borderRadius: '50%', background: '#fbbf24', color: '#000', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: 5, transform: 'translate(-50%,-50%)' }}>D</div>
+              <div style={{ position: 'absolute', left: `${positions[btnPlayerIdx].x + (positions[btnPlayerIdx].x > 50 ? -6 : 6)}%`, top: `${positions[btnPlayerIdx].y + (positions[btnPlayerIdx].y > 50 ? -5 : 5)}%`, width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#000', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(251,191,36,0.5), 0 0 0 2px rgba(0,0,0,0.3)', zIndex: 6, transform: 'translate(-50%,-50%)', letterSpacing: 0.5, border: '2px solid rgba(255,255,255,0.3)' }}>D</div>
             )}
 
             {/* Players */}
@@ -256,7 +261,7 @@ export default function ReplayerPage() {
               return (
                 <div key={i}>
                   {p.currentBet > 0 && !p.folded && (
-                    <div style={{ position: 'absolute', left: `${chipPos.x}%`, top: `${chipPos.y}%`, transform: 'translate(-50%,-50%)', fontSize: 11, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace', background: 'rgba(0,0,0,0.75)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(251,191,36,0.3)', whiteSpace: 'nowrap', zIndex: 5 }}>
+                    <div style={{ position: 'absolute', left: `${chipPos.x}%`, top: `${chipPos.y}%`, transform: 'translate(-50%,-50%)', fontSize: 14, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", background: 'rgba(0,0,0,0.88)', padding: '4px 12px', borderRadius: 6, border: '2px solid rgba(251,191,36,0.5)', whiteSpace: 'nowrap', zIndex: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.6), 0 0 6px rgba(251,191,36,0.2)', letterSpacing: 0.5 }}>
                       {Math.round(p.currentBet).toLocaleString()}
                     </div>
                   )}
@@ -339,3 +344,4 @@ export default function ReplayerPage() {
     </div>
   )
 }
+
