@@ -1151,14 +1151,34 @@ async def rematch_screenshots(
                         ss_entry["id"], hand_rows[0]["id"], raw
                     )
                     
-                    # Criar villain_notes a partir dos jogadores do screenshot
+                    # Criar villain_notes — só para jogadores com VPIP
                     players_list = raw.get("players_list", [])
                     hero_name = raw.get("hero", "")
+                    
+                    # Get updated all_players_actions
+                    updated_hand = query("SELECT all_players_actions FROM hands WHERE id = %s", (hand_rows[0]["id"],))
+                    apa = (updated_hand[0].get("all_players_actions") or {}) if updated_hand else {}
+                    
                     with conn.cursor() as cur:
                         for player in players_list:
                             pname = player.get("name", "")
                             if not pname or pname == "Unknown" or pname == hero_name:
                                 continue
+                            
+                            # Check VPIP
+                            player_data = apa.get(pname, {})
+                            actions = player_data.get("actions", {})
+                            preflop_action = actions.get("preflop", "")
+                            has_vpip = (
+                                actions.get("flop") is not None
+                                or actions.get("turn") is not None
+                                or actions.get("river") is not None
+                                or (preflop_action and "fold" not in preflop_action.lower())
+                            )
+                            
+                            if not has_vpip:
+                                continue
+                            
                             cur.execute(
                                 """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
                                    VALUES ('GGPoker', %s, 1, NOW())
@@ -1259,14 +1279,34 @@ async def re_enrich_all(
                 errors += 1
                 continue
             
-            # Criar/actualizar villain_notes para cada jogador
+            # Criar/actualizar villain_notes — só para jogadores com VPIP
             players_list = raw.get("players_list", [])
             hero_name = raw.get("hero", "")
+            
+            # Reload hand to get updated all_players_actions
+            updated_hand = query("SELECT all_players_actions FROM hands WHERE id = %s", (hand["id"],))
+            apa = (updated_hand[0].get("all_players_actions") or {}) if updated_hand else {}
+            
             with conn.cursor() as cur:
                 for player in players_list:
                     pname = player.get("name", "")
                     if not pname or pname == "Unknown" or pname == hero_name:
                         continue
+                    
+                    # Check if player had VPIP (not just fold preflop)
+                    player_data = apa.get(pname, {})
+                    actions = player_data.get("actions", {})
+                    preflop_action = actions.get("preflop", "")
+                    has_vpip = (
+                        actions.get("flop") is not None
+                        or actions.get("turn") is not None
+                        or actions.get("river") is not None
+                        or (preflop_action and "fold" not in preflop_action.lower())
+                    )
+                    
+                    if not has_vpip:
+                        continue
+                    
                     cur.execute(
                         """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
                            VALUES ('GGPoker', %s, 1, NOW())
