@@ -89,6 +89,7 @@ export const villains = {
   create: (body)        => req('POST',   '/villains', body),
   update: (id, body)    => req('PATCH',  `/villains/${id}`, body),
   delete: (id)          => req('DELETE', `/villains/${id}`),
+  recalculate: ()       => req('POST',  '/villains/recalculate-hands'),
   searchHands: (nick, params = {}) => {
     const qs = new URLSearchParams(
       Object.fromEntries(Object.entries({ nick, ...params }).filter(([, v]) => v != null && v !== ''))
