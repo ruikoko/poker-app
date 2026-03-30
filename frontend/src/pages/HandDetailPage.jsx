@@ -92,6 +92,7 @@ export default function HandDetailPage() {
   const [hand, setHand] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
@@ -238,6 +239,9 @@ export default function HandDetailPage() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         {hand.raw && hand.all_players_actions && (
           <a href={`/replayer/${hand.id}`} style={{ padding: '8px 18px', borderRadius: 6, fontSize: 13, fontWeight: 600, background: '#6366f1', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>&#9654; Replayer</a>
+        )}
+        {hand.raw && (
+          <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ padding: '8px 18px', borderRadius: 6, fontSize: 13, fontWeight: 600, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)', color: copied ? '#22c55e' : '#f59e0b', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.25)'}`, cursor: 'pointer' }}>{copied ? '✓ Copiado' : 'Copiar HH'}</button>
         )}
       </div>
     </div>
