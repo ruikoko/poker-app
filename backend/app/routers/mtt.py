@@ -358,6 +358,18 @@ def _parse_mtt_file(content: bytes, filename: str) -> tuple[list[dict], list[str
 
 # ── Match com screenshots ─────────────────────────────────────────────────────
 
+def _extract_tm_digits(tm_value: str) -> str:
+    """
+    Extrai só os dígitos de qualquer formato de TM/tournament ID.
+    Suporta: TM5754140681, #TM5754140681, GG-5754140681, 5754140681,
+             Poker Hand #TM5754140681, Hand #5754140681, etc.
+    """
+    if not tm_value:
+        return ""
+    digits = re.sub(r"[^0-9]", "", str(tm_value))
+    return digits
+
+
 def _extract_screenshot_data(raw: dict, entry_id: int) -> dict:
     """Extrai dados relevantes de um entry de screenshot."""
     return {
@@ -374,14 +386,17 @@ def _extract_screenshot_data(raw: dict, entry_id: int) -> dict:
 def _match_screenshot(tm_number: str, played_at: str | None = None, blinds: str | None = None) -> dict | None:
     """
     Procura um screenshot órfão pelo TM number + hora + blinds.
+    Usa apenas dígitos para comparação (ignora prefixos TM, GG-, #, etc.)
     
     Estratégia:
-      1. Filtrar por TM number (identifica o torneio)
+      1. Filtrar por TM number (só dígitos)
       2. Se houver múltiplos, filtrar por blinds
-      3. Se ainda houver múltiplos, filtrar por hora (±2 min)
+      3. Se ainda houver múltiplos, filtrar por hora (±5 min)
     Retorna dados do Vision incluindo players_list e vision_sb/bb.
     """
-    tm_digits = tm_number.replace("TM", "")
+    tm_digits = _extract_tm_digits(tm_number)
+    if not tm_digits:
+        return None
     
     rows = query(
         """SELECT id, raw_json 
@@ -1028,9 +1043,8 @@ async def rematch_screenshots(
     current_user=Depends(require_auth),
 ):
     """
-    Re-tenta match de screenshots com mãos de MTT.
-    Itera pelos SCREENSHOTS (poucos) e procura mãos correspondentes,
-    em vez de iterar pelas mãos (25k+) — muito mais eficiente.
+    Re-tenta match de screenshots com mãos.
+    Procura em AMBAS as tabelas (mtt_hands e hands) usando só dígitos do TM.
     """
     # Buscar screenshots com Vision concluído
     screenshot_entries = query(
@@ -1047,6 +1061,8 @@ async def rematch_screenshots(
     matched = 0
     villains_created = 0
     promoted = 0
+    already_matched = 0
+    no_hh = 0
     
     conn = get_conn()
     try:
@@ -1056,47 +1072,92 @@ async def rematch_screenshots(
             if not tm:
                 continue
             
-            tm_digits = tm.replace("TM", "")
+            tm_digits = _extract_tm_digits(tm)
+            if not tm_digits:
+                continue
             
-            # Verificar se já há match para este screenshot
+            # Verificar se já há match para este screenshot (em mtt_hands)
             existing = query(
                 "SELECT id FROM mtt_hands WHERE screenshot_entry_id = %s LIMIT 1",
                 (ss_entry["id"],)
             )
             if existing:
-                continue  # já tem match
-            
-            # Procurar mão na mtt_hands por TM number
-            mtt_rows = query(
-                "SELECT id, tm_number, raw FROM mtt_hands WHERE tm_number = %s AND has_screenshot = false LIMIT 1",
-                (f"TM{tm_digits}",)
-            )
-            if not mtt_rows:
+                already_matched += 1
                 continue
             
-            mtt_hand = mtt_rows[0]
-            screenshot_data = _extract_screenshot_data(raw, ss_entry["id"])
+            # Também verificar se já tem match em hands
+            existing_hands = query(
+                "SELECT id FROM hands WHERE entry_id = %s LIMIT 1",
+                (ss_entry["id"],)
+            )
+            if existing_hands:
+                already_matched += 1
+                continue
             
-            # Marcar mão como tendo screenshot
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
-                    (ss_entry["id"], mtt_hand["id"])
+            # ── Tentar match na mtt_hands (procura flexível por dígitos) ──
+            mtt_rows = query(
+                """SELECT id, tm_number, raw FROM mtt_hands 
+                   WHERE regexp_replace(tm_number, '[^0-9]', '', 'g') = %s
+                     AND has_screenshot = false 
+                   LIMIT 1""",
+                (tm_digits,)
+            )
+            
+            if mtt_rows:
+                mtt_hand = mtt_rows[0]
+                screenshot_data = _extract_screenshot_data(raw, ss_entry["id"])
+                
+                # Marcar mão como tendo screenshot
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
+                        (ss_entry["id"], mtt_hand["id"])
+                    )
+                
+                # Parsear a mão para extrair VPIP e criar villains
+                parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
+                if parsed:
+                    if parsed.get("vpip_seats"):
+                        n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                        villains_created += n
+                    
+                    seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
+                    _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
+                    promoted += 1
+                
+                matched += 1
+                continue
+            
+            # ── Tentar match na tabela hands (mãos importadas pelo /api/import) ──
+            hand_id_pattern = f"GG-{tm_digits}"
+            hand_rows = query(
+                "SELECT id, hand_id FROM hands WHERE hand_id = %s LIMIT 1",
+                (hand_id_pattern,)
+            )
+            
+            if not hand_rows:
+                # Tentar match flexível: extrair dígitos do hand_id
+                hand_rows = query(
+                    """SELECT id, hand_id FROM hands 
+                       WHERE regexp_replace(hand_id, '[^0-9]', '', 'g') = %s
+                       LIMIT 1""",
+                    (tm_digits,)
                 )
             
-            # Parsear a mão para extrair VPIP e criar villains
-            parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
-            if parsed:
-                if parsed.get("vpip_seats"):
-                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
-                    villains_created += n
-                
-                # Promover para Inbox/Mãos
-                seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
-                _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
-                promoted += 1
+            if hand_rows:
+                from app.routers.screenshot import _enrich_hand_from_orphan_entry
+                try:
+                    enrich_result = _enrich_hand_from_orphan_entry(
+                        ss_entry["id"], hand_rows[0]["id"], raw
+                    )
+                    matched += 1
+                    promoted += 1
+                    logger.info(f"Rematch via hands table: entry {ss_entry['id']} → hand {hand_rows[0]['id']} ({hand_id_pattern})")
+                except Exception as e:
+                    logger.warning(f"Rematch enrich failed for entry {ss_entry['id']}: {e}")
+                continue
             
-            matched += 1
+            no_hh += 1
         
         conn.commit()
     except Exception as e:
@@ -1110,6 +1171,8 @@ async def rematch_screenshots(
         "matched": matched,
         "villains_created": villains_created,
         "promoted_to_study": promoted,
+        "already_matched": already_matched,
+        "no_hh_found": no_hh,
         "total_screenshots": len(screenshot_entries),
     }
 
