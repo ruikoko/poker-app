@@ -374,4 +374,101 @@ export default function ReplayerPage() {
           <div style={{ padding: '8px 20px', background: '#0d0f18', borderTop: '1px solid #1e2130', display: 'flex', alignItems: 'center', gap: 10, minHeight: 38, flexShrink: 0 }}>
             {step.actor ? <>
               <span style={{ fontSize: 13, fontWeight: 600, color: step.isHero ? '#818cf8' : '#94a3b8' }}>{step.actor}</span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: step.action.includes('fold') ? '#ef4444' : st
+              <span style={{ fontSize: 14, fontWeight: 600, color: step.action.includes('fold') ? '#ef4444' : step.action.includes('call') || step.action.includes('check') ? '#22c55e' : '#f59e0b' }}>{step.action}</span>
+            </> : <span style={{ fontSize: 13, color: '#4b5563' }}>{step.action}</span>}
+          </div>
+
+          {/* Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 20px', background: '#111420', borderTop: '1px solid #1e2130', flexShrink: 0 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button onClick={() => setSi(0)} style={btnS}>{'\u23EE'}</button>
+              <button onClick={() => setSi(i => Math.max(0, i-1))} style={btnS}>{'\u25C0'}</button>
+              <button onClick={() => setPlaying(!playing)} style={{ ...btnS, background: playing ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)', color: playing ? '#ef4444' : '#22c55e', minWidth: 40 }}>{playing ? '\u23F8' : '\u25B6'}</button>
+              <button onClick={() => setSi(i => Math.min(steps.length-1, i+1))} style={btnS}>{'\u25B6'}</button>
+              <button onClick={() => setSi(steps.length-1)} style={btnS}>{'\u23ED'}</button>
+              <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', marginLeft: 8 }}>{si+1}/{steps.length}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 5 }}>
+              {streets.filter(s => s !== 'showdown').map(s => (
+                <button key={s} onClick={() => { const idx = steps.findIndex(st => st.street === s); if (idx >= 0) setSi(idx) }} style={{ ...btnS, color: step.street === s ? STREET_COLORS[s] : '#4b5563', background: step.street === s ? `${STREET_COLORS[s]}15` : 'transparent', border: `1px solid ${step.street === s ? `${STREET_COLORS[s]}40` : '#2a2d3a'}`, fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{s === 'preflop' ? 'PF' : s.charAt(0).toUpperCase() + s.slice(1)}</button>
+              ))}
+              {streets.includes('showdown') && (
+                <button onClick={() => setSi(steps.length - 1)} style={{ ...btnS, color: step.street === 'showdown' ? STREET_COLORS.showdown : '#4b5563', background: step.street === 'showdown' ? `${STREET_COLORS.showdown}15` : 'transparent', border: `1px solid ${step.street === 'showdown' ? `${STREET_COLORS.showdown}40` : '#2a2d3a'}`, fontSize: 11, fontWeight: 600 }}>SD</button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel */}
+        <div style={{ width: 190, padding: '16px 14px', borderLeft: '1px solid #1e2130', background: '#0d0f18', overflowY: 'auto', flexShrink: 0 }}>
+          {step.analysis && (
+            <div style={{ marginBottom: 20 }}>
+              {step.analysis.type === 'facing' ? <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>{step.isHero ? 'Hero Decision' : 'Hero Faces'}</div>
+                <PRow l="Pot Odds" v={step.analysis.potOdds + '%'} c="#3b82f6" />
+                <PRow l="MDF" v={step.analysis.mdf + '%'} c="#8b5cf6" />
+                <PRow l="To Call" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
+                <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
+              </> : <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero Bet</div>
+                <PRow l="Bet/Pot" v={step.analysis.betToPot + '%'} c="#22c55e" />
+                <PRow l="MBF" v={step.analysis.mbf + '%'} c="#ec4899" />
+                <PRow l="Size" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
+                <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
+              </>}
+            </div>
+          )}
+          {step.villainAnalysis && (
+            <div style={{ marginBottom: 20, padding: '10px', background: 'rgba(245,158,11,0.06)', borderRadius: 6, border: '1px solid rgba(245,158,11,0.15)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Villain Must Defend</div>
+              <PRow l="MDF" v={step.villainAnalysis.villainMDF + '%'} c="#f59e0b" />
+              <PRow l="vs Bet" v={Math.round(step.villainAnalysis.heroBet).toLocaleString()} c="#64748b" />
+            </div>
+          )}
+          {!step.analysis && !step.villainAnalysis && (
+            <div style={{ fontSize: 11, color: '#374151', textAlign: 'center', padding: '20px 0' }}>Navega para uma acção para ver análise</div>
+          )}
+        </div>
+      </div>
+
+      {/* Range Grid Popup */}
+      {showRangeGrid && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }} onClick={() => setShowRangeGrid(false)}>
+          <div style={{ background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 12, padding: 24, width: 520, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+            <RangeGrid
+              selected={selectedCells}
+              onToggle={(key, mode) => {
+                setSelectedCells(prev => {
+                  const next = new Set(prev)
+                  if (mode) next.add(key); else next.delete(key)
+                  return next
+                })
+              }}
+              onClear={() => setSelectedCells(new Set())}
+              onSelectAll={() => {
+                const all = new Set()
+                for (let r = 0; r < 13; r++) for (let c = 0; c < 13; c++) all.add(cellKey(r, c))
+                setSelectedCells(all)
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button onClick={() => {
+                const rangeStr = selectedToRangeStr(selectedCells)
+                setRangeInput(rangeStr)
+                setVillainRange(rangeStr)
+                calcEq(step?.board, rangeStr)
+                setShowRangeGrid(false)
+              }} style={{ flex: 1, padding: '8px 0', borderRadius: 6, fontSize: 13, fontWeight: 600, background: '#22c55e', color: '#000', border: 'none', cursor: 'pointer' }}>Aplicar e Calcular</button>
+              <button onClick={() => setShowRangeGrid(false)} style={{ padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }}>Fechar</button>
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 12, fontSize: 10, color: '#4b5563' }}>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#ca8a04', marginRight: 3 }}></span>Pares</span>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#2563eb', marginRight: 3 }}></span>Suited</span>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#0891b2', marginRight: 3 }}></span>Offsuit</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
