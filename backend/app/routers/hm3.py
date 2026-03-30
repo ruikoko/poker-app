@@ -641,3 +641,203 @@ def hm3_import_stats(current_user=Depends(require_auth)):
         GROUP BY site
     """)
     return {"by_site": [dict(r) for r in rows]}
+
+
+# ── Parse actions from raw HH text (multi-site) ─────────────────────────────
+
+def _parse_actions_from_raw(raw_text, site_name=""):
+    """
+    Extracts actions per street per player from raw HH text.
+    Works for Winamax, PokerStars, WPN, and GG formats.
+    Returns { player_name: { preflop: "raises 3200", flop: "bets 2500", ... }, ... }
+    Also returns cards shown: { player_name: [card1, card2], ... }
+    """
+    actions_by_player = {}
+    cards_by_player = {}
+
+    if not raw_text:
+        return actions_by_player, cards_by_player
+
+    is_winamax = "*** PRE-FLOP ***" in raw_text
+
+    street_markers = [
+        ("preflop", "*** PRE-FLOP ***" if is_winamax else "*** HOLE CARDS ***"),
+        ("flop", "*** FLOP ***"),
+        ("turn", "*** TURN ***"),
+        ("river", "*** RIVER ***"),
+    ]
+
+    for street_idx, (street_name, marker) in enumerate(street_markers):
+        si = raw_text.find(marker)
+        if si == -1:
+            continue
+
+        # Find end of this street
+        ei = len(raw_text)
+        for _, next_marker in street_markers[street_idx + 1:]:
+            ni = raw_text.find(next_marker, si + len(marker))
+            if ni != -1:
+                ei = ni
+                break
+        # Also check showdown/summary
+        for end_marker in ["*** SHOW DOWN ***", "*** SHOW  DOWN ***", "*** SUMMARY ***"]:
+            ni = raw_text.find(end_marker, si + len(marker))
+            if ni != -1 and ni < ei:
+                ei = ni
+
+        section = raw_text[si + len(marker):ei]
+
+        for line in section.split("\n"):
+            t = line.strip()
+            if not t or t.startswith("***") or t.startswith("Dealt") or t.startswith("Main pot"):
+                continue
+
+            # Skip posts (antes/blinds)
+            if "posts" in t.lower():
+                continue
+
+            # Parse action
+            m = re.match(r"^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$", t, re.I)
+            if m:
+                actor = m.group(1).strip()
+                act = m.group(2).lower()
+                rest = m.group(3)
+                amount = 0
+                amt_m = re.search(r"([\d,]+(?:\.\d+)?)", rest)
+                if amt_m:
+                    amount = float(amt_m.group(1).replace(",", ""))
+                to_m = re.search(r"to\s+([\d,]+(?:\.\d+)?)", rest)
+                all_in = bool(re.search(r"all-in|all in", rest, re.I))
+
+                label = act
+                if act == "calls":
+                    label = f"calls {amount:.0f}"
+                elif act == "bets":
+                    label = f"bets {amount:.0f}"
+                elif act == "raises":
+                    to_val = float(to_m.group(1).replace(",", "")) if to_m else amount
+                    label = f"raises to {to_val:.0f}"
+                if all_in:
+                    label += " all-in"
+
+                if actor not in actions_by_player:
+                    actions_by_player[actor] = {}
+                # Append to existing street action (multiple actions per street possible)
+                existing = actions_by_player[actor].get(street_name, "")
+                if existing:
+                    actions_by_player[actor][street_name] = f"{existing}, {label}"
+                else:
+                    actions_by_player[actor][street_name] = label
+
+    # Parse showdown cards
+    showdown_start = raw_text.find("*** SHOW DOWN ***")
+    if showdown_start == -1:
+        showdown_start = raw_text.find("*** SHOW  DOWN ***")
+    if showdown_start != -1:
+        summary_start = raw_text.find("*** SUMMARY ***", showdown_start)
+        sd_section = raw_text[showdown_start:summary_start if summary_start != -1 else len(raw_text)]
+        for line in sd_section.split("\n"):
+            sm = re.match(r"^(.+?)(?::)?\s+shows\s+\[(.+?)\]", line.strip(), re.I)
+            if sm:
+                actor = sm.group(1).strip()
+                cards = [c.strip() for c in sm.group(2).split() if c.strip()]
+                cards_by_player[actor] = cards
+
+    return actions_by_player, cards_by_player
+
+
+@router.post("/re-parse")
+async def re_parse_all_hands(
+    current_user=Depends(require_auth),
+):
+    """
+    Re-parseia TODAS as mãos HM3/Winamax/PokerStars/WPN existentes na BD.
+    Actualiza all_players_actions com acções por street de todos os jogadores.
+    """
+    import json
+
+    # Fetch all hands that have raw text and are from HM3 sites
+    hand_rows = query(
+        """SELECT id, raw, all_players_actions, site
+           FROM hands
+           WHERE raw IS NOT NULL AND raw != ''
+             AND site IN ('Winamax', 'PokerStars', 'WPN', 'GGPoker')
+           ORDER BY id"""
+    )
+
+    if not hand_rows:
+        return {"processed": 0, "updated": 0, "errors": 0}
+
+    processed = 0
+    updated = 0
+    errors = 0
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for hand in hand_rows:
+                try:
+                    raw = hand.get("raw", "")
+                    if not raw or len(raw) < 50:
+                        continue
+
+                    existing_apa = hand.get("all_players_actions") or {}
+                    if isinstance(existing_apa, str):
+                        existing_apa = json.loads(existing_apa)
+
+                    # Parse actions from raw HH
+                    actions_by_player, cards_by_player = _parse_actions_from_raw(raw, hand.get("site", ""))
+
+                    if not actions_by_player:
+                        processed += 1
+                        continue
+
+                    # Merge actions into existing all_players_actions
+                    changed = False
+                    for player_name, actions in actions_by_player.items():
+                        if player_name in existing_apa and isinstance(existing_apa[player_name], dict):
+                            if existing_apa[player_name].get("actions") != actions:
+                                existing_apa[player_name]["actions"] = actions
+                                changed = True
+                            # Add cards if shown
+                            if player_name in cards_by_player:
+                                existing_apa[player_name]["cards"] = cards_by_player[player_name]
+                                changed = True
+                        else:
+                            # Player not in all_players_actions yet (edge case)
+                            # Try to find by partial match (some names may differ)
+                            pass
+
+                    if changed:
+                        cur.execute(
+                            "UPDATE hands SET all_players_actions = %s WHERE id = %s",
+                            (json.dumps(existing_apa), hand["id"])
+                        )
+                        updated += 1
+
+                    processed += 1
+
+                    # Commit every 500 hands to avoid long transactions
+                    if processed % 500 == 0:
+                        conn.commit()
+
+                except Exception as e:
+                    errors += 1
+                    if errors < 10:
+                        logger.warning(f"Re-parse error hand {hand.get('id')}: {e}")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Re-parse error: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no re-parse: {e}")
+    finally:
+        conn.close()
+
+    return {
+        "processed": processed,
+        "updated": updated,
+        "errors": errors,
+        "total_hands": len(hand_rows),
+    }
+
