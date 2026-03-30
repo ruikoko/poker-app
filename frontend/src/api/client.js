@@ -169,6 +169,7 @@ export const hm3 = {
       .then(r => r.json())
   },
   stats: () => req('GET', '/hm3/stats'),
+  reParse: () => req('POST', '/hm3/re-parse'),
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
