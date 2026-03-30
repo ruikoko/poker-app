@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { villains, hands as handsApi } from '../api/client'
+import { villains, hands as handsApi, mtt } from '../api/client'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -480,9 +480,33 @@ export default function VillainsPage() {
             <div className="page-title">Vilões</div>
             <div className="page-subtitle">{data.total} notas</div>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(s => !s)}>
-            {showCreate ? 'Cancelar' : '+ Novo'}
-          </button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button
+              onClick={async () => {
+                if (!confirm('Recalcular hands_seen de todos os vilões (só VPIP)?')) return
+                try {
+                  const res = await villains.recalculate()
+                  alert(`Recalculado: ${res.updated || 0} vilões actualizados`)
+                  load()
+                } catch (err) { alert('Erro: ' + err.message) }
+              }}
+              style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer' }}
+            >&#x1F504; Recalcular</button>
+            <button
+              onClick={async () => {
+                if (!confirm('Re-enrich: re-processar todos os screenshots e criar villains VPIP?')) return
+                try {
+                  const res = await mtt.reEnrich()
+                  alert(`Re-enrich: ${res.processed || 0} mãos, ${res.villains_created || 0} villains`)
+                  load()
+                } catch (err) { alert('Erro: ' + err.message) }
+              }}
+              style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer' }}
+            >&#x1F9E0; Re-enrich</button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(s => !s)}>
+              {showCreate ? 'Cancelar' : '+ Novo'}
+            </button>
+          </div>
         </div>
       </div>
 
