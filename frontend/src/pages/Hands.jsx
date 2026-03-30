@@ -1114,6 +1114,10 @@ function HandRow({ hand, onClick, onDelete, idx }) {
           style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', flexShrink: 0, fontWeight: 600 }}
         >&#9654;</a>
       )}
+      {(() => {
+        const ggMatch = ((hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/))
+        return ggMatch ? <a href={ggMatch[0]} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: '#f59e0b', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', flexShrink: 0, fontWeight: 600 }}>GG</a> : null
+      })()}
       <button
         style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
         onClick={e => { e.stopPropagation(); onDelete() }}
