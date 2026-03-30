@@ -1150,9 +1150,28 @@ async def rematch_screenshots(
                     enrich_result = _enrich_hand_from_orphan_entry(
                         ss_entry["id"], hand_rows[0]["id"], raw
                     )
+                    
+                    # Criar villain_notes a partir dos jogadores do screenshot
+                    players_list = raw.get("players_list", [])
+                    hero_name = raw.get("hero", "")
+                    with conn.cursor() as cur:
+                        for player in players_list:
+                            pname = player.get("name", "")
+                            if not pname or pname == "Unknown" or pname == hero_name:
+                                continue
+                            cur.execute(
+                                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                                   VALUES ('GGPoker', %s, 1, NOW())
+                                   ON CONFLICT (site, nick) DO UPDATE SET
+                                       hands_seen = villain_notes.hands_seen + 1,
+                                       updated_at = NOW()""",
+                                (pname,)
+                            )
+                            villains_created += 1
+                    
                     matched += 1
                     promoted += 1
-                    logger.info(f"Rematch via hands table: entry {ss_entry['id']} → hand {hand_rows[0]['id']} ({hand_id_pattern})")
+                    logger.info(f"Rematch via hands table: entry {ss_entry['id']} → hand {hand_rows[0]['id']} ({hand_id_pattern}), {len(players_list)} players")
                 except Exception as e:
                     logger.warning(f"Rematch enrich failed for entry {ss_entry['id']}: {e}")
                 continue
@@ -1177,7 +1196,128 @@ async def rematch_screenshots(
     }
 
 
-@router.post("/reset-matches")
+@router.post("/re-enrich")
+async def re_enrich_all(
+    current_user=Depends(require_auth),
+):
+    """
+    Re-processa TODOS os screenshots com Vision concluído.
+    Para cada um, actualiza player_names, all_players_actions e cria villain_notes.
+    Funciona independentemente de a mão estar em mtt_hands ou hands.
+    """
+    screenshot_entries = query(
+        """SELECT id, raw_json 
+           FROM entries 
+           WHERE entry_type = 'screenshot' 
+             AND (raw_json->>'vision_done')::boolean = true
+           ORDER BY id"""
+    )
+    
+    if not screenshot_entries:
+        return {"processed": 0, "villains_created": 0, "errors": 0}
+    
+    processed = 0
+    villains_created = 0
+    errors = 0
+    
+    conn = get_conn()
+    try:
+        for ss_entry in screenshot_entries:
+            raw = ss_entry.get("raw_json") or {}
+            tm = raw.get("tm")
+            if not tm:
+                continue
+            
+            tm_digits = _extract_tm_digits(tm)
+            if not tm_digits:
+                continue
+            
+            # Procurar mão na hands (por hand_id)
+            hand_rows = query(
+                "SELECT id, hand_id, raw, all_players_actions FROM hands WHERE hand_id = %s LIMIT 1",
+                (f"GG-{tm_digits}",)
+            )
+            if not hand_rows:
+                hand_rows = query(
+                    """SELECT id, hand_id, raw, all_players_actions FROM hands 
+                       WHERE regexp_replace(hand_id, '[^0-9]', '', 'g') = %s
+                       LIMIT 1""",
+                    (tm_digits,)
+                )
+            
+            if not hand_rows:
+                continue
+            
+            hand = hand_rows[0]
+            
+            # Enrich hand com dados do screenshot
+            try:
+                from app.routers.screenshot import _enrich_hand_from_orphan_entry
+                _enrich_hand_from_orphan_entry(ss_entry["id"], hand["id"], raw)
+            except Exception as e:
+                logger.warning(f"Re-enrich failed for hand {hand['id']}: {e}")
+                errors += 1
+                continue
+            
+            # Criar/actualizar villain_notes para cada jogador
+            players_list = raw.get("players_list", [])
+            hero_name = raw.get("hero", "")
+            with conn.cursor() as cur:
+                for player in players_list:
+                    pname = player.get("name", "")
+                    if not pname or pname == "Unknown" or pname == hero_name:
+                        continue
+                    cur.execute(
+                        """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                           VALUES ('GGPoker', %s, 1, NOW())
+                           ON CONFLICT (site, nick) DO UPDATE SET
+                               hands_seen = villain_notes.hands_seen + 1,
+                               updated_at = NOW()""",
+                        (pname,)
+                    )
+                    villains_created += 1
+            
+            # Também criar na mtt_hands se existir lá
+            mtt_rows = query(
+                """SELECT id, raw FROM mtt_hands 
+                   WHERE regexp_replace(tm_number, '[^0-9]', '', 'g') = %s
+                   LIMIT 1""",
+                (tm_digits,)
+            )
+            if mtt_rows:
+                mtt_hand = mtt_rows[0]
+                screenshot_data = _extract_screenshot_data(raw, ss_entry["id"])
+                parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
+                if parsed and parsed.get("vpip_seats"):
+                    # Limpar villains antigos deste mtt_hand
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (mtt_hand["id"],))
+                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                    villains_created += n
+                
+                # Marcar como tendo screenshot
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
+                        (ss_entry["id"], mtt_hand["id"])
+                    )
+            
+            processed += 1
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erro no re-enrich: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no re-enrich: {e}")
+    finally:
+        conn.close()
+    
+    return {
+        "processed": processed,
+        "villains_created": villains_created,
+        "errors": errors,
+        "total_screenshots": len(screenshot_entries),
+    }
 async def reset_and_rematch(
     current_user=Depends(require_auth),
 ):
