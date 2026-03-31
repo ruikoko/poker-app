@@ -107,14 +107,16 @@ def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000)
         import random as rng
 
         # Auto-detect eval7 score direction:
-        # Compare AA vs 72 on empty board - AA must win
+        # Compare AA vs 72 on a fixed board - AA must win
         _aa = [eval7.Card('As'), eval7.Card('Ad')]
         _72 = [eval7.Card('7c'), eval7.Card('2h')]
         _test_board = [eval7.Card('3d'), eval7.Card('8h'), eval7.Card('Ks'), eval7.Card('4c'), eval7.Card('9s')]
         _aa_score = eval7.evaluate(_aa + _test_board)
         _72_score = eval7.evaluate(_72 + _test_board)
-        # AA has pair of aces, 72 has king high at best
+        logger.info(f"eval7 calibration: AA_score={_aa_score}, 72_score={_72_score}")
+        # If AA score < 72 score, then lower is better
         higher_is_better = _aa_score > _72_score
+        logger.info(f"eval7 higher_is_better={higher_is_better}")
 
         # All work done with strings, only convert to eval7.Card for evaluation
         dead = set(hero_cards + (board or []))
