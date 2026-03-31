@@ -167,8 +167,8 @@ def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000)
             hero_score = eval7.evaluate(hero_hand)
             villain_score = eval7.evaluate(villain_hand)
 
-            # In eval7, HIGHER score = BETTER hand
-            if hero_score > villain_score:
+            # In eval7, LOWER score = BETTER hand (like golf)
+            if hero_score < villain_score:
                 wins += 1
             elif hero_score == villain_score:
                 ties += 1

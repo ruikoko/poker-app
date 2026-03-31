@@ -1622,3 +1622,130 @@ def delete_screenshot_and_revert(entry_id: int, current_user=Depends(require_aut
         conn.close()
 
     return {"ok": True, "reverted_mtt_hand": mtt_hand["id"] if mtt_hand else None}
+
+
+@router.post("/migrate-to-hands")
+def migrate_mtt_to_hands(current_user=Depends(require_auth)):
+    """
+    Migra mtt_hands → hands. Para cada mtt_hand que não exista em hands,
+    cria uma entrada com study_state='mtt_archive'.
+    Safe to run multiple times (idempotent).
+    """
+    conn = get_conn()
+    migrated = 0
+    skipped = 0
+    errors = 0
+    try:
+        with conn.cursor() as cur:
+            # First ensure study_state allows mtt_archive
+            cur.execute("""
+                ALTER TABLE hands DROP CONSTRAINT IF EXISTS hands_study_state_check;
+                ALTER TABLE hands ADD CONSTRAINT hands_study_state_check
+                    CHECK (study_state IN ('new', 'review', 'studying', 'resolved', 'mtt_archive'));
+            """)
+
+            # Get all mtt_hands
+            cur.execute("""
+                SELECT id, tm_number, tournament_name, played_at, blinds,
+                       sb_size, bb_size, ante_size, num_players,
+                       hero_position, hero_cards, board, hero_result,
+                       players_by_position, screenshot_entry_id, has_screenshot,
+                       raw
+                FROM mtt_hands ORDER BY id
+            """)
+            mtt_rows = cur.fetchall()
+
+            for mh in mtt_rows:
+                try:
+                    tm = mh["tm_number"] or ""
+                    tm_digits = _extract_tm_digits(tm)
+                    hand_id = f"GG-{tm_digits}"
+
+                    # Check if already exists in hands
+                    cur.execute("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
+                    if cur.fetchone():
+                        skipped += 1
+                        continue
+
+                    # Build all_players_actions from players_by_position
+                    all_players = {}
+                    pbp = mh.get("players_by_position") or {}
+                    if isinstance(pbp, str):
+                        pbp = json.loads(pbp)
+                    bb_sz = mh.get("bb_size") or 1
+                    for pos, info in pbp.items():
+                        if isinstance(info, dict):
+                            name = info.get("name", pos)
+                            stack = info.get("stack", 0)
+                            all_players[name] = {
+                                "position": pos,
+                                "stack": stack,
+                                "stack_bb": round(stack / bb_sz, 1) if bb_sz > 0 else 0,
+                                "is_hero": info.get("is_hero", False),
+                                "bounty": info.get("bounty"),
+                            }
+
+                    # Add meta
+                    all_players["_meta"] = {
+                        "level": None,
+                        "sb": mh.get("sb_size", 0),
+                        "bb": mh.get("bb_size", 0),
+                        "ante": mh.get("ante_size", 0),
+                        "num_players": mh.get("num_players", 0),
+                    }
+
+                    study_state = "new" if mh.get("has_screenshot") else "mtt_archive"
+                    tournament_name = mh.get("tournament_name") or mh.get("blinds") or ""
+
+                    cur.execute(
+                        """INSERT INTO hands
+                           (site, hand_id, played_at, stakes, position,
+                            hero_cards, board, result, currency,
+                            raw, study_state, all_players_actions,
+                            tags, created_at)
+                        VALUES
+                           (%s, %s, %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, NOW())
+                        ON CONFLICT (hand_id) DO NOTHING""",
+                        (
+                            "GGPoker",
+                            hand_id,
+                            mh.get("played_at"),
+                            tournament_name,
+                            mh.get("hero_position"),
+                            mh.get("hero_cards", []),
+                            mh.get("board", []),
+                            mh.get("hero_result"),
+                            "$",
+                            mh.get("raw", ""),
+                            study_state,
+                            json.dumps(all_players),
+                            ["migrated"],
+                        )
+                    )
+                    migrated += 1
+
+                    if migrated % 500 == 0:
+                        conn.commit()
+
+                except Exception as e:
+                    errors += 1
+                    if errors < 10:
+                        logger.warning(f"Migration error for mtt_hand {mh.get('id')}: {e}")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Migration error: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro na migração: {e}")
+    finally:
+        conn.close()
+
+    return {
+        "migrated": migrated,
+        "skipped": skipped,
+        "errors": errors,
+        "total_mtt_hands": len(mtt_rows) if 'mtt_rows' in dir() else 0,
+    }

@@ -411,12 +411,12 @@ export default function ReplayerPage() {
 
             {/* SB badge */}
             {sbIdx >= 0 && positions[sbIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[sbIdx].x + (positions[sbIdx].x > 50 ? -6 : 6)}%`, top: `${positions[sbIdx].y + (positions[sbIdx].y > 50 ? -8 : 8)}%`, width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg, #64748b, #475569)', color: '#fff', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>SB</div>
+              <div style={{ position: 'absolute', left: `${positions[sbIdx].x + (positions[sbIdx].x > 50 ? 5 : -5)}%`, top: `${positions[sbIdx].y + (positions[sbIdx].y > 50 ? -4 : 4)}%`, width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg, #64748b, #475569)', color: '#fff', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>SB</div>
             )}
 
             {/* BB badge */}
             {bbIdx >= 0 && positions[bbIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[bbIdx].x + (positions[bbIdx].x > 50 ? -6 : 6)}%`, top: `${positions[bbIdx].y + (positions[bbIdx].y > 50 ? -8 : 8)}%`, width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>BB</div>
+              <div style={{ position: 'absolute', left: `${positions[bbIdx].x + (positions[bbIdx].x > 50 ? 5 : -5)}%`, top: `${positions[bbIdx].y + (positions[bbIdx].y > 50 ? -4 : 4)}%`, width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>BB</div>
             )}
 
             {/* Players */}
@@ -425,28 +425,26 @@ export default function ReplayerPage() {
               const chipPos = chipPositions[i]
               const active = step.actorIdx === i
               const bountyStr = p.bounty != null ? (typeof p.bounty === 'string' ? p.bounty : `${p.bounty}€`) : null
+              const isAllIn = p.stack <= 0 && !p.folded && p.currentBet > 0
               return (
                 <div key={i}>
-                  {/* Chip/bet display */}
                   {p.currentBet > 0 && !p.folded && (
                     <div style={{ position: 'absolute', left: `${chipPos.x}%`, top: `${chipPos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 6 }}>
-                      {/* Action label above chip */}
                       {p.actionLabel && <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 2, whiteSpace: 'nowrap' }}>{p.actionLabel}</div>}
-                      {/* Chip amount */}
-                      <div onClick={() => setShowBB(v => !v)} style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", background: 'rgba(0,0,0,0.88)', padding: '3px 10px', borderRadius: 5, border: '2px solid rgba(251,191,36,0.5)', whiteSpace: 'nowrap', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>
+                      <div onClick={() => setShowBB(v => !v)} style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", background: 'rgba(0,0,0,0.88)', padding: '3px 10px', borderRadius: 5, border: `2px solid ${isAllIn ? '#ef4444' : 'rgba(251,191,36,0.5)'}`, whiteSpace: 'nowrap', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>
                         {formatChip(p.currentBet)}
                       </div>
+                      {isAllIn && <div style={{ fontSize: 9, fontWeight: 800, color: '#ef4444', marginTop: 2, letterSpacing: 1 }}>ALL-IN</div>}
                     </div>
                   )}
-                  {/* Player box */}
                   <div style={{ position: 'absolute', left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', minWidth: 90, zIndex: 3, transition: 'all 0.3s' }}>
                     <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginBottom: 3 }}>
                       {p.cards?.length > 0 ? p.cards.map((c, ci) => <RCard key={ci} card={c} size={p.isHero ? 'lg' : 'sm'} />) : !p.folded ? <><RCard faceDown size="sm" /><RCard faceDown size="sm" /></> : null}
                     </div>
-                    <div style={{ background: active ? 'rgba(251,191,36,0.15)' : p.isHero ? 'rgba(99,102,241,0.12)' : 'rgba(0,0,0,0.7)', border: `1.5px solid ${active ? '#fbbf24' : p.isHero ? '#6366f1' : '#2a2d3a'}`, borderRadius: 7, padding: '3px 8px', opacity: p.folded ? 0.3 : 1, transition: 'all 0.3s' }}>
+                    <div style={{ background: active ? 'rgba(251,191,36,0.15)' : isAllIn ? 'rgba(239,68,68,0.12)' : p.isHero ? 'rgba(99,102,241,0.12)' : 'rgba(0,0,0,0.7)', border: `1.5px solid ${active ? '#fbbf24' : isAllIn ? '#ef4444' : p.isHero ? '#6366f1' : '#2a2d3a'}`, borderRadius: 7, padding: '3px 8px', opacity: p.folded ? 0.3 : 1, transition: 'all 0.3s' }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: p.isHero ? '#818cf8' : '#94a3b8', letterSpacing: 0.3 }}>{p.position}</div>
                       <div style={{ fontSize: 11, fontWeight: p.isHero ? 700 : 500, color: p.isHero ? '#c7d2fe' : '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 88 }}>{p.name}</div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace' }}>{p.stackBB}BB</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: isAllIn ? '#ef4444' : '#fbbf24', fontFamily: 'monospace' }}>{isAllIn ? 'ALL-IN' : `${p.stackBB}BB`}</div>
                       {bountyStr && <div style={{ fontSize: 9, color: '#f59e0b' }}>{bountyStr}</div>}
                     </div>
                   </div>

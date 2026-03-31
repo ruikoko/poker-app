@@ -556,7 +556,9 @@ export default function TournamentsPage() {
         Mãos de torneios com screenshots e villains
       </p>
 
-      <ImportPanel onImported={handleImported} />
+      <div style={{ padding: '10px 16px', marginBottom: 16, borderRadius: 6, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 12, color: '#94a3b8' }}>Para importar mãos, usa a <a href="/inbox" style={{ color: '#818cf8', fontWeight: 600, textDecoration: 'none' }}>Inbox</a> (porta única de entrada)</span>
+      </div>
       <StatsBar stats={stats} />
 
       {/* Filters */}

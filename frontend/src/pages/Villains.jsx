@@ -336,8 +336,8 @@ function VillainProfile({ villain, onClose, onSave }) {
                             <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 8 }}>A carregar screenshot...</div>
                           )}
 
-                          {/* Links para mão */}
-                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                          {/* 3 acessos à mão */}
+                          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                             {h.raw && h.all_players_actions && (
                               <a href={`/replayer/${h.id}`} target="_blank" rel="noopener noreferrer" style={{
                                 fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '4px 10px',
@@ -345,11 +345,25 @@ function VillainProfile({ villain, onClose, onSave }) {
                                 fontWeight: 600,
                               }}>&#9654; Replayer</a>
                             )}
-                            <a href={`/hands?search=${h.hand_id || h.id}`} style={{
+                            <a href={`/hand/${h.id}`} style={{
                               fontSize: 11, color: '#22c55e', textDecoration: 'none', padding: '4px 10px',
                               borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)',
                               fontWeight: 600,
-                            }}>Abrir Mão</a>
+                            }}>HH Formatada</a>
+                            {h.raw && (
+                              <button onClick={() => { navigator.clipboard.writeText(h.raw); alert('HH copiada!') }} style={{
+                                fontSize: 11, color: '#f59e0b', padding: '4px 10px',
+                                borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)',
+                                fontWeight: 600, cursor: 'pointer',
+                              }}>Copiar HH</button>
+                            )}
+                            {h.player_names?.gg_link && (
+                              <a href={h.player_names.gg_link} target="_blank" rel="noopener noreferrer" style={{
+                                fontSize: 11, color: '#fbbf24', textDecoration: 'none', padding: '4px 10px',
+                                borderRadius: 4, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)',
+                                fontWeight: 600,
+                              }}>GG Replayer</a>
+                            )}
                           </div>
                         </div>
                       )}
@@ -514,6 +528,17 @@ export default function VillainsPage() {
               }}
               style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}
             >&#x1F4BE; Re-parse DB</button>
+            <button
+              onClick={async () => {
+                if (!confirm('Migrar mtt_hands → hands? Copia mãos que faltam para a tabela principal.')) return
+                try {
+                  const res = await mtt.migrate()
+                  alert(`Migração concluída!\n\n${res.migrated || 0} mãos migradas\n${res.skipped || 0} já existiam\n${res.errors || 0} erros`)
+                  load()
+                } catch (err) { alert('Erro: ' + err.message) }
+              }}
+              style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.25)', cursor: 'pointer' }}
+            >&#x1F4E6; Migrar BD</button>
             <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(s => !s)}>
               {showCreate ? 'Cancelar' : '+ Novo'}
             </button>

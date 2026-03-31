@@ -158,6 +158,7 @@ export const mtt = {
   cleanup: () => req('POST', '/mtt/cleanup'),
   deleteHand: (id) => req('DELETE', `/mtt/hands/${id}`),
   deleteScreenshot: (entryId) => req('DELETE', `/mtt/screenshot/${entryId}`),
+  migrate: () => req('POST', '/mtt/migrate-to-hands'),
 }
 
 // ── HM3 Import ───────────────────────────────────────────────────────────────
