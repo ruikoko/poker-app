@@ -672,15 +672,56 @@ def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_
     return created
 
 
+def _detect_tournament_format(tournament_name: str) -> str:
+    """Detect tournament format from name: PKO, KO, vanilla, mystery."""
+    if not tournament_name:
+        return "vanilla"
+    name_lower = tournament_name.lower()
+    if "mystery" in name_lower:
+        return "mystery"
+    if "bounty" in name_lower or "pko" in name_lower or "knockout" in name_lower:
+        return "PKO"
+    if " ko " in name_lower or name_lower.endswith(" ko"):
+        return "KO"
+    return "vanilla"
+
+
+def _extract_buyin(tournament_name: str) -> str | None:
+    """Extract buy-in from tournament name."""
+    if not tournament_name:
+        return None
+    m = re.search(r'\$(\d+(?:[,.]?\d+)?)', tournament_name)
+    if m:
+        return f"${m.group(1)}"
+    m = re.search(r'(\d+(?:[,.]?\d+)?)\s*[€]', tournament_name)
+    if m:
+        return f"{m.group(1)}€"
+    m = re.search(r'buyIn:\s*([\d€$,.+\s]+)', tournament_name, re.I)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
 def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: dict, seat_to_name: dict):
     """
     Quando uma mão MTT tem screenshot, garante que existe na tabela hands
-    com study_state='new' para aparecer na Inbox/Mãos.
-    Se já existir (ex: como mtt_archive), apaga e recria.
+    com study_state='new'. Adds tag 'Match SS' + format + buy-in.
     """
     tm_number = hh_hand.get("tm_number", "")
-    tm_digits = tm_number.replace("TM", "")
+    tm_digits = _extract_tm_digits(tm_number)
     hand_id = f"GG-{tm_digits}"
+
+    tournament_name = hh_hand.get("tournament_name") or hh_hand.get("blinds", "")
+    tournament_format = _detect_tournament_format(tournament_name)
+    buyin = _extract_buyin(tournament_name)
+
+    # Auto-tags
+    tags = ["Match SS"]
+    if tournament_format != "vanilla":
+        tags.append(tournament_format.lower())
+    num_players = len(hh_hand.get("seats", {}))
+    if num_players > 0:
+        tags.append(f"{num_players}max")
 
     # Construir all_players_actions com nomes reais
     seats = hh_hand.get("seats", {})
@@ -701,7 +742,6 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
             "is_hero": name == "Hero",
         }
 
-    # Player names metadata
     player_names = {
         "players_list": screenshot_data.get("players_list", []),
         "hero": screenshot_data.get("hero"),
@@ -710,9 +750,10 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
         "seat_to_name": {str(k): v for k, v in seat_to_name.items()},
         "screenshot_entry_id": screenshot_data.get("entry_id"),
         "match_method": "mtt_promote_v2",
+        "tournament_format": tournament_format,
+        "buyin": buyin,
     }
 
-    # DELETE + INSERT — garante que study_state = 'new'
     conn2 = get_conn()
     try:
         with conn2.cursor() as cur:
@@ -722,17 +763,17 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                    (site, hand_id, played_at, stakes, position,
                     hero_cards, board, result, currency,
                     raw, study_state, all_players_actions, player_names,
-                    entry_id)
+                    entry_id, tags)
                 VALUES
                    (%s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s)""",
+                    %s, %s)""",
                 (
                     "GGPoker",
                     hand_id,
                     hh_hand.get("played_at"),
-                    hh_hand.get("tournament_name") or hh_hand.get("blinds", ""),
+                    tournament_name,
                     hh_hand.get("hero_position"),
                     hh_hand.get("hero_cards", []),
                     hh_hand.get("board", []),
@@ -743,10 +784,11 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                     json.dumps(all_players),
                     json.dumps(player_names),
                     screenshot_data.get("entry_id"),
+                    tags,
                 )
             )
         conn2.commit()
-        logger.info(f"Promoted {hand_id} to study (Inbox)")
+        logger.info(f"Promoted {hand_id} to study (Inbox) tags={tags}")
     except Exception as e:
         conn2.rollback()
         logger.error(f"Promote failed for {hand_id}: {e}")

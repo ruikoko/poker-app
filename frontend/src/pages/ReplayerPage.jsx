@@ -7,14 +7,12 @@ const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const STREET_COLORS = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', river: '#ef4444', showdown: '#8b5cf6' }
 const HERO_NAMES = new Set(['hero','schadenfreud','thinvalium','sapz','misterpoker1973','cringemeariver','flightrisk','karluz','koumpounophobia','lauro dermio'])
-const SEAT_ORDER = ['UTG','UTG1','UTG2','MP','MP1','HJ','CO','BTN','SB','BB']
+const SEAT_ORDER = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
 
-// Positions pulled INWARD so nothing clips
 const POSITIONS_9 = [
   { x: 50, y: 88 }, { x: 14, y: 74 }, { x: 8, y: 42 }, { x: 14, y: 12 },
   { x: 36, y: 4 }, { x: 64, y: 4 }, { x: 86, y: 12 }, { x: 92, y: 42 }, { x: 86, y: 74 },
 ]
-// Chip positions — between player and center
 const CHIP_OFFSETS_9 = [
   { x: 50, y: 72 }, { x: 24, y: 64 }, { x: 20, y: 42 }, { x: 24, y: 22 },
   { x: 40, y: 16 }, { x: 60, y: 16 }, { x: 76, y: 22 }, { x: 80, y: 42 }, { x: 76, y: 64 },
@@ -40,16 +38,35 @@ function RCard({ card, faceDown, size = 'md' }) {
   return <div style={{ width: w, height: h, borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}40`, boxShadow: '0 2px 6px rgba(0,0,0,0.4)', fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fs, color: '#fff', lineHeight: 1, userSelect: 'none' }}><span>{rank}</span><span style={{ fontSize: fs * 0.75, color: SUIT_COLORS[suit] }}>{SUIT_SYMBOLS[suit]}</span></div>
 }
 
+// ── Parse HH with correct stack tracking and pot calculation ────────────────
 function parseHH(raw, apa) {
   if (!raw) return { steps: [], heroIdx: -1 }
   const meta = apa?._meta || {}
   const bb = meta.bb || 1
   const players = Object.entries(apa || {}).filter(([k]) => k !== '_meta')
     .map(([name, info]) => ({ name, ...info }))
-    .sort((a, b) => (SEAT_ORDER.indexOf(a.position) === -1 ? 99 : SEAT_ORDER.indexOf(a.position)) - (SEAT_ORDER.indexOf(b.position) === -1 ? 99 : SEAT_ORDER.indexOf(b.position)))
+    .sort((a, b) => {
+      const ai = SEAT_ORDER.indexOf(a.position) === -1 ? 99 : SEAT_ORDER.indexOf(a.position)
+      const bi = SEAT_ORDER.indexOf(b.position) === -1 ? 99 : SEAT_ORDER.indexOf(b.position)
+      return ai - bi
+    })
   const heroIdx = players.findIndex(p => p.is_hero || HERO_NAMES.has(p.name.toLowerCase()))
-  const pState = players.map(p => ({ name: p.name, position: p.position, stack: p.stack || 0, stackBB: p.stack_bb || 0, bounty: p.bounty, isHero: p.is_hero || HERO_NAMES.has(p.name.toLowerCase()), cards: [], folded: false, currentBet: 0 }))
-  const dm = raw.match(/Dealt to (\S+) \[(.+?)\]/)
+
+  // Initialize player state with original stacks
+  const pState = players.map(p => ({
+    name: p.name, position: p.position,
+    startStack: p.stack || 0,
+    stack: p.stack || 0,
+    stackBB: p.stack_bb || 0,
+    bounty: p.bounty,
+    isHero: p.is_hero || HERO_NAMES.has(p.name.toLowerCase()),
+    cards: [], folded: false,
+    currentBet: 0,       // current bet this street
+    totalInvested: 0,    // total invested this street (for raise tracking)
+    actionLabel: '',     // last action label
+  }))
+
+  const dm = raw.match(/Dealt to (\S+)\s+\[(.+?)\]/)
   if (dm && heroIdx >= 0) pState[heroIdx].cards = dm[2].split(' ')
 
   const isW = raw.includes('*** PRE-FLOP ***')
@@ -59,13 +76,33 @@ function parseHH(raw, apa) {
   const tmW = raw.match(/\*\*\* TURN \*\*\* \[.+?\]\s*\[(.+?)\]/); if (tmW) bc.push(...tmW[1].split(' '))
   const rmW = raw.match(/\*\*\* RIVER \*\*\* \[.+?\]\s*\[(.+?)\]/); if (rmW) bc.push(...rmW[1].split(' '))
 
+  // Process antes and blinds - deduct from stacks
   let pot = 0
-  const antes = raw.match(/posts the ante ([\d,]+)/g) || []
-  for (const a of antes) { const n = a.match(/[\d,]+/); if (n) pot += parseFloat(n[0].replace(/,/g, '')) }
-  const sbM = raw.match(/posts small blind ([\d,]+)/); if (sbM) pot += parseFloat(sbM[1].replace(/,/g, ''))
-  const bbM = raw.match(/posts big blind ([\d,]+)/); if (bbM) pot += parseFloat(bbM[1].replace(/,/g, ''))
+  const anteMatches = [...raw.matchAll(/(.+?)(?::)?\s+posts\s+(?:the\s+)?ante\s+([\d,]+(?:\.\d+)?)/gi)]
+  for (const am of anteMatches) {
+    const name = am[1].trim(), amount = parseFloat(am[2].replace(/,/g, ''))
+    pot += amount
+    const pi = pState.findIndex(p => p.name === name)
+    if (pi >= 0) { pState[pi].stack -= amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) }
+  }
+  const sbMatch = raw.match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?small blind\s+([\d,]+(?:\.\d+)?)/i)
+  if (sbMatch) {
+    const name = sbMatch[1].trim(), amount = parseFloat(sbMatch[2].replace(/,/g, ''))
+    pot += amount
+    const pi = pState.findIndex(p => p.name === name)
+    if (pi >= 0) { pState[pi].stack -= amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1); pState[pi].totalInvested = amount; pState[pi].currentBet = amount }
+  }
+  const bbMatch = raw.match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?big blind\s+([\d,]+(?:\.\d+)?)/i)
+  if (bbMatch) {
+    const name = bbMatch[1].trim(), amount = parseFloat(bbMatch[2].replace(/,/g, ''))
+    pot += amount
+    const pi = pState.findIndex(p => p.name === name)
+    if (pi >= 0) { pState[pi].stack -= amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1); pState[pi].totalInvested = amount; pState[pi].currentBet = amount }
+  }
 
-  const steps = [{ street: 'preflop', label: 'Pre-Flop', action: 'Blinds posted', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [], ps: pState.map(p => ({...p})), analysis: null, villainAnalysis: null }]
+  const snap = () => pState.map(p => ({ ...p }))
+  const steps = [{ street: 'preflop', label: 'Pre-Flop', action: 'Blinds posted', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [], ps: snap(), analysis: null, villainAnalysis: null }]
+
   const sds = [
     { key: 'preflop', label: 'Pre-Flop', start: pfm, end: '*** FLOP ***' },
     { key: 'flop', label: 'Flop', start: '*** FLOP ***', end: '*** TURN ***' },
@@ -80,99 +117,149 @@ function parseHH(raw, apa) {
     const curBoard = sd.key === 'preflop' ? [] : sd.key === 'flop' ? bc.slice(0,3) : sd.key === 'turn' ? bc.slice(0,4) : bc.slice(0,5)
 
     if (sd.key !== 'preflop' && curBoard.length > 0) {
-      pState.forEach(p => p.currentBet = 0)
-      steps.push({ street: sd.key, label: sd.label, action: `${sd.label} dealt`, actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [...curBoard], ps: pState.map(p => ({...p})), analysis: null, villainAnalysis: null })
+      // New street: reset bets and totalInvested
+      pState.forEach(p => { p.currentBet = 0; p.totalInvested = 0; p.actionLabel = '' })
+      steps.push({ street: sd.key, label: sd.label, action: `${sd.label} dealt`, actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [...curBoard], ps: snap(), analysis: null, villainAnalysis: null })
     }
 
     for (const line of section.split('\n')) {
-      const t = line.trim(); if (!t || t.startsWith('***') || t.startsWith('Dealt')) continue
+      const t = line.trim(); if (!t || t.startsWith('***') || t.startsWith('Dealt') || t.startsWith('Main pot') || t.includes('posts')) continue
+      
+      // Showdown cards
       const showM = t.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
       if (showM) { const pi = pState.findIndex(p => p.name === showM[1].trim()); if (pi >= 0) pState[pi].cards = showM[2].split(' '); continue }
+
+      // Uncalled bet return
+      const uncalledM = t.match(/Uncalled bet \(([\d,]+(?:\.\d+)?)\) returned to (.+)/i)
+      if (uncalledM) {
+        const amount = parseFloat(uncalledM[1].replace(/,/g, ''))
+        const name = uncalledM[2].trim()
+        const pi = pState.findIndex(p => p.name === name)
+        pot -= amount
+        if (pi >= 0) { pState[pi].stack += amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1); pState[pi].currentBet -= amount }
+        continue
+      }
+
+      // Collected
+      const collM = t.match(/^(.+?) collected ([\d,]+(?:\.\d+)?)/i)
+      if (collM) {
+        const name = collM[1].trim(), amount = parseFloat(collM[2].replace(/,/g, ''))
+        const pi = pState.findIndex(p => p.name === name)
+        if (pi >= 0) { pState[pi].stack += amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) }
+        continue
+      }
+
       const m = t.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$/i); if (!m) continue
       const actor = m[1].trim(), action = m[2].toLowerCase(), rest = m[3]
-      let amount = 0; const amtM = rest.match(/([\d,]+)/); if (amtM) amount = parseFloat(amtM[1].replace(/,/g, ''))
+      let amount = 0; const amtM = rest.match(/([\d,]+(?:\.\d+)?)/); if (amtM) amount = parseFloat(amtM[1].replace(/,/g, ''))
       const allIn = /all-in/i.test(rest)
+      const toM = rest.match(/to\s+([\d,]+(?:\.\d+)?)/)
       const pi = pState.findIndex(p => p.name === actor)
       const isH = pi >= 0 && pState[pi].isHero
 
-      if (action === 'folds' && pi >= 0) { pState[pi].folded = true; pState[pi].currentBet = 0 }
-      else if (action === 'calls') { pot += amount; if (pi >= 0) pState[pi].currentBet = amount }
-      else if (action === 'bets') { pot += amount; if (pi >= 0) pState[pi].currentBet = amount }
-      else if (action === 'raises') { const toM = rest.match(/to ([\d,]+)/); const rt = toM ? parseFloat(toM[1].replace(/,/g, '')) : amount; pot += rt; if (pi >= 0) pState[pi].currentBet = rt }
-      else if (action === 'checks' && pi >= 0) { pState[pi].currentBet = 0 }
-
-      let analysis = null, villainAnalysis = null
-      if (isH && (action === 'calls' || action === 'folds')) {
-        const fb = amount; const pb = action === 'calls' ? pot - amount : pot
-        if (fb > 0) analysis = { type: 'facing', potBefore: Math.round(pb), facingBet: Math.round(fb), potOdds: +(fb/(pb+fb)*100).toFixed(1), mdf: +(pb/(pb+fb)*100).toFixed(1), potBB: +(pb/bb).toFixed(1), betBB: +(fb/bb).toFixed(1) }
-      } else if (isH && (action === 'bets' || action === 'raises')) {
-        const pb = pot - amount
-        analysis = { type: 'betting', potBefore: Math.round(pb), betSize: Math.round(amount), betToPot: pb > 0 ? +(amount/pb*100).toFixed(1) : 0, mbf: +(amount/(pb+amount)*100).toFixed(1), potBB: +(pb/bb).toFixed(1), betBB: +(amount/bb).toFixed(1) }
-        villainAnalysis = { villainMDF: +(pb/(pb+amount)*100).toFixed(1), potBefore: Math.round(pb), heroBet: Math.round(amount) }
-      } else if (!isH && (action === 'bets' || action === 'raises')) {
-        const pb = pot - amount
-        if (pb > 0) analysis = { type: 'facing', potBefore: Math.round(pb), facingBet: Math.round(amount), potOdds: +(amount/(pb+amount)*100).toFixed(1), mdf: +(pb/(pb+amount)*100).toFixed(1), potBB: +(pb/bb).toFixed(1), betBB: +(amount/bb).toFixed(1) }
+      let actionLabel = ''
+      if (action === 'folds') {
+        if (pi >= 0) { pState[pi].folded = true; pState[pi].currentBet = 0; pState[pi].actionLabel = '' }
+        actionLabel = 'Fold'
+      } else if (action === 'checks') {
+        if (pi >= 0) { pState[pi].actionLabel = '' }
+        actionLabel = 'Check'
+      } else if (action === 'calls') {
+        // Call: pay the difference between current bet and the bet we're calling
+        const callAmount = amount
+        pot += callAmount
+        if (pi >= 0) {
+          pState[pi].stack -= callAmount
+          pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1)
+          pState[pi].totalInvested += callAmount
+          pState[pi].currentBet = pState[pi].totalInvested
+          pState[pi].actionLabel = `Call ${(callAmount / bb).toFixed(1)}bb`
+        }
+        actionLabel = `calls ${Math.round(callAmount).toLocaleString()}${allIn ? ' (all-in)' : ''}`
+      } else if (action === 'bets') {
+        pot += amount
+        if (pi >= 0) {
+          pState[pi].stack -= amount
+          pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1)
+          pState[pi].totalInvested += amount
+          pState[pi].currentBet = amount
+          pState[pi].actionLabel = `Bet ${(amount / bb).toFixed(1)}bb`
+        }
+        actionLabel = `bets ${Math.round(amount).toLocaleString()}${allIn ? ' (all-in)' : ''}`
+      } else if (action === 'raises') {
+        // Raises: "raises X to Y" — player puts in Y total this street
+        const raiseTo = toM ? parseFloat(toM[1].replace(/,/g, '')) : amount
+        const prevInvested = pi >= 0 ? pState[pi].totalInvested : 0
+        const additionalCost = raiseTo - prevInvested
+        pot += additionalCost
+        if (pi >= 0) {
+          pState[pi].stack -= additionalCost
+          pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1)
+          pState[pi].totalInvested = raiseTo
+          pState[pi].currentBet = raiseTo
+          pState[pi].actionLabel = `Raise ${(raiseTo / bb).toFixed(1)}bb`
+        }
+        actionLabel = `raises to ${Math.round(raiseTo).toLocaleString()}${allIn ? ' (all-in)' : ''}`
       }
 
-      const al = action === 'folds' ? 'folds' : action === 'checks' ? 'checks' : action === 'calls' ? `calls ${Math.round(amount).toLocaleString()}${allIn?' (all-in)':''}` : action === 'bets' ? `bets ${Math.round(amount).toLocaleString()}${allIn?' (all-in)':''}` : `raises to ${Math.round(amount).toLocaleString()}${allIn?' (all-in)':''}`
-      steps.push({ street: sd.key, label: sd.label, action: al, actor, actorIdx: pi, isHero: isH, pot: Math.round(pot), potBB: +(pot/bb).toFixed(1), board: [...curBoard], ps: pState.map(p => ({...p})), analysis, villainAnalysis })
+      // Analysis calculations
+      let analysis = null, villainAnalysis = null
+      const potBeforeAction = pot - (action === 'calls' ? amount : action === 'bets' ? amount : action === 'raises' ? (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) - (pi >= 0 ? pState[pi].totalInvested - (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) : 0) : 0)
+      
+      if (isH && (action === 'calls' || action === 'folds')) {
+        const facingBet = amount
+        const potBefore = action === 'calls' ? pot - amount : pot
+        if (facingBet > 0) analysis = { type: 'facing', potBefore: Math.round(potBefore), facingBet: Math.round(facingBet), potOdds: +(facingBet/(potBefore+facingBet)*100).toFixed(1), mdf: +(potBefore/(potBefore+facingBet)*100).toFixed(1), potBB: +(potBefore/bb).toFixed(1), betBB: +(facingBet/bb).toFixed(1) }
+      } else if (isH && (action === 'bets' || action === 'raises')) {
+        const betAmount = action === 'raises' ? (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) : amount
+        const prevInv = action === 'raises' ? (pState[pi]?.totalInvested - betAmount + (pState[pi]?.totalInvested || 0)) : 0
+        const potBefore = pot - (betAmount - (pi >= 0 ? pState[pi].totalInvested - betAmount : 0))
+        analysis = { type: 'betting', potBefore: Math.round(Math.abs(potBefore)), betSize: Math.round(betAmount), betToPot: potBefore > 0 ? +(betAmount/potBefore*100).toFixed(1) : 0, mbf: +(betAmount/(potBefore+betAmount)*100).toFixed(1), potBB: +(potBefore/bb).toFixed(1), betBB: +(betAmount/bb).toFixed(1) }
+        villainAnalysis = { villainMDF: +(Math.abs(potBefore)/(Math.abs(potBefore)+betAmount)*100).toFixed(1), potBefore: Math.round(Math.abs(potBefore)), heroBet: Math.round(betAmount) }
+      } else if (!isH && (action === 'bets' || action === 'raises')) {
+        const betAmount = action === 'raises' ? (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) : amount
+        const potBefore = pot - betAmount
+        if (potBefore > 0) analysis = { type: 'facing', potBefore: Math.round(potBefore), facingBet: Math.round(betAmount), potOdds: +(betAmount/(potBefore+betAmount)*100).toFixed(1), mdf: +(potBefore/(potBefore+betAmount)*100).toFixed(1), potBB: +(potBefore/bb).toFixed(1), betBB: +(betAmount/bb).toFixed(1) }
+      }
+
+      steps.push({
+        street: sd.key, label: sd.label, action: actionLabel, actor, actorIdx: pi, isHero: isH,
+        pot: Math.round(pot), potBB: +(pot/bb).toFixed(1),
+        board: [...curBoard], ps: snap(), analysis, villainAnalysis
+      })
     }
   }
 
-  // Parse showdown cards
+  // Showdown
   const sdSection = raw.match(/\*\*\* SHOW\s*DOWN \*\*\*([\s\S]*?)(\*\*\* SUMMARY|$)/i)
   if (sdSection) {
     for (const line of sdSection[1].split('\n')) {
       const sm = line.trim().match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
       if (sm) { const pi = pState.findIndex(p => p.name === sm[1].trim()); if (pi >= 0) pState[pi].cards = sm[2].split(' ') }
+      const cm = line.trim().match(/^(.+?) collected ([\d,]+(?:\.\d+)?)/i)
+      if (cm) { const pi = pState.findIndex(p => p.name === cm[1].trim()); if (pi >= 0) { const amt = parseFloat(cm[2].replace(/,/g, '')); pState[pi].stack += amt; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) } }
     }
   }
   if (pState.filter(p => p.cards.length > 0 && !p.folded).length >= 2) {
-    steps.push({ street: 'showdown', label: 'Showdown', action: 'Showdown', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: bc, ps: pState.map(p => ({...p})), analysis: null, villainAnalysis: null })
+    steps.push({ street: 'showdown', label: 'Showdown', action: 'Showdown', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: bc, ps: snap(), analysis: null, villainAnalysis: null })
   }
   return { steps, heroIdx }
 }
 
-// ── Range Grid Component ─────────────────────────────────────────────────────
+// ── Range Grid ──────────────────────────────────────────────────────────────
 const RANKS_GRID = ['A','K','Q','J','T','9','8','7','6','5','4','3','2']
-
-function cellLabel(r, c) {
-  if (r === c) return RANKS_GRID[r] + RANKS_GRID[c]  // pair
-  if (c > r) return RANKS_GRID[r] + RANKS_GRID[c] + 's'  // suited (above diagonal)
-  return RANKS_GRID[c] + RANKS_GRID[r] + 'o'  // offsuit (below diagonal) — show higher rank first
-}
-
-function cellKey(r, c) {
-  // Normalize: pairs = "AA", suited = "AKs", offsuit = "AKo"
-  if (r === c) return RANKS_GRID[r] + RANKS_GRID[c]
-  if (c > r) return RANKS_GRID[r] + RANKS_GRID[c] + 's'
-  return RANKS_GRID[c] + RANKS_GRID[r] + 'o'
-}
-
-function selectedToRangeStr(selected) {
-  if (selected.size === 0) return 'random'
-  return [...selected].sort().join(',')
-}
+function cellLabel(r, c) { if (r === c) return RANKS_GRID[r] + RANKS_GRID[c]; if (c > r) return RANKS_GRID[r] + RANKS_GRID[c] + 's'; return RANKS_GRID[c] + RANKS_GRID[r] + 'o' }
+function cellKey(r, c) { if (r === c) return RANKS_GRID[r] + RANKS_GRID[c]; if (c > r) return RANKS_GRID[r] + RANKS_GRID[c] + 's'; return RANKS_GRID[c] + RANKS_GRID[r] + 'o' }
+function selectedToRangeStr(selected) { if (selected.size === 0) return 'random'; return [...selected].sort().join(',') }
 
 function RangeGrid({ selected, onToggle, onClear, onSelectAll }) {
   const [dragging, setDragging] = useState(false)
-  const [dragMode, setDragMode] = useState(true) // true = selecting, false = deselecting
-
-  function handleMouseDown(key) {
-    const newMode = !selected.has(key)
-    setDragging(true)
-    setDragMode(newMode)
-    onToggle(key, newMode)
-  }
-  function handleMouseEnter(key) {
-    if (dragging) onToggle(key, dragMode)
-  }
-  function handleMouseUp() { setDragging(false) }
-
+  const [dragMode, setDragMode] = useState(true)
+  const handleMouseDown = (key) => { const newMode = !selected.has(key); setDragging(true); setDragMode(newMode); onToggle(key, newMode) }
+  const handleMouseEnter = (key) => { if (dragging) onToggle(key, dragMode) }
   const pct = selected.size > 0 ? ((selected.size / 169) * 100).toFixed(1) : '0'
-
   return (
-    <div onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ userSelect: 'none' }}>
+    <div onMouseUp={() => setDragging(false)} onMouseLeave={() => setDragging(false)} style={{ userSelect: 'none' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>Range: {pct}%</span>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -181,42 +268,17 @@ function RangeGrid({ selected, onToggle, onClear, onSelectAll }) {
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(13, 1fr)', gap: 1 }}>
-        {RANKS_GRID.map((_, r) =>
-          RANKS_GRID.map((_, c) => {
-            const key = cellKey(r, c)
-            const label = cellLabel(r, c)
-            const isSuited = c > r
-            const isPair = r === c
-            const isSelected = selected.has(key)
-            return (
-              <div
-                key={key}
-                onMouseDown={() => handleMouseDown(key)}
-                onMouseEnter={() => handleMouseEnter(key)}
-                style={{
-                  width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 9, fontWeight: 600, fontFamily: 'monospace', cursor: 'pointer',
-                  background: isSelected
-                    ? (isPair ? '#ca8a04' : isSuited ? '#2563eb' : '#0891b2')
-                    : (isPair ? 'rgba(202,138,4,0.08)' : isSuited ? 'rgba(37,99,235,0.06)' : 'rgba(8,145,178,0.06)'),
-                  color: isSelected ? '#fff' : '#4b5563',
-                  borderRadius: 2,
-                  border: `1px solid ${isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.04)'}`,
-                  transition: 'background 0.05s',
-                }}
-              >{label}</div>
-            )
-          })
-        )}
+        {RANKS_GRID.map((_, r) => RANKS_GRID.map((_, c) => { const key = cellKey(r, c), label = cellLabel(r, c), isSuited = c > r, isPair = r === c, isSelected = selected.has(key); return (
+          <div key={key} onMouseDown={() => handleMouseDown(key)} onMouseEnter={() => handleMouseEnter(key)} style={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 600, fontFamily: 'monospace', cursor: 'pointer', background: isSelected ? (isPair ? '#ca8a04' : isSuited ? '#2563eb' : '#0891b2') : (isPair ? 'rgba(202,138,4,0.08)' : isSuited ? 'rgba(37,99,235,0.06)' : 'rgba(8,145,178,0.06)'), color: isSelected ? '#fff' : '#4b5563', borderRadius: 2, border: `1px solid ${isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.04)'}` }}>{label}</div>
+        ) }))}
       </div>
     </div>
   )
 }
 
-function PRow({ l, v, c }) {
-  return <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ fontSize: 11, color: '#64748b' }}>{l}</span><span style={{ fontSize: 13, fontWeight: 700, color: c, fontFamily: 'monospace' }}>{v}</span></div>
-}
+function PRow({ l, v, c }) { return <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #1e2130' }}><span style={{ fontSize: 11, color: '#64748b' }}>{l}</span><span style={{ fontSize: 12, fontWeight: 700, color: c || '#e2e8f0', fontFamily: 'monospace' }}>{v}</span></div> }
 
+// ── Main Component ──────────────────────────────────────────────────────────
 export default function ReplayerPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -233,11 +295,13 @@ export default function ReplayerPage() {
   const [copied, setCopied] = useState(false)
   const [showRangeGrid, setShowRangeGrid] = useState(false)
   const [selectedCells, setSelectedCells] = useState(new Set())
+  const [showBB, setShowBB] = useState(true) // toggle BB vs chips
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
   const { steps, heroIdx } = hand ? parseHH(hand.raw, hand.all_players_actions) : { steps: [], heroIdx: -1 }
   const meta = hand?.all_players_actions?._meta || {}
+  const bbSize = meta.bb || 1
   const step = steps[si] || steps[0]
   const ps = step?.ps || []
   const slots = getSlots(ps.length)
@@ -267,6 +331,10 @@ export default function ReplayerPage() {
 
   const btnS = { background: 'rgba(255,255,255,0.06)', border: '1px solid #2a2d3a', borderRadius: 6, padding: '6px 12px', color: '#94a3b8', cursor: 'pointer', fontSize: 14, lineHeight: 1 }
   const btnPlayerIdx = ps.findIndex(p => p.position === 'BTN')
+  const sbIdx = ps.findIndex(p => p.position === 'SB')
+  const bbIdx = ps.findIndex(p => p.position === 'BB')
+
+  const formatChip = (val) => showBB ? `${(val / bbSize).toFixed(1)}bb` : Math.round(val).toLocaleString()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0a0c14', color: '#e2e8f0', overflow: 'hidden' }}>
@@ -281,9 +349,7 @@ export default function ReplayerPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {hand.stakes && <span style={{ fontSize: 12, color: '#4b5563', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hand.stakes}</span>}
           <a href={`/hand/${hand.id}`} style={{ fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '3px 10px', borderRadius: 5, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', fontWeight: 600 }}>Detalhe</a>
-          {hand.raw && (
-            <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 5, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)', color: copied ? '#22c55e' : '#f59e0b', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.25)'}`, cursor: 'pointer' }}>{copied ? '✓ Copiado' : 'Copiar HH'}</button>
-          )}
+          {hand.raw && <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 5, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)', color: copied ? '#22c55e' : '#f59e0b', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.25)'}`, cursor: 'pointer' }}>{copied ? '✓ Copiado' : 'Copiar HH'}</button>}
           <span style={{ fontSize: 13, fontWeight: 600, color: STREET_COLORS[step.street], padding: '3px 10px', borderRadius: 5, background: `${STREET_COLORS[step.street]}15`, border: `1px solid ${STREET_COLORS[step.street]}30`, textTransform: 'uppercase' }}>{step.label}</span>
         </div>
       </div>
@@ -320,8 +386,10 @@ export default function ReplayerPage() {
             {/* Pot */}
             <div style={{ position: 'absolute', top: '35%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 2 }}>
               <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 2 }}>POT</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", textShadow: '0 0 12px rgba(251,191,36,0.3)' }}>{step.potBB}BB</div>
-              <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>{step.pot?.toLocaleString()}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", textShadow: '0 0 12px rgba(251,191,36,0.3)', cursor: 'pointer' }} onClick={() => setShowBB(v => !v)}>
+                {showBB ? `${step.potBB}BB` : step.pot?.toLocaleString()}
+              </div>
+              <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>{showBB ? step.pot?.toLocaleString() : `${step.potBB}BB`}</div>
               {meta.sb && meta.bb && (
                 <div style={{ marginTop: 4, fontSize: 11, color: '#64748b', fontFamily: 'monospace', background: 'rgba(0,0,0,0.4)', padding: '2px 10px', borderRadius: 4, display: 'inline-block' }}>
                   SB {Math.round(meta.sb)} / BB {Math.round(meta.bb)}{meta.ante ? ` / Ante ${Math.round(meta.ante)}` : ''}
@@ -338,7 +406,17 @@ export default function ReplayerPage() {
 
             {/* Dealer button */}
             {btnPlayerIdx >= 0 && positions[btnPlayerIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[btnPlayerIdx].x + (positions[btnPlayerIdx].x > 50 ? -6 : 6)}%`, top: `${positions[btnPlayerIdx].y + (positions[btnPlayerIdx].y > 50 ? -5 : 5)}%`, width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#000', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(251,191,36,0.5), 0 0 0 2px rgba(0,0,0,0.3)', zIndex: 6, transform: 'translate(-50%,-50%)', letterSpacing: 0.5, border: '2px solid rgba(255,255,255,0.3)' }}>D</div>
+              <div style={{ position: 'absolute', left: `${positions[btnPlayerIdx].x + (positions[btnPlayerIdx].x > 50 ? -6 : 6)}%`, top: `${positions[btnPlayerIdx].y + (positions[btnPlayerIdx].y > 50 ? -5 : 5)}%`, width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#000', fontSize: 12, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(251,191,36,0.5)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.3)' }}>D</div>
+            )}
+
+            {/* SB badge */}
+            {sbIdx >= 0 && positions[sbIdx] && (
+              <div style={{ position: 'absolute', left: `${positions[sbIdx].x + (positions[sbIdx].x > 50 ? -6 : 6)}%`, top: `${positions[sbIdx].y + (positions[sbIdx].y > 50 ? -8 : 8)}%`, width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg, #64748b, #475569)', color: '#fff', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>SB</div>
+            )}
+
+            {/* BB badge */}
+            {bbIdx >= 0 && positions[bbIdx] && (
+              <div style={{ position: 'absolute', left: `${positions[bbIdx].x + (positions[bbIdx].x > 50 ? -6 : 6)}%`, top: `${positions[bbIdx].y + (positions[bbIdx].y > 50 ? -8 : 8)}%`, width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>BB</div>
             )}
 
             {/* Players */}
@@ -346,14 +424,21 @@ export default function ReplayerPage() {
               const pos = positions[i]
               const chipPos = chipPositions[i]
               const active = step.actorIdx === i
-              const bountyStr = p.bounty != null ? (typeof p.bounty === 'string' ? p.bounty.replace('€', ' EUR') : `${p.bounty} EUR`) : null
+              const bountyStr = p.bounty != null ? (typeof p.bounty === 'string' ? p.bounty : `${p.bounty}€`) : null
               return (
                 <div key={i}>
+                  {/* Chip/bet display */}
                   {p.currentBet > 0 && !p.folded && (
-                    <div style={{ position: 'absolute', left: `${chipPos.x}%`, top: `${chipPos.y}%`, transform: 'translate(-50%,-50%)', fontSize: 14, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", background: 'rgba(0,0,0,0.88)', padding: '4px 12px', borderRadius: 6, border: '2px solid rgba(251,191,36,0.5)', whiteSpace: 'nowrap', zIndex: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.6), 0 0 6px rgba(251,191,36,0.2)', letterSpacing: 0.5 }}>
-                      {Math.round(p.currentBet).toLocaleString()}
+                    <div style={{ position: 'absolute', left: `${chipPos.x}%`, top: `${chipPos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 6 }}>
+                      {/* Action label above chip */}
+                      {p.actionLabel && <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 2, whiteSpace: 'nowrap' }}>{p.actionLabel}</div>}
+                      {/* Chip amount */}
+                      <div onClick={() => setShowBB(v => !v)} style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", background: 'rgba(0,0,0,0.88)', padding: '3px 10px', borderRadius: 5, border: '2px solid rgba(251,191,36,0.5)', whiteSpace: 'nowrap', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>
+                        {formatChip(p.currentBet)}
+                      </div>
                     </div>
                   )}
+                  {/* Player box */}
                   <div style={{ position: 'absolute', left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', minWidth: 90, zIndex: 3, transition: 'all 0.3s' }}>
                     <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginBottom: 3 }}>
                       {p.cards?.length > 0 ? p.cards.map((c, ci) => <RCard key={ci} card={c} size={p.isHero ? 'lg' : 'sm'} />) : !p.folded ? <><RCard faceDown size="sm" /><RCard faceDown size="sm" /></> : null}
@@ -374,7 +459,7 @@ export default function ReplayerPage() {
           <div style={{ padding: '8px 20px', background: '#0d0f18', borderTop: '1px solid #1e2130', display: 'flex', alignItems: 'center', gap: 10, minHeight: 38, flexShrink: 0 }}>
             {step.actor ? <>
               <span style={{ fontSize: 13, fontWeight: 600, color: step.isHero ? '#818cf8' : '#94a3b8' }}>{step.actor}</span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: step.action.includes('fold') ? '#ef4444' : step.action.includes('call') || step.action.includes('check') ? '#22c55e' : '#f59e0b' }}>{step.action}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: step.action.includes('Fold') || step.action.includes('fold') ? '#ef4444' : step.action.includes('call') || step.action.includes('Call') || step.action.includes('check') || step.action.includes('Check') ? '#22c55e' : '#f59e0b' }}>{step.action}</span>
             </> : <span style={{ fontSize: 13, color: '#4b5563' }}>{step.action}</span>}
           </div>
 
@@ -422,7 +507,7 @@ export default function ReplayerPage() {
             <div style={{ marginBottom: 20, padding: '10px', background: 'rgba(245,158,11,0.06)', borderRadius: 6, border: '1px solid rgba(245,158,11,0.15)' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Villain Must Defend</div>
               <PRow l="MDF" v={step.villainAnalysis.villainMDF + '%'} c="#f59e0b" />
-              <PRow l="vs Bet" v={Math.round(step.villainAnalysis.heroBet).toLocaleString()} c="#64748b" />
+              <PRow l="vs Bet" v={formatChip(step.villainAnalysis.heroBet)} c="#64748b" />
             </div>
           )}
           {!step.analysis && !step.villainAnalysis && (
@@ -435,30 +520,9 @@ export default function ReplayerPage() {
       {showRangeGrid && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }} onClick={() => setShowRangeGrid(false)}>
           <div style={{ background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 12, padding: 24, width: 520, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
-            <RangeGrid
-              selected={selectedCells}
-              onToggle={(key, mode) => {
-                setSelectedCells(prev => {
-                  const next = new Set(prev)
-                  if (mode) next.add(key); else next.delete(key)
-                  return next
-                })
-              }}
-              onClear={() => setSelectedCells(new Set())}
-              onSelectAll={() => {
-                const all = new Set()
-                for (let r = 0; r < 13; r++) for (let c = 0; c < 13; c++) all.add(cellKey(r, c))
-                setSelectedCells(all)
-              }}
-            />
+            <RangeGrid selected={selectedCells} onToggle={(key, mode) => { setSelectedCells(prev => { const next = new Set(prev); if (mode) next.add(key); else next.delete(key); return next }) }} onClear={() => setSelectedCells(new Set())} onSelectAll={() => { const all = new Set(); for (let r = 0; r < 13; r++) for (let c = 0; c < 13; c++) all.add(cellKey(r, c)); setSelectedCells(all) }} />
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button onClick={() => {
-                const rangeStr = selectedToRangeStr(selectedCells)
-                setRangeInput(rangeStr)
-                setVillainRange(rangeStr)
-                calcEq(step?.board, rangeStr)
-                setShowRangeGrid(false)
-              }} style={{ flex: 1, padding: '8px 0', borderRadius: 6, fontSize: 13, fontWeight: 600, background: '#22c55e', color: '#000', border: 'none', cursor: 'pointer' }}>Aplicar e Calcular</button>
+              <button onClick={() => { const rangeStr = selectedToRangeStr(selectedCells); setRangeInput(rangeStr); setVillainRange(rangeStr); calcEq(step?.board, rangeStr); setShowRangeGrid(false) }} style={{ flex: 1, padding: '8px 0', borderRadius: 6, fontSize: 13, fontWeight: 600, background: '#22c55e', color: '#000', border: 'none', cursor: 'pointer' }}>Aplicar e Calcular</button>
               <button onClick={() => setShowRangeGrid(false)} style={{ padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }}>Fechar</button>
             </div>
             <div style={{ marginTop: 8, display: 'flex', gap: 12, fontSize: 10, color: '#4b5563' }}>

@@ -34,32 +34,25 @@ function parseStreets(raw) {
     { name: 'RIVER', start: '*** RIVER ***', end: '*** SHOW' },
     { name: 'SHOWDOWN', start: /\*\*\* SHOW\s*DOWN \*\*\*/, end: '*** SUMMARY ***' },
   ]
-
   const streets = []
   for (const sd of streetDefs) {
     let si
-    if (sd.start instanceof RegExp) {
-      const m = raw.match(sd.start)
-      si = m ? m.index : -1
-    } else {
-      si = raw.indexOf(sd.start)
-    }
+    if (sd.start instanceof RegExp) { const m = raw.match(sd.start); si = m ? m.index : -1 }
+    else { si = raw.indexOf(sd.start) }
     if (si === -1) continue
     const startLen = sd.start instanceof RegExp ? raw.match(sd.start)[0].length : sd.start.length
     let ei = raw.indexOf(sd.end, si + startLen)
     if (ei === -1) ei = raw.indexOf('*** SUMMARY ***', si)
     if (ei === -1) ei = raw.length
     const section = raw.slice(si + startLen, ei).trim()
-
     let board = []
     if (sd.name === 'FLOP') { const m = raw.match(/\*\*\* FLOP \*\*\* \[(.+?)\]/); if (m) board = m[1].split(' ') }
     else if (sd.name === 'TURN') { const m = raw.match(/\*\*\* TURN \*\*\* \[(.+?)\]\s*\[(.+?)\]/); if (m) board = [...m[1].split(' '), ...m[2].split(' ')] }
     else if (sd.name === 'RIVER') { const m = raw.match(/\*\*\* RIVER \*\*\* \[(.+?)\]\s*\[(.+?)\]/); if (m) board = [...m[1].split(' '), ...m[2].split(' ')] }
-
     const actions = []
     for (const line of section.split('\n')) {
       const t = line.trim()
-      if (!t || t.startsWith('Dealt to')) continue
+      if (!t || t.startsWith('Dealt to') || t.startsWith('Main pot')) continue
       const showM = t.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
       if (showM) { actions.push({ actor: showM[1].trim(), action: 'shows', cards: showM[2].split(' ') }); continue }
       const m = t.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$/i)
@@ -71,7 +64,7 @@ function parseStreets(raw) {
         let label = act.charAt(0).toUpperCase() + act.slice(1)
         if (act === 'calls') label = `Call ${Math.round(amount).toLocaleString()}`
         else if (act === 'bets') label = `Bet ${Math.round(amount).toLocaleString()}`
-        else if (act === 'raises') label = `Raise ${toM ? Math.round(parseFloat(toM[1].replace(/,/g, ''))).toLocaleString() : Math.round(amount).toLocaleString()}`
+        else if (act === 'raises') { const v = toM ? `${Math.round(amount).toLocaleString()} to ${Math.round(parseFloat(toM[1].replace(/,/g, ''))).toLocaleString()}` : Math.round(amount).toLocaleString(); label = `Raise ${v}` }
         else if (act === 'folds') label = 'Fold'
         else if (act === 'checks') label = 'Check'
         if (allIn) label += ' All-In'
@@ -80,7 +73,6 @@ function parseStreets(raw) {
       const wonM = t.match(/^(.+?) collected ([\d,]+)/i)
       if (wonM) actions.push({ actor: wonM[1].trim(), action: 'collected', label: `Wins ${parseFloat(wonM[2].replace(/,/g, '')).toLocaleString()}`, amount: parseFloat(wonM[2].replace(/,/g, '')) })
     }
-
     streets.push({ name: sd.name, board, actions })
   }
   return streets
@@ -96,7 +88,7 @@ export default function HandDetailPage() {
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
-  if (loading) return <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: 16 }}>A carregar mão #{id}...</div>
+  if (loading) return <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: 16 }}>A carregar...</div>
   if (error) return <div style={{ padding: 60, textAlign: 'center', color: '#ef4444', fontSize: 16 }}>{error}</div>
   if (!hand) return null
 
@@ -129,15 +121,17 @@ export default function HandDetailPage() {
 
   const tourneyName = hand.stakes || ''
   const playedDate = hand.played_at ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+  const resultColor = hand.result > 0 ? '#22c55e' : hand.result < 0 ? '#ef4444' : '#64748b'
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto', padding: '28px 24px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+
+      {/* ── HEADER: Back + Actions ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>&larr; Voltar</button>
         <div style={{ display: 'flex', gap: 8 }}>
           {hand.raw && hand.all_players_actions && (
-            <a href={`/replayer/${hand.id}`} style={{ padding: '8px 20px', borderRadius: 6, fontSize: 14, fontWeight: 700, background: '#6366f1', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>&#9654; Replayer</a>
+            <a href={`/replayer/${hand.id}`} style={{ padding: '8px 20px', borderRadius: 6, fontSize: 14, fontWeight: 700, background: '#6366f1', color: '#fff', textDecoration: 'none' }}>&#9654; Replayer</a>
           )}
           {hand.raw && (
             <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ padding: '8px 20px', borderRadius: 6, fontSize: 14, fontWeight: 700, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)', color: copied ? '#22c55e' : '#f59e0b', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.25)'}`, cursor: 'pointer' }}>{copied ? '✓ Copiado' : 'Copiar HH'}</button>
@@ -145,76 +139,69 @@ export default function HandDetailPage() {
         </div>
       </div>
 
-      {/* Tournament info bar */}
-      <div style={{ background: '#0f1117', borderRadius: 10, padding: '14px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <span style={{ fontSize: 17, fontWeight: 700, color: '#e2e8f0' }}>{tourneyName}</span>
-          {blindsLabel && <span style={{ fontSize: 14, color: '#64748b', marginLeft: 12, fontFamily: 'monospace' }}>{blindsLabel}</span>}
-          {meta.level != null && <span style={{ fontSize: 13, color: '#4b5563', marginLeft: 8 }}>Lv{meta.level}</span>}
-        </div>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <span style={{ fontSize: 14, color: '#94a3b8' }}>{hand.site}</span>
-          <span style={{ fontSize: 14, color: '#64748b' }}>{playedDate}</span>
-          {hand.result != null && (
-            <span style={{ fontSize: 18, fontWeight: 800, fontFamily: 'monospace', color: hand.result > 0 ? '#22c55e' : hand.result < 0 ? '#ef4444' : '#64748b' }}>
-              {hand.result > 0 ? '+' : ''}{Number(hand.result).toFixed(1)} BB
-            </span>
-          )}
-        </div>
+      {/* ── INFO GRID (top) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+        {[
+          { l: 'Torneio', v: tourneyName },
+          { l: 'Blinds', v: blindsLabel || '—' },
+          { l: 'Resultado', v: hand.result != null ? `${hand.result > 0 ? '+' : ''}${Number(hand.result).toFixed(1)} BB` : '—', c: resultColor },
+          { l: 'Sala', v: hand.site },
+          { l: 'Data', v: playedDate },
+          { l: 'Posição', v: null, badge: hand.position },
+          { l: 'Hand ID', v: hand.hand_id },
+          { l: 'Level', v: meta.level != null ? `Lv ${meta.level}` : '—' },
+          { l: 'Jogadores', v: players.length },
+        ].map(({ l, v, c, badge }) => (
+          <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, color: '#4b5563', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
+            {badge ? <PosBadge pos={badge} /> : <div style={{ fontSize: 14, color: c || '#e2e8f0', fontWeight: 600, wordBreak: 'break-all' }}>{v || '—'}</div>}
+          </div>
+        ))}
       </div>
 
-      {/* Hero cards + Board */}
-      <div style={{ background: '#0f1117', borderRadius: 10, padding: '18px 24px', marginBottom: 16, display: 'flex', gap: 40, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* ── HERO CARDS + BOARD ── */}
+      <div style={{ background: '#0f1117', borderRadius: 8, padding: '14px 20px', marginBottom: 12, display: 'flex', gap: 36, alignItems: 'center', flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero &middot; <PosBadge pos={hand.position} /></div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <RCard key={i} card={c} size="lg" />) : <span style={{ color: '#4b5563', fontSize: 15 }}>Cartas não visíveis</span>}
+          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase' }}>Hero &middot; <PosBadge pos={hand.position} /></div>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <RCard key={i} card={c} size="lg" />) : <span style={{ color: '#4b5563' }}>—</span>}
           </div>
         </div>
         {hand.board?.length > 0 && (
           <div>
-            <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Board</div>
-            <div style={{ display: 'flex', gap: 5 }}>{hand.board.map((c, i) => <RCard key={i} card={c} size="lg" />)}</div>
+            <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase' }}>Board</div>
+            <div style={{ display: 'flex', gap: 4 }}>{hand.board.map((c, i) => <RCard key={i} card={c} size="lg" />)}</div>
           </div>
         )}
       </div>
 
-      {/* Mesa */}
-      <div style={{ background: '#0f1117', borderRadius: 10, padding: '18px 24px', marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0', marginBottom: 14 }}>MESA ({players.length} JOGADORES)</div>
+      {/* ── MESA ── */}
+      <div style={{ background: '#0f1117', borderRadius: 8, padding: '14px 20px', marginBottom: 2 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', marginBottom: 10, textTransform: 'uppercase' }}>Mesa ({players.length} jogadores)</div>
         {players.map((p, i) => {
           const isHero = p.is_hero || HERO_NAMES.has(p.name.toLowerCase())
           const realName = p.real_name || p.name
           const bounty = playerBounties[realName] || p.bounty || p.bounty_pct
           return (
             <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px',
+              display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px',
               borderBottom: i < players.length - 1 ? '1px solid #1e2130' : 'none',
-              background: isHero ? 'rgba(99,102,241,0.06)' : 'transparent', borderRadius: 5,
+              background: isHero ? 'rgba(99,102,241,0.05)' : 'transparent', borderRadius: 4,
             }}>
               <PosBadge pos={p.position} />
-              <span style={{ fontSize: 15, fontWeight: isHero ? 700 : 500, color: isHero ? '#818cf8' : '#e2e8f0', minWidth: 150 }}>
-                {realName}
-                {isHero && <span style={{ fontSize: 10, fontWeight: 700, color: '#6366f1', marginLeft: 6, textTransform: 'uppercase' }}>HERO</span>}
+              <span style={{ fontSize: 14, fontWeight: isHero ? 700 : 500, color: isHero ? '#818cf8' : '#e2e8f0', minWidth: 140 }}>
+                {realName}{isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 5 }}>HERO</span>}
               </span>
-              <span style={{ fontSize: 14, color: '#94a3b8', fontFamily: 'monospace', minWidth: 80, textAlign: 'right' }}>
-                {p.stack ? Math.round(p.stack).toLocaleString() : '—'}
-              </span>
-              <span style={{ fontSize: 14, color: '#e2e8f0', fontFamily: 'monospace', fontWeight: 600, minWidth: 65, textAlign: 'right' }}>
-                {p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB
-              </span>
-              {bounty != null && (
-                <span style={{ fontSize: 13, color: '#f59e0b', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                  {typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}
-                </span>
-              )}
+              <span style={{ fontSize: 13, color: '#94a3b8', fontFamily: 'monospace', minWidth: 70, textAlign: 'right' }}>{p.stack ? Math.round(p.stack).toLocaleString() : '—'}</span>
+              <span style={{ fontSize: 13, color: '#e2e8f0', fontFamily: 'monospace', fontWeight: 600, minWidth: 60, textAlign: 'right' }}>{p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB</span>
+              {bounty != null && <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, padding: '1px 7px', borderRadius: 4, background: 'rgba(245,158,11,0.1)' }}>{typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}</span>}
             </div>
           )
         })}
       </div>
 
-      {/* Hand History by street */}
-      <div style={{ background: '#0f1117', borderRadius: 10, padding: '18px 24px', marginBottom: 16 }}>
+      {/* ── ACÇÕES POR STREET (continuous, no gap) ── */}
+      <div style={{ background: '#0f1117', borderRadius: '0 0 8px 8px', padding: '14px 20px' }}>
         {streets.map((st, si) => {
           let streetPot = initialPot
           for (let s = 0; s < si; s++) {
@@ -223,63 +210,36 @@ export default function HandDetailPage() {
             }
           }
           const streetPotBB = (streetPot / bb).toFixed(1)
-
           return (
-            <div key={st.name} style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <span style={{
-                  display: 'inline-block', padding: '4px 14px', borderRadius: 5, fontSize: 14, fontWeight: 800,
-                  color: STREET_COLORS[st.name] || '#e2e8f0', background: `${STREET_COLORS[st.name] || '#64748b'}15`,
-                  border: `1px solid ${STREET_COLORS[st.name] || '#64748b'}35`, letterSpacing: 0.5,
-                }}>{st.name}</span>
-                {st.board?.length > 0 && (
-                  <div style={{ display: 'flex', gap: 4 }}>{st.board.map((c, i) => <RCard key={i} card={c} />)}</div>
-                )}
-                <span style={{
-                  fontSize: 14, fontWeight: 700, fontFamily: 'monospace', marginLeft: 'auto',
-                  color: '#94a3b8', background: 'rgba(255,255,255,0.04)', padding: '3px 12px', borderRadius: 4,
-                }}>
-                  Pot: {Math.round(streetPot).toLocaleString()} <span style={{ color: '#64748b' }}>({streetPotBB}bb)</span>
-                </span>
+            <div key={st.name} style={{ marginBottom: si < streets.length - 1 ? 16 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <span style={{ padding: '3px 12px', borderRadius: 4, fontSize: 13, fontWeight: 800, color: STREET_COLORS[st.name] || '#e2e8f0', background: `${STREET_COLORS[st.name] || '#64748b'}15`, border: `1px solid ${STREET_COLORS[st.name] || '#64748b'}30` }}>{st.name}</span>
+                {st.board?.length > 0 && <div style={{ display: 'flex', gap: 3 }}>{st.board.map((c, i) => <RCard key={i} card={c} />)}</div>}
+                <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', marginLeft: 'auto', color: '#94a3b8', background: 'rgba(255,255,255,0.03)', padding: '2px 10px', borderRadius: 4 }}>Pot: {Math.round(streetPot).toLocaleString()} ({streetPotBB}bb)</span>
               </div>
-
-              <div style={{ paddingLeft: 16, borderLeft: `3px solid ${STREET_COLORS[st.name] || '#2a2d3a'}40` }}>
+              <div style={{ paddingLeft: 14, borderLeft: `2px solid ${STREET_COLORS[st.name] || '#2a2d3a'}35` }}>
                 {st.actions.map((a, ai) => {
                   const isHero = HERO_NAMES.has(a.actor.toLowerCase())
                   const player = players.find(p => p.name === a.actor)
                   const pos = player?.position
                   const stackBB = player?.stack_bb
-
-                  let actionColor = '#94a3b8', actionBg = 'rgba(148,163,184,0.08)'
-                  if (a.action === 'folds') { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.08)' }
-                  else if (a.action === 'checks') { actionColor = '#64748b'; actionBg = 'rgba(100,116,139,0.08)' }
-                  else if (a.action === 'calls') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.08)' }
-                  else if (a.action === 'bets' || a.action === 'raises') { actionColor = '#f59e0b'; actionBg = 'rgba(245,158,11,0.08)' }
-                  else if (a.action === 'collected') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.12)' }
-                  else if (a.action === 'shows') { actionColor = '#8b5cf6'; actionBg = 'rgba(139,92,246,0.08)' }
-                  if (a.allIn) { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.15)' }
-
+                  let actionColor = '#94a3b8', actionBg = 'rgba(148,163,184,0.06)'
+                  if (a.action === 'folds') { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.06)' }
+                  else if (a.action === 'checks') { actionColor = '#64748b'; actionBg = 'rgba(100,116,139,0.06)' }
+                  else if (a.action === 'calls') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.06)' }
+                  else if (a.action === 'bets' || a.action === 'raises') { actionColor = '#f59e0b'; actionBg = 'rgba(245,158,11,0.06)' }
+                  else if (a.action === 'collected') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.1)' }
+                  else if (a.action === 'shows') { actionColor = '#8b5cf6'; actionBg = 'rgba(139,92,246,0.06)' }
+                  if (a.allIn) { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.12)' }
                   return (
-                    <div key={ai} style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0',
-                      borderBottom: ai < st.actions.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
-                    }}>
+                    <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: ai < st.actions.length - 1 ? '1px solid rgba(255,255,255,0.02)' : 'none' }}>
                       {pos && <PosBadge pos={pos} />}
-                      <span style={{ fontSize: 15, fontWeight: isHero ? 700 : 500, color: isHero ? '#818cf8' : '#e2e8f0', minWidth: 140 }}>
-                        {a.actor}
-                        {isHero && <span style={{ fontSize: 10, color: '#6366f1', marginLeft: 4 }}>HERO</span>}
+                      <span style={{ fontSize: 14, fontWeight: isHero ? 700 : 500, color: isHero ? '#818cf8' : '#e2e8f0', minWidth: 130 }}>
+                        {a.actor}{isHero && <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>HERO</span>}
                       </span>
-                      {stackBB != null && (
-                        <span style={{ fontSize: 13, color: '#4b5563', fontFamily: 'monospace', minWidth: 55, textAlign: 'right' }}>{stackBB.toFixed(1)}bb</span>
-                      )}
-                      <span style={{
-                        fontSize: 14, fontWeight: 700, color: actionColor,
-                        padding: '3px 12px', borderRadius: 5, background: actionBg,
-                        border: `1px solid ${actionColor}20`,
-                      }}>
-                        {a.label || a.action}
-                      </span>
-                      {a.cards && <div style={{ display: 'flex', gap: 3 }}>{a.cards.map((c, i) => <RCard key={i} card={c} />)}</div>}
+                      {stackBB != null && <span style={{ fontSize: 12, color: '#4b5563', fontFamily: 'monospace', minWidth: 50, textAlign: 'right' }}>{stackBB.toFixed(1)}bb</span>}
+                      <span style={{ fontSize: 13, fontWeight: 700, color: actionColor, padding: '2px 10px', borderRadius: 4, background: actionBg, border: `1px solid ${actionColor}15` }}>{a.label || a.action}</span>
+                      {a.cards && <div style={{ display: 'flex', gap: 2 }}>{a.cards.map((c, i) => <RCard key={i} card={c} />)}</div>}
                     </div>
                   )
                 })}
@@ -287,23 +247,6 @@ export default function HandDetailPage() {
             </div>
           )
         })}
-      </div>
-
-      {/* Info grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-        {[
-          { l: 'Sala', v: hand.site },
-          { l: 'Data', v: playedDate },
-          { l: 'Resultado', v: hand.result != null ? `${hand.result > 0 ? '+' : ''}${Number(hand.result).toFixed(1)} BB` : '—', c: hand.result > 0 ? '#22c55e' : hand.result < 0 ? '#ef4444' : '#64748b' },
-          { l: 'Posição', v: hand.position },
-          { l: 'Torneio', v: tourneyName },
-          { l: 'Hand ID', v: hand.hand_id },
-        ].map(({ l, v, c }) => (
-          <div key={l} style={{ background: '#0f1117', borderRadius: 8, padding: '12px 16px' }}>
-            <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 4, textTransform: 'uppercase' }}>{l}</div>
-            <div style={{ fontSize: 15, color: c || '#e2e8f0', fontWeight: 600, wordBreak: 'break-all' }}>{v || '—'}</div>
-          </div>
-        ))}
       </div>
     </div>
   )

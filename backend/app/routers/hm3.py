@@ -518,7 +518,7 @@ async def import_hm3(
                     )
 
                     # Extract villains for nota++ hands (existing too)
-                    if "nota++" in tags_clean:
+                    if any("nota" in t.lower() for t in tags_clean):
                         dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
                         hero = dealt_m.group(1) if dealt_m else None
                         vpip_players = _detect_vpip_hm3(parsed.get("raw", ""), hero)
@@ -580,7 +580,7 @@ async def import_hm3(
                 inserted += 1
 
                 # Extract villains for nota++ hands
-                if "nota++" in tags_clean:
+                if any("nota" in t.lower() for t in tags_clean):
                     hero_name = parsed.get("raw", "")
                     dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
                     hero = dealt_m.group(1) if dealt_m else None

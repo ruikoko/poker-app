@@ -78,24 +78,37 @@ def _get_position(seat_num: int, button_seat: int, all_seats: list, num_players:
 def _parse_filename(filename: str) -> dict:
     """
     Extrai data, hora, blinds e TM number do nome do ficheiro GGPoker.
-    Formato: 2026-03-06_06_02_PM_2,000_4,000(500)_#TM5672663145.png
+    Formatos suportados:
+      Antigo: 2026-02-28_08_30_PM_25_000_50_000_6_000___TM5645872965.png
+      Novo:   2026-03-28__05-45_PM__0_10__0_20__5761227426.png
     """
     result = {"date": None, "time": None, "blinds": None, "tm": None}
 
-    tm_m = re.search(r'#TM(\d+)', filename)
+    # TM number — try multiple formats
+    # Format 1: #TM followed by digits
+    tm_m = re.search(r'#?TM(\d+)', filename)
     if tm_m:
         result["tm"] = f"TM{tm_m.group(1)}"
     else:
-        # Also try format: #NUMBER (without TM prefix)
+        # Format 2: #NUMBER (without TM prefix)
         tm_m2 = re.search(r'#(\d{8,})', filename)
         if tm_m2:
             result["tm"] = f"TM{tm_m2.group(1)}"
+        else:
+            # Format 3: bare digits at end of filename (new GG format)
+            # Match last sequence of 8+ digits before extension
+            tm_m3 = re.search(r'(\d{8,})(?:\.\w+)?$', filename)
+            if tm_m3:
+                result["tm"] = f"TM{tm_m3.group(1)}"
 
+    # Date
     date_m = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
     if date_m:
         result["date"] = date_m.group(1)
 
-    time_m = re.search(r'(\d{1,2})_(\d{2})_(AM|PM)', filename, re.IGNORECASE)
+    # Time — support both underscore and hyphen separators
+    # Format 1: 08_30_PM (old)
+    time_m = re.search(r'(\d{1,2})[-_](\d{2})[-_](AM|PM)', filename, re.IGNORECASE)
     if time_m:
         h, m, period = int(time_m.group(1)), int(time_m.group(2)), time_m.group(3).upper()
         if period == "PM" and h != 12:
@@ -104,14 +117,20 @@ def _parse_filename(filename: str) -> dict:
             h = 0
         result["time"] = f"{h:02d}:{m:02d}"
 
-    name_clean = re.sub(r'#TM\d+', '', filename)
-    name_clean = re.sub(r'\d{4}-\d{2}-\d{2}_\d{1,2}_\d{2}_(AM|PM)_', '', name_clean, flags=re.IGNORECASE)
-    blinds_m = re.search(r'([\d,]+)_([\d,]+)(?:\(([\d,]+)\))?', name_clean)
+    # Blinds — support both formats
+    name_clean = re.sub(r'#?TM\d+', '', filename)
+    name_clean = re.sub(r'\d{4}-\d{2}-\d{2}[_\s]+\d{1,2}[-_]\d{2}[-_](?:AM|PM)[_\s]+', '', name_clean, flags=re.IGNORECASE)
+    # Old format: 25_000_50_000_6_000 or 2,000_4,000(500)
+    blinds_m = re.search(r'([\d,_]+?)__([\d,_]+?)(?:\(([\d,_]+?)\))?(?:__|_|\.)', name_clean)
+    if not blinds_m:
+        blinds_m = re.search(r'([\d,]+)_([\d,]+)(?:\(([\d,]+)\))?', name_clean)
     if blinds_m:
-        sb = blinds_m.group(1).replace(",", "")
-        bb = blinds_m.group(2).replace(",", "")
-        ante = blinds_m.group(3).replace(",", "") if blinds_m.group(3) else None
-        result["blinds"] = f"{sb}/{bb}" + (f"({ante})" if ante else "")
+        sb = blinds_m.group(1).replace(",", "").replace("_", "")
+        bb = blinds_m.group(2).replace(",", "").replace("_", "")
+        ante = blinds_m.group(3).replace(",", "").replace("_", "") if blinds_m.group(3) else None
+        # Filter out dates/times that look like blinds
+        if len(sb) <= 6 and len(bb) <= 6:
+            result["blinds"] = f"{sb}/{bb}" + (f"({ante})" if ante else "")
 
     return result
 
