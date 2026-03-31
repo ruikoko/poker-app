@@ -193,7 +193,7 @@ def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000)
 
 
 def _calculate_equity_treys(hero_cards, board, villain_range="random", num_sims=10000):
-    """Fallback: Calculate equity using treys if pyeval7 not available."""
+    """Fallback: Calculate equity using treys. Supports ranges."""
     try:
         from treys import Card, Evaluator, Deck
     except ImportError:
@@ -208,25 +208,50 @@ def _calculate_equity_treys(hero_cards, board, villain_range="random", num_sims=
 
         hero = [_card_to_treys(c) for c in hero_cards]
         board_t = [_card_to_treys(c) for c in board] if board else []
-        dead = set(hero + board_t)
-        full_deck = Deck.GetFullDeck()
-        deck = [c for c in full_deck if c not in dead]
+        dead_strs = set(hero_cards + (board or []))
+
+        # Build deck as strings, excluding dead cards
+        all_card_strs = [f"{r}{su}" for r in "23456789TJQKA" for su in "cdhs"]
+        deck_strs = [c for c in all_card_strs if c not in dead_strs]
+
+        # Parse villain range
+        range_combos = _parse_range(villain_range)
+
+        if range_combos:
+            valid_combos = []
+            for combo in range_combos:
+                c1, c2 = combo[0], combo[1]
+                if c1 not in dead_strs and c2 not in dead_strs and c1 != c2:
+                    valid_combos.append((c1, c2))
+            if not valid_combos:
+                return 0.5
+        else:
+            valid_combos = None
 
         wins = 0
         ties = 0
         total = 0
+        cards_needed = 5 - len(board_t)
 
         for _ in range(num_sims):
-            remaining = list(deck)
-            rng.shuffle(remaining)
-            vc = [remaining[0], remaining[1]]
-            remaining_for_board = remaining[2:]
-            full_board = list(board_t)
-            bi = 0
-            while len(full_board) < 5:
-                full_board.append(remaining_for_board[bi])
-                bi += 1
+            if valid_combos:
+                vc1_str, vc2_str = rng.choice(valid_combos)
+                remaining = [c for c in deck_strs if c != vc1_str and c != vc2_str]
+                vc = [_card_to_treys(vc1_str), _card_to_treys(vc2_str)]
+            else:
+                deck_copy = list(deck_strs)
+                rng.shuffle(deck_copy)
+                vc1_str, vc2_str = deck_copy[0], deck_copy[1]
+                remaining = deck_copy[2:]
+                vc = [_card_to_treys(vc1_str), _card_to_treys(vc2_str)]
 
+            # Complete board
+            rng.shuffle(remaining)
+            full_board = list(board_t)
+            for bi in range(cards_needed):
+                full_board.append(_card_to_treys(remaining[bi]))
+
+            # In treys, LOWER score = BETTER hand
             hero_score = evaluator.evaluate(full_board, hero)
             villain_score = evaluator.evaluate(full_board, vc)
 
@@ -238,10 +263,11 @@ def _calculate_equity_treys(hero_cards, board, villain_range="random", num_sims=
 
         if total == 0:
             return 0.5
+
         return (wins + ties * 0.5) / total
 
     except Exception as e:
-        logger.error(f"Treys equity calc error: {e}")
+        logger.error(f"treys equity calc error: {e}")
         return _fallback_equity(hero_cards, board, villain_range)
 
 
