@@ -106,79 +106,79 @@ def _calculate_equity(hero_cards, board, villain_range="random", num_sims=10000)
     try:
         import random as rng
 
-        hero = [eval7.Card(c) for c in hero_cards]
-        board_cards = [eval7.Card(c) for c in board] if board else []
-        
-        # Use original string names for dead card tracking (not str(eval7.Card))
-        dead_strs = set(hero_cards + (board if board else []))
+        # Auto-detect eval7 score direction:
+        # Compare AA vs 72 on empty board - AA must win
+        _aa = [eval7.Card('As'), eval7.Card('Ad')]
+        _72 = [eval7.Card('7c'), eval7.Card('2h')]
+        _test_board = [eval7.Card('3d'), eval7.Card('8h'), eval7.Card('Ks'), eval7.Card('4c'), eval7.Card('9s')]
+        _aa_score = eval7.evaluate(_aa + _test_board)
+        _72_score = eval7.evaluate(_72 + _test_board)
+        # AA has pair of aces, 72 has king high at best
+        higher_is_better = _aa_score > _72_score
 
-        # Build full deck minus dead cards
-        all_card_strs = [f"{r}{su}" for r in "23456789TJQKA" for su in "cdhs"]
-        deck_strs = [c for c in all_card_strs if c not in dead_strs]
-        deck = [eval7.Card(c) for c in deck_strs]
+        # All work done with strings, only convert to eval7.Card for evaluation
+        dead = set(hero_cards + (board or []))
 
-        # Parse villain range into combos
+        # Full deck as strings minus dead
+        all_cards = [f"{r}{su}" for r in "23456789TJQKA" for su in "cdhs"]
+        deck = [c for c in all_cards if c not in dead]
+
+        # Parse villain range
         range_combos = _parse_range(villain_range)
 
-        # Filter combos that conflict with dead cards
+        # Filter combos that use dead cards
         if range_combos:
             valid_combos = []
             for combo in range_combos:
                 c1, c2 = combo[0], combo[1]
-                if c1 not in dead_strs and c2 not in dead_strs and c1 != c2:
-                    try:
-                        valid_combos.append((eval7.Card(c1), eval7.Card(c2), c1, c2))
-                    except Exception:
-                        pass
+                if c1 not in dead and c2 not in dead and c1 != c2:
+                    valid_combos.append((c1, c2))
             if not valid_combos:
-                return 0.5  # No valid combos in range
+                return 0.5
         else:
-            valid_combos = None  # random = any 2 cards
+            valid_combos = None
 
         wins = 0
         ties = 0
         total = 0
-
-        # Build string-to-card map for deck
-        deck_map = {s: eval7.Card(s) for s in deck_strs}
+        board_strs = list(board or [])
+        cards_needed = 5 - len(board_strs)
 
         for _ in range(num_sims):
             if valid_combos:
-                # Pick random combo from villain's range
-                vc = rng.choice(valid_combos)
-                villain = [vc[0], vc[1]]
-                v_str1, v_str2 = vc[2], vc[3]
-                # Filter deck excluding villain cards
-                remaining_strs = [s for s in deck_strs if s != v_str1 and s != v_str2]
+                vc1, vc2 = rng.choice(valid_combos)
+                remaining = [c for c in deck if c != vc1 and c != vc2]
             else:
-                # Random villain hand
-                rng.shuffle(deck_strs)
-                v_str1, v_str2 = deck_strs[0], deck_strs[1]
-                villain = [deck_map[v_str1], deck_map[v_str2]]
-                remaining_strs = deck_strs[2:]
+                deck_copy = list(deck)
+                rng.shuffle(deck_copy)
+                vc1, vc2 = deck_copy[0], deck_copy[1]
+                remaining = deck_copy[2:]
 
             # Complete board to 5 cards
-            rng.shuffle(remaining_strs)
-            full_board = list(board_cards)
-            bi = 0
-            while len(full_board) < 5:
-                full_board.append(deck_map[remaining_strs[bi]])
-                bi += 1
+            rng.shuffle(remaining)
+            full_board_strs = board_strs + remaining[:cards_needed]
 
-            # Evaluate 7-card hands
-            hero_hand = hero + full_board
-            villain_hand = villain + full_board
+            # Convert to eval7 cards and evaluate
+            try:
+                hero_hand = [eval7.Card(c) for c in hero_cards + full_board_strs]
+                villain_hand = [eval7.Card(c) for c in [vc1, vc2] + full_board_strs]
 
-            hero_score = eval7.evaluate(hero_hand)
-            villain_score = eval7.evaluate(villain_hand)
+                hero_score = eval7.evaluate(hero_hand)
+                villain_score = eval7.evaluate(villain_hand)
 
-            # eval7: need to test which direction is better
-            # AA vs 72o preflop should be ~85% for AA
-            if hero_score > villain_score:
-                wins += 1
-            elif hero_score == villain_score:
-                ties += 1
-            total += 1
+                if higher_is_better:
+                    if hero_score > villain_score:
+                        wins += 1
+                    elif hero_score == villain_score:
+                        ties += 1
+                else:
+                    if hero_score < villain_score:
+                        wins += 1
+                    elif hero_score == villain_score:
+                        ties += 1
+                total += 1
+            except Exception:
+                continue
 
         if total == 0:
             return 0.5
