@@ -1040,14 +1040,14 @@ def list_mtt_hands(
     current_user=Depends(require_auth),
 ):
     """Lista mãos GGPoker MTT da tabela hands (pós-migração)."""
-    conditions = ["h.site = 'GGPoker'"]
+    conditions = ["h.site = 'GGPoker'", "h.hand_id LIKE 'GG-%%'"]
     params = []
     
     if has_screenshot is not None:
         if has_screenshot:
-            conditions.append("h.screenshot_url IS NOT NULL")
+            conditions.append("(h.screenshot_url IS NOT NULL OR h.entry_id IS NOT NULL OR h.study_state = 'new')")
         else:
-            conditions.append("h.screenshot_url IS NULL")
+            conditions.append("h.screenshot_url IS NULL AND h.entry_id IS NULL AND h.study_state = 'mtt_archive'")
     
     if tm_search:
         conditions.append("h.hand_id ILIKE %s")
@@ -1085,7 +1085,7 @@ def list_mtt_hands(
         hand["tournament_name"] = hand.get("stakes")
         hand["hero_position"] = hand.get("position")
         hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
-        hand["has_screenshot"] = bool(hand.get("screenshot_url"))
+        hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("entry_id") or hand.get("study_state") == 'new')
         hand["blinds"] = None
         # Extract blinds from all_players_actions meta
         apa = hand.get("all_players_actions") or {}
@@ -1156,7 +1156,7 @@ def get_mtt_hand(
     hand["tournament_name"] = hand.get("stakes")
     hand["hero_position"] = hand.get("position")
     hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
-    hand["has_screenshot"] = bool(hand.get("screenshot_url"))
+    hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("entry_id") or hand.get("study_state") == 'new')
     
     apa = hand.get("all_players_actions") or {}
     if isinstance(apa, str):
@@ -1202,12 +1202,12 @@ def mtt_stats(current_user=Depends(require_auth)):
     rows = query("""
         SELECT 
             COUNT(*) as total_hands,
-            COUNT(*) FILTER (WHERE screenshot_url IS NOT NULL) as hands_with_screenshot,
+            COUNT(*) FILTER (WHERE screenshot_url IS NOT NULL OR entry_id IS NOT NULL OR study_state = 'new') as hands_with_screenshot,
             COUNT(DISTINCT stakes) as tournaments,
             (SELECT COUNT(*) FROM hand_villains) as total_villains,
             (SELECT COUNT(DISTINCT player_name) FROM hand_villains) as unique_villains
         FROM hands
-        WHERE site = 'GGPoker'
+        WHERE site = 'GGPoker' AND hand_id LIKE 'GG-%%'
     """)
     
     if rows:
