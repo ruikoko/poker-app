@@ -67,3 +67,32 @@ def register(body: RegisterBody, response: Response):
         path="/"
     )
     return {"ok": True, "email": user["email"]}
+
+
+@router.post("/reset-password")
+def reset_password(body: LoginBody, response: Response):
+    """Reset password — define nova password para o email indicado."""
+    from app.auth import hash_password
+    from app.db import get_conn
+    user = get_user_by_email(body.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Email não encontrado")
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET password_hash = %s WHERE email = %s",
+                        (hash_password(body.password), body.email))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+    # Auto-login
+    token = create_session_token(user["id"])
+    is_prod = os.getenv("ENV", "production") == "production"
+    response.set_cookie(
+        key=COOKIE_NAME, value=token, httponly=True,
+        secure=is_prod, samesite="none", max_age=COOKIE_MAX_AGE, path="/"
+    )
+    return {"ok": True, "email": body.email, "message": "Password actualizada"}
