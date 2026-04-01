@@ -826,6 +826,84 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
+@router.post("/cleanup-old")
+def cleanup_old_hands(
+    before_date: str = "2026-01-01",
+    dry_run: bool = True,
+    current_user=Depends(require_auth),
+):
+    """
+    Apaga mãos HM3 anteriores a uma data.
+    dry_run=true: só conta, não apaga.
+    dry_run=false: apaga e devolve resultado.
+    """
+    # Count before
+    before_counts = query("""
+        SELECT
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE played_at < %s) as to_delete,
+            COUNT(*) FILTER (WHERE played_at >= %s OR played_at IS NULL) as to_keep
+        FROM hands
+        WHERE site IN ('Winamax', 'PokerStars', 'WPN')
+    """, (before_date, before_date))
+    
+    before = dict(before_counts[0]) if before_counts else {"total": 0, "to_delete": 0, "to_keep": 0}
+    
+    if dry_run:
+        return {
+            "dry_run": True,
+            "before_date": before_date,
+            "total_hands": before["total"],
+            "would_delete": before["to_delete"],
+            "would_keep": before["to_keep"],
+        }
+    
+    # Actually delete
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Delete hand_villains first (FK)
+            cur.execute("""
+                DELETE FROM hand_villains WHERE mtt_hand_id IN (
+                    SELECT id FROM hands 
+                    WHERE site IN ('Winamax', 'PokerStars', 'WPN') 
+                      AND played_at < %s
+                )
+            """, (before_date,))
+            villains_deleted = cur.rowcount
+            
+            # Delete the hands
+            cur.execute("""
+                DELETE FROM hands 
+                WHERE site IN ('Winamax', 'PokerStars', 'WPN') 
+                  AND played_at < %s
+            """, (before_date,))
+            hands_deleted = cur.rowcount
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao apagar: {e}")
+    finally:
+        conn.close()
+    
+    # Count after
+    after_counts = query("""
+        SELECT COUNT(*) as total
+        FROM hands
+        WHERE site IN ('Winamax', 'PokerStars', 'WPN')
+    """)
+    after_total = after_counts[0]["total"] if after_counts else 0
+    
+    return {
+        "dry_run": False,
+        "before_date": before_date,
+        "before_total": before["total"],
+        "deleted": hands_deleted,
+        "villains_deleted": villains_deleted,
+        "after_total": after_total,
+    }
+
+
 # ── Parse actions from raw HH text (multi-site) ─────────────────────────────
 
 def _parse_actions_from_raw(raw_text, site_name=""):
