@@ -1468,12 +1468,48 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
         elif villain_pre_act["action"] == "calls":
             pre_action = "call"
 
-    # ── Build postflop actions description ──
-    postflop_parts = []
+    # ── Detect BvB (blind vs blind limp pot) ──
+    is_bvb = False
+    bvb_label = ""
+    if not first_raiser and num_players >= 2:
+        # No preflop raise = limp pot
+        sb_name = None
+        bb_name = None
+        for name, info in seats.items():
+            if info["position"] == "SB":
+                sb_name = name
+            elif info["position"] == "BB":
+                bb_name = name
+        if sb_name and bb_name and players_in_pot == {sb_name, bb_name}:
+            is_bvb = True
+            if villain_name == bb_name:
+                bvb_label = "BvB"  # BB is subject
+            else:
+                bvb_label = "bvB"  # SB is subject
+
+    # ── Track who's in the pot per street ──
+    active_players = set(players_in_pot)  # copy
+    players_in_pot_by_street = {"preflop": set(active_players)}
     
-    # Track who's the aggressor and what happened
+    for st in ["flop", "turn", "river"]:
+        # Remove players who folded in previous streets
+        for prev_st in ["preflop", "flop", "turn", "river"]:
+            if prev_st == st:
+                break
+            for a in all_actions.get(prev_st, []):
+                if a["action"] == "folds" and a["actor"] in active_players:
+                    active_players.discard(a["actor"])
+        # Also check folds in current street
+        for a in all_actions.get(st, []):
+            if a["action"] == "folds" and a["actor"] in active_players:
+                active_players.discard(a["actor"])
+        players_in_pot_by_street[st] = set(active_players)
+
+    # ── Build postflop actions with full context per street ──
+    postflop_parts = []
     aggressor_pre = first_raiser
-    cbet_happened = {st: False for st in ["flop", "turn", "river"]}
+    villain_was_aggressive = False
+    first_street_done = False  # for MW/opponent context on first action
     
     for st in ["flop", "turn", "river"]:
         acts = all_actions.get(st, [])
@@ -1481,9 +1517,16 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
             continue
             
         pot_at_street = street_pots.get(st, pot)
-        villain_acts_this_street = [a for a in acts if a["actor"] == villain_name]
-        all_acts_this_street = acts
+        st_label = st[0].upper()
         
+        # Who's in the pot this street?
+        in_pot_this_street = players_in_pot_by_street.get(st, set())
+        opponents_this_street = [n for n in in_pot_this_street if n != villain_name]
+        is_mw_this_street = len(in_pot_this_street) > 2
+        is_hu_this_street = len(in_pot_this_street) == 2
+        
+        # Get villain's actions this street
+        villain_acts_this_street = [a for a in acts if a["actor"] == villain_name]
         if not villain_acts_this_street:
             continue
 
@@ -1491,9 +1534,11 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
             # Calculate running pot UP TO this action
             running_pot = pot_at_street
             street_invested = {}
+            facing_bet_info = None  # track what villain faces
+            
             for a in acts:
                 if a is v_act:
-                    break  # stop before villain's action
+                    break
                 prev_inv = street_invested.get(a["actor"], 0)
                 if a["action"] == "calls":
                     running_pot += a["amount"]
@@ -1501,77 +1546,119 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
                 elif a["action"] == "bets":
                     running_pot += a["amount"]
                     street_invested[a["actor"]] = prev_inv + a["amount"]
+                    # Track facing bet for villain
+                    bet_pct = round(a["amount"] / pot_at_street * 100) if pot_at_street > 0 else 0
+                    actor_pos = seats.get(a["actor"], {}).get("position", "?")
+                    facing_bet_info = {"actor": a["actor"], "pos": actor_pos, "pct": bet_pct, "type": "bet"}
                 elif a["action"] == "raises":
                     additional = a["to"] - prev_inv
                     if additional > 0:
                         running_pot += additional
                     street_invested[a["actor"]] = a["to"]
+                    # Calculate raise % relative to pot before raise
+                    pot_before_raise = running_pot - additional
+                    raise_pct = round(additional / pot_before_raise * 100) if pot_before_raise > 0 else 0
+                    actor_pos = seats.get(a["actor"], {}).get("position", "?")
+                    facing_bet_info = {"actor": a["actor"], "pos": actor_pos, "pct": raise_pct, "type": "raise"}
+
+            # Street context suffix
+            street_ctx = ""
+            if first_street_done:
+                if is_mw_this_street:
+                    street_ctx = " MW"
+                elif is_hu_this_street and opponents_this_street:
+                    opp_pos = seats.get(opponents_this_street[0], {}).get("position", "?")
+                    if not is_bvb:
+                        street_ctx = f" vs {opp_pos}"
 
             if v_act["action"] == "folds":
-                # Check if it was a check/fold
-                checks_before = [a for a in acts if a["actor"] == villain_name and a["action"] == "checks"]
+                checks_before = [a for a in acts if a["actor"] == villain_name and a["action"] == "checks" and acts.index(a) < acts.index(v_act)]
                 if checks_before:
-                    postflop_parts.append(f"x/f {st[0].upper()}")
+                    postflop_parts.append(f"x/f {st_label}{street_ctx}")
                 else:
-                    postflop_parts.append(f"fold {st[0].upper()}")
+                    postflop_parts.append(f"fold {st_label}{street_ctx}")
 
             elif v_act["action"] == "checks":
-                # Will be implicit in most cases
-                # Check if this is GU (give up on river after being aggressor)
                 if st == "river":
-                    # Was villain aggressive on previous street?
-                    prev_st = "turn" if st == "river" else "flop"
-                    prev_acts = [a for a in all_actions.get(prev_st, []) if a["actor"] == villain_name and a["action"] in ("bets", "raises")]
-                    if prev_acts:
-                        postflop_parts.append("GU R")
+                    # GU if villain was aggressive on a previous street
+                    if villain_was_aggressive:
+                        postflop_parts.append(f"GU {st_label}{street_ctx}")
+
+            elif v_act["action"] == "calls":
+                # Passive but include with facing info
+                if facing_bet_info:
+                    fb = facing_bet_info
+                    if fb["type"] == "bet":
+                        if not is_bvb:
+                            postflop_parts.append(f"call {st_label} {fb['pct']}% {fb['pos']}{street_ctx}")
+                        else:
+                            postflop_parts.append(f"call {st_label} {fb['pct']}%{street_ctx}")
+                    elif fb["type"] == "raise":
+                        if not is_bvb:
+                            postflop_parts.append(f"call x/r {fb['pct']}% {fb['pos']}{street_ctx}")
+                        else:
+                            postflop_parts.append(f"call x/r {fb['pct']}%{street_ctx}")
 
             elif v_act["action"] in ("bets", "raises"):
                 amount = v_act["amount"]
                 if v_act["action"] == "raises":
-                    # For raises, the "bet size" is the raise amount minus what villain already invested
                     v_prev = street_invested.get(villain_name, 0)
                     amount = v_act["to"] - v_prev
                 
-                # Calculate % of pot at the moment of action
                 pct = round(amount / running_pot * 100) if running_pot > 0 else 0
                 
-                # Determine action type
-                st_label = st[0].upper()
+                # Was there a check before villain's action? (x/r)
+                checks_before = [a for a in acts if a["actor"] == villain_name and a["action"] == "checks" and acts.index(a) < acts.index(v_act)]
                 
-                # Was there a check before villain's bet? (x/r)
-                checks_before_raise = []
-                for a in acts:
-                    if a["actor"] == villain_name and a["action"] == "checks":
-                        checks_before_raise.append(a)
-                    if a is v_act:
-                        break
-
-                if v_act["action"] == "raises" and checks_before_raise:
-                    # Check-raise
-                    act_label = f"x/r {st_label} {pct}%"
+                # Determine action type
+                is_aggressor = (aggressor_pre == villain_name)
+                
+                if v_act["action"] == "raises" and checks_before:
+                    # Check-raise — include facing bet info
+                    if facing_bet_info and not is_bvb:
+                        act_label = f"x/r {st_label} {pct}% vs bet {facing_bet_info['pct']}% {facing_bet_info['pos']}"
+                    elif facing_bet_info:
+                        act_label = f"x/r {st_label} {pct}% vs bet {facing_bet_info['pct']}%"
+                    else:
+                        act_label = f"x/r {st_label} {pct}%"
+                    # Add MW context on first action
+                    if not first_street_done and is_mw_this_street:
+                        # Identify opponents
+                        opp_descs = []
+                        for opp in opponents_this_street:
+                            opp_pos = seats.get(opp, {}).get("position", "?")
+                            if opp != facing_bet_info.get("actor") if facing_bet_info else True:
+                                # Describe what this opponent did
+                                opp_acts = [a for a in acts if a["actor"] == opp]
+                                if opp_acts and opp_acts[0]["action"] == "checks" and opp == aggressor_pre:
+                                    opp_descs.append(f"vs mcbet {opp_pos}")
+                        if opp_descs:
+                            act_label += " " + " ".join(opp_descs)
                 elif v_act["action"] == "bets":
-                    # Is it a cbet, dcbet, probe, donk, or just bet?
-                    is_aggressor = (aggressor_pre == villain_name)
-                    
-                    if is_aggressor and st == "flop" and not cbet_happened["flop"]:
+                    if is_aggressor and st == "flop":
                         act_label = f"cbet {st_label} {pct}%"
-                        cbet_happened["flop"] = True
-                    elif is_aggressor and st == "turn" and not cbet_happened["flop"]:
-                        act_label = f"dcbet {st_label} {pct}%"
+                    elif is_aggressor and st == "turn":
+                        # Check if cbet happened on flop
+                        flop_bets = [a for a in all_actions.get("flop", []) if a["actor"] == villain_name and a["action"] in ("bets", "raises")]
+                        if not flop_bets:
+                            act_label = f"dcbet {st_label} {pct}%"
+                        else:
+                            act_label = f"bet {st_label} {pct}%"
                     elif is_aggressor:
                         act_label = f"bet {st_label} {pct}%"
                     elif not is_aggressor:
-                        # Villain is not the preflop aggressor
-                        # Check if aggressor checked (probe) or if villain leads (donk)
+                        # Check if it's probe or donk
                         aggressor_checked = any(a["actor"] == aggressor_pre and a["action"] == "checks" for a in acts)
-                        if aggressor_checked and villain["position"] in ("BB", "SB", "UTG", "MP"):
-                            # OP and aggressor checked → probe (only if not flop)
-                            if st != "flop":
-                                act_label = f"probe {st_label} {pct}%"
-                            else:
-                                act_label = f"donk {st_label} {pct}%"
-                        elif not aggressor_checked and st == "flop":
+                        # Determine if villain is OP relative to aggressor
+                        v_seat = villain.get("seat", 0)
+                        agg_seat = seats.get(aggressor_pre, {}).get("seat", 0) if aggressor_pre else 0
+                        
+                        if aggressor_checked and st != "flop":
+                            act_label = f"probe {st_label} {pct}%"
+                        elif st == "flop" and not aggressor_checked:
                             act_label = f"donk {st_label} {pct}%"
+                        elif st == "flop" and aggressor_checked:
+                            act_label = f"bet {st_label} {pct}%"
                         else:
                             act_label = f"bet {st_label} {pct}%"
                     else:
@@ -1583,8 +1670,17 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
 
                 if v_act.get("all_in"):
                     act_label = f"shove {st_label} {pct}%"
-
+                
+                villain_was_aggressive = True
+                
+                # Add first-street MW context
+                if not first_street_done:
+                    if is_mw_this_street:
+                        act_label = act_label  # MW added in assembly
+                
                 postflop_parts.append(act_label)
+            
+            first_street_done = True
 
     # ── Format cards ──
     RANK_ORDER = "AKQJT98765432"
@@ -1734,12 +1830,7 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
 
     vs_str = " e ".join(postflop_opponents) if postflop_opponents else "?"
 
-    # ── Context: multiway, all-in players ──
-    context_parts = []
-    if is_multiway:
-        context_parts.append("MW")
-    
-    # Any all-in players (not villain)?
+    # ── Context: all-in players ──
     allin_others = []
     for st in streets:
         for a in all_actions.get(st, []):
@@ -1749,45 +1840,26 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
                 opp_bb = round(opp_info.get("stack_bb", 0))
                 allin_others.append(f"{opp_pos} {opp_bb}BB all-in")
 
-    # ── Determine what the opponent did (for "vs mcbet T BTN" style) ──
-    opponent_context = ""
-    if hero_name and hero_name in players_in_pot:
-        hero_pos = seats.get(hero_name, {}).get("position", "?")
-        is_hero_aggressor = (aggressor_pre == hero_name)
-        
-        if is_hero_aggressor:
-            # Did hero cbet flop?
-            hero_flop_bets = [a for a in all_actions.get("flop", []) if a["actor"] == hero_name and a["action"] in ("bets", "raises")]
-            hero_turn_bets = [a for a in all_actions.get("turn", []) if a["actor"] == hero_name and a["action"] in ("bets", "raises")]
-            
-            if not hero_flop_bets and not hero_turn_bets:
-                opponent_context = f"vs mcbet F+T {hero_pos}"
-            elif hero_flop_bets and not hero_turn_bets:
-                opponent_context = f"vs cbet F mcbet T {hero_pos}"
-            elif not hero_flop_bets and hero_turn_bets:
-                opponent_context = f"vs dcbet T {hero_pos}"
-            # else: hero bet both streets, just use position
-        
-        if not opponent_context:
-            opponent_context = f"vs {hero_pos}"
-
     # ── Assemble note ──
     parts = [f"{v_stack_bb}BB"]
     if ko_label:
         parts.append(ko_label)
+    if is_bvb:
+        parts.append(bvb_label)
+    if is_multiway and not is_bvb:
+        parts.append("MW")
     parts.append(f"LV{level}")
     parts.append(cards_str)
-    parts.append(v_pos)
+    if not is_bvb:
+        parts.append(v_pos)
     
     # Pre action — include for preflop-only OR all-in pre hands
     if pre_action and (preflop_only or villain_allin_pre):
         parts.append(pre_action)
     
-    # Postflop: check if villain had NO aggressive actions at all → x ATW
+    # Postflop: check if villain had NO aggressive or relevant passive actions → x ATW
     if not villain_allin_pre and not preflop_only and board:
-        villain_had_aggression = len(postflop_parts) > 0
-        if not villain_had_aggression:
-            # Check if villain was in the hand postflop (not folded)
+        if not postflop_parts:
             villain_folded_post = False
             for st in ["flop", "turn", "river"]:
                 for a in all_actions.get(st, []):
@@ -1800,15 +1872,37 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
     if postflop_parts:
         parts.append(", ".join(postflop_parts))
     
-    # Multiway context
-    if is_multiway:
-        parts.append("MW")
-    
-    # Vs — use opponent context if available (vs mcbet T BTN), else vs position
-    if opponent_context:
-        parts.append(opponent_context)
-    else:
-        parts.append(f"vs {vs_str}")
+    # Vs — for non-BvB, non-MW first-street context
+    if not is_bvb and not is_multiway:
+        # Simple HU — identify opponent
+        opponents = [n for n in players_in_pot if n != villain_name]
+        if opponents:
+            opp_pos = seats.get(opponents[0], {}).get("position", "?")
+            # Describe opponent's pre-flop behavior if relevant
+            if aggressor_pre and aggressor_pre in opponents:
+                agg_pos = seats.get(aggressor_pre, {}).get("position", "?")
+                hero_flop_bets = [a for a in all_actions.get("flop", []) if a["actor"] == aggressor_pre and a["action"] in ("bets", "raises")]
+                hero_turn_bets = [a for a in all_actions.get("turn", []) if a["actor"] == aggressor_pre and a["action"] in ("bets", "raises")]
+                if not hero_flop_bets and not hero_turn_bets:
+                    parts.append(f"vs mcbet F+T {agg_pos}")
+                elif hero_flop_bets and not hero_turn_bets:
+                    parts.append(f"vs cbet F mcbet T {agg_pos}")
+                elif not hero_flop_bets and hero_turn_bets:
+                    parts.append(f"vs dcbet T {agg_pos}")
+                else:
+                    parts.append(f"vs {agg_pos}")
+            else:
+                parts.append(f"vs {opp_pos}")
+    elif not is_bvb and is_multiway:
+        # MW — opponents already described in postflop_parts per street
+        # Add initial opponent list if not yet described
+        if preflop_only or villain_allin_pre:
+            opp_positions = []
+            for opp in [n for n in players_in_pot if n != villain_name]:
+                opp_pos = seats.get(opp, {}).get("position", "?")
+                if opp_pos not in opp_positions:
+                    opp_positions.append(opp_pos)
+            parts.append(f"vs {' e '.join(opp_positions)}")
     
     # All-in context
     if allin_others:
@@ -1819,8 +1913,6 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
         parts.append(f"em {board_str}")
 
     note = " ".join(parts)
-    
-    # Clean up double spaces
     note = re.sub(r"\s+", " ", note).strip()
     
     return note
