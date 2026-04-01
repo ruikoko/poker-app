@@ -230,17 +230,45 @@ function parseHH(raw, apa) {
     }
   }
 
-  // Showdown
+  // Showdown — parse cards from SHOW DOWN and SUMMARY sections
   const sdSection = raw.match(/\*\*\* SHOW\s*DOWN \*\*\*([\s\S]*?)(\*\*\* SUMMARY|$)/i)
   if (sdSection) {
     for (const line of sdSection[1].split('\n')) {
       const sm = line.trim().match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
-      if (sm) { const pi = pState.findIndex(p => p.name === sm[1].trim()); if (pi >= 0) pState[pi].cards = sm[2].split(' ') }
+      if (sm) {
+        const name = sm[1].trim()
+        const cards = sm[2].split(' ').filter(c => c.trim())
+        // Try exact match first, then partial
+        let pi = pState.findIndex(p => p.name === name)
+        if (pi < 0) pi = pState.findIndex(p => p.name.startsWith(name) || name.startsWith(p.name))
+        if (pi >= 0) pState[pi].cards = cards
+      }
       const cm = line.trim().match(/^(.+?) collected ([\d,]+(?:\.\d+)?)/i)
-      if (cm) { const pi = pState.findIndex(p => p.name === cm[1].trim()); if (pi >= 0) { const amt = parseFloat(cm[2].replace(/,/g, '')); pState[pi].stack += amt; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) } }
+      if (cm) {
+        const name = cm[1].trim()
+        let pi = pState.findIndex(p => p.name === name)
+        if (pi < 0) pi = pState.findIndex(p => p.name.startsWith(name) || name.startsWith(p.name))
+        if (pi >= 0) { const amt = parseFloat(cm[2].replace(/,/g, '')); pState[pi].stack += amt; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) }
+      }
     }
   }
-  if (pState.filter(p => p.cards.length > 0 && !p.folded).length >= 2) {
+  // Also check SUMMARY section for "showed [cards]" lines (Winamax/PS format)
+  const summarySection = raw.match(/\*\*\* SUMMARY \*\*\*([\s\S]*?)$/i)
+  if (summarySection) {
+    for (const line of summarySection[1].split('\n')) {
+      const sm = line.trim().match(/:\s*(.+?)\s+showed\s+\[(.+?)\]/i)
+      if (sm) {
+        const name = sm[1].trim()
+        const cards = sm[2].split(' ').filter(c => c.trim())
+        let pi = pState.findIndex(p => p.name === name)
+        if (pi < 0) pi = pState.findIndex(p => p.name.startsWith(name) || name.startsWith(p.name))
+        if (pi >= 0 && pState[pi].cards.length === 0) pState[pi].cards = cards
+      }
+    }
+  }
+  // Show showdown if at least 2 non-folded players have cards, OR if any non-hero has cards
+  const playersWithCards = pState.filter(p => p.cards.length > 0 && !p.folded)
+  if (playersWithCards.length >= 2) {
     steps.push({ street: 'showdown', label: 'Showdown', action: 'Showdown', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: bc, ps: snap(), analysis: null, villainAnalysis: null })
   }
   return { steps, heroIdx }
@@ -312,6 +340,7 @@ export default function ReplayerPage() {
 
   const calcEq = useCallback(async (boardCards, range) => {
     if (!hand?.hero_cards?.length) return; setEqLoading(true)
+    console.log('EQUITY CALC:', { hero: hand.hero_cards, board: boardCards, range })
     try { const d = await equity.calculate(hand.hero_cards, boardCards || [], range || 'random', 8000); setEq(d) } catch (e) { console.error(e) } finally { setEqLoading(false) }
   }, [hand?.hero_cards])
 

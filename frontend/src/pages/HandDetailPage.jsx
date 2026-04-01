@@ -249,38 +249,45 @@ export default function HandDetailPage() {
 
                       // Update stack for this action
                       const s = stacks[a.actor]
+                      let raiseTo = 0
                       if (s && a.action === 'calls') { s.stack -= a.amount; s.invested += a.amount }
                       else if (s && a.action === 'bets') { s.stack -= a.amount; s.invested += a.amount }
                       else if (s && a.action === 'raises') {
                         const toM = a.label.match(/to ([\d,]+)/)
-                        const raiseTo = toM ? parseFloat(toM[1].replace(/,/g, '')) : a.amount
+                        raiseTo = toM ? parseFloat(toM[1].replace(/,/g, '')) : a.amount
                         const additional = raiseTo - s.invested
                         s.stack -= additional; s.invested = raiseTo
                       }
 
                       const currentStackBB = s ? (s.stack / bb).toFixed(1) : '—'
-                      const amountBB = a.amount ? (a.amount / bb).toFixed(1) : ''
 
+                      // BB for the action — use raiseTo for raises, amount for calls/bets
+                      let bbLabel = ''
+                      if (a.action === 'calls' && a.amount) bbLabel = `(${(a.amount / bb).toFixed(1)}bb)`
+                      else if (a.action === 'bets' && a.amount) bbLabel = `(${(a.amount / bb).toFixed(1)}bb)`
+                      else if (a.action === 'raises') {
+                        const rt = raiseTo || a.amount
+                        bbLabel = `(${(rt / bb).toFixed(1)}bb)`
+                      }
+                      else if (a.action === 'collected' && a.amount) bbLabel = `(${(a.amount / bb).toFixed(1)}bb)`
+
+                      // Colors: fold=white, raise/bet=red, call=green, check=grey
                       let actionColor = '#94a3b8', actionBg = 'rgba(148,163,184,0.06)'
-                      if (a.action === 'folds') { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.06)' }
+                      if (a.action === 'folds') { actionColor = '#e2e8f0'; actionBg = 'rgba(226,232,240,0.06)' }
                       else if (a.action === 'checks') { actionColor = '#64748b'; actionBg = 'rgba(100,116,139,0.06)' }
-                      else if (a.action === 'calls') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.06)' }
-                      else if (a.action === 'bets' || a.action === 'raises') { actionColor = '#f59e0b'; actionBg = 'rgba(245,158,11,0.06)' }
+                      else if (a.action === 'calls') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.08)' }
+                      else if (a.action === 'bets' || a.action === 'raises') { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.08)' }
                       else if (a.action === 'collected') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.1)' }
                       else if (a.action === 'shows') { actionColor = '#8b5cf6'; actionBg = 'rgba(139,92,246,0.06)' }
                       if (a.allIn) { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.12)' }
 
-                      // Build label with BB
-                      let displayLabel = a.label || a.action
-                      if (amountBB && a.action !== 'folds' && a.action !== 'checks' && a.action !== 'shows') {
-                        displayLabel += ` (${amountBB}bb)`
-                      }
+                      const displayLabel = bbLabel ? `${a.label || a.action} ${bbLabel}` : (a.label || a.action)
 
                       return (
                         <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: ai < st.actions.length - 1 ? '1px solid rgba(255,255,255,0.02)' : 'none' }}>
                           {pos && <PosBadge pos={pos} />}
-                          <span style={{ fontSize: 15, fontWeight: isHero ? 700 : 500, color: isHero ? '#a5b4fc' : '#f1f5f9', minWidth: 140 }}>
-                            {a.actor}{isHero && <span style={{ fontSize: 10, color: '#818cf8', marginLeft: 4 }}>HERO</span>}
+                          <span style={{ fontSize: 14, fontWeight: 600, color: '#0a0c14', background: isHero ? '#a5b4fc' : '#e2e8f0', padding: '2px 8px', borderRadius: 4, minWidth: 120, display: 'inline-block' }}>
+                            {a.actor}{isHero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
                           </span>
                           <span style={{ fontSize: 13, color: '#fbbf24', fontFamily: 'monospace', minWidth: 55, textAlign: 'right', fontWeight: 600 }}>{currentStackBB}bb</span>
                           <span style={{ fontSize: 14, fontWeight: 700, color: actionColor, padding: '3px 12px', borderRadius: 5, background: actionBg, border: `1px solid ${actionColor}15` }}>{displayLabel}</span>
