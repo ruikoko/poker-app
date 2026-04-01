@@ -252,8 +252,14 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
           <span style={{ fontSize: 11, color: '#22c55e' }}>SS</span>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <a href={`/hand/${hand.id}`} onClick={e => e.stopPropagation()}
+            style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}
+          >Detalhe</a>
+          <a href={`/replayer/${hand.id}`} onClick={e => e.stopPropagation()}
+            style={{ fontSize: 10, color: '#22c55e', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', fontWeight: 600 }}
+          >&#9654;</a>
           <button
-            title="Apagar mão MTT"
+            title="Apagar mão"
             onClick={(e) => { e.stopPropagation(); onDeleteHand(hand.id) }}
             style={{
               background: 'transparent', border: 'none', color: '#4b5563',
