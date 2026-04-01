@@ -44,6 +44,37 @@ HERO_NAMES = {
     "koumpounophobia", "lauro dermio",
 }
 
+
+def _extract_showdown_villain_tags(raw_text: str) -> list[str]:
+    """
+    Extract villain nicks that went to showdown (excluding hero).
+    Returns list of nick strings to be used as tags.
+    Works for Winamax, GG, PokerStars, and WPN formats.
+    """
+    # Detect hero from "Dealt to X [cards]"
+    dealt_m = re.search(r'Dealt to (.+?)\s+\[', raw_text)
+    hero_from_dealt = dealt_m.group(1).strip().lower() if dealt_m else None
+
+    villain_nicks = []
+    for m in re.finditer(r'^(.+?)(?::)?\s+shows\s+\[(.+?)\]', raw_text, re.MULTILINE):
+        name = m.group(1).strip()
+        if name.lower().startswith('main pot') or name.startswith('***'):
+            continue
+        # Check cards are valid (2 chars each)
+        cards = [c.strip() for c in m.group(2).split() if c.strip() and len(c.strip()) == 2]
+        if not cards:
+            continue
+        # Skip hero
+        if name.lower() in HERO_NAMES:
+            continue
+        if name.lower() == 'hero':
+            continue
+        if hero_from_dealt and name.lower() == hero_from_dealt:
+            continue
+        villain_nicks.append(name)
+
+    return villain_nicks
+
 # ── Position Logic ────────────────────────────────────────────────────────────
 
 POSITION_MAPS = {
@@ -491,6 +522,18 @@ async def import_hm3(
 
                 tags_clean = [t.strip() for t in tags if t.strip()]
 
+                # Auto-tag with showdown villain nicks
+                raw_text = parsed.get("raw", "")
+                sd_villain_nicks = _extract_showdown_villain_tags(raw_text)
+                if sd_villain_nicks:
+                    tags_clean.append("showdown")
+                    for nick in sd_villain_nicks:
+                        if nick not in tags_clean:
+                            tags_clean.append(nick)
+
+                # Extract actions + showdown cards from raw HH
+                actions_by_player, cards_by_player = _parse_actions_from_raw(raw_text, site_name)
+
                 cur.execute(
                     "SELECT id, tags FROM hands WHERE hand_id = %s",
                     (parsed["hand_id"],)
@@ -511,6 +554,18 @@ async def import_hm3(
                         "ante": parsed.get("ante_size", 0),
                         "num_players": parsed.get("num_players", 0),
                     }
+
+                    # Merge actions + showdown cards
+                    for player_name, actions in actions_by_player.items():
+                        if player_name in all_players and isinstance(all_players[player_name], dict):
+                            all_players[player_name]["actions"] = actions
+                        elif player_name != "_meta":
+                            all_players[player_name] = {"actions": actions}
+                    for player_name, cards in cards_by_player.items():
+                        if player_name in all_players and isinstance(all_players[player_name], dict):
+                            all_players[player_name]["cards"] = cards
+                        elif player_name != "_meta":
+                            all_players[player_name] = {"cards": cards}
 
                     cur.execute(
                         "UPDATE hands SET tags = %s, all_players_actions = %s WHERE id = %s",
@@ -546,6 +601,18 @@ async def import_hm3(
                     "ante": parsed.get("ante_size", 0),
                     "num_players": parsed.get("num_players", 0),
                 }
+
+                # Merge actions + showdown cards into all_players
+                for player_name, actions in actions_by_player.items():
+                    if player_name in all_players and isinstance(all_players[player_name], dict):
+                        all_players[player_name]["actions"] = actions
+                    elif player_name != "_meta":
+                        all_players[player_name] = {"actions": actions}
+                for player_name, cards in cards_by_player.items():
+                    if player_name in all_players and isinstance(all_players[player_name], dict):
+                        all_players[player_name]["cards"] = cards
+                    elif player_name != "_meta":
+                        all_players[player_name] = {"cards": cards}
 
                 cur.execute(
                     """INSERT INTO hands
@@ -729,18 +796,20 @@ def _parse_actions_from_raw(raw_text, site_name=""):
                 else:
                     actions_by_player[actor][street_name] = label
 
-    # Parse showdown cards
-    showdown_start = raw_text.find("*** SHOW DOWN ***")
-    if showdown_start == -1:
-        showdown_start = raw_text.find("*** SHOW  DOWN ***")
-    if showdown_start != -1:
-        summary_start = raw_text.find("*** SUMMARY ***", showdown_start)
-        sd_section = raw_text[showdown_start:summary_start if summary_start != -1 else len(raw_text)]
-        for line in sd_section.split("\n"):
-            sm = re.match(r"^(.+?)(?::)?\s+shows\s+\[(.+?)\]", line.strip(), re.I)
-            if sm:
-                actor = sm.group(1).strip()
-                cards = [c.strip() for c in sm.group(2).split() if c.strip()]
+    # Parse showdown cards — handle all formats:
+    # Winamax/PS/WPN: cards appear AFTER "*** SHOW DOWN ***"
+    # GG: cards appear BEFORE "*** SHOWDOWN ***" (no spaces)
+    # Universal approach: scan entire text for "shows [cards]" pattern
+    for line in raw_text.split("\n"):
+        t = line.strip()
+        sm = re.match(r"^(.+?)(?::)?\s+shows\s+\[(.+?)\]", t, re.I)
+        if sm:
+            actor = sm.group(1).strip()
+            # Skip non-player lines (e.g. "Main pot 215400.00")
+            if actor.lower().startswith("main pot") or actor.startswith("***"):
+                continue
+            cards = [c.strip() for c in sm.group(2).split() if c.strip() and len(c.strip()) == 2]
+            if cards:
                 cards_by_player[actor] = cards
 
     return actions_by_player, cards_by_player
@@ -758,7 +827,7 @@ async def re_parse_all_hands(
 
     # Fetch all hands that have raw text and are from HM3 sites
     hand_rows = query(
-        """SELECT id, raw, all_players_actions, site
+        """SELECT id, raw, all_players_actions, site, tags
            FROM hands
            WHERE raw IS NOT NULL AND raw != ''
              AND site IN ('Winamax', 'PokerStars', 'WPN', 'GGPoker')
@@ -814,6 +883,27 @@ async def re_parse_all_hands(
                             (json.dumps(existing_apa), hand["id"])
                         )
                         updated += 1
+
+                    # Auto-tag with showdown villain nicks
+                    sd_villain_nicks = _extract_showdown_villain_tags(raw)
+                    if sd_villain_nicks:
+                        existing_tags = hand.get("tags") or []
+                        new_tags = list(existing_tags)
+                        tags_changed = False
+                        if "showdown" not in new_tags:
+                            new_tags.append("showdown")
+                            tags_changed = True
+                        for nick in sd_villain_nicks:
+                            if nick not in new_tags:
+                                new_tags.append(nick)
+                                tags_changed = True
+                        if tags_changed:
+                            cur.execute(
+                                "UPDATE hands SET tags = %s WHERE id = %s",
+                                (new_tags, hand["id"])
+                            )
+                            if not changed:
+                                updated += 1
 
                     processed += 1
 
