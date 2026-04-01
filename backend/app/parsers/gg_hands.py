@@ -411,6 +411,26 @@ def _parse_single_hand(block: str) -> dict | None:
     if bb_size > 0 and seats:
         actions_data = _parse_actions(block, seats, "Hero", bb_size)
 
+        # Extract level number
+        level_num = None
+        lvl_m = re.search(r"Level\s*(\d+)", block)
+        if lvl_m:
+            level_num = int(lvl_m.group(1))
+
+        # Extract SB size
+        sb_size = 0
+        if level_m:
+            sb_size = float(level_m.group(1).replace(",", ""))
+
+        # Extract ante
+        ante_size = 0
+        if level_m and level_m.group(3):
+            ante_size = float(level_m.group(3).replace(",", ""))
+        else:
+            ante_m2 = re.search(r"posts the ante\s+([\d,]+)", block)
+            if ante_m2:
+                ante_size = float(ante_m2.group(1).replace(",", ""))
+
         all_players = {}
         for seat_num, seat_info in seats.items():
             name = seat_info["name"]
@@ -423,11 +443,20 @@ def _parse_single_hand(block: str) -> dict | None:
             all_players[name] = {
                 "seat": seat_num,
                 "position": pos,
+                "stack": seat_info["stack"],
                 "stack_bb": stack_bb,
                 "actions": player_actions,
                 "cards": cards,
                 "is_hero": name == "Hero",
             }
+
+        all_players["_meta"] = {
+            "level": level_num,
+            "sb": sb_size,
+            "bb": bb_size,
+            "ante": ante_size,
+            "num_players": num_players,
+        }
 
         result["all_players_actions"] = all_players
 
