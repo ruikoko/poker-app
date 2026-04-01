@@ -1045,9 +1045,9 @@ def list_mtt_hands(
     
     if has_screenshot is not None:
         if has_screenshot:
-            conditions.append("(h.screenshot_url IS NOT NULL OR h.entry_id IS NOT NULL OR h.study_state = 'new')")
+            conditions.append("(h.screenshot_url IS NOT NULL OR h.player_names IS NOT NULL)")
         else:
-            conditions.append("h.screenshot_url IS NULL AND h.entry_id IS NULL AND h.study_state = 'mtt_archive'")
+            conditions.append("h.screenshot_url IS NULL AND h.player_names IS NULL")
     
     if tm_search:
         conditions.append("h.hand_id ILIKE %s")
@@ -1085,7 +1085,7 @@ def list_mtt_hands(
         hand["tournament_name"] = hand.get("stakes")
         hand["hero_position"] = hand.get("position")
         hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
-        hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("entry_id") or hand.get("study_state") == 'new')
+        hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("player_names"))
         hand["blinds"] = None
         # Extract blinds from all_players_actions meta
         apa = hand.get("all_players_actions") or {}
@@ -1156,7 +1156,7 @@ def get_mtt_hand(
     hand["tournament_name"] = hand.get("stakes")
     hand["hero_position"] = hand.get("position")
     hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
-    hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("entry_id") or hand.get("study_state") == 'new')
+    hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("player_names"))
     
     apa = hand.get("all_players_actions") or {}
     if isinstance(apa, str):
@@ -1202,7 +1202,7 @@ def mtt_stats(current_user=Depends(require_auth)):
     rows = query("""
         SELECT 
             COUNT(*) as total_hands,
-            COUNT(*) FILTER (WHERE screenshot_url IS NOT NULL OR entry_id IS NOT NULL OR study_state = 'new') as hands_with_screenshot,
+            COUNT(*) FILTER (WHERE screenshot_url IS NOT NULL OR player_names IS NOT NULL) as hands_with_screenshot,
             COUNT(DISTINCT stakes) as tournaments,
             (SELECT COUNT(*) FROM hand_villains) as total_villains,
             (SELECT COUNT(DISTINCT player_name) FROM hand_villains) as unique_villains
