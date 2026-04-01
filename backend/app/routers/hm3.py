@@ -1157,6 +1157,11 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
     level_m = re.search(r"level:\s*(\d+)", raw_text, re.I)
     if not level_m:
         level_m = re.search(r"Lv\s*(\d+)", raw_text, re.I)
+    if not level_m:
+        level_m = re.search(r"Level\s+(\d+)", raw_text, re.I)
+    if not level_m:
+        # Try from blind structure: level X in GG format
+        level_m = re.search(r"Level (\d+)", raw_text)
     level = level_m.group(1) if level_m else "?"
 
     # Blinds (BB value)
@@ -1303,7 +1308,7 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
                 acts.append({"actor": actor, "action": act, "amount": amount, "to": to_val, "all_in": all_in})
         all_actions[st_name] = acts
 
-    # ── Determine pot at each street ──
+    # ── Determine pot at each street (accurate tracking) ──
     pot = 0
     # antes
     ante_m = re.findall(r"posts\s+ante\s+([\d,]+(?:\.\d+)?)", raw_text, re.I)
@@ -1311,22 +1316,44 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
         pot += float(a.replace(",", ""))
     # blinds
     sb_m = re.search(r"posts\s+small blind\s+([\d,]+(?:\.\d+)?)", raw_text, re.I)
-    if sb_m:
-        pot += float(sb_m.group(1).replace(",", ""))
-    bb_m = re.search(r"posts\s+(?:the\s+)?big blind\s+([\d,]+(?:\.\d+)?)", raw_text, re.I)
-    if bb_m:
-        pot += float(bb_m.group(1).replace(",", ""))
+    sb_val = float(sb_m.group(1).replace(",", "")) if sb_m else 0
+    pot += sb_val
+    bb_m_pot = re.search(r"posts\s+(?:the\s+)?big blind\s+([\d,]+(?:\.\d+)?)", raw_text, re.I)
+    bb_val_pot = float(bb_m_pot.group(1).replace(",", "")) if bb_m_pot else 0
+    pot += bb_val_pot
 
-    street_pots = {"preflop": pot}
+    # Track pot per street, accounting for bets/calls/raises properly
+    street_pots = {}  # pot BEFORE first action on this street
+    player_invested = {}  # per street: how much each player has put in
+    
     for st in streets:
+        street_pots[st] = pot  # pot at start of street
+        player_invested.clear()
+        
+        # For preflop, SB and BB already invested
+        if st == "preflop":
+            for name in seats:
+                if seats[name]["position"] == "SB":
+                    player_invested[name] = sb_val
+                elif seats[name]["position"] == "BB":
+                    player_invested[name] = bb_val_pot
+        
         for a in all_actions.get(st, []):
-            if a["action"] in ("calls", "bets"):
+            prev = player_invested.get(a["actor"], 0)
+            if a["action"] == "calls":
                 pot += a["amount"]
+                player_invested[a["actor"]] = prev + a["amount"]
+            elif a["action"] == "bets":
+                pot += a["amount"]
+                player_invested[a["actor"]] = prev + a["amount"]
             elif a["action"] == "raises":
-                # raises adds the diff
-                pot += a["to"]  # simplified
-        if st != "preflop":
-            street_pots[st] = pot
+                # "raises X to Y" — player puts in Y total this street
+                # Additional cost = to_val - prev_invested
+                to_val = a["to"]
+                additional = to_val - prev
+                if additional > 0:
+                    pot += additional
+                player_invested[a["actor"]] = to_val
 
     # ── Identify who's in the pot postflop ──
     preflop_acts = all_actions.get("preflop", [])
@@ -1510,6 +1537,11 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
                 postflop_parts.append(act_label)
 
     # ── Format cards ──
+    RANK_ORDER = "AKQJT98765432"
+    
+    def rank_val(r):
+        return RANK_ORDER.index(r) if r in RANK_ORDER else 99
+    
     def format_villain_cards(cards, board_cards, preflop_only_flag):
         if not cards or len(cards) < 2:
             return "??"
@@ -1517,14 +1549,35 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
         r1, s1 = c1[0], c1[1] if len(c1) > 1 else ""
         r2, s2 = c2[0], c2[1] if len(c2) > 1 else ""
         
+        # Sort by rank (higher first)
+        if rank_val(r1) > rank_val(r2):
+            r1, s1, r2, s2 = r2, s2, r1, s1
+        
+        # Pocket pair
+        if r1 == r2:
+            if preflop_only_flag:
+                return f"{r1}{r2}"
+            # Postflop: check if suit relevant
+            board_suits = [c[1] for c in board_cards if len(c) > 1]
+            suit_counts = {}
+            for s in board_suits:
+                suit_counts[s] = suit_counts.get(s, 0) + 1
+            relevant_suits = {s for s, cnt in suit_counts.items() if cnt >= 2}
+            if relevant_suits:
+                s1_rel = s1 in relevant_suits
+                s2_rel = s2 in relevant_suits
+                if s1_rel and s2_rel:
+                    return f"{r1}{s1}{r2}{s2}"
+                elif s1_rel:
+                    return f"{r1}{s1}{r2}x"
+                elif s2_rel:
+                    return f"{r1}x{r2}{s2}"
+            return f"{r1}{r2}"
+        
         if preflop_only_flag:
-            # Pre-only: just rank + suited/offsuit
-            if r1 == r2:
-                return f"{r1}{r2}"
-            elif s1 == s2:
+            if s1 == s2:
                 return f"{r1}{r2}s"
-            else:
-                return f"{r1}{r2}"
+            return f"{r1}{r2}"
         
         # Postflop: check if suits interact with board
         board_suits = [c[1] for c in board_cards if len(c) > 1]
@@ -1532,24 +1585,17 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
         for s in board_suits:
             suit_counts[s] = suit_counts.get(s, 0) + 1
         
-        # Are there flush draws or monotone boards?
         relevant_suits = {s for s, cnt in suit_counts.items() if cnt >= 2}
         
         if not relevant_suits:
-            # Rainbow-ish board, suits don't matter
-            if r1 == r2:
-                return f"{r1}{r2}"
-            elif s1 == s2:
+            if s1 == s2:
                 return f"{r1}{r2}s"
-            else:
-                return f"{r1}{r2}"
+            return f"{r1}{r2}"
         else:
-            # Show suits if they match the board's relevant suits
             s1_relevant = s1 in relevant_suits
             s2_relevant = s2 in relevant_suits
             
             if s1 == s2 and s1_relevant:
-                # Both same relevant suit
                 return f"{r1}{s1}{r2}{s1}"
             elif s1_relevant and s2_relevant:
                 return f"{r1}{s1}{r2}{s2}"
@@ -1558,7 +1604,6 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
             elif s2_relevant:
                 return f"{r1}x{r2}{s2}"
             else:
-                # Neither suit relevant
                 if s1 == s2:
                     return f"{r1}{r2}s"
                 return f"{r1}{r2}"
@@ -1655,20 +1700,26 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
                 allin_others.append(f"{opp_pos} {opp_bb}BB all-in")
 
     # ── Determine what the opponent did (for "vs mcbet T BTN" style) ──
-    # Check if opponent missed cbet
     opponent_context = ""
-    if hero_name and hero_name in players_in_pot and hero_name == aggressor_pre:
+    if hero_name and hero_name in players_in_pot:
         hero_pos = seats.get(hero_name, {}).get("position", "?")
-        # Did hero cbet?
-        hero_flop_acts = [a for a in all_actions.get("flop", []) if a["actor"] == hero_name]
-        hero_cbet = any(a["action"] in ("bets", "raises") for a in hero_flop_acts)
-        hero_turn_acts = [a for a in all_actions.get("turn", []) if a["actor"] == hero_name]
-        hero_turn_bet = any(a["action"] in ("bets", "raises") for a in hero_turn_acts)
+        is_hero_aggressor = (aggressor_pre == hero_name)
         
-        if not hero_cbet and not hero_turn_bet:
-            opponent_context = f"vs mcbet T {hero_pos}"
-        elif hero_cbet and not hero_turn_bet:
-            opponent_context = f"vs mcbet T {hero_pos}"
+        if is_hero_aggressor:
+            # Did hero cbet flop?
+            hero_flop_bets = [a for a in all_actions.get("flop", []) if a["actor"] == hero_name and a["action"] in ("bets", "raises")]
+            hero_turn_bets = [a for a in all_actions.get("turn", []) if a["actor"] == hero_name and a["action"] in ("bets", "raises")]
+            
+            if not hero_flop_bets and not hero_turn_bets:
+                opponent_context = f"vs mcbet F+T {hero_pos}"
+            elif hero_flop_bets and not hero_turn_bets:
+                opponent_context = f"vs cbet F mcbet T {hero_pos}"
+            elif not hero_flop_bets and hero_turn_bets:
+                opponent_context = f"vs dcbet T {hero_pos}"
+            # else: hero bet both streets, just use position
+        
+        if not opponent_context:
+            opponent_context = f"vs {hero_pos}"
 
     # ── Assemble note ──
     parts = [f"{v_stack_bb}BB"]
@@ -1678,24 +1729,39 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
     parts.append(cards_str)
     parts.append(v_pos)
     
-    # Pre action (if relevant and not implicit)
-    if preflop_only:
-        if pre_action:
+    # Pre action for preflop-only hands
+    if preflop_only and pre_action:
+        # Open Shove = OS (not ORs)
+        if pre_action == "OR" and villain_pre_act and villain_pre_act.get("all_in"):
+            parts.append("OS")
+        elif pre_action.endswith("s") and pre_action != "calls":
+            # 3bs, 4bs etc — keep as is
             parts.append(pre_action)
-        if "SQZ" in pre_action or "3b" in pre_action or "4b" in pre_action:
-            pass  # already clear
-        elif pre_action == "OR" and villain_pre_act and villain_pre_act.get("all_in"):
-            parts[-1] = "OS"  # Open Shove
+        else:
+            parts.append(pre_action)
+    
+    # Postflop: check if villain had NO aggressive actions at all → x ATW
+    if not preflop_only and board:
+        villain_had_aggression = len(postflop_parts) > 0
+        if not villain_had_aggression:
+            # Check if villain was in the hand postflop (not folded)
+            villain_folded_post = False
+            for st in ["flop", "turn", "river"]:
+                for a in all_actions.get(st, []):
+                    if a["actor"] == villain_name and a["action"] == "folds":
+                        villain_folded_post = True
+            if not villain_folded_post:
+                postflop_parts.append("x ATW")
     
     # Postflop actions
     if postflop_parts:
         parts.append(", ".join(postflop_parts))
     
-    # Context
-    if context_parts:
-        parts.append(" ".join(context_parts))
+    # Multiway context
+    if is_multiway:
+        parts.append("MW")
     
-    # Vs
+    # Vs — use opponent context if available (vs mcbet T BTN), else vs position
     if opponent_context:
         parts.append(opponent_context)
     else:
