@@ -1070,7 +1070,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
     <div
       onClick={onClick}
       style={{
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex', alignItems: 'center', gap: 0,
         padding: '8px 14px',
         background: zebra,
         borderBottom: '1px solid rgba(255,255,255,0.03)',
@@ -1080,50 +1080,52 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      <div style={{ minWidth: 52, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 55, flexShrink: 0 }}>
+      <div style={{ width: 52, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
+      <div style={{ display: 'flex', gap: 3, width: 58, flexShrink: 0 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>
         }
       </div>
-      <div style={{ minWidth: 40, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ minWidth: 65, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ minWidth: 120, maxWidth: 240, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>
+      <div style={{ width: 44, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ width: 75, flexShrink: 0, textAlign: 'right', paddingRight: 10 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ width: 200, flexShrink: 1, flexGrow: 1, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>
         {hand.stakes || ''}
       </div>
-      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 2, width: 130, flexShrink: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>
         }
       </div>
-      <div style={{ minWidth: 65, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
+      <div style={{ width: 80, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', paddingRight: 10 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 11, color: '#4b5563', minWidth: 80, flexShrink: 0 }}>
+      <div style={{ fontSize: 11, color: '#4b5563', width: 120, flexShrink: 0 }}>
         {hand.played_at ? (() => {
           const d = hand.played_at.slice(0, 10)
           const t = hand.played_at.slice(11, 16)
           return <>{d}{t ? <span style={{ color: '#4b5563', marginLeft: 3 }}>{t}</span> : ''}</>
         })() : ''}
       </div>
-      {hand.raw && hand.all_players_actions && (
-        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', flexShrink: 0, fontWeight: 600 }}
-        >&#9654;</a>
-      )}
-      {(() => {
-        const ggMatch = ((hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/))
-        return ggMatch ? <a href={ggMatch[0]} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: '#f59e0b', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', flexShrink: 0, fontWeight: 600 }}>GG</a> : null
-      })()}
-      <button
-        style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
-        onClick={e => { e.stopPropagation(); onDelete() }}
-        onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-        onMouseLeave={e => e.currentTarget.style.color = '#374151'}
-      >&#10005;</button>
+      <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+        {hand.raw && hand.all_players_actions && (
+          <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}
+          >&#9654;</a>
+        )}
+        {(() => {
+          const ggMatch = ((hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/))
+          return ggMatch ? <a href={ggMatch[0]} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: '#f59e0b', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', fontWeight: 600 }}>GG</a> : null
+        })()}
+        <button
+          style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
+          onClick={e => { e.stopPropagation(); onDelete() }}
+          onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+          onMouseLeave={e => e.currentTarget.style.color = '#374151'}
+        >&#10005;</button>
+      </div>
     </div>
   )
 }
