@@ -542,6 +542,88 @@ function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDeta
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 
+// ── Import Panel with date/nota filter ───────────────────────────────────────
+
+function HM3ImportPanel({ onImported }) {
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const [daysBack, setDaysBack] = useState('7')
+  const [notaOnly, setNotaOnly] = useState(true)
+
+  const handleImport = async (files) => {
+    if (!files || files.length === 0) return
+    setImporting(true)
+    setImportResult(null)
+    try {
+      const results = []
+      for (const file of files) {
+        const r = await hm3.import(file, { daysBack: daysBack || null, notaOnly })
+        results.push(r)
+      }
+      const total = results.reduce((a, r) => ({
+        inserted: a.inserted + (r.inserted || 0),
+        skipped: a.skipped + (r.skipped_duplicates || 0),
+        skippedDate: a.skippedDate + (r.skipped_date_filter || 0),
+        skippedNota: a.skippedNota + (r.skipped_nota_filter || 0),
+        villains: a.villains + (r.villains_created || 0),
+      }), { inserted: 0, skipped: 0, skippedDate: 0, skippedNota: 0, villains: 0 })
+      setImportResult(total)
+      if (total.inserted > 0) onImported?.()
+    } catch (e) {
+      setImportResult({ error: e.message })
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  return (
+    <div style={{
+      background: 'rgba(139,92,246,0.04)', border: '1px solid rgba(139,92,246,0.15)',
+      borderRadius: 8, padding: '14px 20px', marginBottom: 16,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#a78bfa' }}>Importar CSV</span>
+        <select value={daysBack} onChange={e => setDaysBack(e.target.value)} style={{
+          background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6,
+          color: '#e2e8f0', padding: '5px 10px', fontSize: 12,
+        }}>
+          <option value="">Todas as datas</option>
+          <option value="3">Últimos 3 dias</option>
+          <option value="7">Últimos 7 dias</option>
+          <option value="14">Últimos 14 dias</option>
+          <option value="30">Últimos 30 dias</option>
+        </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>
+          <input type="checkbox" checked={notaOnly} onChange={e => setNotaOnly(e.target.checked)}
+            style={{ accentColor: '#8b5cf6' }} />
+          Só com tag nota
+        </label>
+        <label style={{
+          padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+          background: importing ? 'rgba(139,92,246,0.1)' : 'rgba(139,92,246,0.15)',
+          color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)', cursor: 'pointer',
+        }}>
+          {importing ? 'A importar...' : '📂 Escolher CSV'}
+          <input type="file" accept=".csv" hidden onChange={e => handleImport(e.target.files)} />
+        </label>
+      </div>
+      {importResult && !importResult.error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#94a3b8', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: '#22c55e' }}>{importResult.inserted} importadas</span>
+          {importResult.skipped > 0 && <span style={{ color: '#f59e0b' }}>{importResult.skipped} duplicadas</span>}
+          {importResult.skippedDate > 0 && <span style={{ color: '#64748b' }}>{importResult.skippedDate} fora do prazo</span>}
+          {importResult.skippedNota > 0 && <span style={{ color: '#64748b' }}>{importResult.skippedNota} sem nota</span>}
+          {importResult.villains > 0 && <span style={{ color: '#8b5cf6' }}>{importResult.villains} vilões</span>}
+        </div>
+      )}
+      {importResult?.error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#ef4444' }}>{importResult.error}</div>
+      )}
+    </div>
+  )
+}
+
+
 export default function HM3Page() {
   const [data, setData] = useState({ data: [], total: 0, pages: 1 })
   const [page, setPage] = useState(1)
@@ -629,6 +711,9 @@ export default function HM3Page() {
           ))}
         </div>
       )}
+
+      {/* Import with date/nota filter */}
+      <HM3ImportPanel onImported={() => { load(); loadStats() }} />
 
       {/* Time filters */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
