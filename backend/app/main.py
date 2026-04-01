@@ -108,6 +108,17 @@ def ensure_entries_schema():
         "CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id)",
         "CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state)",
         "CREATE INDEX IF NOT EXISTS idx_hands_tournament_id ON hands(tournament_id)",
+        # hand_villains universal FK: hand_db_id points to hands.id
+        """
+        ALTER TABLE hand_villains
+        ADD COLUMN IF NOT EXISTS hand_db_id BIGINT
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_hand_villains_hand_db_id ON hand_villains(hand_db_id)",
+        # Make mtt_hand_id nullable for new records that only use hand_db_id
+        """
+        ALTER TABLE hand_villains
+        ALTER COLUMN mtt_hand_id DROP NOT NULL
+        """,
     ]
 
     conn = get_conn()

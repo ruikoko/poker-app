@@ -848,12 +848,17 @@ async def import_mtt(
     try:
         with conn.cursor() as cur:
             for h in all_hands:
-                # Verificar duplicado (TM + hora)
+                tm_number = h["tm_number"]
+                tm_digits = _extract_tm_digits(tm_number)
+                hand_id = f"GG-{tm_digits}"
+
+                # Verificar duplicado na tabela hands
                 cur.execute(
-                    "SELECT id FROM mtt_hands WHERE tm_number = %s AND played_at = %s",
-                    (h["tm_number"], h.get("played_at"))
+                    "SELECT id FROM hands WHERE hand_id = %s",
+                    (hand_id,)
                 )
-                if cur.fetchone():
+                existing = cur.fetchone()
+                if existing:
                     skipped += 1
                     continue
                 
@@ -861,38 +866,141 @@ async def import_mtt(
                 screenshot = _match_screenshot(h["tm_number"], h.get("played_at"), h.get("blinds"))
                 has_screenshot = screenshot is not None
                 screenshot_entry_id = screenshot["entry_id"] if screenshot else None
-                
-                # Inserir mão
+
+                tournament_name = h.get("tournament_name") or h.get("blinds", "")
+                bb_size = h.get("bb_size", 1)
+
+                # Build all_players_actions
+                seats = h.get("seats", {})
+                all_players = {}
+                seat_to_name = {}
+                if has_screenshot:
+                    seat_to_name = _build_seat_to_name_map(h, screenshot)
+
+                for seat_num, info in seats.items():
+                    name = info.get("name", "")
+                    pos = info.get("position", "?")
+                    stack = info.get("stack", 0)
+                    stack_bb = round(stack / bb_size, 1) if bb_size > 0 else 0
+                    real_name = seat_to_name.get(seat_num, name) if has_screenshot else name
+
+                    all_players[real_name] = {
+                        "seat": seat_num,
+                        "position": pos,
+                        "stack": stack,
+                        "stack_bb": stack_bb,
+                        "real_name": real_name,
+                        "is_hero": name == "Hero",
+                    }
+
+                all_players["_meta"] = {
+                    "level": None,
+                    "sb": h.get("sb_size", 0),
+                    "bb": h.get("bb_size", 0),
+                    "ante": h.get("ante_size", 0),
+                    "num_players": h.get("num_players", 0),
+                }
+
+                # Auto-tags
+                tags = []
+                if has_screenshot:
+                    tags.append("Match SS")
+                    tournament_format = _detect_tournament_format(tournament_name)
+                    if tournament_format != "vanilla":
+                        tags.append(tournament_format.lower())
+                num_p = len(seats)
+                if num_p > 0:
+                    tags.append(f"{num_p}max")
+
+                study_state = "new" if has_screenshot else "mtt_archive"
+
+                # Player names (screenshot data)
+                player_names = None
+                if has_screenshot:
+                    buyin = _extract_buyin(tournament_name)
+                    player_names = json.dumps({
+                        "players_list": screenshot.get("players_list", []),
+                        "hero": screenshot.get("hero"),
+                        "vision_sb": screenshot.get("vision_sb"),
+                        "vision_bb": screenshot.get("vision_bb"),
+                        "seat_to_name": {str(k): v for k, v in seat_to_name.items()},
+                        "screenshot_entry_id": screenshot_entry_id,
+                        "match_method": "mtt_import_v3",
+                        "tournament_format": _detect_tournament_format(tournament_name),
+                        "buyin": buyin,
+                    })
+
+                # Inserir na tabela hands (fonte primária)
                 cur.execute(
-                    """INSERT INTO mtt_hands 
-                       (tm_number, tournament_name, played_at, blinds,
-                        sb_size, bb_size, ante_size, num_players,
-                        hero_position, hero_cards, board, hero_result,
-                        players_by_position, screenshot_entry_id, has_screenshot, raw)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       RETURNING id""",
+                    """INSERT INTO hands
+                       (site, hand_id, played_at, stakes, position,
+                        hero_cards, board, result, currency,
+                        raw, study_state, all_players_actions, player_names,
+                        entry_id, tags)
+                    VALUES
+                       (%s, %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s)
+                    ON CONFLICT (hand_id) DO NOTHING
+                    RETURNING id""",
                     (
-                        h["tm_number"], h["tournament_name"], h["played_at"], h["blinds"],
-                        h["sb_size"], h["bb_size"], h["ante_size"], h["num_players"],
-                        h["hero_position"], h["hero_cards"], h["board"], h["hero_result"],
-                        json.dumps(h["players_by_position"]),
-                        screenshot_entry_id, has_screenshot, h["raw"],
+                        "GGPoker",
+                        hand_id,
+                        h.get("played_at"),
+                        tournament_name,
+                        h.get("hero_position"),
+                        h.get("hero_cards", []),
+                        h.get("board", []),
+                        h.get("hero_result"),
+                        "$",
+                        h.get("raw", ""),
+                        study_state,
+                        json.dumps(all_players),
+                        player_names,
+                        screenshot_entry_id,
+                        tags if tags else None,
                     )
                 )
-                mtt_hand_id = cur.fetchone()["id"]
+                row = cur.fetchone()
+                if not row:
+                    skipped += 1
+                    continue
+
+                hands_id = row["id"]
                 inserted += 1
+
+                # Também inserir em mtt_hands (backup/legacy)
+                try:
+                    cur.execute(
+                        """INSERT INTO mtt_hands 
+                           (tm_number, tournament_name, played_at, blinds,
+                            sb_size, bb_size, ante_size, num_players,
+                            hero_position, hero_cards, board, hero_result,
+                            players_by_position, screenshot_entry_id, has_screenshot, raw)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (tm_number, played_at) DO NOTHING
+                           RETURNING id""",
+                        (
+                            h["tm_number"], tournament_name, h["played_at"], h["blinds"],
+                            h["sb_size"], h["bb_size"], h["ante_size"], h["num_players"],
+                            h["hero_position"], h["hero_cards"], h["board"], h["hero_result"],
+                            json.dumps(h["players_by_position"]),
+                            screenshot_entry_id, has_screenshot, h["raw"],
+                        )
+                    )
+                    mtt_row = cur.fetchone()
+                    mtt_hand_id = mtt_row["id"] if mtt_row else None
+                except Exception:
+                    mtt_hand_id = None
                 
                 # Criar villains se houver screenshot
                 if has_screenshot and h.get("vpip_seats"):
-                    n = _create_villains_for_hand(conn, mtt_hand_id, h, screenshot)
+                    # Use mtt_hand_id for legacy FK, hands_id for new FK
+                    n = _create_villains_for_hand(conn, mtt_hand_id or hands_id, h, screenshot)
                     villains_created += n
                     if n > 0:
                         matched += 1
-                
-                # Promover para Inbox/Mãos se houver screenshot
-                if has_screenshot:
-                    seat_to_name = _build_seat_to_name_map(h, screenshot)
-                    _promote_to_study(conn, mtt_hand_id, h, screenshot, seat_to_name)
         
         conn.commit()
     except Exception as e:
@@ -931,25 +1039,25 @@ def list_mtt_hands(
     page_size: int = Query(50, ge=1, le=200),
     current_user=Depends(require_auth),
 ):
-    """Lista mãos de MTT, opcionalmente filtradas por screenshot."""
-    conditions = []
+    """Lista mãos GGPoker MTT da tabela hands (pós-migração)."""
+    conditions = ["h.site = 'GGPoker'"]
     params = []
     
     if has_screenshot is not None:
-        conditions.append("h.has_screenshot = %s")
-        params.append(has_screenshot)
+        if has_screenshot:
+            conditions.append("h.screenshot_url IS NOT NULL")
+        else:
+            conditions.append("h.screenshot_url IS NULL")
     
     if tm_search:
-        conditions.append("h.tm_number ILIKE %s")
+        conditions.append("h.hand_id ILIKE %s")
         params.append(f"%{tm_search}%")
     
-    where = ""
-    if conditions:
-        where = "WHERE " + " AND ".join(conditions)
+    where = "WHERE " + " AND ".join(conditions)
     
     # Count
     count_rows = query(
-        f"SELECT COUNT(*) as n FROM mtt_hands h {where}",
+        f"SELECT COUNT(*) as n FROM hands h {where}",
         tuple(params)
     )
     total = count_rows[0]["n"] if count_rows else 0
@@ -957,9 +1065,11 @@ def list_mtt_hands(
     # Fetch
     offset = (page - 1) * page_size
     rows = query(
-        f"""SELECT h.*, 
-                   (SELECT COUNT(*) FROM hand_villains v WHERE v.mtt_hand_id = h.id) as villain_count
-            FROM mtt_hands h 
+        f"""SELECT h.id, h.hand_id, h.played_at, h.stakes, h.position,
+                   h.hero_cards, h.board, h.result, h.study_state,
+                   h.screenshot_url, h.player_names, h.all_players_actions,
+                   h.entry_id
+            FROM hands h 
             {where}
             ORDER BY h.played_at DESC NULLS LAST
             LIMIT %s OFFSET %s""",
@@ -969,14 +1079,49 @@ def list_mtt_hands(
     result = []
     for r in rows:
         hand = dict(r)
-        # Não enviar o raw (muito grande)
-        hand.pop("raw", None)
-        # Carregar villains
-        villains = query(
-            "SELECT * FROM hand_villains WHERE mtt_hand_id = %s ORDER BY position",
-            (hand["id"],)
-        )
+        # Map to MTT-compatible fields for frontend
+        tm_digits = (hand.get("hand_id") or "").replace("GG-", "")
+        hand["tm_number"] = f"TM{tm_digits}" if tm_digits else None
+        hand["tournament_name"] = hand.get("stakes")
+        hand["hero_position"] = hand.get("position")
+        hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
+        hand["has_screenshot"] = bool(hand.get("screenshot_url"))
+        hand["blinds"] = None
+        # Extract blinds from all_players_actions meta
+        apa = hand.get("all_players_actions") or {}
+        if isinstance(apa, str):
+            apa = json.loads(apa)
+        meta = apa.get("_meta", {})
+        if meta.get("sb") and meta.get("bb"):
+            sb_val = meta["sb"]
+            bb_val = meta["bb"]
+            ante_val = meta.get("ante")
+            hand["blinds"] = f"{sb_val}/{bb_val}" + (f"({ante_val})" if ante_val else "")
+        hand["num_players"] = meta.get("num_players", 0)
+        # Screenshot entry_id for delete button
+        pn = hand.get("player_names") or {}
+        if isinstance(pn, str):
+            pn = json.loads(pn)
+        hand["screenshot_entry_id"] = hand.get("entry_id") or pn.get("screenshot_entry_id")
+        # Villains from hand_villains (try both FK columns)
+        try:
+            villains = query(
+                """SELECT * FROM hand_villains 
+                   WHERE mtt_hand_id = %s OR hand_db_id = %s
+                   ORDER BY position""",
+                (hand["id"], hand["id"])
+            )
+        except Exception:
+            # hand_db_id column may not exist yet
+            villains = query(
+                "SELECT * FROM hand_villains WHERE mtt_hand_id = %s ORDER BY position",
+                (hand["id"],)
+            )
         hand["villains"] = [dict(v) for v in villains]
+        hand["villain_count"] = len(villains)
+        # Cleanup: don't send heavy fields
+        hand.pop("all_players_actions", None)
+        hand.pop("player_names", None)
         result.append(hand)
     
     return {
@@ -992,49 +1137,77 @@ def get_mtt_hand(
     hand_id: int,
     current_user=Depends(require_auth),
 ):
-    """Detalhe de uma mão de MTT com villains."""
+    """Detalhe de uma mão GGPoker MTT da tabela hands."""
     rows = query(
-        "SELECT * FROM mtt_hands WHERE id = %s",
+        """SELECT id, hand_id, played_at, stakes, position,
+                  hero_cards, board, result, study_state,
+                  screenshot_url, player_names, all_players_actions,
+                  entry_id
+           FROM hands WHERE id = %s""",
         (hand_id,)
     )
     if not rows:
         raise HTTPException(status_code=404, detail="Mão não encontrada")
     
     hand = dict(rows[0])
-    hand.pop("raw", None)
+    # Map to MTT-compatible fields
+    tm_digits = (hand.get("hand_id") or "").replace("GG-", "")
+    hand["tm_number"] = f"TM{tm_digits}" if tm_digits else None
+    hand["tournament_name"] = hand.get("stakes")
+    hand["hero_position"] = hand.get("position")
+    hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
+    hand["has_screenshot"] = bool(hand.get("screenshot_url"))
     
-    villains = query(
-        "SELECT * FROM hand_villains WHERE mtt_hand_id = %s ORDER BY position",
-        (hand_id,)
-    )
+    apa = hand.get("all_players_actions") or {}
+    if isinstance(apa, str):
+        apa = json.loads(apa)
+    meta = apa.get("_meta", {})
+    hand["blinds"] = None
+    if meta.get("sb") and meta.get("bb"):
+        hand["blinds"] = f"{meta['sb']}/{meta['bb']}" + (f"({meta['ante']})" if meta.get("ante") else "")
+    
+    # Villains
+    try:
+        villains = query(
+            """SELECT * FROM hand_villains 
+               WHERE mtt_hand_id = %s OR hand_db_id = %s
+               ORDER BY position""",
+            (hand_id, hand_id)
+        )
+    except Exception:
+        villains = query(
+            "SELECT * FROM hand_villains WHERE mtt_hand_id = %s ORDER BY position",
+            (hand_id,)
+        )
     hand["villains"] = [dict(v) for v in villains]
     
-    # Carregar screenshot se existir
-    if hand.get("screenshot_entry_id"):
-        ss_rows = query(
-            "SELECT raw_json FROM entries WHERE id = %s",
-            (hand["screenshot_entry_id"],)
-        )
-        if ss_rows:
-            raw = ss_rows[0].get("raw_json") or {}
-            hand["screenshot_players"] = raw.get("players_by_position", {})
-            hand["screenshot_hero"] = raw.get("hero")
-            # Não enviar img_b64 (muito grande)
+    # Screenshot players from player_names
+    pn = hand.get("player_names") or {}
+    if isinstance(pn, str):
+        pn = json.loads(pn)
+    hand["screenshot_players"] = pn.get("players_by_position", {})
+    hand["screenshot_hero"] = pn.get("hero")
+    hand["screenshot_entry_id"] = hand.get("entry_id") or pn.get("screenshot_entry_id")
+    
+    # Don't send raw heavy fields
+    hand.pop("all_players_actions", None)
+    hand.pop("player_names", None)
     
     return hand
 
 
 @router.get("/stats")
 def mtt_stats(current_user=Depends(require_auth)):
-    """Estatísticas gerais de MTT."""
+    """Estatísticas gerais de mãos GGPoker MTT."""
     rows = query("""
         SELECT 
             COUNT(*) as total_hands,
-            COUNT(*) FILTER (WHERE has_screenshot) as hands_with_screenshot,
-            COUNT(DISTINCT tournament_name) as tournaments,
+            COUNT(*) FILTER (WHERE screenshot_url IS NOT NULL) as hands_with_screenshot,
+            COUNT(DISTINCT stakes) as tournaments,
             (SELECT COUNT(*) FROM hand_villains) as total_villains,
             (SELECT COUNT(DISTINCT player_name) FROM hand_villains) as unique_villains
-        FROM mtt_hands
+        FROM hands
+        WHERE site = 'GGPoker'
     """)
     
     if rows:
@@ -1052,7 +1225,7 @@ def mtt_stats(current_user=Depends(require_auth)):
 def orphan_screenshots(current_user=Depends(require_auth)):
     """
     Lista screenshots que ainda não têm match com HH.
-    Agrupa por TM number.
+    Verifica ambas as tabelas: mtt_hands e hands.
     """
     rows = query("""
         SELECT e.id, e.raw_json, e.created_at
@@ -1061,6 +1234,9 @@ def orphan_screenshots(current_user=Depends(require_auth)):
           AND e.status = 'new'
           AND NOT EXISTS (
               SELECT 1 FROM mtt_hands m WHERE m.screenshot_entry_id = e.id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM hands h WHERE h.entry_id = e.id
           )
         ORDER BY e.created_at DESC
     """)
@@ -1554,16 +1730,14 @@ def delete_mtt_hand(hand_id: int, current_user=Depends(require_auth)):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Apagar villains associados
+            # Apagar villains associados (both FK columns)
             cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (hand_id,))
-            # Buscar TM number para apagar da tabela hands também
-            cur.execute("SELECT tm_number FROM mtt_hands WHERE id = %s", (hand_id,))
-            row = cur.fetchone()
-            if row:
-                tm_digits = row["tm_number"].replace("TM", "")
-                cur.execute("DELETE FROM hands WHERE hand_id = %s", (f"GG-{tm_digits}",))
-            # Apagar a mão MTT
-            cur.execute("DELETE FROM mtt_hands WHERE id = %s", (hand_id,))
+            try:
+                cur.execute("DELETE FROM hand_villains WHERE hand_db_id = %s", (hand_id,))
+            except Exception:
+                pass
+            # Apagar da tabela hands
+            cur.execute("DELETE FROM hands WHERE id = %s", (hand_id,))
             deleted = cur.rowcount
         conn.commit()
     except Exception as e:
@@ -1581,33 +1755,43 @@ def delete_screenshot_and_revert(entry_id: int, current_user=Depends(require_aut
     """
     Apaga um screenshot e reverte o match:
     - Remove villains associados
-    - Reverte a mão MTT para has_screenshot=false
-    - Reverte a mão promovida na tabela hands para mtt_archive
+    - Reverte a mão na tabela hands para mtt_archive
     - Apaga o entry do screenshot
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Encontrar mão MTT associada
+            # Encontrar mão na tabela hands associada a este entry
+            cur.execute(
+                "SELECT id, hand_id FROM hands WHERE entry_id = %s",
+                (entry_id,)
+            )
+            hand_row = cur.fetchone()
+
+            if hand_row:
+                # Apagar villains
+                cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (hand_row["id"],))
+                try:
+                    cur.execute("DELETE FROM hand_villains WHERE hand_db_id = %s", (hand_row["id"],))
+                except Exception:
+                    pass
+                # Reverter mão para mtt_archive
+                cur.execute(
+                    "UPDATE hands SET study_state = 'mtt_archive', player_names = NULL, screenshot_url = NULL, entry_id = NULL WHERE id = %s",
+                    (hand_row["id"],)
+                )
+
+            # Also check mtt_hands (legacy)
             cur.execute(
                 "SELECT id, tm_number FROM mtt_hands WHERE screenshot_entry_id = %s",
                 (entry_id,)
             )
             mtt_hand = cur.fetchone()
-
             if mtt_hand:
-                # Apagar villains
                 cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (mtt_hand["id"],))
-                # Reverter mão MTT
                 cur.execute(
                     "UPDATE mtt_hands SET has_screenshot = false, screenshot_entry_id = NULL WHERE id = %s",
                     (mtt_hand["id"],)
-                )
-                # Reverter mão promovida
-                tm_digits = mtt_hand["tm_number"].replace("TM", "")
-                cur.execute(
-                    "UPDATE hands SET study_state = 'mtt_archive', player_names = NULL, all_players_actions = NULL, entry_id = NULL WHERE hand_id = %s",
-                    (f"GG-{tm_digits}",)
                 )
 
             # Apagar o entry do screenshot

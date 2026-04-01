@@ -118,19 +118,59 @@ def _parse_filename(filename: str) -> dict:
         result["time"] = f"{h:02d}:{m:02d}"
 
     # Blinds — support both formats
-    name_clean = re.sub(r'#?TM\d+', '', filename)
-    name_clean = re.sub(r'\d{4}-\d{2}-\d{2}[_\s]+\d{1,2}[-_]\d{2}[-_](?:AM|PM)[_\s]+', '', name_clean, flags=re.IGNORECASE)
-    # Old format: 25_000_50_000_6_000 or 2,000_4,000(500)
-    blinds_m = re.search(r'([\d,_]+?)__([\d,_]+?)(?:\(([\d,_]+?)\))?(?:__|_|\.)', name_clean)
-    if not blinds_m:
-        blinds_m = re.search(r'([\d,]+)_([\d,]+)(?:\(([\d,]+)\))?', name_clean)
-    if blinds_m:
-        sb = blinds_m.group(1).replace(",", "").replace("_", "")
-        bb = blinds_m.group(2).replace(",", "").replace("_", "")
-        ante = blinds_m.group(3).replace(",", "").replace("_", "") if blinds_m.group(3) else None
-        # Filter out dates/times that look like blinds
-        if len(sb) <= 6 and len(bb) <= 6:
-            result["blinds"] = f"{sb}/{bb}" + (f"({ante})" if ante else "")
+    # Strategy: detect format by presence of ___TM (old) vs __digits (new)
+    has_triple_tm = '___TM' in filename
+
+    if has_triple_tm:
+        # OLD format: 2026-02-28_08_30_PM_25_000_50_000_6_000___TM5645872965.png
+        # Also: 2026-03-29_07_08_PM_60_120_15___TM... (60/120 ante 15)
+        # Underscores can be thousands separators (25_000) OR field separators (60_120_15)
+        blinds_section = re.search(
+            r'(?:AM|PM)[_\s]+([\d,_]+?)___TM',
+            filename, re.IGNORECASE
+        )
+        if blinds_section:
+            raw = blinds_section.group(1)
+            parts = raw.split('_')
+            n = len(parts)
+            if n <= 3:
+                # Direct: each part is a separate number (60_120_15 → 60/120/15)
+                nums = parts
+            elif n % 2 == 0:
+                # Even count: try pairs as thousands (25_000_50_000 → 25000/50000)
+                nums = [parts[i] + parts[i+1] for i in range(0, n, 2)]
+            else:
+                # Odd >3: group by _\d{3} pattern, fallback to split
+                segments = re.findall(r'\d+(?:_\d{3})+|\d+', raw)
+                nums = [s.replace('_', '') for s in segments]
+                if len(nums) < 2:
+                    nums = parts
+            if len(nums) >= 2:
+                sb, bb = nums[0], nums[1]
+                ante = nums[2] if len(nums) >= 3 else None
+                if len(sb) <= 6 and len(bb) <= 6:
+                    result["blinds"] = f"{sb}/{bb}" + (f"({ante})" if ante else "")
+    else:
+        # NEW format: 2026-03-29__05-52_PM__1_50__3__5766245148.png
+        # Blinds between PM__ and __TM_digits, underscores are DECIMAL points
+        # Pattern: __SB__BB__DIGITS or __SB__BB__ANTE__DIGITS
+        blinds_section = re.search(
+            r'(?:AM|PM)__([\d_]+?)__([\d_]+?)(?:__([\d_]+?))?__(\d{8,})',
+            filename, re.IGNORECASE
+        )
+        if blinds_section:
+            def underscore_to_decimal(s):
+                """Convert 1_50 → 1.50, 0_13 → 0.13, 3 → 3"""
+                if '_' in s:
+                    return s.replace('_', '.', 1)
+                return s
+            sb = underscore_to_decimal(blinds_section.group(1))
+            bb = underscore_to_decimal(blinds_section.group(2))
+            ante_raw = blinds_section.group(3)
+            ante = underscore_to_decimal(ante_raw) if ante_raw else None
+            # Validate: not too long
+            if len(sb) <= 8 and len(bb) <= 8:
+                result["blinds"] = f"{sb}/{bb}" + (f"({ante})" if ante else "")
 
     return result
 
