@@ -1493,6 +1493,9 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
     if aio: pts.append(f"com {', '.join(aio)}")
     if bs: pts.append(f"em {bs}")
     return re.sub(r"\s+"," "," ".join(pts)).strip()
+
+
+@router.post("/generate-notes")
 def generate_auto_notes(
     limit: int = 100,
     dry_run: bool = True,
