@@ -860,14 +860,15 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     """
     Dado um entry de screenshot e o id da mão na BD,
     aplica o enriquecimento completo (nomes reais, bounty, country)
-    e marca o entry como 'resolved'.
+    e preenche campos básicos da mão a partir dos dados Vision.
+    Marca o entry como 'resolved'.
     """
     hero_name = raw_json.get("hero")
     file_meta = raw_json.get("file_meta", {})
     screenshot_url = raw_json.get("screenshot_url")
 
     hand_rows = query(
-        "SELECT id, hand_id, all_players_actions, position, raw FROM hands WHERE id = %s",
+        "SELECT id, hand_id, all_players_actions, position, raw, stakes, hero_cards, board FROM hands WHERE id = %s",
         (hand_db_id,)
     )
     if not hand_rows:
@@ -890,27 +891,68 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
         "match_method": "anchors_stack_elimination_v2",
     }
 
+    # Fill basic fields from Vision data if hand is empty
+    extra_updates = []
+    extra_params = []
+
+    # Tournament name from Vision
+    tournament_name = raw_json.get("tournament") or file_meta.get("tournament")
+    if tournament_name and not matched_hand.get("stakes"):
+        extra_updates.append("stakes = %s")
+        extra_params.append(tournament_name)
+
+    # Hero position from Vision SB/BB or from players list
+    if not matched_hand.get("position") and hero_name:
+        vision_sb = raw_json.get("vision_sb", "")
+        vision_bb = raw_json.get("vision_bb", "")
+        if hero_name == vision_sb:
+            extra_updates.append("position = %s")
+            extra_params.append("SB")
+        elif hero_name == vision_bb:
+            extra_updates.append("position = %s")
+            extra_params.append("BB")
+
+    # Date from file_meta
+    if file_meta.get("date") and not matched_hand.get("played_at"):
+        date_str = file_meta["date"]
+        time_str = file_meta.get("time", "00:00")
+        try:
+            from datetime import datetime as dt
+            played = dt.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            extra_updates.append("played_at = %s")
+            extra_params.append(played.isoformat())
+        except (ValueError, TypeError):
+            pass
+
+    # Entry ID link
+    extra_updates.append("entry_id = %s")
+    extra_params.append(entry_id)
+
+    # Study state: promote to 'new' if was mtt_archive
+    extra_updates.append("study_state = 'new'")
+
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            update_fields = "player_names = %s, all_players_actions = %s"
+            update_params = [json.dumps(player_names_json), json.dumps(enriched_actions)]
+
             if screenshot_url:
-                cur.execute(
-                    """UPDATE hands
-                    SET player_names = %s, all_players_actions = %s, screenshot_url = %s
-                    WHERE id = %s""",
-                    (json.dumps(player_names_json), json.dumps(enriched_actions),
-                     screenshot_url, hand_db_id)
-                )
-            else:
-                cur.execute(
-                    """UPDATE hands
-                    SET player_names = %s, all_players_actions = %s
-                    WHERE id = %s""",
-                    (json.dumps(player_names_json), json.dumps(enriched_actions), hand_db_id)
-                )
+                update_fields += ", screenshot_url = %s"
+                update_params.append(screenshot_url)
+
+            if extra_updates:
+                update_fields += ", " + ", ".join(extra_updates)
+                update_params.extend(extra_params)
+
+            update_params.append(hand_db_id)
+            cur.execute(
+                f"UPDATE hands SET {update_fields} WHERE id = %s",
+                tuple(update_params)
+            )
             cur.execute("UPDATE entries SET status = 'resolved' WHERE id = %s", (entry_id,))
         conn.commit()
-        logger.info(f"Enriched hand {hand_db_id} from entry {entry_id}: {len(anon_map)} mappings")
+        logger.info(f"Enriched hand {hand_db_id} from entry {entry_id}: {len(anon_map)} mappings, extras: {len(extra_updates)}")
     except Exception as e:
         conn.rollback()
         logger.error(f"Error enriching hand {hand_db_id} from entry {entry_id}: {e}")
