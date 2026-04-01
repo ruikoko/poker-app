@@ -24,7 +24,7 @@ function PosBadge({ pos }) {
   return <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 5, fontSize: 14, fontWeight: 700, letterSpacing: 0.5, color: c, background: `${c}18`, border: `1px solid ${c}30`, minWidth: 38, textAlign: 'center' }}>{pos}</span>
 }
 
-function parseStreets(raw) {
+function parseStreets(raw, nameMap = {}) {
   if (!raw) return []
   const isW = raw.includes('*** PRE-FLOP ***')
   const streetDefs = [
@@ -34,6 +34,7 @@ function parseStreets(raw) {
     { name: 'RIVER', start: '*** RIVER ***', end: '*** SHOW' },
     { name: 'SHOWDOWN', start: /\*\*\* SHOW\s*DOWN \*\*\*/, end: '*** SUMMARY ***' },
   ]
+  // Also handle GG format where shows appear before *** SHOWDOWN ***
   const streets = []
   for (const sd of streetDefs) {
     let si
@@ -54,10 +55,12 @@ function parseStreets(raw) {
       const t = line.trim()
       if (!t || t.startsWith('Dealt to') || t.startsWith('Main pot')) continue
       const showM = t.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
-      if (showM) { actions.push({ actor: showM[1].trim(), action: 'shows', cards: showM[2].split(' ') }); continue }
+      if (showM) { const actor = nameMap[showM[1].trim()] || showM[1].trim(); actions.push({ actor, action: 'shows', cards: showM[2].split(' ') }); continue }
       const m = t.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$/i)
       if (m) {
-        const actor = m[1].trim(), act = m[2].toLowerCase(), rest = m[3]
+        const rawActor = m[1].trim()
+        const actor = nameMap[rawActor] || rawActor
+        const act = m[2].toLowerCase(), rest = m[3]
         let amount = 0; const amtM = rest.match(/([\d,]+)/); if (amtM) amount = parseFloat(amtM[1].replace(/,/g, ''))
         const allIn = /all-in/i.test(rest)
         const toM = rest.match(/to ([\d,]+)/)
@@ -71,7 +74,7 @@ function parseStreets(raw) {
         actions.push({ actor, action: act, label, amount, allIn })
       }
       const wonM = t.match(/^(.+?) collected ([\d,]+)/i)
-      if (wonM) actions.push({ actor: wonM[1].trim(), action: 'collected', label: `wins ${parseFloat(wonM[2].replace(/,/g, '')).toLocaleString()}`, amount: parseFloat(wonM[2].replace(/,/g, '')) })
+      if (wonM) { const actor = nameMap[wonM[1].trim()] || wonM[1].trim(); actions.push({ actor, action: 'collected', label: `wins ${parseFloat(wonM[2].replace(/,/g, '')).toLocaleString()}`, amount: parseFloat(wonM[2].replace(/,/g, '')) }) }
     }
     streets.push({ name: sd.name, board, actions })
   }
@@ -103,7 +106,31 @@ export default function HandDetailPage() {
       return ai - bi
     })
 
-  const streets = parseStreets(hand.raw)
+  // Build name map: anon hash → real name from seats in raw HH vs all_players_actions
+  const nameMap = {}
+  const apa = hand.all_players_actions || {}
+  const seatLines = (hand.raw || '').match(/Seat \d+: .+? \([\d,]+(?:\s+in chips)?\)/g) || []
+  for (const line of seatLines) {
+    const sm = line.match(/Seat (\d+): (.+?) \(/)
+    if (sm) {
+      const anonName = sm[2].trim()
+      // Find the real name in all_players_actions that has this seat number
+      for (const [realName, info] of Object.entries(apa)) {
+        if (realName === '_meta') continue
+        if (info && info.seat === parseInt(sm[1])) {
+          if (realName !== anonName) nameMap[anonName] = realName
+          break
+        }
+      }
+    }
+  }
+  // Also map from player_names.anon_map if available
+  const pnAnon = (hand.player_names || {}).anon_map || {}
+  for (const [k, v] of Object.entries(pnAnon)) {
+    if (k !== v) nameMap[k] = v
+  }
+
+  const streets = parseStreets(hand.raw, nameMap)
   const blindsLabel = meta.sb && meta.bb ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : ''
 
   let initialPot = 0
@@ -209,16 +236,19 @@ export default function HandDetailPage() {
             const stacks = {}
             players.forEach(p => { stacks[p.name] = { stack: p.stack || 0, invested: 0 } })
 
+            // Helper: resolve name from raw HH to real name
+            const resolve = (n) => nameMap[n] || n
+
             // Deduct antes and blinds
             const anteLines = (hand.raw || '').match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?ante\s+([\d,]+)/gi) || []
             for (const line of anteLines) {
               const m = line.match(/^(.+?)(?::)?\s+posts\s+(?:the\s+)?ante\s+([\d,]+)/i)
-              if (m && stacks[m[1].trim()]) stacks[m[1].trim()].stack -= parseFloat(m[2].replace(/,/g, ''))
+              if (m) { const rn = resolve(m[1].trim()); if (stacks[rn]) stacks[rn].stack -= parseFloat(m[2].replace(/,/g, '')) }
             }
             const sbLine = (hand.raw || '').match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?small blind\s+([\d,]+)/i)
-            if (sbLine && stacks[sbLine[1].trim()]) { stacks[sbLine[1].trim()].stack -= parseFloat(sbLine[2].replace(/,/g, '')); stacks[sbLine[1].trim()].invested = parseFloat(sbLine[2].replace(/,/g, '')) }
+            if (sbLine) { const rn = resolve(sbLine[1].trim()); if (stacks[rn]) { stacks[rn].stack -= parseFloat(sbLine[2].replace(/,/g, '')); stacks[rn].invested = parseFloat(sbLine[2].replace(/,/g, '')) } }
             const bbLine = (hand.raw || '').match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?big blind\s+([\d,]+)/i)
-            if (bbLine && stacks[bbLine[1].trim()]) { stacks[bbLine[1].trim()].stack -= parseFloat(bbLine[2].replace(/,/g, '')); stacks[bbLine[1].trim()].invested = parseFloat(bbLine[2].replace(/,/g, '')) }
+            if (bbLine) { const rn = resolve(bbLine[1].trim()); if (stacks[rn]) { stacks[rn].stack -= parseFloat(bbLine[2].replace(/,/g, '')); stacks[rn].invested = parseFloat(bbLine[2].replace(/,/g, '')) } }
 
             return streets.map((st, si) => {
               let streetPot = initialPot
