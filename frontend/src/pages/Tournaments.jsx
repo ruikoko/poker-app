@@ -464,8 +464,10 @@ function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand,
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function TournamentsPage() {
+  const [tab, setTab] = useState('gg') // 'gg' or 'hm3'
   const [hands, setHands] = useState([])
   const [stats, setStats] = useState(null)
+  const [notaStats, setNotaStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState({ has_screenshot: 'true' })
   const [expandedHands, setExpandedHands] = useState(new Set())
@@ -473,24 +475,33 @@ export default function TournamentsPage() {
   const loadHands = useCallback(async () => {
     setLoading(true)
     try {
-      const params = { page: 1, page_size: 200 }
-      if (filter.has_screenshot) params.has_screenshot = filter.has_screenshot
-      if (filter.tm_search) params.tm_search = filter.tm_search
-      const data = await mtt.hands(params)
-      setHands(data.hands || [])
+      if (tab === 'gg') {
+        const params = { page: 1, page_size: 200 }
+        if (filter.has_screenshot) params.has_screenshot = filter.has_screenshot
+        if (filter.tm_search) params.tm_search = filter.tm_search
+        const data = await mtt.hands(params)
+        setHands(data.hands || [])
+      } else {
+        const { hm3 } = await import('../api/client')
+        const data = await hm3.notaHands({ page: 1, page_size: 200 })
+        setHands(data.hands || [])
+      }
     } catch (e) {
-      console.error('Erro a carregar mãos MTT:', e)
+      console.error('Erro a carregar mãos:', e)
     } finally {
       setLoading(false)
     }
-  }, [filter])
+  }, [filter, tab])
 
   const loadStats = useCallback(async () => {
     try {
       const data = await mtt.stats()
       setStats(data)
+      const { hm3 } = await import('../api/client')
+      const ns = await hm3.notaStats()
+      setNotaStats(ns)
     } catch (e) {
-      console.error('Erro a carregar stats MTT:', e)
+      console.error('Erro a carregar stats:', e)
     }
   }, [])
 
@@ -506,13 +517,8 @@ export default function TournamentsPage() {
     })
   }, [])
 
-  const handleImported = () => {
-    loadHands()
-    loadStats()
-  }
-
   const handleDeleteHand = async (handId) => {
-    if (!confirm('Apagar esta mão MTT e vilões associados?')) return
+    if (!confirm('Apagar esta mão e vilões associados?')) return
     try {
       await mtt.deleteHand(handId)
       loadHands()
@@ -523,7 +529,7 @@ export default function TournamentsPage() {
   }
 
   const handleDeleteScreenshot = async (entryId) => {
-    if (!confirm('Apagar screenshot e reverter match? A mão volta a ficar sem screenshot.')) return
+    if (!confirm('Apagar screenshot e reverter match?')) return
     try {
       await mtt.deleteScreenshot(entryId)
       loadHands()
@@ -533,65 +539,102 @@ export default function TournamentsPage() {
     }
   }
 
-  // Agrupar por data > torneio (por nome, não por TM number)
+  // Agrupar por data > torneio
   const grouped = {}
   for (const h of hands) {
     const dateKey = formatDateKey(h.played_at)
     if (!grouped[dateKey]) grouped[dateKey] = {}
-    // Group by tournament name (or TM number as fallback)
-    const tourneyKey = h.tournament_name || h.tm_number || 'unknown'
+    const tourneyKey = h.tournament_name || h.tm_number || h.stakes || 'unknown'
     if (!grouped[dateKey][tourneyKey]) {
-      grouped[dateKey][tourneyKey] = { name: h.tournament_name, hands: [] }
+      grouped[dateKey][tourneyKey] = { name: h.tournament_name || h.stakes, hands: [] }
     }
     grouped[dateKey][tourneyKey].hands.push(h)
   }
-
-  // Ordenar datas descendente
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
+
+  const tabStyle = (active) => ({
+    padding: '8px 24px', borderRadius: '6px 6px 0 0', fontSize: 14, fontWeight: 700,
+    cursor: 'pointer', border: 'none', transition: 'all 0.2s',
+    background: active ? '#1e2130' : 'transparent',
+    color: active ? '#e2e8f0' : '#64748b',
+    borderBottom: active ? '2px solid #6366f1' : '2px solid transparent',
+  })
 
   return (
     <div style={{ padding: '24px 32px' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', marginBottom: 4 }}>MTT</h1>
       <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
-        Mãos de torneios com screenshots e villains
+        Mãos de torneios para estudo
       </p>
 
-      <div style={{ padding: '10px 16px', marginBottom: 16, borderRadius: 6, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 12, color: '#94a3b8' }}>Para importar mãos, usa a <a href="/inbox" style={{ color: '#818cf8', fontWeight: 600, textDecoration: 'none' }}>Inbox</a> (porta única de entrada)</span>
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <button style={tabStyle(tab === 'gg')} onClick={() => { setTab('gg'); setFilter({ has_screenshot: 'true' }) }}>
+          GG com Screenshot
+          {stats && <span style={{ fontSize: 11, color: '#22c55e', marginLeft: 8 }}>{stats.hands_with_screenshot || 0}</span>}
+        </button>
+        <button style={tabStyle(tab === 'hm3')} onClick={() => { setTab('hm3'); setFilter({}) }}>
+          HM3 com Nota
+          {notaStats && <span style={{ fontSize: 11, color: '#f59e0b', marginLeft: 8 }}>{notaStats.total_hands || 0}</span>}
+        </button>
       </div>
-      <StatsBar stats={stats} />
+
+      {/* Stats bar */}
+      {tab === 'gg' && <StatsBar stats={stats} />}
+      {tab === 'hm3' && notaStats && (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Mãos', value: notaStats.total_hands, color: '#e2e8f0' },
+            { label: 'Com Showdown', value: notaStats.with_showdown, color: '#8b5cf6' },
+            { label: 'Torneios', value: notaStats.tournaments, color: '#6366f1' },
+            { label: 'Salas', value: notaStats.sites, color: '#f59e0b' },
+          ].map(({ label, value, color }) => (
+            <div key={label} style={{
+              background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+              borderRadius: 6, padding: '6px 14px',
+            }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color, fontFamily: 'monospace' }}>{value}</span>
+              <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 6 }}>{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select
-          value={filter.has_screenshot ?? ''}
-          onChange={(e) => setFilter(f => ({ ...f, has_screenshot: e.target.value || null }))}
-          style={{
-            background: '#1e2130', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 4, padding: '4px 8px', fontSize: 12,
-          }}
-        >
-          <option value="">Todas as mãos</option>
-          <option value="true">Com screenshot</option>
-          <option value="false">Sem screenshot</option>
-        </select>
-        <input
-          type="text"
-          placeholder="Pesquisar TM..."
-          value={filter.tm_search || ''}
-          onChange={(e) => setFilter(f => ({ ...f, tm_search: e.target.value }))}
-          style={{
-            background: '#1e2130', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 4, padding: '4px 8px', fontSize: 12, width: 160,
-          }}
-        />
+        {tab === 'gg' && (
+          <>
+            <select
+              value={filter.has_screenshot ?? ''}
+              onChange={(e) => setFilter(f => ({ ...f, has_screenshot: e.target.value || null }))}
+              style={{
+                background: '#1e2130', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 4, padding: '4px 8px', fontSize: 12,
+              }}
+            >
+              <option value="">Todas as mãos</option>
+              <option value="true">Com screenshot</option>
+              <option value="false">Sem screenshot</option>
+            </select>
+            <input
+              type="text"
+              placeholder="Pesquisar TM..."
+              value={filter.tm_search || ''}
+              onChange={(e) => setFilter(f => ({ ...f, tm_search: e.target.value }))}
+              style={{
+                background: '#1e2130', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 4, padding: '4px 8px', fontSize: 12, width: 160,
+              }}
+            />
+          </>
+        )}
       </div>
 
       {loading ? (
         <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
       ) : sortedDates.length === 0 ? (
         <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
-          Nenhuma mão encontrada. Importa ficheiros HH de MTT acima.
+          {tab === 'gg' ? 'Nenhuma mão GG encontrada.' : 'Nenhuma mão HM3 com tag nota encontrada.'}
         </div>
       ) : (
         <div>
