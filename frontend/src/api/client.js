@@ -163,14 +163,26 @@ export const mtt = {
 
 // ── HM3 Import ───────────────────────────────────────────────────────────────
 export const hm3 = {
-  import: (file) => {
+  import: (file, { daysBack, notaOnly } = {}) => {
     const form = new FormData()
     form.append('file', file)
-    return fetch(`${BASE}/hm3/import`, { method: 'POST', credentials: 'include', body: form })
+    let qs = ''
+    const params = []
+    if (daysBack) params.push(`days_back=${daysBack}`)
+    if (notaOnly) params.push('nota_only=true')
+    if (params.length) qs = '?' + params.join('&')
+    return fetch(`${BASE}/hm3/import${qs}`, { method: 'POST', credentials: 'include', body: form })
       .then(r => r.json())
   },
   stats: () => req('GET', '/hm3/stats'),
   reParse: () => req('POST', '/hm3/re-parse'),
+  notaHands: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/hm3/nota-hands${qs ? '?' + qs : ''}`)
+  },
+  notaStats: () => req('GET', '/hm3/nota-stats'),
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
