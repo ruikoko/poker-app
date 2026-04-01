@@ -1154,25 +1154,47 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
         hero_name = dm.group(1) if dm else None
 
     # Level
+    level = "?"
     level_m = re.search(r"level:\s*(\d+)", raw_text, re.I)
-    if not level_m:
+    if level_m:
+        level = level_m.group(1)
+    else:
         level_m = re.search(r"Lv\s*(\d+)", raw_text, re.I)
-    if not level_m:
-        level_m = re.search(r"Level\s+(\d+)", raw_text, re.I)
-    if not level_m:
-        # Try from blind structure: level X in GG format
-        level_m = re.search(r"Level (\d+)", raw_text)
-    level = level_m.group(1) if level_m else "?"
+        if level_m:
+            level = level_m.group(1)
+        else:
+            # PokerStars uses Roman numerals: Level VII (400/800)
+            roman_m = re.search(r"Level\s+([IVXLCDM]+)", raw_text)
+            if roman_m:
+                roman = roman_m.group(1).upper()
+                roman_vals = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
+                total = 0
+                for i, ch in enumerate(roman):
+                    val = roman_vals.get(ch, 0)
+                    next_val = roman_vals.get(roman[i + 1], 0) if i + 1 < len(roman) else 0
+                    total += -val if val < next_val else val
+                level = str(total)
+            else:
+                level_m = re.search(r"Level\s+(\d+)", raw_text, re.I)
+                if level_m:
+                    level = level_m.group(1)
 
-    # Blinds (BB value)
+    # Blinds (BB value) — handle multiple formats
     bb_val = 1
+    # Winamax: (ante/sb/bb) e.g. (60/250/500)
     blind_m = re.search(r"\((\d+)/(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\)", raw_text)
     if blind_m:
         bb_val = float(blind_m.group(3))
     else:
-        blind_m2 = re.search(r"\((\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\)", raw_text)
-        if blind_m2:
-            bb_val = float(blind_m2.group(2))
+        # PS: Level VII (400/800) — take second number
+        ps_blind = re.search(r"Level\s+\S+\s*\(([\d,]+)/([\d,]+)\)", raw_text)
+        if ps_blind:
+            bb_val = float(ps_blind.group(2).replace(",", ""))
+        else:
+            # Generic: (sb/bb)
+            blind_m2 = re.search(r"\((\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\)", raw_text)
+            if blind_m2:
+                bb_val = float(blind_m2.group(2))
     if bb_val == 0:
         bb_val = 1
 
@@ -1422,7 +1444,10 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
     if villain_pre_act:
         if villain_pre_act["action"] == "raises":
             if raise_count == 1 or first_raiser == villain_name:
-                pre_action = "OR"
+                if villain_pre_act.get("all_in"):
+                    pre_action = "OS"  # Open Shove
+                else:
+                    pre_action = "OR"
             elif raise_count == 2:
                 # Is it a squeeze? (OR + caller + villain raises)
                 callers_before = [a for a in pre_actors_before_villain if a["action"] == "calls"]
@@ -1430,12 +1455,16 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
                     pre_action = "SQZ"
                 else:
                     pre_action = "3b"
+                if villain_pre_act.get("all_in"):
+                    pre_action += "s"  # 3bs, SQZs
             elif raise_count == 3:
                 pre_action = "4b"
+                if villain_pre_act.get("all_in"):
+                    pre_action += "s"
             else:
                 pre_action = f"{raise_count}b"
-            if villain_pre_act.get("all_in"):
-                pre_action += "s"  # shove suffix (3bs = 3bet shove)
+                if villain_pre_act.get("all_in"):
+                    pre_action += "s"
         elif villain_pre_act["action"] == "calls":
             pre_action = "call"
 
@@ -1459,6 +1488,25 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
             continue
 
         for v_act in villain_acts_this_street:
+            # Calculate running pot UP TO this action
+            running_pot = pot_at_street
+            street_invested = {}
+            for a in acts:
+                if a is v_act:
+                    break  # stop before villain's action
+                prev_inv = street_invested.get(a["actor"], 0)
+                if a["action"] == "calls":
+                    running_pot += a["amount"]
+                    street_invested[a["actor"]] = prev_inv + a["amount"]
+                elif a["action"] == "bets":
+                    running_pot += a["amount"]
+                    street_invested[a["actor"]] = prev_inv + a["amount"]
+                elif a["action"] == "raises":
+                    additional = a["to"] - prev_inv
+                    if additional > 0:
+                        running_pot += additional
+                    street_invested[a["actor"]] = a["to"]
+
             if v_act["action"] == "folds":
                 # Check if it was a check/fold
                 checks_before = [a for a in acts if a["actor"] == villain_name and a["action"] == "checks"]
@@ -1480,10 +1528,12 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
             elif v_act["action"] in ("bets", "raises"):
                 amount = v_act["amount"]
                 if v_act["action"] == "raises":
-                    amount = v_act["to"]
+                    # For raises, the "bet size" is the raise amount minus what villain already invested
+                    v_prev = street_invested.get(villain_name, 0)
+                    amount = v_act["to"] - v_prev
                 
-                # Calculate % of pot
-                pct = round(amount / pot_at_street * 100) if pot_at_street > 0 else 0
+                # Calculate % of pot at the moment of action
+                pct = round(amount / running_pot * 100) if running_pot > 0 else 0
                 
                 # Determine action type
                 st_label = st[0].upper()
@@ -1729,19 +1779,12 @@ def _generate_villain_note(raw_text: str, villain_name: str, hero_name: str = No
     parts.append(cards_str)
     parts.append(v_pos)
     
-    # Pre action for preflop-only hands
-    if preflop_only and pre_action:
-        # Open Shove = OS (not ORs)
-        if pre_action == "OR" and villain_pre_act and villain_pre_act.get("all_in"):
-            parts.append("OS")
-        elif pre_action.endswith("s") and pre_action != "calls":
-            # 3bs, 4bs etc — keep as is
-            parts.append(pre_action)
-        else:
-            parts.append(pre_action)
+    # Pre action — include for preflop-only OR all-in pre hands
+    if pre_action and (preflop_only or villain_allin_pre):
+        parts.append(pre_action)
     
     # Postflop: check if villain had NO aggressive actions at all → x ATW
-    if not preflop_only and board:
+    if not villain_allin_pre and not preflop_only and board:
         villain_had_aggression = len(postflop_parts) > 0
         if not villain_had_aggression:
             # Check if villain was in the hand postflop (not folded)
