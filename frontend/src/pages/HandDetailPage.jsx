@@ -319,8 +319,8 @@ export default function HandDetailPage() {
                           <span style={{ fontSize: 14, fontWeight: 600, color: '#0a0c14', background: isHero ? '#a5b4fc' : '#e2e8f0', padding: '2px 8px', borderRadius: 4, minWidth: 120, display: 'inline-block' }}>
                             {a.actor}{isHero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
                           </span>
-                          <span style={{ fontSize: 13, color: '#fbbf24', fontFamily: 'monospace', minWidth: 55, textAlign: 'right', fontWeight: 600 }}>{currentStackBB}bb</span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: actionColor, padding: '3px 12px', borderRadius: 5, background: actionBg, border: `1px solid ${actionColor}15` }}>{displayLabel}</span>
+                          <span style={{ fontSize: 14, color: '#fbbf24', fontFamily: 'monospace', minWidth: 55, textAlign: 'right', fontWeight: 700 }}>{currentStackBB}bb</span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: actionColor, padding: '4px 14px', borderRadius: 5, background: actionBg, border: `1px solid ${actionColor}25` }}>{displayLabel}</span>
                           {a.cards && <div style={{ display: 'flex', gap: 3 }}>{a.cards.map((c, i) => <RCard key={i} card={c} />)}</div>}
                         </div>
                       )
