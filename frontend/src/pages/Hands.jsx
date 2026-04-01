@@ -808,6 +808,41 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           >&#10005;</button>
         </div>
 
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {hand.raw && (
+            <button
+              onClick={() => { navigator.clipboard.writeText(hand.raw); }}
+              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)', cursor: 'pointer' }}
+            >Copiar HH</button>
+          )}
+          {hand.raw && hand.all_players_actions && (
+            <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', cursor: 'pointer', textDecoration: 'none' }}
+            >&#9654; Replayer</a>
+          )}
+        </div>
+
+        {/* Info grid — FIRST */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 20px',
+          marginBottom: 16, fontSize: 13,
+        }}>
+          {[
+            { l: 'Sala', v: hand.site },
+            { l: 'Data', v: hand.played_at ? hand.played_at.slice(0, 10) : null },
+            { l: 'Resultado', v: <ResultBadge result={hand.result} /> },
+            { l: 'Posição', v: <PosBadge pos={hand.position} /> },
+            { l: 'Torneio', v: hand.stakes },
+            { l: 'Hand ID', v: hand.hand_id ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{hand.hand_id.slice(-12)}</span> : null },
+          ].map(({ l, v }) => (
+            <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '8px 12px' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
+              <div>{v || <span style={{ color: '#4b5563' }}>&mdash;</span>}</div>
+            </div>
+          ))}
+        </div>
+
         {/* Cartas + Board */}
         <div style={{
           background: '#0f1117', borderRadius: 10, padding: '16px 20px',
@@ -885,26 +920,6 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             </div>
           )
         })()}
-
-        {/* Info grid */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 20px',
-          marginBottom: 20, fontSize: 13,
-        }}>
-          {[
-            { l: 'Sala', v: hand.site },
-            { l: 'Data', v: hand.played_at ? hand.played_at.slice(0, 10) : null },
-            { l: 'Resultado', v: <ResultBadge result={hand.result} /> },
-            { l: 'Posição', v: <PosBadge pos={hand.position} /> },
-            { l: 'Torneio', v: hand.stakes },
-            { l: 'Hand ID', v: hand.hand_id ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{hand.hand_id.slice(-12)}</span> : null },
-          ].map(({ l, v }) => (
-            <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '8px 12px' }}>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
-              <div>{v || <span style={{ color: '#4b5563' }}>&mdash;</span>}</div>
-            </div>
-          ))}
-        </div>
 
         {/* Acções — prioridade: HH parseada (raw) > all_players_actions > fallback notas */}
         {hand.raw
@@ -1065,6 +1080,8 @@ function HandRow({ hand, onClick, onDelete, idx }) {
   const meta = hand.all_players_actions?._meta
   const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}` : null
   const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
+  const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : hand.site === 'WPN' ? 'WPN' : hand.site === 'GGPoker' ? 'GG' : '?'
+  const siteColor = hand.site === 'Winamax' ? '#f59e0b' : hand.site === 'PokerStars' ? '#ef4444' : hand.site === 'WPN' ? '#22c55e' : '#6366f1'
 
   return (
     <div
@@ -1089,7 +1106,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       </div>
       <div style={{ width: 44, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
       <div style={{ width: 75, flexShrink: 0, textAlign: 'right', paddingRight: 10 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ width: 200, flexShrink: 1, flexGrow: 1, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>
+      <div style={{ width: 200, flexShrink: 1, flexGrow: 1, fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>
         {hand.stakes || ''}
       </div>
       <div style={{ display: 'flex', gap: 2, width: 130, flexShrink: 0 }}>
@@ -1098,14 +1115,16 @@ function HandRow({ hand, onClick, onDelete, idx }) {
           : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>
         }
       </div>
+      <div style={{ width: 30, flexShrink: 0, textAlign: 'center' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: siteColor, background: `${siteColor}15`, padding: '2px 5px', borderRadius: 3 }}>{siteShort}</span>
+      </div>
       <div style={{ width: 80, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', paddingRight: 10 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 11, color: '#4b5563', width: 120, flexShrink: 0 }}>
+      <div style={{ fontSize: 11, color: '#64748b', width: 90, flexShrink: 0 }}>
         {hand.played_at ? (() => {
-          const d = hand.played_at.slice(0, 10)
           const t = hand.played_at.slice(11, 16)
-          return <>{d}{t ? <span style={{ color: '#4b5563', marginLeft: 3 }}>{t}</span> : ''}</>
+          return <>{t || ''}</>
         })() : ''}
       </div>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
@@ -1529,7 +1548,7 @@ export default function HandsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #2a2d3a' }}>
-                  {['Estado', 'Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Tags', ''].map(h => (
+                  {['Estado', 'Sala', 'Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Tags', ''].map(h => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -1543,6 +1562,13 @@ export default function HandsPage() {
                     onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'}
                   >
                     <td style={{ padding: '10px 14px' }}><StateBadge state={h.study_state} /></td>
+                    <td style={{ padding: '10px 14px' }}>
+                      {(() => {
+                        const ss = h.site === 'Winamax' ? 'WN' : h.site === 'PokerStars' ? 'PS' : h.site === 'WPN' ? 'WPN' : h.site === 'GGPoker' ? 'GG' : '?'
+                        const sc = h.site === 'Winamax' ? '#f59e0b' : h.site === 'PokerStars' ? '#ef4444' : h.site === 'WPN' ? '#22c55e' : '#6366f1'
+                        return <span style={{ fontSize: 10, fontWeight: 700, color: sc }}>{ss}</span>
+                      })()}
+                    </td>
                     <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>{h.played_at ? h.played_at.slice(0, 10) : '&mdash;'}</td>
                     <td style={{ padding: '10px 14px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#94a3b8', fontSize: 11 }}>{h.stakes || '&mdash;'}</td>
                     <td style={{ padding: '10px 14px' }}><PosBadge pos={h.position} /></td>
