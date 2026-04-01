@@ -482,6 +482,8 @@ def _detect_vpip_hm3(raw_text, hero_name=None):
 @router.post("/import")
 async def import_hm3(
     file: UploadFile = File(...),
+    days_back: int | None = None,
+    nota_only: bool = False,
     current_user=Depends(require_auth),
 ):
     content = await file.read()
@@ -489,7 +491,16 @@ async def import_hm3(
 
     reader = csv.DictReader(io.StringIO(text))
 
+    # Calculate cutoff date if days_back specified
+    cutoff_date = None
+    if days_back and days_back > 0:
+        from datetime import timedelta
+        cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+        logger.info(f"Import filter: only hands after {cutoff_date.isoformat()}")
+
     hands_map = {}
+    skipped_date = 0
+    skipped_nota = 0
     for row in reader:
         key = (row.get("gamenumber", ""), row.get("site_id", ""))
         if key not in hands_map:
@@ -497,6 +508,29 @@ async def import_hm3(
         tag = row.get("tag", "").strip()
         if tag and tag not in hands_map[key]["tags"]:
             hands_map[key]["tags"].append(tag)
+
+    # Filter by date and nota if requested
+    if cutoff_date or nota_only:
+        filtered = {}
+        for key, data in hands_map.items():
+            # Check nota filter
+            if nota_only:
+                if not any("nota" in t.lower() for t in data["tags"]):
+                    skipped_nota += 1
+                    continue
+            # Check date filter
+            if cutoff_date:
+                ts = data["row"].get("handtimestamp", "")
+                if ts:
+                    try:
+                        hand_date = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
+                        if hand_date < cutoff_date:
+                            skipped_date += 1
+                            continue
+                    except (ValueError, IndexError):
+                        pass
+            filtered[key] = data
+        hands_map = filtered
 
     if not hands_map:
         return {"status": "error", "message": "Nenhuma mão encontrada no CSV"}
@@ -680,6 +714,8 @@ async def import_hm3(
         "total_rows": len(hands_map),
         "inserted": inserted,
         "skipped_duplicates": skipped,
+        "skipped_date_filter": skipped_date,
+        "skipped_nota_filter": skipped_nota,
         "villains_created": villains_created,
         "errors": len(errors),
         "error_log": errors[:20],
@@ -708,6 +744,86 @@ def hm3_import_stats(current_user=Depends(require_auth)):
         GROUP BY site
     """)
     return {"by_site": [dict(r) for r in rows]}
+
+
+@router.get("/nota-hands")
+def list_nota_hands(
+    page: int = 1,
+    page_size: int = 200,
+    current_user=Depends(require_auth),
+):
+    """Lista mãos HM3 que têm tag 'nota' (qualquer variante)."""
+    from fastapi import Query as Q
+
+    count_rows = query(
+        """SELECT COUNT(*) as n FROM hands
+           WHERE site IN ('Winamax', 'PokerStars', 'WPN')
+             AND EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%%nota%%')"""
+    )
+    total = count_rows[0]["n"] if count_rows else 0
+
+    offset = (page - 1) * page_size
+    rows = query(
+        """SELECT id, hand_id, played_at, stakes, position,
+                  hero_cards, board, result, study_state, site, tags,
+                  all_players_actions
+           FROM hands
+           WHERE site IN ('Winamax', 'PokerStars', 'WPN')
+             AND EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%%nota%%')
+           ORDER BY played_at DESC NULLS LAST
+           LIMIT %s OFFSET %s""",
+        (page_size, offset)
+    )
+
+    import json
+    result = []
+    for r in rows:
+        hand = dict(r)
+        # Extract blinds from meta
+        apa = hand.get("all_players_actions") or {}
+        if isinstance(apa, str):
+            apa = json.loads(apa)
+        meta = apa.get("_meta", {})
+        hand["blinds"] = None
+        if meta.get("sb") and meta.get("bb"):
+            hand["blinds"] = f"{meta['sb']}/{meta['bb']}" + (f"({meta['ante']})" if meta.get("ante") else "")
+        hand["num_players"] = meta.get("num_players", 0)
+        hand["tournament_name"] = hand.get("stakes")
+        hand["hero_position"] = hand.get("position")
+        hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
+        hand["has_screenshot"] = False
+        hand["villain_count"] = 0
+        hand["villains"] = []
+        # Check showdown tags
+        hand["has_showdown"] = "showdown" in (hand.get("tags") or [])
+        hand["showdown_villains"] = [t for t in (hand.get("tags") or []) if t not in ("showdown", "nota", "nota+", "nota++", "nota ++", "notas") and not t.startswith("#")]
+        hand.pop("all_players_actions", None)
+        result.append(hand)
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "hands": result,
+    }
+
+
+@router.get("/nota-stats")
+def nota_stats(current_user=Depends(require_auth)):
+    """Estatísticas de mãos HM3 com tag nota."""
+    rows = query("""
+        SELECT
+            COUNT(*) as total_hands,
+            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) = 'showdown')) as with_showdown,
+            COUNT(DISTINCT stakes) as tournaments,
+            COUNT(DISTINCT site) as sites
+        FROM hands
+        WHERE site IN ('Winamax', 'PokerStars', 'WPN')
+          AND EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%%nota%%')
+    """)
+    if rows:
+        return dict(rows[0])
+    return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
 # ── Parse actions from raw HH text (multi-site) ─────────────────────────────
