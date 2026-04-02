@@ -450,54 +450,127 @@ def update_tree(tree_id: int, data: dict, _=Depends(require_auth)):
 
 @router.get("/match")
 def match_tree(
-    hero_position: str,
     hero_stack_bb: float,
     format: str,
     num_players: int,
-    tournament_phase: Optional[str] = None,
-    villain_covers_hero: Optional[bool] = None,
+    hero_position_idx: int = 0,
+    active_stacks_bb: Optional[str] = None,
+    remaining_stacks_bb: Optional[str] = None,
     _=Depends(require_auth),
 ):
+    """
+    Matching engine v2: finds best tree for a spot.
+    Score based on hero stack, active stacks, remaining stacks, phase.
+    """
     ensure_gto_schema()
+    
     rows = query("""
         SELECT id, name, format, num_players, tournament_phase,
                hero_position, hero_stack_bb_min, hero_stack_bb_max,
                villain_stack_bb, hero_covers,
                covers_at_least_one, covered_by_at_least_one,
-               node_count
+               node_count, settings_json
         FROM gto_trees
-        WHERE num_players = %s AND format = %s AND hero_position = %s
-    """, (num_players, format, hero_position))
+        WHERE format = %s
+    """, (format,))
 
     if not rows:
-        return {"match": None, "reason": "Nenhuma tree encontrada para este spot"}
+        return {"matches": [], "reason": "Nenhuma tree encontrada para este formato"}
 
-    is_ko = format in ("PKO", "KO", "mystery")
+    active = [float(x) for x in active_stacks_bb.split(',')] if active_stacks_bb else []
+    remaining = [float(x) for x in remaining_stacks_bb.split(',')] if remaining_stacks_bb else []
 
-    def score(tree):
-        mid = (float(tree["hero_stack_bb_min"] or 0) + float(tree["hero_stack_bb_max"] or 0)) / 2
-        s = abs(hero_stack_bb - mid)
-        if is_ko and villain_covers_hero is not None:
-            expected = not villain_covers_hero
-            if tree["hero_covers"] is not None and tree["hero_covers"] != expected:
-                s += 100
-        if tournament_phase and tree["tournament_phase"] != tournament_phase:
-            s += 5
-        return s
-
-    best = min(rows, key=score)
-    best_score = score(best)
-    mid = (float(best["hero_stack_bb_min"] or 0) + float(best["hero_stack_bb_max"] or 0)) / 2
-    stack_diff = abs(hero_stack_bb - mid)
-
-    return {
-        "match": best,
-        "score": best_score,
-        "stack_diff_bb": round(stack_diff, 1),
-        "covering_ok": (
-            best["hero_covers"] == (not villain_covers_hero)
-            if villain_covers_hero is not None and best["hero_covers"] is not None
-            else None
-        ),
-        "confidence": max(0, round(100 - stack_diff * 2 - (50 if best_score > 50 else 0), 1)),
-    }
+    results = []
+    for tree in rows:
+        settings = tree.get("settings_json") or {}
+        if isinstance(settings, str):
+            try: settings = json.loads(settings)
+            except: settings = {}
+        
+        hd = settings.get("handdata", {})
+        tree_stacks = hd.get("stacks", [])
+        tree_blinds = hd.get("blinds", [])
+        tree_bb = max(tree_blinds[:2]) if len(tree_blinds) >= 2 else 1
+        tree_stacks_bb = [round(s / tree_bb, 1) for s in tree_stacks] if tree_bb > 0 else []
+        tree_np = len(tree_stacks)
+        
+        if not tree_stacks_bb:
+            continue
+        
+        eqmodel = settings.get("eqmodel", {})
+        other_stacks = eqmodel.get("otherstacks", [])
+        prizes = eqmodel.get("structure", {}).get("prizes", {})
+        total_remaining = tree_np + len(other_stacks)
+        paid_places = len(prizes)
+        
+        phase = "unknown"
+        if paid_places > 0 and total_remaining > 0:
+            ratio = total_remaining / paid_places
+            if ratio > 3: phase = "early"
+            elif ratio > 1.5: phase = "middle"
+            elif ratio > 1.05: phase = "bubble"
+            elif total_remaining <= tree_np: phase = "final_table"
+            else: phase = "itm"
+        
+        np_penalty = abs(tree_np - num_players) * 20
+        if np_penalty > 40:
+            continue
+        
+        best_hero_diff = 999
+        best_hero_idx = -1
+        for i, s in enumerate(tree_stacks_bb):
+            diff = abs(s - hero_stack_bb)
+            if diff < best_hero_diff:
+                best_hero_diff = diff
+                best_hero_idx = i
+        
+        active_score = 0
+        if active:
+            rem_tree = [s for i, s in enumerate(tree_stacks_bb) if i != best_hero_idx]
+            for a_stack in active:
+                if rem_tree:
+                    best = min(rem_tree, key=lambda s: abs(s - a_stack))
+                    active_score += abs(best - a_stack)
+                    rem_tree.remove(best)
+                else:
+                    active_score += 20
+        
+        remaining_score = 0
+        if remaining:
+            rem_tree2 = [s for i, s in enumerate(tree_stacks_bb) if i != best_hero_idx]
+            for r_stack in remaining:
+                if rem_tree2:
+                    best = min(rem_tree2, key=lambda s: abs(s - r_stack))
+                    remaining_score += abs(best - r_stack)
+                    rem_tree2.remove(best)
+                else:
+                    remaining_score += 10
+        
+        total_score = (
+            best_hero_diff * 3 +
+            active_score * 2 +
+            remaining_score * 1 +
+            np_penalty
+        )
+        
+        confidence = max(0, round(100 - total_score * 2, 1))
+        
+        results.append({
+            "tree_id": tree["id"],
+            "name": tree["name"],
+            "format": tree["format"],
+            "num_players": tree_np,
+            "phase": phase,
+            "total_remaining": total_remaining,
+            "paid_places": paid_places,
+            "tree_stacks_bb": tree_stacks_bb,
+            "hero_match_idx": best_hero_idx,
+            "hero_stack_diff": round(best_hero_diff, 1),
+            "score": round(total_score, 2),
+            "confidence": confidence,
+            "node_count": tree["node_count"],
+        })
+    
+    results.sort(key=lambda x: x["score"])
+    
+    return {"matches": results[:5]}
