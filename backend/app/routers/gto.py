@@ -135,7 +135,7 @@ def parse_hrc_zip(zip_bytes: bytes) -> dict:
         equity_name = next((n for n in names if n.endswith("equity.json")), None)
         equity = json.loads(zf.read(equity_name)) if equity_name else {}
         node_names = sorted(
-            [n for n in names if "/nodes/" in n and n.endswith(".json")],
+            [n for n in names if ("nodes/" in n) and n.endswith(".json") and not n.endswith("settings.json") and not n.endswith("equity.json")],
             key=lambda x: int(os.path.splitext(os.path.basename(x))[0])
         )
         if not node_names:
