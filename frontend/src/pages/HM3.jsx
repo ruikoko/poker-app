@@ -58,10 +58,11 @@ function StateBadge({ state }) {
 }
 
 function PosBadge({ pos }) {
-  if (!pos) return <span style={{ color: '#4b5563' }}>&mdash;</span>
+  if (!pos) return <span style={{ display: 'inline-block', width: 48, textAlign: 'center', color: '#4b5563' }}>&mdash;</span>
   const colors = { BTN: '#6366f1', CO: '#8b5cf6', HJ: '#a78bfa', SB: '#f59e0b', BB: '#ef4444', UTG: '#22c55e', UTG1: '#16a34a', UTG2: '#15803d', MP: '#06b6d4', MP1: '#0891b2' }
   const c = colors[pos] || '#64748b'
-  return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: c, background: `${c}20`, border: `1px solid ${c}40` }}>{pos}</span>
+  const isBlind = pos === 'SB' || pos === 'BB'
+  return <span style={{ display: 'inline-block', padding: '2px 0', borderRadius: 4, width: 48, textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: '#0a0c14', background: isBlind ? c : '#e2e8f0', border: `1px solid ${isBlind ? c : '#e2e8f0'}` }}>{pos}</span>
 }
 
 function ResultBadge({ result }) {
@@ -287,25 +288,31 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
               <div style={{ background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130', overflow: 'hidden' }}>
                 {players.map((p, i) => (
                   <div key={i} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '5px 12px',
+                    display: 'flex', alignItems: 'center', padding: '6px 12px',
                     background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)',
                     borderBottom: i < players.length - 1 ? '1px solid #1a1d27' : 'none',
                   }}>
-                    <div style={{ minWidth: 40 }}><PosBadge pos={p.position} /></div>
-                    <span style={{ fontSize: 12, minWidth: 110, color: p.is_hero ? '#818cf8' : '#94a3b8', fontWeight: p.is_hero ? 600 : 400 }}>
-                      {p.name}{p.is_hero && <span style={{ fontSize: 11, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
-                    </span>
-                    <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', minWidth: 70 }}>
-                      {p.stack ? Number(p.stack).toLocaleString() : '—'}
-                    </span>
-                    <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace' }}>
-                      {p.stack_bb ? `${p.stack_bb} BB` : ''}
-                    </span>
-                    {p.bounty != null && (
-                      <span style={{ fontSize: 11, color: '#f59e0b', fontFamily: 'monospace' }}>
-                        {p.bounty}€
+                    <div style={{ width: 54, flexShrink: 0 }}><PosBadge pos={p.position} /></div>
+                    <div style={{ width: 150, flexShrink: 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: p.is_hero ? 700 : 600, color: '#0a0c14', background: p.is_hero ? '#a5b4fc' : '#fbbf24', padding: '2px 8px', borderRadius: 4, display: 'inline-block' }}>
+                        {p.name}{p.is_hero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
                       </span>
-                    )}
+                    </div>
+                    <div style={{ width: 75, flexShrink: 0, textAlign: 'right', fontSize: 12, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>
+                      {p.stack ? Number(p.stack).toLocaleString() : '—'}
+                    </div>
+                    <div style={{ width: 70, flexShrink: 0, textAlign: 'right' }}>
+                      <span style={{ fontSize: 11, color: '#fff', fontFamily: 'monospace', fontWeight: 700, background: '#f97316', padding: '2px 6px', borderRadius: 3 }}>
+                        {p.stack_bb ? `${p.stack_bb} BB` : '—'}
+                      </span>
+                    </div>
+                    <div style={{ width: 70, flexShrink: 0, textAlign: 'right', paddingLeft: 12 }}>
+                      {p.bounty != null && (
+                        <span style={{ fontSize: 11, color: '#f1f5f9', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(30,58,95,0.4)', border: '1px solid rgba(30,58,95,0.5)' }}>
+                          {p.bounty}€
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
