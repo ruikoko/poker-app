@@ -369,21 +369,30 @@ export default function ReplayerPage() {
     if (!m) return
     const heroEntry = Object.entries(hand.all_players_actions).find(([k, v]) => k !== '_meta' && HERO_NAMES.has(k.toLowerCase()))
     if (!heroEntry) return
-    const heroPos = heroEntry[1].position
     const heroBB = heroEntry[1].stack_bb || (heroEntry[1].stack / (m.bb || 1))
     const isPKO = hand.raw && /bounty|PKO|KO|Progressive|Mystery/i.test(hand.raw)
     const fmt = isPKO ? 'PKO' : 'vanilla'
+    
+    // Get all player stacks for matching
+    const allPlayers = Object.entries(hand.all_players_actions)
+      .filter(([k]) => k !== '_meta')
+      .map(([name, info]) => ({ name, ...info }))
+    const otherStacks = allPlayers
+      .filter(p => !HERO_NAMES.has(p.name.toLowerCase()))
+      .map(p => p.stack_bb || (p.stack / (m.bb || 1)))
+      .filter(s => s > 0)
+    
     setGtoLoading(true)
     gtoApi.match({
-      hero_position: heroPos,
       hero_stack_bb: Math.round(heroBB * 10) / 10,
       format: fmt,
-      num_players: m.num_players || ps.length || 6,
+      num_players: m.num_players || allPlayers.length || 6,
+      active_stacks_bb: otherStacks.join(','),
     }).then(d => {
       setGtoMatch(d)
-      // Load root node
-      if (d.match) {
-        gtoApi.getNode(d.match.id, 0).then(setGtoNode).catch(() => {})
+      // Load root node of best match
+      if (d.matches && d.matches.length > 0) {
+        gtoApi.getNode(d.matches[0].tree_id, 0).then(setGtoNode).catch(() => {})
       }
     }).catch(() => {}).finally(() => setGtoLoading(false))
   }, [hand])
@@ -611,28 +620,36 @@ export default function ReplayerPage() {
 
             {rightTab === 'gto' && <>
               {gtoLoading && <div style={{ fontSize: 11, color: '#64748b', textAlign: 'center', padding: '20px 0' }}>A procurar tree GTO...</div>}
-              {!gtoLoading && !gtoMatch?.match && (
+              {!gtoLoading && (!gtoMatch?.matches || gtoMatch.matches.length === 0) && (
                 <div style={{ fontSize: 11, color: '#4b5563', textAlign: 'center', padding: '20px 0' }}>
                   Nenhuma tree GTO encontrada para este spot.
                   <br /><br />
                   <span style={{ fontSize: 10, color: '#374151' }}>Importa trees na secção GTO Brain</span>
                 </div>
               )}
-              {!gtoLoading && gtoMatch?.match && (
+              {!gtoLoading && gtoMatch?.matches?.length > 0 && (
                 <div>
-                  {/* Match info */}
-                  <div style={{ marginBottom: 12, padding: '8px 10px', background: 'rgba(99,102,241,0.06)', borderRadius: 6, border: '1px solid rgba(99,102,241,0.15)' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Tree Match</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2 }}>{gtoMatch.match.name}</div>
-                    <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#64748b', flexWrap: 'wrap' }}>
-                      <span>Stack diff: {gtoMatch.stack_diff_bb}bb</span>
-                      <span>Confiança: {gtoMatch.confidence}%</span>
-                      {gtoMatch.covering_ok != null && (
-                        <span style={{ color: gtoMatch.covering_ok ? '#22c55e' : '#ef4444' }}>
-                          Covering: {gtoMatch.covering_ok ? '✓' : '✗'}
-                        </span>
-                      )}
-                    </div>
+                  {/* Matches list */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Matches ({gtoMatch.matches.length})</div>
+                    {gtoMatch.matches.map((m, mi) => (
+                      <div key={mi} onClick={() => {
+                        gtoApi.getNode(m.tree_id, 0).then(setGtoNode).catch(() => {})
+                      }} style={{
+                        padding: '6px 8px', marginBottom: 4, borderRadius: 5, cursor: 'pointer',
+                        background: mi === 0 ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.02)',
+                        border: `1px solid ${mi === 0 ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)'}`,
+                      }}>
+                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 2 }}>{m.name}</div>
+                        <div style={{ display: 'flex', gap: 6, fontSize: 9, color: '#64748b', flexWrap: 'wrap' }}>
+                          <span style={{ color: m.confidence > 70 ? '#22c55e' : m.confidence > 40 ? '#f59e0b' : '#ef4444' }}>{m.confidence}%</span>
+                          <span>{m.num_players}-max</span>
+                          <span>{m.phase}</span>
+                          <span>Δ{m.hero_stack_diff}bb</span>
+                          <span>{m.node_count} nós</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   {/* GTO Range Grid */}
@@ -720,7 +737,7 @@ export default function ReplayerPage() {
                               {actions.map((a, i) => (
                                 <button key={i} onClick={() => {
                                   if (a.node != null) {
-                                    gtoApi.getNode(gtoMatch.match.id, a.node).then(setGtoNode).catch(() => {})
+                                    gtoApi.getNode(gtoMatch.matches[0].tree_id, a.node).then(setGtoNode).catch(() => {})
                                   }
                                 }} style={{
                                   padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
@@ -736,7 +753,7 @@ export default function ReplayerPage() {
 
                         {/* Back to root */}
                         {gtoNode.node_index !== 0 && (
-                          <button onClick={() => gtoApi.getNode(gtoMatch.match.id, 0).then(setGtoNode).catch(() => {})} style={{
+                          <button onClick={() => gtoApi.getNode(gtoMatch.matches[0].tree_id, 0).then(setGtoNode).catch(() => {})} style={{
                             marginTop: 6, padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
                             background: 'rgba(255,255,255,0.04)', color: '#64748b',
                             border: '1px solid #2a2d3a', cursor: 'pointer', width: '100%',
