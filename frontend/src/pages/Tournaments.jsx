@@ -47,13 +47,14 @@ function PokerCard({ card, size = 'sm' }) {
 }
 
 function PosBadge({ pos }) {
-  if (!pos) return <span style={{ color: '#4b5563' }}>—</span>
+  if (!pos) return <span style={{ display: 'inline-block', width: 48, textAlign: 'center', color: '#4b5563' }}>—</span>
   const c = POS_COLORS[pos] || '#64748b'
+  const isBlind = pos === 'SB' || pos === 'BB'
   return (
     <span style={{
-      display: 'inline-block', padding: '1px 6px', borderRadius: 3,
+      display: 'inline-block', padding: '1px 0', borderRadius: 3, width: 48, textAlign: 'center',
       fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
-      color: c, background: `${c}20`, border: `1px solid ${c}40`,
+      color: '#0a0c14', background: isBlind ? c : '#e2e8f0', border: `1px solid ${isBlind ? c : '#e2e8f0'}`,
     }}>{pos}</span>
   )
 }
