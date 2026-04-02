@@ -370,27 +370,47 @@ export default function ReplayerPage() {
     const heroEntry = Object.entries(hand.all_players_actions).find(([k, v]) => k !== '_meta' && HERO_NAMES.has(k.toLowerCase()))
     if (!heroEntry) return
     const heroBB = heroEntry[1].stack_bb || (heroEntry[1].stack / (m.bb || 1))
+    const heroPos = heroEntry[1].position || ''
     const isPKO = hand.raw && /bounty|PKO|KO|Progressive|Mystery/i.test(hand.raw)
     const fmt = isPKO ? 'PKO' : 'vanilla'
     
-    // Get all player stacks for matching
+    // Get all players sorted by seat order
     const allPlayers = Object.entries(hand.all_players_actions)
       .filter(([k]) => k !== '_meta')
       .map(([name, info]) => ({ name, ...info }))
-    const otherStacks = allPlayers
-      .filter(p => !HERO_NAMES.has(p.name.toLowerCase()))
-      .map(p => p.stack_bb || (p.stack / (m.bb || 1)))
-      .filter(s => s > 0)
+    
+    // Determine active players (in pot) and remaining (yet to act)
+    const otherPlayers = allPlayers.filter(p => !HERO_NAMES.has(p.name.toLowerCase()))
+    const activeStacks = otherPlayers.map(p => p.stack_bb || (p.stack / (m.bb || 1))).filter(s => s > 0)
+    const activePositions = otherPlayers.map(p => p.position).filter(Boolean)
+    
+    // Extract level from raw
+    let level = m.level || null
+    if (!level && hand.raw) {
+      const lvM = hand.raw.match(/level[:\s]+(\d+)/i) || hand.raw.match(/Level\s+([IVXLCDM]+)/i)
+      if (lvM) {
+        const v = lvM[1]
+        if (/^\d+$/.test(v)) level = parseInt(v)
+        else { // Roman
+          const rv = {I:1,V:5,X:10,L:50}; let t=0
+          for (let i=0;i<v.length;i++) { const c=rv[v[i]]||0; const n=rv[v[i+1]]||0; t+=c<n?-c:c }
+          level = t
+        }
+      }
+    }
     
     setGtoLoading(true)
     gtoApi.match({
       hero_stack_bb: Math.round(heroBB * 10) / 10,
       format: fmt,
       num_players: m.num_players || allPlayers.length || 6,
-      active_stacks_bb: otherStacks.join(','),
+      hero_position: heroPos,
+      level: level,
+      site: hand.site || 'Winamax',
+      active_positions: activePositions.join(','),
+      active_stacks_bb: activeStacks.map(s => Math.round(s*10)/10).join(','),
     }).then(d => {
       setGtoMatch(d)
-      // Load root node of best match
       if (d.matches && d.matches.length > 0) {
         gtoApi.getNode(d.matches[0].tree_id, 0).then(setGtoNode).catch(() => {})
       }
@@ -641,13 +661,19 @@ export default function ReplayerPage() {
                         border: `1px solid ${mi === 0 ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)'}`,
                       }}>
                         <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 2 }}>{m.name}</div>
-                        <div style={{ display: 'flex', gap: 6, fontSize: 9, color: '#64748b', flexWrap: 'wrap' }}>
-                          <span style={{ color: m.confidence > 70 ? '#22c55e' : m.confidence > 40 ? '#f59e0b' : '#ef4444' }}>{m.confidence}%</span>
+                        <div style={{ display: 'flex', gap: 6, fontSize: 9, color: '#64748b', flexWrap: 'wrap', marginBottom: 3 }}>
+                          <span style={{ color: m.confidence > 70 ? '#22c55e' : m.confidence > 40 ? '#f59e0b' : '#ef4444', fontWeight: 700, fontSize: 11 }}>{m.confidence}%</span>
                           <span>{m.num_players}-max</span>
                           <span>{m.phase}</span>
                           <span>Δ{m.hero_stack_diff}bb</span>
-                          <span>{m.node_count} nós</span>
                         </div>
+                        {m.breakdown && (
+                          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                            {[['Fase', m.breakdown.phase], ['Pos', m.breakdown.position], ['Stack', m.breakdown.hero_stack], ['Adv.Pos', m.breakdown.active_pos], ['Adv.Stk', m.breakdown.active_stk]].map(([l, v]) => (
+                              <span key={l} style={{ fontSize: 8, padding: '1px 4px', borderRadius: 2, background: v > 70 ? 'rgba(34,197,94,0.15)' : v > 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)', color: v > 70 ? '#22c55e' : v > 40 ? '#f59e0b' : '#ef4444' }}>{l}:{v}</span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
