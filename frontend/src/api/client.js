@@ -210,6 +210,35 @@ export const equity = {
   handAnalysis: (handId) => req('POST', `/equity/hand-analysis/${handId}`),
 }
 
+// ── GTO Brain ────────────────────────────────────────────────────────────────
+export const gto = {
+  trees: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/gto/trees${qs ? '?' + qs : ''}`)
+  },
+  getTree:  (id)        => req('GET',    `/gto/trees/${id}`),
+  getNode:  (treeId, nodeIndex) => req('GET', `/gto/trees/${treeId}/node/${nodeIndex}`),
+  getNodes: (treeId, indices)   => req('GET', `/gto/trees/${treeId}/nodes?indices=${indices.join(',')}`),
+  updateTree: (id, body) => req('PATCH', `/gto/trees/${id}`, body),
+  deleteTree: (id)       => req('DELETE', `/gto/trees/${id}`),
+  match: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/gto/match?${qs}`)
+  },
+  import: (file, meta = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    Object.entries(meta).forEach(([k, v]) => { if (v != null && v !== '') form.append(k, v) })
+    return fetch((import.meta.env.VITE_API_URL || '') + '/api/gto/import', {
+      method: 'POST', credentials: 'include', body: form,
+    }).then(r => r.json())
+  },
+}
+
 // ── Screenshots ───────────────────────────────────────────────────────────────
 export const screenshots = {
   upload: (file) => {

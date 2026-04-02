@@ -13,6 +13,7 @@ import HM3Page from './pages/HM3'
 import StatsPage from './pages/Stats'
 import ReplayerPage from './pages/ReplayerPage'
 import HandDetailPage from './pages/HandDetailPage'
+import GTOBrainPage from './pages/GTOBrain'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="pnl" element={<PnlPage />} />
         <Route path="discord" element={<DiscordPage />} />
         <Route path="tournaments" element={<TournamentsPage />} />
+        <Route path="gto" element={<GTOBrainPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
