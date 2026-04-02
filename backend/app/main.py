@@ -15,7 +15,7 @@ from app.routers.mtt import router as mtt_router, ensure_mtt_schema
 from app.routers.hm3 import router as hm3_router
 from app.routers.stats import router as stats_router
 from app.routers.equity import router as equity_router
-# from app.routers.gto import router as gto_router  # DESACTIVADO — gto.py tem erro de import (get_db não existe em db.py)
+from app.routers.gto import router as gto_router
 
 load_dotenv()
 
@@ -215,7 +215,7 @@ app.include_router(mtt_router)
 app.include_router(hm3_router)
 app.include_router(stats_router)
 app.include_router(equity_router)
-# app.include_router(gto_router)  # DESACTIVADO — corrigir gto.py primeiro
+app.include_router(gto_router)
 
 # Serve uploaded screenshots as static files
 import os
