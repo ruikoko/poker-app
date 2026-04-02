@@ -236,7 +236,22 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           <button style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18, padding: 4 }} onClick={onClose}>&#10005;</button>
         </div>
 
-        {/* Cards + Board */}
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {hand.raw && (
+            <button onClick={() => navigator.clipboard.writeText(hand.raw)}
+              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)', cursor: 'pointer' }}
+            >Copiar HH</button>
+          )}
+          {hand.raw && hand.all_players_actions && (
+            <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', cursor: 'pointer', textDecoration: 'none' }}
+            >&#9654; Replayer</a>
+          )}
+          <a href={`/hand/${hand.id}`} target="_blank" rel="noopener noreferrer"
+            style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)', cursor: 'pointer', textDecoration: 'none' }}
+          >Detalhe</a>
+        </div>
         <div style={{ background: '#0f1117', borderRadius: 10, padding: '16px 20px', marginBottom: 20, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero &middot; <PosBadge pos={hand.position} /></div>
@@ -503,8 +518,52 @@ function HM3HandRow({ hand, onClick, onDelete, idx }) {
   )
 }
 
+function TournamentSubGroup({ name, hands, onOpenDetail, onDeleteHand }) {
+  const [open, setOpen] = useState(false)
+  const wins = hands.filter(h => h.result != null && Number(h.result) > 0).length
+  const losses = hands.filter(h => h.result != null && Number(h.result) < 0).length
+  const totalBB = hands.reduce((a, h) => a + (Number(h.result) || 0), 0)
+
+  return (
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+      <div onClick={() => setOpen(!open)} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '7px 16px 7px 32px', cursor: 'pointer', userSelect: 'none',
+      }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10, color: '#6366f1', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>&#9654;</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', maxWidth: 350, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+          <span style={{ fontSize: 11, color: '#4b5563' }}>{hands.length} {hands.length === 1 ? 'mão' : 'mãos'}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11 }}>
+          <span style={{ color: '#22c55e' }}>{wins}W</span>
+          <span style={{ color: '#ef4444' }}>{losses}L</span>
+          <span style={{ color: totalBB >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600, fontFamily: 'monospace' }}>
+            {totalBB >= 0 ? '+' : ''}{totalBB.toFixed(1)} BB
+          </span>
+        </div>
+      </div>
+      {open && hands.map((h, idx) => (
+        <HM3HandRow key={h.id} hand={h} idx={idx} onClick={() => onOpenDetail(h.id)} onDelete={onDeleteHand} />
+      ))}
+    </div>
+  )
+}
+
 function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
+
+  // Sub-group by tournament (stakes field)
+  const byTourney = {}
+  for (const h of hands) {
+    const key = h.stakes || 'Sem torneio'
+    if (!byTourney[key]) byTourney[key] = []
+    byTourney[key].push(h)
+  }
+  const tourneyKeys = Object.keys(byTourney).sort()
 
   return (
     <div style={{ marginBottom: 6, border: `1px solid ${open ? 'rgba(139,92,246,0.3)' : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
@@ -519,6 +578,7 @@ function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDeta
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ display: 'inline-block', fontSize: 11, color: '#8b5cf6', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{dateLabel}</span>
+          <span style={{ fontSize: 12, color: '#6366f1' }}>{tourneyKeys.length} torneio{tourneyKeys.length !== 1 ? 's' : ''}</span>
           <span style={{ fontSize: 12, color: '#64748b' }}>{hands.length} {hands.length === 1 ? 'mão' : 'mãos'}</span>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 11 }}>
@@ -531,8 +591,14 @@ function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDeta
       </div>
       {open && (
         <div>
-          {hands.map((h, idx) => (
-            <HM3HandRow key={h.id} hand={h} idx={idx} onClick={() => onOpenDetail(h.id)} onDelete={onDeleteHand} />
+          {tourneyKeys.map(tk => (
+            <TournamentSubGroup
+              key={tk}
+              name={tk}
+              hands={byTourney[tk]}
+              onOpenDetail={onOpenDetail}
+              onDeleteHand={onDeleteHand}
+            />
           ))}
         </div>
       )}
