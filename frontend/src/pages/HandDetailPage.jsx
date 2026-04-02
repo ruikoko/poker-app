@@ -252,8 +252,8 @@ export default function HandDetailPage() {
                   </span>
                 </div>
                 <div style={{ width: 80, flexShrink: 0, textAlign: 'right', fontSize: 15, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>{p.stack ? Math.round(p.stack).toLocaleString() : '—'}</div>
-                <div style={{ width: 70, flexShrink: 0, textAlign: 'right', fontSize: 13, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>{p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB</div>
-                <div style={{ width: 70, flexShrink: 0, textAlign: 'right' }}>
+                <div style={{ width: 75, flexShrink: 0, textAlign: 'right' }}><span style={{ fontSize: 13, color: '#fff', fontFamily: 'monospace', fontWeight: 700, background: '#f97316', padding: '2px 8px', borderRadius: 4 }}>{p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB</span></div>
+                <div style={{ width: 80, flexShrink: 0, textAlign: 'right', paddingLeft: 12 }}>
                   {bounty != null && <span style={{ fontSize: 13, color: '#f1f5f9', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(30,58,95,0.4)', border: '1px solid rgba(30,58,95,0.5)' }}>{typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}</span>}
                 </div>
               </div>
