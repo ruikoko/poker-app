@@ -821,6 +821,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
               style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', cursor: 'pointer', textDecoration: 'none' }}
             >&#9654; Replayer</a>
           )}
+          <a href={`/hand/${hand.id}`} target="_blank" rel="noopener noreferrer"
+            style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)', cursor: 'pointer', textDecoration: 'none' }}
+          >Detalhe</a>
         </div>
 
         {/* Info grid — FIRST */}
