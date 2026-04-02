@@ -277,6 +277,21 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
       {/* Expanded detail */}
       {expanded && (
         <div style={{ padding: '8px 12px 12px 52px', background: 'rgba(255,255,255,0.01)' }}>
+          {/* Action buttons */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            {hand.raw && (
+              <button onClick={() => navigator.clipboard.writeText(hand.raw)}
+                style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)', cursor: 'pointer' }}
+              >Copiar HH</button>
+            )}
+            <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+              style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', textDecoration: 'none' }}
+            >&#9654; Replayer</a>
+            <a href={`/hand/${hand.id}`} target="_blank" rel="noopener noreferrer"
+              style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)', textDecoration: 'none' }}
+            >Detalhe</a>
+          </div>
+
           {/* Villains */}
           {hand.villains && hand.villains.length > 0 && (
             <div style={{ marginBottom: 8 }}>
