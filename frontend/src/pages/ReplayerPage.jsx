@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { hands as handsApi, equity } from '../api/client'
+import { hands as handsApi, equity, gto as gtoApi } from '../api/client'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
@@ -52,6 +52,28 @@ function parseHH(raw, apa) {
     })
   const heroIdx = players.findIndex(p => p.is_hero || HERO_NAMES.has(p.name.toLowerCase()))
 
+  // Build nameMap: anon hash → real name (from seats in raw vs apa)
+  const nameMap = {}
+  const seatLines = raw.match(/Seat \d+: .+? \([\d,]+(?:\.\d+)?(?:\s+in chips)?\)/g) || []
+  for (const line of seatLines) {
+    const sm = line.match(/Seat (\d+): (.+?) \(/)
+    if (sm) {
+      const seatNum = parseInt(sm[1])
+      const anonName = sm[2].trim()
+      for (const p of players) {
+        if (p.seat === seatNum && p.name !== anonName) {
+          nameMap[anonName] = p.name
+          break
+        }
+      }
+    }
+  }
+  const resolve = (n) => nameMap[n] || n
+  const findPlayer = (rawName) => {
+    const realName = resolve(rawName)
+    return pState.findIndex(p => p.name === realName)
+  }
+
   // Initialize player state with original stacks
   const pState = players.map(p => ({
     name: p.name, position: p.position,
@@ -82,21 +104,21 @@ function parseHH(raw, apa) {
   for (const am of anteMatches) {
     const name = am[1].trim(), amount = parseFloat(am[2].replace(/,/g, ''))
     pot += amount
-    const pi = pState.findIndex(p => p.name === name)
+    const pi = findPlayer(name)
     if (pi >= 0) { pState[pi].stack -= amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) }
   }
   const sbMatch = raw.match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?small blind\s+([\d,]+(?:\.\d+)?)/i)
   if (sbMatch) {
     const name = sbMatch[1].trim(), amount = parseFloat(sbMatch[2].replace(/,/g, ''))
     pot += amount
-    const pi = pState.findIndex(p => p.name === name)
+    const pi = findPlayer(name)
     if (pi >= 0) { pState[pi].stack -= amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1); pState[pi].totalInvested = amount; pState[pi].currentBet = amount }
   }
   const bbMatch = raw.match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?big blind\s+([\d,]+(?:\.\d+)?)/i)
   if (bbMatch) {
     const name = bbMatch[1].trim(), amount = parseFloat(bbMatch[2].replace(/,/g, ''))
     pot += amount
-    const pi = pState.findIndex(p => p.name === name)
+    const pi = findPlayer(name)
     if (pi >= 0) { pState[pi].stack -= amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1); pState[pi].totalInvested = amount; pState[pi].currentBet = amount }
   }
 
@@ -127,14 +149,14 @@ function parseHH(raw, apa) {
       
       // Showdown cards
       const showM = t.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
-      if (showM) { const pi = pState.findIndex(p => p.name === showM[1].trim()); if (pi >= 0) pState[pi].cards = showM[2].split(' '); continue }
+      if (showM) { const pi = findPlayer(showM[1].trim()); if (pi >= 0) pState[pi].cards = showM[2].split(' '); continue }
 
       // Uncalled bet return
       const uncalledM = t.match(/Uncalled bet \(([\d,]+(?:\.\d+)?)\) returned to (.+)/i)
       if (uncalledM) {
         const amount = parseFloat(uncalledM[1].replace(/,/g, ''))
         const name = uncalledM[2].trim()
-        const pi = pState.findIndex(p => p.name === name)
+        const pi = findPlayer(name)
         pot -= amount
         if (pi >= 0) { pState[pi].stack += amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1); pState[pi].currentBet -= amount }
         continue
@@ -144,7 +166,7 @@ function parseHH(raw, apa) {
       const collM = t.match(/^(.+?) collected ([\d,]+(?:\.\d+)?)/i)
       if (collM) {
         const name = collM[1].trim(), amount = parseFloat(collM[2].replace(/,/g, ''))
-        const pi = pState.findIndex(p => p.name === name)
+        const pi = findPlayer(name)
         if (pi >= 0) { pState[pi].stack += amount; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) }
         continue
       }
@@ -154,7 +176,7 @@ function parseHH(raw, apa) {
       let amount = 0; const amtM = rest.match(/([\d,]+(?:\.\d+)?)/); if (amtM) amount = parseFloat(amtM[1].replace(/,/g, ''))
       const allIn = /all-in/i.test(rest)
       const toM = rest.match(/to\s+([\d,]+(?:\.\d+)?)/)
-      const pi = pState.findIndex(p => p.name === actor)
+      const pi = findPlayer(actor)
       const isH = pi >= 0 && pState[pi].isHero
 
       let actionLabel = ''
@@ -223,7 +245,7 @@ function parseHH(raw, apa) {
       }
 
       steps.push({
-        street: sd.key, label: sd.label, action: actionLabel, actor, actorIdx: pi, isHero: isH,
+        street: sd.key, label: sd.label, action: actionLabel, actor: resolve(actor), actorIdx: pi, isHero: isH,
         pot: Math.round(pot), potBB: +(pot/bb).toFixed(1),
         board: [...curBoard], ps: snap(), analysis, villainAnalysis
       })
@@ -239,14 +261,14 @@ function parseHH(raw, apa) {
         const name = sm[1].trim()
         const cards = sm[2].split(' ').filter(c => c.trim())
         // Try exact match first, then partial
-        let pi = pState.findIndex(p => p.name === name)
+        let pi = findPlayer(name)
         if (pi < 0) pi = pState.findIndex(p => p.name.startsWith(name) || name.startsWith(p.name))
         if (pi >= 0) pState[pi].cards = cards
       }
       const cm = line.trim().match(/^(.+?) collected ([\d,]+(?:\.\d+)?)/i)
       if (cm) {
         const name = cm[1].trim()
-        let pi = pState.findIndex(p => p.name === name)
+        let pi = findPlayer(name)
         if (pi < 0) pi = pState.findIndex(p => p.name.startsWith(name) || name.startsWith(p.name))
         if (pi >= 0) { const amt = parseFloat(cm[2].replace(/,/g, '')); pState[pi].stack += amt; pState[pi].stackBB = +(pState[pi].stack / bb).toFixed(1) }
       }
@@ -260,7 +282,7 @@ function parseHH(raw, apa) {
       if (sm) {
         const name = sm[1].trim()
         const cards = sm[2].split(' ').filter(c => c.trim())
-        let pi = pState.findIndex(p => p.name === name)
+        let pi = findPlayer(name)
         if (pi < 0) pi = pState.findIndex(p => p.name.startsWith(name) || name.startsWith(p.name))
         if (pi >= 0 && pState[pi].cards.length === 0) pState[pi].cards = cards
       }
@@ -324,6 +346,10 @@ export default function ReplayerPage() {
   const [showRangeGrid, setShowRangeGrid] = useState(false)
   const [selectedCells, setSelectedCells] = useState(new Set())
   const [showBB, setShowBB] = useState(true) // toggle BB vs chips
+  const [rightTab, setRightTab] = useState('analysis') // 'analysis' | 'gto'
+  const [gtoMatch, setGtoMatch] = useState(null)
+  const [gtoNode, setGtoNode] = useState(null)
+  const [gtoLoading, setGtoLoading] = useState(false)
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
@@ -335,6 +361,32 @@ export default function ReplayerPage() {
   const slots = getSlots(ps.length)
   const positions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return POSITIONS_9[slots[idx] || 0] })
   const chipPositions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return CHIP_OFFSETS_9[slots[idx] || 0] })
+
+  // GTO matching — find closest tree when hand loads
+  useEffect(() => {
+    if (!hand?.all_players_actions) return
+    const m = hand.all_players_actions._meta
+    if (!m) return
+    const heroEntry = Object.entries(hand.all_players_actions).find(([k, v]) => k !== '_meta' && HERO_NAMES.has(k.toLowerCase()))
+    if (!heroEntry) return
+    const heroPos = heroEntry[1].position
+    const heroBB = heroEntry[1].stack_bb || (heroEntry[1].stack / (m.bb || 1))
+    const isPKO = hand.raw && /bounty|PKO|KO|Progressive|Mystery/i.test(hand.raw)
+    const fmt = isPKO ? 'PKO' : 'vanilla'
+    setGtoLoading(true)
+    gtoApi.match({
+      hero_position: heroPos,
+      hero_stack_bb: Math.round(heroBB * 10) / 10,
+      format: fmt,
+      num_players: m.num_players || ps.length || 6,
+    }).then(d => {
+      setGtoMatch(d)
+      // Load root node
+      if (d.match) {
+        gtoApi.getNode(d.match.id, 0).then(setGtoNode).catch(() => {})
+      }
+    }).catch(() => {}).finally(() => setGtoLoading(false))
+  }, [hand])
 
   useEffect(() => { if (!playing || si >= steps.length - 1) { setPlaying(false); return }; const t = setTimeout(() => setSi(i => i + 1), 1200); return () => clearTimeout(t) }, [playing, si, steps.length])
 
@@ -511,35 +563,192 @@ export default function ReplayerPage() {
           </div>
         </div>
 
-        {/* Right Panel */}
-        <div style={{ width: 190, padding: '16px 14px', borderLeft: '1px solid #1e2130', background: '#0d0f18', overflowY: 'auto', flexShrink: 0 }}>
-          {step.analysis && (
-            <div style={{ marginBottom: 20 }}>
-              {step.analysis.type === 'facing' ? <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>{step.isHero ? 'Hero Decision' : 'Hero Faces'}</div>
-                <PRow l="Pot Odds" v={step.analysis.potOdds + '%'} c="#3b82f6" />
-                <PRow l="MDF" v={step.analysis.mdf + '%'} c="#8b5cf6" />
-                <PRow l="To Call" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
-                <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
-              </> : <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero Bet</div>
-                <PRow l="Bet/Pot" v={step.analysis.betToPot + '%'} c="#22c55e" />
-                <PRow l="MBF" v={step.analysis.mbf + '%'} c="#ec4899" />
-                <PRow l="Size" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
-                <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
-              </>}
-            </div>
-          )}
-          {step.villainAnalysis && (
-            <div style={{ marginBottom: 20, padding: '10px', background: 'rgba(245,158,11,0.06)', borderRadius: 6, border: '1px solid rgba(245,158,11,0.15)' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Villain Must Defend</div>
-              <PRow l="MDF" v={step.villainAnalysis.villainMDF + '%'} c="#f59e0b" />
-              <PRow l="vs Bet" v={formatChip(step.villainAnalysis.heroBet)} c="#64748b" />
-            </div>
-          )}
-          {!step.analysis && !step.villainAnalysis && (
-            <div style={{ fontSize: 11, color: '#374151', textAlign: 'center', padding: '20px 0' }}>Navega para uma acção para ver análise</div>
-          )}
+        {/* Right Panel — Tabs */}
+        <div style={{ width: 240, padding: '0', borderLeft: '1px solid #1e2130', background: '#0d0f18', overflowY: 'auto', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+          {/* Tab switcher */}
+          <div style={{ display: 'flex', borderBottom: '1px solid #1e2130', flexShrink: 0 }}>
+            {[['analysis', 'Análise'], ['gto', 'GTO']].map(([k, l]) => (
+              <button key={k} onClick={() => setRightTab(k)} style={{
+                flex: 1, padding: '10px 0', fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+                background: rightTab === k ? 'rgba(99,102,241,0.08)' : 'transparent',
+                color: rightTab === k ? '#818cf8' : '#4b5563',
+                border: 'none', borderBottom: rightTab === k ? '2px solid #6366f1' : '2px solid transparent',
+                cursor: 'pointer', textTransform: 'uppercase',
+              }}>{l}</button>
+            ))}
+          </div>
+
+          <div style={{ padding: '16px 14px', flex: 1, overflowY: 'auto' }}>
+            {rightTab === 'analysis' && <>
+              {step.analysis && (
+                <div style={{ marginBottom: 20 }}>
+                  {step.analysis.type === 'facing' ? <>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>{step.isHero ? 'Hero Decision' : 'Hero Faces'}</div>
+                    <PRow l="Pot Odds" v={step.analysis.potOdds + '%'} c="#3b82f6" />
+                    <PRow l="MDF" v={step.analysis.mdf + '%'} c="#8b5cf6" />
+                    <PRow l="To Call" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
+                    <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
+                  </> : <>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero Bet</div>
+                    <PRow l="Bet/Pot" v={step.analysis.betToPot + '%'} c="#22c55e" />
+                    <PRow l="MBF" v={step.analysis.mbf + '%'} c="#ec4899" />
+                    <PRow l="Size" v={step.analysis.betBB + ' BB'} c="#f59e0b" />
+                    <PRow l="Pot" v={step.analysis.potBB + ' BB'} c="#64748b" />
+                  </>}
+                </div>
+              )}
+              {step.villainAnalysis && (
+                <div style={{ marginBottom: 20, padding: '10px', background: 'rgba(245,158,11,0.06)', borderRadius: 6, border: '1px solid rgba(245,158,11,0.15)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Villain Must Defend</div>
+                  <PRow l="MDF" v={step.villainAnalysis.villainMDF + '%'} c="#f59e0b" />
+                  <PRow l="vs Bet" v={formatChip(step.villainAnalysis.heroBet)} c="#64748b" />
+                </div>
+              )}
+              {!step.analysis && !step.villainAnalysis && (
+                <div style={{ fontSize: 11, color: '#374151', textAlign: 'center', padding: '20px 0' }}>Navega para uma acção para ver análise</div>
+              )}
+            </>}
+
+            {rightTab === 'gto' && <>
+              {gtoLoading && <div style={{ fontSize: 11, color: '#64748b', textAlign: 'center', padding: '20px 0' }}>A procurar tree GTO...</div>}
+              {!gtoLoading && !gtoMatch?.match && (
+                <div style={{ fontSize: 11, color: '#4b5563', textAlign: 'center', padding: '20px 0' }}>
+                  Nenhuma tree GTO encontrada para este spot.
+                  <br /><br />
+                  <span style={{ fontSize: 10, color: '#374151' }}>Importa trees na secção GTO Brain</span>
+                </div>
+              )}
+              {!gtoLoading && gtoMatch?.match && (
+                <div>
+                  {/* Match info */}
+                  <div style={{ marginBottom: 12, padding: '8px 10px', background: 'rgba(99,102,241,0.06)', borderRadius: 6, border: '1px solid rgba(99,102,241,0.15)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Tree Match</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2 }}>{gtoMatch.match.name}</div>
+                    <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#64748b', flexWrap: 'wrap' }}>
+                      <span>Stack diff: {gtoMatch.stack_diff_bb}bb</span>
+                      <span>Confiança: {gtoMatch.confidence}%</span>
+                      {gtoMatch.covering_ok != null && (
+                        <span style={{ color: gtoMatch.covering_ok ? '#22c55e' : '#ef4444' }}>
+                          Covering: {gtoMatch.covering_ok ? '✓' : '✗'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* GTO Range Grid */}
+                  {gtoNode?.hands && (() => {
+                    const actions = gtoNode.actions || []
+                    const actionLabels = actions.map(a => a.type === 'F' ? 'Fold' : a.type === 'C' ? 'Call' : `Raise ${a.amount ? Math.round(a.amount / (meta.bb || 1) / 100) : ''}`)
+                    const actionColors = actions.map(a => a.type === 'F' ? '#ef4444' : a.type === 'C' ? '#3b82f6' : '#22c55e')
+                    const RANKS = 'AKQJT98765432'
+
+                    return (
+                      <div>
+                        {/* Legend */}
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                          {actions.map((a, i) => (
+                            <span key={i} style={{ fontSize: 9, color: actionColors[i], background: `${actionColors[i]}15`, padding: '2px 6px', borderRadius: 3, border: `1px solid ${actionColors[i]}30` }}>
+                              {actionLabels[i]}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* 13x13 Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(13, 1fr)', gap: 1, fontSize: 7, lineHeight: 1 }}>
+                          {RANKS.split('').map((r, row) =>
+                            RANKS.split('').map((c, col) => {
+                              let hand
+                              if (row === col) hand = r + c  // pair
+                              else if (row < col) hand = RANKS[row] + RANKS[col] + 's' // suited above diagonal
+                              else hand = RANKS[col] + RANKS[row] + 'o' // offsuit below diagonal
+
+                              const data = gtoNode.hands[hand]
+                              if (!data) return <div key={`${row}-${col}`} style={{ width: '100%', aspectRatio: '1', background: '#111' }} />
+
+                              const played = data.played || []
+                              // Dominant action color
+                              let maxIdx = 0, maxVal = 0
+                              played.forEach((p, i) => { if (p > maxVal) { maxVal = p; maxIdx = i } })
+                              const dominantColor = actionColors[maxIdx] || '#333'
+                              const opacity = Math.max(0.15, maxVal)
+
+                              // Mixed? Show gradient
+                              const isMixed = played.filter(p => p > 0.05).length > 1
+
+                              let bg
+                              if (!isMixed) {
+                                bg = `${dominantColor}${Math.round(opacity * 255).toString(16).padStart(2, '0')}`
+                              } else {
+                                // Create gradient segments
+                                const segments = []
+                                let pos = 0
+                                played.forEach((p, i) => {
+                                  if (p > 0.01) {
+                                    segments.push(`${actionColors[i] || '#333'} ${pos * 100}% ${(pos + p) * 100}%`)
+                                    pos += p
+                                  }
+                                })
+                                bg = segments.length > 0 ? `linear-gradient(to right, ${segments.join(', ')})` : '#222'
+                              }
+
+                              return (
+                                <div key={`${row}-${col}`} title={`${hand}: ${played.map((p, i) => `${actionLabels[i] || '?'} ${(p * 100).toFixed(0)}%`).join(', ')}`} style={{
+                                  width: '100%', aspectRatio: '1',
+                                  background: bg,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: maxVal > 0.5 ? '#fff' : '#666',
+                                  fontWeight: 600, fontSize: 6, borderRadius: 1,
+                                  border: row === col ? '1px solid rgba(255,255,255,0.15)' : 'none',
+                                }}>
+                                  {hand.replace('o', '').replace('s', '')}
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+
+                        {/* Node info */}
+                        <div style={{ marginTop: 8, fontSize: 10, color: '#4b5563' }}>
+                          Player {gtoNode.player} · Nó {gtoNode.node_index} · {gtoNode.is_terminal ? 'Terminal' : `${actions.length} acções`}
+                        </div>
+
+                        {/* Navigate deeper */}
+                        {actions.length > 0 && !gtoNode.is_terminal && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: '#64748b', marginBottom: 4 }}>Navegar:</div>
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {actions.map((a, i) => (
+                                <button key={i} onClick={() => {
+                                  if (a.node != null) {
+                                    gtoApi.getNode(gtoMatch.match.id, a.node).then(setGtoNode).catch(() => {})
+                                  }
+                                }} style={{
+                                  padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                                  background: `${actionColors[i]}15`, color: actionColors[i],
+                                  border: `1px solid ${actionColors[i]}30`, cursor: 'pointer',
+                                }}>
+                                  {actionLabels[i]}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Back to root */}
+                        {gtoNode.node_index !== 0 && (
+                          <button onClick={() => gtoApi.getNode(gtoMatch.match.id, 0).then(setGtoNode).catch(() => {})} style={{
+                            marginTop: 6, padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                            background: 'rgba(255,255,255,0.04)', color: '#64748b',
+                            border: '1px solid #2a2d3a', cursor: 'pointer', width: '100%',
+                          }}>← Raiz</button>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+            </>}
+          </div>
         </div>
       </div>
 
