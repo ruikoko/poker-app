@@ -27,7 +27,7 @@ function PosBadge({ pos }) {
   return <span style={{
     display: 'inline-block', width: 52, padding: '4px 0', borderRadius: 5,
     fontSize: 13, fontWeight: 700, letterSpacing: 0.5, textAlign: 'center',
-    color: isBlind ? '#fff' : c,
+    color: '#0a0c14',
     background: isBlind ? c : '#e2e8f0',
     border: `1px solid ${isBlind ? c : '#e2e8f0'}`,
   }}>{pos}</span>
@@ -251,10 +251,10 @@ export default function HandDetailPage() {
                     {realName}{isHero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
                   </span>
                 </div>
-                <div style={{ width: 80, flexShrink: 0, textAlign: 'right', fontSize: 14, color: '#64748b', fontFamily: 'monospace' }}>{p.stack ? Math.round(p.stack).toLocaleString() : '—'}</div>
-                <div style={{ width: 70, flexShrink: 0, textAlign: 'right', fontSize: 15, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>{p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB</div>
+                <div style={{ width: 80, flexShrink: 0, textAlign: 'right', fontSize: 15, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>{p.stack ? Math.round(p.stack).toLocaleString() : '—'}</div>
+                <div style={{ width: 70, flexShrink: 0, textAlign: 'right', fontSize: 13, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>{p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB</div>
                 <div style={{ width: 70, flexShrink: 0, textAlign: 'right' }}>
-                  {bounty != null && <span style={{ fontSize: 13, color: '#1e3a5f', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(30,58,95,0.15)', border: '1px solid rgba(30,58,95,0.25)' }}>{typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}</span>}
+                  {bounty != null && <span style={{ fontSize: 13, color: '#f1f5f9', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(30,58,95,0.4)', border: '1px solid rgba(30,58,95,0.5)' }}>{typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}</span>}
                 </div>
               </div>
             )
@@ -270,7 +270,7 @@ export default function HandDetailPage() {
 
         {/* HAND HISTORY — with correct pot and stack tracking */}
         <div style={{ padding: '16px 20px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>HAND HISTORY <span style={{ fontWeight: 400, color: '#4b5563', fontSize: 12 }}>{blindsLabel} LV {meta.level || '?'}</span></div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>HAND HISTORY <span style={{ fontWeight: 600, color: '#94a3b8', fontSize: 15 }}>{blindsLabel} LV {meta.level || '?'}</span></div>
           {(() => {
             // Stack tracking
             const stacks = {}
@@ -315,7 +315,7 @@ export default function HandDetailPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                     <span style={{ padding: '4px 14px', borderRadius: 5, fontSize: 14, fontWeight: 800, color: STREET_COLORS[st.name] || '#f1f5f9', background: `${STREET_COLORS[st.name] || '#64748b'}15`, border: `1px solid ${STREET_COLORS[st.name] || '#64748b'}30` }}>{st.name}</span>
                     {st.board?.length > 0 && <div style={{ display: 'flex', gap: 4 }}>{st.board.map((c, i) => <RCard key={i} card={c} />)}</div>}
-                    <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', marginLeft: 'auto', color: '#94a3b8', background: 'rgba(255,255,255,0.03)', padding: '3px 12px', borderRadius: 4 }}>Pot: {Math.round(potBeforeStreet).toLocaleString()} ({potBB}bb)</span>
+                    <span style={{ fontSize: 15, fontWeight: 700, fontFamily: 'monospace', marginLeft: 'auto', color: '#94a3b8', background: 'rgba(255,255,255,0.03)', padding: '4px 14px', borderRadius: 4 }}>Pot: {Math.round(potBeforeStreet).toLocaleString()} ({potBB}bb)</span>
                   </div>
                   <div style={{ paddingLeft: 16, borderLeft: `3px solid ${STREET_COLORS[st.name] || '#2a2d3a'}30` }}>
                     {st.actions.map((a, ai) => {
