@@ -37,6 +37,7 @@ def _build_conditions(
     result_max: float = None,
     source: str = None,
     villain: str = None,
+    date_to: str = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
@@ -69,6 +70,10 @@ def _build_conditions(
     if date_from:
         conditions.append("h.played_at >= %s")
         params.append(date_from)
+
+    if date_to:
+        conditions.append("h.played_at <= %s")
+        params.append(date_to + ' 23:59:59')
 
     if result_min is not None:
         conditions.append("(h.result >= %s OR h.result <= %s)")
@@ -104,6 +109,7 @@ def list_hands(
     position:         Optional[str] = Query(None, description="Filtrar por posição"),
     search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
     date_from:        Optional[str] = Query(None, description="Filtrar por data (ISO date, ex: 2026-03-20)"),
+    date_to:          Optional[str] = Query(None, description="Filtrar até data (ISO date)"),
     result_min:       Optional[float] = Query(None, description="Resultado mínimo em BB"),
     result_max:       Optional[float] = Query(None, description="Resultado máximo em BB"),
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
@@ -111,12 +117,12 @@ def list_hands(
     source:           Optional[str] = Query(None, description="Filtrar por source da entry (ex: discord)"),
     villain:          Optional[str] = Query(None, description="Filtrar por vilão (nick exacto em all_players_actions)"),
     page:             int = Query(1, ge=1),
-    page_size:        int = Query(50, ge=1, le=500),
+    page_size:        int = Query(50, ge=1, le=2000),
     current_user=Depends(require_auth)
 ):
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only,
-        result_min, result_max, source=source, villain=villain
+        result_min, result_max, source=source, villain=villain, date_to=date_to
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':

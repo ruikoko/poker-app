@@ -1131,23 +1131,36 @@ function HandRow({ hand, onClick, onDelete, idx }) {
   const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : hand.site === 'WPN' ? 'WPN' : hand.site === 'GGPoker' ? 'GG' : '?'
   const siteColor = hand.site === 'Winamax' ? '#f59e0b' : hand.site === 'PokerStars' ? '#ef4444' : hand.site === 'WPN' ? '#22c55e' : '#6366f1'
 
-  // Extract buy-in from stakes
-  const buyinMatch = (hand.stakes || '').match(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/i)
-  const buyin = buyinMatch ? buyinMatch[0].replace(/\s+/g, '') : ''
-  // Tournament name without buy-in part
-  const tourneyName = (hand.stakes || '').replace(/\(.*?\)/g, '').replace(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/g, '').replace(/EUR|USD/gi, '').trim() || hand.stakes || ''
-  // Full date + time
+  // Buy-in: sum all parts into single value (€45+€45+€10 → €100)
+  const stakesStr = hand.stakes || ''
+  let buyin = ''
+  const bm1 = stakesStr.match(/(\d+(?:\.\d+)?)\s*[€$]\s*\+\s*(\d+(?:\.\d+)?)\s*[€$](?:\s*\+\s*(\d+(?:\.\d+)?)\s*[€$])?/)
+  const bm2 = stakesStr.match(/[€$](\d+(?:\.\d+)?)\s*\+\s*[€$](\d+(?:\.\d+)?)(?:\s*\+\s*[€$](\d+(?:\.\d+)?))?/)
+  const bm3 = stakesStr.match(/(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)(?:\s*\+\s*(\d+(?:\.\d+)?))?/)
+  const bmatch = bm1 || bm2 || bm3
+  if (bmatch) {
+    const total = [bmatch[1], bmatch[2], bmatch[3]].filter(Boolean).map(Number).reduce((a, b) => a + b, 0)
+    buyin = `${stakesStr.includes('$') ? '$' : '€'}${total}`
+  }
+
+  // Tournament name: strip buy-in, currency, parentheses
+  const tourneyName = stakesStr.replace(/\(.*?\)/g, '').replace(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/g, '').replace(/EUR|USD/gi, '').trim() || stakesStr
+
+  // Date + time
   const dateStr = hand.played_at ? hand.played_at.slice(5, 10) : ''
   const timeStr = hand.played_at ? hand.played_at.slice(11, 16) : ''
+
+  // Level + blinds combined
+  const lvBlinds = [level, blindsLabel].filter(Boolean).join(' ')
 
   return (
     <div
       onClick={onClick}
       style={{
         display: 'grid',
-        gridTemplateColumns: '46px 54px 48px 68px minmax(100px,2fr) 80px minmax(80px,1.2fr) 32px 78px 90px 56px',
-        alignItems: 'center', gap: 6,
-        padding: '7px 12px',
+        gridTemplateColumns: '5.6% 5.6% 5.6% 5.6% 7.6% 3.9% 20.3% 3.6% 7.9% 8.3% 1fr',
+        alignItems: 'center',
+        padding: '7px 8px',
         background: zebra,
         borderBottom: '1px solid rgba(255,255,255,0.03)',
         cursor: 'pointer', transition: 'background 0.1s',
@@ -1155,45 +1168,49 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      {/* 1. Estado */}
+      {/* 1. Estado 5.6% */}
       <div><StateBadge state={hand.study_state} /></div>
-      {/* 2. Hero cards */}
+      {/* 2. Hero cards 5.6% */}
       <div style={{ display: 'flex', gap: 2 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
       </div>
-      {/* 3. Posição */}
+      {/* 3. Posição 5.6% */}
       <div><PosBadge pos={hand.position} /></div>
-      {/* 4. Resultado */}
-      <div style={{ textAlign: 'right' }}><ResultBadge result={hand.result} /></div>
-      {/* 5. Torneio (nome completo, flexível) */}
+      {/* 4. Resultado 5.6% */}
+      <div><ResultBadge result={hand.result} /></div>
+      {/* 5. Torneio 7.6% — nome só, sem buy-in */}
       <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
         {tourneyName}
       </div>
-      {/* 6. Buy-in */}
-      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      {/* 6. Buy-in 3.9% — valor total */}
+      <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
         {buyin}
       </div>
-      {/* 7. Board (flexível) */}
+      {/* 7. Board 20.3% — gaps +6 entre flop/turn e turn/river */}
       <div style={{ display: 'flex', gap: 2, minWidth: 0 }}>
         {hand.board?.length > 0
-          ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
+          ? hand.board.slice(0, 5).map((c, i) => (
+            <span key={i} style={{ display: 'inline-flex', marginLeft: (i === 3 || i === 4) ? 6 : 0 }}>
+              <PokerCard card={c} size="sm" />
+            </span>
+          ))
           : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>}
       </div>
-      {/* 8. Sala */}
+      {/* 8. Sala 3.6% */}
       <div style={{ textAlign: 'center' }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: siteColor, background: `${siteColor}15`, padding: '2px 5px', borderRadius: 3 }}>{siteShort}</span>
       </div>
-      {/* 9. Level/Blinds */}
-      <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>
-        {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
+      {/* 9. Level/Blinds 7.9% — combined */}
+      <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
+        {lvBlinds}
       </div>
-      {/* 10. Data + Hora */}
-      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', textAlign: 'right' }}>
-        <span>{dateStr}</span> <span style={{ color: '#94a3b8' }}>{timeStr}</span>
+      {/* 10. Data+Hora 8.3% */}
+      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
+        {dateStr} <span style={{ color: '#94a3b8' }}>{timeStr}</span>
       </div>
-      {/* 11. Botões */}
+      {/* 11. Botões 1fr (resto ~26%) */}
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
         {hand.raw && hand.all_players_actions && (
           <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"

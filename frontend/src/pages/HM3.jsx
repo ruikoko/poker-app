@@ -789,7 +789,8 @@ function HM3ImportPanel({ onImported }) {
 
 export default function HM3Page() {
   const [data, setData] = useState({ data: [], total: 0, pages: 1 })
-  const [page, setPage] = useState(1)
+  const [weekOffset, setWeekOffset] = useState(0)
+  const [totalWeeks, setTotalWeeks] = useState(1)
   const [filters, setFilters] = useState({ study_state: '', site: '', search: '', date_from: '', tag: '', result_min: '', result_max: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -798,12 +799,30 @@ export default function HM3Page() {
 
   const HM3_SITES = ['Winamax', 'PokerStars', 'WPN']
 
+  // Calculate Monday-Sunday range for a given week offset (0 = current week)
+  const getWeekRange = (offset) => {
+    const now = new Date()
+    const day = now.getDay()
+    const diffToMonday = day === 0 ? 6 : day - 1
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - diffToMonday - (offset * 7))
+    monday.setHours(0, 0, 0, 0)
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+    sunday.setHours(23, 59, 59, 999)
+    return {
+      from: monday.toISOString().slice(0, 10),
+      to: sunday.toISOString().slice(0, 10),
+      label: `${monday.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' })} — ${sunday.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' })}`
+    }
+  }
+
   const load = useCallback(() => {
     setLoading(true)
     setError('')
-    const params = { ...filters, page, page_size: 200 }
+    const week = getWeekRange(weekOffset)
+    const params = { ...filters, page: 1, page_size: 2000, date_from: week.from, date_to: week.to }
     if (!params.site) delete params.site
-    if (!params.date_from) delete params.date_from
     if (!params.tag) delete params.tag
     if (!params.search) delete params.search
     if (!params.study_state) delete params.study_state
@@ -811,13 +830,15 @@ export default function HM3Page() {
     if (!params.result_max) delete params.result_max
     hands.list(params)
       .then(d => {
-        // Filter to HM3 sites only
         const filtered = (d.data || []).filter(h => HM3_SITES.includes(h.site))
         setData({ ...d, data: filtered })
+        // Estimate total weeks from total hands
+        const tw = Math.max(1, Math.ceil((d.total || 0) / Math.max(1, filtered.length || 50)))
+        setTotalWeeks(Math.min(tw, 52))
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [page, filters])
+  }, [weekOffset, filters])
 
   const loadStats = useCallback(() => {
     hm3.stats().then(setStats).catch(() => {})
@@ -828,7 +849,7 @@ export default function HM3Page() {
 
   function set(key, val) {
     setFilters(f => ({ ...f, [key]: val }))
-    setPage(1)
+    setWeekOffset(0)
   }
 
   async function openDetail(id) {
@@ -947,7 +968,7 @@ export default function HM3Page() {
         <input type="number" placeholder="BB min" value={filters.result_min} onChange={e => set('result_min', e.target.value)} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 8px', fontSize: 12, width: 65 }} />
         <input type="number" placeholder="BB max" value={filters.result_max} onChange={e => set('result_max', e.target.value)} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 8px', fontSize: 12, width: 65 }} />
         {(filters.study_state || filters.site || filters.search || filters.date_from || filters.tag || filters.result_min || filters.result_max) && (
-          <button onClick={() => { setFilters({ study_state: '', site: '', search: '', date_from: '', tag: '', result_min: '', result_max: '' }); setPage(1) }} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }}>&#10005; Limpar</button>
+          <button onClick={() => { setFilters({ study_state: '', site: '', search: '', date_from: '', tag: '', result_min: '', result_max: '' }); setWeekOffset(0) }} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }}>&#10005; Limpar</button>
         )}
       </div>
 
@@ -1006,9 +1027,9 @@ export default function HM3Page() {
       {/* Pagination */}
       {data.pages > 1 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 24 }}>
-          <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, background: page <= 1 ? 'transparent' : '#1a1d27', color: page <= 1 ? '#374151' : '#e2e8f0', border: '1px solid #2a2d3a', cursor: page <= 1 ? 'not-allowed' : 'pointer' }}>&#8592;</button>
-          <span style={{ color: '#64748b', fontSize: 12 }}>Pág. {page} / {data.pages}</span>
-          <button disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, background: page >= data.pages ? 'transparent' : '#1a1d27', color: page >= data.pages ? '#374151' : '#e2e8f0', border: '1px solid #2a2d3a', cursor: page >= data.pages ? 'not-allowed' : 'pointer' }}>&#8594;</button>
+          <button onClick={() => setWeekOffset(w => w + 1)} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, background: '#1a1d27', color: '#e2e8f0', border: '1px solid #2a2d3a', cursor: 'pointer' }}>&#8592;</button>
+          <span style={{ color: '#64748b', fontSize: 12 }}>{getWeekRange(weekOffset).label}</span>
+          <button disabled={weekOffset <= 0} onClick={() => setWeekOffset(w => w - 1)} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, background: weekOffset <= 0 ? 'transparent' : '#1a1d27', color: weekOffset <= 0 ? '#374151' : '#e2e8f0', border: '1px solid #2a2d3a', cursor: weekOffset <= 0 ? 'not-allowed' : 'pointer' }}>&#8594;</button>
         </div>
       )}
 
