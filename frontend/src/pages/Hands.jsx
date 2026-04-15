@@ -1153,28 +1153,25 @@ function HandRow({ hand, onClick, onDelete, idx }) {
           : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>
         }
       </div>
-      <div style={{ width: 44, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ width: 75, flexShrink: 0, textAlign: 'right', paddingRight: 10 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ width: 200, flexShrink: 1, flexGrow: 1, fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>
+      <div style={{ width: 48, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ width: 75, flexShrink: 0, textAlign: 'right', paddingRight: 8 }}><ResultBadge result={hand.result} /></div>
+      <div style={{ width: 220, flexShrink: 0, fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>
         {hand.stakes || ''}
       </div>
-      <div style={{ display: 'flex', gap: 2, width: 130, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 2, width: 140, flexShrink: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
           : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>
         }
       </div>
-      <div style={{ width: 30, flexShrink: 0, textAlign: 'center' }}>
+      <div style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: siteColor, background: `${siteColor}15`, padding: '2px 5px', borderRadius: 3 }}>{siteShort}</span>
       </div>
-      <div style={{ width: 80, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', paddingRight: 10 }}>
+      <div style={{ width: 85, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', paddingRight: 8 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 11, color: '#64748b', width: 90, flexShrink: 0 }}>
-        {hand.played_at ? (() => {
-          const t = hand.played_at.slice(11, 16)
-          return <>{t || ''}</>
-        })() : ''}
+      <div style={{ fontSize: 11, color: '#64748b', width: 45, flexShrink: 0 }}>
+        {hand.played_at ? hand.played_at.slice(11, 16) : ''}
       </div>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
         {hand.raw && hand.all_players_actions && (
