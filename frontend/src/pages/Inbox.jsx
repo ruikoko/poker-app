@@ -102,7 +102,7 @@ function classifyFile(file) {
 }
 
 // ── Orphan Screenshot Row (componente separado para usar useState) ───────────
-function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
+function OrphanScreenshotRow({ o, onRematch, onDismiss, onDelete, selected, onToggleSelect }) {
   const [showImg, setShowImg] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const meta = (o.raw_json && o.raw_json.file_meta) || {}
@@ -119,10 +119,13 @@ function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
 
   return (
     <div style={{
-      padding: '7px 16px 7px 36px', fontSize: 11,
+      padding: '7px 16px 7px 24px', fontSize: 11,
       borderBottom: '1px solid rgba(30,33,48,0.6)',
+      background: selected ? 'rgba(239,68,68,0.04)' : 'transparent',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <input type="checkbox" checked={selected} onChange={() => onToggleSelect(o.id)}
+          style={{ accentColor: '#ef4444', cursor: 'pointer' }} />
         <span style={{ color: visionDone ? '#22c55e' : '#f59e0b', fontSize: 10 }}>{visionDone ? '●' : '○'}</span>
         <div
           style={{ flex: 1, minWidth: 0, cursor: imgB64 ? 'pointer' : 'default' }}
@@ -167,6 +170,18 @@ function OrphanScreenshotRow({ o, onRematch, onDismiss }) {
             background: 'transparent', color: '#4b5563',
             border: '1px solid #1e2130', cursor: 'pointer',
           }}
+          title="Esconder (não apaga)"
+        >Esconder</button>
+        <button
+          onClick={() => { if (confirm('Apagar este screenshot permanentemente?')) onDelete(o.id) }}
+          style={{
+            padding: '3px 6px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+            background: 'transparent', color: '#4b5563',
+            border: '1px solid #1e2130', cursor: 'pointer',
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+          onMouseLeave={e => e.currentTarget.style.color = '#4b5563'}
+          title="Apagar permanentemente"
         >&#10005;</button>
       </div>
       {showImg && imgSrc && (
@@ -244,6 +259,48 @@ export default function InboxPage() {
       loadOrphans()
     } catch (e) {
       alert(e.message)
+    }
+  }
+
+  // Orphan screenshots selection for batch delete
+  const [selectedOrphans, setSelectedOrphans] = useState(new Set())
+
+  function toggleOrphanSelect(id) {
+    setSelectedOrphans(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllOrphans() {
+    if (selectedOrphans.size === orphans.length) {
+      setSelectedOrphans(new Set())
+    } else {
+      setSelectedOrphans(new Set(orphans.map(o => o.id)))
+    }
+  }
+
+  async function bulkDeleteOrphans() {
+    if (selectedOrphans.size === 0) return
+    if (!confirm(`Apagar ${selectedOrphans.size} screenshot(s) permanentemente?`)) return
+    try {
+      await screenshots.bulkDelete([...selectedOrphans])
+      setSelectedOrphans(new Set())
+      loadOrphans()
+    } catch (e) {
+      alert('Erro: ' + e.message)
+    }
+  }
+
+  async function handleDeleteOrphan(entryId) {
+    try {
+      await screenshots.deleteEntry(entryId)
+      setSelectedOrphans(prev => { const next = new Set(prev); next.delete(entryId); return next })
+      loadOrphans()
+    } catch (e) {
+      alert('Erro: ' + e.message)
     }
   }
 
@@ -721,6 +778,25 @@ export default function InboxPage() {
                   border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer',
                 }}
               >&#x1F9E0; Re-enrich</button>
+              {selectedOrphans.size > 0 && (
+                <button
+                  onClick={e => { e.stopPropagation(); bulkDeleteOrphans() }}
+                  style={{
+                    padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                    background: 'rgba(239,68,68,0.15)', color: '#ef4444',
+                    border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
+                  }}
+                >&#128465; Apagar {selectedOrphans.size}</button>
+              )}
+              <button
+                onClick={e => { e.stopPropagation(); selectAllOrphans() }}
+                style={{
+                  padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                  background: selectedOrphans.size === orphans.length ? 'rgba(99,102,241,0.15)' : 'transparent',
+                  color: selectedOrphans.size === orphans.length ? '#818cf8' : '#4b5563',
+                  border: '1px solid #2a2d3a', cursor: 'pointer',
+                }}
+              >{selectedOrphans.size === orphans.length ? 'Desseleccionar' : 'Seleccionar todos'}</button>
               <span style={{ color: '#4b5563', fontSize: 12, transition: 'transform 0.2s', display: 'inline-block', transform: orphansExpanded ? 'rotate(180deg)' : 'none' }}>&#9660;</span>
             </div>
 
@@ -773,6 +849,9 @@ export default function InboxPage() {
                           o={o}
                           onRematch={handleRematch}
                           onDismiss={handleDismiss}
+                          onDelete={handleDeleteOrphan}
+                          selected={selectedOrphans.has(o.id)}
+                          onToggleSelect={toggleOrphanSelect}
                         />
                       ))}
                     </div>

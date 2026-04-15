@@ -1201,6 +1201,31 @@ function HandRow({ hand, onClick, onDelete, idx }) {
 // ── Componente: Tag Group (colapsável) ──────────────────────────────────────
 
 // TagGroup recebe metadados do endpoint tag-groups e faz lazy-load das mãos ao expandir
+function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand }) {
+  const [open, setOpen] = useState(false)
+  const bbColor = totalBB > 0 ? '#22c55e' : totalBB < 0 ? '#ef4444' : '#64748b'
+  return (
+    <div style={{ marginBottom: 8, border: `1px solid ${open ? 'rgba(99,102,241,0.3)' : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: open ? 'rgba(99,102,241,0.06)' : '#1a1d27', cursor: 'pointer', userSelect: 'none' }}
+        onMouseEnter={e => { if (!open) e.currentTarget.style.background = '#1e2130' }}
+        onMouseLeave={e => { if (!open) e.currentTarget.style.background = open ? 'rgba(99,102,241,0.06)' : '#1a1d27' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ display: 'inline-block', fontSize: 11, color: '#818cf8', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>{name}</span>
+          <span style={{ fontSize: 11, color: '#64748b' }}>{hands.length} mãos</span>
+        </div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, fontFamily: 'monospace' }}>
+          <span style={{ color: '#22c55e' }}>{wins}W</span>
+          <span style={{ color: '#ef4444' }}>{losses}L</span>
+          <span style={{ color: bbColor, fontWeight: 700 }}>{totalBB > 0 ? '+' : ''}{totalBB.toFixed(1)} BB</span>
+        </div>
+      </div>
+      {open && hands.map((h, idx) => <HandRow key={h.id} hand={h} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} idx={idx} />)}
+    </div>
+  )
+}
+
 function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
@@ -1377,8 +1402,8 @@ export default function HandsPage() {
     if (viewMode === 'tags') return
     setLoading(true)
     setError('')
-    // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo)
-    const params = { ...filters, page, page_size: 200, exclude_mtt_only: true }
+    const ps = viewMode === 'tournament' ? 1000 : 200
+    const params = { ...filters, page, page_size: ps, exclude_mtt_only: true }
     if (!params.date_from) delete params.date_from
     hands.list(params)
       .then(setData)
@@ -1431,6 +1456,7 @@ export default function HandsPage() {
         <div style={{ display: 'flex', gap: 4, background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8, padding: 3 }}>
           {[
             { mode: 'tags', icon: '\u25A4', label: 'Por Tags' },
+            { mode: 'tournament', icon: '\uD83C\uDFC6', label: 'Por Torneio' },
             { mode: 'grid', icon: '\u229E', label: 'Cards' },
             { mode: 'table', icon: '\u2261', label: 'Tabela' },
           ].map(({ mode, icon, label }) => (
@@ -1571,6 +1597,31 @@ export default function HandsPage() {
           })}
         </div>
       )}
+
+      {/* Tournament View — group hands by tournament name */}
+      {!loading && viewMode === 'tournament' && rows.length > 0 && (() => {
+        const tournGroups = {}
+        for (const h of rows) {
+          const tName = h.stakes || 'Sem torneio'
+          if (!tournGroups[tName]) tournGroups[tName] = []
+          tournGroups[tName].push(h)
+        }
+        const sorted = Object.entries(tournGroups).sort((a, b) => {
+          const aTime = Math.max(...a[1].map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
+          const bTime = Math.max(...b[1].map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
+          return bTime - aTime
+        })
+        return (
+          <div style={{ marginBottom: 24 }}>
+            {sorted.map(([tName, tHands]) => {
+              const wins = tHands.filter(h => h.result != null && Number(h.result) > 0).length
+              const losses = tHands.filter(h => h.result != null && Number(h.result) < 0).length
+              const totalBB = tHands.reduce((a, h) => a + (Number(h.result) || 0), 0)
+              return <TournamentGroup key={tName} name={tName} hands={tHands} wins={wins} losses={losses} totalBB={totalBB} onOpenDetail={openDetail} onDeleteHand={deleteHand} />
+            })}
+          </div>
+        )
+      })()}
 
       {/* Grid View */}
       {!loading && rows.length > 0 && viewMode === 'grid' && (

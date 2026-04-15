@@ -11,7 +11,6 @@ const NAV = [
   { to: '/villains',    label: 'Vilões' },
   { to: '/pnl',         label: 'P&L' },
   { to: '/discord',     label: 'Discord' },
-  { to: '/gto',          label: 'GTO Brain' },
 ]
 
 export default function Shell() {

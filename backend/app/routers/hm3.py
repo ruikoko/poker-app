@@ -221,8 +221,8 @@ def _parse_hand(hh_text, site_name):
                 hero_seat = seat_num
                 hero_name = name
     else:
-        # PokerStars/WPN: Seat 1: name (24500 in chips, $25 bounty)
-        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)\s+in chips(?:,\s*([^)]+))?\)", hh_text):
+        # PokerStars/WPN: Seat 1: name (24500 in chips, $25 bounty) OR Seat 1: name (24500)
+        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)(?:\s+in chips)?(?:,\s*([^)]+))?\)", hh_text):
             seat_num = int(sm.group(1))
             name = sm.group(2).strip()
             stack = float(sm.group(3).replace(",", ""))

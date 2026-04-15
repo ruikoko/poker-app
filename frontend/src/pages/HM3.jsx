@@ -189,6 +189,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
   const [notes, setNotes] = useState(hand.notes || '')
   const [tags, setTags] = useState((hand.tags || []).join(', '))
   const [saving, setSaving] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const streets = parseRawHH(hand.raw)
   const level = extractLevel(hand.raw)
@@ -240,9 +241,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           {hand.raw && (
-            <button onClick={() => navigator.clipboard.writeText(hand.raw)}
-              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)', cursor: 'pointer' }}
-            >Copiar HH</button>
+            <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.1)', color: '#22c55e', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(34,197,94,0.2)'}`, cursor: 'pointer' }}
+            >{copied ? '✓ Copiado' : 'Copiar HH'}</button>
           )}
           {hand.raw && hand.all_players_actions && (
             <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
@@ -253,6 +254,33 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             style={{ padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)', cursor: 'pointer', textDecoration: 'none' }}
           >Detalhe</a>
         </div>
+
+        {/* Info Grid */}
+        {(() => {
+          const m = hand.all_players_actions?._meta || {}
+          const blindsLabel = m.sb && m.bb ? `${Math.round(m.sb)}/${Math.round(m.bb)}${m.ante ? `(${Math.round(m.ante)})` : ''}` : ''
+          const resultColor = hand.result > 0 ? '#22c55e' : hand.result < 0 ? '#ef4444' : '#64748b'
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 14 }}>
+              {[
+                { l: 'SALA', v: hand.site },
+                { l: 'DATA', v: hand.played_at ? hand.played_at.slice(0, 10) : '—' },
+                { l: 'RESULTADO', v: hand.result != null ? `${hand.result > 0 ? '+' : ''}${Number(hand.result).toFixed(1)} BB` : '—', c: resultColor },
+                { l: 'POSIÇÃO', v: null, badge: hand.position },
+                { l: 'TORNEIO', v: hand.stakes || '—' },
+                { l: 'HAND ID', v: hand.hand_id || '—' },
+                { l: 'BLINDS', v: blindsLabel || '—' },
+                { l: 'LEVEL', v: level || (m.level != null ? `Lv ${m.level}` : '—') },
+                { l: 'JOGADORES', v: Object.keys(hand.all_players_actions || {}).filter(k => k !== '_meta').length || '—' },
+              ].map(({ l, v, c, badge }) => (
+                <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: 0.5, marginBottom: 3 }}>{l}</div>
+                  {badge ? <PosBadge pos={badge} /> : <div style={{ fontSize: 13, color: c || '#f1f5f9', fontWeight: 700, wordBreak: 'break-all' }}>{v}</div>}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         <div style={{ background: '#0f1117', borderRadius: 10, padding: '16px 20px', marginBottom: 20, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Hero &middot; <PosBadge pos={hand.position} /></div>
@@ -330,107 +358,150 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         {/* Parsed HH Actions */}
         {streets && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 10, textTransform: 'uppercase' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: '#94a3b8', fontWeight: 700, letterSpacing: 0.5, marginBottom: 10, textTransform: 'uppercase' }}>
               <span>Hand History</span>
               {(() => {
                 const m = hand.all_players_actions?._meta
-                return m ? <span style={{ fontFamily: 'monospace', color: '#4b5563', fontWeight: 600, fontSize: 10 }}>
+                return m ? <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600, fontSize: 14 }}>
                   {m.sb && m.bb ? `${Math.round(m.sb)}/${Math.round(m.bb)}${m.ante ? `(${Math.round(m.ante)})` : ''}` : ''}
-                  {m.level != null ? ` Lv ${m.level}` : ''}
+                  {m.level != null ? ` LV ${m.level}` : ''}
                 </span> : null
               })()}
             </div>
             {(() => {
-              // Calculate pot per street from raw
-              const potByStreet = {}
               const raw = hand.raw
               const meta = hand.all_players_actions?._meta
-              if (raw) {
-                let pot = 0
-                const numRe = /[\d,]+(?:\.\d+)?/
-                const anteMs = raw.match(/posts the ante ([\d,]+)/g) || []
-                for (const am of anteMs) { const n = am.match(numRe); if (n) pot += parseFloat(n[0].replace(/,/g, '')) }
-                const sbM = raw.match(/posts small blind ([\d,]+)/)
-                if (sbM) pot += parseFloat(sbM[1].replace(/,/g, ''))
-                const bbM = raw.match(/posts big blind ([\d,]+)/)
-                if (bbM) pot += parseFloat(bbM[1].replace(/,/g, ''))
-                const sects = [
-                  { key: 'preflop', start: raw.includes('*** PRE-FLOP ***') ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***', end: '*** FLOP ***' },
-                  { key: 'flop', start: '*** FLOP ***', end: '*** TURN ***' },
-                  { key: 'turn', start: '*** TURN ***', end: '*** RIVER ***' },
-                  { key: 'river', start: '*** RIVER ***', end: '*** SHOW' },
-                ]
-                for (const { key, start, end } of sects) {
-                  const si = raw.indexOf(start)
-                  if (si === -1) { potByStreet[key] = pot; continue }
-                  let ei = raw.indexOf(end, si + start.length)
-                  if (ei === -1) ei = raw.indexOf('*** SUMMARY ***', si)
-                  if (ei === -1) ei = raw.length
-                  const section = raw.slice(si, ei)
-                  for (const line of section.split('\n')) {
-                    const cM = line.match(/calls ([\d,]+)/)
-                    const bM = line.match(/bets ([\d,]+)/)
-                    const rM = line.match(/raises [\d,]+ to ([\d,]+)/)
-                    if (cM) pot += parseFloat(cM[1].replace(/,/g, ''))
-                    else if (rM) pot += parseFloat(rM[1].replace(/,/g, ''))
-                    else if (bM) pot += parseFloat(bM[1].replace(/,/g, ''))
-                  }
-                  const unc = section.match(/Uncalled bet \(([\d,]+)\)/)
-                  if (unc) pot -= parseFloat(unc[1].replace(/,/g, ''))
-                  potByStreet[key] = pot
+              const bb = meta?.bb || 1
+
+              // Build stack tracker
+              const stacks = {}
+              if (hand.all_players_actions) {
+                for (const [name, info] of Object.entries(hand.all_players_actions)) {
+                  if (name === '_meta') continue
+                  stacks[name] = { stack: info.stack || 0, invested: 0 }
                 }
               }
 
-              return streets.map(({ key, actions }) => {
-              const color = STREET_COLORS[key] || '#94a3b8'
-              const isShowdown = key === 'showdown'
-              const potVal = potByStreet[key]
-              const bbSize = hand.all_players_actions?._meta?.bb
-              return (
-                <div key={key} style={{ marginBottom: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color, textTransform: 'uppercase', padding: '2px 8px', borderRadius: 4, background: `${color}15`, border: `1px solid ${color}30` }}>{STREET_LABELS[key]}</span>
-                    {potVal > 0 && !isShowdown && (
-                      <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
-                        Pot: {Math.round(potVal).toLocaleString()}{bbSize ? ` (${(potVal / bbSize).toFixed(1)}bb)` : ''}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', background: isShowdown ? '#0d1020' : '#0f1117', borderRadius: 8, padding: isShowdown ? '8px 12px' : '4px 12px', border: `1px solid ${isShowdown ? '#2a2050' : '#1e2130'}`, marginTop: 6 }}>
-                    {actions.map((a, i) => {
-                      const showCards = a.cards || []
-                      const isShow = showCards.length > 0
-                      const playerInfo = hand.all_players_actions?.[a.name]
-                      const pos = playerInfo?.position
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: isShowdown ? '6px 0' : '3px 0', borderBottom: i < actions.length - 1 ? `1px solid ${isShowdown ? '#1e1840' : '#1a1d27'}` : 'none' }}>
-                          {pos && <PosBadge pos={pos} />}
-                          <span style={{ fontSize: 11, color: a.isHero ? '#818cf8' : '#94a3b8', fontWeight: a.isHero ? 600 : 400, minWidth: 100 }}>
-                            {a.name}{a.isHero && <span style={{ fontSize: 11, color: '#6366f1', marginLeft: 4 }}>(HERO)</span>}
-                          </span>
-                          {playerInfo?.stack_bb && !isShowdown && (
-                            <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', minWidth: 40 }}>{playerInfo.stack_bb}bb</span>
-                          )}
-                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-                            {isShow ? (
-                              <>
-                                <span style={{ fontSize: 11, color: '#8b5cf6', fontWeight: 600 }}>shows</span>
-                                <div style={{ display: 'flex', gap: 3 }}>
-                                  {showCards.map((c, ci) => <PokerCard key={ci} card={c} size="md" />)}
-                                </div>
-                                {a.action.includes('(') && <span style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>{a.action.match(/\((.+)\)/)?.[1] || ''}</span>}
-                              </>
-                            ) : (
-                              <ActionBadge text={a.action} />
+              // Deduct antes/blinds
+              if (raw) {
+                const sbM = raw.match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?small blind\s+([\d,]+)/i)
+                if (sbM) { const n = sbM[1].trim(); for (const k of Object.keys(stacks)) { if (k === n || k.includes(n) || n.includes(k)) { stacks[k].stack -= parseFloat(sbM[2].replace(/,/g, '')); stacks[k].invested = parseFloat(sbM[2].replace(/,/g, '')); break } } }
+                const bbM = raw.match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?big blind\s+([\d,]+)/i)
+                if (bbM) { const n = bbM[1].trim(); for (const k of Object.keys(stacks)) { if (k === n || k.includes(n) || n.includes(k)) { stacks[k].stack -= parseFloat(bbM[2].replace(/,/g, '')); stacks[k].invested = parseFloat(bbM[2].replace(/,/g, '')); break } } }
+              }
+
+              // Initial pot
+              let initPot = 0
+              if (raw) {
+                const anteMs = raw.match(/posts\s+(?:the\s+)?ante\s+([\d,]+)/gi) || []
+                for (const am of anteMs) { const n = am.match(/([\d,]+)/); if (n) initPot += parseFloat(n[0].replace(/,/g, '')) }
+                const sbM = raw.match(/posts\s+(?:the\s+)?small blind\s+([\d,]+)/i)
+                if (sbM) initPot += parseFloat(sbM[1].replace(/,/g, ''))
+                const bbM = raw.match(/posts\s+(?:the\s+)?big blind\s+([\d,]+)/i)
+                if (bbM) initPot += parseFloat(bbM[1].replace(/,/g, ''))
+              }
+
+              // Pot BEFORE each street
+              let runPot = initPot
+              const streetPots = {}
+              for (const { key, actions } of streets) {
+                streetPots[key] = runPot
+                for (const a of actions) {
+                  const callM = a.action.match(/calls ([\d,]+)/); const betM = a.action.match(/bets ([\d,]+)/)
+                  const raiseToM = a.action.match(/raises [\d,]+ to ([\d,]+)/)
+                  if (callM) runPot += parseFloat(callM[1].replace(/,/g, ''))
+                  else if (raiseToM) runPot += parseFloat(raiseToM[1].replace(/,/g, ''))
+                  else if (betM) runPot += parseFloat(betM[1].replace(/,/g, ''))
+                }
+              }
+
+              return streets.map(({ key, actions }, si) => {
+                const color = STREET_COLORS[key] || '#94a3b8'
+                const isShowdown = key === 'showdown'
+                const potBefore = streetPots[key] || 0
+                const potBB = bb > 0 ? (potBefore / bb).toFixed(1) : '?'
+
+                if (si > 0 && !isShowdown) {
+                  for (const k of Object.keys(stacks)) stacks[k].invested = 0
+                }
+
+                return (
+                  <div key={key} style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.5, color, textTransform: 'uppercase', padding: '3px 10px', borderRadius: 4, background: `${color}15`, border: `1px solid ${color}30` }}>{STREET_LABELS[key]}</span>
+                      {!isShowdown && potBefore > 0 && (
+                        <span style={{ fontSize: 14, color: '#94a3b8', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto', background: 'rgba(255,255,255,0.03)', padding: '3px 12px', borderRadius: 4 }}>
+                          Pot: {Math.round(potBefore).toLocaleString()} ({potBB}bb)
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', background: isShowdown ? '#0d1020' : '#0f1117', borderRadius: 8, padding: isShowdown ? '8px 12px' : '4px 12px', border: `1px solid ${isShowdown ? '#2a2050' : '#1e2130'}` }}>
+                      {actions.map((a, i) => {
+                        const showCards = a.cards || []
+                        const isShow = showCards.length > 0
+                        const playerInfo = hand.all_players_actions?.[a.name]
+                        const pos = playerInfo?.position
+                        const bounty = playerInfo?.bounty || playerInfo?.bounty_pct
+                        const showBounty = (key === 'preflop' || key === 'flop') && bounty != null
+
+                        // Track stacks
+                        const s = stacks[a.name]
+                        let actionBBLabel = ''
+                        if (s && !isShowdown) {
+                          const callM2 = a.action.match(/calls ([\d,]+)/)
+                          const betM2 = a.action.match(/bets ([\d,]+)/)
+                          const raiseToM2 = a.action.match(/raises [\d,]+ to ([\d,]+)/)
+                          const wonM = a.action.match(/collected ([\d,]+)/)
+                          if (callM2) { const amt = parseFloat(callM2[1].replace(/,/g, '')); s.stack -= amt; s.invested += amt; actionBBLabel = ` (${(amt/bb).toFixed(1)}bb)` }
+                          else if (raiseToM2) { const to = parseFloat(raiseToM2[1].replace(/,/g, '')); const add = to - s.invested; if (add > 0) s.stack -= add; s.invested = to; actionBBLabel = ` (${(to/bb).toFixed(1)}bb)` }
+                          else if (betM2) { const amt = parseFloat(betM2[1].replace(/,/g, '')); s.stack -= amt; s.invested += amt; actionBBLabel = ` (${(amt/bb).toFixed(1)}bb)` }
+                          else if (wonM) { actionBBLabel = ` (${(parseFloat(wonM[1].replace(/,/g,''))/bb).toFixed(1)}bb)` }
+                        }
+                        const currentBB = s ? (s.stack / bb).toFixed(1) : ''
+
+                        // Action colors
+                        let col = '#94a3b8', bg = 'rgba(148,163,184,0.06)'
+                        if (/fold/i.test(a.action)) { col = '#e2e8f0'; bg = 'rgba(226,232,240,0.06)' }
+                        else if (/check/i.test(a.action)) { col = '#64748b'; bg = 'rgba(100,116,139,0.06)' }
+                        else if (/call/i.test(a.action)) { col = '#22c55e'; bg = 'rgba(34,197,94,0.08)' }
+                        else if (/raise|bet/i.test(a.action)) { col = '#ef4444'; bg = 'rgba(239,68,68,0.08)' }
+                        else if (/collect|win|won/i.test(a.action)) { col = '#22c55e'; bg = 'rgba(34,197,94,0.1)' }
+                        if (/all-in/i.test(a.action)) { col = '#ef4444'; bg = 'rgba(239,68,68,0.12)' }
+
+                        return (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', padding: isShowdown ? '6px 0' : '5px 0', borderBottom: i < actions.length - 1 ? `1px solid ${isShowdown ? '#1e1840' : '#1a1d27'}` : 'none' }}>
+                            <div style={{ width: 54, flexShrink: 0 }}>{pos && <PosBadge pos={pos} />}</div>
+                            <div style={{ width: 140, flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: a.isHero ? 700 : 600, color: '#0a0c14', background: a.isHero ? '#a5b4fc' : '#fbbf24', padding: '2px 8px', borderRadius: 4, display: 'inline-block' }}>
+                                {a.name}{a.isHero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
+                              </span>
+                            </div>
+                            {!isShowdown && (
+                              <div style={{ width: 50, flexShrink: 0, textAlign: 'right', fontSize: 12, color: '#f1f5f9', fontFamily: 'monospace', fontWeight: 600 }}>{currentBB ? `${currentBB}bb` : ''}</div>
                             )}
+                            {showBounty ? (
+                              <div style={{ width: 50, flexShrink: 0, textAlign: 'right', fontSize: 11, paddingLeft: 4 }}>
+                                <span style={{ color: '#f1f5f9', fontWeight: 700, padding: '1px 5px', borderRadius: 3, background: 'rgba(30,58,95,0.4)' }}>{typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}</span>
+                              </div>
+                            ) : <div style={{ width: 50, flexShrink: 0 }} />}
+                            <div style={{ flex: 1, paddingLeft: 10, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                              {isShow ? (
+                                <>
+                                  <span style={{ fontSize: 11, color: '#8b5cf6', fontWeight: 600 }}>shows</span>
+                                  <div style={{ display: 'flex', gap: 3 }}>{showCards.map((c, ci) => <PokerCard key={ci} card={c} size="md" />)}</div>
+                                  {a.action.includes('(') && <span style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>{a.action.match(/\((.+)\)/)?.[1] || ''}</span>}
+                                </>
+                              ) : (
+                                <span style={{ fontSize: 13, fontWeight: 700, color: col, padding: '3px 12px', borderRadius: 5, background: bg, border: `1px solid ${col}25` }}>{a.action}{actionBBLabel}</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              )
-            })
+                )
+              })
             })()}
           </div>
         )}
@@ -496,9 +567,12 @@ function HM3HandRow({ hand, onClick, onDelete, idx }) {
         {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 12 }}>&mdash;</span>}
       </div>
       <div style={{ minWidth: 44, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
+      <div style={{ minWidth: 70, flexShrink: 0 }}>
+        {hand.tags?.length > 0 && <Tag t={hand.tags[0]} />}
+      </div>
       <div style={{ minWidth: 72, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
       <div style={{ minWidth: 140, maxWidth: 240, fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{hand.stakes || ''}</div>
-      <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 3, minWidth: 130, width: 130, flexShrink: 0 }}>
         {hand.board?.length > 0 ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
       </div>
       <div style={{ minWidth: 80, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
@@ -622,6 +696,8 @@ function HM3ImportPanel({ onImported }) {
   const [importResult, setImportResult] = useState(null)
   const [daysBack, setDaysBack] = useState('7')
   const [notaOnly, setNotaOnly] = useState(true)
+  const [reparsing, setReparsing] = useState(false)
+  const [reparseResult, setReparseResult] = useState(null)
 
   const handleImport = async (files) => {
     if (!files || files.length === 0) return
@@ -679,6 +755,14 @@ function HM3ImportPanel({ onImported }) {
           {importing ? 'A importar...' : '📂 Escolher CSV'}
           <input type="file" accept=".csv" hidden onChange={e => handleImport(e.target.files)} />
         </label>
+        <button onClick={async () => {
+          setReparsing(true); setReparseResult(null)
+          try { const r = await hm3.reParse(); setReparseResult(r); onImported?.() }
+          catch (e) { setReparseResult({ error: e.message }) }
+          finally { setReparsing(false) }
+        }} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer' }}>
+          {reparsing ? 'A re-parsear...' : '🔄 Re-parse'}
+        </button>
       </div>
       {importResult && !importResult.error && (
         <div style={{ marginTop: 8, fontSize: 12, color: '#94a3b8', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -691,6 +775,12 @@ function HM3ImportPanel({ onImported }) {
       )}
       {importResult?.error && (
         <div style={{ marginTop: 8, fontSize: 12, color: '#ef4444' }}>{importResult.error}</div>
+      )}
+      {reparseResult && !reparseResult.error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#f59e0b' }}>Re-parse: {reparseResult.updated || 0} actualizadas de {reparseResult.processed || 0}</div>
+      )}
+      {reparseResult?.error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#ef4444' }}>Re-parse erro: {reparseResult.error}</div>
       )}
     </div>
   )

@@ -405,3 +405,118 @@ def admin_reset_gg(current_user=Depends(require_auth)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+@router.post("/admin/reparse-gg")
+def admin_reparse_gg(current_user=Depends(require_auth)):
+    """
+    Re-parseia mãos GGPoker existentes que têm raw mas faltam dados.
+    Preenche hero_cards, board, position, result, all_players_actions com _meta.
+    """
+    import json as json_mod
+    from app.parsers.gg_hands import parse_hands as gg_parse
+    from app.db import get_conn
+
+    # Fetch GG hands with raw but missing data
+    rows = query(
+        """SELECT id, hand_id, raw, hero_cards, board, position, result, all_players_actions, tags
+           FROM hands
+           WHERE site = 'GGPoker'
+             AND raw IS NOT NULL AND raw != ''
+             AND (hero_cards IS NULL OR hero_cards = '{}' 
+                  OR all_players_actions IS NULL
+                  OR NOT (all_players_actions ? '_meta'))
+           ORDER BY id
+           LIMIT 5000"""
+    )
+
+    if not rows:
+        return {"processed": 0, "updated": 0, "message": "Nenhuma mão GG para re-parsear"}
+
+    updated = 0
+    errors = 0
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for hand in rows:
+                try:
+                    raw = hand.get("raw", "")
+                    if not raw or len(raw) < 50:
+                        continue
+
+                    # Re-parse the hand
+                    parsed_list, errs = gg_parse(raw.encode("utf-8"), "reparse.txt")
+                    if not parsed_list:
+                        continue
+
+                    parsed = parsed_list[0]
+                    apa = parsed.get("all_players_actions") or {}
+
+                    # Build update
+                    updates = []
+                    params = []
+
+                    if parsed.get("hero_cards") and (not hand.get("hero_cards") or hand["hero_cards"] == []):
+                        updates.append("hero_cards = %s")
+                        params.append(parsed["hero_cards"])
+
+                    if parsed.get("board") and (not hand.get("board") or hand["board"] == []):
+                        updates.append("board = %s")
+                        params.append(parsed["board"])
+
+                    if parsed.get("position") and not hand.get("position"):
+                        updates.append("position = %s")
+                        params.append(parsed["position"])
+
+                    if parsed.get("result") is not None and hand.get("result") is None:
+                        updates.append("result = %s")
+                        params.append(parsed["result"])
+
+                    if parsed.get("stakes") and not hand.get("stakes"):
+                        updates.append("stakes = %s")
+                        params.append(parsed["stakes"])
+
+                    if apa and "_meta" in apa:
+                        # Merge with existing apa if any
+                        existing_apa = hand.get("all_players_actions") or {}
+                        if isinstance(existing_apa, str):
+                            existing_apa = json_mod.loads(existing_apa)
+                        # Only update if existing doesn't have _meta
+                        if "_meta" not in existing_apa:
+                            updates.append("all_players_actions = %s")
+                            params.append(json_mod.dumps(apa))
+                        elif not existing_apa.get("_meta", {}).get("bb"):
+                            # _meta exists but bb is missing
+                            existing_apa["_meta"] = apa["_meta"]
+                            updates.append("all_players_actions = %s")
+                            params.append(json_mod.dumps(existing_apa))
+
+                    if updates:
+                        params.append(hand["id"])
+                        cur.execute(
+                            f"UPDATE hands SET {', '.join(updates)} WHERE id = %s",
+                            tuple(params)
+                        )
+                        updated += 1
+
+                    if updated % 200 == 0 and updated > 0:
+                        conn.commit()
+
+                except Exception as e:
+                    errors += 1
+                    if errors < 5:
+                        import logging
+                        logging.getLogger("hands").warning(f"Reparse GG error hand {hand.get('id')}: {e}")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro no reparse: {e}")
+    finally:
+        conn.close()
+
+    return {
+        "processed": len(rows),
+        "updated": updated,
+        "errors": errors,
+    }
