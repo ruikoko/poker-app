@@ -228,10 +228,14 @@ function parseHH(raw, apa) {
       let analysis = null, villainAnalysis = null
       const potBeforeAction = pot - (action === 'calls' ? amount : action === 'bets' ? amount : action === 'raises' ? (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) - (pi >= 0 ? pState[pi].totalInvested - (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) : 0) : 0)
       
-      if (isH && (action === 'calls' || action === 'folds')) {
+      if (isH && action === 'calls') {
         const facingBet = amount
-        const potBefore = action === 'calls' ? pot - amount : pot
+        const potBefore = pot - amount
         if (facingBet > 0) analysis = { type: 'facing', potBefore: Math.round(potBefore), facingBet: Math.round(facingBet), potOdds: +(facingBet/(potBefore+facingBet)*100).toFixed(1), mdf: +(potBefore/(potBefore+facingBet)*100).toFixed(1), potBB: +(potBefore/bb).toFixed(1), betBB: +(facingBet/bb).toFixed(1) }
+      } else if (isH && action === 'folds') {
+        // Hero folds — show what they were facing (last villain bet/raise)
+        const lastBetStep = [...steps].reverse().find(s => s.analysis?.type === 'facing')
+        if (lastBetStep?.analysis) analysis = { ...lastBetStep.analysis, heroFolded: true }
       } else if (isH && (action === 'bets' || action === 'raises')) {
         const betAmount = action === 'raises' ? (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) : amount
         const prevInv = action === 'raises' ? (pState[pi]?.totalInvested - betAmount + (pState[pi]?.totalInvested || 0)) : 0
@@ -242,6 +246,10 @@ function parseHH(raw, apa) {
         const betAmount = action === 'raises' ? (toM ? parseFloat(toM[1].replace(/,/g, '')) : amount) : amount
         const potBefore = pot - betAmount
         if (potBefore > 0) analysis = { type: 'facing', potBefore: Math.round(potBefore), facingBet: Math.round(betAmount), potOdds: +(betAmount/(potBefore+betAmount)*100).toFixed(1), mdf: +(potBefore/(potBefore+betAmount)*100).toFixed(1), potBB: +(potBefore/bb).toFixed(1), betBB: +(betAmount/bb).toFixed(1) }
+      } else if (!isH && (action === 'calls' || action === 'checks' || action === 'folds')) {
+        // Non-hero passive action — carry forward analysis if next to act is hero
+        const lastBetStep = [...steps].reverse().find(s => s.analysis?.type === 'facing')
+        if (lastBetStep?.analysis) analysis = lastBetStep.analysis
       }
 
       steps.push({
@@ -350,6 +358,7 @@ export default function ReplayerPage() {
   const [gtoMatch, setGtoMatch] = useState(null)
   const [gtoNode, setGtoNode] = useState(null)
   const [gtoLoading, setGtoLoading] = useState(false)
+  const [heroGtoAction, setHeroGtoAction] = useState(null)
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
@@ -379,10 +388,20 @@ export default function ReplayerPage() {
       .filter(([k]) => k !== '_meta')
       .map(([name, info]) => ({ name, ...info }))
     
-    // Determine active players (in pot) and remaining (yet to act)
+    // Determine active players (in pot) and remaining (yet to act after hero)
+    const SEAT_ORD = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
+    const heroSeatIdx = SEAT_ORD.indexOf(heroPos)
     const otherPlayers = allPlayers.filter(p => !HERO_NAMES.has(p.name.toLowerCase()))
     const activeStacks = otherPlayers.map(p => p.stack_bb || (p.stack / (m.bb || 1))).filter(s => s > 0)
     const activePositions = otherPlayers.map(p => p.position).filter(Boolean)
+    
+    // Remaining = players who act AFTER hero in preflop order (BTN, SB, BB if hero is CO)
+    const remainingPlayers = otherPlayers.filter(p => {
+      const pIdx = SEAT_ORD.indexOf(p.position)
+      return pIdx > heroSeatIdx
+    })
+    const remainingPositions = remainingPlayers.map(p => p.position).filter(Boolean)
+    const remainingStacks = remainingPlayers.map(p => p.stack_bb || (p.stack / (m.bb || 1))).filter(s => s > 0)
     
     // Extract level from raw
     let level = m.level || null
@@ -409,10 +428,75 @@ export default function ReplayerPage() {
       site: hand.site || 'Winamax',
       active_positions: activePositions.join(','),
       active_stacks_bb: activeStacks.map(s => Math.round(s*10)/10).join(','),
+      remaining_positions: remainingPositions.join(','),
+      remaining_stacks_bb: remainingStacks.map(s => Math.round(s*10)/10).join(','),
     }).then(d => {
       setGtoMatch(d)
       if (d.matches && d.matches.length > 0) {
-        gtoApi.getNode(d.matches[0].tree_id, 0).then(setGtoNode).catch(() => {})
+        const bestMatch = d.matches[0]
+        
+        // Build preflop action sequence for auto-navigation
+        const preflopActions = []
+        const raw = hand.raw || ''
+        const isW = raw.includes('*** PRE-FLOP ***')
+        const pfStart = isW ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***'
+        const pfEnd = '*** FLOP ***'
+        const si2 = raw.indexOf(pfStart)
+        if (si2 >= 0) {
+          let ei2 = raw.indexOf(pfEnd, si2)
+          if (ei2 === -1) ei2 = raw.indexOf('*** SUMMARY ***', si2)
+          if (ei2 === -1) ei2 = raw.length
+          const pfSection = raw.slice(si2 + pfStart.length, ei2)
+          for (const line of pfSection.split('\n')) {
+            const t2 = line.trim()
+            if (!t2 || t2.includes('posts') || t2.startsWith('Dealt') || t2.startsWith('***')) continue
+            const am = t2.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$/i)
+            if (!am) continue
+            const act2 = am[2].toLowerCase()
+            const rest2 = am[3]
+            const toM2 = rest2.match(/to\s+([\d,]+(?:\.\d+)?)/)
+            let amtBB = 0
+            if (act2 === 'raises' && toM2) amtBB = parseFloat(toM2[1].replace(/,/g, '')) / (m.bb || 1)
+            else if (act2 === 'calls') { const amM = rest2.match(/([\d,]+(?:\.\d+)?)/); if (amM) amtBB = parseFloat(amM[1].replace(/,/g, '')) / (m.bb || 1) }
+            else if (act2 === 'bets') { const amM = rest2.match(/([\d,]+(?:\.\d+)?)/); if (amM) amtBB = parseFloat(amM[1].replace(/,/g, '')) / (m.bb || 1) }
+            
+            let aType = 'F'
+            if (act2 === 'folds') aType = 'F'
+            else if (act2 === 'calls' || act2 === 'checks') aType = 'C'
+            else if (act2 === 'bets' || act2 === 'raises') aType = 'R'
+            
+            preflopActions.push({ type: aType, amount_bb: Math.round(amtBB * 10) / 10 })
+          }
+        }
+        
+        // Find hero's action index in sequence
+        const heroActionIdx = (() => {
+          const SEAT_ORD2 = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
+          const sorted = [...allPlayers].sort((a,b) => {
+            const ai2 = SEAT_ORD2.indexOf(a.position); const bi2 = SEAT_ORD2.indexOf(b.position)
+            return (ai2===-1?99:ai2) - (bi2===-1?99:bi2)
+          })
+          return sorted.findIndex(p => HERO_NAMES.has(p.name.toLowerCase()))
+        })()
+        
+        // Navigate to hero's node: send all actions BEFORE hero
+        const actionsBeforeHero = preflopActions.slice(0, heroActionIdx >= 0 ? heroActionIdx : preflopActions.length - 1)
+        
+        if (actionsBeforeHero.length > 0) {
+          gtoApi.navigate({ tree_id: bestMatch.tree_id, actions: actionsBeforeHero }).then(node => {
+            setGtoNode(node)
+          }).catch(() => {
+            // Fallback: load root
+            gtoApi.getNode(bestMatch.tree_id, 0).then(setGtoNode).catch(() => {})
+          })
+        } else {
+          gtoApi.getNode(bestMatch.tree_id, 0).then(setGtoNode).catch(() => {})
+        }
+        
+        // Store hero's actual action for comparison
+        if (heroActionIdx >= 0 && heroActionIdx < preflopActions.length) {
+          setHeroGtoAction(preflopActions[heroActionIdx])
+        }
       }
     }).catch(() => {}).finally(() => setGtoLoading(false))
   }, [hand])
@@ -753,7 +837,52 @@ export default function ReplayerPage() {
                         {/* Node info */}
                         <div style={{ marginTop: 8, fontSize: 10, color: '#4b5563' }}>
                           Player {gtoNode.player} · Nó {gtoNode.node_index} · {gtoNode.is_terminal ? 'Terminal' : `${actions.length} acções`}
+                          {gtoNode.path && <span> · Path: {gtoNode.path.join('→')}</span>}
                         </div>
+
+                        {/* Hero vs GTO comparison */}
+                        {heroGtoAction && gtoNode.hands && (() => {
+                          const heroType = heroGtoAction.type
+                          const heroTypeLabel = heroType === 'F' ? 'Fold' : heroType === 'C' ? 'Call' : 'Raise'
+                          // Find the action index matching hero's action
+                          const matchIdx = actions.findIndex(a => a.type === heroType)
+                          // Get hero's specific hand from hand.hero_cards
+                          let heroHandKey = null
+                          if (hand?.hero_cards?.length === 2) {
+                            const c1 = hand.hero_cards[0], c2 = hand.hero_cards[1]
+                            const r1 = c1.slice(0,-1).toUpperCase(), r2 = c2.slice(0,-1).toUpperCase()
+                            const s1 = c1.slice(-1).toLowerCase(), s2 = c2.slice(-1).toLowerCase()
+                            const RANK_ORDER = 'AKQJT98765432'
+                            const ri1 = RANK_ORDER.indexOf(r1), ri2 = RANK_ORDER.indexOf(r2)
+                            if (ri1 === ri2) heroHandKey = r1 + r2
+                            else if (ri1 < ri2) heroHandKey = r1 + r2 + (s1 === s2 ? 's' : 'o')
+                            else heroHandKey = r2 + r1 + (s1 === s2 ? 's' : 'o')
+                          }
+                          const heroHandData = heroHandKey ? gtoNode.hands[heroHandKey] : null
+                          let gtoFreq = 0
+                          let verdict = 'unknown'
+                          let verdictColor = '#64748b'
+                          if (heroHandData && matchIdx >= 0) {
+                            gtoFreq = (heroHandData.played[matchIdx] || 0) * 100
+                            if (gtoFreq >= 70) { verdict = '✓ GTO'; verdictColor = '#22c55e' }
+                            else if (gtoFreq >= 30) { verdict = '~ Misto'; verdictColor = '#f59e0b' }
+                            else { verdict = '✗ Desvio'; verdictColor = '#ef4444' }
+                          }
+                          return (
+                            <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 6, background: `${verdictColor}10`, border: `1px solid ${verdictColor}30` }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: verdictColor, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>Hero vs GTO</div>
+                              <div style={{ fontSize: 12, color: '#f1f5f9' }}>
+                                Hero: <span style={{ fontWeight: 700 }}>{heroTypeLabel}</span>
+                                {heroHandKey && <span style={{ color: '#94a3b8' }}> ({heroHandKey})</span>}
+                              </div>
+                              {heroHandData && (
+                                <div style={{ fontSize: 11, color: verdictColor, fontWeight: 700, marginTop: 2 }}>
+                                  {verdict} — GTO {heroTypeLabel}: {gtoFreq.toFixed(0)}%
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
 
                         {/* Navigate deeper */}
                         {actions.length > 0 && !gtoNode.is_terminal && (

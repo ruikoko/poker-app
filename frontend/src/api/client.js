@@ -241,6 +241,7 @@ export const gto = {
   },
   getNode: (treeId, nodeIndex) => req('GET', `/gto/trees/${treeId}/node/${nodeIndex}`),
   getNodes: (treeId, indices) => req('GET', `/gto/trees/${treeId}/nodes?indices=${indices.join(',')}`),
+  navigate: (data) => req('POST', '/gto/navigate', data),
   trees: (params = {}) => {
     const qs = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

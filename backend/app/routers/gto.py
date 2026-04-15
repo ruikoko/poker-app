@@ -159,56 +159,110 @@ def _phase_from_settings(s):
     return 'itm'
 
 def calc_score(settings, tree_sbb, hi):
+    """
+    Mesa-vs-mesa scoring. The hero's presence is irrelevant for matching.
+    We match the entire table setup: all positions + all stacks.
+    Then the hero's position determines which tree player corresponds to them.
+    
+    Weights (calibrated with Rui):
+    1. Phase: 20%  2. Hero pos: 20%  3. Hero stack: 20%
+    4. Active pos: 15%  5. Active stacks: 15%
+    6. Remaining count: 5%  7. Remaining stacks: 5%
+    """
     tp=_phase_from_settings(settings); hp=hi.get('phase','unknown')
     s1=_phase_score(tp,hp)
-    # Position
-    np=len(tree_sbb); pm=POS_MAPS.get(np,POS_MAPS.get(6))[:np]
-    hpos=hi.get('hero_position',''); best_ps=0; best_hi=0
-    for i,tp2 in enumerate(pm):
-        ps=_pos_score(hpos,tp2)
-        if ps>best_ps: best_ps=ps; best_hi=i
-    s2=best_ps
-    # Hero stack
-    hbb=hi.get('hero_stack_bb',0); thbb=tree_sbb[best_hi] if best_hi<len(tree_sbb) else 0
-    s3=_stack_score(hbb,thbb)
-    # Active positions
-    ap=hi.get('active_positions',[]); s4=50
-    if ap:
-        tpos=[pm[i] for i in range(np) if i!=best_hi]; used=set(); scores=[]
-        for a in ap:
-            best=0; bj=-1
-            for j,t in enumerate(tpos):
-                if j in used: continue
-                ps2=_pos_score(a,t)
-                if ps2>best: best=ps2; bj=j
-            if bj>=0: used.add(bj)
-            scores.append(best)
-        s4=sum(scores)/len(scores) if scores else 50
-    # Active stacks
-    astk=hi.get('active_stacks_bb',[]); s5=50
-    if astk:
-        rem=[s for i,s in enumerate(tree_sbb) if i!=best_hi]; scores=[]
-        for a in astk:
-            if rem:
-                b=min(rem,key=lambda s:abs(s-a)); scores.append(_stack_score(a,b)); rem.remove(b)
-            else: scores.append(0)
-        s5=sum(scores)/len(scores) if scores else 50
-    # Remaining count
-    rc=hi.get('remaining_count',0); tr=np-best_hi-1
+    
+    # Build position maps for BOTH table sizes
+    tree_np=len(tree_sbb); hand_np=hi.get('num_players', tree_np)
+    tree_pm=POS_MAPS.get(tree_np, POS_MAPS.get(6))[:tree_np]
+    hand_pm=POS_MAPS.get(hand_np, POS_MAPS.get(6))[:hand_np]
+    
+    # All hand players: hero + active + remaining
+    hand_players=[]  # list of {pos, stack_bb}
+    hpos=hi.get('hero_position',''); hbb=hi.get('hero_stack_bb',0)
+    if hpos and hbb>0:
+        hand_players.append({'pos':hpos,'stack_bb':hbb,'is_hero':True})
+    for i,ap in enumerate(hi.get('active_positions',[])):
+        stk=hi.get('active_stacks_bb',[])
+        s=stk[i] if i<len(stk) else 0
+        if ap and s>0: hand_players.append({'pos':ap,'stack_bb':s,'is_hero':False})
+    for i,rp in enumerate(hi.get('remaining_positions',[])):
+        stk=hi.get('remaining_stacks_bb',[])
+        s=stk[i] if i<len(stk) else 0
+        if rp and s>0: hand_players.append({'pos':rp,'stack_bb':s,'is_hero':False})
+    
+    # Match each hand player to best tree player (greedy by combined pos+stack score)
+    tree_available=list(range(tree_np))  # indices
+    mapping={}  # hand_player_idx -> tree_player_idx
+    hero_tree_idx=0
+    
+    # Sort hand players: hero first, then by importance
+    hp_sorted=sorted(range(len(hand_players)),key=lambda i: (0 if hand_players[i]['is_hero'] else 1))
+    
+    for hi_idx in hp_sorted:
+        hp2=hand_players[hi_idx]
+        best_combined=-1; best_ti=-1
+        for ti in tree_available:
+            tp2=tree_pm[ti] if ti<len(tree_pm) else ''
+            ps=_pos_score(hp2['pos'],tp2)
+            ss=_stack_score(hp2['stack_bb'],tree_sbb[ti] if ti<len(tree_sbb) else 0)
+            combined=ps*0.5+ss*0.5  # equal weight for greedy matching
+            if combined>best_combined: best_combined=combined; best_ti=ti
+        if best_ti>=0:
+            mapping[hi_idx]=best_ti
+            tree_available.remove(best_ti)
+            if hp2.get('is_hero'): hero_tree_idx=best_ti
+    
+    # Now score using the mapping
+    hero_hp=next((p for p in hand_players if p.get('is_hero')),None)
+    if hero_hp and 0 in mapping:
+        hero_ti=mapping[0]  # hero is always first in hp_sorted
+        s2=_pos_score(hero_hp['pos'], tree_pm[hero_ti] if hero_ti<len(tree_pm) else '')
+        s3=_stack_score(hero_hp['stack_bb'], tree_sbb[hero_ti] if hero_ti<len(tree_sbb) else 0)
+    else:
+        s2=50; s3=50; hero_ti=0
+    
+    # Active players scores (those already in the pot)
+    active_pos_scores=[]; active_stk_scores=[]
+    active_positions=hi.get('active_positions',[])
+    active_stacks=hi.get('active_stacks_bb',[])
+    for i,hp_idx in enumerate(hp_sorted):
+        if hand_players[hp_idx].get('is_hero'): continue
+        if hand_players[hp_idx]['pos'] not in active_positions: continue
+        ti=mapping.get(hp_idx)
+        if ti is not None:
+            active_pos_scores.append(_pos_score(hand_players[hp_idx]['pos'], tree_pm[ti] if ti<len(tree_pm) else ''))
+            active_stk_scores.append(_stack_score(hand_players[hp_idx]['stack_bb'], tree_sbb[ti] if ti<len(tree_sbb) else 0))
+    s4=sum(active_pos_scores)/len(active_pos_scores) if active_pos_scores else 50
+    s5=sum(active_stk_scores)/len(active_stk_scores) if active_stk_scores else 50
+    
+    # Remaining players
+    rem_positions=hi.get('remaining_positions',[])
+    rem_stk_scores=[]
+    for i,hp_idx in enumerate(hp_sorted):
+        if hand_players[hp_idx].get('is_hero'): continue
+        if hand_players[hp_idx]['pos'] not in rem_positions: continue
+        ti=mapping.get(hp_idx)
+        if ti is not None:
+            rem_stk_scores.append(_stack_score(hand_players[hp_idx]['stack_bb'], tree_sbb[ti] if ti<len(tree_sbb) else 0))
+    rc=len(rem_positions); tr=tree_np-hero_ti-1
     s6=_remaining_n_score(rc,max(0,tr))
-    # Remaining stacks
-    rstk=hi.get('remaining_stacks_bb',[]); s7=50
-    if rstk:
-        ta=tree_sbb[best_hi+1:] if best_hi+1<len(tree_sbb) else []; scores=[]
-        for r in rstk:
-            if ta:
-                b=min(ta,key=lambda s:abs(s-r)); scores.append(_stack_score(r,b)); ta.remove(b)
-            else: scores.append(0)
-        s7=sum(scores)/len(scores) if scores else 50
-    total=s1*0.20+s2*0.20+s3*0.20+s4*0.15+s5*0.15+s6*0.05+s7*0.05
+    s7=sum(rem_stk_scores)/len(rem_stk_scores) if rem_stk_scores else 50
+    
+    # Num players penalty (not in the 7 factors but important)
+    np_pen=0
+    if abs(tree_np-hand_np)==1: np_pen=5
+    elif abs(tree_np-hand_np)==2: np_pen=15
+    elif abs(tree_np-hand_np)>2: np_pen=30
+    
+    total=s1*0.20+s2*0.20+s3*0.20+s4*0.15+s5*0.15+s6*0.05+s7*0.05-np_pen
+    total=max(0,min(100,total))
+    
+    thbb=tree_sbb[hero_ti] if hero_ti<len(tree_sbb) else 0
     return {"score":round(total,1),"phase":round(s1,1),"position":round(s2,1),"hero_stack":round(s3,1),
         "active_pos":round(s4,1),"active_stk":round(s5,1),"remaining_n":round(s6,1),"remaining_stk":round(s7,1),
-        "tree_phase":tp,"hero_match_idx":best_hi,"hero_stack_diff":round(abs(hbb-thbb),1)}
+        "tree_phase":tp,"hero_match_idx":hero_ti,"hero_stack_diff":round(abs(hbb-thbb),1),
+        "mapping":{str(k):v for k,v in mapping.items()}}
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -320,6 +374,95 @@ def update_tree(tid:int,data:dict,_=Depends(require_auth)):
     finally: conn.close()
     return {"updated":tid}
 
+@router.post("/navigate")
+def navigate_tree(data: dict, _=Depends(require_auth)):
+    """
+    Navigate a tree following a sequence of real hand actions.
+    Input: {tree_id, actions: [{player_idx, type: 'F'|'C'|'R', amount_bb}]}
+    Returns: the node reached after following all actions.
+    """
+    ensure_gto_schema()
+    tid = data.get("tree_id")
+    actions_seq = data.get("actions", [])
+    if not tid: raise HTTPException(400, "tree_id required")
+    
+    # Get tree settings for BB conversion
+    trees = query("SELECT settings_json FROM gto_trees WHERE id=%s", (tid,))
+    if not trees: raise HTTPException(404, "Tree not found")
+    settings = trees[0].get("settings_json") or {}
+    if isinstance(settings, str):
+        try: settings = json.loads(settings)
+        except: settings = {}
+    hd = settings.get("handdata", {})
+    blinds = hd.get("blinds", [])
+    tree_bb = max(blinds[:2]) if len(blinds) >= 2 else 1
+    
+    # Start at root
+    current_node_idx = 0
+    path = [0]
+    
+    for act in actions_seq:
+        # Get current node
+        rows = query("SELECT node_index,player,actions,is_terminal FROM gto_nodes WHERE tree_id=%s AND node_index=%s", (tid, current_node_idx))
+        if not rows: break
+        node = rows[0]
+        if node["is_terminal"]: break
+        
+        node_actions = node["actions"]
+        if isinstance(node_actions, str):
+            try: node_actions = json.loads(node_actions)
+            except: break
+        
+        act_type = act.get("type", "F").upper()  # F, C, R
+        act_amount_bb = act.get("amount_bb", 0)
+        act_amount_chips = act_amount_bb * tree_bb  # convert to tree chips
+        
+        # Find best matching action in tree
+        best_action = None
+        best_dist = float('inf')
+        
+        for ta in node_actions:
+            ta_type = ta.get("type", "")
+            if ta_type != act_type: continue
+            if act_type == 'F' or act_type == 'C':
+                best_action = ta
+                break  # Only one fold/call per node
+            elif act_type == 'R':
+                # Match raise by closest amount
+                ta_amount = ta.get("amount", 0)
+                dist = abs(ta_amount - act_amount_chips)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_action = ta
+        
+        if not best_action:
+            # If no exact type match, try fold as fallback
+            for ta in node_actions:
+                if ta.get("type") == "F":
+                    best_action = ta
+                    break
+        
+        if best_action and best_action.get("node") is not None:
+            current_node_idx = best_action["node"]
+            path.append(current_node_idx)
+        else:
+            break
+    
+    # Fetch final node with hands
+    rows = query("SELECT node_index,player,street,sequence,actions,hands,is_terminal,has_mixed FROM gto_nodes WHERE tree_id=%s AND node_index=%s", (tid, current_node_idx))
+    if not rows: raise HTTPException(404, "Node not found")
+    node = dict(rows[0])
+    ha = node["hands"]
+    if isinstance(ha, list):
+        hd2 = {}
+        for i, h in enumerate(HAND_ORDER):
+            if i < len(ha) and ha[i] is not None:
+                w, p, e = ha[i]; hd2[h] = {"weight": w, "played": p, "evs": e}
+        node["hands"] = hd2
+    node["hand_order"] = HAND_ORDER
+    node["path"] = path
+    return node
+
 @router.get("/match")
 def match_tree(hero_stack_bb:float, format:str, num_players:int,
     hero_position:Optional[str]=None, level:Optional[int]=None, site:Optional[str]=None,
@@ -335,7 +478,8 @@ def match_tree(hero_stack_bb:float, format:str, num_players:int,
     rp=[x.strip() for x in remaining_positions.split(',')] if remaining_positions else []
     rsk=[float(x) for x in remaining_stacks_bb.split(',')] if remaining_stacks_bb else []
     hi={'hero_position':hero_position or '','hero_stack_bb':hero_stack_bb,'phase':hp,
-        'active_positions':ap,'active_stacks_bb':ask,'remaining_count':len(rp),'remaining_stacks_bb':rsk}
+        'active_positions':ap,'active_stacks_bb':ask,'remaining_count':len(rp),
+        'remaining_positions':rp,'remaining_stacks_bb':rsk,'num_players':num_players}
     results=[]
     for t in rows:
         s=t.get("settings_json") or {}
