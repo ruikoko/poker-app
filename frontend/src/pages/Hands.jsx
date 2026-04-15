@@ -86,10 +86,9 @@ function PokerCard({ card, size = 'md' }) {
 function BoardCards({ board, size = 'sm' }) {
   if (!board || board.length === 0) return <span style={{ color: '#4b5563', fontSize: 12 }}>&mdash;</span>
   return (
-    <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
       {board.slice(0, 5).map((c, i) => (
-        <span key={i}>
-          {(i === 3 || i === 4) && <span style={{ display: 'inline-block', width: 4 }} />}
+        <span key={i} style={{ display: 'inline-flex', marginLeft: (i === 3 || i === 4) ? 8 : 0 }}>
           <PokerCard card={c} size={size} />
         </span>
       ))}
@@ -1132,48 +1131,70 @@ function HandRow({ hand, onClick, onDelete, idx }) {
   const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : hand.site === 'WPN' ? 'WPN' : hand.site === 'GGPoker' ? 'GG' : '?'
   const siteColor = hand.site === 'Winamax' ? '#f59e0b' : hand.site === 'PokerStars' ? '#ef4444' : hand.site === 'WPN' ? '#22c55e' : '#6366f1'
 
+  // Extract buy-in from stakes
+  const buyinMatch = (hand.stakes || '').match(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/i)
+  const buyin = buyinMatch ? buyinMatch[0].replace(/\s+/g, '') : ''
+  // Tournament name without buy-in part
+  const tourneyName = (hand.stakes || '').replace(/\(.*?\)/g, '').replace(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/g, '').replace(/EUR|USD/gi, '').trim() || hand.stakes || ''
+  // Full date + time
+  const dateStr = hand.played_at ? hand.played_at.slice(5, 10) : ''
+  const timeStr = hand.played_at ? hand.played_at.slice(11, 16) : ''
+
   return (
     <div
       onClick={onClick}
       style={{
-        display: 'flex', alignItems: 'center', gap: 0,
-        padding: '8px 14px',
+        display: 'grid',
+        gridTemplateColumns: '46px 54px 48px 68px minmax(100px,2fr) 80px minmax(80px,1.2fr) 32px 78px 90px 56px',
+        alignItems: 'center', gap: 6,
+        padding: '7px 12px',
         background: zebra,
         borderBottom: '1px solid rgba(255,255,255,0.03)',
-        cursor: 'pointer',
-        transition: 'background 0.1s',
+        cursor: 'pointer', transition: 'background 0.1s',
       }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
       onMouseLeave={e => e.currentTarget.style.background = zebra}
     >
-      <div style={{ width: 52, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ display: 'flex', gap: 3, width: 58, flexShrink: 0 }}>
+      {/* 1. Estado */}
+      <div><StateBadge state={hand.study_state} /></div>
+      {/* 2. Hero cards */}
+      <div style={{ display: 'flex', gap: 2 }}>
         {hand.hero_cards?.length > 0
           ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
-          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>
-        }
+          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
       </div>
-      <div style={{ width: 48, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ width: 75, flexShrink: 0, textAlign: 'right', paddingRight: 8 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ width: 220, flexShrink: 0, fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>
-        {hand.stakes || ''}
+      {/* 3. Posição */}
+      <div><PosBadge pos={hand.position} /></div>
+      {/* 4. Resultado */}
+      <div style={{ textAlign: 'right' }}><ResultBadge result={hand.result} /></div>
+      {/* 5. Torneio (nome completo, flexível) */}
+      <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+        {tourneyName}
       </div>
-      <div style={{ display: 'flex', gap: 2, width: 140, flexShrink: 0 }}>
+      {/* 6. Buy-in */}
+      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {buyin}
+      </div>
+      {/* 7. Board (flexível) */}
+      <div style={{ display: 'flex', gap: 2, minWidth: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />)
-          : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>
-        }
+          : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>}
       </div>
-      <div style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>
+      {/* 8. Sala */}
+      <div style={{ textAlign: 'center' }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: siteColor, background: `${siteColor}15`, padding: '2px 5px', borderRadius: 3 }}>{siteShort}</span>
       </div>
-      <div style={{ width: 85, flexShrink: 0, fontSize: 11, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', paddingRight: 8 }}>
+      {/* 9. Level/Blinds */}
+      <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
-      <div style={{ fontSize: 11, color: '#64748b', width: 45, flexShrink: 0 }}>
-        {hand.played_at ? hand.played_at.slice(11, 16) : ''}
+      {/* 10. Data + Hora */}
+      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', textAlign: 'right' }}>
+        <span>{dateStr}</span> <span style={{ color: '#94a3b8' }}>{timeStr}</span>
       </div>
-      <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+      {/* 11. Botões */}
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
         {hand.raw && hand.all_players_actions && (
           <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
             onClick={e => e.stopPropagation()}
