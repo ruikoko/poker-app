@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { equity } from '../api/client'
+import { HERO_NAMES } from '../heroNames'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const STREET_COLORS = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', river: '#ef4444', showdown: '#8b5cf6' }
-const HERO_NAMES = new Set(['hero','schadenfreud','thinvalium','sapz','misterpoker1973','cringemeariver','flightrisk','karluz','koumpounophobia','lauro dermio'])
 const SEAT_ORDER = ['UTG','UTG1','UTG2','MP','MP1','HJ','CO','BTN','SB','BB']
 
 function RCard({ card, faceDown, size = 'md' }) {
@@ -55,8 +55,13 @@ function parseHH(raw, apa) {
   let pot = 0
   const antes = raw.match(/posts the ante ([\d,]+)/g) || []
   for (const a of antes) { const n = a.match(/[\d,]+/); if (n) pot += parseFloat(n[0].replace(/,/g, '')) }
-  const sbM = raw.match(/posts small blind ([\d,]+)/); if (sbM) pot += parseFloat(sbM[1].replace(/,/g, ''))
-  const bbM = raw.match(/posts big blind ([\d,]+)/); if (bbM) pot += parseFloat(bbM[1].replace(/,/g, ''))
+  const sbM = raw.match(/(.+?)[: ]+posts small blind ([\d,]+)/); if (sbM) pot += parseFloat(sbM[2].replace(/,/g, ''))
+  const bbM = raw.match(/(.+?)[: ]+posts big blind ([\d,]+)/); if (bbM) pot += parseFloat(bbM[2].replace(/,/g, ''))
+
+  // Set initial currentBet for SB and BB so chips show at preflop start
+  pState.forEach(p => { p.currentBet = 0 })
+  if (sbM) { const sbPlayer = sbM[1].trim(); const idx = pState.findIndex(p => p.name === sbPlayer); if (idx >= 0) pState[idx].currentBet = parseFloat(sbM[2].replace(/,/g, '')) }
+  if (bbM) { const bbPlayer = bbM[1].trim(); const idx = pState.findIndex(p => p.name === bbPlayer); if (idx >= 0) pState[idx].currentBet = parseFloat(bbM[2].replace(/,/g, '')) }
 
   const steps = [{ street: 'preflop', label: 'Pre-Flop', action: 'Blinds posted', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [], ps: pState.map(p => ({...p})), analysis: null }]
 
@@ -90,9 +95,15 @@ function parseHH(raw, apa) {
       const isH = pi >= 0 && pState[pi].isHero
 
       if (action === 'folds' && pi >= 0) pState[pi].folded = true
-      else if (action === 'calls') pot += amount
-      else if (action === 'bets') pot += amount
-      else if (action === 'raises') { const toM = rest.match(/to ([\d,]+)/); pot += toM ? parseFloat(toM[1].replace(/,/g, '')) : amount }
+      else if (action === 'calls') { pot += amount; if (pi >= 0) pState[pi].currentBet = (pState[pi].currentBet || 0) + amount }
+      else if (action === 'bets') { pot += amount; if (pi >= 0) pState[pi].currentBet = amount }
+      else if (action === 'raises') {
+        const toM = rest.match(/to ([\d,]+)/)
+        const toAmount = toM ? parseFloat(toM[1].replace(/,/g, '')) : amount
+        const prevBet = pi >= 0 ? (pState[pi].currentBet || 0) : 0
+        pot += (toAmount - prevBet)
+        if (pi >= 0) pState[pi].currentBet = toAmount
+      }
 
       let analysis = null
       if (isH && (action === 'calls' || action === 'folds')) {
@@ -116,6 +127,42 @@ function parseHH(raw, apa) {
 }
 
 const btn = { background: 'rgba(255,255,255,0.05)', border: '1px solid #2a2d3a', borderRadius: 4, padding: '4px 8px', color: '#94a3b8', cursor: 'pointer', fontSize: 12, lineHeight: 1 }
+
+// ── Visual components: dealer button and bet chips ────────────────────────
+
+function DealerButton() {
+  return (
+    <div style={{
+      width: 20, height: 20, borderRadius: '50%',
+      background: 'radial-gradient(circle at 30% 30%, #fff, #e2e8f0 60%, #94a3b8)',
+      border: '1.5px solid #64748b',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 11, fontWeight: 800, color: '#0f172a',
+      fontFamily: "'Fira Code',monospace",
+      boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
+      userSelect: 'none',
+    }}>D</div>
+  )
+}
+
+function ChipStack({ amount, bb, label }) {
+  // Stack of 3 tiny chips + amount in BB. Label optional (SB/BB).
+  const amountBB = bb > 0 ? (amount / bb).toFixed(1) : '0'
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+      <div style={{ position: 'relative', width: 22, height: 14 }}>
+        {/* 3 stacked chips */}
+        <div style={{ position: 'absolute', left: 0, top: 6, width: 18, height: 6, borderRadius: '50%', background: 'radial-gradient(ellipse at 50% 30%, #fbbf24, #d97706 70%, #78350f)', border: '1px solid rgba(0,0,0,0.4)', boxShadow: '0 1px 2px rgba(0,0,0,0.5)' }} />
+        <div style={{ position: 'absolute', left: 2, top: 3, width: 18, height: 6, borderRadius: '50%', background: 'radial-gradient(ellipse at 50% 30%, #ef4444, #b91c1c 70%, #450a0a)', border: '1px solid rgba(0,0,0,0.4)', boxShadow: '0 1px 2px rgba(0,0,0,0.5)' }} />
+        <div style={{ position: 'absolute', left: 4, top: 0, width: 18, height: 6, borderRadius: '50%', background: 'radial-gradient(ellipse at 50% 30%, #e2e8f0, #94a3b8 70%, #334155)', border: '1px solid rgba(0,0,0,0.4)', boxShadow: '0 1px 2px rgba(0,0,0,0.5)' }} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(0,0,0,0.75)', padding: '1px 5px', borderRadius: 3, border: '1px solid rgba(251,191,36,0.3)' }}>
+        {label && <span style={{ fontSize: 8, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.3 }}>{label}</span>}
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', fontFamily: "'Fira Code',monospace", lineHeight: 1 }}>{amountBB}bb</span>
+      </div>
+    </div>
+  )
+}
 
 export default function Replayer({ hand }) {
   const { steps, heroIdx } = parseHH(hand?.raw, hand?.all_players_actions)
@@ -180,16 +227,40 @@ export default function Replayer({ hand }) {
         {ps.map((p, i) => {
           const pos = positions[i]
           const active = step.actorIdx === i
+          // Chip stack position: between player and pot (pot at 50%,38%)
+          const potX = 50, potY = 38
+          const chipX = pos.x + (potX - pos.x) * 0.35
+          const chipY = pos.y + (potY - pos.y) * 0.35
+          const showChips = (p.currentBet || 0) > 0 && !p.folded
+          const blindLabel = p.position === 'SB' ? 'SB' : p.position === 'BB' ? 'BB' : null
+          // Dealer button position: slightly offset from player toward pot
+          const dbX = pos.x + (potX - pos.x) * 0.18
+          const dbY = pos.y + (potY - pos.y) * 0.18
           return (
-            <div key={i} style={{ position: 'absolute', left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', minWidth: 85, transition: 'all 0.3s' }}>
-              <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginBottom: 3 }}>
-                {p.cards?.length > 0 ? p.cards.map((c, ci) => <RCard key={ci} card={c} size={p.isHero ? 'lg' : 'sm'} />) : !p.folded ? <><RCard faceDown size="sm" /><RCard faceDown size="sm" /></> : null}
-              </div>
-              <div style={{ background: active ? 'rgba(251,191,36,0.15)' : p.isHero ? 'rgba(99,102,241,0.12)' : 'rgba(0,0,0,0.6)', border: `1px solid ${active ? '#fbbf24' : p.isHero ? '#6366f1' : '#2a2d3a'}`, borderRadius: 6, padding: '3px 8px', opacity: p.folded ? 0.35 : 1, transition: 'all 0.3s' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: p.isHero ? '#818cf8' : '#94a3b8' }}>{p.position}</div>
-                <div style={{ fontSize: 11, fontWeight: p.isHero ? 700 : 500, color: p.isHero ? '#c7d2fe' : '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 85 }}>{p.name}</div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace' }}>{p.stackBB}BB</div>
-                {p.bounty != null && <div style={{ fontSize: 9, color: '#f59e0b' }}>{typeof p.bounty === 'string' ? p.bounty.replace('€', ' EUR') : `${p.bounty} EUR`}</div>}
+            <div key={i}>
+              {/* Dealer button on BTN, or on SB in heads-up (no BTN position) */}
+              {(p.position === 'BTN' || (p.position === 'SB' && !ps.some(x => x.position === 'BTN'))) && (
+                <div style={{ position: 'absolute', left: `${dbX}%`, top: `${dbY}%`, transform: 'translate(-50%,-50%)', zIndex: 3 }}>
+                  <DealerButton />
+                </div>
+              )}
+              {/* Bet chips (blinds pre-flop, then raises/calls/bets per street) */}
+              {showChips && (
+                <div style={{ position: 'absolute', left: `${chipX}%`, top: `${chipY}%`, transform: 'translate(-50%,-50%)', zIndex: 2 }}>
+                  <ChipStack amount={p.currentBet} bb={meta.bb || 1} label={step.street === 'preflop' ? blindLabel : null} />
+                </div>
+              )}
+              {/* Player box */}
+              <div style={{ position: 'absolute', left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', minWidth: 85, transition: 'all 0.3s' }}>
+                <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginBottom: 3 }}>
+                  {p.cards?.length > 0 ? p.cards.map((c, ci) => <RCard key={ci} card={c} size={p.isHero ? 'lg' : 'sm'} />) : !p.folded ? <><RCard faceDown size="sm" /><RCard faceDown size="sm" /></> : null}
+                </div>
+                <div style={{ background: active ? 'rgba(251,191,36,0.15)' : p.isHero ? 'rgba(99,102,241,0.12)' : 'rgba(0,0,0,0.6)', border: `1px solid ${active ? '#fbbf24' : p.isHero ? '#6366f1' : '#2a2d3a'}`, borderRadius: 6, padding: '3px 8px', opacity: p.folded ? 0.35 : 1, transition: 'all 0.3s' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: p.isHero ? '#818cf8' : '#94a3b8' }}>{p.position}</div>
+                  <div style={{ fontSize: 11, fontWeight: p.isHero ? 700 : 500, color: p.isHero ? '#c7d2fe' : '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 85 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace' }}>{p.stackBB}BB</div>
+                  {p.bounty != null && <div style={{ fontSize: 9, color: '#f59e0b' }}>{typeof p.bounty === 'string' ? p.bounty.replace('€', ' EUR') : `${p.bounty} EUR`}</div>}
+                </div>
               </div>
             </div>
           )

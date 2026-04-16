@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { hands, equity } from '../api/client'
 import Replayer from '../components/Replayer'
+import { isHero } from '../heroNames'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -378,15 +379,13 @@ function parseRawHH(raw, playerNames) {
         const realName = nameMap[anonName] || anonName
         const cards = showM[2].trim().split(/\s+/)
         const rest = showM[3] ? showM[3].trim() : ''
-        const heroNames = ['hero', 'schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver', 'flightrisk', 'karluz', 'koumpounophobia', 'lauro dermio']
-        const isHero = heroNames.some(h => anonName.toLowerCase() === h || realName.toLowerCase() === h)
-        showdownActions.push({ name: realName, action: `shows [${showM[2].trim()}]${rest ? ' ' + rest : ''}`, cards, isHero })
+        const isHeroFlag = isHero(anonName) || isHero(realName)
+        showdownActions.push({ name: realName, action: `shows [${showM[2].trim()}]${rest ? ' ' + rest : ''}`, cards, isHero: isHeroFlag })
       } else if (collectM) {
         const anonName = collectM[1].trim()
         const realName = nameMap[anonName] || anonName
-        const heroNames = ['hero', 'schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver', 'flightrisk', 'karluz', 'koumpounophobia', 'lauro dermio']
-        const isHero = heroNames.some(h => anonName.toLowerCase() === h || realName.toLowerCase() === h)
-        showdownActions.push({ name: realName, action: `collected ${collectM[2]}`, isHero })
+        const isHeroFlag = isHero(anonName) || isHero(realName)
+        showdownActions.push({ name: realName, action: `collected ${collectM[2]}`, isHero: isHeroFlag })
       }
     }
   }
@@ -417,10 +416,9 @@ function parseRawHH(raw, playerNames) {
       const realName = nameMap[anonName] || anonName
 
       // Detect hero by multiple methods
-      const heroNames = ['hero', 'schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver', 'flightrisk', 'karluz', 'koumpounophobia', 'lauro dermio']
-      const isHero = heroNames.some(h => anonName.toLowerCase() === h || realName.toLowerCase() === h)
+      const isHeroFlag = isHero(anonName) || isHero(realName)
 
-      actions.push({ name: realName, action: actionText, isHero })
+      actions.push({ name: realName, action: actionText, isHero: isHeroFlag })
     }
 
     if (actions.length > 0) {
@@ -1212,7 +1210,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       </div>
       {/* 11. Botões 1fr (resto ~26%) */}
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
-        {hand.raw && hand.all_players_actions && (
+        {hand.all_players_actions && (
           <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
             onClick={e => e.stopPropagation()}
             style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}

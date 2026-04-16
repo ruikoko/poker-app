@@ -121,7 +121,6 @@ function ActionBadge({ text }) {
 
 function parseRawHH(raw) {
   if (!raw) return null
-  const heroNames = ['schadenfreud', 'thinvalium', 'sapz', 'misterpoker1973', 'cringemeariver']
   let heroName = null
   const dealtM = raw.match(/Dealt to (\S+)/)
   if (dealtM) heroName = dealtM[1]

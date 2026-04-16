@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from app.auth import require_auth
+from app.hero_names import HERO_NAMES
 
 router = APIRouter(prefix="/api/equity", tags=["equity"])
 logger = logging.getLogger("equity")
@@ -390,7 +391,6 @@ def hand_analysis(hand_id: int, current_user=Depends(require_auth)):
     preflop_marker = "*** PRE-FLOP ***" if is_winamax else "*** HOLE CARDS ***"
 
     # Find hero name
-    hero_names_set = {"hero", "schadenfreud", "thinvalium", "sapz", "misterpoker1973", "cringemeariver", "flightrisk", "karluz", "koumpounophobia", "lauro dermio"}
     hero_name = None
     dealt_m = re.search(r"Dealt to (\S+)", raw)
     if dealt_m:
@@ -467,7 +467,7 @@ def hand_analysis(hand_id: int, current_user=Depends(require_auth)):
 
             # Update pot for non-hero actions
             is_hero = hero_name and actor == hero_name
-            if not is_hero and actor.lower() in hero_names_set:
+            if not is_hero and actor.lower() in HERO_NAMES:
                 is_hero = True
 
             if action in ("calls", "bets"):

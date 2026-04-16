@@ -3,48 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 from app.auth import require_auth
 from app.db import query, execute, execute_returning
+from app.hero_names import FRIEND_NICKS
 
 router = APIRouter(prefix="/api/villains", tags=["villains"])
 
 # ── Friends / Hero nicks to exclude from villains ─────────────────────────────
-# These are nicks of the user's group — they appear at the table but are NOT villains.
+# FRIEND_NICKS is imported from app.hero_names — it includes both the user's
+# own hero accounts AND the team/friend group. Any nick in this set will be
+# filtered out of the villain database.
 # Match is case-insensitive and supports truncated names (starts-with).
 
-FRIEND_NICKS = {
-    # Hero nicks
-    "schadenfreud", "thinvalium", "sapz", "misterpoker1973",
-    "cringemeariver", "flightrisk", "karluz", "koumpounophobia",
-    "lauro dermio", "andacasa", "jeandouca",
-    # GG group (with truncations handled by starts-with)
-    # Winamax / Multi-sala group
-    "1otario", "a lagardere", "abutrinzi", "algorhythm",
-    "amazeswhores", "arr0zdepat0", "aturatu", "autoswiperight",
-    "avecamos", "beijamyrola", "cattleking", "cavalitos",
-    "cmaculatum", "coconacueca", "covfef3", "cr7dagreta",
-    "cr7dapussy", "crashcow", "cunetejaune", "dapanal?",
-    "decode", "deusfumo", "djobidjoba87", "dincredible",
-    "eitaqdelicia", "el kingzaur", "etonelespute", "floptwist",
-    "freeolivença", "godsmoke", "golimar666", "grenouille",
-    "hmhm", "hollywoodpimp", "huntermilf", "i<3kebab",
-    "ipaysor", "iuse2bspewer", "jackpito", "joao barbosa",
-    "johngeologic", "kabalaharris", "klklwoku", "kokonakueka",
-    "lendiadbisca", "leportugay8", "lewinsky", "ltbau",
-    "luckytobme", "luckytobvsu", "milffinder", "milfodds",
-    "mmaboss", "mrpeco", "mrpecoo", "narsa114",
-    "neurose", "obviamente.", "ohum", "opaidasputas",
-    "opaidelas", "pagachorari", "paidaskengas", "patodesisto",
-    "pec0", "pelosithenancy", "pokerfan1967", "priest lucy",
-    "proctocolectomy", "queleiteon", "quimterro", "quimtrega",
-    "rail iota", "rapinzi", "rapinzi12", "rapinzi1988",
-    "rapinzigg", "robyoungbff", "rosanorte", "ruing",
-    "ryandays", "sapinzi", "shaamp00", "shrug",
-    "sticklapisse", "tintin", "takiozaur", "thanatos",
-    "toniextractor", "tonixtractor", "trapatonigpt", "traumatizer",
-    "vanaldinho", "vascodagamba", "vascodagamba", "vtmizer",
-    "zen17", "zen1to",
-    # c78d hash nick
-    "c78d63886ce0850aa6e75c3b58d63b",
-}
 
 def _is_friend(nick: str) -> bool:
     """Check if a nick belongs to the friend group (case-insensitive, supports truncated names)."""

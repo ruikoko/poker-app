@@ -28,9 +28,16 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Backgro
 from PIL import Image
 from app.auth import require_auth
 from app.db import get_conn, query
+from app.hero_names import HERO_NAMES
 
 router = APIRouter(prefix="/api/screenshots", tags=["screenshots"])
 logger = logging.getLogger("screenshots")
+
+# ── Hero nicks seen in GG screenshots ────────────────────────────────────────
+# GG uses anonymised display names for non-hero players, so the hero's
+# real nickname is always visible in the bottom-center seat. Keep this list
+# restricted to aliases actually used on GGPoker by the user.
+_GG_HERO_ALIASES = ["lauro dermio", "koumpounophobia", "lauro derm"]
 
 
 # ── Posições por número de jogadores ────────────────────────────────────────
@@ -196,7 +203,7 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
         prompt = (
             "This is a GGPoker hand replayer screenshot.\n\n"
             "KNOWN FACTS:\n"
-            "- The HERO is always 'Lauro Dermio', 'koumpounophobia', 'FlightRisk', or 'Karluz' (bottom center of table).\n"
+            "- The HERO is always 'Lauro Dermio' or 'koumpounophobia' (bottom center of table).\n"
             "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
             "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
             "- Players with 'WIN' overlay on their avatar must still be included.\n"
@@ -442,7 +449,7 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
     hh_data = _parse_hh_stacks_and_blinds(raw_hh) if raw_hh else None
 
     used_vision = set()
-    hero_names = ["lauro dermio", "koumpounophobia", "lauro derm", "flightrisk", "karluz"]
+    hero_names = _GG_HERO_ALIASES
 
     # ── Fase 1: Âncoras fixas ────────────────────────────────────────────
 

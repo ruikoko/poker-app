@@ -21,6 +21,7 @@ from collections import defaultdict
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
+from app.hero_names import HERO_NAMES
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
 logger = logging.getLogger("hm3")
@@ -34,14 +35,6 @@ SITE_MAP = {
     "29": "GGPoker",
     "4": "888poker",
     "12": "iPoker",
-}
-
-HERO_NAMES = {
-    "schadenfreud", "thinvalium", "sapz",
-    "misterpoker1973",
-    "cringemeariver",
-    "flightrisk", "karluz",
-    "koumpounophobia", "lauro dermio",
 }
 
 
