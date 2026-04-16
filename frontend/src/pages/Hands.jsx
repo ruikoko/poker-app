@@ -1156,7 +1156,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       onClick={onClick}
       style={{
         display: 'grid',
-        gridTemplateColumns: '5.6% 5.6% 5.6% 5.6% 7.6% 3.9% 20.3% 3.6% 7.9% 8.3% 1fr',
+        gridTemplateColumns: '5.6% 5.6% 5.6% 5.6% 8.6% 3.9% 23.3% 3.6% 7.9% 8.3% 1fr',
         alignItems: 'center',
         padding: '7px 8px',
         background: zebra,
@@ -1178,19 +1178,19 @@ function HandRow({ hand, onClick, onDelete, idx }) {
       <div><PosBadge pos={hand.position} /></div>
       {/* 4. Resultado 5.6% */}
       <div><ResultBadge result={hand.result} /></div>
-      {/* 5. Torneio 7.6% — nome só, sem buy-in */}
-      <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+      {/* 5. Torneio 8.6% — nome só, com padding à direita para separar do buy-in */}
+      <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, paddingRight: 10 }}>
         {tourneyName}
       </div>
       {/* 6. Buy-in 3.9% — valor total */}
       <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
         {buyin}
       </div>
-      {/* 7. Board 20.3% — gaps +6 entre flop/turn e turn/river */}
-      <div style={{ display: 'flex', gap: 2, minWidth: 0 }}>
+      {/* 7. Board 23.3% — gaps duplicados: 4px entre cartas flop, 12px antes turn/river */}
+      <div style={{ display: 'flex', gap: 4, minWidth: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => (
-            <span key={i} style={{ display: 'inline-flex', marginLeft: (i === 3 || i === 4) ? 6 : 0 }}>
+            <span key={i} style={{ display: 'inline-flex', marginLeft: (i === 3 || i === 4) ? 12 : 0 }}>
               <PokerCard card={c} size="sm" />
             </span>
           ))
