@@ -3,14 +3,10 @@ import { useAuth } from '../hooks/useAuth'
 
 const NAV = [
   { to: '/',            label: 'Dashboard' },
-  { to: '/inbox',       label: 'Inbox' },
-  { to: '/hands',       label: 'Mãos' },
-  { to: '/hm3',         label: 'HM3' },
-  { to: '/stats',       label: 'Stats' },
-  { to: '/tournaments', label: 'MTT' },
+  { to: '/hands',       label: 'Estudo' },
+  { to: '/tournaments', label: 'Torneios' },
   { to: '/villains',    label: 'Vilões' },
-  { to: '/pnl',         label: 'P&L' },
-  { to: '/discord',     label: 'Discord' },
+  { to: '/gto',         label: 'GTO' },
 ]
 
 export default function Shell() {
