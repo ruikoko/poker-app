@@ -15,6 +15,7 @@ from app.routers.mtt import router as mtt_router, ensure_mtt_schema
 from app.routers.hm3 import router as hm3_router
 from app.routers.stats import router as stats_router
 from app.routers.equity import router as equity_router
+from app.routers.study import router as study_router, ensure_study_schema
 
 load_dotenv()
 
@@ -171,6 +172,7 @@ async def lifespan(app: FastAPI):
     ensure_entries_schema()
     ensure_discord_sync_table()
     ensure_mtt_schema()
+    ensure_study_schema()
 
     # Arrancar bot Discord em background
     from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
@@ -214,6 +216,7 @@ app.include_router(mtt_router)
 app.include_router(hm3_router)
 app.include_router(stats_router)
 app.include_router(equity_router)
+app.include_router(study_router)
 
 # Serve uploaded screenshots as static files
 import os

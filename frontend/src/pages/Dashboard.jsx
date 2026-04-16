@@ -1,134 +1,301 @@
 import { useEffect, useState } from 'react'
-import { hands, tournaments } from '../api/client'
+import { useNavigate } from 'react-router-dom'
+import { hands, study } from '../api/client'
 
-function fmt(n, currency) {
-  const abs = Math.abs(n).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return (n >= 0 ? '+' : '-') + (currency || '') + abs
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const SUIT_BG = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
+const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
+
+const STATE_META = {
+  new:      { label: 'Nova',      color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  review:   { label: 'Revisão',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  studying: { label: 'A Estudar', color: '#8b5cf6', bg: 'rgba(139,92,246,0.15)' },
+  resolved: { label: 'Resolvida', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
 }
 
+const POS_COLORS = {
+  BTN: '#6366f1', CO: '#8b5cf6', HJ: '#a78bfa',
+  SB: '#f59e0b', BB: '#ef4444',
+  UTG: '#22c55e', UTG1: '#16a34a', UTG2: '#15803d',
+  MP: '#06b6d4', MP1: '#0891b2',
+}
+
+const SITE_COLORS = {
+  PokerStars: '#ef4444', Winamax: '#22c55e', GGPoker: '#f59e0b',
+  WPN: '#06b6d4', '888poker': '#8b5cf6',
+}
+
+const SITE_SHORT = {
+  PokerStars: 'PS', Winamax: 'WN', GGPoker: 'GG',
+  WPN: 'WPN', '888poker': '888',
+}
+
+// ── Mini-components ──────────────────────────────────────────────────────────
+
+function PokerCard({ card }) {
+  if (!card || card.length < 2) return null
+  const rank = card.slice(0, -1).toUpperCase()
+  const suit = card.slice(-1).toLowerCase()
+  return (
+    <span style={{
+      display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      width: 24, height: 33, background: SUIT_BG[suit] || '#1e293b',
+      border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+      fontFamily: "'Fira Code',monospace", fontSize: 10, fontWeight: 700, color: '#fff',
+      lineHeight: 1, gap: 0, userSelect: 'none',
+    }}>
+      <span>{rank}</span>
+      <span style={{ fontSize: 8 }}>{SUIT_SYMBOLS[suit] || suit}</span>
+    </span>
+  )
+}
+
+function PosBadge({ pos }) {
+  if (!pos) return <span style={{ color: '#4b5563' }}>&mdash;</span>
+  const c = POS_COLORS[pos] || '#64748b'
+  const isBlind = pos === 'SB' || pos === 'BB'
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 0', borderRadius: 4, width: 40, textAlign: 'center',
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+      color: '#0a0c14', background: isBlind ? c : '#e2e8f0',
+    }}>{pos}</span>
+  )
+}
+
+function StateBadge({ state }) {
+  const m = STATE_META[state] || { label: state || '—', color: '#666', bg: 'rgba(100,100,100,0.15)' }
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+      fontSize: 10, fontWeight: 600, color: m.color, background: m.bg,
+    }}>{m.label}</span>
+  )
+}
+
+function ResultBB({ result }) {
+  if (result == null) return <span style={{ color: '#4b5563' }}>&mdash;</span>
+  const v = Number(result)
+  const color = v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : '#64748b'
+  return <span style={{ color, fontWeight: 600, fontFamily: 'monospace', fontSize: 12 }}>{v > 0 ? '+' : ''}{v.toFixed(1)}</span>
+}
+
+function SiteBadge({ site }) {
+  const short = SITE_SHORT[site] || site || '—'
+  const c = SITE_COLORS[site] || '#64748b'
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 700, color: c,
+      background: `${c}15`, padding: '2px 6px', borderRadius: 3,
+    }}>{short}</span>
+  )
+}
+
+function formatStudyTime(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+function formatDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${min}`
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
-  const [handStats, setHandStats] = useState(null)
-  const [pnlSummary, setPnlSummary] = useState([])
-  const [recentHands, setRecentHands] = useState([])
+  const navigate = useNavigate()
+  const [stats, setStats] = useState(null)
+  const [studyWeek, setStudyWeek] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    hands.stats().then(setHandStats).catch(e => setError(e.message))
-    hands.list({ page_size: 5, study_state: 'new' }).then(d => setRecentHands(d.data || [])).catch(() => {})
-    tournaments.summary().then(setPnlSummary).catch(() => {})
+    hands.stats().then(setStats).catch(e => setError(e.message))
+    study.week().then(setStudyWeek).catch(() => {})
   }, [])
 
-  const total_profit = pnlSummary.reduce((s, r) => s + Number(r.profit), 0)
+  const recent = stats?.recent || []
+  const weekDays = studyWeek?.days || []
+  const maxDaySeconds = Math.max(1, ...weekDays.map(d => d.seconds))
+
+  const dayLabels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+  const today = new Date().getDay() // 0=Dom, 1=Seg, ..., 6=Sáb
+  const todayIdx = today === 0 ? 6 : today - 1
 
   return (
     <>
-      <div className="page-header">
-        <div className="page-title">Dashboard</div>
-        <div className="page-subtitle">Visão geral do estudo e resultados</div>
-      </div>
-
-      {error && <div className="error-msg" style={{ marginBottom: 16 }}>{error}</div>}
-
-      {/* ── Estatísticas de Mãos ── */}
-      <div className="stat-grid" style={{ marginBottom: 24 }}>
-        <div className="stat-card">
-          <div className="stat-label">Total de Mãos</div>
-          <div className="stat-value">{handStats?.total ?? '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Novas (Inbox)</div>
-          <div className="stat-value" style={{ color: 'var(--accent)' }}>{handStats?.new ?? '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Em Revisão</div>
-          <div className="stat-value" style={{ color: '#f59e0b' }}>{handStats?.review ?? '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Resolvidas</div>
-          <div className="stat-value green">{handStats?.resolved ?? '—'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>Dashboard</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+            {new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
         </div>
       </div>
 
-      {/* ── Mãos recentes na inbox ── */}
-      {recentHands.length > 0 && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
-            Últimas mãos na Inbox
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Sala</th>
-                  <th>Cartas</th>
-                  <th>Posição</th>
-                  <th>Board</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentHands.map(h => (
-                  <tr key={h.id}>
-                    <td className="muted">{h.played_at ? h.played_at.slice(0, 10) : '—'}</td>
-                    <td>{h.site || '—'}</td>
-                    <td className="mono">{h.hero_cards?.join(' ') || '—'}</td>
-                    <td>{h.position || '—'}</td>
-                    <td className="mono">{h.board?.join(' ') || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {error && <div style={{ padding: '10px 16px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
-      {/* ── Resumo P&L (read-only) ── */}
-      {pnlSummary.length > 0 && (
-        <div className="card">
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>P&L por Sala</span>
-            <span className={`mono ${total_profit >= 0 ? 'green' : 'red'}`} style={{ fontSize: 13 }}>
-              Total: {fmt(total_profit)}
+      {/* ── 3 Painéis ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
+
+        {/* Total de mãos */}
+        <div
+          onClick={() => navigate('/hands')}
+          style={{
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            padding: '20px', cursor: 'pointer', transition: 'border-color 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+        >
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Total de mãos</div>
+          <div style={{ fontSize: 28, fontWeight: 600, lineHeight: 1 }}>
+            {stats ? Number(stats.total).toLocaleString('pt-PT') : '—'}
+          </div>
+          {stats?.new_this_week != null && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>+{stats.new_this_week} esta semana</div>
+          )}
+        </div>
+
+        {/* Mãos por estudar */}
+        <div
+          onClick={() => navigate('/hands?study_state=new')}
+          style={{
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            padding: '20px', cursor: 'pointer', transition: 'border-color 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+        >
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Mãos por estudar</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 28, fontWeight: 600, lineHeight: 1 }}>
+              {stats ? Number(stats.new).toLocaleString('pt-PT') : '—'}
             </span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>novas</span>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Sala</th>
-                  <th>Torneios</th>
-                  <th>Buy-in</th>
-                  <th>Cashout</th>
-                  <th>Profit</th>
-                  <th>ROI%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pnlSummary.map(r => (
-                  <tr key={r.site + r.currency}>
-                    <td>{r.site}</td>
-                    <td>{r.total}</td>
-                    <td className="muted">{r.currency}{Number(r.total_buyin).toLocaleString('pt-PT', { minimumFractionDigits: 2 })}</td>
-                    <td className="muted">{r.currency}{Number(r.total_cashout).toLocaleString('pt-PT', { minimumFractionDigits: 2 })}</td>
-                    <td className={Number(r.profit) >= 0 ? 'green' : 'red'}>
-                      {fmt(Number(r.profit), r.currency)}
-                    </td>
-                    <td className={Number(r.roi_pct) >= 0 ? 'green' : 'red'}>
-                      {r.roi_pct}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {stats && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, display: 'flex', gap: 10 }}>
+              <span>{stats.review || 0} revisão</span>
+              <span style={{ color: 'var(--border)' }}>·</span>
+              <span>{stats.studying || 0} a estudar</span>
+            </div>
+          )}
         </div>
-      )}
 
-      {!handStats && !error && (
-        <div className="empty-state">
-          A carregar dados…
+        {/* Tempo de estudo */}
+        <div
+          style={{
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            padding: '20px',
+          }}
+        >
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Tempo de estudo</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 28, fontWeight: 600, lineHeight: 1 }}>
+              {studyWeek ? formatStudyTime(studyWeek.total_seconds) : '—'}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>esta semana</span>
+          </div>
+          {/* Sparkline semanal */}
+          <div style={{ display: 'flex', gap: 3, height: 32, alignItems: 'flex-end', marginTop: 12 }}>
+            {weekDays.map((d, i) => {
+              const pct = d.seconds > 0 ? Math.max(8, (d.seconds / maxDaySeconds) * 100) : 0
+              const isFuture = i > todayIdx
+              return (
+                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div style={{
+                    width: '100%', height: `${pct}%`, minHeight: pct > 0 ? 4 : 0,
+                    background: isFuture ? 'var(--border)' : 'var(--accent)', borderRadius: 2,
+                    opacity: isFuture ? 0.3 : d.seconds > 0 ? 1 : 0.15,
+                  }} />
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+            {dayLabels.map((l, i) => (
+              <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, color: i === todayIdx ? 'var(--text)' : 'var(--muted)', fontWeight: i === todayIdx ? 600 : 400 }}>{l}</div>
+            ))}
+          </div>
         </div>
-      )}
+
+      </div>
+
+      {/* ── Últimas 5 mãos importadas ── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Últimas mãos importadas</span>
+          <button
+            onClick={() => navigate('/hands')}
+            style={{
+              fontSize: 12, padding: '4px 12px', borderRadius: 4,
+              background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
+          >Ver todas →</button>
+        </div>
+
+        {recent.length === 0 && !error && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            {stats === null ? 'A carregar…' : 'Sem mãos importadas'}
+          </div>
+        )}
+
+        {recent.map((h, idx) => {
+          const isLast = idx === recent.length - 1
+          const stakes = h.stakes || ''
+          // Extract blinds from stakes like "€45+€45+€10 EUR" or from level info
+          const blindsMatch = stakes.match(/([\d,]+)\/([\d,]+)/)
+          const blindsStr = blindsMatch ? `${blindsMatch[1]}/${blindsMatch[2]}` : ''
+
+          return (
+            <div
+              key={h.id}
+              onClick={() => navigate(`/hand/${h.id}`)}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '64px 56px 44px 64px 1fr 44px 90px 72px',
+                gap: 10, alignItems: 'center',
+                padding: '10px 16px',
+                borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.03)',
+                cursor: 'pointer', transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div><StateBadge state={h.study_state} /></div>
+              <div style={{ display: 'flex', gap: 3 }}>
+                {h.hero_cards?.length > 0
+                  ? h.hero_cards.map((c, i) => <PokerCard key={i} card={c} />)
+                  : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
+              </div>
+              <div><PosBadge pos={h.position} /></div>
+              <div><ResultBB result={h.result} /></div>
+              <div style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                {stakes}
+              </div>
+              <div style={{ textAlign: 'center' }}><SiteBadge site={h.site} /></div>
+              <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>
+                {blindsStr}
+              </div>
+              <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>
+                {formatDate(h.played_at || h.created_at)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </>
   )
 }

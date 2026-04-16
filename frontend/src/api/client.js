@@ -231,6 +231,13 @@ export const screenshots = {
   bulkDelete: (entryIds) => req('POST', '/entries/bulk-delete', { entry_ids: entryIds }),
 }
 
+// ── Study Sessions ──────────────────────────────────────────────────────────
+export const study = {
+  start: (handId = null) => req('POST', '/study/start', { hand_id: handId }),
+  stop:  (sessionId)     => req('POST', '/study/stop',  { session_id: sessionId }),
+  week:  ()              => req('GET',  '/study/week'),
+}
+
 // ── GTO Brain ──────────────────────────────────────────────────────────────
 export const gto = {
   match: (params) => {

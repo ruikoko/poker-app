@@ -225,7 +225,13 @@ def tag_groups(
 
 @router.get("/stats")
 def hand_stats(current_user=Depends(require_auth)):
-    """Estatísticas globais das mãos (exclui arquivo MTT)."""
+    """Estatísticas globais das mãos (exclui arquivo MTT).
+
+    Inclui:
+      - total/new/review/studying/resolved — contadores por estado
+      - new_this_week — mãos criadas nos últimos 7 dias
+      - recent — 5 últimas mãos importadas (por created_at)
+    """
     rows = query("""
         SELECT
             COUNT(*) FILTER (WHERE study_state != 'mtt_archive') AS total,
@@ -234,11 +240,28 @@ def hand_stats(current_user=Depends(require_auth)):
             COUNT(*) FILTER (WHERE study_state = 'studying') AS studying,
             COUNT(*) FILTER (WHERE study_state = 'resolved') AS resolved,
             COUNT(*) FILTER (WHERE study_state = 'mtt_archive') AS mtt_archive,
+            COUNT(*) FILTER (
+                WHERE study_state != 'mtt_archive'
+                  AND created_at >= NOW() - INTERVAL '7 days'
+            ) AS new_this_week,
             COUNT(DISTINCT site) FILTER (WHERE study_state != 'mtt_archive') AS sites,
             COUNT(DISTINCT position) FILTER (WHERE position IS NOT NULL AND study_state != 'mtt_archive') AS positions
         FROM hands
     """)
-    return dict(rows[0]) if rows else {}
+    result = dict(rows[0]) if rows else {}
+
+    # 5 últimas mãos importadas (excluindo bulk MTT)
+    recent_rows = query("""
+        SELECT id, site, hand_id, played_at, stakes, position,
+               hero_cards, board, result, currency, study_state,
+               created_at
+        FROM hands
+        WHERE study_state != 'mtt_archive'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 5
+    """)
+    result["recent"] = [dict(r) for r in recent_rows]
+    return result
 
 
 @router.get("/{hand_pk}")
