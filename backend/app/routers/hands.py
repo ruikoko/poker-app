@@ -254,7 +254,7 @@ def hand_stats(current_user=Depends(require_auth)):
     recent_rows = query("""
         SELECT id, site, hand_id, played_at, stakes, position,
                hero_cards, board, result, currency, study_state,
-               created_at
+               tags, created_at
         FROM hands
         WHERE study_state != 'mtt_archive'
         ORDER BY created_at DESC, id DESC

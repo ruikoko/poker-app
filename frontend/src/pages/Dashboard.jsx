@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { hands, study, screenshots } from '../api/client'
+import { hands, study, screenshots, villains } from '../api/client'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -115,16 +115,20 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const [stats, setStats] = useState(null)
   const [studyWeek, setStudyWeek] = useState(null)
+  const [recentVillains, setRecentVillains] = useState([])
   const [error, setError] = useState('')
 
   useEffect(() => {
     hands.stats().then(setStats).catch(e => setError(e.message))
     study.week().then(setStudyWeek).catch(() => {})
+    villains.list({ page_size: 5, sort: 'updated_desc' }).then(d => setRecentVillains(d.data || [])).catch(() => {})
   }, [])
 
   const recent = stats?.recent || []
   const weekDays = studyWeek?.days || []
   const maxDaySeconds = Math.max(1, ...weekDays.map(d => d.seconds))
+  const daysWithStudy = weekDays.filter(d => d.seconds > 0).length
+  const avgDaily = daysWithStudy > 0 ? Math.round((studyWeek?.total_seconds || 0) / daysWithStudy) : 0
 
   const dayLabels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
   const today = new Date().getDay() // 0=Dom, 1=Seg, ..., 6=Sáb
@@ -205,6 +209,11 @@ export default function DashboardPage() {
             </span>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>esta semana</span>
           </div>
+          {avgDaily > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+              média {formatStudyTime(avgDaily)}/dia ({daysWithStudy} {daysWithStudy === 1 ? 'dia' : 'dias'} activos)
+            </div>
+          )}
           {/* Sparkline semanal */}
           <div style={{ display: 'flex', gap: 3, height: 32, alignItems: 'flex-end', marginTop: 12 }}>
             {weekDays.map((d, i) => {
@@ -265,7 +274,7 @@ export default function DashboardPage() {
               onClick={() => navigate(`/hand/${h.id}`)}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '64px 56px 44px 64px 1fr 44px 90px 72px',
+                gridTemplateColumns: '64px 56px 44px 64px 1fr 1fr 44px 72px',
                 gap: 10, alignItems: 'center',
                 padding: '10px 16px',
                 borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.03)',
@@ -285,10 +294,13 @@ export default function DashboardPage() {
               <div style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
                 {stakes}
               </div>
-              <div style={{ textAlign: 'center' }}><SiteBadge site={h.site} /></div>
-              <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>
-                {blindsStr}
+              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', minWidth: 0 }}>
+                {(h.tags || []).slice(0, 3).map((t, i) => (
+                  <span key={i} style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'rgba(99,102,241,0.12)', color: '#818cf8', fontWeight: 600, whiteSpace: 'nowrap' }}>{t}</span>
+                ))}
+                {(h.tags || []).length > 3 && <span style={{ fontSize: 9, color: '#4b5563' }}>+{h.tags.length - 3}</span>}
               </div>
+              <div style={{ textAlign: 'center' }}><SiteBadge site={h.site} /></div>
               <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>
                 {formatDate(h.played_at || h.created_at)}
               </div>
@@ -296,6 +308,54 @@ export default function DashboardPage() {
           )
         })}
       </div>
+
+      {/* ── Vilões recentes ── */}
+      {recentVillains.length > 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Vilões recentes</span>
+            <button
+              onClick={() => navigate('/villains')}
+              style={{
+                fontSize: 12, padding: '4px 12px', borderRadius: 4,
+                background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
+            >Ver todos →</button>
+          </div>
+          {recentVillains.map((v, idx) => (
+            <div
+              key={v.id}
+              onClick={() => navigate(`/villains`)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 16px',
+                borderBottom: idx < recentVillains.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
+                cursor: 'pointer', transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', padding: '2px 8px', borderRadius: 4 }}>{v.nick}</span>
+                {v.site && <SiteBadge site={v.site} />}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11 }}>
+                <span style={{ color: 'var(--muted)' }}>{v.hands_seen} mãos</span>
+                {v.tags?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {v.tags.slice(0, 2).map((t, i) => (
+                      <span key={i} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontWeight: 500 }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Screenshots ── */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 24 }}>
