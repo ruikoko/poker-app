@@ -719,13 +719,15 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
     tournament_format = _detect_tournament_format(tournament_name)
     buyin = _extract_buyin(tournament_name)
 
-    # Auto-tags
-    tags = ["Match SS"]
+    # Auto-tags: "GG Hands" vai para hm3_tags (tema de estudo principal).
+    # Tags de formato/max-players continuam em tags (auto-geradas).
+    hm3_tags = ["GG Hands"]
+    auto_tags = []
     if tournament_format != "vanilla":
-        tags.append(tournament_format.lower())
+        auto_tags.append(tournament_format.lower())
     num_players = len(hh_hand.get("seats", {}))
     if num_players > 0:
-        tags.append(f"{num_players}max")
+        auto_tags.append(f"{num_players}max")
 
     # Construir all_players_actions com nomes reais
     seats = hh_hand.get("seats", {})
@@ -767,12 +769,12 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                    (site, hand_id, played_at, stakes, position,
                     hero_cards, board, result, currency,
                     raw, study_state, all_players_actions, player_names,
-                    entry_id, tags)
+                    entry_id, tags, hm3_tags)
                 VALUES
                    (%s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s)""",
+                    %s, %s, %s)""",
                 (
                     "GGPoker",
                     hand_id,
@@ -788,11 +790,12 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                     json.dumps(all_players),
                     json.dumps(player_names),
                     screenshot_data.get("entry_id"),
-                    tags,
+                    auto_tags,
+                    hm3_tags,
                 )
             )
         conn2.commit()
-        logger.info(f"Promoted {hand_id} to study (Inbox) tags={tags}")
+        logger.info(f"Promoted {hand_id} to study (hm3_tags={hm3_tags}, tags={auto_tags})")
     except Exception as e:
         conn2.rollback()
         logger.error(f"Promote failed for {hand_id}: {e}")
@@ -1672,6 +1675,86 @@ async def reset_and_rematch(
         "villains_created": villains_created,
         "promoted": promoted,
         "total_screenshots": len(screenshot_entries),
+    }
+
+
+@router.post("/backfill-promote-matched")
+def backfill_promote_matched(current_user=Depends(require_auth)):
+    """
+    Percorre todas as mtt_hands com has_screenshot=true e promove-as
+    para a tabela hands (se ainda não estiverem lá) com hm3_tags=['GG Hands'].
+    Usa os dados já guardados em mtt_hands + entries.raw_json (Vision).
+    """
+    rows = query(
+        """
+        SELECT m.id AS mtt_id, m.tm_number, m.tournament_name, m.played_at,
+               m.hero_position, m.hero_cards, m.board, m.hero_result, m.blinds,
+               m.num_players, m.players_by_position,
+               m.screenshot_entry_id, m.raw AS raw_hh,
+               e.raw_json AS screenshot_raw
+        FROM mtt_hands m
+        LEFT JOIN entries e ON e.id = m.screenshot_entry_id
+        WHERE m.has_screenshot = true
+        ORDER BY m.id ASC
+        """
+    )
+    total = len(rows)
+    promoted = 0
+    skipped_already = 0
+    errors = 0
+
+    for r in rows:
+        tm_digits = _extract_tm_digits(r["tm_number"] or "")
+        hand_id_str = f"GG-{tm_digits}"
+
+        # Já existe em hands?
+        existing = query("SELECT id FROM hands WHERE hand_id = %s LIMIT 1", (hand_id_str,))
+        if existing:
+            skipped_already += 1
+            continue
+
+        try:
+            # Construir hh_hand e screenshot_data no formato que _promote_to_study espera
+            screenshot_raw = r.get("screenshot_raw") or {}
+            hh_hand = {
+                "tm_number": r["tm_number"],
+                "tournament_name": r["tournament_name"],
+                "played_at": r["played_at"],
+                "hero_position": r["hero_position"],
+                "hero_cards": r["hero_cards"] or [],
+                "board": r["board"] or [],
+                "hero_result": r["hero_result"],
+                "blinds": r["blinds"],
+                "num_players": r["num_players"],
+                "raw": r.get("raw_hh") or "",
+                "seats": (r.get("players_by_position") or {}) if isinstance(r.get("players_by_position"), dict) else {},
+                "bb_size": 1,  # fallback; _promote_to_study usa este para calcular stack_bb
+            }
+            screenshot_data = {
+                "entry_id": r["screenshot_entry_id"],
+                "players_list": screenshot_raw.get("players_list", []),
+                "hero": screenshot_raw.get("hero"),
+                "vision_sb": screenshot_raw.get("vision_sb"),
+                "vision_bb": screenshot_raw.get("vision_bb"),
+                "file_meta": screenshot_raw.get("file_meta", {}),
+            }
+            seat_to_name = _build_seat_to_name_map(hh_hand, screenshot_data)
+
+            conn = get_conn()
+            try:
+                _promote_to_study(conn, r["mtt_id"], hh_hand, screenshot_data, seat_to_name)
+                promoted += 1
+            finally:
+                conn.close()
+        except Exception as e:
+            errors += 1
+            logger.error(f"Backfill promote error for mtt_id={r['mtt_id']}: {e}")
+
+    return {
+        "total_matched": total,
+        "promoted": promoted,
+        "skipped_already_in_hands": skipped_already,
+        "errors": errors,
     }
 
 

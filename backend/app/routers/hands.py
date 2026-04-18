@@ -740,6 +740,44 @@ def admin_delete_before_2026(current_user=Depends(require_auth)):
         conn.close()
 
 
+@router.post("/admin/delete-gg-without-screenshot")
+def admin_delete_gg_no_ss(current_user=Depends(require_auth)):
+    """
+    Apaga mãos GGPoker da tabela `hands` que não têm screenshot nem vêm do HM3.
+    Estas mãos são bulk (vieram de import de ZIP HH) e duplicam o que está em mtt_hands.
+    A arquitectura correcta é:
+      - mtt_hands guarda TODAS as GG
+      - hands só tem GG que foram promovidas (por match de SS)
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Contar antes
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM hands
+                WHERE site = 'GGPoker'
+                  AND (screenshot_url IS NULL OR screenshot_url = '')
+                  AND (player_names IS NULL OR player_names::text IN ('null', '{}'))
+            """)
+            to_delete = cur.fetchone()["n"]
+
+            # Apagar
+            cur.execute("""
+                DELETE FROM hands
+                WHERE site = 'GGPoker'
+                  AND (screenshot_url IS NULL OR screenshot_url = '')
+                  AND (player_names IS NULL OR player_names::text IN ('null', '{}'))
+            """)
+            deleted = cur.rowcount
+        conn.commit()
+        return {"ok": True, "to_delete_estimate": to_delete, "deleted": deleted}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/admin/migrate-hm3-tags")
 def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
     """
