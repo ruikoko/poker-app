@@ -478,6 +478,22 @@ function OrphanList({ onRematchComplete }) {
     }
   }
 
+  async function handleDelete(entryId, e) {
+    e?.stopPropagation()
+    if (!confirm('Apagar este screenshot permanentemente? (não é reversível)')) return
+    setActionLoading(prev => ({ ...prev, [entryId]: 'delete' }))
+    try {
+      await screenshots.deleteEntry(entryId)
+      setOrphans(prev => prev.filter(o => o.id !== entryId))
+      onRematchComplete?.()
+    } catch (e) {
+      console.error('Delete error:', e)
+      alert('Erro ao apagar: ' + (e.message || e))
+    } finally {
+      setActionLoading(prev => ({ ...prev, [entryId]: null }))
+    }
+  }
+
   if (loading) return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar órfãos...</div>
   if (orphans.length === 0) return null
 
@@ -593,6 +609,17 @@ function OrphanList({ onRematchComplete }) {
                     opacity: isActing ? 0.5 : 1,
                   }}
                 >{isActing === 'dismiss' ? '...' : 'Ignorar'}</button>
+                <button
+                  onClick={(e) => handleDelete(o.id, e)}
+                  disabled={!!isActing}
+                  title="Apagar permanentemente"
+                  style={{
+                    fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                    color: '#f87171', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
+                    opacity: isActing ? 0.5 : 1,
+                  }}
+                >{isActing === 'delete' ? '...' : 'Apagar'}</button>
               </div>
             </div>
 
