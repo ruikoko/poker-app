@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { hands, study } from '../api/client'
+import { hands, study, screenshots } from '../api/client'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -297,37 +297,116 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* ── 2 Painéis Screenshots ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginTop: 24 }}>
-
-        {/* Total Screenshots */}
-        <div style={{
-          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-          padding: '20px',
-        }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Screenshots na BD</div>
-          <div style={{ fontSize: 28, fontWeight: 600, lineHeight: 1 }}>
-            {stats?.total_screenshots != null ? Number(stats.total_screenshots).toLocaleString('pt-PT') : '—'}
+      {/* ── Screenshots ── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: '16px 20px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Screenshots na BD</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>
+              {stats?.total_screenshots != null ? Number(stats.total_screenshots).toLocaleString('pt-PT') : '—'}
+            </div>
+          </div>
+          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Sem match</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.orphan_screenshots > 0 ? '#f59e0b' : 'var(--text)' }}>
+              {stats?.orphan_screenshots != null ? Number(stats.orphan_screenshots).toLocaleString('pt-PT') : '—'}
+            </div>
           </div>
         </div>
-
-        {/* Orphan Screenshots */}
-        <div style={{
-          background: 'var(--surface)',
-          border: `1px solid ${stats?.orphan_screenshots > 0 ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
-          borderRadius: 'var(--radius)',
-          padding: '20px',
-        }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Screenshots sem match</div>
-          <div style={{ fontSize: 28, fontWeight: 600, lineHeight: 1, color: stats?.orphan_screenshots > 0 ? '#f59e0b' : 'var(--text)' }}>
-            {stats?.orphan_screenshots != null ? Number(stats.orphan_screenshots).toLocaleString('pt-PT') : '—'}
-          </div>
-          {stats?.orphan_screenshots > 0 && (
-            <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 8 }}>aguardam match com mãos</div>
-          )}
-        </div>
-
+        {stats?.orphan_screenshots > 0 && <OrphanList />}
       </div>
     </>
+  )
+}
+
+// ── Orphan Screenshots List ──────────────────────────────────────────────────
+
+function OrphanList() {
+  const [orphans, setOrphans] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState({})
+
+  useEffect(() => {
+    screenshots.orphans().then(data => {
+      setOrphans(Array.isArray(data) ? data : data?.data || [])
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  async function handleRematch(entryId) {
+    setActionLoading(prev => ({ ...prev, [entryId]: 'rematch' }))
+    try {
+      const result = await screenshots.rematch(entryId)
+      if (result?.status === 'matched') {
+        setOrphans(prev => prev.filter(o => o.id !== entryId))
+      }
+    } catch (e) {
+      console.error('Rematch error:', e)
+    } finally {
+      setActionLoading(prev => ({ ...prev, [entryId]: null }))
+    }
+  }
+
+  async function handleDismiss(entryId) {
+    setActionLoading(prev => ({ ...prev, [entryId]: 'dismiss' }))
+    try {
+      await screenshots.dismiss(entryId)
+      setOrphans(prev => prev.filter(o => o.id !== entryId))
+    } catch (e) {
+      console.error('Dismiss error:', e)
+    } finally {
+      setActionLoading(prev => ({ ...prev, [entryId]: null }))
+    }
+  }
+
+  if (loading) return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar órfãos...</div>
+  if (orphans.length === 0) return null
+
+  return (
+    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+      {orphans.map((o, idx) => {
+        const raw = o.raw_json || {}
+        const tm = raw.tm || raw.tournament_number || '—'
+        const date = o.discord_posted_at || o.created_at || ''
+        const dateStr = date ? new Date(date).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
+        const isActing = actionLoading[o.id]
+
+        return (
+          <div key={o.id} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 20px',
+            borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.03)' : 'none',
+            fontSize: 12,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+              <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>TM {tm}</span>
+              <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dateStr}</span>
+              {o.file_name && <span style={{ color: '#4b5563', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{o.file_name}</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button
+                onClick={() => handleRematch(o.id)}
+                disabled={!!isActing}
+                style={{
+                  fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                  background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)',
+                  color: '#22c55e', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
+                  opacity: isActing ? 0.5 : 1,
+                }}
+              >{isActing === 'rematch' ? '...' : 'Rematch'}</button>
+              <button
+                onClick={() => handleDismiss(o.id)}
+                disabled={!!isActing}
+                style={{
+                  fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                  background: 'transparent', border: '1px solid var(--border)',
+                  color: 'var(--muted)', cursor: isActing ? 'wait' : 'pointer',
+                  opacity: isActing ? 0.5 : 1,
+                }}
+              >{isActing === 'dismiss' ? '...' : 'Ignorar'}</button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
