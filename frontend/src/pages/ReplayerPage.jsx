@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi, equity, gto as gtoApi } from '../api/client'
 import { HERO_NAMES } from '../heroNames'
-import { useStudyHand } from '../contexts/StudyTimerContext'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
@@ -340,7 +339,6 @@ function PRow({ l, v, c }) { return <div style={{ display: 'flex', justifyConten
 // ── Main Component ──────────────────────────────────────────────────────────
 export default function ReplayerPage() {
   const { id } = useParams()
-  useStudyHand(id)
   const navigate = useNavigate()
   const [hand, setHand] = useState(null)
   const [loading, setLoading] = useState(true)

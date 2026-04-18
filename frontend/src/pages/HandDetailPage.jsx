@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi } from '../api/client'
 import { HERO_NAMES } from '../heroNames'
-import { useStudyHand } from '../contexts/StudyTimerContext'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
@@ -84,7 +83,6 @@ function parseStreets(raw, nameMap = {}) {
 
 export default function HandDetailPage() {
   const { id } = useParams()
-  useStudyHand(id)
   const navigate = useNavigate()
   const [hand, setHand] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -165,6 +163,28 @@ export default function HandDetailPage() {
           {hand.raw && (
             <button onClick={() => { navigator.clipboard.writeText(hand.raw); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ padding: '8px 20px', borderRadius: 6, fontSize: 14, fontWeight: 700, background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)', color: copied ? '#22c55e' : '#f59e0b', border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.25)'}`, cursor: 'pointer' }}>{copied ? '✓ Copiado' : 'Copiar HH'}</button>
           )}
+          <button
+            onClick={async () => {
+              const hasContent = (hand.tags?.length > 0) || (hand.notes && hand.notes.trim().length > 0)
+              if (hasContent) {
+                const parts = []
+                if (hand.tags?.length > 0) parts.push(`tags: ${hand.tags.join(', ')}`)
+                if (hand.notes) parts.push('notas')
+                if (!confirm(`Esta mão tem ${parts.join(' e ')}. Apagar mesmo assim?`)) return
+              }
+              try {
+                await handsApi.delete(hand.id)
+                navigate(-1)
+              } catch (e) {
+                alert('Erro ao apagar: ' + (e.message || e))
+              }
+            }}
+            style={{
+              padding: '8px 16px', borderRadius: 6, fontSize: 14, fontWeight: 700,
+              background: 'rgba(239,68,68,0.1)', color: '#f87171',
+              border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
+            }}
+          >Apagar</button>
         </div>
       </div>
 

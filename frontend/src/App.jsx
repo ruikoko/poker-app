@@ -15,7 +15,6 @@ import ReplayerPage from './pages/ReplayerPage'
 import HandDetailPage from './pages/HandDetailPage'
 import GTOBrainPage from './pages/GTOBrain'
 import { StudyTimerProvider } from './contexts/StudyTimerContext'
-import StudyTimerBadge from './components/StudyTimerBadge'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -61,7 +60,6 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      {user && <StudyTimerBadge />}
     </StudyTimerProvider>
   )
 }

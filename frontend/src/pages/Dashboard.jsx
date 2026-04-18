@@ -118,8 +118,12 @@ export default function DashboardPage() {
   const [recentVillains, setRecentVillains] = useState([])
   const [error, setError] = useState('')
 
-  useEffect(() => {
+  function reloadStats() {
     hands.stats().then(setStats).catch(e => setError(e.message))
+  }
+
+  useEffect(() => {
+    reloadStats()
     study.week().then(setStudyWeek).catch(() => {})
     villains.list({ page_size: 5, sort: 'updated_desc' }).then(d => setRecentVillains(d.data || [])).catch(() => {})
   }, [])
@@ -268,13 +272,30 @@ export default function DashboardPage() {
           const blindsMatch = stakes.match(/([\d,]+)\/([\d,]+)/)
           const blindsStr = blindsMatch ? `${blindsMatch[1]}/${blindsMatch[2]}` : ''
 
+          async function handleDelete(e) {
+            e.stopPropagation()
+            const hasContent = (h.tags?.length > 0) || (h.notes && h.notes.trim().length > 0)
+            if (hasContent) {
+              const parts = []
+              if (h.tags?.length > 0) parts.push(`tags: ${h.tags.join(', ')}`)
+              if (h.notes) parts.push('notas')
+              if (!confirm(`Esta mão tem ${parts.join(' e ')}. Apagar mesmo assim?`)) return
+            }
+            try {
+              await hands.delete(h.id)
+              reloadStats()
+            } catch (err) {
+              alert('Erro ao apagar: ' + (err.message || err))
+            }
+          }
+
           return (
             <div
               key={h.id}
               onClick={() => navigate(`/hand/${h.id}`)}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '64px 56px 44px 64px 1fr 1fr 44px 72px',
+                gridTemplateColumns: '64px 56px 44px 64px 1fr 1fr 44px 72px 22px',
                 gap: 10, alignItems: 'center',
                 padding: '10px 16px',
                 borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.03)',
@@ -304,6 +325,20 @@ export default function DashboardPage() {
               <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>
                 {formatDate(h.played_at || h.created_at)}
               </div>
+              <button
+                onClick={handleDelete}
+                title="Apagar mão"
+                style={{
+                  width: 18, height: 18, padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'transparent',
+                  border: '1px solid transparent',
+                  borderRadius: 3, cursor: 'pointer',
+                  color: '#4b5563', fontSize: 12, lineHeight: 1,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#f87171'; e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = '#4b5563'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+              >×</button>
             </div>
           )
         })}
@@ -373,7 +408,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-        {stats?.orphan_screenshots > 0 && <OrphanList />}
+        {stats?.orphan_screenshots > 0 && <OrphanList onRematchComplete={reloadStats} />}
       </div>
     </>
   )
@@ -381,17 +416,39 @@ export default function DashboardPage() {
 
 // ── Orphan Screenshots List ──────────────────────────────────────────────────
 
-function OrphanList() {
+function OrphanList({ onRematchComplete }) {
   const [orphans, setOrphans] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
   const [expandedId, setExpandedId] = useState(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)
 
-  useEffect(() => {
+  function loadOrphans() {
+    setLoading(true)
     screenshots.orphans().then(data => {
       setOrphans(Array.isArray(data) ? data : data?.data || [])
     }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadOrphans() }, [])
+
+  async function handleBulkRematch() {
+    if (bulkLoading) return
+    setBulkLoading(true)
+    setBulkResult(null)
+    try {
+      const r = await screenshots.bulkRematch()
+      setBulkResult(r)
+      loadOrphans()
+      onRematchComplete?.()
+    } catch (e) {
+      console.error('Bulk rematch error:', e)
+      setBulkResult({ error: e.message || 'Erro ao tentar rematch' })
+    } finally {
+      setBulkLoading(false)
+    }
+  }
 
   async function handleRematch(entryId, e) {
     e?.stopPropagation()
@@ -425,6 +482,55 @@ function OrphanList() {
   if (orphans.length === 0) return null
 
   return (
+    <>
+      {/* Barra de acções */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 20px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        background: 'rgba(0,0,0,0.12)',
+      }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+          {bulkResult ? (
+            bulkResult.error
+              ? <span style={{ color: '#ef4444' }}>Erro: {bulkResult.error}</span>
+              : (
+                <span>
+                  <span style={{ color: '#22c55e', fontWeight: 600 }}>{bulkResult.matched}</span> matched
+                  <span style={{ color: '#4b5563' }}> · </span>
+                  hands {bulkResult.matched_hands} · mtt {bulkResult.matched_mtt}
+                  <span style={{ color: '#4b5563' }}> · </span>
+                  <span style={{ color: '#f59e0b' }}>{bulkResult.no_match}</span> sem HH
+                  <span style={{ color: '#4b5563' }}> · </span>
+                  <span style={{ color: '#6b7280' }}>{bulkResult.no_tm}</span> sem TM
+                  {bulkResult.errors > 0 && (
+                    <>
+                      <span style={{ color: '#4b5563' }}> · </span>
+                      <span style={{ color: '#ef4444' }}>{bulkResult.errors}</span> erros
+                    </>
+                  )}
+                </span>
+              )
+          ) : (
+            <span>Tenta fazer match automático de todos os órfãos em `hands` e `mtt_hands`.</span>
+          )}
+        </div>
+        <button
+          onClick={handleBulkRematch}
+          disabled={bulkLoading}
+          style={{
+            fontSize: 11, padding: '5px 14px', borderRadius: 4, fontWeight: 600,
+            background: bulkLoading ? 'rgba(99,102,241,0.1)' : 'rgba(99,102,241,0.15)',
+            border: '1px solid rgba(99,102,241,0.35)',
+            color: '#818cf8',
+            cursor: bulkLoading ? 'wait' : 'pointer',
+            opacity: bulkLoading ? 0.6 : 1,
+          }}
+        >
+          {bulkLoading ? 'A processar…' : `Rematch todos (${orphans.length})`}
+        </button>
+      </div>
+
     <div style={{ maxHeight: 520, overflowY: 'auto' }}>
       {orphans.map((o, idx) => {
         const raw = o.raw_json || {}
@@ -546,6 +652,7 @@ function OrphanList() {
         )
       })}
     </div>
+    </>
   )
 }
 
