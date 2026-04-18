@@ -1008,6 +1008,77 @@ def rematch_orphan(entry_id: int, current_user=Depends(require_auth)):
     }
 
 
+# ── Cleanup: apagar SS órfãos de mãos anteriores a 2026 ─────────────────────
+
+@router.get("/cleanup-before-2026/preview")
+def cleanup_before_2026_preview(current_user=Depends(require_auth)):
+    """
+    Preview: devolve contagem e amostra dos SS órfãos cuja data da mão
+    (raw_json.file_meta.date) é anterior a 2026-01-01.
+    Não apaga nada.
+    """
+    count_rows = query(
+        """
+        SELECT COUNT(*) AS n FROM entries
+        WHERE entry_type = 'screenshot'
+          AND status = 'new'
+          AND (raw_json->'file_meta'->>'date') < '2026-01-01'
+        """
+    )
+    count = count_rows[0]["n"] if count_rows else 0
+
+    sample_rows = query(
+        """
+        SELECT id, file_name,
+               raw_json->'file_meta'->>'date' AS data_mao,
+               raw_json->>'tm' AS tm
+        FROM entries
+        WHERE entry_type = 'screenshot'
+          AND status = 'new'
+          AND (raw_json->'file_meta'->>'date') < '2026-01-01'
+        ORDER BY (raw_json->'file_meta'->>'date') DESC
+        LIMIT 10
+        """
+    )
+    return {
+        "count": count,
+        "sample": [dict(r) for r in sample_rows],
+    }
+
+
+@router.post("/cleanup-before-2026")
+def cleanup_before_2026(current_user=Depends(require_auth)):
+    """
+    Apaga todos os SS órfãos (status='new') cuja data da mão é anterior a 2026-01-01.
+    Irreversível.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM entries
+                WHERE entry_type = 'screenshot'
+                  AND status = 'new'
+                  AND (raw_json->'file_meta'->>'date') < '2026-01-01'
+                RETURNING id
+                """
+            )
+            deleted_ids = [r["id"] for r in cur.fetchall()]
+        conn.commit()
+        logger.info(f"[cleanup-before-2026] Deleted {len(deleted_ids)} orphan screenshots")
+        return {
+            "deleted": len(deleted_ids),
+            "deleted_ids": deleted_ids[:50],  # amostra
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[cleanup-before-2026] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.get("/hand/{hand_id}")
 def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     """Devolve o screenshot_url e player_names de uma mão."""
