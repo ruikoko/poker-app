@@ -261,6 +261,23 @@ def hand_stats(current_user=Depends(require_auth)):
         LIMIT 5
     """)
     result["recent"] = [dict(r) for r in recent_rows]
+
+    # Screenshot stats
+    try:
+        ss_rows = query("""
+            SELECT
+                COUNT(*) AS total_screenshots,
+                COUNT(*) FILTER (WHERE status = 'new') AS orphan_screenshots
+            FROM entries
+            WHERE entry_type = 'screenshot'
+        """)
+        if ss_rows:
+            result["total_screenshots"] = ss_rows[0]["total_screenshots"]
+            result["orphan_screenshots"] = ss_rows[0]["orphan_screenshots"]
+    except Exception:
+        result["total_screenshots"] = 0
+        result["orphan_screenshots"] = 0
+
     return result
 
 

@@ -296,6 +296,38 @@ export default function DashboardPage() {
           )
         })}
       </div>
+
+      {/* ── 2 Painéis Screenshots ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginTop: 24 }}>
+
+        {/* Total Screenshots */}
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          padding: '20px',
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Screenshots na BD</div>
+          <div style={{ fontSize: 28, fontWeight: 600, lineHeight: 1 }}>
+            {stats?.total_screenshots != null ? Number(stats.total_screenshots).toLocaleString('pt-PT') : '—'}
+          </div>
+        </div>
+
+        {/* Orphan Screenshots */}
+        <div style={{
+          background: 'var(--surface)',
+          border: `1px solid ${stats?.orphan_screenshots > 0 ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
+          borderRadius: 'var(--radius)',
+          padding: '20px',
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Screenshots sem match</div>
+          <div style={{ fontSize: 28, fontWeight: 600, lineHeight: 1, color: stats?.orphan_screenshots > 0 ? '#f59e0b' : 'var(--text)' }}>
+            {stats?.orphan_screenshots != null ? Number(stats.orphan_screenshots).toLocaleString('pt-PT') : '—'}
+          </div>
+          {stats?.orphan_screenshots > 0 && (
+            <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 8 }}>aguardam match com mãos</div>
+          )}
+        </div>
+
+      </div>
     </>
   )
 }
