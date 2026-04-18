@@ -24,7 +24,7 @@ import logging
 import asyncio
 import io
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response
 from PIL import Image
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -1077,6 +1077,44 @@ def cleanup_before_2026(current_user=Depends(require_auth)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+# ── Servir imagem de um entry de screenshot ────────────────────────────────
+
+@router.get("/image/{entry_id}")
+def get_screenshot_image(entry_id: int, current_user=Depends(require_auth)):
+    """
+    Devolve a imagem do screenshot guardado em entries.raw_json.img_b64
+    como binário (image/jpeg ou image/png).
+    Permite abrir o SS em nova tab do browser sem os limites dos data: URIs.
+    """
+    rows = query(
+        "SELECT raw_json FROM entries WHERE id = %s AND entry_type = 'screenshot'",
+        (entry_id,)
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Screenshot não encontrado")
+
+    raw = rows[0].get("raw_json") or {}
+    img_b64 = raw.get("img_b64")
+    if not img_b64:
+        raise HTTPException(status_code=404, detail="Imagem não disponível neste entry")
+
+    mime = raw.get("mime_type", "image/jpeg")
+    try:
+        img_bytes = base64.b64decode(img_b64)
+    except Exception as e:
+        logger.error(f"Failed to decode image for entry {entry_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao descodificar imagem")
+
+    return Response(
+        content=img_bytes,
+        media_type=mime,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Disposition": f'inline; filename="screenshot_{entry_id}.jpg"',
+        },
+    )
 
 
 @router.get("/hand/{hand_id}")

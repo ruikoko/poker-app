@@ -543,7 +543,7 @@ function OrphanList({ onRematchComplete }) {
         const visionDone = raw.vision_done === true
         const imgB64 = raw.img_b64
         const mime = raw.mime_type || 'image/jpeg'
-        const imgSrc = imgB64 ? `data:${mime};base64,${imgB64}` : null
+        const imgSrc = imgB64 ? screenshots.imageUrl(o.id) : null
         const date = o.discord_posted_at || o.created_at || ''
         const dateStr = date ? new Date(date).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
         const isActing = actionLoading[o.id]

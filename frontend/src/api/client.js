@@ -226,6 +226,8 @@ export const screenshots = {
     return req('GET', `/entries?${qs}`)
   },
   rematch: (entryId) => req('POST', `/screenshots/orphans/${entryId}/rematch`),
+  bulkRematch: () => req('POST', `/screenshots/orphans/bulk-rematch`),
+  imageUrl: (entryId) => `${BASE}/screenshots/image/${entryId}`,
   dismiss: (entryId) => req('PATCH', `/entries/${entryId}`, { status: 'resolved' }),
   deleteEntry: (entryId) => req('DELETE', `/entries/${entryId}`),
   bulkDelete: (entryIds) => req('POST', '/entries/bulk-delete', { entry_ids: entryIds }),
