@@ -54,12 +54,14 @@ def classify_entry(file_name: str, content: str) -> dict:
     text = content or ""
     stripped = text.strip()
     lines = [ln.strip() for ln in stripped.splitlines() if ln.strip()]
-    head = "\\n".join(lines[:20]).lower()
+    head = "\n".join(lines[:20]).lower()
     site = _detect_site(file_name, text)
 
-    # Se comeca com Poker Hand #, pode ser uma mao OU um summary que lista a ultima mao
+    # ── Hand History detection (multi-site) ──
+
+    # GG / PokerStars: starts with "Poker Hand #"
     if stripped.startswith("Poker Hand #"):
-        # Se tiver "Buy-in" ou "Prize" nas primeiras 10 linhas, e um summary
+        # If has "Buy-in" or "Prize" in first 10 lines, it's a summary
         if any(m in head for m in ["buy-in", "prize", "cashout", "received"]):
             return {
                 "source": "summary",
@@ -75,6 +77,40 @@ def classify_entry(file_name: str, content: str) -> dict:
             "external_id": _extract_external_id(file_name, text, site or "GGPoker"),
             "confidence_level": "high",
         }
+
+    # Winamax: starts with "Winamax Poker -"
+    if stripped.startswith("Winamax Poker -"):
+        return {
+            "source": "hh_text",
+            "entry_type": "hand_history",
+            "site": site or "Winamax",
+            "external_id": _extract_external_id(file_name, text, site or "Winamax"),
+            "confidence_level": "high",
+        }
+
+    # PokerStars: starts with "PokerStars Hand #" or "PokerStars Tournament #" (followed by HH)
+    if stripped.startswith("PokerStars Hand #") or stripped.startswith("PokerStars Tournament"):
+        if "*** hole cards ***" in head or "*** flop ***" in head:
+            return {
+                "source": "hh_text",
+                "entry_type": "hand_history",
+                "site": site or "PokerStars",
+                "external_id": _extract_external_id(file_name, text, site or "PokerStars"),
+                "confidence_level": "high",
+            }
+
+    # WPN (Americas Cardroom / Black Chip): starts with "Americas Cardroom Hand" or similar
+    if any(stripped.startswith(p) for p in ["Americas Cardroom Hand", "Black Chip Poker Hand", "Hand #"]):
+        if "*** hole cards ***" in head:
+            return {
+                "source": "hh_text",
+                "entry_type": "hand_history",
+                "site": site or "WPN",
+                "external_id": _extract_external_id(file_name, text, site or "WPN"),
+                "confidence_level": "high",
+            }
+
+    # ── Other types ──
 
     tabular_markers = ["id\\t", "data\\t", "rede\\t", "nome\\t", "stake\\t"]
     if any(marker in head for marker in tabular_markers):

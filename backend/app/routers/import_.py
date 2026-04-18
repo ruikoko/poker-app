@@ -1,5 +1,7 @@
 import zipfile
 import io
+import re
+import json
 import logging
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
@@ -10,6 +12,7 @@ from app.services.entry_classifier import classify_entry
 from app.services.entry_service import create_entry
 from app.services.hand_service import process_entry_to_hands, _insert_hand
 from app.routers.screenshot import _enrich_hand_from_orphan_entry
+from app.routers.hm3 import _parse_hand as hm3_parse_hand
 
 logger = logging.getLogger("import")
 
@@ -21,6 +24,91 @@ SUMMARY_PARSERS = {
     "ggpoker": ggpoker.parse_file,
 }
 
+# ── HH multi-site splitter ────────────────────────────────────────────────────
+
+# Patterns that mark the start of a new hand in each site's HH format
+_HAND_START_PATTERNS = [
+    re.compile(r"^Winamax Poker - ", re.MULTILINE),
+    re.compile(r"^PokerStars Hand #", re.MULTILINE),
+    re.compile(r"^PokerStars Tournament #", re.MULTILINE),
+    re.compile(r"^Americas Cardroom Hand", re.MULTILINE),
+    re.compile(r"^Black Chip Poker Hand", re.MULTILINE),
+    re.compile(r"^Poker Hand #", re.MULTILINE),
+]
+
+def _detect_site_from_block(block: str) -> str:
+    """Detect which site a HH block belongs to."""
+    if block.startswith("Winamax Poker"):
+        return "Winamax"
+    if block.startswith("PokerStars"):
+        return "PokerStars"
+    if block.startswith("Americas Cardroom") or block.startswith("Black Chip"):
+        return "WPN"
+    if block.startswith("Poker Hand #"):
+        return "GGPoker"
+    return "Unknown"
+
+def _split_hh_blocks(text: str) -> list[str]:
+    """Split a multi-hand HH file into individual hand blocks."""
+    # Find all start positions
+    starts = []
+    for pat in _HAND_START_PATTERNS:
+        for m in pat.finditer(text):
+            starts.append(m.start())
+    starts = sorted(set(starts))
+
+    if not starts:
+        return [text.strip()] if text.strip() else []
+
+    blocks = []
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        block = text[start:end].strip()
+        if block:
+            blocks.append(block)
+    return blocks
+
+def _parse_hh_file(content: bytes, filename: str) -> tuple[list[dict], list[str]]:
+    """Parse a .txt HH file that may contain hands from multiple sites.
+    Returns (parsed_hands, errors)."""
+    text = content.decode("utf-8", errors="replace")
+    # Normalise line endings
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    blocks = _split_hh_blocks(text)
+    parsed = []
+    errors = []
+
+    for i, block in enumerate(blocks):
+        site = _detect_site_from_block(block)
+        try:
+            if site == "GGPoker":
+                # Use GG parser for GG hands
+                hands_list, errs = parse_hands(block.encode("utf-8"), filename)
+                parsed.extend(hands_list)
+                errors.extend(errs)
+            else:
+                # Use hm3 parser for Winamax/PS/WPN
+                result = hm3_parse_hand(block, site)
+                if result:
+                    # Build all_players_actions JSON for insertion
+                    all_players = result.pop("all_players", {})
+                    meta = {
+                        "bb": result.get("bb_size", 0),
+                        "sb": result.get("sb_size", 0),
+                        "ante": result.get("ante_size", 0),
+                        "level": result.get("level"),
+                    }
+                    all_players["_meta"] = meta
+                    result["all_players_actions"] = all_players
+                    parsed.append(result)
+                else:
+                    errors.append(f"Block {i+1}: parser returned None for {site}")
+        except Exception as e:
+            errors.append(f"Block {i+1} ({site}): {e}")
+
+    return parsed, errors
+
 
 def _detect_site(filename: str, content: bytes) -> str | None:
     fn = filename.lower()
@@ -28,12 +116,20 @@ def _detect_site(filename: str, content: bytes) -> str | None:
         return "winamax"
     if "ggpoker" in fn or fn.startswith("gg"):
         return "ggpoker"
+    if "pokerstars" in fn or fn.startswith("ps"):
+        return "pokerstars"
+    if "wpn" in fn or "americas" in fn or "blackchip" in fn:
+        return "wpn"
 
     sample = content[:2000].decode("utf-8", errors="replace").lower()
     if "winamax" in sample:
         return "winamax"
     if "ggpoker" in sample or "gg poker" in sample:
         return "ggpoker"
+    if "pokerstars" in sample:
+        return "pokerstars"
+    if "americas cardroom" in sample or "black chip" in sample:
+        return "wpn"
 
     return None
 
@@ -190,17 +286,18 @@ async def import_file(
 
     # ── HAND HISTORY → vai para hands ──
     if content_type == "hand_history":
+        total_inserted = 0
+        total_skipped = 0
+        all_errors = []
+
         if is_zip:
-            total_inserted = 0
-            total_skipped = 0
-            all_errors = []
             try:
                 with zipfile.ZipFile(io.BytesIO(content)) as zf:
                     for name in zf.namelist():
                         if not name.lower().endswith(".txt"):
                             continue
                         file_content = zf.read(name)
-                        hands_parsed, errors = parse_hands(file_content, name)
+                        hands_parsed, errors = _parse_hh_file(file_content, name)
                         all_errors.extend(errors)
                         conn = get_conn()
                         try:
@@ -218,66 +315,69 @@ async def import_file(
                             conn.close()
             except Exception as e:
                 all_errors.append(str(e))
-
-            # ── Auto-rematch de screenshots órfãos ──
-            rematched = []
-            try:
-                orphan_rows = query(
-                    "SELECT id, raw_json FROM entries WHERE entry_type = 'screenshot' AND status = 'new'"
-                )
-                for orphan in orphan_rows:
-                    raw = orphan.get("raw_json") or {}
-                    tm = raw.get("tm")
-                    if not tm:
-                        continue
-                    tm_digits = tm.replace("TM", "")
-                    hand_rows = query(
-                        "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
-                        (f"GG-{tm_digits}",)
-                    )
-                    if hand_rows:
-                        enrich_result = _enrich_hand_from_orphan_entry(
-                            orphan["id"], hand_rows[0]["id"], raw
-                        )
-                        rematched.append({
-                            "entry_id": orphan["id"],
-                            "tm": tm,
-                            "hand_id": hand_rows[0]["id"],
-                            "players_mapped": enrich_result.get("players_mapped", 0),
-                            "enrich_status": enrich_result.get("status"),
-                        })
-                        logger.info(f"Auto-rematch: entry {orphan['id']} enriched for GG-{tm_digits}, {enrich_result.get('players_mapped', 0)} players mapped")
-            except Exception as e:
-                logger.error(f"Auto-rematch query error: {e}")
-
-            return {
-                "import_type": "hands",
-                "entry_id": entry_id,
-                "site": entry_site_label or detected_site,
-                "filename": filename,
-                "status": "ok" if total_inserted > 0 else "error",
-                "hands_found": total_inserted + total_skipped,
-                "hands_inserted": total_inserted,
-                "hands_skipped": total_skipped,
-                "errors": len(all_errors),
-                "error_log": all_errors[:20],
-                "rematched_screenshots": len(rematched),
-                "rematched": rematched,
-            }
         else:
-            result = process_entry_to_hands(entry_id)
-            return {
-                "import_type": "hands",
-                "entry_id": entry_id,
-                "site": entry_site_label or detected_site,
-                "filename": filename,
-                "status": "ok" if result["inserted"] > 0 else "error",
-                "hands_found": result["inserted"] + result["skipped"],
-                "hands_inserted": result["inserted"],
-                "hands_skipped": result["skipped"],
-                "errors": len(result["errors"]),
-                "error_log": result["errors"][:20],
-            }
+            # Single .txt file
+            hands_parsed, errors = _parse_hh_file(content, filename)
+            all_errors.extend(errors)
+            conn = get_conn()
+            try:
+                for h in hands_parsed:
+                    ok = _insert_hand(conn, h, entry_id)
+                    if ok:
+                        total_inserted += 1
+                    else:
+                        total_skipped += 1
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        # ── Auto-rematch de screenshots órfãos ──
+        rematched = []
+        try:
+            orphan_rows = query(
+                "SELECT id, raw_json FROM entries WHERE entry_type = 'screenshot' AND status = 'new'"
+            )
+            for orphan in orphan_rows:
+                raw = orphan.get("raw_json") or {}
+                tm = raw.get("tm")
+                if not tm:
+                    continue
+                tm_digits = tm.replace("TM", "")
+                hand_rows = query(
+                    "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                    (f"GG-{tm_digits}",)
+                )
+                if hand_rows:
+                    enrich_result = _enrich_hand_from_orphan_entry(
+                        orphan["id"], hand_rows[0]["id"], raw
+                    )
+                    rematched.append({
+                        "entry_id": orphan["id"],
+                        "tm": tm,
+                        "hand_id": hand_rows[0]["id"],
+                        "players_mapped": enrich_result.get("players_mapped", 0),
+                        "enrich_status": enrich_result.get("status"),
+                    })
+        except Exception as e:
+            logger.error(f"Auto-rematch query error: {e}")
+
+        return {
+            "import_type": "hands",
+            "entry_id": entry_id,
+            "site": entry_site_label or detected_site,
+            "filename": filename,
+            "status": "ok" if total_inserted > 0 else "error",
+            "hands_found": total_inserted + total_skipped,
+            "hands_inserted": total_inserted,
+            "hands_skipped": total_skipped,
+            "errors": len(all_errors),
+            "error_log": all_errors[:20],
+            "rematched_screenshots": len(rematched),
+            "rematched": rematched,
+        }
 
     # ── TOURNAMENT SUMMARY / REPORT → vai para tournaments (P&L) ──
     if not detected_site or detected_site not in SUMMARY_PARSERS:
