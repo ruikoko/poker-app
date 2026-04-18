@@ -1398,7 +1398,7 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
               if (!byTournament[tName]) byTournament[tName] = []
               byTournament[tName].push(h)
             }
-            const tournamentNames = Object.keys(byTournament).sort()
+            const tournamentNames = Object.keys(byTournament).sort((a, b) => byTournament[b].length - byTournament[a].length)
             if (tournamentNames.length === 1) {
               // Só um torneio — mostrar mãos directamente sem sub-grupo
               return tagHands.map((h, idx) => (
