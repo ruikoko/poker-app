@@ -243,13 +243,47 @@ def _parse_hand(hh_text, site_name):
                     hero_seat = sn
                     break
 
-    num_players = len(all_seat_nums)
+    # ── Filter out sitting-out players ──
+    # A player who appears in the seats but never posted ante/blind and never
+    # acted in any street is "sitting out". Remove them from position calculations
+    # to avoid assigning wrong positions (e.g. Tran_Nguyen getting SB when he
+    # didn't play). We check if the name appears anywhere after the seat lines.
+    active_names = set()
+    action_section = hh_text[hh_text.find("*** ANTE") if "*** ANTE" in hh_text else hh_text.find("*** PRE"):]
+    for seat_num in list(all_seat_nums):
+        name = seats[seat_num]["name"]
+        # Check if name appears in ante/blinds/actions (not just in seat lines)
+        if re.search(rf"(?:^|\n)\s*{re.escape(name)}\b", action_section):
+            active_names.add(seat_num)
+
+    if active_names and len(active_names) < len(all_seat_nums):
+        # Mark sitting-out players
+        for sn in all_seat_nums:
+            if sn not in active_names:
+                seats[sn]["sitting_out"] = True
+        # Use only active seats for position calculation
+        active_seat_nums = sorted(active_names)
+    else:
+        active_seat_nums = all_seat_nums
+
+    num_players = len(active_seat_nums)
+
+    # ── Effective button (handles sitting-out BTN) ──
+    effective_button = button_seat
+    if button_seat and active_names and button_seat not in active_names:
+        sorted_all = sorted(all_seat_nums)
+        btn_idx = sorted_all.index(button_seat)
+        for i in range(1, len(sorted_all)):
+            candidate = sorted_all[(btn_idx - i) % len(sorted_all)]
+            if candidate in active_names:
+                effective_button = candidate
+                break
 
     # ── Hero position ──
-    if button_seat and all_seat_nums and hero_seat:
+    if effective_button and active_seat_nums and hero_seat:
         try:
             result["position"] = _normalise_position(
-                _get_position(hero_seat, button_seat, all_seat_nums, num_players)
+                _get_position(hero_seat, effective_button, active_seat_nums, num_players)
             )
         except (ValueError, IndexError):
             pass
@@ -314,11 +348,11 @@ def _parse_hand(hh_text, site_name):
 
     # ── Build all_players_actions with stacks, positions, level, blinds ──
     all_players = {}
-    if button_seat and all_seat_nums:
-        for seat_num in all_seat_nums:
+    if effective_button and active_seat_nums:
+        for seat_num in active_seat_nums:
             try:
                 pos = _normalise_position(
-                    _get_position(seat_num, button_seat, all_seat_nums, num_players)
+                    _get_position(seat_num, effective_button, active_seat_nums, num_players)
                 )
             except (ValueError, IndexError):
                 pos = "?"

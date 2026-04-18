@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import ImportModal from './ImportModal'
 
 const NAV = [
   { to: '/',            label: 'Dashboard' },
@@ -11,6 +13,7 @@ const NAV = [
 
 export default function Shell() {
   const { user, logout } = useAuth()
+  const [importOpen, setImportOpen] = useState(false)
 
   return (
     <div className="app-shell">
@@ -30,6 +33,18 @@ export default function Shell() {
           ))}
         </nav>
 
+        <div style={{ padding: '16px 16px 0' }}>
+          <button
+            onClick={() => setImportOpen(true)}
+            style={{
+              width: '100%', padding: '8px 0', fontSize: 12, fontWeight: 600,
+              background: 'var(--accent)', color: '#fff', border: 'none',
+              borderRadius: 'var(--radius)', cursor: 'pointer',
+              letterSpacing: 0.3,
+            }}
+          >+ Importar</button>
+        </div>
+
         <div style={{ marginTop: 'auto', padding: '0 20px' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
             {user?.email}
@@ -43,6 +58,8 @@ export default function Shell() {
       <main className="main-content">
         <Outlet />
       </main>
+
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   )
 }
