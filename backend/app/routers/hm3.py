@@ -87,6 +87,18 @@ def _get_position(seat_num, button_seat, all_seats, num_players):
     sorted_seats = sorted(all_seats)
     if num_players == 2:
         return "SB" if seat_num == button_seat else "BB"
+    if button_seat not in sorted_seats:
+        # Button is not in the active seat list (sitting out) — find nearest
+        # active seat before the button position as effective BTN
+        all_sorted = sorted(sorted_seats + [button_seat])
+        btn_pos = all_sorted.index(button_seat)
+        for i in range(1, len(all_sorted) + 1):
+            candidate = all_sorted[(btn_pos - i) % len(all_sorted)]
+            if candidate in sorted_seats:
+                button_seat = candidate
+                break
+        else:
+            return "?"
     btn_idx = sorted_seats.index(button_seat)
     ordered = sorted_seats[btn_idx + 1:] + sorted_seats[:btn_idx + 1]
     pos_map = POSITION_MAPS.get(num_players)
