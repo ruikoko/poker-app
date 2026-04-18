@@ -588,7 +588,11 @@ async def import_hm3(
                 site_name = SITE_MAP.get(site_id, f"Site{site_id}")
                 hh_text = row.get("handhistory", "")
 
-                parsed = _parse_hand(hh_text, site_name)
+                try:
+                    parsed = _parse_hand(hh_text, site_name)
+                except Exception as parse_err:
+                    errors.append(f"Parse error: {gamenumber} ({site_name}): {parse_err}")
+                    continue
                 if not parsed or not parsed["hand_id"]:
                     errors.append(f"Parse failed: {gamenumber} ({site_name})")
                     continue
