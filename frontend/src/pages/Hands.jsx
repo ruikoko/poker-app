@@ -1668,11 +1668,37 @@ export default function HandsPage() {
       )}
 
       {/* Tags View (default) — grupos com contagens reais, lazy-load ao expandir.
-          Organizados por tiers: A (>100), B (10-100), C (<10) — os dois últimos colapsáveis. */}
+          Re-agrega por TEMA (primeira tag que não seja 'nota*'); se só houver notas, usa a tag de nota.
+          Depois parte em tiers: A (>100), B (10-100), C (<10). */}
       {!loading && viewMode === 'tags' && tagGroupsData.groups.length > 0 && (() => {
-        const tierA = tagGroupsData.groups.filter(g => g.count > 100)
-        const tierB = tagGroupsData.groups.filter(g => g.count > 10 && g.count <= 100)
-        const tierC = tagGroupsData.groups.filter(g => g.count <= 10)
+        // Regra: se uma mão tem tags [X, Y, nota++], o tema é a primeira (alfabética) que não seja "nota*".
+        // Fallback: se só tem tags de nota, usa a nota mesma.
+        const pickTheme = (tags) => {
+          if (!tags || tags.length === 0) return null
+          const sorted = tags.slice().sort((a, b) => a.localeCompare(b))
+          const themes = sorted.filter(t => !/nota/i.test(t))
+          return themes.length > 0 ? themes[0] : sorted[0]
+        }
+
+        // Re-agregar
+        const themeAgg = {}
+        for (const g of tagGroupsData.groups) {
+          const theme = pickTheme(g.tags)
+          if (!theme) continue
+          if (!themeAgg[theme]) {
+            themeAgg[theme] = { tags: [theme], count: 0, wins: 0, losses: 0, total_bb: 0 }
+          }
+          const t = themeAgg[theme]
+          t.count    += g.count
+          t.wins     += g.wins
+          t.losses   += g.losses
+          t.total_bb += g.total_bb
+        }
+        const merged = Object.values(themeAgg).sort((a, b) => b.count - a.count)
+
+        const tierA = merged.filter(g => g.count > 100)
+        const tierB = merged.filter(g => g.count > 10 && g.count <= 100)
+        const tierC = merged.filter(g => g.count <= 10)
 
         const renderGroup = (group, i) => {
           const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.slice().sort().join('+')
