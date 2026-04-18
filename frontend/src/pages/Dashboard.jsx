@@ -385,6 +385,7 @@ function OrphanList() {
   const [orphans, setOrphans] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
+  const [expandedId, setExpandedId] = useState(null)
 
   useEffect(() => {
     screenshots.orphans().then(data => {
@@ -392,7 +393,8 @@ function OrphanList() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
-  async function handleRematch(entryId) {
+  async function handleRematch(entryId, e) {
+    e?.stopPropagation()
     setActionLoading(prev => ({ ...prev, [entryId]: 'rematch' }))
     try {
       const result = await screenshots.rematch(entryId)
@@ -406,7 +408,8 @@ function OrphanList() {
     }
   }
 
-  async function handleDismiss(entryId) {
+  async function handleDismiss(entryId, e) {
+    e?.stopPropagation()
     setActionLoading(prev => ({ ...prev, [entryId]: 'dismiss' }))
     try {
       await screenshots.dismiss(entryId)
@@ -422,51 +425,142 @@ function OrphanList() {
   if (orphans.length === 0) return null
 
   return (
-    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+    <div style={{ maxHeight: 520, overflowY: 'auto' }}>
       {orphans.map((o, idx) => {
         const raw = o.raw_json || {}
+        const fileMeta = raw.file_meta || {}
         const tm = raw.tm || raw.tournament_number || '—'
+        const tournament = raw.tournament || fileMeta.tournament || null
+        const hero = raw.hero || null
+        const blinds = fileMeta.blinds || null
+        const board = Array.isArray(raw.board) && raw.board.length ? raw.board.join(' ') : null
+        const visionDone = raw.vision_done === true
+        const imgB64 = raw.img_b64
+        const mime = raw.mime_type || 'image/jpeg'
+        const imgSrc = imgB64 ? `data:${mime};base64,${imgB64}` : null
         const date = o.discord_posted_at || o.created_at || ''
         const dateStr = date ? new Date(date).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
         const isActing = actionLoading[o.id]
+        const isOpen = expandedId === o.id
 
         return (
-          <div key={o.id} style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '10px 20px',
-            borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.03)' : 'none',
-            fontSize: 12,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-              <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>TM {tm}</span>
-              <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dateStr}</span>
-              {o.file_name && <span style={{ color: '#4b5563', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{o.file_name}</span>}
+          <div key={o.id} style={{ borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
+            {/* Linha compacta clicável */}
+            <div
+              onClick={() => setExpandedId(isOpen ? null : o.id)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 20px',
+                fontSize: 12, cursor: 'pointer',
+                transition: 'background 0.1s',
+                background: isOpen ? 'rgba(99,102,241,0.06)' : 'transparent',
+              }}
+              onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
+              onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = 'transparent' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                <span style={{ color: 'var(--muted)', fontSize: 10, flexShrink: 0, width: 10 }}>
+                  {isOpen ? '▼' : '▶'}
+                </span>
+                <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>TM {tm}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dateStr}</span>
+                {o.file_name && <span style={{ color: '#4b5563', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{o.file_name}</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button
+                  onClick={(e) => handleRematch(o.id, e)}
+                  disabled={!!isActing}
+                  style={{
+                    fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                    background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)',
+                    color: '#22c55e', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
+                    opacity: isActing ? 0.5 : 1,
+                  }}
+                >{isActing === 'rematch' ? '...' : 'Rematch'}</button>
+                <button
+                  onClick={(e) => handleDismiss(o.id, e)}
+                  disabled={!!isActing}
+                  style={{
+                    fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                    background: 'transparent', border: '1px solid var(--border)',
+                    color: 'var(--muted)', cursor: isActing ? 'wait' : 'pointer',
+                    opacity: isActing ? 0.5 : 1,
+                  }}
+                >{isActing === 'dismiss' ? '...' : 'Ignorar'}</button>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-              <button
-                onClick={() => handleRematch(o.id)}
-                disabled={!!isActing}
-                style={{
-                  fontSize: 10, padding: '3px 10px', borderRadius: 4,
-                  background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)',
-                  color: '#22c55e', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
-                  opacity: isActing ? 0.5 : 1,
-                }}
-              >{isActing === 'rematch' ? '...' : 'Rematch'}</button>
-              <button
-                onClick={() => handleDismiss(o.id)}
-                disabled={!!isActing}
-                style={{
-                  fontSize: 10, padding: '3px 10px', borderRadius: 4,
-                  background: 'transparent', border: '1px solid var(--border)',
-                  color: 'var(--muted)', cursor: isActing ? 'wait' : 'pointer',
-                  opacity: isActing ? 0.5 : 1,
-                }}
-              >{isActing === 'dismiss' ? '...' : 'Ignorar'}</button>
-            </div>
+
+            {/* Dropdown expandido */}
+            {isOpen && (
+              <div style={{
+                padding: '14px 20px 16px 44px',
+                background: 'rgba(0,0,0,0.15)',
+                borderTop: '1px solid rgba(255,255,255,0.04)',
+                display: 'grid',
+                gridTemplateColumns: '1fr 200px',
+                gap: 20,
+                alignItems: 'start',
+              }}>
+                {/* Dados */}
+                <div style={{ fontSize: 12, color: 'var(--text)' }}>
+                  <OrphanField label="Torneio" value={tournament} />
+                  <OrphanField label="Herói"   value={hero} />
+                  <OrphanField label="Blinds"  value={blinds} mono />
+                  <OrphanField label="Board"   value={board} mono />
+                  {!visionDone && (
+                    <div style={{ marginTop: 8, fontSize: 11, color: '#f59e0b' }}>
+                      Vision ainda não processou este screenshot.
+                    </div>
+                  )}
+                </div>
+
+                {/* Thumbnail + link */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+                  {imgSrc ? (
+                    <>
+                      <a href={imgSrc} target="_blank" rel="noopener noreferrer" style={{ lineHeight: 0 }}>
+                        <img
+                          src={imgSrc}
+                          alt="screenshot"
+                          style={{
+                            width: 200, height: 'auto', borderRadius: 4,
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            display: 'block',
+                          }}
+                        />
+                      </a>
+                      <a
+                        href={imgSrc}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none' }}
+                      >Abrir imagem ↗</a>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Imagem não disponível</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function OrphanField({ label, value, mono }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, padding: '3px 0' }}>
+      <span style={{
+        width: 70, fontSize: 10, color: 'var(--muted)',
+        textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0, paddingTop: 1,
+      }}>{label}</span>
+      <span style={{
+        color: value ? 'var(--text)' : '#4b5563',
+        fontFamily: mono ? "'Fira Code', monospace" : 'inherit',
+        fontSize: mono ? 11 : 12,
+      }}>{value || '—'}</span>
     </div>
   )
 }
