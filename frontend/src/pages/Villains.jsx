@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
@@ -439,6 +440,27 @@ export default function VillainsPage() {
 
   // Profile panel
   const [selected, setSelected] = useState(null)
+
+  // Auto-abrir perfil se vier ?nick=... na URL (ex: vindo do Dashboard)
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const nickParam = searchParams.get('nick')
+    if (!nickParam) return
+    // Procura exacta do vilão pelo nick e abre o modal
+    villains.list({ search: nickParam, page_size: 10 })
+      .then(res => {
+        const items = res?.data || []
+        const match = items.find(v => v.nick === nickParam) || items[0]
+        if (match) setSelected(match)
+      })
+      .catch(() => {})
+      .finally(() => {
+        // limpa o query param para não reabrir em navegações subsequentes
+        searchParams.delete('nick')
+        setSearchParams(searchParams, { replace: true })
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function load(p = page, s = search) {
     setLoading(true)

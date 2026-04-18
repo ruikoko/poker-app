@@ -328,7 +328,7 @@ export default function DashboardPage() {
           {recentVillains.map((v, idx) => (
             <div
               key={v.id}
-              onClick={() => navigate(`/villains`)}
+              onClick={() => navigate(`/villains?nick=${encodeURIComponent(v.nick)}`)}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '10px 16px',
