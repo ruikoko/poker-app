@@ -1427,22 +1427,59 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
             const byTournament = {}
             for (const h of tagHands) {
               const tName = h.stakes || 'Sem torneio'
-              if (!byTournament[tName]) byTournament[tName] = []
-              byTournament[tName].push(h)
+              // Data do torneio (YYYY-MM-DD), extraída de played_at
+              const dayIso = h.played_at
+                ? new Date(h.played_at).toISOString().slice(0, 10)
+                : 'sem-data'
+              const key = `${dayIso}__${tName}`
+              if (!byTournament[key]) {
+                byTournament[key] = {
+                  name: tName,
+                  day: dayIso,
+                  hands: [],
+                  maxTime: 0,
+                }
+              }
+              byTournament[key].hands.push(h)
+              const t = h.played_at ? new Date(h.played_at).getTime() : 0
+              if (t > byTournament[key].maxTime) byTournament[key].maxTime = t
             }
-            const tournamentNames = Object.keys(byTournament).sort((a, b) => byTournament[b].length - byTournament[a].length)
-            if (tournamentNames.length === 1) {
-              // Só um torneio — mostrar mãos directamente sem sub-grupo
+            // Ordem: data descendente (mais recente primeiro)
+            const entries = Object.values(byTournament).sort((a, b) => b.maxTime - a.maxTime)
+
+            if (entries.length === 1) {
+              // Só um torneio/dia — mostrar mãos directamente sem sub-grupo
               return tagHands.map((h, idx) => (
                 <HandRow key={h.id} hand={h} idx={idx} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} />
               ))
             }
-            return tournamentNames.map(tName => {
-              const tHands = byTournament[tName]
-              const wins = tHands.filter(h => Number(h.result) > 0).length
+
+            // Formatar label: "GRAVITY · 17/04" (PT-PT)
+            const fmtDay = (iso) => {
+              if (!iso || iso === 'sem-data') return ''
+              const [y, m, d] = iso.split('-')
+              return `${d}/${m}`
+            }
+
+            return entries.map(ent => {
+              const tHands = ent.hands
+              const wins   = tHands.filter(h => Number(h.result) > 0).length
               const losses = tHands.filter(h => Number(h.result) < 0).length
-              const tBB = tHands.reduce((s, h) => s + Number(h.result || 0), 0)
-              return <TournamentGroup key={tName} name={tName} hands={tHands} wins={wins} losses={losses} totalBB={tBB} onOpenDetail={onOpenDetail} onDeleteHand={onDeleteHand} />
+              const tBB    = tHands.reduce((s, h) => s + Number(h.result || 0), 0)
+              const dayLabel = fmtDay(ent.day)
+              const label = dayLabel ? `${ent.name} · ${dayLabel}` : ent.name
+              return (
+                <TournamentGroup
+                  key={`${ent.day}__${ent.name}`}
+                  name={label}
+                  hands={tHands}
+                  wins={wins}
+                  losses={losses}
+                  totalBB={tBB}
+                  onOpenDetail={onOpenDetail}
+                  onDeleteHand={onDeleteHand}
+                />
+              )
             })
           })()}
         </div>
