@@ -573,3 +573,23 @@ def admin_promote_archive(current_user=Depends(require_auth)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+@router.post("/admin/delete-before-2026")
+def admin_delete_before_2026(current_user=Depends(require_auth)):
+    """Apaga todas as maos jogadas antes de 2026-01-01 (estudo + arquivo)."""
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM hand_villains WHERE hand_db_id IN (SELECT id FROM hands WHERE played_at < '2026-01-01')")
+            villains_deleted = cur.rowcount
+            cur.execute("DELETE FROM hands WHERE played_at < '2026-01-01'")
+            hands_deleted = cur.rowcount
+        conn.commit()
+        return {"ok": True, "hands_deleted": hands_deleted, "villains_deleted": villains_deleted}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()

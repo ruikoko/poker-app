@@ -1281,11 +1281,14 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
         }
         const result = await hands.list(params)
         let fetched = result.data || []
-        // Se o grupo tem múltiplas tags, filtrar para só mostrar mãos com exactamente essas tags
-        if (tags.length > 1) {
-          const keySet = tags.sort().join('+')
-          fetched = fetched.filter(h => h.tags && h.tags.sort().join('+') === keySet)
-        } else if (tags.length === 0) {
+        // Filtrar para só mostrar mãos que tenham exactamente esta combinação de tags
+        if (tags.length > 0) {
+          const keySet = [...tags].sort().join('+')
+          fetched = fetched.filter(h => {
+            const hTags = h.tags || []
+            return [...hTags].sort().join('+') === keySet
+          })
+        } else {
           fetched = fetched.filter(h => !h.tags || h.tags.length === 0)
         }
         setTagHands(fetched)
@@ -1387,17 +1390,29 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
             <div style={{ padding: '16px', textAlign: 'center', color: '#4b5563', fontSize: 12 }}>
               Sem mãos neste grupo
             </div>
-          ) : (
-            tagHands.map((h, idx) => (
-              <HandRow
-                key={h.id}
-                hand={h}
-                idx={idx}
-                onClick={() => onOpenDetail(h.id)}
-                onDelete={() => onDeleteHand(h.id)}
-              />
-            ))
-          )}
+          ) : (() => {
+            // Agrupar mãos por torneio (stakes)
+            const byTournament = {}
+            for (const h of tagHands) {
+              const tName = h.stakes || 'Sem torneio'
+              if (!byTournament[tName]) byTournament[tName] = []
+              byTournament[tName].push(h)
+            }
+            const tournamentNames = Object.keys(byTournament).sort()
+            if (tournamentNames.length === 1) {
+              // Só um torneio — mostrar mãos directamente sem sub-grupo
+              return tagHands.map((h, idx) => (
+                <HandRow key={h.id} hand={h} idx={idx} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} />
+              ))
+            }
+            return tournamentNames.map(tName => {
+              const tHands = byTournament[tName]
+              const wins = tHands.filter(h => Number(h.result) > 0).length
+              const losses = tHands.filter(h => Number(h.result) < 0).length
+              const tBB = tHands.reduce((s, h) => s + Number(h.result || 0), 0)
+              return <TournamentGroup key={tName} name={tName} hands={tHands} wins={wins} losses={losses} totalBB={tBB} onOpenDetail={onOpenDetail} onDeleteHand={onDeleteHand} />
+            })
+          })()}
         </div>
       )}
     </div>
@@ -1414,7 +1429,7 @@ export default function HandsPage() {
   const [error, setError]         = useState('')
   const [loading, setLoading]     = useState(false)
   const [selected, setSelected]   = useState(null)
-  const [viewMode, setViewMode]   = useState('tags') // 'tags' | 'grid' | 'table'
+  const [viewMode, setViewMode]   = useState('tournament') // 'tags' | 'tournament' | 'grid' | 'table'
 
   // Para a vista por tags: usa o endpoint tag-groups (sem paginação, só metadados)
   const loadTagGroups = useCallback(() => {
