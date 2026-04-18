@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from app.db import get_conn
 from app.routers import health, auth, import_, tournaments, hands, villains
+from app.routers.hands import ensure_hm3_tags_column
 from app.routers.entries import router as entries_router
 from app.routers.discord import router as discord_router
 from app.routers.screenshot import router as screenshot_router
@@ -173,6 +174,7 @@ async def lifespan(app: FastAPI):
     ensure_discord_sync_table()
     ensure_mtt_schema()
     ensure_study_schema()
+    ensure_hm3_tags_column()
 
     # Arrancar bot Discord em background
     from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS

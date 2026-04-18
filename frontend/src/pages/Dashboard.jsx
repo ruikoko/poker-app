@@ -274,10 +274,10 @@ export default function DashboardPage() {
 
           async function handleDelete(e) {
             e.stopPropagation()
-            const hasContent = (h.tags?.length > 0) || (h.notes && h.notes.trim().length > 0)
+            const hasContent = (h.hm3_tags?.length > 0) || (h.notes && h.notes.trim().length > 0)
             if (hasContent) {
               const parts = []
-              if (h.tags?.length > 0) parts.push(`tags: ${h.tags.join(', ')}`)
+              if (h.hm3_tags?.length > 0) parts.push(`tags: ${h.hm3_tags.join(', ')}`)
               if (h.notes) parts.push('notas')
               if (!confirm(`Esta mão tem ${parts.join(' e ')}. Apagar mesmo assim?`)) return
             }
@@ -316,10 +316,10 @@ export default function DashboardPage() {
                 {stakes}
               </div>
               <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', minWidth: 0 }}>
-                {(h.tags || []).slice(0, 3).map((t, i) => (
+                {(h.hm3_tags || []).slice(0, 3).map((t, i) => (
                   <span key={i} style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'rgba(99,102,241,0.12)', color: '#818cf8', fontWeight: 600, whiteSpace: 'nowrap' }}>{t}</span>
                 ))}
-                {(h.tags || []).length > 3 && <span style={{ fontSize: 9, color: '#4b5563' }}>+{h.tags.length - 3}</span>}
+                {(h.hm3_tags || []).length > 3 && <span style={{ fontSize: 9, color: '#4b5563' }}>+{h.hm3_tags.length - 3}</span>}
               </div>
               <div style={{ textAlign: 'center' }}><SiteBadge site={h.site} /></div>
               <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>

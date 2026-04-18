@@ -597,29 +597,36 @@ async def import_hm3(
                     errors.append(f"Parse failed: {gamenumber} ({site_name})")
                     continue
 
-                tags_clean = [t.strip() for t in tags if t.strip()]
+                # Separar tags HM3 (vieram do CSV) das auto-geradas (showdown, nicks)
+                hm3_tags_clean = [t.strip() for t in tags if t.strip()]
+                auto_tags = []
 
                 # Auto-tag with showdown villain nicks
                 raw_text = parsed.get("raw", "")
                 sd_villain_nicks = _extract_showdown_villain_tags(raw_text)
                 if sd_villain_nicks:
-                    tags_clean.append("showdown")
+                    auto_tags.append("showdown")
                     for nick in sd_villain_nicks:
-                        if nick not in tags_clean:
-                            tags_clean.append(nick)
+                        if nick not in auto_tags:
+                            auto_tags.append(nick)
+
+                # tags_clean mantido para compatibilidade com código abaixo (villains nota)
+                tags_clean = hm3_tags_clean + auto_tags
 
                 # Extract actions + showdown cards from raw HH
                 actions_by_player, cards_by_player = _parse_actions_from_raw(raw_text, site_name)
 
                 cur.execute(
-                    "SELECT id, tags FROM hands WHERE hand_id = %s",
+                    "SELECT id, tags, hm3_tags FROM hands WHERE hand_id = %s",
                     (parsed["hand_id"],)
                 )
                 existing = cur.fetchone()
 
                 if existing:
                     existing_tags = existing["tags"] or []
-                    merged = list(set(existing_tags + tags_clean))
+                    existing_hm3 = existing["hm3_tags"] or []
+                    merged_tags = list(set(existing_tags + auto_tags))
+                    merged_hm3 = list(set(existing_hm3 + hm3_tags_clean))
 
                     # Build all_players_actions for update
                     import json
@@ -645,12 +652,12 @@ async def import_hm3(
                             all_players[player_name] = {"cards": cards}
 
                     cur.execute(
-                        "UPDATE hands SET tags = %s, all_players_actions = %s WHERE id = %s",
-                        (merged, json.dumps(all_players), existing["id"])
+                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s WHERE id = %s",
+                        (merged_tags, merged_hm3, json.dumps(all_players), existing["id"])
                     )
 
                     # Extract villains for nota++ hands (existing too)
-                    if any("nota" in t.lower() for t in tags_clean):
+                    if any("nota" in t.lower() for t in hm3_tags_clean):
                         dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
                         hero = dealt_m.group(1) if dealt_m else None
                         vpip_players = _detect_vpip_hm3(parsed.get("raw", ""), hero)
@@ -695,13 +702,14 @@ async def import_hm3(
                     """INSERT INTO hands
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
-                        notes, tags, raw, study_state, all_players_actions)
+                        notes, tags, hm3_tags, raw, study_state, all_players_actions)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s, 'new', %s)
+                        %s, %s, %s, %s, 'new', %s)
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
+                        hm3_tags = EXCLUDED.hm3_tags,
                         all_players_actions = EXCLUDED.all_players_actions
                     RETURNING id""",
                     (
@@ -715,7 +723,8 @@ async def import_hm3(
                         parsed["result"],
                         parsed["currency"],
                         None,
-                        tags_clean,
+                        auto_tags,
+                        hm3_tags_clean,
                         parsed["raw"],
                         json.dumps(all_players),
                     )
@@ -724,7 +733,7 @@ async def import_hm3(
                 inserted += 1
 
                 # Extract villains for nota++ hands
-                if any("nota" in t.lower() for t in tags_clean):
+                if any("nota" in t.lower() for t in hm3_tags_clean):
                     hero_name = parsed.get("raw", "")
                     dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
                     hero = dealt_m.group(1) if dealt_m else None

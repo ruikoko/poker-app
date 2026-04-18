@@ -2,10 +2,121 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import logging
 from app.auth import require_auth
-from app.db import query, execute, execute_returning
+from app.db import query, execute, execute_returning, get_conn
 
 router = APIRouter(prefix="/api/hands", tags=["hands"])
+logger = logging.getLogger("hands")
+
+
+# ── Schema migration ────────────────────────────────────────────────────────
+
+def ensure_hm3_tags_column():
+    """
+    Garante que a coluna hm3_tags (TEXT[]) existe na tabela hands.
+    Criada em v9 para separar tags reais do HM3 das auto-geradas (showdown, nicks).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS hm3_tags TEXT[]
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hands_hm3_tags
+                ON hands USING GIN (hm3_tags)
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_hm3_tags_column: {e}")
+    finally:
+        conn.close()
+
+
+# ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
+# Obtida via scan directo à BD HM3 (handmarkcategories).
+# Cada entrada: (category_id, description).
+HM3_REAL_TAGS = [
+    (1,  "For Review"),
+    (5,  "RFI PKO+"),
+    (6,  "RFI PKO-"),
+    (7,  "nota++"),
+    (8,  "nota"),
+    (9,  "PKO pos"),
+    (10, "MW OP"),
+    (11, "MW IP"),
+    (12, "ICM"),
+    (13, "ICM PKO"),
+    (14, "PKO SS"),
+    (15, "Timetell"),
+    (16, "GTw"),
+    (17, "Bvb pre"),
+    (18, "bvB pre"),
+    (19, "Bvb pos"),
+    (20, "cbet OP PKO+"),
+    (22, "OP vs 3bet"),
+    (23, "IP vs 3bet"),
+    (24, "OP vs 3bet PKO"),
+    (25, "IP vs 3bet PKO"),
+    (26, "SQZ PKO"),
+    (27, "SQZ"),
+    (28, "vs Turn cbet OP"),
+    (30, "Turn Cbet IP"),
+    (32, "Flop Cbet IP PKO- ES"),
+    (33, "Flop Cbet IP PKO- MS"),
+    (34, "Flop Cbet IP PKO- LS"),
+    (35, "probe MW"),
+    (36, "stats"),
+    (37, "cc/3b IP PKO +"),
+    (38, "cc/3b IP PKO-"),
+    (39, "Turn cbet IP"),
+    (40, "IP vs mcbet Flop"),
+    (41, "IP vs mcbet Flop PKO"),
+    (42, "OP vs cbet Flop PKO+"),
+    (43, "OP vs cbet Flop PKO -"),
+    (44, "OP vs Cbet PKO 3bet"),
+    (45, "RFI PKO LS"),
+    (46, "Stats"),
+    (47, "perceived range river forte"),
+    (48, "spots do pisso river q devia r"),
+    (49, "RFI FT"),
+    (50, "MW"),
+    (51, "MW PKO"),
+    (53, "prbe PKO"),
+    (54, "bvB PKO PRE"),
+    (55, "Bvb PKO pre"),
+    (56, "bvB PKO pos"),
+    (57, "Bvb PKO pos"),
+    (58, "CC vs SQZ PKO"),
+    (59, "OR vs SQZ PKO"),
+    (60, "OR vs SQZ"),
+    (61, "CC vs SQZ"),
+    (62, "SB vs Steal"),
+    (63, "SB vs Steal PKO"),
+    (64, "SB vs Steal LS"),
+    (65, "SB vs Steal PKO LS"),
+    (66, "PKO pos 3bet"),
+    (67, "GTw 3bet"),
+    (68, "SB SS vs open"),
+    (69, "chat"),
+    (70, "bvb pos"),
+    (71, "BB SS vs cbet"),
+    (72, "BB SS vs CBET PKO"),
+    (73, "BB vs SS CBET"),
+    (74, "BB vs SS CBET PKO"),
+    (75, "cbet OP"),
+    (77, "bet vs mcbet"),
+    (78, "3b pos flop mono"),
+    (79, "nando"),
+    (80, "analise field"),
+    (81, "nota ex"),
+]
+
+# Set de nomes de tags HM3 para match rápido
+HM3_REAL_TAG_NAMES = {name for _, name in HM3_REAL_TAGS}
 
 
 class HandCreate(BaseModel):
@@ -141,7 +252,7 @@ def list_hands(
     rows = query(
         f"""
         SELECT h.id, h.site, h.hand_id, h.played_at, h.stakes, h.position,
-               h.hero_cards, h.board, h.result, h.currency, h.notes, h.tags,
+               h.hero_cards, h.board, h.result, h.currency, h.notes, h.tags, h.hm3_tags,
                h.study_state, h.entry_id, h.viewed_at, h.studied_at, h.created_at,
                h.all_players_actions, h.screenshot_url, h.player_names,
                e.discord_channel, e.discord_posted_at,
@@ -174,20 +285,30 @@ def tag_groups(
     date_from:        Optional[str] = Query(None),
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT"),
+    use_hm3_tags:     bool = Query(False, description="Agrupar por hm3_tags em vez de tags"),
     current_user=Depends(require_auth)
 ):
-    """Devolve grupos de tags com contagens, wins/losses e resultado total em BB."""
+    """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
+
+    Se use_hm3_tags=true, usa coluna hm3_tags (tags reais HM3) e IGNORA mãos sem hm3_tags.
+    """
     conditions, params = _build_conditions(
         site, None, study_state, position, search, date_from, exclude_mtt_only
     )
     # Excluir arquivo MTT por defeito
     if not include_archive and study_state != 'mtt_archive':
         conditions.append("h.study_state != 'mtt_archive'")
+
+    tag_col = "hm3_tags" if use_hm3_tags else "tags"
+
+    # Quando use_hm3_tags=true, só queremos mãos que TÊM pelo menos uma hm3_tag
+    if use_hm3_tags:
+        conditions.append("h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0")
+
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    # Fetch all matching hands (only id, tags, result) — no pagination
     rows = query(
-        f"SELECT h.id, h.tags, h.result, h.study_state FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST",
+        f"SELECT h.id, h.{tag_col} AS tags, h.result, h.study_state FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST",
         params
     )
 
@@ -254,7 +375,7 @@ def hand_stats(current_user=Depends(require_auth)):
     recent_rows = query("""
         SELECT id, site, hand_id, played_at, stakes, position,
                hero_cards, board, result, currency, study_state,
-               tags, created_at
+               tags, hm3_tags, created_at
         FROM hands
         WHERE study_state != 'mtt_archive'
         ORDER BY created_at DESC, id DESC
@@ -610,3 +731,56 @@ def admin_delete_before_2026(current_user=Depends(require_auth)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+@router.post("/admin/migrate-hm3-tags")
+def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
+    """
+    Migração retroactiva: para cada mão, separa em duas colunas:
+    - hm3_tags: tags que batem com HM3_REAL_TAG_NAMES
+    - tags: apenas as que NÃO batem (auto-geradas: showdown, nicks de vilões)
+    Corre uma vez depois de aplicar a coluna hm3_tags.
+    """
+    conn = get_conn()
+    try:
+        # Lê todas as mãos que ainda não têm hm3_tags populado
+        rows = query(
+            """
+            SELECT id, tags FROM hands
+            WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+              AND (hm3_tags IS NULL OR array_length(hm3_tags, 1) IS NULL)
+            """
+        )
+        total = len(rows)
+        updated = 0
+        unchanged = 0
+
+        with conn.cursor() as cur:
+            for row in rows:
+                old_tags = row["tags"] or []
+                hm3 = [t for t in old_tags if t in HM3_REAL_TAG_NAMES]
+                auto = [t for t in old_tags if t not in HM3_REAL_TAG_NAMES]
+                if hm3:
+                    cur.execute(
+                        "UPDATE hands SET hm3_tags = %s, tags = %s WHERE id = %s",
+                        (hm3, auto, row["id"])
+                    )
+                    updated += 1
+                else:
+                    unchanged += 1
+        conn.commit()
+        logger.info(f"[migrate-hm3-tags] total={total} updated={updated} unchanged={unchanged}")
+        return {
+            "ok": True,
+            "total_scanned": total,
+            "updated": updated,
+            "unchanged_no_hm3_match": unchanged,
+            "hm3_tags_list_size": len(HM3_REAL_TAG_NAMES),
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[migrate-hm3-tags] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+

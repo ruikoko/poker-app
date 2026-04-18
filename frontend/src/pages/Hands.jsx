@@ -1259,6 +1259,49 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
   )
 }
 
+// ── Tier headers/collapsibles para a página Estudo ──────────────────────────
+
+function TierHeader({ label, subtitle, count }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'baseline', gap: 10,
+      padding: '14px 4px 8px',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
+      marginBottom: 6,
+    }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#e5e7eb', letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontSize: 10, color: 'var(--muted)' }}>{subtitle}</span>
+      <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 'auto' }}>{count} grupos</span>
+    </div>
+  )
+}
+
+function TierCollapsible({ label, subtitle, count, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'baseline', gap: 10,
+          padding: '10px 4px 8px',
+          background: 'transparent', border: 'none',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          cursor: 'pointer', textAlign: 'left',
+          marginBottom: open ? 6 : 0,
+        }}
+      >
+        <span style={{ fontSize: 10, color: 'var(--muted)', width: 10 }}>{open ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#cbd5e1', letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{subtitle}</span>
+        <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 'auto' }}>{count} grupos</span>
+      </button>
+      {open && <div>{children}</div>}
+    </div>
+  )
+}
+
+
 function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
@@ -1436,8 +1479,9 @@ export default function HandsPage() {
     if (viewMode !== 'tags') return
     setLoading(true)
     setError('')
-    // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo)
-    const params = { ...filters, exclude_mtt_only: true }
+    // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo).
+    // use_hm3_tags=true: agrupa por hm3_tags (tags reais do HM3) e esconde mãos sem hm3_tags
+    const params = { ...filters, exclude_mtt_only: true, use_hm3_tags: true }
     if (!params.date_from) delete params.date_from
     hands.tagGroups(params)
       .then(setTagGroupsData)
@@ -1623,28 +1667,52 @@ export default function HandsPage() {
         </div>
       )}
 
-      {/* Tags View (default) — grupos com contagens reais, lazy-load ao expandir */}
-      {!loading && viewMode === 'tags' && tagGroupsData.groups.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          {tagGroupsData.groups.map((group, i) => {
-            const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.sort().join('+')
-            return (
-              <TagGroup
-                key={tagKey + i}
-                tagKey={tagKey}
-                tags={group.tags}
-                count={group.count}
-                wins={group.wins}
-                losses={group.losses}
-                totalBB={group.total_bb}
-                filters={filters}
-                onOpenDetail={openDetail}
-                onDeleteHand={deleteHand}
-              />
-            )
-          })}
-        </div>
-      )}
+      {/* Tags View (default) — grupos com contagens reais, lazy-load ao expandir.
+          Organizados por tiers: A (>100), B (10-100), C (<10) — os dois últimos colapsáveis. */}
+      {!loading && viewMode === 'tags' && tagGroupsData.groups.length > 0 && (() => {
+        const tierA = tagGroupsData.groups.filter(g => g.count > 100)
+        const tierB = tagGroupsData.groups.filter(g => g.count > 10 && g.count <= 100)
+        const tierC = tagGroupsData.groups.filter(g => g.count <= 10)
+
+        const renderGroup = (group, i) => {
+          const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.slice().sort().join('+')
+          return (
+            <TagGroup
+              key={tagKey + i}
+              tagKey={tagKey}
+              tags={group.tags}
+              count={group.count}
+              wins={group.wins}
+              losses={group.losses}
+              totalBB={group.total_bb}
+              filters={filters}
+              onOpenDetail={openDetail}
+              onDeleteHand={deleteHand}
+            />
+          )
+        }
+
+        return (
+          <div style={{ marginBottom: 24 }}>
+            {tierA.length > 0 && (
+              <>
+                <TierHeader label="Principais" subtitle=">100 mãos" count={tierA.length} />
+                {tierA.map(renderGroup)}
+              </>
+            )}
+            {tierB.length > 0 && (
+              <TierCollapsible label="Secundárias" subtitle="10–100 mãos" count={tierB.length} defaultOpen={tierA.length === 0}>
+                {tierB.map(renderGroup)}
+              </TierCollapsible>
+            )}
+            {tierC.length > 0 && (
+              <TierCollapsible label="Spots específicos" subtitle="<10 mãos" count={tierC.length} defaultOpen={false}>
+                {tierC.map(renderGroup)}
+              </TierCollapsible>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Tournament View — group hands by tournament name */}
       {!loading && viewMode === 'tournament' && rows.length > 0 && (() => {
