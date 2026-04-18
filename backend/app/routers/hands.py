@@ -549,3 +549,27 @@ def admin_reparse_gg(current_user=Depends(require_auth)):
         "updated": updated,
         "errors": errors,
     }
+
+
+@router.post("/admin/promote-archive")
+def admin_promote_archive(current_user=Depends(require_auth)):
+    """Promove mãos com study_state='mtt_archive' para 'new'.
+
+    Útil para corrigir mãos importadas via /api/import que foram
+    inseridas com study_state errado (bug corrigido).
+    """
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE hands SET study_state = 'new' WHERE study_state = 'mtt_archive'"
+            )
+            updated = cur.rowcount
+        conn.commit()
+        return {"ok": True, "promoted": updated, "message": f"{updated} mãos promovidas de mtt_archive para new"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
