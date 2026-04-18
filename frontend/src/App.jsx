@@ -14,6 +14,8 @@ import StatsPage from './pages/Stats'
 import ReplayerPage from './pages/ReplayerPage'
 import HandDetailPage from './pages/HandDetailPage'
 import GTOBrainPage from './pages/GTOBrain'
+import { StudyTimerProvider } from './contexts/StudyTimerContext'
+import StudyTimerBadge from './components/StudyTimerBadge'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -26,37 +28,40 @@ export default function App() {
   const { user } = useAuth()
 
   return (
-    <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
-      <Route path="/replayer/:id" element={
-        <RequireAuth>
-          <ReplayerPage />
-        </RequireAuth>
-      } />
-      <Route path="/hand/:id" element={
-        <RequireAuth>
-          <Shell />
-        </RequireAuth>
-      }>
-        <Route index element={<HandDetailPage />} />
-      </Route>
-      <Route path="/" element={
-        <RequireAuth>
-          <Shell />
-        </RequireAuth>
-      }>
-        <Route index element={<DashboardPage />} />
-        <Route path="inbox" element={<InboxPage />} />
-        <Route path="hands" element={<HandsPage />} />
-        <Route path="hm3" element={<HM3Page />} />
-        <Route path="stats" element={<StatsPage />} />
-        <Route path="villains" element={<VillainsPage />} />
-        <Route path="pnl" element={<PnlPage />} />
-        <Route path="discord" element={<DiscordPage />} />
-        <Route path="tournaments" element={<TournamentsPage />} />
-        <Route path="gto" element={<GTOBrainPage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <StudyTimerProvider>
+      <Routes>
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/replayer/:id" element={
+          <RequireAuth>
+            <ReplayerPage />
+          </RequireAuth>
+        } />
+        <Route path="/hand/:id" element={
+          <RequireAuth>
+            <Shell />
+          </RequireAuth>
+        }>
+          <Route index element={<HandDetailPage />} />
+        </Route>
+        <Route path="/" element={
+          <RequireAuth>
+            <Shell />
+          </RequireAuth>
+        }>
+          <Route index element={<DashboardPage />} />
+          <Route path="inbox" element={<InboxPage />} />
+          <Route path="hands" element={<HandsPage />} />
+          <Route path="hm3" element={<HM3Page />} />
+          <Route path="stats" element={<StatsPage />} />
+          <Route path="villains" element={<VillainsPage />} />
+          <Route path="pnl" element={<PnlPage />} />
+          <Route path="discord" element={<DiscordPage />} />
+          <Route path="tournaments" element={<TournamentsPage />} />
+          <Route path="gto" element={<GTOBrainPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      {user && <StudyTimerBadge />}
+    </StudyTimerProvider>
   )
 }
