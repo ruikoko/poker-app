@@ -149,6 +149,7 @@ def _build_conditions(
     source: str = None,
     villain: str = None,
     date_to: str = None,
+    hm3_tag: str = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
@@ -164,6 +165,10 @@ def _build_conditions(
         else:
             conditions.append("%s = ANY(h.tags)")
             params.append(tag)
+
+    if hm3_tag:
+        conditions.append("%s = ANY(h.hm3_tags)")
+        params.append(hm3_tag)
 
     if study_state:
         conditions.append("h.study_state = %s")
@@ -215,7 +220,8 @@ def _build_conditions(
 @router.get("")
 def list_hands(
     site:             Optional[str] = Query(None),
-    tag:              Optional[str] = Query(None, description="Filtrar por tag"),
+    tag:              Optional[str] = Query(None, description="Filtrar por tag (na coluna tags)"),
+    hm3_tag:          Optional[str] = Query(None, description="Filtrar por tag HM3 (na coluna hm3_tags)"),
     study_state:      Optional[str] = Query(None, description="Filtrar por estado de estudo"),
     position:         Optional[str] = Query(None, description="Filtrar por posição"),
     search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
@@ -233,7 +239,8 @@ def list_hands(
 ):
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only,
-        result_min, result_max, source=source, villain=villain, date_to=date_to
+        result_min, result_max, source=source, villain=villain, date_to=date_to,
+        hm3_tag=hm3_tag,
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':

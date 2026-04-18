@@ -1311,29 +1311,18 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
     if (!open && tagHands.length === 0) {
       setLoadingHands(true)
       try {
-        // Fetch mãos deste grupo específico
         const params = { ...filters, page_size: 500, page: 1 }
         if (!params.date_from) delete params.date_from
         if (tags.length === 0) {
-          // sem-tag: buscar mãos sem tags
+          // sem-tag: buscar mãos sem hm3_tags
           params.tag = '__none__'
         } else {
-          // Para grupos com tags, filtrar pela tag principal (combinação)
-          // Usamos a primeira tag como filtro e depois filtramos no frontend
-          params.tag = tags[0]
+          // Filtrar pela tag HM3 principal do grupo (tema).
+          // Com a nova lógica, cada grupo é definido por UMA tag HM3.
+          params.hm3_tag = tags[0]
         }
         const result = await hands.list(params)
-        let fetched = result.data || []
-        // Filtrar para só mostrar mãos que tenham exactamente esta combinação de tags
-        if (tags.length > 0) {
-          const keySet = [...tags].sort().join('+')
-          fetched = fetched.filter(h => {
-            const hTags = h.tags || []
-            return [...hTags].sort().join('+') === keySet
-          })
-        } else {
-          fetched = fetched.filter(h => !h.tags || h.tags.length === 0)
-        }
+        const fetched = result.data || []
         setTagHands(fetched)
       } catch (e) {
         console.error('Erro ao carregar mãos do grupo:', e)
