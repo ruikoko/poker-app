@@ -137,6 +137,7 @@ class HandCreate(BaseModel):
 class HandUpdate(BaseModel):
     notes:       Optional[str] = None
     tags:        Optional[list[str]] = None
+    hm3_tags:    Optional[list[str]] = None
     position:    Optional[str] = None
     study_state: Optional[str] = None
 
@@ -733,6 +734,35 @@ def admin_delete_before_2026(current_user=Depends(require_auth)):
             hands_deleted = cur.rowcount
         conn.commit()
         return {"ok": True, "hands_deleted": hands_deleted, "villains_deleted": villains_deleted}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/admin/tag-gg-hands")
+def admin_tag_gg_hands(current_user=Depends(require_auth)):
+    """
+    Adiciona 'GG Hands' ao hm3_tags de todas as mãos GGPoker em `hands`.
+    Corre uma vez depois da migração para apanhar as mãos promovidas pelo pipeline antigo
+    (que gravava em `tags` em vez de `hm3_tags`).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE hands
+                SET hm3_tags = CASE
+                    WHEN hm3_tags IS NULL THEN ARRAY['GG Hands']::text[]
+                    WHEN NOT ('GG Hands' = ANY(hm3_tags)) THEN hm3_tags || 'GG Hands'
+                    ELSE hm3_tags
+                END
+                WHERE site = 'GGPoker'
+            """)
+            updated = cur.rowcount
+        conn.commit()
+        return {"ok": True, "updated": updated}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
