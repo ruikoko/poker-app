@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { hands, equity } from '../api/client'
 import Replayer from '../components/Replayer'
 import { isHero } from '../heroNames'
+import TagEditor from '../components/TagEditor'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -1220,6 +1221,7 @@ function HandRow({ hand, onClick, onDelete, idx }) {
           const ggMatch = ((hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/))
           return ggMatch ? <a href={ggMatch[0]} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: '#f59e0b', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', fontWeight: 600 }}>GG</a> : null
         })()}
+        <TagEditor hand={hand} variant="inline" onUpdate={(patch) => { hand.hm3_tags = patch.hm3_tags }} />
         <button
           style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
           onClick={e => { e.stopPropagation(); onDelete() }}
@@ -1234,7 +1236,16 @@ function HandRow({ hand, onClick, onDelete, idx }) {
 // ── Componente: Tag Group (colapsável) ──────────────────────────────────────
 
 // TagGroup recebe metadados do endpoint tag-groups e faz lazy-load das mãos ao expandir
-function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand }) {
+// ── Tags que justificam atalho HRC Ninja (decisões ICM/bubble/SS) ─────────
+const ICM_TAGS = new Set([
+  'ICM', 'ICM PKO', 'PKO SS', 'SQZ', 'SQZ PKO',
+  'cc/3b IP PKO +', 'cc/3b IP PKO-',
+  'IP vs 3bet PKO', 'OP vs 3bet PKO',
+  'bvB PKO PRE', 'Bvb PKO pre',
+  'SB vs Steal PKO', 'SB vs Steal', 'SB vs Steal LS',
+])
+
+function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false }) {
   const [open, setOpen] = useState(false)
   const bbColor = totalBB > 0 ? '#22c55e' : totalBB < 0 ? '#ef4444' : '#64748b'
   return (
@@ -1247,6 +1258,20 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
           <span style={{ display: 'inline-block', fontSize: 11, color: '#818cf8', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>{name}</span>
           <span style={{ fontSize: 11, color: '#64748b' }}>{hands.length} mãos</span>
+          {showHrcButton && (
+            <a
+              href="https://hrc.ninja/create-structure/"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title="Abrir HRC Ninja (criar estrutura ICM)"
+              style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                color: '#f87171', textDecoration: 'none', letterSpacing: 0.3,
+              }}
+            >HRC</a>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 11, fontFamily: 'monospace' }}>
           <span style={{ color: '#22c55e' }}>{wins}W</span>
@@ -1468,6 +1493,9 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
               const tBB    = tHands.reduce((s, h) => s + Number(h.result || 0), 0)
               const dayLabel = fmtDay(ent.day)
               const label = dayLabel ? `${ent.name} · ${dayLabel}` : ent.name
+              // Tema do grupo = tags[0]. Mostrar botão HRC se estiver na lista ICM.
+              const groupTheme = tags[0]
+              const showHrc = groupTheme && ICM_TAGS.has(groupTheme)
               return (
                 <TournamentGroup
                   key={`${ent.day}__${ent.name}`}
@@ -1478,6 +1506,7 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
                   totalBB={tBB}
                   onOpenDetail={onOpenDetail}
                   onDeleteHand={onDeleteHand}
+                  showHrcButton={showHrc}
                 />
               )
             })
