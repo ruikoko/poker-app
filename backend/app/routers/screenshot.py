@@ -884,6 +884,91 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
             
             await asyncio.to_thread(_try_match)
 
+            # Fallback GGDiscord: se nenhuma mão foi criada/ligada a este entry
+            # (ex: SS chega mas HH ainda não foi importada), criar uma mão
+            # placeholder para ficar visível em /discord com tag GGDiscord.
+            # Quando a HH for importada via bulk, _promote_to_study apaga esta
+            # via DELETE FROM hands WHERE hand_id = %s e insere a versão completa.
+            def _create_discord_placeholder_if_needed():
+                if not tm_final:
+                    return
+                existing = query(
+                    "SELECT id FROM hands WHERE entry_id = %s LIMIT 1",
+                    (entry_id,)
+                )
+                if existing:
+                    return  # match correu, já há mão
+
+                # Verificar se entry veio do Discord
+                ent = query(
+                    "SELECT source, discord_channel, discord_posted_at FROM entries WHERE id = %s",
+                    (entry_id,)
+                )
+                if not ent or ent[0].get("source") != "discord":
+                    return
+
+                tm_digits = tm_final.replace("TM", "")
+                hand_id = f"GG-{tm_digits}"
+
+                # Não substituir se já existe uma mão GG-<tm> (para não apagar uma
+                # mão bulk ou outra SS)
+                existing_hand = query(
+                    "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                    (hand_id,)
+                )
+                if existing_hand:
+                    return
+
+                # all_players_actions minimal com _meta vindo do Vision data
+                apa = {
+                    "_meta": {
+                        "num_players": len(vision_players) if vision_players else 0,
+                        "from_discord_placeholder": True,
+                    }
+                }
+
+                pn_json = {
+                    "players_list": vision_players,
+                    "hero": hero_name,
+                    "vision_sb": vision_sb,
+                    "vision_bb": vision_bb,
+                    "file_meta": file_meta,
+                    "match_method": "discord_placeholder_no_hh",
+                }
+
+                conn = get_conn()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """INSERT INTO hands
+                               (site, hand_id, played_at, notes, tags, hm3_tags,
+                                entry_id, study_state, screenshot_url,
+                                all_players_actions, player_names)
+                               VALUES ('GGPoker', %s, %s, %s, %s, %s, %s, 'new', %s,
+                                       %s::jsonb, %s::jsonb)
+                               ON CONFLICT (hand_id) DO NOTHING""",
+                            (
+                                hand_id,
+                                ent[0].get("discord_posted_at"),
+                                f"Discord SS sem HH ainda. TM: {tm_final}",
+                                [],  # tags
+                                ["GGDiscord"],  # hm3_tags
+                                entry_id,
+                                file_meta.get("og_image_url") if file_meta else None,
+                                json.dumps(apa),
+                                json.dumps(pn_json),
+                            )
+                        )
+                        logger.info(f"[bg] Created GGDiscord placeholder for entry {entry_id} ({hand_id})")
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"[bg] Failed to create GGDiscord placeholder: {e}")
+                finally:
+                    conn.close()
+
+            await asyncio.to_thread(_create_discord_placeholder_if_needed)
+
     except Exception as e:
         logger.error(f"[bg] Vision failed for entry {entry_id}: {e}")
 
