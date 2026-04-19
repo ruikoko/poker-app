@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { equity } from '../api/client'
 import { HERO_NAMES } from '../heroNames'
+import { parseHH } from '../lib/handParser'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
@@ -33,98 +34,6 @@ function getSlots(n) {
   return [0, 1, 2, 3, 4, 5, 6, 7, 8]
 }
 
-function parseHH(raw, apa) {
-  if (!raw) return { steps: [], heroIdx: -1 }
-  const meta = apa?._meta || {}
-  const bb = meta.bb || 1
-  const players = Object.entries(apa || {}).filter(([k]) => k !== '_meta')
-    .map(([name, info]) => ({ name, ...info }))
-    .sort((a, b) => (SEAT_ORDER.indexOf(a.position) === -1 ? 99 : SEAT_ORDER.indexOf(a.position)) - (SEAT_ORDER.indexOf(b.position) === -1 ? 99 : SEAT_ORDER.indexOf(b.position)))
-  const heroIdx = players.findIndex(p => p.is_hero || HERO_NAMES.has(p.name.toLowerCase()))
-  const pState = players.map(p => ({ name: p.name, position: p.position, stack: p.stack || 0, stackBB: p.stack_bb || 0, bounty: p.bounty, isHero: p.is_hero || HERO_NAMES.has(p.name.toLowerCase()), cards: [], folded: false }))
-  const dm = raw.match(/Dealt to (\S+) \[(.+?)\]/)
-  if (dm && heroIdx >= 0) pState[heroIdx].cards = dm[2].split(' ')
-
-  const isW = raw.includes('*** PRE-FLOP ***')
-  const pfm = isW ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***'
-  const bc = []
-  const fm = raw.match(/\*\*\* FLOP \*\*\* \[(.+?)\]/); if (fm) bc.push(...fm[1].split(' '))
-  const tmW = raw.match(/\*\*\* TURN \*\*\* \[.+?\]\s*\[(.+?)\]/); if (tmW) bc.push(...tmW[1].split(' '))
-  const rmW = raw.match(/\*\*\* RIVER \*\*\* \[.+?\]\s*\[(.+?)\]/); if (rmW) bc.push(...rmW[1].split(' '))
-
-  let pot = 0
-  const antes = raw.match(/posts the ante ([\d,]+)/g) || []
-  for (const a of antes) { const n = a.match(/[\d,]+/); if (n) pot += parseFloat(n[0].replace(/,/g, '')) }
-  const sbM = raw.match(/(.+?)[: ]+posts small blind ([\d,]+)/); if (sbM) pot += parseFloat(sbM[2].replace(/,/g, ''))
-  const bbM = raw.match(/(.+?)[: ]+posts big blind ([\d,]+)/); if (bbM) pot += parseFloat(bbM[2].replace(/,/g, ''))
-
-  // Set initial currentBet for SB and BB so chips show at preflop start
-  pState.forEach(p => { p.currentBet = 0 })
-  if (sbM) { const sbPlayer = sbM[1].trim(); const idx = pState.findIndex(p => p.name === sbPlayer); if (idx >= 0) pState[idx].currentBet = parseFloat(sbM[2].replace(/,/g, '')) }
-  if (bbM) { const bbPlayer = bbM[1].trim(); const idx = pState.findIndex(p => p.name === bbPlayer); if (idx >= 0) pState[idx].currentBet = parseFloat(bbM[2].replace(/,/g, '')) }
-
-  const steps = [{ street: 'preflop', label: 'Pre-Flop', action: 'Blinds posted', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [], ps: pState.map(p => ({...p})), analysis: null }]
-
-  const sds = [
-    { key: 'preflop', label: 'Pre-Flop', start: pfm, end: '*** FLOP ***' },
-    { key: 'flop', label: 'Flop', start: '*** FLOP ***', end: '*** TURN ***' },
-    { key: 'turn', label: 'Turn', start: '*** TURN ***', end: '*** RIVER ***' },
-    { key: 'river', label: 'River', start: '*** RIVER ***', end: '*** SHOW' },
-  ]
-
-  for (const sd of sds) {
-    const si = raw.indexOf(sd.start); if (si === -1) continue
-    let ei = raw.indexOf(sd.end, si + sd.start.length); if (ei === -1) ei = raw.indexOf('*** SUMMARY ***', si); if (ei === -1) ei = raw.length
-    const section = raw.slice(si, ei)
-    const curBoard = sd.key === 'preflop' ? [] : sd.key === 'flop' ? bc.slice(0,3) : sd.key === 'turn' ? bc.slice(0,4) : bc.slice(0,5)
-
-    if (sd.key !== 'preflop' && curBoard.length > 0) {
-      pState.forEach(p => p.currentBet = 0)
-      steps.push({ street: sd.key, label: sd.label, action: `${sd.label} dealt`, actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: [...curBoard], ps: pState.map(p => ({...p})), analysis: null })
-    }
-
-    for (const line of section.split('\n')) {
-      const t = line.trim(); if (!t || t.startsWith('***') || t.startsWith('Dealt')) continue
-      const showM = t.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
-      if (showM) { const pi = pState.findIndex(p => p.name === showM[1].trim()); if (pi >= 0) pState[pi].cards = showM[2].split(' '); continue }
-      const m = t.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$/i); if (!m) continue
-      const actor = m[1].trim(), action = m[2].toLowerCase(), rest = m[3]
-      let amount = 0; const amtM = rest.match(/([\d,]+)/); if (amtM) amount = parseFloat(amtM[1].replace(/,/g, ''))
-      const allIn = /all-in/i.test(rest)
-      const pi = pState.findIndex(p => p.name === actor)
-      const isH = pi >= 0 && pState[pi].isHero
-
-      if (action === 'folds' && pi >= 0) pState[pi].folded = true
-      else if (action === 'calls') { pot += amount; if (pi >= 0) pState[pi].currentBet = (pState[pi].currentBet || 0) + amount }
-      else if (action === 'bets') { pot += amount; if (pi >= 0) pState[pi].currentBet = amount }
-      else if (action === 'raises') {
-        const toM = rest.match(/to ([\d,]+)/)
-        const toAmount = toM ? parseFloat(toM[1].replace(/,/g, '')) : amount
-        const prevBet = pi >= 0 ? (pState[pi].currentBet || 0) : 0
-        pot += (toAmount - prevBet)
-        if (pi >= 0) pState[pi].currentBet = toAmount
-      }
-
-      let analysis = null
-      if (isH && (action === 'calls' || action === 'folds')) {
-        const fb = amount; const pb = action === 'calls' ? pot - amount : pot
-        if (fb > 0) analysis = { type: 'facing', potBefore: Math.round(pb), facingBet: Math.round(fb), potOdds: +(fb/(pb+fb)*100).toFixed(1), mdf: +(pb/(pb+fb)*100).toFixed(1), potBB: +(pb/bb).toFixed(1), betBB: +(fb/bb).toFixed(1) }
-      } else if (isH && (action === 'bets' || action === 'raises')) {
-        const pb = pot - amount
-        analysis = { type: 'betting', potBefore: Math.round(pb), betSize: Math.round(amount), betToPot: pb > 0 ? +(amount/pb*100).toFixed(1) : 0, mbf: +(amount/(pb+amount)*100).toFixed(1), potBB: +(pb/bb).toFixed(1), betBB: +(amount/bb).toFixed(1) }
-      }
-
-      const al = action === 'folds' ? 'folds' : action === 'checks' ? 'checks' : action === 'calls' ? `calls ${Math.round(amount).toLocaleString()}${allIn?' (all-in)':''}` : action === 'bets' ? `bets ${Math.round(amount).toLocaleString()}${allIn?' (all-in)':''}` : `raises to ${Math.round(amount).toLocaleString()}${allIn?' (all-in)':''}`
-      steps.push({ street: sd.key, label: sd.label, action: al, actor, actorIdx: pi, isHero: isH, pot: Math.round(pot), potBB: +(pot/bb).toFixed(1), board: [...curBoard], ps: pState.map(p => ({...p})), analysis })
-    }
-  }
-
-  if (pState.filter(p => p.cards.length > 0 && !p.folded).length >= 2) {
-    steps.push({ street: 'showdown', label: 'Showdown', action: 'Showdown', actor: null, actorIdx: -1, isHero: false, pot, potBB: +(pot/bb).toFixed(1), board: bc, ps: pState.map(p => ({...p})), analysis: null })
-  }
-
-  return { steps, heroIdx }
-}
 
 const btn = { background: 'rgba(255,255,255,0.05)', border: '1px solid #2a2d3a', borderRadius: 4, padding: '4px 8px', color: '#94a3b8', cursor: 'pointer', fontSize: 12, lineHeight: 1 }
 

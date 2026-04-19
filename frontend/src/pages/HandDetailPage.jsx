@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi } from '../api/client'
 import { HERO_NAMES } from '../heroNames'
 import TagEditor from '../components/TagEditor'
+import { parseStreetsForDisplay } from '../lib/handParser'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
@@ -25,62 +26,6 @@ function PosBadge({ pos }) {
   return <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 5, fontSize: 14, fontWeight: 700, letterSpacing: 0.5, color: c, background: `${c}18`, border: `1px solid ${c}30`, minWidth: 38, textAlign: 'center' }}>{pos}</span>
 }
 
-function parseStreets(raw, nameMap = {}) {
-  if (!raw) return []
-  const isW = raw.includes('*** PRE-FLOP ***')
-  const streetDefs = [
-    { name: 'PRE-FLOP', start: isW ? '*** PRE-FLOP ***' : '*** HOLE CARDS ***', end: '*** FLOP ***' },
-    { name: 'FLOP', start: '*** FLOP ***', end: '*** TURN ***' },
-    { name: 'TURN', start: '*** TURN ***', end: '*** RIVER ***' },
-    { name: 'RIVER', start: '*** RIVER ***', end: '*** SHOW' },
-    { name: 'SHOWDOWN', start: /\*\*\* SHOW\s*DOWN \*\*\*/, end: '*** SUMMARY ***' },
-  ]
-  // Also handle GG format where shows appear before *** SHOWDOWN ***
-  const streets = []
-  for (const sd of streetDefs) {
-    let si
-    if (sd.start instanceof RegExp) { const m = raw.match(sd.start); si = m ? m.index : -1 }
-    else { si = raw.indexOf(sd.start) }
-    if (si === -1) continue
-    const startLen = sd.start instanceof RegExp ? raw.match(sd.start)[0].length : sd.start.length
-    let ei = raw.indexOf(sd.end, si + startLen)
-    if (ei === -1) ei = raw.indexOf('*** SUMMARY ***', si)
-    if (ei === -1) ei = raw.length
-    const section = raw.slice(si + startLen, ei).trim()
-    let board = []
-    if (sd.name === 'FLOP') { const m = raw.match(/\*\*\* FLOP \*\*\* \[(.+?)\]/); if (m) board = m[1].split(' ') }
-    else if (sd.name === 'TURN') { const m = raw.match(/\*\*\* TURN \*\*\* \[(.+?)\]\s*\[(.+?)\]/); if (m) board = [...m[1].split(' '), ...m[2].split(' ')] }
-    else if (sd.name === 'RIVER') { const m = raw.match(/\*\*\* RIVER \*\*\* \[(.+?)\]\s*\[(.+?)\]/); if (m) board = [...m[1].split(' '), ...m[2].split(' ')] }
-    const actions = []
-    for (const line of section.split('\n')) {
-      const t = line.trim()
-      if (!t || t.startsWith('Dealt to') || t.startsWith('Main pot')) continue
-      const showM = t.match(/^(.+?)(?::)?\s+shows\s+\[(.+?)\]/i)
-      if (showM) { const actor = nameMap[showM[1].trim()] || showM[1].trim(); actions.push({ actor, action: 'shows', cards: showM[2].split(' ') }); continue }
-      const m = t.match(/^(.+?)(?::)?\s+(folds|checks|calls|bets|raises)(.*)$/i)
-      if (m) {
-        const rawActor = m[1].trim()
-        const actor = nameMap[rawActor] || rawActor
-        const act = m[2].toLowerCase(), rest = m[3]
-        let amount = 0; const amtM = rest.match(/([\d,]+)/); if (amtM) amount = parseFloat(amtM[1].replace(/,/g, ''))
-        const allIn = /all-in/i.test(rest)
-        const toM = rest.match(/to ([\d,]+)/)
-        let label = act.charAt(0).toUpperCase() + act.slice(1)
-        if (act === 'calls') label = `calls ${Math.round(amount).toLocaleString()}`
-        else if (act === 'bets') label = `bets ${Math.round(amount).toLocaleString()}`
-        else if (act === 'raises') { const v = toM ? `${Math.round(amount).toLocaleString()} to ${Math.round(parseFloat(toM[1].replace(/,/g, ''))).toLocaleString()}` : Math.round(amount).toLocaleString(); label = `raises ${v}` }
-        else if (act === 'folds') label = 'folds'
-        else if (act === 'checks') label = 'checks'
-        if (allIn) label += ' all-in'
-        actions.push({ actor, action: act, label, amount, allIn })
-      }
-      const wonM = t.match(/^(.+?) collected ([\d,]+)/i)
-      if (wonM) { const actor = nameMap[wonM[1].trim()] || wonM[1].trim(); actions.push({ actor, action: 'collected', label: `wins ${parseFloat(wonM[2].replace(/,/g, '')).toLocaleString()}`, amount: parseFloat(wonM[2].replace(/,/g, '')) }) }
-    }
-    streets.push({ name: sd.name, board, actions })
-  }
-  return streets
-}
 
 export default function HandDetailPage() {
   const { id } = useParams()
@@ -131,7 +76,7 @@ export default function HandDetailPage() {
     if (k !== v) nameMap[k] = v
   }
 
-  const streets = parseStreets(hand.raw, nameMap)
+  const streets = parseStreetsForDisplay(hand.raw, hand.all_players_actions)
   const blindsLabel = meta.sb && meta.bb ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : ''
 
   let initialPot = 0
