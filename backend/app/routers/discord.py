@@ -258,6 +258,51 @@ def process_replayer_links_preview(current_user=Depends(require_auth)):
     }
 
 
+@router.get("/debug-fetch")
+def debug_fetch(url: str, current_user=Depends(require_auth)):
+    """
+    DIAGNÓSTICO. Faz fetch de um URL e devolve metadata detalhada:
+    status HTTP, tamanho HTML, URL final (após redirects), primeiras 2000 chars
+    do HTML, se contém 'og:image', se contém URLs *.png do gg-global-cdn.
+
+    Usar para investigar porque _extract_gg_replayer_image falha em URLs gg.gl.
+    """
+    import re
+    try:
+        import httpx
+    except ImportError:
+        raise HTTPException(status_code=500, detail="httpx não instalado")
+
+    # 1º tentativa: sem User-Agent (como o código actual)
+    results = {}
+    for label, headers in [
+        ("no_ua", {}),
+        ("with_ua", {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}),
+    ]:
+        try:
+            with httpx.Client(follow_redirects=True, timeout=15, headers=headers) as client:
+                resp = client.get(url)
+                html = resp.text
+                og_matches = re.findall(r'og:image[^>]{0,200}', html, re.IGNORECASE)
+                cdn_matches = re.findall(r'https://user\.gg-global-cdn\.com/[^"\'<>\s]+\.png', html)
+                any_png = re.findall(r'https?://[^\s"\'<>]+\.png', html)
+                results[label] = {
+                    "status_code": resp.status_code,
+                    "final_url": str(resp.url),
+                    "content_type": resp.headers.get("content-type"),
+                    "html_length": len(html),
+                    "og_image_matches": og_matches[:3],
+                    "og_image_count": len(og_matches),
+                    "gg_cdn_png_matches": cdn_matches[:3],
+                    "any_png_matches": any_png[:5],
+                    "html_first_2000": html[:2000],
+                }
+        except Exception as e:
+            results[label] = {"error": str(e)}
+
+    return {"ok": True, "url": url, "attempts": results}
+
+
 @router.post("/process-replayer-links")
 async def process_replayer_links(
     confirm: bool = False,
