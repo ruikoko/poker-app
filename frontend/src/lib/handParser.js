@@ -26,42 +26,54 @@ const SEAT_ORDER = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','
 
 // ─── Extract blind sizes from raw HH when _meta is missing/wrong ─────────────
 // Formatos suportados:
-//   GG:       "Level5(125/250(35))"           → bb=250, sb=125, ante=35
-//   GG alt:   "Level5(125/250)"                → bb=250, sb=125
-//   WN/PS:    "Level XXII (20000/40000)"      → bb=40000, sb=20000
-//   WN/PS alt: "(20000/40000) - NL Holdem..."  → bb=40000
+//   GG:       "Level5(125/250(35))"             → bb=250, sb=125, ante=35
+//   GG vírg:  "Level18(1,750/3,500(500))"       → bb=3500, sb=1750, ante=500
+//   GG alt:   "Level5(125/250)"                  → bb=250, sb=125
+//   WN/PS:    "Level XXII (20000/40000)"        → bb=40000, sb=20000
+//   WN/PS alt: "(20000/40000) - NL Holdem..."    → bb=40000
+//
+// Aceita vírgulas como separador de milhares (ex: "1,750"). Converte para
+// número retirando vírgulas antes do parseInt.
+const toInt = (s) => parseInt(String(s).replace(/,/g, ''), 10)
+
+// Padrão de número com separador de milhares opcional: 1 ou 1,750 ou 12,345,678
+const NUM = '\\d[\\d,]*'
+
 export function parseBlindsFromRaw(raw) {
   if (!raw) return { bb: 0, sb: 0, ante: 0, level: null }
 
-  // Tenta formato GG com ante: Level5(125/250(35))
-  const mGGAnte = raw.match(/Level\s*(\d+)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\(\s*(\d+)\s*\)\s*\)/i)
+  // Tenta formato GG com ante: Level5(125/250(35)) ou Level18(1,750/3,500(500))
+  const reGGAnte = new RegExp(`Level\\s*(\\d+)\\s*\\(\\s*(${NUM})\\s*\\/\\s*(${NUM})\\s*\\(\\s*(${NUM})\\s*\\)\\s*\\)`, 'i')
+  const mGGAnte = raw.match(reGGAnte)
   if (mGGAnte) {
     return {
       level: parseInt(mGGAnte[1], 10),
-      sb: parseInt(mGGAnte[2], 10),
-      bb: parseInt(mGGAnte[3], 10),
-      ante: parseInt(mGGAnte[4], 10),
+      sb: toInt(mGGAnte[2]),
+      bb: toInt(mGGAnte[3]),
+      ante: toInt(mGGAnte[4]),
     }
   }
 
   // Tenta formato GG sem ante: Level5(125/250)
-  const mGG = raw.match(/Level\s*(\d+)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/i)
+  const reGG = new RegExp(`Level\\s*(\\d+)\\s*\\(\\s*(${NUM})\\s*\\/\\s*(${NUM})\\s*\\)`, 'i')
+  const mGG = raw.match(reGG)
   if (mGG) {
     return {
       level: parseInt(mGG[1], 10),
-      sb: parseInt(mGG[2], 10),
-      bb: parseInt(mGG[3], 10),
+      sb: toInt(mGG[2]),
+      bb: toInt(mGG[3]),
       ante: 0,
     }
   }
 
-  // Fallback genérico: qualquer (X/Y)
-  const mGen = raw.match(/\(\s*(\d+)\s*\/\s*(\d+)\s*\)/)
+  // Fallback genérico: qualquer (X/Y) com ou sem vírgulas
+  const reGen = new RegExp(`\\(\\s*(${NUM})\\s*\\/\\s*(${NUM})\\s*\\)`)
+  const mGen = raw.match(reGen)
   if (mGen) {
     return {
       level: null,
-      sb: parseInt(mGen[1], 10),
-      bb: parseInt(mGen[2], 10),
+      sb: toInt(mGen[1]),
+      bb: toInt(mGen[2]),
       ante: 0,
     }
   }
