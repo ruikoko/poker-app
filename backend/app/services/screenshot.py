@@ -24,7 +24,7 @@ import logging
 import asyncio
 import io
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response
 from PIL import Image
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -331,14 +331,41 @@ def _parse_vision_response(text: str) -> dict:
             parts = [p.strip() for p in line[7:].split("|")]
             if len(parts) >= 2:
                 name = parts[0]
-                stack_str = parts[1].replace(",", "").replace(".", "")
+                raw_stack = parts[1]
                 bounty_str = parts[2] if len(parts) > 2 else "0%"
                 country = parts[3] if len(parts) > 3 else None
 
-                try:
-                    stack = int(stack_str)
-                except ValueError:
-                    stack = 0
+                # Parse stack. Vision devolve em 2 formatos possíveis:
+                #   "215940"     → fichas (inteiro)
+                #   "10.2 BB"    → big blinds (float com sufixo)
+                #   "32 BB"      → big blinds (inteiro com sufixo)
+                # Guardamos stack_raw (valor original) + stack_unit ("chips" | "bb").
+                # A conversão bb→chips é feita depois, quando já temos o bb_size
+                # da HH (função _normalize_vision_stacks).
+                stack_value = 0.0
+                stack_unit = "chips"
+
+                # Remover vírgulas (milhares) antes de qualquer coisa
+                s = raw_stack.replace(",", "").strip()
+
+                # Detectar sufixo BB (case-insensitive, com ou sem espaço)
+                bb_match = re.search(r"([\d.]+)\s*BB", s, re.IGNORECASE)
+                if bb_match:
+                    try:
+                        stack_value = float(bb_match.group(1))
+                        stack_unit = "bb"
+                    except ValueError:
+                        stack_value = 0.0
+                else:
+                    # Formato fichas. Pode ter "." como separador de milhares
+                    # (configuração regional, ex: "1.234.567") — mas neste caso
+                    # não há "BB" no fim. Só removemos "." se houver mais do que um
+                    # (senão mantemos como decimal, improvável mas seguro).
+                    s_clean = s.replace(".", "") if s.count(".") > 1 else s
+                    try:
+                        stack_value = float(s_clean)
+                    except ValueError:
+                        stack_value = 0.0
 
                 bounty_pct = 0
                 bounty_m = re.search(r'(\d+)', bounty_str)
@@ -347,13 +374,60 @@ def _parse_vision_response(text: str) -> dict:
 
                 player_info = {
                     "name": name,
-                    "stack": stack,
+                    # Compatibilidade: `stack` continua a ser um int em fichas quando
+                    # possível. Se Vision devolveu BB, `stack` é 0 até haver conversão.
+                    # O matching usa stack_chips (preenchido por _normalize_vision_stacks).
+                    "stack": int(stack_value) if stack_unit == "chips" else 0,
+                    "stack_raw": stack_value,
+                    "stack_unit": stack_unit,
+                    "stack_chips": int(stack_value) if stack_unit == "chips" else None,
                     "bounty_pct": bounty_pct,
                     "country": country if country and country.upper() != "NONE" else None,
                 }
                 result["players_list"].append(player_info)
 
     return result
+
+
+def _normalize_vision_stacks(vision_data: dict, bb_size: int) -> dict:
+    """
+    Garante que cada jogador no players_list tem `stack_chips` preenchido
+    (valor em fichas, int). Converte unidades "bb" → "chips" usando bb_size.
+
+    Não modifica o vision_data original — devolve uma cópia com os players_list
+    normalizados. Se bb_size for 0, não faz nada (devolve original).
+    """
+    if not vision_data or not bb_size:
+        return vision_data
+    pl = vision_data.get("players_list") or []
+    if not pl:
+        return vision_data
+
+    new_list = []
+    for p in pl:
+        np = dict(p)
+        # Já tem chips → nada a fazer
+        if np.get("stack_chips"):
+            new_list.append(np)
+            continue
+        unit = np.get("stack_unit")
+        raw = np.get("stack_raw")
+        # Entries antigos: sem stack_unit/stack_raw, só com "stack" (int fichas ou 0)
+        if unit is None and raw is None:
+            legacy_stack = np.get("stack", 0)
+            np["stack_chips"] = int(legacy_stack) if legacy_stack else None
+            new_list.append(np)
+            continue
+        if unit == "bb" and raw is not None:
+            np["stack_chips"] = int(round(float(raw) * bb_size))
+            np["stack"] = np["stack_chips"]  # compat: preencher também o campo antigo
+        elif unit == "chips" and raw is not None:
+            np["stack_chips"] = int(raw)
+        new_list.append(np)
+
+    new_data = dict(vision_data)
+    new_data["players_list"] = new_list
+    return new_data
 
 
 # ── Extracção de dados da HH raw ──────────────────────────────────────────
@@ -448,12 +522,22 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
     raw_hh = hand_row.get("raw", "")
     hh_data = _parse_hh_stacks_and_blinds(raw_hh) if raw_hh else None
 
+    # Normalizar stacks do Vision para fichas se vieram em BB.
+    # Alguns SS GG têm stacks em "10.2 BB" em vez de "35700" fichas.
+    # Usamos bb_size da HH (fonte de verdade) para converter.
+    bb_size = (hh_data or {}).get("bb_size", 0)
+    if bb_size:
+        vision_data = _normalize_vision_stacks(vision_data, bb_size)
+        vision_list = vision_data.get("players_list", [])
+
     used_vision = set()
     hero_names = _GG_HERO_ALIASES
 
     # ── Fase 1: Âncoras fixas ────────────────────────────────────────────
 
     for player_key, info in all_players.items():
+        if player_key == "_meta":
+            continue  # metadata, não é jogador
         pos = info.get("position", "")
 
         # Hero
@@ -501,6 +585,8 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
         ante = hh_data["ante"]
 
         for player_key, info in all_players.items():
+            if player_key == "_meta":
+                continue  # metadata, não é jogador
             if player_key in anon_map:
                 continue
 
@@ -521,7 +607,13 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             for i, vp in enumerate(vision_list):
                 if i in used_vision:
                     continue
-                diff = abs(stack_esperado - vp["stack"])
+                # Preferir stack_chips (normalizado). Fallback para stack (compat).
+                vp_stack = vp.get("stack_chips")
+                if vp_stack is None:
+                    vp_stack = vp.get("stack", 0)
+                if not vp_stack:
+                    continue
+                diff = abs(stack_esperado - vp_stack)
                 pct = (diff / stack_esperado * 100) if stack_esperado > 0 else 999
                 if pct < 2.0 and diff < best_diff:
                     best_diff = diff
@@ -530,13 +622,14 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             if best_i is not None:
                 anon_map[player_key] = vision_list[best_i]["name"]
                 used_vision.add(best_i)
+                vp_stack_log = vision_list[best_i].get("stack_chips") or vision_list[best_i].get("stack", 0)
                 logger.info(f"  Fold match: {player_key} -> {vision_list[best_i]['name']} "
-                           f"(esperado={stack_esperado}, vision={vision_list[best_i]['stack']}, "
+                           f"(esperado={stack_esperado}, vision={vp_stack_log}, "
                            f"diff={best_diff})")
 
     # ── Fase 3: Eliminação — jogadores restantes ─────────────────────────
 
-    unmapped_hh = [k for k in all_players if k not in anon_map]
+    unmapped_hh = [k for k in all_players if k not in anon_map and k != "_meta"]
     unmapped_vision = [i for i in range(len(vision_list)) if i not in used_vision]
 
     if len(unmapped_hh) == 1 and len(unmapped_vision) == 1:
@@ -552,7 +645,10 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             best_diff = float("inf")
             for i in still_unmapped_vision:
                 vp = vision_list[i]
-                diff = abs(stack_initial - vp["stack"])
+                vp_stack = vp.get("stack_chips")
+                if vp_stack is None:
+                    vp_stack = vp.get("stack", 0)
+                diff = abs(stack_initial - vp_stack)
                 if diff < best_diff:
                     best_diff = diff
                     best_i = i
@@ -560,8 +656,9 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             if best_i is not None:
                 anon_map[player_key] = vision_list[best_i]["name"]
                 still_unmapped_vision.discard(best_i)
+                vp_stack_log = vision_list[best_i].get("stack_chips") or vision_list[best_i].get("stack", 0)
                 logger.info(f"  Approx match: {player_key} -> {vision_list[best_i]['name']} "
-                           f"(hh_initial={stack_initial}, vision={vision_list[best_i]['stack']}, "
+                           f"(hh_initial={stack_initial}, vision={vp_stack_log}, "
                            f"diff={best_diff})")
 
     logger.info(f"Match result: {len(anon_map)}/{len(all_players)} mapped. "
@@ -573,8 +670,14 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
     """
     Substitui chaves anónimas pelos nomes reais em all_players_actions
     e adiciona bounty_pct e country de cada jogador.
+
+    Preserva a chave '_meta' intacta (bb/sb/ante/level/num_players).
     """
     enriched = {}
+
+    # Preservar metadata — não é um jogador
+    if "_meta" in all_players:
+        enriched["_meta"] = all_players["_meta"]
 
     vision_by_name = {}
     for vp in vision_data.get("players_list", []):
@@ -582,6 +685,8 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
     vision_by_pos = vision_data.get("players_by_position", {})
 
     for player_key, info in all_players.items():
+        if player_key == "_meta":
+            continue  # já preservado acima
         real_name = anon_map.get(player_key, player_key)
 
         vision_info = vision_by_name.get(real_name.lower(), {})
@@ -778,6 +883,91 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                     logger.error(f"[bg] MTT auto-match failed for TM{tm_digits}: {e}")
             
             await asyncio.to_thread(_try_match)
+
+            # Fallback GGDiscord: se nenhuma mão foi criada/ligada a este entry
+            # (ex: SS chega mas HH ainda não foi importada), criar uma mão
+            # placeholder para ficar visível em /discord com tag GGDiscord.
+            # Quando a HH for importada via bulk, _promote_to_study apaga esta
+            # via DELETE FROM hands WHERE hand_id = %s e insere a versão completa.
+            def _create_discord_placeholder_if_needed():
+                if not tm_final:
+                    return
+                existing = query(
+                    "SELECT id FROM hands WHERE entry_id = %s LIMIT 1",
+                    (entry_id,)
+                )
+                if existing:
+                    return  # match correu, já há mão
+
+                # Verificar se entry veio do Discord
+                ent = query(
+                    "SELECT source, discord_channel, discord_posted_at FROM entries WHERE id = %s",
+                    (entry_id,)
+                )
+                if not ent or ent[0].get("source") != "discord":
+                    return
+
+                tm_digits = tm_final.replace("TM", "")
+                hand_id = f"GG-{tm_digits}"
+
+                # Não substituir se já existe uma mão GG-<tm> (para não apagar uma
+                # mão bulk ou outra SS)
+                existing_hand = query(
+                    "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                    (hand_id,)
+                )
+                if existing_hand:
+                    return
+
+                # all_players_actions minimal com _meta vindo do Vision data
+                apa = {
+                    "_meta": {
+                        "num_players": len(vision_players) if vision_players else 0,
+                        "from_discord_placeholder": True,
+                    }
+                }
+
+                pn_json = {
+                    "players_list": vision_players,
+                    "hero": hero_name,
+                    "vision_sb": vision_sb,
+                    "vision_bb": vision_bb,
+                    "file_meta": file_meta,
+                    "match_method": "discord_placeholder_no_hh",
+                }
+
+                conn = get_conn()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """INSERT INTO hands
+                               (site, hand_id, played_at, notes, tags, hm3_tags,
+                                entry_id, study_state, screenshot_url,
+                                all_players_actions, player_names)
+                               VALUES ('GGPoker', %s, %s, %s, %s, %s, %s, 'new', %s,
+                                       %s::jsonb, %s::jsonb)
+                               ON CONFLICT (hand_id) DO NOTHING""",
+                            (
+                                hand_id,
+                                ent[0].get("discord_posted_at"),
+                                f"Discord SS sem HH ainda. TM: {tm_final}",
+                                [],  # tags
+                                ["GGDiscord"],  # hm3_tags
+                                entry_id,
+                                file_meta.get("og_image_url") if file_meta else None,
+                                json.dumps(apa),
+                                json.dumps(pn_json),
+                            )
+                        )
+                        logger.info(f"[bg] Created GGDiscord placeholder for entry {entry_id} ({hand_id})")
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"[bg] Failed to create GGDiscord placeholder: {e}")
+                finally:
+                    conn.close()
+
+            await asyncio.to_thread(_create_discord_placeholder_if_needed)
 
     except Exception as e:
         logger.error(f"[bg] Vision failed for entry {entry_id}: {e}")
@@ -1077,6 +1267,44 @@ def cleanup_before_2026(current_user=Depends(require_auth)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+# ── Servir imagem de um entry de screenshot ────────────────────────────────
+
+@router.get("/image/{entry_id}")
+def get_screenshot_image(entry_id: int, current_user=Depends(require_auth)):
+    """
+    Devolve a imagem do screenshot guardado em entries.raw_json.img_b64
+    como binário (image/jpeg ou image/png).
+    Permite abrir o SS em nova tab do browser sem os limites dos data: URIs.
+    """
+    rows = query(
+        "SELECT raw_json FROM entries WHERE id = %s AND entry_type = 'screenshot'",
+        (entry_id,)
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Screenshot não encontrado")
+
+    raw = rows[0].get("raw_json") or {}
+    img_b64 = raw.get("img_b64")
+    if not img_b64:
+        raise HTTPException(status_code=404, detail="Imagem não disponível neste entry")
+
+    mime = raw.get("mime_type", "image/jpeg")
+    try:
+        img_bytes = base64.b64decode(img_b64)
+    except Exception as e:
+        logger.error(f"Failed to decode image for entry {entry_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao descodificar imagem")
+
+    return Response(
+        content=img_bytes,
+        media_type=mime,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Disposition": f'inline; filename="screenshot_{entry_id}.jpg"',
+        },
+    )
 
 
 @router.get("/hand/{hand_id}")
