@@ -447,3 +447,181 @@ async def process_replayer_links(
         "note": "Vision corre em background. Verifica /preview daqui a ~30s para veres quantos têm vision_done.",
     }
 
+
+# ─── Backfill GGDiscord para entries com Vision feito mas sem mão ───────────
+
+@router.get("/backfill-ggdiscord/preview")
+def backfill_ggdiscord_preview(current_user=Depends(require_auth)):
+    """
+    DRY-RUN. Lista entries Discord com vision_done=true que não têm mão associada.
+    Estes são candidatos a receber uma mão placeholder com hm3_tags=['GGDiscord'].
+    """
+    rows = query("""
+        SELECT e.id, e.raw_json->>'tm' AS tm,
+               e.discord_posted_at,
+               (e.raw_json->'players_list') AS players_list,
+               e.raw_json->>'hero' AS hero,
+               (SELECT COUNT(*) FROM hands h WHERE h.entry_id = e.id) AS hands_count
+        FROM entries e
+        WHERE e.source = 'discord'
+          AND e.entry_type = 'replayer_link'
+          AND e.site = 'GGPoker'
+          AND (e.raw_json->>'vision_done')::boolean = true
+        ORDER BY e.id DESC
+    """)
+
+    candidates = []
+    for r in rows:
+        if r["hands_count"] > 0:
+            continue
+        if not r["tm"]:
+            continue
+        # Verificar também se já existe mão GG-<tm> (de outro caminho)
+        tm_digits = r["tm"].replace("TM", "")
+        existing_hand = query(
+            "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+            (f"GG-{tm_digits}",)
+        )
+        if existing_hand:
+            continue
+        candidates.append({
+            "entry_id": r["id"],
+            "tm": r["tm"],
+            "hand_id_to_create": f"GG-{tm_digits}",
+            "players_count": len(r["players_list"]) if r["players_list"] else 0,
+            "hero": r["hero"],
+            "posted_at": r["discord_posted_at"].isoformat() if r["discord_posted_at"] else None,
+        })
+
+    return {
+        "ok": True,
+        "total_vision_done": len(rows),
+        "candidates_count": len(candidates),
+        "candidates": candidates,
+    }
+
+
+@router.post("/backfill-ggdiscord")
+def backfill_ggdiscord(
+    confirm: bool = False,
+    current_user=Depends(require_auth),
+):
+    """
+    Para cada entry Discord com vision_done=true mas sem mão associada,
+    cria uma mão placeholder com hm3_tags=['GGDiscord'].
+
+    Quando a HH correspondente for importada via bulk, _promote_to_study
+    fará DELETE FROM hands WHERE hand_id = %s e reinserirá com 'GG Hands'.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Adicionar ?confirm=true para executar. Corre /backfill-ggdiscord/preview primeiro."
+        )
+
+    import json as _json
+    from app.db import get_conn
+
+    rows = query("""
+        SELECT e.id, e.raw_json,
+               e.discord_posted_at,
+               e.discord_channel,
+               (SELECT COUNT(*) FROM hands h WHERE h.entry_id = e.id) AS hands_count
+        FROM entries e
+        WHERE e.source = 'discord'
+          AND e.entry_type = 'replayer_link'
+          AND e.site = 'GGPoker'
+          AND (e.raw_json->>'vision_done')::boolean = true
+    """)
+
+    created = 0
+    skipped = []
+    failed = []
+
+    conn = get_conn()
+    try:
+        for r in rows:
+            entry_id = r["id"]
+            if r["hands_count"] > 0:
+                skipped.append({"id": entry_id, "reason": "já tem mão associada"})
+                continue
+
+            rj = r["raw_json"] or {}
+            tm = rj.get("tm")
+            if not tm:
+                skipped.append({"id": entry_id, "reason": "sem TM"})
+                continue
+
+            tm_digits = tm.replace("TM", "")
+            hand_id = f"GG-{tm_digits}"
+
+            existing_hand = query(
+                "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                (hand_id,)
+            )
+            if existing_hand:
+                skipped.append({"id": entry_id, "reason": f"já existe mão {hand_id}"})
+                continue
+
+            apa = {
+                "_meta": {
+                    "num_players": len(rj.get("players_list") or []),
+                    "from_discord_placeholder": True,
+                }
+            }
+
+            pn = {
+                "players_list": rj.get("players_list") or [],
+                "hero": rj.get("hero"),
+                "vision_sb": rj.get("vision_sb"),
+                "vision_bb": rj.get("vision_bb"),
+                "file_meta": rj.get("file_meta") or {},
+                "match_method": "discord_placeholder_no_hh_backfill",
+            }
+
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO hands
+                           (site, hand_id, played_at, notes, tags, hm3_tags,
+                            entry_id, study_state, screenshot_url,
+                            all_players_actions, player_names)
+                           VALUES ('GGPoker', %s, %s, %s, %s, %s, %s, 'new', %s,
+                                   %s::jsonb, %s::jsonb)
+                           ON CONFLICT (hand_id) DO NOTHING
+                           RETURNING id""",
+                        (
+                            hand_id,
+                            r["discord_posted_at"],
+                            f"Discord SS sem HH ainda. TM: {tm}",
+                            [],
+                            ["GGDiscord"],
+                            entry_id,
+                            (rj.get("file_meta") or {}).get("og_image_url"),
+                            _json.dumps(apa),
+                            _json.dumps(pn),
+                        )
+                    )
+                    inserted = cur.fetchone()
+                if inserted:
+                    created += 1
+                else:
+                    skipped.append({"id": entry_id, "reason": "ON CONFLICT - mão já existia"})
+            except Exception as e:
+                failed.append({"id": entry_id, "error": str(e)})
+
+        conn.commit()
+        return {
+            "ok": True,
+            "total_scanned": len(rows),
+            "created": created,
+            "skipped_count": len(skipped),
+            "skipped": skipped[:10],
+            "failed_count": len(failed),
+            "failed": failed[:10],
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
