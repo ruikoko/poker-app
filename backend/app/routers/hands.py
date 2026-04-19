@@ -859,3 +859,89 @@ def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
     finally:
         conn.close()
 
+
+@router.get("/admin/scope-anonmap-bug")
+def admin_scope_anonmap_bug(current_user=Depends(require_auth)):
+    """
+    DIAGNÓSTICO (read-only).
+
+    Conta mãos GG onde o matching Vision↔raw colocou a metadata do
+    all_players_actions (bb/sb/ante/level) com chave de nome de jogador,
+    e o nome de um jogador real com chave '_meta'. Sintoma:
+
+      all_players_actions._meta  → undefined (em vez de dict)
+      all_players_actions.<nick> → {bb, sb, ante, level, ...} (em vez de dados do jogador)
+      player_names.anon_map._meta → string com nome de jogador
+
+    Devolve: total GG com SS, nº afectadas, até 5 exemplos (id + hero + nick_fantasma).
+    NÃO MODIFICA NADA.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Total de mãos GG promovidas (com player_names populado)
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM hands
+                WHERE site = 'GGPoker'
+                  AND player_names IS NOT NULL
+                  AND player_names::text NOT IN ('null', '{}')
+            """)
+            total_gg = cur.fetchone()["n"]
+
+            # Afectadas: anon_map tem chave '_meta' cujo valor é string (nick)
+            # em vez de dict (metadata). Usamos JSONB path para inspeccionar.
+            cur.execute("""
+                SELECT id, hand_id, hero_cards,
+                       player_names->'anon_map'->>'_meta' AS ghost_nick,
+                       played_at, stakes
+                FROM hands
+                WHERE site = 'GGPoker'
+                  AND player_names IS NOT NULL
+                  AND player_names->'anon_map' ? '_meta'
+                  AND jsonb_typeof(player_names->'anon_map'->'_meta') = 'string'
+                ORDER BY played_at DESC NULLS LAST
+                LIMIT 5000
+            """)
+            affected_rows = cur.fetchall()
+            affected_count = len(affected_rows)
+
+            # Amostra (5 exemplos)
+            examples = [
+                {
+                    "id": r["id"],
+                    "hand_id": r["hand_id"],
+                    "hero_cards": r["hero_cards"],
+                    "ghost_nick": r["ghost_nick"],
+                    "played_at": r["played_at"].isoformat() if r["played_at"] else None,
+                    "stakes": r["stakes"],
+                }
+                for r in affected_rows[:5]
+            ]
+
+            # Contagem cruzada: destes, quantos também têm o sintoma no all_players_actions
+            # (chave do nick fantasma existe como "player" com bb/sb/ante em vez de seat/stack)
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM hands
+                WHERE site = 'GGPoker'
+                  AND player_names IS NOT NULL
+                  AND player_names->'anon_map' ? '_meta'
+                  AND jsonb_typeof(player_names->'anon_map'->'_meta') = 'string'
+                  AND all_players_actions IS NOT NULL
+                  AND NOT (all_players_actions ? '_meta')
+            """)
+            apa_without_meta = cur.fetchone()["n"]
+
+        return {
+            "ok": True,
+            "total_gg_with_screenshot": total_gg,
+            "affected_count": affected_count,
+            "affected_pct": round(100 * affected_count / total_gg, 1) if total_gg else 0,
+            "apa_missing_meta": apa_without_meta,
+            "examples": examples,
+        }
+    except Exception as e:
+        logger.error(f"[scope-anonmap-bug] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
