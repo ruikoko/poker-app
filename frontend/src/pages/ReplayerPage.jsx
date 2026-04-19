@@ -42,7 +42,19 @@ function RCard({ card, faceDown, size = 'md' }) {
 function parseHH(raw, apa) {
   if (!raw) return { steps: [], heroIdx: -1 }
   const meta = apa?._meta || {}
-  const bb = meta.bb || 1
+  let bb = meta.bb || 0
+  // Fallback: tentar parsear bb directamente do raw se meta está vazio.
+  // Formatos comuns:
+  //  - GG: "Level5(125/250(35))" → bb=250
+  //  - WN/PS: "Level XXII (20000/40000)" → bb=40000
+  if (!bb) {
+    const m1 = raw.match(/Level\s*\d+\s*\(\s*\d+\s*\/\s*(\d+)/i)
+    const m2 = raw.match(/\(\s*(\d+)\s*\/\s*(\d+)\s*\)/)
+    if (m1) bb = parseInt(m1[1], 10)
+    else if (m2) bb = parseInt(m2[2], 10)
+  }
+  if (!bb) bb = 1  // último recurso para não dividir por zero
+
   const players = Object.entries(apa || {}).filter(([k]) => k !== '_meta')
     .map(([name, info]) => ({ name, ...info }))
     .sort((a, b) => {
@@ -79,7 +91,7 @@ function parseHH(raw, apa) {
     name: p.name, position: p.position,
     startStack: p.stack || 0,
     stack: p.stack || 0,
-    stackBB: p.stack_bb || 0,
+    stackBB: p.stack_bb || (bb > 1 ? +((p.stack || 0) / bb).toFixed(1) : 0),
     bounty: p.bounty,
     isHero: p.is_hero || HERO_NAMES.has(p.name.toLowerCase()),
     cards: [], folded: false,
