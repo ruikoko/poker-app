@@ -35,6 +35,7 @@ const TAG_COLORS = {
   bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b',
   cbet: '#a78bfa', ip: '#34d399', mw: '#fb923c',
   speed: '#ec4899', racer: '#ec4899',
+  GGDiscord: '#f43f5e', 'GG Hands': '#10b981',
 }
 
 // ── Mini Componentes ────────────────────────────────────────────────────────
@@ -332,12 +333,16 @@ export default function DiscordPage() {
   }
 
   // Agrupar por tags
+  // Combina tags (canal Discord, format, max-players) + hm3_tags (GG Hands, GGDiscord, etc.)
+  // Mãos GGDiscord têm tags=[] mas hm3_tags=['GGDiscord'] e devem aparecer no seu próprio grupo,
+  // não em "sem-tag".
   const tagGroups = {}
   const noTagHands = []
   handsList.forEach(h => {
-    if (h.tags && h.tags.length > 0) {
-      const tagKey = [...h.tags].sort().join('+')
-      if (!tagGroups[tagKey]) tagGroups[tagKey] = { tags: h.tags, hands: [] }
+    const allTags = [...(h.tags || []), ...(h.hm3_tags || [])]
+    if (allTags.length > 0) {
+      const tagKey = [...allTags].sort().join('+')
+      if (!tagGroups[tagKey]) tagGroups[tagKey] = { tags: allTags, hands: [] }
       tagGroups[tagKey].hands.push(h)
     } else {
       noTagHands.push(h)
