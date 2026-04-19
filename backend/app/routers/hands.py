@@ -755,7 +755,7 @@ def admin_tag_gg_hands(current_user=Depends(require_auth)):
                 UPDATE hands
                 SET hm3_tags = CASE
                     WHEN hm3_tags IS NULL THEN ARRAY['GG Hands']::text[]
-                    WHEN NOT ('GG Hands' = ANY(hm3_tags)) THEN hm3_tags || 'GG Hands'
+                    WHEN NOT ('GG Hands' = ANY(hm3_tags)) THEN hm3_tags || ARRAY['GG Hands']::text[]
                     ELSE hm3_tags
                 END
                 WHERE site = 'GGPoker'
