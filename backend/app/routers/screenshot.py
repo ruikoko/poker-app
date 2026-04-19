@@ -331,14 +331,41 @@ def _parse_vision_response(text: str) -> dict:
             parts = [p.strip() for p in line[7:].split("|")]
             if len(parts) >= 2:
                 name = parts[0]
-                stack_str = parts[1].replace(",", "").replace(".", "")
+                raw_stack = parts[1]
                 bounty_str = parts[2] if len(parts) > 2 else "0%"
                 country = parts[3] if len(parts) > 3 else None
 
-                try:
-                    stack = int(stack_str)
-                except ValueError:
-                    stack = 0
+                # Parse stack. Vision devolve em 2 formatos possíveis:
+                #   "215940"     → fichas (inteiro)
+                #   "10.2 BB"    → big blinds (float com sufixo)
+                #   "32 BB"      → big blinds (inteiro com sufixo)
+                # Guardamos stack_raw (valor original) + stack_unit ("chips" | "bb").
+                # A conversão bb→chips é feita depois, quando já temos o bb_size
+                # da HH (função _normalize_vision_stacks).
+                stack_value = 0.0
+                stack_unit = "chips"
+
+                # Remover vírgulas (milhares) antes de qualquer coisa
+                s = raw_stack.replace(",", "").strip()
+
+                # Detectar sufixo BB (case-insensitive, com ou sem espaço)
+                bb_match = re.search(r"([\d.]+)\s*BB", s, re.IGNORECASE)
+                if bb_match:
+                    try:
+                        stack_value = float(bb_match.group(1))
+                        stack_unit = "bb"
+                    except ValueError:
+                        stack_value = 0.0
+                else:
+                    # Formato fichas. Pode ter "." como separador de milhares
+                    # (configuração regional, ex: "1.234.567") — mas neste caso
+                    # não há "BB" no fim. Só removemos "." se houver mais do que um
+                    # (senão mantemos como decimal, improvável mas seguro).
+                    s_clean = s.replace(".", "") if s.count(".") > 1 else s
+                    try:
+                        stack_value = float(s_clean)
+                    except ValueError:
+                        stack_value = 0.0
 
                 bounty_pct = 0
                 bounty_m = re.search(r'(\d+)', bounty_str)
@@ -347,13 +374,60 @@ def _parse_vision_response(text: str) -> dict:
 
                 player_info = {
                     "name": name,
-                    "stack": stack,
+                    # Compatibilidade: `stack` continua a ser um int em fichas quando
+                    # possível. Se Vision devolveu BB, `stack` é 0 até haver conversão.
+                    # O matching usa stack_chips (preenchido por _normalize_vision_stacks).
+                    "stack": int(stack_value) if stack_unit == "chips" else 0,
+                    "stack_raw": stack_value,
+                    "stack_unit": stack_unit,
+                    "stack_chips": int(stack_value) if stack_unit == "chips" else None,
                     "bounty_pct": bounty_pct,
                     "country": country if country and country.upper() != "NONE" else None,
                 }
                 result["players_list"].append(player_info)
 
     return result
+
+
+def _normalize_vision_stacks(vision_data: dict, bb_size: int) -> dict:
+    """
+    Garante que cada jogador no players_list tem `stack_chips` preenchido
+    (valor em fichas, int). Converte unidades "bb" → "chips" usando bb_size.
+
+    Não modifica o vision_data original — devolve uma cópia com os players_list
+    normalizados. Se bb_size for 0, não faz nada (devolve original).
+    """
+    if not vision_data or not bb_size:
+        return vision_data
+    pl = vision_data.get("players_list") or []
+    if not pl:
+        return vision_data
+
+    new_list = []
+    for p in pl:
+        np = dict(p)
+        # Já tem chips → nada a fazer
+        if np.get("stack_chips"):
+            new_list.append(np)
+            continue
+        unit = np.get("stack_unit")
+        raw = np.get("stack_raw")
+        # Entries antigos: sem stack_unit/stack_raw, só com "stack" (int fichas ou 0)
+        if unit is None and raw is None:
+            legacy_stack = np.get("stack", 0)
+            np["stack_chips"] = int(legacy_stack) if legacy_stack else None
+            new_list.append(np)
+            continue
+        if unit == "bb" and raw is not None:
+            np["stack_chips"] = int(round(float(raw) * bb_size))
+            np["stack"] = np["stack_chips"]  # compat: preencher também o campo antigo
+        elif unit == "chips" and raw is not None:
+            np["stack_chips"] = int(raw)
+        new_list.append(np)
+
+    new_data = dict(vision_data)
+    new_data["players_list"] = new_list
+    return new_data
 
 
 # ── Extracção de dados da HH raw ──────────────────────────────────────────
@@ -448,6 +522,14 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
     raw_hh = hand_row.get("raw", "")
     hh_data = _parse_hh_stacks_and_blinds(raw_hh) if raw_hh else None
 
+    # Normalizar stacks do Vision para fichas se vieram em BB.
+    # Alguns SS GG têm stacks em "10.2 BB" em vez de "35700" fichas.
+    # Usamos bb_size da HH (fonte de verdade) para converter.
+    bb_size = (hh_data or {}).get("bb_size", 0)
+    if bb_size:
+        vision_data = _normalize_vision_stacks(vision_data, bb_size)
+        vision_list = vision_data.get("players_list", [])
+
     used_vision = set()
     hero_names = _GG_HERO_ALIASES
 
@@ -525,7 +607,13 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             for i, vp in enumerate(vision_list):
                 if i in used_vision:
                     continue
-                diff = abs(stack_esperado - vp["stack"])
+                # Preferir stack_chips (normalizado). Fallback para stack (compat).
+                vp_stack = vp.get("stack_chips")
+                if vp_stack is None:
+                    vp_stack = vp.get("stack", 0)
+                if not vp_stack:
+                    continue
+                diff = abs(stack_esperado - vp_stack)
                 pct = (diff / stack_esperado * 100) if stack_esperado > 0 else 999
                 if pct < 2.0 and diff < best_diff:
                     best_diff = diff
@@ -534,8 +622,9 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             if best_i is not None:
                 anon_map[player_key] = vision_list[best_i]["name"]
                 used_vision.add(best_i)
+                vp_stack_log = vision_list[best_i].get("stack_chips") or vision_list[best_i].get("stack", 0)
                 logger.info(f"  Fold match: {player_key} -> {vision_list[best_i]['name']} "
-                           f"(esperado={stack_esperado}, vision={vision_list[best_i]['stack']}, "
+                           f"(esperado={stack_esperado}, vision={vp_stack_log}, "
                            f"diff={best_diff})")
 
     # ── Fase 3: Eliminação — jogadores restantes ─────────────────────────
@@ -556,7 +645,10 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             best_diff = float("inf")
             for i in still_unmapped_vision:
                 vp = vision_list[i]
-                diff = abs(stack_initial - vp["stack"])
+                vp_stack = vp.get("stack_chips")
+                if vp_stack is None:
+                    vp_stack = vp.get("stack", 0)
+                diff = abs(stack_initial - vp_stack)
                 if diff < best_diff:
                     best_diff = diff
                     best_i = i
@@ -564,8 +656,9 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
             if best_i is not None:
                 anon_map[player_key] = vision_list[best_i]["name"]
                 still_unmapped_vision.discard(best_i)
+                vp_stack_log = vision_list[best_i].get("stack_chips") or vision_list[best_i].get("stack", 0)
                 logger.info(f"  Approx match: {player_key} -> {vision_list[best_i]['name']} "
-                           f"(hh_initial={stack_initial}, vision={vision_list[best_i]['stack']}, "
+                           f"(hh_initial={stack_initial}, vision={vp_stack_log}, "
                            f"diff={best_diff})")
 
     logger.info(f"Match result: {len(anon_map)}/{len(all_players)} mapped. "
