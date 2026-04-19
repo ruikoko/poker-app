@@ -1006,21 +1006,36 @@ def admin_refix_anonmap_preview(current_user=Depends(require_auth)):
     """
     DRY-RUN. Mostra para cada mão afectada o que seria alterado.
     Não grava nada.
+
+    Estratégia (v2):
+      1. Reparsear a HH raw para obter all_players_actions PRE-ENRICH
+         (chaves = hashes GG, não nicks reais). Usa parsers.gg_hands.
+      2. Carregar raw_vision do entry do SS, reparsear com o novo parser
+         (aceita formato BB e fichas) e normalizar stacks com bb_size da HH.
+      3. Correr _build_anon_to_real_map + _enrich_all_players_actions.
+      4. Resultado: anon_map com {hash: nick_real} correctamente, all_players_actions com nicks como chaves.
     """
     from app.routers.screenshot import (
         _build_anon_to_real_map,
         _enrich_all_players_actions,
+        _parse_vision_response,
+        _normalize_vision_stacks,
+        _parse_hh_stacks_and_blinds,
     )
+    from app.parsers.gg_hands import parse_hands as gg_parse_hands
 
     rows = query(
         """
-        SELECT id, hand_id, raw, all_players_actions, player_names, hero_cards, stakes
-        FROM hands
-        WHERE site = 'GGPoker'
-          AND player_names IS NOT NULL
-          AND player_names->'anon_map' ? '_meta'
-          AND jsonb_typeof(player_names->'anon_map'->'_meta') = 'string'
-        ORDER BY played_at DESC NULLS LAST
+        SELECT h.id, h.hand_id, h.raw, h.all_players_actions, h.player_names,
+               h.hero_cards, h.stakes, h.entry_id,
+               e.raw_json AS entry_raw_json
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        WHERE h.site = 'GGPoker'
+          AND h.player_names IS NOT NULL
+          AND h.player_names->'anon_map' ? '_meta'
+          AND jsonb_typeof(h.player_names->'anon_map'->'_meta') = 'string'
+        ORDER BY h.played_at DESC NULLS LAST
         """
     )
 
@@ -1028,53 +1043,88 @@ def admin_refix_anonmap_preview(current_user=Depends(require_auth)):
     skipped = []
     for r in rows:
         try:
-            apa = r["all_players_actions"] or {}
-            pn = r["player_names"] or {}
+            hand_db_id = r["id"]
+            hand_id = r["hand_id"]
+            raw_hh = r["raw"] or ""
+            entry_rj = r["entry_raw_json"] or {}
 
-            # Passo 1: restaurar _meta
-            apa_fixed, ghost_nick = _restore_apa_meta(apa, pn)
-            if ghost_nick is None:
-                skipped.append({"id": r["id"], "hand_id": r["hand_id"], "reason": "não foi possível restaurar _meta"})
+            if not raw_hh:
+                skipped.append({"id": hand_db_id, "hand_id": hand_id, "reason": "sem HH raw"})
                 continue
 
-            # Passo 2: refazer matching offline usando player_names já guardado
-            vision_data = {
-                "hero": pn.get("hero"),
-                "vision_sb": pn.get("vision_sb"),
-                "vision_bb": pn.get("vision_bb"),
-                "players_list": pn.get("players_list") or [],
-                "players_by_position": pn.get("players_by_position") or {},
-            }
-            if not vision_data["players_list"]:
-                skipped.append({"id": r["id"], "hand_id": r["hand_id"], "reason": "sem players_list guardado"})
+            # ── Passo 1: reconstruir all_players_actions pre-enrich da HH raw ──
+            # gg_parse_hands espera bytes; passamos o raw como bytes UTF-8.
+            parsed_list, errors = gg_parse_hands(raw_hh.encode("utf-8"), f"hand_{hand_db_id}.txt")
+            if not parsed_list:
+                skipped.append({
+                    "id": hand_db_id, "hand_id": hand_id,
+                    "reason": f"reparse HH falhou: {errors[:3] if errors else 'sem resultado'}"
+                })
+                continue
+            apa_pre_enrich = parsed_list[0].get("all_players_actions") or {}
+            if not apa_pre_enrich:
+                skipped.append({"id": hand_db_id, "hand_id": hand_id, "reason": "reparse HH sem all_players_actions"})
                 continue
 
-            # Constrói hand_row minimal para as funções
-            hand_row = {
-                "all_players_actions": apa_fixed,
-                "raw": r["raw"] or "",
-            }
-            new_anon_map = _build_anon_to_real_map(hand_row, vision_data)
-            new_apa = _enrich_all_players_actions(apa_fixed, new_anon_map, vision_data)
+            # ── Passo 2: obter vision_data ──
+            # Preferir reparsear raw_vision do entry (para apanhar stacks que o parser antigo zerou).
+            vision_data = None
+            raw_vision_text = entry_rj.get("raw_vision") if isinstance(entry_rj, dict) else None
+            if raw_vision_text:
+                vision_data = _parse_vision_response(raw_vision_text)
+                # _parse_vision_response não devolve file_meta — mantemos do entry se existir
+                if isinstance(entry_rj, dict):
+                    vision_data["file_meta"] = entry_rj.get("file_meta") or {}
+            else:
+                # Fallback: usar player_names da mão (pode ter stacks a 0 se era formato BB)
+                pn = r["player_names"] or {}
+                vision_data = {
+                    "hero": pn.get("hero"),
+                    "vision_sb": pn.get("vision_sb"),
+                    "vision_bb": pn.get("vision_bb"),
+                    "players_list": pn.get("players_list") or [],
+                    "players_by_position": pn.get("players_by_position") or {},
+                    "file_meta": pn.get("file_meta") or {},
+                }
 
-            # Resumo das mudanças
-            old_keys = sorted([k for k in apa.keys() if k != "_meta"])
+            if not vision_data.get("players_list"):
+                skipped.append({"id": hand_db_id, "hand_id": hand_id, "reason": "sem players_list Vision"})
+                continue
+
+            # Normalizar stacks (BB → fichas usando bb_size da HH)
+            hh_data = _parse_hh_stacks_and_blinds(raw_hh)
+            bb_size = (hh_data or {}).get("bb_size", 0)
+            if bb_size:
+                vision_data = _normalize_vision_stacks(vision_data, bb_size)
+
+            # ── Passo 3: correr matching + enrich ──
+            hand_row_pre = {
+                "all_players_actions": apa_pre_enrich,
+                "raw": raw_hh,
+            }
+            new_anon_map = _build_anon_to_real_map(hand_row_pre, vision_data)
+            new_apa = _enrich_all_players_actions(apa_pre_enrich, new_anon_map, vision_data)
+
+            # ── Resumo das mudanças ──
+            old_apa = r["all_players_actions"] or {}
+            old_pn = r["player_names"] or {}
+            old_keys = sorted([k for k in old_apa.keys() if k != "_meta"])
             new_keys = sorted([k for k in new_apa.keys() if k != "_meta"])
-
-            old_anon_map = pn.get("anon_map") or {}
-            old_anon_sample = {k: v for k, v in list(old_anon_map.items())[:10] if k != "_meta"}
-            new_anon_sample = {k: v for k, v in list(new_anon_map.items())[:10]}
+            old_anon_map = old_pn.get("anon_map") or {}
 
             results.append({
-                "id": r["id"],
-                "hand_id": r["hand_id"],
+                "id": hand_db_id,
+                "hand_id": hand_id,
                 "stakes": r["stakes"],
-                "ghost_nick_was": ghost_nick,
+                "bb_size": bb_size,
+                "had_raw_vision": bool(raw_vision_text),
                 "meta_after": new_apa.get("_meta"),
                 "apa_keys_before": old_keys,
                 "apa_keys_after": new_keys,
-                "anon_map_before_sample": old_anon_sample,
-                "anon_map_after": new_anon_sample,
+                "anon_map_before": {k: v for k, v in old_anon_map.items()},
+                "anon_map_after": new_anon_map,
+                "mapped_count": len([k for k, v in new_anon_map.items() if k != "Hero"]),
+                "hh_seat_count": len([k for k in apa_pre_enrich if k != "_meta"]),
             })
         except Exception as e:
             logger.error(f"[refix-preview] Hand {r['id']}: {e}")
@@ -1099,11 +1149,10 @@ def admin_refix_anonmap_execute(
     """
     EXECUÇÃO. Aplica o fix nas mãos afectadas. Requer ?confirm=true.
 
-    Para cada mão:
-      - Actualiza all_players_actions (com _meta restaurado + chaves reais)
-      - Actualiza player_names.anon_map (matching refeito)
-
-    NÃO mexe em hand_villains — isso precisará de fix separado se for preciso.
+    Mesma lógica do /preview mas escreve:
+      - all_players_actions (rebuild completo do pipeline)
+      - player_names.anon_map (mapping correcto hash→nick)
+      - player_names.players_list (normalizado com stacks em fichas)
     """
     if not confirm:
         raise HTTPException(
@@ -1114,16 +1163,22 @@ def admin_refix_anonmap_execute(
     from app.routers.screenshot import (
         _build_anon_to_real_map,
         _enrich_all_players_actions,
+        _parse_vision_response,
+        _normalize_vision_stacks,
+        _parse_hh_stacks_and_blinds,
     )
+    from app.parsers.gg_hands import parse_hands as gg_parse_hands
 
     rows = query(
         """
-        SELECT id, hand_id, raw, all_players_actions, player_names
-        FROM hands
-        WHERE site = 'GGPoker'
-          AND player_names IS NOT NULL
-          AND player_names->'anon_map' ? '_meta'
-          AND jsonb_typeof(player_names->'anon_map'->'_meta') = 'string'
+        SELECT h.id, h.hand_id, h.raw, h.player_names, h.entry_id,
+               e.raw_json AS entry_raw_json
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        WHERE h.site = 'GGPoker'
+          AND h.player_names IS NOT NULL
+          AND h.player_names->'anon_map' ? '_meta'
+          AND jsonb_typeof(h.player_names->'anon_map'->'_meta') = 'string'
         """
     )
 
@@ -1135,36 +1190,70 @@ def admin_refix_anonmap_execute(
         with conn.cursor() as cur:
             for r in rows:
                 try:
-                    apa = r["all_players_actions"] or {}
-                    pn = r["player_names"] or {}
+                    hand_db_id = r["id"]
+                    raw_hh = r["raw"] or ""
+                    entry_rj = r["entry_raw_json"] or {}
 
-                    apa_fixed, ghost_nick = _restore_apa_meta(apa, pn)
-                    if ghost_nick is None:
-                        skipped.append({"id": r["id"], "reason": "sem _meta restaurável"})
+                    if not raw_hh:
+                        skipped.append({"id": hand_db_id, "reason": "sem HH raw"})
                         continue
 
-                    vision_data = {
-                        "hero": pn.get("hero"),
-                        "vision_sb": pn.get("vision_sb"),
-                        "vision_bb": pn.get("vision_bb"),
-                        "players_list": pn.get("players_list") or [],
-                        "players_by_position": pn.get("players_by_position") or {},
-                    }
-                    if not vision_data["players_list"]:
-                        skipped.append({"id": r["id"], "reason": "sem players_list"})
+                    # Passo 1: reparse HH
+                    parsed_list, _errs = gg_parse_hands(raw_hh.encode("utf-8"), f"hand_{hand_db_id}.txt")
+                    if not parsed_list:
+                        skipped.append({"id": hand_db_id, "reason": "reparse HH falhou"})
+                        continue
+                    apa_pre_enrich = parsed_list[0].get("all_players_actions") or {}
+                    if not apa_pre_enrich:
+                        skipped.append({"id": hand_db_id, "reason": "reparse sem APA"})
                         continue
 
-                    hand_row = {"all_players_actions": apa_fixed, "raw": r["raw"] or ""}
-                    new_anon_map = _build_anon_to_real_map(hand_row, vision_data)
-                    new_apa = _enrich_all_players_actions(apa_fixed, new_anon_map, vision_data)
+                    # Passo 2: vision_data
+                    raw_vision_text = entry_rj.get("raw_vision") if isinstance(entry_rj, dict) else None
+                    if raw_vision_text:
+                        vision_data = _parse_vision_response(raw_vision_text)
+                        if isinstance(entry_rj, dict):
+                            vision_data["file_meta"] = entry_rj.get("file_meta") or {}
+                    else:
+                        pn_old = r["player_names"] or {}
+                        vision_data = {
+                            "hero": pn_old.get("hero"),
+                            "vision_sb": pn_old.get("vision_sb"),
+                            "vision_bb": pn_old.get("vision_bb"),
+                            "players_list": pn_old.get("players_list") or [],
+                            "players_by_position": pn_old.get("players_by_position") or {},
+                            "file_meta": pn_old.get("file_meta") or {},
+                        }
 
-                    new_pn = dict(pn)
+                    if not vision_data.get("players_list"):
+                        skipped.append({"id": hand_db_id, "reason": "sem players_list"})
+                        continue
+
+                    # Normalizar stacks
+                    hh_data = _parse_hh_stacks_and_blinds(raw_hh)
+                    bb_size = (hh_data or {}).get("bb_size", 0)
+                    if bb_size:
+                        vision_data = _normalize_vision_stacks(vision_data, bb_size)
+
+                    # Passo 3: rebuild
+                    hand_row_pre = {"all_players_actions": apa_pre_enrich, "raw": raw_hh}
+                    new_anon_map = _build_anon_to_real_map(hand_row_pre, vision_data)
+                    new_apa = _enrich_all_players_actions(apa_pre_enrich, new_anon_map, vision_data)
+
+                    # Construir novo player_names
+                    old_pn = r["player_names"] or {}
+                    new_pn = dict(old_pn)
                     new_pn["anon_map"] = new_anon_map
+                    new_pn["players_list"] = vision_data.get("players_list") or []
+                    new_pn["hero"] = vision_data.get("hero") or old_pn.get("hero")
+                    new_pn["vision_sb"] = vision_data.get("vision_sb") or old_pn.get("vision_sb")
+                    new_pn["vision_bb"] = vision_data.get("vision_bb") or old_pn.get("vision_bb")
+                    new_pn["match_method"] = "anchors_stack_elimination_v2_refix"
 
                     import json
                     cur.execute(
                         "UPDATE hands SET all_players_actions = %s::jsonb, player_names = %s::jsonb WHERE id = %s",
-                        (json.dumps(new_apa), json.dumps(new_pn), r["id"])
+                        (json.dumps(new_apa), json.dumps(new_pn), hand_db_id)
                     )
                     updated += 1
                 except Exception as e:
