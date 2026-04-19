@@ -454,6 +454,8 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
     # ── Fase 1: Âncoras fixas ────────────────────────────────────────────
 
     for player_key, info in all_players.items():
+        if player_key == "_meta":
+            continue  # metadata, não é jogador
         pos = info.get("position", "")
 
         # Hero
@@ -501,6 +503,8 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
         ante = hh_data["ante"]
 
         for player_key, info in all_players.items():
+            if player_key == "_meta":
+                continue  # metadata, não é jogador
             if player_key in anon_map:
                 continue
 
@@ -536,7 +540,7 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
 
     # ── Fase 3: Eliminação — jogadores restantes ─────────────────────────
 
-    unmapped_hh = [k for k in all_players if k not in anon_map]
+    unmapped_hh = [k for k in all_players if k not in anon_map and k != "_meta"]
     unmapped_vision = [i for i in range(len(vision_list)) if i not in used_vision]
 
     if len(unmapped_hh) == 1 and len(unmapped_vision) == 1:
@@ -573,8 +577,14 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
     """
     Substitui chaves anónimas pelos nomes reais em all_players_actions
     e adiciona bounty_pct e country de cada jogador.
+
+    Preserva a chave '_meta' intacta (bb/sb/ante/level/num_players).
     """
     enriched = {}
+
+    # Preservar metadata — não é um jogador
+    if "_meta" in all_players:
+        enriched["_meta"] = all_players["_meta"]
 
     vision_by_name = {}
     for vp in vision_data.get("players_list", []):
@@ -582,6 +592,8 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
     vision_by_pos = vision_data.get("players_by_position", {})
 
     for player_key, info in all_players.items():
+        if player_key == "_meta":
+            continue  # já preservado acima
         real_name = anon_map.get(player_key, player_key)
 
         vision_info = vision_by_name.get(real_name.lower(), {})

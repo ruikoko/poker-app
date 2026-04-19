@@ -945,3 +945,246 @@ def admin_scope_anonmap_bug(current_user=Depends(require_auth)):
     finally:
         conn.close()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REFIX anon-map bug — re-aplica matching correcto às 42 mãos afectadas.
+#
+# Contexto: a Fase 3 do matching em screenshot.py (`_build_anon_to_real_map`)
+# iterava sobre a chave '_meta' de all_players_actions como se fosse jogador.
+# Resultado: em mãos com observador no SS, o dict _meta (bb/sb/ante/level)
+# ficava gravado sob uma chave de nick, e o _meta real desaparecia.
+#
+# Este endpoint:
+#   1. Encontra as mãos afectadas (mesmo critério de scope-anonmap-bug)
+#   2. Para cada uma: restaura _meta no seu sítio, apaga entrada fantasma
+#   3. Re-corre _build_anon_to_real_map + _enrich_all_players_actions (já fixos)
+#      usando o players_list guardado em player_names (offline, sem chamar Vision)
+#   4. Grava all_players_actions e player_names.anon_map actualizados
+#
+# Tem preview (GET) e execute (POST con confirm=true).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _restore_apa_meta(apa: dict, player_names: dict) -> tuple[dict, str | None]:
+    """
+    Desfaz o swap:
+      - Lê ghost_nick = anon_map['_meta']
+      - Se all_players_actions[ghost_nick] é dict com chaves de metadata
+        (bb, sb ou ante), move-o para _meta e apaga a chave ghost_nick
+    Devolve (apa_corrigido, ghost_nick) — ghost_nick é None se não aplicável.
+    """
+    if not isinstance(apa, dict) or not isinstance(player_names, dict):
+        return apa, None
+
+    anon_map = player_names.get("anon_map") or {}
+    ghost_nick = anon_map.get("_meta")
+    if not isinstance(ghost_nick, str):
+        return apa, None
+
+    # Se o apa já tem _meta correcto, não fazemos nada
+    if isinstance(apa.get("_meta"), dict) and any(
+        k in apa["_meta"] for k in ("bb", "sb", "ante", "level")
+    ):
+        return apa, None
+
+    # Procurar o dict de metadata escondido sob ghost_nick
+    hidden = apa.get(ghost_nick)
+    if not isinstance(hidden, dict):
+        return apa, None
+    # Validar que parece mesmo metadata (não um jogador normal)
+    is_metadata = any(k in hidden for k in ("bb", "sb", "ante", "level")) and \
+                  "seat" not in hidden and "stack" not in hidden
+    if not is_metadata:
+        return apa, None
+
+    new_apa = {k: v for k, v in apa.items() if k != ghost_nick}
+    new_apa["_meta"] = hidden
+    return new_apa, ghost_nick
+
+
+@router.get("/admin/refix-anonmap-bug/preview")
+def admin_refix_anonmap_preview(current_user=Depends(require_auth)):
+    """
+    DRY-RUN. Mostra para cada mão afectada o que seria alterado.
+    Não grava nada.
+    """
+    from app.routers.screenshot import (
+        _build_anon_to_real_map,
+        _enrich_all_players_actions,
+    )
+
+    rows = query(
+        """
+        SELECT id, hand_id, raw, all_players_actions, player_names, hero_cards, stakes
+        FROM hands
+        WHERE site = 'GGPoker'
+          AND player_names IS NOT NULL
+          AND player_names->'anon_map' ? '_meta'
+          AND jsonb_typeof(player_names->'anon_map'->'_meta') = 'string'
+        ORDER BY played_at DESC NULLS LAST
+        """
+    )
+
+    results = []
+    skipped = []
+    for r in rows:
+        try:
+            apa = r["all_players_actions"] or {}
+            pn = r["player_names"] or {}
+
+            # Passo 1: restaurar _meta
+            apa_fixed, ghost_nick = _restore_apa_meta(apa, pn)
+            if ghost_nick is None:
+                skipped.append({"id": r["id"], "hand_id": r["hand_id"], "reason": "não foi possível restaurar _meta"})
+                continue
+
+            # Passo 2: refazer matching offline usando player_names já guardado
+            vision_data = {
+                "hero": pn.get("hero"),
+                "vision_sb": pn.get("vision_sb"),
+                "vision_bb": pn.get("vision_bb"),
+                "players_list": pn.get("players_list") or [],
+                "players_by_position": pn.get("players_by_position") or {},
+            }
+            if not vision_data["players_list"]:
+                skipped.append({"id": r["id"], "hand_id": r["hand_id"], "reason": "sem players_list guardado"})
+                continue
+
+            # Constrói hand_row minimal para as funções
+            hand_row = {
+                "all_players_actions": apa_fixed,
+                "raw": r["raw"] or "",
+            }
+            new_anon_map = _build_anon_to_real_map(hand_row, vision_data)
+            new_apa = _enrich_all_players_actions(apa_fixed, new_anon_map, vision_data)
+
+            # Resumo das mudanças
+            old_keys = sorted([k for k in apa.keys() if k != "_meta"])
+            new_keys = sorted([k for k in new_apa.keys() if k != "_meta"])
+
+            old_anon_map = pn.get("anon_map") or {}
+            old_anon_sample = {k: v for k, v in list(old_anon_map.items())[:10] if k != "_meta"}
+            new_anon_sample = {k: v for k, v in list(new_anon_map.items())[:10]}
+
+            results.append({
+                "id": r["id"],
+                "hand_id": r["hand_id"],
+                "stakes": r["stakes"],
+                "ghost_nick_was": ghost_nick,
+                "meta_after": new_apa.get("_meta"),
+                "apa_keys_before": old_keys,
+                "apa_keys_after": new_keys,
+                "anon_map_before_sample": old_anon_sample,
+                "anon_map_after": new_anon_sample,
+            })
+        except Exception as e:
+            logger.error(f"[refix-preview] Hand {r['id']}: {e}")
+            skipped.append({"id": r["id"], "hand_id": r["hand_id"], "reason": f"erro: {e}"})
+
+    return {
+        "ok": True,
+        "total_affected": len(rows),
+        "will_update": len(results),
+        "will_skip": len(skipped),
+        "skipped": skipped,
+        "sample": results[:3],
+        "all_hand_ids": [r["hand_id"] for r in results],
+    }
+
+
+@router.post("/admin/refix-anonmap-bug")
+def admin_refix_anonmap_execute(
+    confirm: bool = Query(False, description="Tem de ser true para executar"),
+    current_user=Depends(require_auth),
+):
+    """
+    EXECUÇÃO. Aplica o fix nas mãos afectadas. Requer ?confirm=true.
+
+    Para cada mão:
+      - Actualiza all_players_actions (com _meta restaurado + chaves reais)
+      - Actualiza player_names.anon_map (matching refeito)
+
+    NÃO mexe em hand_villains — isso precisará de fix separado se for preciso.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Adicionar ?confirm=true para executar. Corre o /preview primeiro."
+        )
+
+    from app.routers.screenshot import (
+        _build_anon_to_real_map,
+        _enrich_all_players_actions,
+    )
+
+    rows = query(
+        """
+        SELECT id, hand_id, raw, all_players_actions, player_names
+        FROM hands
+        WHERE site = 'GGPoker'
+          AND player_names IS NOT NULL
+          AND player_names->'anon_map' ? '_meta'
+          AND jsonb_typeof(player_names->'anon_map'->'_meta') = 'string'
+        """
+    )
+
+    updated = 0
+    skipped = []
+    failed = []
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for r in rows:
+                try:
+                    apa = r["all_players_actions"] or {}
+                    pn = r["player_names"] or {}
+
+                    apa_fixed, ghost_nick = _restore_apa_meta(apa, pn)
+                    if ghost_nick is None:
+                        skipped.append({"id": r["id"], "reason": "sem _meta restaurável"})
+                        continue
+
+                    vision_data = {
+                        "hero": pn.get("hero"),
+                        "vision_sb": pn.get("vision_sb"),
+                        "vision_bb": pn.get("vision_bb"),
+                        "players_list": pn.get("players_list") or [],
+                        "players_by_position": pn.get("players_by_position") or {},
+                    }
+                    if not vision_data["players_list"]:
+                        skipped.append({"id": r["id"], "reason": "sem players_list"})
+                        continue
+
+                    hand_row = {"all_players_actions": apa_fixed, "raw": r["raw"] or ""}
+                    new_anon_map = _build_anon_to_real_map(hand_row, vision_data)
+                    new_apa = _enrich_all_players_actions(apa_fixed, new_anon_map, vision_data)
+
+                    new_pn = dict(pn)
+                    new_pn["anon_map"] = new_anon_map
+
+                    import json
+                    cur.execute(
+                        "UPDATE hands SET all_players_actions = %s::jsonb, player_names = %s::jsonb WHERE id = %s",
+                        (json.dumps(new_apa), json.dumps(new_pn), r["id"])
+                    )
+                    updated += 1
+                except Exception as e:
+                    logger.error(f"[refix-execute] Hand {r['id']}: {e}")
+                    failed.append({"id": r["id"], "error": str(e)})
+
+        conn.commit()
+        return {
+            "ok": True,
+            "total_scanned": len(rows),
+            "updated": updated,
+            "skipped_count": len(skipped),
+            "skipped": skipped[:10],
+            "failed_count": len(failed),
+            "failed": failed[:10],
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[refix-execute] Rollback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
