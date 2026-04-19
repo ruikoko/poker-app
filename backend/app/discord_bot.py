@@ -303,8 +303,18 @@ def _extract_gg_replayer_image(url: str) -> dict | None:
             return None
 
     try:
+        # Cloudflare em my.pokercraft.com bloqueia requests sem User-Agent (HTTP 403).
+        # Usar UA de browser real.
+        _HEADERS = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/*;q=0.8,*/*;q=0.7",
+        }
         # Follow redirects to get the actual page
-        with httpx.Client(follow_redirects=True, timeout=15) as client:
+        with httpx.Client(follow_redirects=True, timeout=15, headers=_HEADERS) as client:
             resp = client.get(url)
             if resp.status_code != 200:
                 logger.warning(f"GG replayer fetch failed: {resp.status_code} for {url}")
@@ -366,8 +376,14 @@ def _extract_gg_replayer_image_urllib(url: str) -> dict | None:
     import re
     import urllib.request
 
+    _UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=15) as resp:
             html = resp.read().decode('utf-8', errors='replace')
 
@@ -383,7 +399,7 @@ def _extract_gg_replayer_image_urllib(url: str) -> dict | None:
         if not img_url:
             return None
 
-        img_req = urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"})
+        img_req = urllib.request.Request(img_url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(img_req, timeout=15) as img_resp:
             img_bytes = img_resp.read()
 
