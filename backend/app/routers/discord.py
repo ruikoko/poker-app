@@ -1,10 +1,12 @@
 """
 API endpoints para monitorização e controlo do bot Discord.
 """
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import require_auth
 from app.db import query
 
+logger = logging.getLogger("discord_router")
 router = APIRouter(prefix="/api/discord", tags=["discord"])
 
 
@@ -79,6 +81,77 @@ async def trigger_sync(current_user=Depends(require_auth)):
             synced += 1
 
     return {"status": "sync_started", "servers": synced}
+
+
+@router.post("/sync-and-process")
+async def sync_and_process(current_user=Depends(require_auth)):
+    """
+    Workflow completo de varrimento pós-sessão:
+      1. Sync Discord (vai buscar mensagens novas e cria entries)
+      2. Espera um período para _sync_guild_history processar mensagens
+      3. Processa replayer_links pendentes (extract og:image + Vision + match)
+      4. Cria placeholders GGDiscord para SS sem HH
+
+    Uso: clicar uma vez após fechar as salas de poker no fim da sessão.
+    """
+    import asyncio
+    from app.discord_bot import get_bot, MONITORED_SERVERS
+
+    bot = get_bot()
+    if not bot or not bot.is_ready():
+        raise HTTPException(status_code=503, detail="Bot Discord não está online")
+
+    # 1. Sync — dispara em background
+    synced_servers = 0
+    sync_tasks = []
+    for guild in bot.guilds:
+        if str(guild.id) in MONITORED_SERVERS:
+            t = asyncio.create_task(bot._sync_guild_history(guild))
+            sync_tasks.append(t)
+            synced_servers += 1
+
+    # 2. Esperar sync terminar (com timeout para não bloquear)
+    if sync_tasks:
+        try:
+            await asyncio.wait_for(asyncio.gather(*sync_tasks), timeout=120)
+        except asyncio.TimeoutError:
+            logger.warning("[sync-and-process] sync timeout, continuando para processamento")
+
+    # 3. Contar entries criados
+    from app.db import query as _q
+    new_entries = _q("""
+        SELECT COUNT(*) AS n FROM entries
+        WHERE source = 'discord'
+          AND entry_type = 'replayer_link'
+          AND site = 'GGPoker'
+          AND (raw_json->>'img_b64') IS NULL
+    """)[0]["n"]
+
+    # 4. Processar replayer_links (extract + Vision em background)
+    processed_response = None
+    if new_entries > 0:
+        try:
+            processed_response = await process_replayer_links(confirm=True, limit=200, current_user=current_user)
+        except HTTPException as e:
+            processed_response = {"error": str(e.detail)}
+
+    # 5. Backfill GGDiscord para os que não tiveram match
+    #    Esperar um pouco para Vision correr em background antes de criar placeholders
+    await asyncio.sleep(10)
+    backfill_response = None
+    try:
+        backfill_response = backfill_ggdiscord(confirm=True, current_user=current_user)
+    except HTTPException:
+        pass
+
+    return {
+        "ok": True,
+        "servers_synced": synced_servers,
+        "new_replayer_entries": new_entries,
+        "process_result": processed_response,
+        "backfill_result": backfill_response,
+        "note": "Vision corre em background. Actualizar a página daqui a ~30s para ver resultados finais.",
+    }
 
 
 @router.get("/stats")

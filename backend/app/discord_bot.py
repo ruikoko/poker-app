@@ -31,6 +31,11 @@ IGNORED_CHANNELS = [
     for s in os.getenv("DISCORD_IGNORED_CHANNELS", "general").split(",")
     if s.strip()
 ]
+# Processamento automático de mensagens (on_message listener + sync no arranque).
+# Default: false — bot liga mas não faz extracção sozinho. Sync só via POST /api/discord/sync.
+# Desligar extracção automática reduz risco de scraping contínuo em relação a ToS
+# das salas de poker. Ligar extracção manual apenas após sessão terminada.
+AUTO_SYNC = os.getenv("DISCORD_AUTO_SYNC", "false").lower() in ("true", "1", "yes")
 
 # ── Regex para detecção de conteúdo ──────────────────────────────────────────
 
@@ -470,9 +475,14 @@ class PokerBot(discord.Client):
         logger.info(f"Bot conectado como {self.user} (ID: {self.user.id})")
         logger.info(f"Servidores monitorizados: {MONITORED_SERVERS}")
         logger.info(f"Canais ignorados: {IGNORED_CHANNELS}")
+        logger.info(f"AUTO_SYNC: {AUTO_SYNC} (false = sync só manual via /api/discord/sync)")
         _ensure_sync_table()
 
-        # Sync histórico na primeira ligação
+        if not AUTO_SYNC:
+            logger.info("Auto-sync desligado. Bot fica em standby. Usa POST /api/discord/sync para varrer mensagens.")
+            return
+
+        # Sync histórico na primeira ligação (só se AUTO_SYNC=true)
         for guild in self.guilds:
             if str(guild.id) in MONITORED_SERVERS:
                 logger.info(f"Servidor encontrado: {guild.name} ({guild.id})")
@@ -492,7 +502,10 @@ class PokerBot(discord.Client):
         return True
 
     async def on_message(self, message: discord.Message):
-        """Processa mensagens em tempo real."""
+        """Processa mensagens em tempo real — desligado se AUTO_SYNC=false."""
+        if not AUTO_SYNC:
+            return  # standby
+
         # Ignorar mensagens do próprio bot
         if message.author == self.user:
             return

@@ -320,11 +320,18 @@ export default function DiscordPage() {
   const triggerSync = async () => {
     setSyncing(true); setMsg('')
     try {
-      const r = await discord.sync()
-      setMsg(`Sync iniciado em ${r.servers} servidor(es). Actualiza em 30s.`)
+      setMsg('A varrer o Discord e a processar mãos novas. Isto pode demorar 1-3 minutos...')
+      const r = await discord.syncAndProcess()
+      const newEntries = r.new_replayer_entries || 0
+      const queued = r.process_result?.vision_queued || 0
+      const placeholders = r.backfill_result?.created || 0
+      setMsg(`Sync concluído: ${newEntries} entries novos, ${queued} a correr Vision, ${placeholders} placeholders GGDiscord criados. Actualiza em 30s.`)
       setTimeout(() => { loadStatus(); loadHands() }, 30000)
-    } catch (e) { setError(e.message) }
-    finally { setSyncing(false) }
+    } catch (e) {
+      setError(`Erro: ${e.message}`)
+    } finally {
+      setSyncing(false)
+    }
   }
 
   async function openDetail(id) {
