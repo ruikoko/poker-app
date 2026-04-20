@@ -619,16 +619,33 @@ def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
     return seat_to_name
 
 
-def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt_hand_id: int = None, hand_db_id: int = None):
+def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt_hand_id: int = None, hand_db_id: int = None, showdown_only: bool = False):
     assert (mtt_hand_id is None) ^ (hand_db_id is None), "must pass exactly one of mtt_hand_id or hand_db_id"
     """
-    Cria registos hand_villains para jogadores com VPIP.
+    Cria registos hand_villains.
+    Se showdown_only=True, villains = jogadores não-herói que mostraram cartas no showdown.
+    Caso contrário, villains = jogadores com VPIP (comportamento legacy).
     Nomes vêm do screenshot via match por stack (algoritmo v2).
-    Posições e VPIP vêm da HH.
+    Posições vêm da HH.
     """
-    vpip_seats = hh_hand.get("vpip_seats", {})
-    if not vpip_seats:
-        return 0
+    if showdown_only:
+        # Showdown mode: villains are non-hero players who showed cards
+        all_players = hh_hand.get("all_players_actions", {})
+        if not isinstance(all_players, dict):
+            return 0
+        showdown_seats = {}
+        for p, pdata in all_players.items():
+            if p == "_meta":
+                continue
+            if isinstance(pdata, dict) and not pdata.get("is_hero") and pdata.get("cards"):
+                showdown_seats[pdata["seat"]] = ", ".join(pdata["cards"])
+        if not showdown_seats:
+            return 0
+        vpip_seats = showdown_seats
+    else:
+        vpip_seats = hh_hand.get("vpip_seats", {})
+        if not vpip_seats:
+            return 0
 
     seats = hh_hand.get("seats", {})
 

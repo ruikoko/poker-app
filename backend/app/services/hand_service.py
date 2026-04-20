@@ -25,25 +25,44 @@ def _get_or_create_tournament_pk(conn, tournament_id_str: str, site: str) -> int
     return None
 
 
+import logging
+logger = logging.getLogger("hand_service")
+
 def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None, study_state: str = 'mtt_archive') -> bool:
     """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
     with conn.cursor() as cur:
         if h["hand_id"]:
+            logger.info(f"[_insert_hand] Processando hand_id: {h['hand_id']}")
             cur.execute("SELECT id, raw, hm3_tags FROM hands WHERE hand_id = %s", (h["hand_id"],))
             existing = cur.fetchone()
             if existing:
+                logger.info(f"[_insert_hand] hand_id {h['hand_id']} já existe. ID: {existing['id']}, raw_len: {len(existing['raw']) if existing['raw'] else 0}, tags: {existing['hm3_tags']}")
                 # Se for placeholder GGDiscord (raw vazio + tag GGDiscord), apaga-o para dar lugar à HH real
                 is_placeholder = (
                     (not existing["raw"] or existing["raw"].strip() == "") and
                     existing["hm3_tags"] and "GGDiscord" in existing["hm3_tags"]
                 )
                 if is_placeholder:
+                    logger.info(f"[_insert_hand] hand_id {h['hand_id']} é placeholder GGDiscord. A apagar para substituir.")
                     cur.execute("DELETE FROM hands WHERE id = %s", (existing["id"],))
                 else:
+                    logger.info(f"[_insert_hand] hand_id {h['hand_id']} NÃO é placeholder. Ignorando (duplicado).")
                     return False
+            else:
+                logger.info(f"[_insert_hand] hand_id {h['hand_id']} é novo. A inserir.")
 
         all_actions = h.get("all_players_actions")
         all_actions_json = json.dumps(all_actions) if all_actions else None
+
+        # Detect showdown: any non-hero player with cards shown
+        has_showdown = False
+        if isinstance(all_actions, dict):
+            for p, pdata in all_actions.items():
+                if p == "_meta":
+                    continue
+                if isinstance(pdata, dict) and not pdata.get("is_hero") and pdata.get("cards"):
+                    has_showdown = True
+                    break
 
         # Resolve tournament_pk from the hand's tournament_id string if not provided
         t_pk = tournament_pk
@@ -55,11 +74,13 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
             INSERT INTO hands
                 (site, hand_id, played_at, stakes, position,
                  hero_cards, board, result, currency,
-                 raw, entry_id, study_state, all_players_actions, tournament_id)
+                 raw, entry_id, study_state, all_players_actions, tournament_id,
+                 has_showdown)
             VALUES
                 (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
                  %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
-                 %(raw)s, %(entry_id)s, %(study_state)s, %(all_players_actions)s, %(tournament_id)s)
+                 %(raw)s, %(entry_id)s, %(study_state)s, %(all_players_actions)s, %(tournament_id)s,
+                 %(has_showdown)s)
             """,
             {
                 "site": h["site"],
@@ -76,6 +97,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 "study_state": study_state,
                 "all_players_actions": all_actions_json,
                 "tournament_id": t_pk,
+                "has_showdown": has_showdown,
             },
         )
         return True
