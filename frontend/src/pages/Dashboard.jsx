@@ -392,9 +392,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Screenshots ── */}
+      {/* ── Mãos sem HH ── */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 24 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid var(--border)' }}>
           <div style={{ padding: '16px 20px' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Screenshots na BD</div>
             <div style={{ fontSize: 24, fontWeight: 600 }}>
@@ -402,21 +402,31 @@ export default function DashboardPage() {
             </div>
           </div>
           <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Sem match</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>SS sem mão</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: stats?.orphan_screenshots > 0 ? '#f59e0b' : 'var(--text)' }}>
               {stats?.orphan_screenshots != null ? Number(stats.orphan_screenshots).toLocaleString('pt-PT') : '—'}
             </div>
           </div>
+          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Discord sem HH</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.gg_discord_count > 0 ? '#fb7185' : 'var(--text)' }}>
+              {stats?.gg_discord_count != null ? Number(stats.gg_discord_count).toLocaleString('pt-PT') : '—'}
+            </div>
+          </div>
         </div>
-        {stats?.orphan_screenshots > 0 && <OrphanList onRematchComplete={reloadStats} />}
+        {stats?.incomplete_count > 0 && <OrphanList onRematchComplete={reloadStats} />}
       </div>
     </>
   )
 }
 
 // ── Orphan Screenshots List ──────────────────────────────────────────────────
+// Suporta 2 tipos de items, devolvidos misturados pelo backend /orphan-screenshots:
+//   kind="orphan_ss"  → entry screenshot upload manual sem mão criada
+//   kind="gg_discord" → mão placeholder GGDiscord (SS Discord sem HH match)
 
 function OrphanList({ onRematchComplete }) {
+  const navigate = useNavigate()
   const [orphans, setOrphans] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
@@ -456,7 +466,8 @@ function OrphanList({ onRematchComplete }) {
     try {
       const result = await screenshots.rematch(entryId)
       if (result?.status === 'matched') {
-        setOrphans(prev => prev.filter(o => o.id !== entryId))
+        setOrphans(prev => prev.filter(o => (o.entry_id || o.id) !== entryId))
+        onRematchComplete?.()
       }
     } catch (e) {
       console.error('Rematch error:', e)
@@ -470,7 +481,7 @@ function OrphanList({ onRematchComplete }) {
     setActionLoading(prev => ({ ...prev, [entryId]: 'dismiss' }))
     try {
       await screenshots.dismiss(entryId)
-      setOrphans(prev => prev.filter(o => o.id !== entryId))
+      setOrphans(prev => prev.filter(o => (o.entry_id || o.id) !== entryId))
     } catch (e) {
       console.error('Dismiss error:', e)
     } finally {
@@ -484,7 +495,7 @@ function OrphanList({ onRematchComplete }) {
     setActionLoading(prev => ({ ...prev, [entryId]: 'delete' }))
     try {
       await screenshots.deleteEntry(entryId)
-      setOrphans(prev => prev.filter(o => o.id !== entryId))
+      setOrphans(prev => prev.filter(o => (o.entry_id || o.id) !== entryId))
       onRematchComplete?.()
     } catch (e) {
       console.error('Delete error:', e)
@@ -492,6 +503,11 @@ function OrphanList({ onRematchComplete }) {
     } finally {
       setActionLoading(prev => ({ ...prev, [entryId]: null }))
     }
+  }
+
+  function handleOpenHand(handDbId, e) {
+    e?.stopPropagation()
+    if (handDbId) navigate(`/replayer/${handDbId}`)
   }
 
   if (loading) return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar órfãos...</div>
@@ -549,27 +565,33 @@ function OrphanList({ onRematchComplete }) {
 
     <div style={{ maxHeight: 520, overflowY: 'auto' }}>
       {orphans.map((o, idx) => {
+        const kind = o.kind || 'orphan_ss'
+        const isGGDiscord = kind === 'gg_discord'
+        const entryId = o.entry_id || o.id  // backwards compat se backend antigo
         const raw = o.raw_json || {}
-        const fileMeta = raw.file_meta || {}
-        const tm = raw.tm || raw.tournament_number || '—'
+        const fileMeta = o.file_meta || raw.file_meta || {}
+        const tm = o.tm || raw.tm || raw.tournament_number || '—'
         const tournament = raw.tournament || fileMeta.tournament || null
-        const hero = raw.hero || null
+        const hero = o.hero || raw.hero || null
         const blinds = fileMeta.blinds || null
         const board = Array.isArray(raw.board) && raw.board.length ? raw.board.join(' ') : null
-        const visionDone = raw.vision_done === true
-        const imgB64 = raw.img_b64
-        const mime = raw.mime_type || 'image/jpeg'
-        const imgSrc = imgB64 ? screenshots.imageUrl(o.id) : null
+        const visionDone = isGGDiscord || raw.vision_done === true
+        // Imagem: orphan_ss serve via /screenshots/image/{entry_id};
+        // gg_discord usa screenshot_url já guardado (CDN GG)
+        const imgSrc = isGGDiscord
+          ? o.screenshot_url
+          : (raw.img_b64 ? screenshots.imageUrl(entryId) : null)
         const date = o.discord_posted_at || o.created_at || ''
         const dateStr = date ? new Date(date).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
-        const isActing = actionLoading[o.id]
-        const isOpen = expandedId === o.id
+        const isActing = actionLoading[entryId]
+        const rowId = isGGDiscord ? `gg_${o.hand_db_id}` : `ss_${entryId}`
+        const isOpen = expandedId === rowId
 
         return (
-          <div key={o.id} style={{ borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
+          <div key={rowId} style={{ borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
             {/* Linha compacta clicável */}
             <div
-              onClick={() => setExpandedId(isOpen ? null : o.id)}
+              onClick={() => setExpandedId(isOpen ? null : rowId)}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '10px 20px',
@@ -584,42 +606,64 @@ function OrphanList({ onRematchComplete }) {
                 <span style={{ color: 'var(--muted)', fontSize: 10, flexShrink: 0, width: 10 }}>
                   {isOpen ? '▼' : '▶'}
                 </span>
+                {/* Badge da origem */}
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3,
+                  background: isGGDiscord ? 'rgba(244,63,94,0.15)' : 'rgba(99,102,241,0.15)',
+                  color: isGGDiscord ? '#fb7185' : '#818cf8',
+                  border: `1px solid ${isGGDiscord ? 'rgba(244,63,94,0.3)' : 'rgba(99,102,241,0.3)'}`,
+                  textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0,
+                }}>{isGGDiscord ? 'Discord' : 'Manual'}</span>
                 <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>TM {tm}</span>
                 <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dateStr}</span>
-                {o.file_name && <span style={{ color: '#4b5563', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{o.file_name}</span>}
+                {hero && <span style={{ color: 'var(--muted)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{hero}</span>}
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                <button
-                  onClick={(e) => handleRematch(o.id, e)}
-                  disabled={!!isActing}
-                  style={{
-                    fontSize: 10, padding: '3px 10px', borderRadius: 4,
-                    background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)',
-                    color: '#22c55e', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
-                    opacity: isActing ? 0.5 : 1,
-                  }}
-                >{isActing === 'rematch' ? '...' : 'Rematch'}</button>
-                <button
-                  onClick={(e) => handleDismiss(o.id, e)}
-                  disabled={!!isActing}
-                  style={{
-                    fontSize: 10, padding: '3px 10px', borderRadius: 4,
-                    background: 'transparent', border: '1px solid var(--border)',
-                    color: 'var(--muted)', cursor: isActing ? 'wait' : 'pointer',
-                    opacity: isActing ? 0.5 : 1,
-                  }}
-                >{isActing === 'dismiss' ? '...' : 'Ignorar'}</button>
-                <button
-                  onClick={(e) => handleDelete(o.id, e)}
-                  disabled={!!isActing}
-                  title="Apagar permanentemente"
-                  style={{
-                    fontSize: 10, padding: '3px 10px', borderRadius: 4,
-                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
-                    color: '#f87171', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
-                    opacity: isActing ? 0.5 : 1,
-                  }}
-                >{isActing === 'delete' ? '...' : 'Apagar'}</button>
+                {isGGDiscord ? (
+                  // GGDiscord: só "Abrir mão" (rematch acontece automaticamente quando importas HH)
+                  <button
+                    onClick={(e) => handleOpenHand(o.hand_db_id, e)}
+                    style={{
+                      fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                      background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)',
+                      color: '#818cf8', cursor: 'pointer', fontWeight: 600,
+                    }}
+                  >Abrir</button>
+                ) : (
+                  <>
+                    <button
+                      onClick={(e) => handleRematch(entryId, e)}
+                      disabled={!!isActing}
+                      style={{
+                        fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                        background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)',
+                        color: '#22c55e', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
+                        opacity: isActing ? 0.5 : 1,
+                      }}
+                    >{isActing === 'rematch' ? '...' : 'Rematch'}</button>
+                    <button
+                      onClick={(e) => handleDismiss(entryId, e)}
+                      disabled={!!isActing}
+                      style={{
+                        fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                        background: 'transparent', border: '1px solid var(--border)',
+                        color: 'var(--muted)', cursor: isActing ? 'wait' : 'pointer',
+                        opacity: isActing ? 0.5 : 1,
+                      }}
+                    >{isActing === 'dismiss' ? '...' : 'Ignorar'}</button>
+                    <button
+                      onClick={(e) => handleDelete(entryId, e)}
+                      disabled={!!isActing}
+                      title="Apagar permanentemente"
+                      style={{
+                        fontSize: 10, padding: '3px 10px', borderRadius: 4,
+                        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                        color: '#f87171', cursor: isActing ? 'wait' : 'pointer', fontWeight: 600,
+                        opacity: isActing ? 0.5 : 1,
+                      }}
+                    >{isActing === 'delete' ? '...' : 'Apagar'}</button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -640,7 +684,15 @@ function OrphanList({ onRematchComplete }) {
                   <OrphanField label="Herói"   value={hero} />
                   <OrphanField label="Blinds"  value={blinds} mono />
                   <OrphanField label="Board"   value={board} mono />
-                  {!visionDone && (
+                  {isGGDiscord && o.discord_channel && (
+                    <OrphanField label="Canal" value={`#${o.discord_channel}`} />
+                  )}
+                  {isGGDiscord && (
+                    <div style={{ marginTop: 8, fontSize: 11, color: '#fb7185' }}>
+                      Falta importar a HH deste torneio. Quando importares, esta mão é auto-substituída.
+                    </div>
+                  )}
+                  {!isGGDiscord && !visionDone && (
                     <div style={{ marginTop: 8, fontSize: 11, color: '#f59e0b' }}>
                       Vision ainda não processou este screenshot.
                     </div>

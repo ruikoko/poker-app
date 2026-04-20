@@ -396,8 +396,12 @@ def hand_stats(current_user=Depends(require_auth)):
         ss_rows = query("""
             SELECT
                 COUNT(*) AS total_screenshots,
-                COUNT(*) FILTER (WHERE status = 'new') AS orphan_screenshots
-            FROM entries
+                COUNT(*) FILTER (
+                    WHERE status = 'new'
+                      AND NOT EXISTS (SELECT 1 FROM mtt_hands m WHERE m.screenshot_entry_id = e.id)
+                      AND NOT EXISTS (SELECT 1 FROM hands h WHERE h.entry_id = e.id)
+                ) AS orphan_screenshots
+            FROM entries e
             WHERE entry_type = 'screenshot'
         """)
         if ss_rows:
@@ -406,6 +410,23 @@ def hand_stats(current_user=Depends(require_auth)):
     except Exception:
         result["total_screenshots"] = 0
         result["orphan_screenshots"] = 0
+
+    # Mãos GGDiscord (placeholder Discord SS sem HH match ainda)
+    try:
+        gd_rows = query("""
+            SELECT COUNT(*) AS n
+            FROM hands
+            WHERE 'GGDiscord' = ANY(hm3_tags)
+        """)
+        result["gg_discord_count"] = gd_rows[0]["n"] if gd_rows else 0
+    except Exception:
+        result["gg_discord_count"] = 0
+
+    # Total combinado "sem match" (mostrado no Dashboard)
+    result["incomplete_count"] = (
+        (result.get("orphan_screenshots") or 0)
+        + (result.get("gg_discord_count") or 0)
+    )
 
     return result
 

@@ -1231,10 +1231,16 @@ def mtt_stats(current_user=Depends(require_auth)):
 @router.get("/orphan-screenshots")
 def orphan_screenshots(current_user=Depends(require_auth)):
     """
-    Lista screenshots que ainda não têm match com HH.
-    Verifica ambas as tabelas: mtt_hands e hands.
+    Lista mãos/screenshots sem HH match.
+
+    Devolve 2 tipos misturados:
+      - kind="orphan_ss"  → entry screenshot (upload manual) sem mão criada
+      - kind="gg_discord" → mão placeholder GGDiscord em hands (SS Discord sem HH)
+
+    Ambos são mostrados juntos no painel "Sem match" do Dashboard.
     """
-    rows = query("""
+    # Tipo 1: orphan screenshots tradicionais
+    orphan_ss_rows = query("""
         SELECT e.id, e.raw_json, e.created_at
         FROM entries e
         WHERE e.entry_type = 'screenshot'
@@ -1247,20 +1253,52 @@ def orphan_screenshots(current_user=Depends(require_auth)):
           )
         ORDER BY e.created_at DESC
     """)
-    
-    orphans = []
-    for r in rows:
+
+    items = []
+    for r in orphan_ss_rows:
         raw = r.get("raw_json") or {}
-        orphans.append({
+        items.append({
+            "kind": "orphan_ss",
             "entry_id": r["id"],
+            "hand_id": None,
             "tm": raw.get("tm"),
             "vision_done": raw.get("vision_done", False),
             "hero": raw.get("hero"),
             "file_meta": raw.get("file_meta", {}),
+            "screenshot_url": None,  # imagem servida via /api/screenshots/image/{entry_id}
             "created_at": str(r["created_at"]) if r.get("created_at") else None,
         })
-    
-    return orphans
+
+    # Tipo 2: mãos GGDiscord (placeholder, SS Discord sem HH)
+    gg_discord_rows = query("""
+        SELECT h.id AS hand_db_id, h.hand_id, h.entry_id, h.screenshot_url,
+               h.played_at, h.created_at, h.player_names,
+               e.raw_json AS entry_raw_json,
+               e.discord_channel
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        WHERE 'GGDiscord' = ANY(h.hm3_tags)
+        ORDER BY h.played_at DESC NULLS LAST, h.id DESC
+    """)
+
+    for r in gg_discord_rows:
+        pn = r.get("player_names") or {}
+        rj = r.get("entry_raw_json") or {}
+        items.append({
+            "kind": "gg_discord",
+            "entry_id": r["entry_id"],
+            "hand_id": r["hand_id"],
+            "hand_db_id": r["hand_db_id"],
+            "tm": rj.get("tm") or (r["hand_id"] or "").replace("GG-", "TM"),
+            "vision_done": True,
+            "hero": pn.get("hero"),
+            "file_meta": pn.get("file_meta") or rj.get("file_meta") or {},
+            "screenshot_url": r["screenshot_url"],
+            "discord_channel": r.get("discord_channel"),
+            "created_at": str(r["created_at"]) if r.get("created_at") else None,
+        })
+
+    return items
 
 
 @router.post("/rematch")
