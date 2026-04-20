@@ -860,6 +860,7 @@ async def import_mtt(
                 tm_digits = _extract_tm_digits(tm_number)
                 hand_id = f"GG-{tm_digits}"
 
+                logger.info(f"[import_mtt] Processando hand_id: {hand_id}")
                 # Verificar duplicado na tabela hands
                 cur.execute(
                     "SELECT id, raw, hm3_tags FROM hands WHERE hand_id = %s",
@@ -867,21 +868,21 @@ async def import_mtt(
                 )
                 existing = cur.fetchone()
                 if existing:
-                    # Caso especial: se for placeholder GGDiscord (raw vazio, tag GGDiscord),
-                    # apaga e permite a HH real a entrar. Sem isto, HHs importadas após
-                    # criação de placeholder Discord ficavam para sempre como GGDiscord.
-                    existing_raw = existing.get("raw") or ""
-                    existing_tags = existing.get("hm3_tags") or []
+                    logger.info(f"[import_mtt] hand_id {hand_id} já existe. ID: {existing['id']}, raw_len: {len(existing['raw']) if existing['raw'] else 0}, tags: {existing['hm3_tags']}")
+                    # Se for placeholder GGDiscord (raw vazio + tag GGDiscord), apaga-o para dar lugar à HH real
                     is_placeholder = (
-                        not existing_raw
-                        and "GGDiscord" in existing_tags
+                        (not existing["raw"] or existing["raw"].strip() == "") and
+                        existing["hm3_tags"] and "GGDiscord" in existing["hm3_tags"]
                     )
                     if is_placeholder:
+                        logger.info(f"[import_mtt] hand_id {hand_id} é placeholder GGDiscord. A apagar para substituir.")
                         cur.execute("DELETE FROM hands WHERE id = %s", (existing["id"],))
-                        # Continua para o INSERT normal em baixo
                     else:
+                        logger.info(f"[import_mtt] hand_id {hand_id} NÃO é placeholder. Ignorando (duplicado).")
                         skipped += 1
                         continue
+                else:
+                    logger.info(f"[import_mtt] hand_id {hand_id} é novo. A inserir.")
                 
                 # Procurar screenshot match (TM + hora + blinds)
                 screenshot = _match_screenshot(h["tm_number"], h.get("played_at"), h.get("blinds"))
