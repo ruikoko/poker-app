@@ -1158,6 +1158,115 @@ def admin_refix_anonmap_preview(current_user=Depends(require_auth)):
     }
 
 
+@router.get("/admin/refix-villains/preview")
+def admin_refix_villains_preview(current_user=Depends(require_auth)):
+    """
+    PREVIEW. Mostra quantas mãos serão afetadas pelo refix de villains.
+    """
+    rows = query(
+        """
+        SELECT id, hand_id
+        FROM hands
+        WHERE player_names->>'match_method' = 'anchors_stack_elimination_v2_refix'
+        """
+    )
+    return {
+        "ok": True,
+        "total_affected": len(rows),
+        "sample": rows[:5]
+    }
+
+@router.post("/admin/refix-villains")
+def admin_refix_villains_execute(
+    confirm: bool = Query(False, description="Tem de ser true para executar"),
+    current_user=Depends(require_auth),
+):
+    """
+    EXECUÇÃO. Aplica o fix retroactivo de villains nas mãos afectadas. Requer ?confirm=true.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Adicionar ?confirm=true para executar. Corre o /preview primeiro."
+        )
+
+    from app.parsers.gg_hands import parse_hands as gg_parse_hands
+    from app.routers.mtt import _create_villains_for_hand
+
+    rows = query(
+        """
+        SELECT id, hand_id, raw, player_names
+        FROM hands
+        WHERE player_names->>'match_method' = 'anchors_stack_elimination_v2_refix'
+        """
+    )
+
+    created_total = 0
+    skipped = []
+    failed = []
+    conn = get_conn()
+    
+    try:
+        with conn.cursor() as cur:
+            for r in rows:
+                try:
+                    hand_db_id = r["id"]
+                    raw_hh = r["raw"]
+                    player_names = r["player_names"] or {}
+                    
+                    if not raw_hh:
+                        skipped.append({"id": hand_db_id, "reason": "sem HH raw"})
+                        continue
+                        
+                    # Parse HH
+                    parsed_list, _errs = gg_parse_hands(raw_hh.encode("utf-8"), f"hand_{hand_db_id}.txt")
+                    if not parsed_list:
+                        skipped.append({"id": hand_db_id, "reason": "reparse HH falhou"})
+                        continue
+                        
+                    parsed = parsed_list[0]
+                    if not parsed.get("vpip_seats"):
+                        skipped.append({"id": hand_db_id, "reason": "sem VPIP seats"})
+                        continue
+                        
+                    # Reconstruct screenshot_data from player_names
+                    screenshot_data = {
+                        "hero": player_names.get("hero"),
+                        "vision_sb": player_names.get("vision_sb"),
+                        "vision_bb": player_names.get("vision_bb"),
+                        "players_list": player_names.get("players_list") or [],
+                        "players_by_position": player_names.get("players_by_position") or {},
+                        "file_meta": player_names.get("file_meta") or {},
+                    }
+                    
+                    # Idempotency: delete existing villains for this hand_db_id
+                    cur.execute("DELETE FROM hand_villains WHERE hand_db_id = %s", (hand_db_id,))
+                    
+                    # Create villains
+                    n = _create_villains_for_hand(conn, parsed, screenshot_data, hand_db_id=hand_db_id)
+                    created_total += n
+                    
+                except Exception as e:
+                    logger.error(f"[refix-villains] Hand {r['id']}: {e}")
+                    failed.append({"id": r["id"], "error": str(e)})
+                    
+        conn.commit()
+        return {
+            "ok": True,
+            "total_scanned": len(rows),
+            "villains_created": created_total,
+            "skipped_count": len(skipped),
+            "skipped": skipped[:10],
+            "failed_count": len(failed),
+            "failed": failed[:10],
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[refix-villains] Rollback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
 @router.post("/admin/refix-anonmap-bug")
 def admin_refix_anonmap_execute(
     confirm: bool = Query(False, description="Tem de ser true para executar"),
