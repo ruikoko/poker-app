@@ -652,6 +652,22 @@ def backfill_ggdiscord(
                 "match_method": "discord_placeholder_no_hh_backfill",
             }
 
+            # Extrair played_at do nome do PNG (unix ms timestamp). Pattern:
+            # https://user.gg-global-cdn.com/.../<13_digit_timestamp_ms>.png
+            # Validado com mãos reais: bate com hora de jogo dentro de segundos/minutos.
+            played_at_extracted = None
+            og_url = (rj.get("file_meta") or {}).get("og_image_url")
+            if og_url:
+                import re as _re
+                from datetime import datetime as _dt, timezone as _tz
+                m = _re.search(r"/(\d{13})\.png", og_url)
+                if m:
+                    try:
+                        ts_ms = int(m.group(1))
+                        played_at_extracted = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                    except (ValueError, OSError):
+                        pass
+
             try:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -665,7 +681,7 @@ def backfill_ggdiscord(
                            RETURNING id""",
                         (
                             hand_id,
-                            r["discord_posted_at"],
+                            played_at_extracted,
                             f"Discord SS sem HH ainda. TM: {tm}",
                             [],
                             ["GGDiscord"],
@@ -700,125 +716,64 @@ def backfill_ggdiscord(
         conn.close()
 
 
-# ─── Migração: limpar mãos órfãs do caminho antigo ──────────────────────────
+# ─── Migração: corrigir played_at das mãos GGDiscord existentes ─────────────
 
-@router.get("/cleanup-old-discord-hands/preview")
-def cleanup_old_discord_hands_preview(current_user=Depends(require_auth)):
-    """
-    DRY-RUN. Lista mãos com hand_id no formato antigo `discord_<type>_<hash>`
-    e sem hm3_tags. Eram criadas pelo caminho antigo `_create_placeholder_hand`
-    em discord_bot.py, agora desactivado. Estas mãos nunca tiveram Vision corrido.
-    """
-    rows = query("""
-        SELECT h.id, h.hand_id, h.entry_id, h.tags, h.notes, h.screenshot_url,
-               h.played_at, h.created_at,
-               e.id IS NOT NULL AS entry_exists,
-               e.raw_text AS entry_url,
-               (e.raw_json->>'vision_done')::boolean AS vision_done
-        FROM hands h
-        LEFT JOIN entries e ON e.id = h.entry_id
-        WHERE h.hand_id LIKE 'discord_%'
-          AND (h.hm3_tags IS NULL OR array_length(h.hm3_tags, 1) IS NULL)
-        ORDER BY h.id DESC
-    """)
-
-    sample = []
-    can_reprocess = 0
-    no_entry = 0
-    for r in rows:
-        if r["entry_exists"]:
-            can_reprocess += 1
-        else:
-            no_entry += 1
-        if len(sample) < 5:
-            sample.append({
-                "hand_id": r["hand_id"],
-                "entry_id": r["entry_id"],
-                "entry_exists": r["entry_exists"],
-                "vision_done": r["vision_done"],
-                "url": r["entry_url"],
-                "tags": r["tags"],
-            })
-
-    return {
-        "ok": True,
-        "total_old_hands": len(rows),
-        "can_reprocess_via_entry": can_reprocess,
-        "orphan_no_entry": no_entry,
-        "sample": sample,
-        "note": "POST /cleanup-old-discord-hands?confirm=true apaga estas mãos. Depois usar /process-replayer-links para reprocessar via Vision.",
-    }
-
-
-@router.post("/cleanup-old-discord-hands")
-def cleanup_old_discord_hands(
+@router.post("/fix-ggdiscord-played-at")
+def fix_ggdiscord_played_at(
     confirm: bool = False,
     current_user=Depends(require_auth),
 ):
     """
-    Apaga mãos com hand_id antigo `discord_<type>_<hash>` sem hm3_tags.
+    Para cada mão GGDiscord existente, recalcula played_at a partir do
+    timestamp do nome do PNG no screenshot_url. Pattern .../<unix_ms>.png
 
-    Requer ?confirm=true. Antes de correr este endpoint, tomar nota dos entry_ids
-    associados (via /preview). Os entries permanecem intactos — depois usar
-    POST /api/discord/process-replayer-links?confirm=true para reprocessar via
-    Vision e produzir mãos GG-<tm> com hm3_tags correctos.
+    Necessário porque as mãos antigas foram criadas com played_at = discord_posted_at
+    (que era o momento do post no Discord, não da mão jogada).
     """
     if not confirm:
-        raise HTTPException(
-            status_code=400,
-            detail="Adicionar ?confirm=true. Corre /cleanup-old-discord-hands/preview primeiro."
-        )
+        raise HTTPException(status_code=400, detail="Adicionar ?confirm=true.")
 
+    import re as _re
+    from datetime import datetime as _dt, timezone as _tz
     from app.db import get_conn
 
     rows = query("""
-        SELECT id, hand_id, entry_id
+        SELECT id, hand_id, played_at, screenshot_url
         FROM hands
-        WHERE hand_id LIKE 'discord_%'
-          AND (hm3_tags IS NULL OR array_length(hm3_tags, 1) IS NULL)
+        WHERE 'GGDiscord' = ANY(hm3_tags)
     """)
 
-    deleted = 0
-    deleted_ids = []
-    entry_ids_to_reprocess = []
-    failed = []
-
+    updated = 0
+    skipped = []
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             for r in rows:
+                url = r.get("screenshot_url") or ""
+                m = _re.search(r"/(\d{13})\.png", url)
+                if not m:
+                    skipped.append({"hand_id": r["hand_id"], "reason": "screenshot_url sem timestamp"})
+                    continue
                 try:
-                    cur.execute("DELETE FROM hands WHERE id = %s", (r["id"],))
-                    deleted += 1
-                    deleted_ids.append(r["hand_id"])
-                    if r["entry_id"]:
-                        entry_ids_to_reprocess.append(r["entry_id"])
-                except Exception as e:
-                    failed.append({"hand_id": r["hand_id"], "error": str(e)})
+                    ts_ms = int(m.group(1))
+                    new_played_at = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                except (ValueError, OSError) as e:
+                    skipped.append({"hand_id": r["hand_id"], "reason": f"timestamp inválido: {e}"})
+                    continue
 
-            # Reset img_b64 nos entries para que process-replayer-links os apanhe
-            # (filtro do endpoint é img_b64 IS NULL).
-            if entry_ids_to_reprocess:
                 cur.execute(
-                    """UPDATE entries
-                       SET raw_json = raw_json - 'img_b64' - 'img_url'
-                                                 - 'gg_replayer_resolved' - 'mime_type'
-                                                 - 'vision_done' - 'players_list'
-                                                 - 'players_by_position' - 'hero'
-                                                 - 'board' - 'vision_sb' - 'vision_bb'
-                                                 - 'raw_vision' - 'tm' - 'file_meta'
-                       WHERE id = ANY(%s)""",
-                    (entry_ids_to_reprocess,)
+                    "UPDATE hands SET played_at = %s WHERE id = %s",
+                    (new_played_at, r["id"])
                 )
+                updated += 1
 
         conn.commit()
         return {
             "ok": True,
-            "deleted_hands": deleted,
-            "entries_reset_for_reprocessing": len(entry_ids_to_reprocess),
-            "failed_count": len(failed),
-            "failed": failed[:10],
-            "next_step": "POST /api/discord/process-replayer-links?confirm=true&limit=100",
+            "total_scanned": len(rows),
+            "updated": updated,
+            "skipped_count": len(skipped),
+            "skipped": skipped[:10],
         }
     except Exception as e:
         conn.rollback()

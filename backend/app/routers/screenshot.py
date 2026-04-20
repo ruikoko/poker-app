@@ -936,6 +936,23 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                     "match_method": "discord_placeholder_no_hh",
                 }
 
+                # Extrair played_at do nome do ficheiro PNG da og:image URL.
+                # Pattern: https://user.gg-global-cdn.com/.../<unix_ms>.png
+                # O número é unix timestamp em ms — momento em que o GG gerou a imagem
+                # do replayer (poucos segundos depois do showdown). Aproximação fiel.
+                played_at_extracted = None
+                og_url = (file_meta or {}).get("og_image_url")
+                if og_url:
+                    import re as _re
+                    from datetime import datetime as _dt, timezone as _tz
+                    m = _re.search(r"/(\d{13})\.png", og_url)
+                    if m:
+                        try:
+                            ts_ms = int(m.group(1))
+                            played_at_extracted = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                        except (ValueError, OSError):
+                            pass
+
                 conn = get_conn()
                 try:
                     with conn.cursor() as cur:
@@ -949,7 +966,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                ON CONFLICT (hand_id) DO NOTHING""",
                             (
                                 hand_id,
-                                ent[0].get("discord_posted_at"),
+                                played_at_extracted,
                                 f"Discord SS sem HH ainda. TM: {tm_final}",
                                 [],  # tags
                                 ["GGDiscord"],  # hm3_tags
@@ -959,7 +976,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 json.dumps(pn_json),
                             )
                         )
-                        logger.info(f"[bg] Created GGDiscord placeholder for entry {entry_id} ({hand_id})")
+                        logger.info(f"[bg] Created GGDiscord placeholder for entry {entry_id} ({hand_id}, played_at={played_at_extracted})")
                     conn.commit()
                 except Exception as e:
                     conn.rollback()

@@ -1241,9 +1241,10 @@ def orphan_screenshots(current_user=Depends(require_auth)):
     """
     # Origem 1: orphan screenshots tradicionais (entries sem mão)
     orphan_ss_rows = query("""
-        SELECT e.id, e.raw_json, e.created_at,
+        SELECT e.id, e.raw_json, e.created_at, e.discord_posted_at,
                NULL::bigint AS hand_db_id,
-               NULL::text AS gg_discord_screenshot_url
+               NULL::text AS gg_discord_screenshot_url,
+               NULL::timestamp AS played_at
         FROM entries e
         WHERE e.entry_type = 'screenshot'
           AND e.status = 'new'
@@ -1257,9 +1258,10 @@ def orphan_screenshots(current_user=Depends(require_auth)):
 
     # Origem 2: mãos GGDiscord (placeholder Discord sem HH)
     gg_discord_rows = query("""
-        SELECT e.id, e.raw_json, e.created_at,
+        SELECT e.id, e.raw_json, e.created_at, e.discord_posted_at,
                h.id AS hand_db_id,
-               h.screenshot_url AS gg_discord_screenshot_url
+               h.screenshot_url AS gg_discord_screenshot_url,
+               h.played_at
         FROM hands h
         JOIN entries e ON e.id = h.entry_id
         WHERE 'GGDiscord' = ANY(h.hm3_tags)
@@ -1277,11 +1279,13 @@ def orphan_screenshots(current_user=Depends(require_auth)):
             "file_meta": raw.get("file_meta", {}),
             "screenshot_url": r["gg_discord_screenshot_url"],  # só GGDiscord
             "raw_json": raw,
+            "played_at": str(r["played_at"]) if r.get("played_at") else None,
+            "discord_posted_at": str(r["discord_posted_at"]) if r.get("discord_posted_at") else None,
             "created_at": str(r["created_at"]) if r.get("created_at") else None,
         })
 
-    # Ordenar por data desc
-    items.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    # Ordenar por played_at (real) com fallback para discord_posted_at e created_at
+    items.sort(key=lambda x: x.get("played_at") or x.get("discord_posted_at") or x.get("created_at") or "", reverse=True)
     return items
 
 

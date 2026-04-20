@@ -564,8 +564,11 @@ function OrphanList({ onRematchComplete }) {
         // Mãos GGDiscord vêm com screenshot_url (CDN GG og:image directo);
         // orphan SS upload manual usam img_b64 servido via /api/screenshots/image/{entry_id}
         const imgSrc = o.screenshot_url || (imgB64 ? screenshots.imageUrl(o.id) : null)
-        const date = o.discord_posted_at || o.created_at || ''
+        const date = o.played_at || ''
         const dateStr = date ? new Date(date).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
+        // Para GGDiscord, played_at é null. Mostrar discord_posted_at como informação secundária.
+        const postedDate = o.discord_posted_at || ''
+        const postedStr = postedDate ? new Date(postedDate).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
         const isActing = actionLoading[o.id]
         const isOpen = expandedId === o.id
 
@@ -589,7 +592,12 @@ function OrphanList({ onRematchComplete }) {
                   {isOpen ? '▼' : '▶'}
                 </span>
                 <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>TM {tm}</span>
-                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dateStr}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 11 }}>
+                  {dateStr}
+                  {dateStr === '—' && postedStr && (
+                    <span style={{ color: '#4b5563', fontSize: 10, marginLeft: 6 }}>(postado {postedStr})</span>
+                  )}
+                </span>
                 {o.file_name && <span style={{ color: '#4b5563', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{o.file_name}</span>}
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
