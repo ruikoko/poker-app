@@ -18,6 +18,7 @@ import asyncio
 from datetime import datetime
 from collections import defaultdict
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from app.auth import require_auth
 from app.db import get_conn, query, execute
 from app.hero_names import HERO_NAMES
@@ -2119,3 +2120,113 @@ def migrate_mtt_to_hands(current_user=Depends(require_auth)):
         "errors": errors,
         "total_mtt_hands": total_rows,
     }
+
+
+# ─── Debug: diagnosticar porque /mtt/rematch não promove mãos GGDiscord ─────
+
+@router.get("/debug-ggdiscord-match")
+def debug_ggdiscord_match(current_user=Depends(require_auth)):
+    """
+    Devolve diagnóstico completo para perceber porque as mãos GGDiscord
+    não estão a ser promovidas a GG Hands. Verifica para cada uma:
+      - tm digits na entry
+      - se existe row em mtt_hands com mesmo tm_digits
+      - se tm_number em mtt_hands tem formato diferente
+    """
+    # Todas as mãos GGDiscord
+    gd_hands = query("""
+        SELECT h.id AS hand_db_id, h.hand_id, h.entry_id, h.created_at,
+               e.raw_json AS entry_raw_json,
+               e.entry_type AS entry_type_real
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        WHERE 'GGDiscord' = ANY(h.hm3_tags)
+        ORDER BY h.id
+    """)
+
+    result = {
+        "total_ggdiscord": len(gd_hands),
+        "hands_with_no_entry": 0,
+        "hands_with_no_tm_in_entry": 0,
+        "hands_with_match_in_mtt_hands": 0,
+        "hands_without_match_in_mtt_hands": 0,
+        "details": [],
+    }
+
+    # Amostra dos tm_numbers em mtt_hands para perceber formato
+    sample_mtt = query("""
+        SELECT tm_number, regexp_replace(tm_number, '[^0-9]', '', 'g') AS tm_digits
+        FROM mtt_hands
+        ORDER BY id DESC
+        LIMIT 5
+    """)
+    result["sample_mtt_hands_recent"] = sample_mtt
+
+    # Total mtt_hands
+    total_mtt = query("SELECT COUNT(*) AS n FROM mtt_hands")
+    result["total_mtt_hands"] = total_mtt[0]["n"] if total_mtt else 0
+
+    # Total mtt_hands com has_screenshot=false
+    avail_mtt = query("SELECT COUNT(*) AS n FROM mtt_hands WHERE has_screenshot = false")
+    result["mtt_hands_available_for_match"] = avail_mtt[0]["n"] if avail_mtt else 0
+
+    for gd in gd_hands:
+        entry_raw = gd.get("entry_raw_json") or {}
+        tm = entry_raw.get("tm")
+
+        row = {
+            "hand_id": gd["hand_id"],
+            "entry_id": gd["entry_id"],
+            "entry_type": gd["entry_type_real"],
+            "tm_in_entry": tm,
+        }
+
+        if not gd["entry_id"]:
+            result["hands_with_no_entry"] += 1
+            row["status"] = "no_entry"
+            result["details"].append(row)
+            continue
+
+        if not tm:
+            result["hands_with_no_tm_in_entry"] += 1
+            row["status"] = "no_tm_in_entry"
+            result["details"].append(row)
+            continue
+
+        tm_digits = _extract_tm_digits(tm)
+        row["tm_digits"] = tm_digits
+
+        # Procurar em mtt_hands
+        mtt_matches = query(
+            """SELECT id, tm_number, has_screenshot, screenshot_entry_id
+               FROM mtt_hands
+               WHERE regexp_replace(tm_number, '[^0-9]', '', 'g') = %s
+               LIMIT 5""",
+            (tm_digits,)
+        )
+
+        if mtt_matches:
+            result["hands_with_match_in_mtt_hands"] += 1
+            row["status"] = "match_found"
+            row["mtt_matches"] = [
+                {"id": m["id"], "tm_number": m["tm_number"],
+                 "has_screenshot": m["has_screenshot"],
+                 "screenshot_entry_id": m["screenshot_entry_id"]}
+                for m in mtt_matches
+            ]
+        else:
+            result["hands_without_match_in_mtt_hands"] += 1
+            row["status"] = "no_match"
+            # Tentar também com LIKE em caso de prefixo diferente
+            like_matches = query(
+                """SELECT tm_number FROM mtt_hands
+                   WHERE tm_number LIKE %s OR tm_number LIKE %s
+                   LIMIT 3""",
+                (f"%{tm_digits}%", f"{tm_digits}%")
+            )
+            if like_matches:
+                row["like_matches"] = [m["tm_number"] for m in like_matches]
+
+        result["details"].append(row)
+
+    return result
