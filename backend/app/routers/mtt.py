@@ -1231,17 +1231,19 @@ def mtt_stats(current_user=Depends(require_auth)):
 @router.get("/orphan-screenshots")
 def orphan_screenshots(current_user=Depends(require_auth)):
     """
-    Lista mãos/screenshots sem HH match.
+    Lista mãos/screenshots sem HH match — mistura 2 origens no mesmo formato:
 
-    Devolve 2 tipos misturados:
-      - kind="orphan_ss"  → entry screenshot (upload manual) sem mão criada
-      - kind="gg_discord" → mão placeholder GGDiscord em hands (SS Discord sem HH)
+      1. Entries `screenshot` (upload manual) sem mão criada
+      2. Mãos placeholder GGDiscord (SS Discord sem HH match ainda)
 
-    Ambos são mostrados juntos no painel "Sem match" do Dashboard.
+    Devolvidos juntos no mesmo formato. O frontend trata-os como orphan SS
+    sem distinção visual. Para o utilizador, é tudo "SS sem match".
     """
-    # Tipo 1: orphan screenshots tradicionais
+    # Origem 1: orphan screenshots tradicionais (entries sem mão)
     orphan_ss_rows = query("""
-        SELECT e.id, e.raw_json, e.created_at
+        SELECT e.id, e.raw_json, e.created_at,
+               NULL::bigint AS hand_db_id,
+               NULL::text AS gg_discord_screenshot_url
         FROM entries e
         WHERE e.entry_type = 'screenshot'
           AND e.status = 'new'
@@ -1251,53 +1253,35 @@ def orphan_screenshots(current_user=Depends(require_auth)):
           AND NOT EXISTS (
               SELECT 1 FROM hands h WHERE h.entry_id = e.id
           )
-        ORDER BY e.created_at DESC
+    """)
+
+    # Origem 2: mãos GGDiscord (placeholder Discord sem HH)
+    gg_discord_rows = query("""
+        SELECT e.id, e.raw_json, e.created_at,
+               h.id AS hand_db_id,
+               h.screenshot_url AS gg_discord_screenshot_url
+        FROM hands h
+        JOIN entries e ON e.id = h.entry_id
+        WHERE 'GGDiscord' = ANY(h.hm3_tags)
     """)
 
     items = []
-    for r in orphan_ss_rows:
+    for r in (orphan_ss_rows + gg_discord_rows):
         raw = r.get("raw_json") or {}
         items.append({
-            "kind": "orphan_ss",
-            "entry_id": r["id"],
-            "hand_id": None,
+            "id": r["id"],                         # entry_id
+            "hand_db_id": r["hand_db_id"],         # null para orphan_ss, id para GGDiscord
             "tm": raw.get("tm"),
             "vision_done": raw.get("vision_done", False),
             "hero": raw.get("hero"),
             "file_meta": raw.get("file_meta", {}),
-            "screenshot_url": None,  # imagem servida via /api/screenshots/image/{entry_id}
+            "screenshot_url": r["gg_discord_screenshot_url"],  # só GGDiscord
+            "raw_json": raw,
             "created_at": str(r["created_at"]) if r.get("created_at") else None,
         })
 
-    # Tipo 2: mãos GGDiscord (placeholder, SS Discord sem HH)
-    gg_discord_rows = query("""
-        SELECT h.id AS hand_db_id, h.hand_id, h.entry_id, h.screenshot_url,
-               h.played_at, h.created_at, h.player_names,
-               e.raw_json AS entry_raw_json,
-               e.discord_channel
-        FROM hands h
-        LEFT JOIN entries e ON e.id = h.entry_id
-        WHERE 'GGDiscord' = ANY(h.hm3_tags)
-        ORDER BY h.played_at DESC NULLS LAST, h.id DESC
-    """)
-
-    for r in gg_discord_rows:
-        pn = r.get("player_names") or {}
-        rj = r.get("entry_raw_json") or {}
-        items.append({
-            "kind": "gg_discord",
-            "entry_id": r["entry_id"],
-            "hand_id": r["hand_id"],
-            "hand_db_id": r["hand_db_id"],
-            "tm": rj.get("tm") or (r["hand_id"] or "").replace("GG-", "TM"),
-            "vision_done": True,
-            "hero": pn.get("hero"),
-            "file_meta": pn.get("file_meta") or rj.get("file_meta") or {},
-            "screenshot_url": r["screenshot_url"],
-            "discord_channel": r.get("discord_channel"),
-            "created_at": str(r["created_at"]) if r.get("created_at") else None,
-        })
-
+    # Ordenar por data desc
+    items.sort(key=lambda x: x["created_at"] or "", reverse=True)
     return items
 
 

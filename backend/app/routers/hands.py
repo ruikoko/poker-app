@@ -391,7 +391,10 @@ def hand_stats(current_user=Depends(require_auth)):
     """)
     result["recent"] = [dict(r) for r in recent_rows]
 
-    # Screenshot stats
+    # Screenshot stats — "orphan_screenshots" inclui:
+    #   - entries screenshot (upload manual) sem mão criada
+    #   - mãos GGDiscord (placeholder Discord SS sem HH)
+    # Tudo é "SS sem match" para o utilizador, sem distinção visual no Dashboard.
     try:
         ss_rows = query("""
             SELECT
@@ -400,33 +403,26 @@ def hand_stats(current_user=Depends(require_auth)):
                     WHERE status = 'new'
                       AND NOT EXISTS (SELECT 1 FROM mtt_hands m WHERE m.screenshot_entry_id = e.id)
                       AND NOT EXISTS (SELECT 1 FROM hands h WHERE h.entry_id = e.id)
-                ) AS orphan_screenshots
+                ) AS orphan_ss_only
             FROM entries e
             WHERE entry_type = 'screenshot'
         """)
-        if ss_rows:
-            result["total_screenshots"] = ss_rows[0]["total_screenshots"]
-            result["orphan_screenshots"] = ss_rows[0]["orphan_screenshots"]
+        orphan_ss = ss_rows[0]["orphan_ss_only"] if ss_rows else 0
+        result["total_screenshots"] = ss_rows[0]["total_screenshots"] if ss_rows else 0
     except Exception:
+        orphan_ss = 0
         result["total_screenshots"] = 0
-        result["orphan_screenshots"] = 0
 
-    # Mãos GGDiscord (placeholder Discord SS sem HH match ainda)
     try:
         gd_rows = query("""
-            SELECT COUNT(*) AS n
-            FROM hands
-            WHERE 'GGDiscord' = ANY(hm3_tags)
+            SELECT COUNT(*) AS n FROM hands WHERE 'GGDiscord' = ANY(hm3_tags)
         """)
-        result["gg_discord_count"] = gd_rows[0]["n"] if gd_rows else 0
+        gg_discord = gd_rows[0]["n"] if gd_rows else 0
     except Exception:
-        result["gg_discord_count"] = 0
+        gg_discord = 0
 
-    # Total combinado "sem match" (mostrado no Dashboard)
-    result["incomplete_count"] = (
-        (result.get("orphan_screenshots") or 0)
-        + (result.get("gg_discord_count") or 0)
-    )
+    # Contagem unificada — o que o painel "Sem match" do Dashboard mostra
+    result["orphan_screenshots"] = orphan_ss + gg_discord
 
     return result
 

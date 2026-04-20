@@ -69,13 +69,26 @@ def entry_reprocess(entry_id: int, current_user=Depends(require_auth)):
 
 @router.delete("/{entry_id}")
 def entry_delete(entry_id: int, current_user=Depends(require_auth)):
-    """Apaga uma entry (screenshot, HH, etc.) e limpa referências em hands."""
+    """Apaga uma entry (screenshot, HH, etc.) e limpa referências em hands.
+
+    Para mãos com tag 'GGDiscord' (placeholder Discord sem HH), apaga também
+    a mão da BD — não faz sentido manter placeholder sem o entry de origem.
+    Para outras mãos, apenas remove a referência (entry_id=NULL) e arquiva.
+    """
     from app.db import get_conn, execute
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Limpar referência em hands que apontam para este entry
-            cur.execute("UPDATE hands SET entry_id = NULL, study_state = 'mtt_archive' WHERE entry_id = %s", (entry_id,))
+            # Apagar mãos GGDiscord ligadas a este entry (são placeholder, sem HH)
+            cur.execute(
+                "DELETE FROM hands WHERE entry_id = %s AND 'GGDiscord' = ANY(hm3_tags)",
+                (entry_id,)
+            )
+            # Limpar referência em outras mãos que apontam para este entry
+            cur.execute(
+                "UPDATE hands SET entry_id = NULL, study_state = 'mtt_archive' WHERE entry_id = %s",
+                (entry_id,)
+            )
             # Apagar o entry
             cur.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
             deleted = cur.rowcount
