@@ -1272,6 +1272,14 @@ def admin_refix_anonmap_execute(
                         "UPDATE hands SET all_players_actions = %s::jsonb, player_names = %s::jsonb WHERE id = %s",
                         (json.dumps(new_apa), json.dumps(new_pn), hand_db_id)
                     )
+                    
+                    # Passo 4: recriar villains
+                    from app.routers.mtt import _create_villains_for_hand
+                    if parsed_list and parsed_list[0].get("vpip_seats"):
+                        # Limpar villains antigos para este hand_db_id (idempotência)
+                        cur.execute("DELETE FROM hand_villains WHERE hand_db_id = %s", (hand_db_id,))
+                        _create_villains_for_hand(conn, parsed_list[0], vision_data, hand_db_id=hand_db_id)
+                        
                     updated += 1
                 except Exception as e:
                     logger.error(f"[refix-execute] Hand {r['id']}: {e}")

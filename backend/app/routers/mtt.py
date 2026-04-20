@@ -619,7 +619,8 @@ def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
     return seat_to_name
 
 
-def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: dict):
+def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt_hand_id: int = None, hand_db_id: int = None):
+    assert (mtt_hand_id is None) ^ (hand_db_id is None), "must pass exactly one of mtt_hand_id or hand_db_id"
     """
     Cria registos hand_villains para jogadores com VPIP.
     Nomes vêm do screenshot via match por stack (algoritmo v2).
@@ -657,9 +658,9 @@ def _create_villains_for_hand(conn, mtt_hand_id: int, hh_hand: dict, screenshot_
 
             cur.execute(
                 """INSERT INTO hand_villains
-                   (mtt_hand_id, player_name, position, stack, bounty_pct, country, vpip_action)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (mtt_hand_id, player_name, position, stack, bounty_pct, country, vpip_action)
+                   (mtt_hand_id, hand_db_id, player_name, position, stack, bounty_pct, country, vpip_action)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (mtt_hand_id, hand_db_id, player_name, position, stack, bounty_pct, country, vpip_action)
             )
             created += 1
 
@@ -1019,7 +1020,10 @@ async def import_mtt(
                 # Criar villains se houver screenshot
                 if has_screenshot and h.get("vpip_seats"):
                     # Use mtt_hand_id for legacy FK, hands_id for new FK
-                    n = _create_villains_for_hand(conn, mtt_hand_id or hands_id, h, screenshot)
+                    if mtt_hand_id:
+                        n = _create_villains_for_hand(conn, h, screenshot, mtt_hand_id=mtt_hand_id)
+                    else:
+                        n = _create_villains_for_hand(conn, h, screenshot, hand_db_id=hands_id)
                     villains_created += n
                     if n > 0:
                         matched += 1
@@ -1384,7 +1388,7 @@ async def rematch_screenshots(
                 parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
                 if parsed:
                     if parsed.get("vpip_seats"):
-                        n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                        n = _create_villains_for_hand(conn, parsed, screenshot_data, mtt_hand_id=mtt_hand["id"])
                         villains_created += n
                     
                     seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
@@ -1660,7 +1664,7 @@ async def re_enrich_all(
                     # Limpar villains antigos deste mtt_hand
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM hand_villains WHERE mtt_hand_id = %s", (mtt_hand["id"],))
-                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                    n = _create_villains_for_hand(conn, parsed, screenshot_data, mtt_hand_id=mtt_hand["id"])
                     villains_created += n
                 
                 # Marcar como tendo screenshot
@@ -1755,7 +1759,7 @@ async def reset_and_rematch(
             parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
             if parsed:
                 if parsed.get("vpip_seats"):
-                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                    n = _create_villains_for_hand(conn, parsed, screenshot_data, mtt_hand_id=mtt_hand["id"])
                     villains_created += n
 
                 seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
