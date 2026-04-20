@@ -1448,7 +1448,65 @@ async def rematch_screenshots(
                 continue
             
             no_hh += 1
-        
+
+        # ── SEGUNDA FASE: mãos GGDiscord (placeholder Discord sem HH) ──
+        # Estas têm entry_id preenchido mas a entry é 'replayer_link', não 'screenshot'.
+        # O loop anterior ignora-as (filtro entry_type='screenshot'). Precisamos de as
+        # tratar explicitamente: tentar match em mtt_hands pelo TM, se houver HH importada
+        # entretanto, promover (DELETE placeholder + INSERT com GG Hands).
+        ggdiscord_hands = query("""
+            SELECT h.id AS hand_db_id, h.hand_id, h.entry_id,
+                   e.raw_json AS entry_raw_json
+            FROM hands h
+            JOIN entries e ON e.id = h.entry_id
+            WHERE 'GGDiscord' = ANY(h.hm3_tags)
+        """)
+
+        for gd in ggdiscord_hands:
+            entry_raw = gd.get("entry_raw_json") or {}
+            tm = entry_raw.get("tm")
+            if not tm:
+                continue
+            tm_digits = _extract_tm_digits(tm)
+            if not tm_digits:
+                continue
+
+            # Procurar HH em mtt_hands pelo TM
+            mtt_rows = query(
+                """SELECT id, tm_number, raw FROM mtt_hands
+                   WHERE regexp_replace(tm_number, '[^0-9]', '', 'g') = %s
+                   LIMIT 1""",
+                (tm_digits,)
+            )
+            if not mtt_rows:
+                no_hh += 1
+                continue
+
+            mtt_hand = mtt_rows[0]
+            # Se a HH já tem has_screenshot, significa que já foi processada — tentar
+            # promover à mesma (a mão GGDiscord actual é placeholder antigo).
+            screenshot_data = _extract_screenshot_data(entry_raw, gd["entry_id"])
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
+                    (gd["entry_id"], mtt_hand["id"])
+                )
+
+            parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
+            if parsed:
+                if parsed.get("vpip_seats"):
+                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
+                    villains_created += n
+
+                seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
+                # _promote_to_study faz DELETE FROM hands WHERE hand_id=GG-<tm> e INSERT novo
+                # → apaga placeholder GGDiscord e insere com hm3_tags=['GG Hands']
+                _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
+                promoted += 1
+                matched += 1
+                logger.info(f"GGDiscord promote: hand {gd['hand_id']} → matched via mtt_hands, HH importada entretanto")
+
         conn.commit()
     except Exception as e:
         conn.rollback()
