@@ -862,13 +862,26 @@ async def import_mtt(
 
                 # Verificar duplicado na tabela hands
                 cur.execute(
-                    "SELECT id FROM hands WHERE hand_id = %s",
+                    "SELECT id, raw, hm3_tags FROM hands WHERE hand_id = %s",
                     (hand_id,)
                 )
                 existing = cur.fetchone()
                 if existing:
-                    skipped += 1
-                    continue
+                    # Caso especial: se for placeholder GGDiscord (raw vazio, tag GGDiscord),
+                    # apaga e permite a HH real a entrar. Sem isto, HHs importadas após
+                    # criação de placeholder Discord ficavam para sempre como GGDiscord.
+                    existing_raw = existing.get("raw") or ""
+                    existing_tags = existing.get("hm3_tags") or []
+                    is_placeholder = (
+                        not existing_raw
+                        and "GGDiscord" in existing_tags
+                    )
+                    if is_placeholder:
+                        cur.execute("DELETE FROM hands WHERE id = %s", (existing["id"],))
+                        # Continua para o INSERT normal em baixo
+                    else:
+                        skipped += 1
+                        continue
                 
                 # Procurar screenshot match (TM + hora + blinds)
                 screenshot = _match_screenshot(h["tm_number"], h.get("played_at"), h.get("blinds"))
@@ -937,18 +950,6 @@ async def import_mtt(
                         "tournament_format": _detect_tournament_format(tournament_name),
                         "buyin": buyin,
                     })
-
-                # Apagar placeholder GGDiscord se existir para este hand_id. O placeholder
-                # foi criado previamente quando o SS Discord foi processado sem HH.
-                # Sem este DELETE o INSERT abaixo cai em ON CONFLICT DO NOTHING e a HH
-                # real era ignorada, deixando a mão perpetuamente como placeholder.
-                cur.execute(
-                    """DELETE FROM hands
-                       WHERE hand_id = %s
-                         AND 'GGDiscord' = ANY(hm3_tags)
-                         AND (raw IS NULL OR raw = '')""",
-                    (hand_id,)
-                )
 
                 # Inserir na tabela hands (fonte primária)
                 cur.execute(
@@ -2263,3 +2264,15 @@ def debug_ggdiscord_match(current_user=Depends(require_auth)):
         result["details"].append(row)
 
     return result
+
+
+@router.get("/debug-version")
+def debug_version(current_user=Depends(require_auth)):
+    """Devolve se o fix do hand_service está activo."""
+    import inspect
+    from app.services.hand_service import _insert_hand
+    source = inspect.getsource(_insert_hand)
+    return {
+        "hand_service_has_ggdiscord_fix": "GGDiscord" in source,
+        "hand_service_line_count": len(source.split("\n")),
+    }
