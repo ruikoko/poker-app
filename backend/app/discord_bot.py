@@ -183,9 +183,10 @@ def _save_to_db(
                 _apply_channel_tags(entry_id, tags)
         except Exception as e:
             logger.error(f"Erro ao parsear HH: {e}")
-    else:
-        # Para links e imagens, criar uma mão placeholder com os dados que temos
-        _create_placeholder_hand(entry_id, content_type, content, tags, site, channel_name, message_created_at)
+    # Para links e imagens: NÃO criar mão placeholder aqui.
+    # O processamento (extract og:image + Vision + match + GGDiscord placeholder)
+    # corre via POST /api/discord/process-replayer-links accionado pelo botão
+    # "Sincronizar Agora" da página /discord. Caminho único e consistente.
 
     return entry_id
 
@@ -224,7 +225,15 @@ def _create_placeholder_hand(
     channel_name: str,
     played_at: datetime | None,
 ):
-    """Cria uma mão placeholder para links/imagens que ainda não foram parseados."""
+    """
+    DEPRECATED. Mantido apenas por retro-compat.
+
+    Esta função criava mãos com hand_id sintético tipo "discord_gg_replayer_<hash>"
+    e SEM hm3_tags, levando a 21 mãos órfãs em estado limbo. Foi substituída pelo
+    fluxo único: _save_to_db cria entry → POST /api/discord/process-replayer-links
+    extrai og:image → Vision → cria mão GG-<tm> com hm3_tags=['GG Hands'] ou
+    placeholder GGDiscord. Não chamar.
+    """
     from app.db import execute_returning
 
     # Gerar um hand_id único baseado no tipo e conteúdo

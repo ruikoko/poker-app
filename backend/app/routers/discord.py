@@ -698,3 +698,130 @@ def backfill_ggdiscord(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+# ─── Migração: limpar mãos órfãs do caminho antigo ──────────────────────────
+
+@router.get("/cleanup-old-discord-hands/preview")
+def cleanup_old_discord_hands_preview(current_user=Depends(require_auth)):
+    """
+    DRY-RUN. Lista mãos com hand_id no formato antigo `discord_<type>_<hash>`
+    e sem hm3_tags. Eram criadas pelo caminho antigo `_create_placeholder_hand`
+    em discord_bot.py, agora desactivado. Estas mãos nunca tiveram Vision corrido.
+    """
+    rows = query("""
+        SELECT h.id, h.hand_id, h.entry_id, h.tags, h.notes, h.screenshot_url,
+               h.played_at, h.created_at,
+               e.id IS NOT NULL AS entry_exists,
+               e.raw_text AS entry_url,
+               (e.raw_json->>'vision_done')::boolean AS vision_done
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        WHERE h.hand_id LIKE 'discord_%'
+          AND (h.hm3_tags IS NULL OR array_length(h.hm3_tags, 1) IS NULL)
+        ORDER BY h.id DESC
+    """)
+
+    sample = []
+    can_reprocess = 0
+    no_entry = 0
+    for r in rows:
+        if r["entry_exists"]:
+            can_reprocess += 1
+        else:
+            no_entry += 1
+        if len(sample) < 5:
+            sample.append({
+                "hand_id": r["hand_id"],
+                "entry_id": r["entry_id"],
+                "entry_exists": r["entry_exists"],
+                "vision_done": r["vision_done"],
+                "url": r["entry_url"],
+                "tags": r["tags"],
+            })
+
+    return {
+        "ok": True,
+        "total_old_hands": len(rows),
+        "can_reprocess_via_entry": can_reprocess,
+        "orphan_no_entry": no_entry,
+        "sample": sample,
+        "note": "POST /cleanup-old-discord-hands?confirm=true apaga estas mãos. Depois usar /process-replayer-links para reprocessar via Vision.",
+    }
+
+
+@router.post("/cleanup-old-discord-hands")
+def cleanup_old_discord_hands(
+    confirm: bool = False,
+    current_user=Depends(require_auth),
+):
+    """
+    Apaga mãos com hand_id antigo `discord_<type>_<hash>` sem hm3_tags.
+
+    Requer ?confirm=true. Antes de correr este endpoint, tomar nota dos entry_ids
+    associados (via /preview). Os entries permanecem intactos — depois usar
+    POST /api/discord/process-replayer-links?confirm=true para reprocessar via
+    Vision e produzir mãos GG-<tm> com hm3_tags correctos.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Adicionar ?confirm=true. Corre /cleanup-old-discord-hands/preview primeiro."
+        )
+
+    from app.db import get_conn
+
+    rows = query("""
+        SELECT id, hand_id, entry_id
+        FROM hands
+        WHERE hand_id LIKE 'discord_%'
+          AND (hm3_tags IS NULL OR array_length(hm3_tags, 1) IS NULL)
+    """)
+
+    deleted = 0
+    deleted_ids = []
+    entry_ids_to_reprocess = []
+    failed = []
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for r in rows:
+                try:
+                    cur.execute("DELETE FROM hands WHERE id = %s", (r["id"],))
+                    deleted += 1
+                    deleted_ids.append(r["hand_id"])
+                    if r["entry_id"]:
+                        entry_ids_to_reprocess.append(r["entry_id"])
+                except Exception as e:
+                    failed.append({"hand_id": r["hand_id"], "error": str(e)})
+
+            # Reset img_b64 nos entries para que process-replayer-links os apanhe
+            # (filtro do endpoint é img_b64 IS NULL).
+            if entry_ids_to_reprocess:
+                cur.execute(
+                    """UPDATE entries
+                       SET raw_json = raw_json - 'img_b64' - 'img_url'
+                                                 - 'gg_replayer_resolved' - 'mime_type'
+                                                 - 'vision_done' - 'players_list'
+                                                 - 'players_by_position' - 'hero'
+                                                 - 'board' - 'vision_sb' - 'vision_bb'
+                                                 - 'raw_vision' - 'tm' - 'file_meta'
+                       WHERE id = ANY(%s)""",
+                    (entry_ids_to_reprocess,)
+                )
+
+        conn.commit()
+        return {
+            "ok": True,
+            "deleted_hands": deleted,
+            "entries_reset_for_reprocessing": len(entry_ids_to_reprocess),
+            "failed_count": len(failed),
+            "failed": failed[:10],
+            "next_step": "POST /api/discord/process-replayer-links?confirm=true&limit=100",
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
