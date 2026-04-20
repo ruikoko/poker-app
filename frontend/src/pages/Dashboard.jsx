@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { hands, study, screenshots, villains } from '../api/client'
+import { hands, study, screenshots, villains, mtt } from '../api/client'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -426,7 +426,9 @@ function OrphanList({ onRematchComplete }) {
 
   function loadOrphans() {
     setLoading(true)
-    screenshots.orphans().then(data => {
+    // mtt.orphans devolve a lista combinada (orphan SS + GGDiscord) do backend.
+    // screenshots.orphans filtra por entry_type='screenshot' e exclui GGDiscord.
+    mtt.orphans().then(data => {
       setOrphans(Array.isArray(data) ? data : data?.data || [])
     }).catch(() => {}).finally(() => setLoading(false))
   }
