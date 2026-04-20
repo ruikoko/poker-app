@@ -938,6 +938,18 @@ async def import_mtt(
                         "buyin": buyin,
                     })
 
+                # Apagar placeholder GGDiscord se existir para este hand_id. O placeholder
+                # foi criado previamente quando o SS Discord foi processado sem HH.
+                # Sem este DELETE o INSERT abaixo cai em ON CONFLICT DO NOTHING e a HH
+                # real era ignorada, deixando a mão perpetuamente como placeholder.
+                cur.execute(
+                    """DELETE FROM hands
+                       WHERE hand_id = %s
+                         AND 'GGDiscord' = ANY(hm3_tags)
+                         AND (raw IS NULL OR raw = '')""",
+                    (hand_id,)
+                )
+
                 # Inserir na tabela hands (fonte primária)
                 cur.execute(
                     """INSERT INTO hands
@@ -1450,17 +1462,22 @@ async def rematch_screenshots(
             
             no_hh += 1
 
-        # ── SEGUNDA FASE: mãos GGDiscord (placeholder Discord sem HH) ──
-        # Estas têm entry_id preenchido mas a entry é 'replayer_link', não 'screenshot'.
-        # O loop anterior ignora-as (filtro entry_type='screenshot'). Precisamos de as
-        # tratar explicitamente: tentar match em mtt_hands pelo TM, se houver HH importada
-        # entretanto, promover (DELETE placeholder + INSERT com GG Hands).
+        # ── SEGUNDA FASE: reconciliar mãos GGDiscord órfãs ──
+        # Verifica, para cada placeholder GGDiscord, se existe agora uma HH real
+        # em `hands` com raw preenchido (mesmo torneio/TM) e substitui a placeholder.
+        #
+        # Caminho normal (post fix do /mtt/import):
+        #   Import novo apaga placeholder antes de INSERT. Esta fase não encontra nada.
+        # Caminho de recuperação:
+        #   Se houver placeholders órfãos (criados depois de HH já importada, ou com
+        #   hand_id divergente), esta fase reconcilia.
         ggdiscord_hands = query("""
             SELECT h.id AS hand_db_id, h.hand_id, h.entry_id,
                    e.raw_json AS entry_raw_json
             FROM hands h
-            JOIN entries e ON e.id = h.entry_id
+            LEFT JOIN entries e ON e.id = h.entry_id
             WHERE 'GGDiscord' = ANY(h.hm3_tags)
+              AND (h.raw IS NULL OR h.raw = '')
         """)
 
         for gd in ggdiscord_hands:
@@ -1472,41 +1489,40 @@ async def rematch_screenshots(
             if not tm_digits:
                 continue
 
-            # Procurar HH em mtt_hands pelo TM
-            mtt_rows = query(
-                """SELECT id, tm_number, raw FROM mtt_hands
-                   WHERE regexp_replace(tm_number, '[^0-9]', '', 'g') = %s
+            # Procurar HH real em `hands` (HH do bulk upload vai directamente para hands)
+            # O hand_id tem o formato GG-<tm_digits> tanto para placeholder como para HH real.
+            # Logo aqui, se encontrarmos linha diferente do placeholder com raw preenchido,
+            # é a HH real desse torneio a viver com hand_id diferente — caso edge.
+            # Mais provável: não há HH → continuar como GGDiscord (utilizador precisa importar HH).
+            real_hand = query(
+                """SELECT id, hand_id, raw FROM hands
+                   WHERE id != %s
+                     AND regexp_replace(hand_id, '[^0-9]', '', 'g') = %s
+                     AND raw IS NOT NULL
+                     AND raw != ''
                    LIMIT 1""",
-                (tm_digits,)
+                (gd["hand_db_id"], tm_digits)
             )
-            if not mtt_rows:
+            if not real_hand:
                 no_hh += 1
                 continue
 
-            mtt_hand = mtt_rows[0]
-            # Se a HH já tem has_screenshot, significa que já foi processada — tentar
-            # promover à mesma (a mão GGDiscord actual é placeholder antigo).
-            screenshot_data = _extract_screenshot_data(entry_raw, gd["entry_id"])
-
+            # Há uma HH real. Apaga placeholder (que é gd) e a HH real mantém-se.
+            # Se o entry_id da placeholder não é None, reaponta para a HH real se esta não tiver entry_id.
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE mtt_hands SET has_screenshot = true, screenshot_entry_id = %s WHERE id = %s",
-                    (gd["entry_id"], mtt_hand["id"])
-                )
-
-            parsed = _parse_mtt_hand(mtt_hand["raw"]) if mtt_hand.get("raw") else None
-            if parsed:
-                if parsed.get("vpip_seats"):
-                    n = _create_villains_for_hand(conn, mtt_hand["id"], parsed, screenshot_data)
-                    villains_created += n
-
-                seat_to_name = _build_seat_to_name_map(parsed, screenshot_data)
-                # _promote_to_study faz DELETE FROM hands WHERE hand_id=GG-<tm> e INSERT novo
-                # → apaga placeholder GGDiscord e insere com hm3_tags=['GG Hands']
-                _promote_to_study(conn, mtt_hand["id"], parsed, screenshot_data, seat_to_name)
+                # Transferir entry_id se a real não tem
+                if gd["entry_id"]:
+                    cur.execute(
+                        """UPDATE hands
+                           SET entry_id = COALESCE(entry_id, %s)
+                           WHERE id = %s""",
+                        (gd["entry_id"], real_hand[0]["id"])
+                    )
+                # Apagar placeholder
+                cur.execute("DELETE FROM hands WHERE id = %s", (gd["hand_db_id"],))
                 promoted += 1
                 matched += 1
-                logger.info(f"GGDiscord promote: hand {gd['hand_id']} → matched via mtt_hands, HH importada entretanto")
+                logger.info(f"GGDiscord reconciliado: placeholder {gd['hand_id']} apagado, HH real preservada ({real_hand[0]['hand_id']})")
 
         conn.commit()
     except Exception as e:
@@ -2207,7 +2223,7 @@ def debug_ggdiscord_match(current_user=Depends(require_auth)):
 
         if mtt_matches:
             result["hands_with_match_in_mtt_hands"] += 1
-            row["status"] = "match_found"
+            row["status"] = "match_found_in_mtt_hands"
             row["mtt_matches"] = [
                 {"id": m["id"], "tm_number": m["tm_number"],
                  "has_screenshot": m["has_screenshot"],
@@ -2215,17 +2231,34 @@ def debug_ggdiscord_match(current_user=Depends(require_auth)):
                 for m in mtt_matches
             ]
         else:
-            result["hands_without_match_in_mtt_hands"] += 1
-            row["status"] = "no_match"
-            # Tentar também com LIKE em caso de prefixo diferente
-            like_matches = query(
-                """SELECT tm_number FROM mtt_hands
-                   WHERE tm_number LIKE %s OR tm_number LIKE %s
-                   LIMIT 3""",
-                (f"%{tm_digits}%", f"{tm_digits}%")
+            # Procurar em hands (onde bulk upload insere agora)
+            # Por TM (usando notes/raw) — hand_id da HH bulk pode ser diferente da GGDiscord
+            hands_matches = query(
+                """SELECT id, hand_id, hm3_tags, site,
+                          length(raw) AS raw_length,
+                          played_at
+                   FROM hands
+                   WHERE (hand_id != %s)
+                     AND (
+                       regexp_replace(hand_id, '[^0-9]', '', 'g') = %s
+                       OR raw LIKE %s
+                     )
+                   LIMIT 5""",
+                (gd["hand_id"], tm_digits, f"%{tm_digits}%")
             )
-            if like_matches:
-                row["like_matches"] = [m["tm_number"] for m in like_matches]
+
+            if hands_matches:
+                row["status"] = "match_in_hands_table"
+                row["hands_matches"] = [
+                    {"id": h["id"], "hand_id": h["hand_id"],
+                     "hm3_tags": h["hm3_tags"], "raw_length": h["raw_length"],
+                     "played_at": str(h["played_at"]) if h["played_at"] else None}
+                    for h in hands_matches
+                ]
+                result["hands_without_match_in_mtt_hands"] += 1
+            else:
+                result["hands_without_match_in_mtt_hands"] += 1
+                row["status"] = "no_match_anywhere"
 
         result["details"].append(row)
 
