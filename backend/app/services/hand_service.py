@@ -29,9 +29,18 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
     """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
     with conn.cursor() as cur:
         if h["hand_id"]:
-            cur.execute("SELECT id FROM hands WHERE hand_id = %s", (h["hand_id"],))
-            if cur.fetchone():
-                return False
+            cur.execute("SELECT id, raw, hm3_tags FROM hands WHERE hand_id = %s", (h["hand_id"],))
+            existing = cur.fetchone()
+            if existing:
+                # Se for placeholder GGDiscord (raw vazio + tag GGDiscord), apaga-o para dar lugar à HH real
+                is_placeholder = (
+                    (not existing["raw"] or existing["raw"].strip() == "") and
+                    existing["hm3_tags"] and "GGDiscord" in existing["hm3_tags"]
+                )
+                if is_placeholder:
+                    cur.execute("DELETE FROM hands WHERE id = %s", (existing["id"],))
+                else:
+                    return False
 
         all_actions = h.get("all_players_actions")
         all_actions_json = json.dumps(all_actions) if all_actions else None
