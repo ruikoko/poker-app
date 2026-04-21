@@ -199,6 +199,15 @@ def _parse_hand(hh_text, site_name):
     button_seat = int(table_m.group(1)) if table_m else None
 
     # ── Seats + Bounties ──
+    # Restringir o scan ao header (antes da acção preflop) para evitar que
+    # linhas do SUMMARY do tipo "Seat N: nick (big blind) showed [...] and won (54000)"
+    # sejam interpretadas como seats e corrompam os nomes. Em torneios PS/WPN o
+    # valor no summary vem em parênteses só com dígitos, e a regex engole tudo
+    # até esse parêntese. Winamax usa *** PRE-FLOP *** como marker.
+    preflop_marker = "*** PRE-FLOP ***" if site_name == "Winamax" else "*** HOLE CARDS ***"
+    _header_end = hh_text.find(preflop_marker)
+    seat_scan_text = hh_text[:_header_end] if _header_end != -1 else hh_text
+
     seats = {}
     all_seat_nums = []
     hero_seat = None
@@ -206,7 +215,7 @@ def _parse_hand(hh_text, site_name):
 
     if site_name == "Winamax":
         # Winamax: Seat 1: thinvalium (12379, 20€ bounty)  or  Seat 1: name (12379)
-        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d.]+)(?:,\s*([^)]+))?\)", hh_text):
+        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d.]+)(?:,\s*([^)]+))?\)", seat_scan_text):
             seat_num = int(sm.group(1))
             name = sm.group(2).strip()
             stack = float(sm.group(3).replace(",", ""))
@@ -227,7 +236,7 @@ def _parse_hand(hh_text, site_name):
                 hero_name = name
     else:
         # PokerStars/WPN: Seat 1: name (24500 in chips, $25 bounty) OR Seat 1: name (24500)
-        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)(?:\s+in chips)?(?:,\s*([^)]+))?\)", hh_text):
+        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)(?:\s+in chips)?(?:,\s*([^)]+))?\)", seat_scan_text):
             seat_num = int(sm.group(1))
             name = sm.group(2).strip()
             stack = float(sm.group(3).replace(",", ""))
@@ -651,9 +660,18 @@ async def import_hm3(
                         elif player_name != "_meta":
                             all_players[player_name] = {"cards": cards}
 
+                    # Detect showdown: any non-hero player with cards shown
+                    has_showdown = any(
+                        isinstance(pdata, dict)
+                        and not pdata.get("is_hero")
+                        and pdata.get("cards")
+                        for name, pdata in all_players.items()
+                        if name != "_meta"
+                    )
+
                     cur.execute(
-                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s WHERE id = %s",
-                        (merged_tags, merged_hm3, json.dumps(all_players), existing["id"])
+                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s WHERE id = %s",
+                        (merged_tags, merged_hm3, json.dumps(all_players), has_showdown, existing["id"])
                     )
 
                     # Extract villains for nota++ hands (existing too)
@@ -698,19 +716,29 @@ async def import_hm3(
                     elif player_name != "_meta":
                         all_players[player_name] = {"cards": cards}
 
+                # Detect showdown: any non-hero player with cards shown
+                has_showdown = any(
+                    isinstance(pdata, dict)
+                    and not pdata.get("is_hero")
+                    and pdata.get("cards")
+                    for name, pdata in all_players.items()
+                    if name != "_meta"
+                )
+
                 cur.execute(
                     """INSERT INTO hands
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
-                        notes, tags, hm3_tags, raw, study_state, all_players_actions)
+                        notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s, %s, 'new', %s)
+                        %s, %s, %s, %s, 'new', %s, %s)
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
-                        all_players_actions = EXCLUDED.all_players_actions
+                        all_players_actions = EXCLUDED.all_players_actions,
+                        has_showdown = EXCLUDED.has_showdown
                     RETURNING id""",
                     (
                         parsed["site"],
@@ -727,6 +755,7 @@ async def import_hm3(
                         hm3_tags_clean,
                         parsed["raw"],
                         json.dumps(all_players),
+                        has_showdown,
                     )
                 )
                 hand_db_id = cur.fetchone()["id"]

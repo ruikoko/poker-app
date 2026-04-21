@@ -1,3 +1,8 @@
 __pycache__/
 frontend/node_modules/
 frontend/.vite/
+
+# Scripts ad-hoc de investigação (correm via `railway run`, não fazem parte do produto)
+query.py
+query_*.py
+*_output.txt
