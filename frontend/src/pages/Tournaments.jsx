@@ -491,7 +491,7 @@ export default function TournamentsPage() {
   const [stats, setStats] = useState(null)
   const [notaStats, setNotaStats] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState({ has_screenshot: 'true' })
+  const [filter, setFilter] = useState({ ss_filter: 'with' })
   const [expandedHands, setExpandedHands] = useState(new Set())
 
   const loadHands = useCallback(async () => {
@@ -499,7 +499,7 @@ export default function TournamentsPage() {
     try {
       if (tab === 'gg') {
         const params = { page: 1, page_size: 200 }
-        if (filter.has_screenshot) params.has_screenshot = filter.has_screenshot
+        if (filter.ss_filter) params.ss_filter = filter.ss_filter
         if (filter.tm_search) params.tm_search = filter.tm_search
         const data = await mtt.hands(params)
         setHands(data.hands || [])
@@ -591,8 +591,8 @@ export default function TournamentsPage() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <button style={tabStyle(tab === 'gg')} onClick={() => { setTab('gg'); setFilter({ has_screenshot: 'true' }) }}>
-          GG com Screenshot
+        <button style={tabStyle(tab === 'gg')} onClick={() => { setTab('gg'); setFilter({ ss_filter: 'with' }) }}>
+          GG
           {stats && <span style={{ fontSize: 11, color: '#22c55e', marginLeft: 8 }}>{stats.hands_with_screenshot || 0}</span>}
         </button>
         <button style={tabStyle(tab === 'hm3')} onClick={() => { setTab('hm3'); setFilter({}) }}>
@@ -622,33 +622,47 @@ export default function TournamentsPage() {
         </div>
       )}
 
+      {/* Sub-navegação GG: Com SS / Sem SS */}
+      {tab === 'gg' && (
+        <div style={{
+          display: 'inline-flex', gap: 4, marginBottom: 12, padding: 3,
+          background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8,
+        }}>
+          {[
+            { value: 'with',    label: 'Com SS', color: '#22c55e' },
+            { value: 'without', label: 'Sem SS', color: '#94a3b8' },
+          ].map(({ value, label, color }) => {
+            const active = filter.ss_filter === value
+            return (
+              <button
+                key={value}
+                onClick={() => setFilter(f => ({ ...f, ss_filter: value }))}
+                style={{
+                  padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                  border: 'none', cursor: 'pointer',
+                  background: active ? color : 'transparent',
+                  color: active ? '#0a0c14' : color,
+                  transition: 'all 0.15s',
+                }}
+              >{label}</button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {tab === 'gg' && (
-          <>
-            <select
-              value={filter.has_screenshot ?? ''}
-              onChange={(e) => setFilter(f => ({ ...f, has_screenshot: e.target.value || null }))}
-              style={{
-                background: '#1e2130', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 4, padding: '4px 8px', fontSize: 12,
-              }}
-            >
-              <option value="">Todas as mãos</option>
-              <option value="true">Com screenshot</option>
-              <option value="false">Sem screenshot</option>
-            </select>
-            <input
-              type="text"
-              placeholder="Pesquisar TM..."
-              value={filter.tm_search || ''}
-              onChange={(e) => setFilter(f => ({ ...f, tm_search: e.target.value }))}
-              style={{
-                background: '#1e2130', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 4, padding: '4px 8px', fontSize: 12, width: 160,
-              }}
-            />
-          </>
+          <input
+            type="text"
+            placeholder="Pesquisar TM..."
+            value={filter.tm_search || ''}
+            onChange={(e) => setFilter(f => ({ ...f, tm_search: e.target.value }))}
+            style={{
+              background: '#1e2130', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4, padding: '4px 8px', fontSize: 12, width: 160,
+            }}
+          />
         )}
       </div>
 
@@ -656,7 +670,11 @@ export default function TournamentsPage() {
         <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
       ) : sortedDates.length === 0 ? (
         <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
-          {tab === 'gg' ? 'Nenhuma mão GG encontrada.' : 'Nenhuma mão HM3 com tag nota encontrada.'}
+          {tab === 'gg'
+            ? (filter.ss_filter === 'without'
+                ? 'Nenhuma mão GG sem SS encontrada.'
+                : 'Nenhuma mão GG com SS encontrada.')
+            : 'Nenhuma mão HM3 com tag nota encontrada.'}
         </div>
       ) : (
         <div>

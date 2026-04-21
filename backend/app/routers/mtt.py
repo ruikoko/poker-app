@@ -1076,6 +1076,7 @@ async def import_mtt(
 
 @router.get("/hands")
 def list_mtt_hands(
+    ss_filter: str | None = Query(None, description="'with' | 'without' | 'both' — tem precedência sobre has_screenshot"),
     has_screenshot: bool | None = None,
     tm_search: str | None = None,
     page: int = Query(1, ge=1),
@@ -1085,8 +1086,22 @@ def list_mtt_hands(
     """Lista mãos GGPoker MTT da tabela hands (pós-migração)."""
     conditions = ["h.site = 'GGPoker'", "h.hand_id LIKE 'GG-%%'"]
     params = []
-    
-    if has_screenshot is not None:
+
+    if ss_filter is not None:
+        if ss_filter == 'with':
+            # "Com SS": match SS↔HH válido (match_method preenchido) OU screenshot directo
+            conditions.append(
+                "(h.screenshot_url IS NOT NULL "
+                "OR h.player_names ->> 'match_method' IS NOT NULL)"
+            )
+        elif ss_filter == 'without':
+            # Sem SS E sem match válido (player_names sem match_method também conta)
+            conditions.append(
+                "h.screenshot_url IS NULL "
+                "AND (h.player_names IS NULL OR h.player_names->>'match_method' IS NULL)"
+            )
+        # 'both' → sem filtro
+    elif has_screenshot is not None:
         if has_screenshot:
             conditions.append("(h.screenshot_url IS NOT NULL OR h.player_names IS NOT NULL)")
         else:
