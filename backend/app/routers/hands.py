@@ -228,6 +228,7 @@ def _build_conditions(
     villain: str = None,
     date_to: str = None,
     hm3_tag: str = None,
+    has_showdown: Optional[bool] = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
@@ -292,6 +293,11 @@ def _build_conditions(
         conditions.append("h.all_players_actions ? %s")
         params.append(villain)
 
+    if has_showdown is True:
+        conditions.append("h.has_showdown = TRUE")
+    elif has_showdown is False:
+        conditions.append("(h.has_showdown = FALSE OR h.has_showdown IS NULL)")
+
     return conditions, params
 
 
@@ -311,6 +317,7 @@ def list_hands(
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT (mtt_archive)"),
     source:           Optional[str] = Query(None, description="Filtrar por source da entry (ex: discord)"),
     villain:          Optional[str] = Query(None, description="Filtrar por vilão (nick exacto em all_players_actions)"),
+    has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
     page:             int = Query(1, ge=1),
     page_size:        int = Query(50, ge=1, le=2000),
     current_user=Depends(require_auth)
@@ -318,7 +325,7 @@ def list_hands(
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only,
         result_min, result_max, source=source, villain=villain, date_to=date_to,
-        hm3_tag=hm3_tag,
+        hm3_tag=hm3_tag, has_showdown=has_showdown,
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':
@@ -371,6 +378,7 @@ def tag_groups(
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT"),
     use_hm3_tags:     bool = Query(False, description="Agrupar por hm3_tags em vez de tags"),
+    has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
@@ -378,7 +386,8 @@ def tag_groups(
     Se use_hm3_tags=true, usa coluna hm3_tags (tags reais HM3) e IGNORA mãos sem hm3_tags.
     """
     conditions, params = _build_conditions(
-        site, None, study_state, position, search, date_from, exclude_mtt_only
+        site, None, study_state, position, search, date_from, exclude_mtt_only,
+        has_showdown=has_showdown,
     )
     # Excluir arquivo MTT por defeito
     if not include_archive and study_state != 'mtt_archive':

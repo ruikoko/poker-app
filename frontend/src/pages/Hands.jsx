@@ -1519,11 +1519,21 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
 
 // ── Página Principal ─────────────────────────────────────────────────────────
 
+function applyFilterTransform(params) {
+  if (!params.date_from) delete params.date_from
+  const { sd_yes, sd_no } = params
+  delete params.sd_yes
+  delete params.sd_no
+  if (sd_yes && !sd_no) params.has_showdown = true
+  else if (!sd_yes && sd_no) params.has_showdown = false
+  return params
+}
+
 export default function HandsPage() {
   const [data, setData]           = useState({ data: [], total: 0, pages: 1 })
   const [tagGroupsData, setTagGroupsData] = useState({ groups: [], total: 0 })
   const [page, setPage]           = useState(1)
-  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '' })
+  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false })
   const [error, setError]         = useState('')
   const [loading, setLoading]     = useState(false)
   const [selected, setSelected]   = useState(null)
@@ -1536,8 +1546,7 @@ export default function HandsPage() {
     setError('')
     // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo).
     // use_hm3_tags=true: agrupa por hm3_tags (tags reais do HM3) e esconde mãos sem hm3_tags
-    const params = { ...filters, exclude_mtt_only: true, use_hm3_tags: true }
-    if (!params.date_from) delete params.date_from
+    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, use_hm3_tags: true })
     hands.tagGroups(params)
       .then(setTagGroupsData)
       .catch(e => setError(e.message))
@@ -1550,8 +1559,7 @@ export default function HandsPage() {
     setLoading(true)
     setError('')
     const ps = viewMode === 'tournament' ? 1000 : 200
-    const params = { ...filters, page, page_size: ps, exclude_mtt_only: true }
-    if (!params.date_from) delete params.date_from
+    const params = applyFilterTransform({ ...filters, page, page_size: ps, exclude_mtt_only: true })
     hands.list(params)
       .then(setData)
       .catch(e => setError(e.message))
@@ -1629,28 +1637,55 @@ export default function HandsPage() {
         </div>
       )}
 
-      {/* Filtros temporais rápidos */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Todas', value: '' },
-          { label: 'Hoje', value: (() => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10) })() },
-          { label: '3 dias', value: (() => { const d = new Date(); d.setDate(d.getDate()-3); return d.toISOString().slice(0,10) })() },
-          { label: 'Semana', value: (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10) })() },
-          { label: 'Mês', value: (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10) })() },
-        ].map(({ label, value }) => (
-          <button
-            key={label}
-            onClick={() => set('date_from', value)}
-            style={{
-              padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
-              border: '1px solid',
-              borderColor: filters.date_from === value ? '#6366f1' : '#2a2d3a',
-              background: filters.date_from === value ? 'rgba(99,102,241,0.15)' : 'transparent',
-              color: filters.date_from === value ? '#818cf8' : '#64748b',
-              cursor: 'pointer', transition: 'all 0.15s',
-            }}
-          >{label}</button>
-        ))}
+      {/* Filtros temporais + showdown toggles (grupos separados) */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Datas — pills indigo */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Todas', value: '' },
+            { label: 'Hoje', value: (() => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10) })() },
+            { label: '3 dias', value: (() => { const d = new Date(); d.setDate(d.getDate()-3); return d.toISOString().slice(0,10) })() },
+            { label: 'Semana', value: (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10) })() },
+            { label: 'Mês', value: (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10) })() },
+          ].map(({ label, value }) => (
+            <button
+              key={label}
+              onClick={() => set('date_from', value)}
+              style={{
+                padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                border: '1px solid',
+                borderColor: filters.date_from === value ? '#6366f1' : '#2a2d3a',
+                background: filters.date_from === value ? 'rgba(99,102,241,0.15)' : 'transparent',
+                color: filters.date_from === value ? '#818cf8' : '#64748b',
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}
+            >{label}</button>
+          ))}
+        </div>
+
+        {/* Showdown toggles — shape mais quadrada + cor emerald */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { key: 'sd_yes', label: 'Com showdown' },
+            { key: 'sd_no',  label: 'Sem showdown' },
+          ].map(({ key, label }) => {
+            const active = !!filters[key]
+            return (
+              <button
+                key={key}
+                onClick={() => { setFilters(f => ({ ...f, [key]: !f[key] })); setPage(1) }}
+                style={{
+                  padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                  border: '1px solid',
+                  borderColor: active ? '#10b981' : '#2a2d3a',
+                  background: active ? 'rgba(16,185,129,0.15)' : 'transparent',
+                  color: active ? '#34d399' : '#64748b',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >{label}</button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Filtros */}
@@ -1694,9 +1729,9 @@ export default function HandsPage() {
           }}
         />
 
-        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from || filters.villain) && (
+        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from || filters.villain || filters.sd_yes || filters.sd_no) && (
           <button
-            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '' }); setPage(1) }}
+            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false }); setPage(1) }}
             style={{
               padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
               background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer',
