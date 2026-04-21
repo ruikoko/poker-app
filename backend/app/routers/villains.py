@@ -55,6 +55,32 @@ VPIP_CONDITION = """
 """
 
 
+# ── Villain eligibility rule (A ∨ B ∨ C) ─────────────────────────────────────
+# Canonical rule for 'a hand counts for villains'. Assumes alias `h` for hands.
+#   (A) hm3_tags contém tag ILIKE 'nota%'
+#   (B) match_method populado AND has_showdown = TRUE
+#   (C) 'nota' in discord_tags AND match_method populado
+# Filtro de 2026 está incluído dentro da própria condição (CLAUDE.md §5).
+
+VILLAIN_ELIGIBILITY_CONDITION = """
+    h.played_at >= '2026-01-01'
+    AND (
+        EXISTS (
+            SELECT 1 FROM unnest(COALESCE(h.hm3_tags, ARRAY[]::text[])) t
+            WHERE t ILIKE 'nota%%'
+        )
+        OR (
+            h.player_names ->> 'match_method' IS NOT NULL
+            AND h.has_showdown = TRUE
+        )
+        OR (
+            'nota' = ANY(COALESCE(h.discord_tags, ARRAY[]::text[]))
+            AND h.player_names ->> 'match_method' IS NOT NULL
+        )
+    )
+"""
+
+
 class VillainCreate(BaseModel):
     site:       Optional[str] = None
     nick:       str
@@ -178,29 +204,31 @@ def villain_hands(
     current_user=Depends(require_auth)
 ):
     """
-    Encontra mãos onde o vilão aparece com VPIP.
-    Usa a mesma lógica VPIP do recalculate para consistência.
+    Devolve mãos do vilão presentes em hand_villains (2026+, cumprindo A∨B∨C).
+    v2: join canónico por hv.hand_db_id; rows legacy só-com-mtt_hand_id ignoradas.
     """
     offset = (page - 1) * page_size
 
-    vpip_sql = f"""
-        SELECT DISTINCT h.id, h.hand_id, h.played_at, h.stakes, h.position,
-               h.hero_cards, h.board, h.result, h.study_state,
-               h.all_players_actions, h.screenshot_url, h.player_names,
-               h.entry_id, h.raw, h.site
-        FROM hands h, jsonb_each(h.all_players_actions) AS kv(key, val)
-        WHERE h.all_players_actions IS NOT NULL
-          AND key = %s
-          AND {VPIP_CONDITION}
+    base_from_where = f"""
+        FROM hands h
+        JOIN hand_villains hv ON hv.hand_db_id = h.id
+        WHERE hv.player_name = %s
+          AND {VILLAIN_ELIGIBILITY_CONDITION}
     """
 
     rows = query(
-        f"{vpip_sql} ORDER BY h.played_at DESC NULLS LAST LIMIT %s OFFSET %s",
+        f"""SELECT DISTINCT h.id, h.hand_id, h.played_at, h.stakes, h.position,
+                   h.hero_cards, h.board, h.result, h.study_state,
+                   h.all_players_actions, h.screenshot_url, h.player_names,
+                   h.entry_id, h.raw, h.site
+            {base_from_where}
+            ORDER BY h.played_at DESC NULLS LAST
+            LIMIT %s OFFSET %s""",
         (nick, page_size, offset)
     )
 
     total_rows = query(
-        f"SELECT COUNT(DISTINCT h.id) AS total FROM hands h, jsonb_each(h.all_players_actions) AS kv(key, val) WHERE h.all_players_actions IS NOT NULL AND key = %s AND {VPIP_CONDITION}",
+        f"SELECT COUNT(DISTINCT h.id) AS total {base_from_where}",
         (nick,)
     )
     total = total_rows[0]["total"] if total_rows else 0
@@ -216,10 +244,10 @@ def villain_hands(
 def recalculate_hands_seen(current_user=Depends(require_auth)):
     """
     Recalcula hands_seen para todos os vilões.
+    v2: conta mãos em hand_villains cumprindo (A∨B∨C) com filtro 2026.
     1. Reset ALL to zero
-    2. Count VPIP hands from all_players_actions
-    3. Also count from hand_villains (MTT pipeline)
-    Uses same VPIP_CONDITION for consistency.
+    2. COUNT DISTINCT hands per nick via hand_villains JOIN hands + regra ABC
+    3. Delete friend nicks from villain_notes
     """
     from app.db import get_conn
     conn = get_conn()
@@ -228,27 +256,19 @@ def recalculate_hands_seen(current_user=Depends(require_auth)):
     friends_cleaned = 0
     try:
         with conn.cursor() as cur:
-            # Step 1: Reset ALL to zero
             cur.execute("UPDATE villain_notes SET hands_seen = 0")
             reset_count = cur.rowcount
 
-            # Step 2: Recalculate from actual data
             cur.execute(f"""
                 UPDATE villain_notes vn SET
                     hands_seen = COALESCE(sub.cnt, 0),
                     updated_at = NOW()
                 FROM (
-                    SELECT nick, COUNT(DISTINCT hand_ref) as cnt
-                    FROM (
-                        SELECT player_name AS nick, mtt_hand_id::text AS hand_ref
-                        FROM hand_villains
-                        UNION
-                        SELECT key AS nick, h.id::text AS hand_ref
-                        FROM hands h, jsonb_each(h.all_players_actions) AS kv(key, val)
-                        WHERE h.all_players_actions IS NOT NULL
-                          AND key != '_meta'
-                          AND {VPIP_CONDITION}
-                    ) combined
+                    SELECT hv.player_name AS nick,
+                           COUNT(DISTINCT h.id) AS cnt
+                    FROM hand_villains hv
+                    JOIN hands h ON h.id = hv.hand_db_id
+                    WHERE {VILLAIN_ELIGIBILITY_CONDITION}
                     GROUP BY nick
                 ) sub
                 WHERE vn.nick = sub.nick
