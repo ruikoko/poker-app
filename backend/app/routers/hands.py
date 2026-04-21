@@ -135,6 +135,32 @@ def ensure_buy_in_column():
         conn.close()
 
 
+def ensure_tournament_format_column():
+    """
+    Garante que hands.tournament_format (TEXT) existe.
+    Valores canónicos: 'PKO' | 'KO' | 'mystery' | 'vanilla'
+    Derivado do tournament_name/stakes via util partilhada; NULL quando
+    ainda não classificado. Validação fica na camada aplicacional.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS tournament_format TEXT
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hands_tournament_format
+                ON hands(tournament_format)
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_tournament_format_column: {e}")
+    finally:
+        conn.close()
+
+
 # ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
 # Obtida via scan directo à BD HM3 (handmarkcategories).
 # Cada entrada: (category_id, description).

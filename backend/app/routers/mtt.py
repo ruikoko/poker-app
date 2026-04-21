@@ -23,6 +23,7 @@ from app.auth import require_auth
 from app.db import get_conn, query, execute
 from app.hero_names import HERO_NAMES
 from app.parsers.gg_hands import _extract_buyin_numeric
+from app.utils.tournament_format import detect_tournament_format
 
 router = APIRouter(prefix="/api/mtt", tags=["mtt"])
 logger = logging.getLogger("mtt")
@@ -696,20 +697,6 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
     return created
 
 
-def _detect_tournament_format(tournament_name: str) -> str:
-    """Detect tournament format from name: PKO, KO, vanilla, mystery."""
-    if not tournament_name:
-        return "vanilla"
-    name_lower = tournament_name.lower()
-    if "mystery" in name_lower:
-        return "mystery"
-    if "bounty" in name_lower or "pko" in name_lower or "knockout" in name_lower:
-        return "PKO"
-    if " ko " in name_lower or name_lower.endswith(" ko"):
-        return "KO"
-    return "vanilla"
-
-
 def _extract_buyin(tournament_name: str) -> str | None:
     """Extract buy-in from tournament name."""
     if not tournament_name:
@@ -736,7 +723,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
     hand_id = f"GG-{tm_digits}"
 
     tournament_name = hh_hand.get("tournament_name") or hh_hand.get("blinds", "")
-    tournament_format = _detect_tournament_format(tournament_name)
+    tournament_format = detect_tournament_format(tournament_name)
     buyin = _extract_buyin(tournament_name)
     buyin_numeric = _extract_buyin_numeric(tournament_name)
 
@@ -790,12 +777,12 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                    (site, hand_id, played_at, stakes, position,
                     hero_cards, board, result, currency,
                     raw, study_state, all_players_actions, player_names,
-                    entry_id, tags, hm3_tags, buy_in)
+                    entry_id, tags, hm3_tags, buy_in, tournament_format)
                 VALUES
                    (%s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s, %s)""",
+                    %s, %s, %s, %s, %s)""",
                 (
                     "GGPoker",
                     hand_id,
@@ -814,6 +801,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                     auto_tags,
                     hm3_tags,
                     buyin_numeric,
+                    tournament_format,
                 )
             )
         conn2.commit()
@@ -944,11 +932,13 @@ async def import_mtt(
                     "num_players": h.get("num_players", 0),
                 }
 
+                # Classificar formato sempre (persistir em hands.tournament_format)
+                tournament_format = detect_tournament_format(tournament_name)
+
                 # Auto-tags
                 tags = []
                 if has_screenshot:
                     tags.append("Match SS")
-                    tournament_format = _detect_tournament_format(tournament_name)
                     if tournament_format != "vanilla":
                         tags.append(tournament_format.lower())
                 num_p = len(seats)
@@ -969,7 +959,7 @@ async def import_mtt(
                         "seat_to_name": {str(k): v for k, v in seat_to_name.items()},
                         "screenshot_entry_id": screenshot_entry_id,
                         "match_method": "mtt_import_v3",
-                        "tournament_format": _detect_tournament_format(tournament_name),
+                        "tournament_format": tournament_format,
                         "buyin": buyin,
                     })
 
@@ -979,12 +969,12 @@ async def import_mtt(
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
                         raw, study_state, all_players_actions, player_names,
-                        entry_id, tags)
+                        entry_id, tags, tournament_format)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s)
+                        %s, %s, %s)
                     ON CONFLICT (hand_id) DO NOTHING
                     RETURNING id""",
                     (
@@ -1003,6 +993,7 @@ async def import_mtt(
                         player_names,
                         screenshot_entry_id,
                         tags if tags else None,
+                        tournament_format,
                     )
                 )
                 row = cur.fetchone()

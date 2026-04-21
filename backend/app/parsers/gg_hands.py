@@ -12,6 +12,7 @@ import re
 import json
 from datetime import datetime
 from collections import defaultdict
+from app.utils.tournament_format import detect_tournament_format
 
 
 # ── Position Logic ───────────────────────────────────────────────────────────
@@ -315,6 +316,7 @@ def _parse_single_hand(block: str) -> dict | None:
         "tournament_name": None,
         "tournament_id": None,
         "buy_in": None,
+        "tournament_format": None,
         "all_players_actions": None,
     }
 
@@ -334,6 +336,7 @@ def _parse_single_hand(block: str) -> dict | None:
     if name_m:
         result["tournament_name"] = name_m.group(1).strip().rstrip(",")
         result["buy_in"] = _extract_buyin_numeric(result["tournament_name"])
+        result["tournament_format"] = detect_tournament_format(result["tournament_name"])
 
     # ── Date ──
     date_m = re.search(r"(\d{4})[/-](\d{2})[/-](\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})", block)

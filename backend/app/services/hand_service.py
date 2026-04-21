@@ -75,12 +75,12 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 (site, hand_id, played_at, stakes, position,
                  hero_cards, board, result, currency,
                  raw, entry_id, study_state, all_players_actions, tournament_id,
-                 has_showdown, buy_in)
+                 has_showdown, buy_in, tournament_format)
             VALUES
                 (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
                  %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
                  %(raw)s, %(entry_id)s, %(study_state)s, %(all_players_actions)s, %(tournament_id)s,
-                 %(has_showdown)s, %(buy_in)s)
+                 %(has_showdown)s, %(buy_in)s, %(tournament_format)s)
             """,
             {
                 "site": h["site"],
@@ -99,6 +99,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 "tournament_id": t_pk,
                 "has_showdown": has_showdown,
                 "buy_in": h.get("buy_in"),
+                "tournament_format": h.get("tournament_format"),
             },
         )
         return True
