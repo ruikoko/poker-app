@@ -110,6 +110,31 @@ def _normalize_action(action_text: str, bb_size: float) -> str | None:
     return None
 
 
+# ── Buy-in extractor ─────────────────────────────────────────────────────────
+
+def _extract_buyin_numeric(tournament_name: str | None) -> float | None:
+    """
+    Extrai buy-in numérico total (buy-in + rake + bounty) do tournament_name.
+    Formatos aceites:
+      '$10+$1 Gladiator'         → 11.0
+      'Bounty Builder $5'        → 5.0
+      '$25+$2+$3 Zodiac'         → 30.0
+    Devolve None se não encontrar nenhum padrão $X.
+    """
+    if not tournament_name:
+        return None
+    m = re.search(
+        r"\$(\d+(?:\.\d+)?)\s*\+\s*\$(\d+(?:\.\d+)?)(?:\s*\+\s*\$(\d+(?:\.\d+)?))?",
+        tournament_name,
+    )
+    if m:
+        return round(sum(float(x) for x in m.groups() if x), 2)
+    m = re.search(r"\$(\d+(?:\.\d+)?)", tournament_name)
+    if m:
+        return round(float(m.group(1)), 2)
+    return None
+
+
 # ── Anonymous ID → Real Name Mapper ─────────────────────────────────────────
 
 def _build_anon_map(block: str, seats: dict) -> dict[str, str]:
@@ -289,6 +314,7 @@ def _parse_single_hand(block: str) -> dict | None:
         "raw": block.strip(),
         "tournament_name": None,
         "tournament_id": None,
+        "buy_in": None,
         "all_players_actions": None,
     }
 
@@ -307,6 +333,7 @@ def _parse_single_hand(block: str) -> dict | None:
     name_m = re.search(r"Tournament\s*#\d+\s*,?\s*(.+?)(?:\s+Hold'em|\s*$)", block, re.M)
     if name_m:
         result["tournament_name"] = name_m.group(1).strip().rstrip(",")
+        result["buy_in"] = _extract_buyin_numeric(result["tournament_name"])
 
     # ── Date ──
     date_m = re.search(r"(\d{4})[/-](\d{2})[/-](\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})", block)

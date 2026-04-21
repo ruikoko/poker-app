@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from app.auth import require_auth
 from app.db import get_conn, query, execute
 from app.hero_names import HERO_NAMES
+from app.parsers.gg_hands import _extract_buyin_numeric
 
 router = APIRouter(prefix="/api/mtt", tags=["mtt"])
 logger = logging.getLogger("mtt")
@@ -737,6 +738,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
     tournament_name = hh_hand.get("tournament_name") or hh_hand.get("blinds", "")
     tournament_format = _detect_tournament_format(tournament_name)
     buyin = _extract_buyin(tournament_name)
+    buyin_numeric = _extract_buyin_numeric(tournament_name)
 
     # Auto-tags: "GG Hands" vai para hm3_tags (tema de estudo principal).
     # Tags de formato/max-players continuam em tags (auto-geradas).
@@ -788,12 +790,12 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                    (site, hand_id, played_at, stakes, position,
                     hero_cards, board, result, currency,
                     raw, study_state, all_players_actions, player_names,
-                    entry_id, tags, hm3_tags)
+                    entry_id, tags, hm3_tags, buy_in)
                 VALUES
                    (%s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s)""",
+                    %s, %s, %s, %s)""",
                 (
                     "GGPoker",
                     hand_id,
@@ -811,6 +813,7 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
                     screenshot_data.get("entry_id"),
                     auto_tags,
                     hm3_tags,
+                    buyin_numeric,
                 )
             )
         conn2.commit()

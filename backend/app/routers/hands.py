@@ -113,6 +113,28 @@ def ensure_origin_column():
         conn.close()
 
 
+def ensure_buy_in_column():
+    """
+    Garante que hands.buy_in (NUMERIC(10,2)) existe.
+    Valor em unidades da moeda do torneio (sem conversão). Extraído do HH
+    pelo parser da sala; NULL quando desconhecido. Usado no header do torneio
+    na UI e em agregações por torneio.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS buy_in NUMERIC(10,2)
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_buy_in_column: {e}")
+    finally:
+        conn.close()
+
+
 # ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
 # Obtida via scan directo à BD HM3 (handmarkcategories).
 # Cada entrada: (category_id, description).

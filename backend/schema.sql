@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS hands (
     tags         TEXT[],
     discord_tags TEXT[] DEFAULT ARRAY[]::text[],  -- canais Discord onde a mão foi partilhada (ex: 'nota')
     origin       TEXT,                            -- fonte: 'hm3' | 'discord' | 'ss_upload' | 'hh_import'
+    buy_in       NUMERIC(10,2),                   -- buy-in do torneio (unidades da moeda; NULL se desconhecido)
     raw          TEXT,                          -- HH original
     import_id    INTEGER,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
