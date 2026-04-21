@@ -61,14 +61,16 @@ CREATE TABLE IF NOT EXISTS hands (
     result      NUMERIC(10,2),
     currency    TEXT,
     notes       TEXT,
-    tags        TEXT[],
-    raw         TEXT,                          -- HH original
-    import_id   INTEGER,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    tags         TEXT[],
+    discord_tags TEXT[] DEFAULT ARRAY[]::text[],  -- canais Discord onde a mão foi partilhada (ex: 'nota')
+    raw          TEXT,                          -- HH original
+    import_id    INTEGER,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_hands_played_at ON hands(played_at);
 CREATE INDEX IF NOT EXISTS idx_hands_tags ON hands USING GIN(tags);
+CREATE INDEX IF NOT EXISTS idx_hands_discord_tags ON hands USING GIN(discord_tags);
 
 -- ── VILLAIN_NOTES ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS villain_notes (

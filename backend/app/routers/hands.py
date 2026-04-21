@@ -61,6 +61,32 @@ def ensure_has_showdown_column():
         conn.close()
 
 
+def ensure_discord_tags_column():
+    """
+    Garante que hands.discord_tags (TEXT[]) existe.
+    Preenchido quando a mão foi partilhada num canal Discord de estudo
+    (ex: tag 'nota' → canal #nota). Usado para elegibilidade de villains
+    e para badges de origem na UI.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS discord_tags TEXT[] DEFAULT ARRAY[]::text[]
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hands_discord_tags
+                ON hands USING GIN (discord_tags)
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_discord_tags_column: {e}")
+    finally:
+        conn.close()
+
+
 # ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
 # Obtida via scan directo à BD HM3 (handmarkcategories).
 # Cada entrada: (category_id, description).
