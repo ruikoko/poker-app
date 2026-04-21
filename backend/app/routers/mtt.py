@@ -619,7 +619,7 @@ def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
     return seat_to_name
 
 
-def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt_hand_id: int = None, hand_db_id: int = None, showdown_only: bool = False):
+def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt_hand_id: int = None, hand_db_id: int = None, showdown_only: bool = False, site: str = "GGPoker"):
     assert (mtt_hand_id is None) ^ (hand_db_id is None), "must pass exactly one of mtt_hand_id or hand_db_id"
     """
     Cria registos hand_villains.
@@ -685,11 +685,11 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
             if player_name and player_name != "Unknown" and player_name != "Hero":
                 cur.execute(
                     """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                       VALUES ('GGPoker', %s, 1, NOW())
+                       VALUES (%s, %s, 1, NOW())
                        ON CONFLICT (site, nick) DO UPDATE SET
                            hands_seen = villain_notes.hands_seen + 1,
                            updated_at = NOW()""",
-                    (player_name,)
+                    (site, player_name)
                 )
 
     return created

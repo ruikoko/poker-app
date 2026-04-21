@@ -236,7 +236,7 @@ def _parse_hand(hh_text, site_name):
                 hero_name = name
     else:
         # PokerStars/WPN: Seat 1: name (24500 in chips, $25 bounty) OR Seat 1: name (24500)
-        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)(?:\s+in chips)?(?:,\s*([^)]+))?\)", seat_scan_text):
+        for sm in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,.]+)(?:\s+in chips)?(?:,\s*([^)]+))?\)", seat_scan_text):
             seat_num = int(sm.group(1))
             name = sm.group(2).strip()
             stack = float(sm.group(3).replace(",", ""))
@@ -274,7 +274,7 @@ def _parse_hand(hh_text, site_name):
     for seat_num in list(all_seat_nums):
         name = seats[seat_num]["name"]
         # Check if name appears in ante/blinds/actions (not just in seat lines)
-        if re.search(rf"(?:^|\n)\s*{re.escape(name)}\b", action_section):
+        if re.search(rf"(?:^|\n)\s*{re.escape(name)}(?=\s|$)", action_section):
             active_names.add(seat_num)
 
     if active_names and len(active_names) < len(all_seat_nums):
