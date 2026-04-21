@@ -1090,6 +1090,12 @@ def list_mtt_hands(
     conditions = ["h.site = 'GGPoker'", "h.hand_id LIKE 'GG-%%'"]
     params = []
 
+    # Excluir placeholders Discord (destino é Dashboard, não Torneios)
+    conditions.append(
+        "(h.all_players_actions -> '_meta' ->> 'from_discord_placeholder') "
+        "IS DISTINCT FROM 'true'"
+    )
+
     if ss_filter is not None:
         if ss_filter == 'with':
             # "Com SS": match SS↔HH válido (match_method preenchido) OU screenshot directo
