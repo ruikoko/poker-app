@@ -1129,8 +1129,8 @@ def list_mtt_hands(
         f"""SELECT h.id, h.hand_id, h.played_at, h.stakes, h.position,
                    h.hero_cards, h.board, h.result, h.study_state,
                    h.screenshot_url, h.player_names, h.all_players_actions,
-                   h.entry_id
-            FROM hands h 
+                   h.entry_id, h.buy_in, h.hm3_tags, h.discord_tags
+            FROM hands h
             {where}
             ORDER BY h.played_at DESC NULLS LAST
             LIMIT %s OFFSET %s""",
@@ -1159,6 +1159,10 @@ def list_mtt_hands(
             ante_val = meta.get("ante")
             hand["blinds"] = f"{sb_val}/{bb_val}" + (f"({ante_val})" if ante_val else "")
         hand["num_players"] = meta.get("num_players", 0)
+        hand["level"] = meta.get("level")
+        hand["bb"] = meta.get("bb")
+        if hand.get("buy_in") is not None:
+            hand["buy_in"] = float(hand["buy_in"])
         # Screenshot entry_id for delete button
         pn = hand.get("player_names") or {}
         if isinstance(pn, str):

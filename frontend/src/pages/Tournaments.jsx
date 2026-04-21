@@ -245,6 +245,17 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
           )}
         </div>
         <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.blinds}</span>
+        {hand.level != null && (
+          <span style={{
+            fontSize: 10, color: '#818cf8',
+            background: 'rgba(99,102,241,0.1)', padding: '1px 5px', borderRadius: 3,
+          }}>Lv {hand.level}</span>
+        )}
+        {hand.bb != null && (
+          <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
+            BB {hand.bb.toLocaleString()}
+          </span>
+        )}
         <ResultBadge result={hand.hero_result} />
         {hand.villain_count > 0 && (
           <span style={{ fontSize: 11, color: '#8b5cf6' }}>{hand.villain_count}V</span>
@@ -252,6 +263,20 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
         {hand.has_screenshot && (
           <span style={{ fontSize: 11, color: '#22c55e' }}>SS</span>
         )}
+        {(() => {
+          const tags = [...(hand.hm3_tags || []), ...(hand.discord_tags || [])]
+          if (tags.length === 0) return null
+          return (
+            <span style={{
+              fontSize: 10, color: '#a78bfa',
+              background: 'rgba(139,92,246,0.1)',
+              padding: '1px 6px', borderRadius: 3,
+              maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }} title={tags.join(', ')}>
+              {tags.join(', ')}
+            </span>
+          )
+        })()}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <a href={`/hand/${hand.id}`} onClick={e => e.stopPropagation()}
             style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}
@@ -373,6 +398,21 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
   const ssCount = hands.filter(h => h.has_screenshot).length
   const totalVillains = hands.reduce((a, h) => a + (h.villain_count || 0), 0)
 
+  const buyIn = hands.find(h => h.buy_in != null)?.buy_in
+  const fmtBuyIn = v => (v % 1 === 0 ? `$${v}` : `$${v.toFixed(2)}`)
+
+  // hands vêm ordenadas DESC por played_at → [0]=mais recente, [last]=mais antiga
+  const newest = hands[0]
+  const oldest = hands[hands.length - 1]
+  const blindsLabel = !oldest ? ''
+    : (oldest.blinds === newest.blinds ? oldest.blinds : `${oldest.blinds} → ${newest.blinds}`)
+  const timeRange = !oldest ? ''
+    : (oldest.played_at === newest.played_at
+        ? formatTime(oldest.played_at)
+        : `${formatTime(oldest.played_at)} → ${formatTime(newest.played_at)}`)
+
+  const sep = { fontSize: 11, color: '#4b5563' }
+
   return (
     <div style={{
       background: 'rgba(255,255,255,0.02)',
@@ -383,7 +423,7 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
       <div
         onClick={() => setOpen(!open)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px',
+          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
           cursor: 'pointer', background: 'rgba(255,255,255,0.02)',
         }}
         onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
@@ -392,21 +432,38 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
         <span style={{ color: '#6366f1', fontSize: 12 }}>{open ? '▼' : '▶'}</span>
         <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>{tmNumber}</span>
         {tournamentName && (
-          <span style={{ fontSize: 11, color: '#64748b', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {tournamentName}
-          </span>
+          <>
+            <span style={sep}>·</span>
+            <span style={{ fontSize: 11, color: '#94a3b8', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {tournamentName}
+            </span>
+          </>
         )}
-        <span style={{ fontSize: 11, color: '#22c55e', marginLeft: 'auto' }}>
-          {ssCount} SS
-        </span>
-        <span style={{ fontSize: 11, color: '#94a3b8' }}>
-          {hands.length} mãos
-        </span>
-        {totalVillains > 0 && (
-          <span style={{ fontSize: 11, color: '#8b5cf6' }}>
-            {totalVillains} V
-          </span>
+        {buyIn != null && (
+          <>
+            <span style={sep}>·</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#f59e0b' }}>{fmtBuyIn(buyIn)}</span>
+          </>
         )}
+        {blindsLabel && (
+          <>
+            <span style={sep}>·</span>
+            <span style={{ fontSize: 11, color: '#64748b' }}>{blindsLabel}</span>
+          </>
+        )}
+        {timeRange && (
+          <>
+            <span style={sep}>·</span>
+            <span style={{ fontSize: 11, color: '#64748b' }}>{timeRange}</span>
+          </>
+        )}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>{hands.length} mãos</span>
+          <span style={{ fontSize: 11, color: '#22c55e' }}>{ssCount} SS</span>
+          {totalVillains > 0 && (
+            <span style={{ fontSize: 11, color: '#8b5cf6' }}>{totalVillains} V</span>
+          )}
+        </span>
       </div>
 
       {/* Hands list */}
