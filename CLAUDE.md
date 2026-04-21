@@ -169,9 +169,11 @@ Uma mão gera entry em `hand_villains` sse **(A OR B OR C)**:
 
 - **(A)** `hm3_tags ~ 'nota%'` (tag HM3 começa por "nota")
 - **(B)** `player_names ->> 'match_method' IS NOT NULL` **AND** `has_showdown = TRUE` (match SS↔HH válido **e** houve showdown)
-- **(C)** `'nota' = ANY(discord_tags)` (partilhada no canal Discord #nota, ID `1410311700023869522`)
+- **(C)** `'nota' = ANY(discord_tags)` **AND** `player_names ->> 'match_method' IS NOT NULL` (partilhada no canal Discord #nota, ID `1410311700023869522`, e com match SS↔HH)
 
 O modal do vilão mostra **só** mãos presentes em `hand_villains` — não mais o VPIP global antigo, que puxava toda a mão onde o vilão aparecia.
+
+**Princípio invariante:** NUNCA criar villain numa mão GG anonimizada (sem `match_method`). Aplica-se às 3 regras — B e C já o exigem explicitamente; A aplica-se a tags HM3 que em GG também implicam match na prática.
 
 ### 5. Filtro permanente: só mãos de 2026
 
