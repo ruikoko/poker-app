@@ -87,6 +87,32 @@ def ensure_discord_tags_column():
         conn.close()
 
 
+def ensure_origin_column():
+    """
+    Garante que hands.origin (TEXT) existe.
+    Indica a fonte da mão: 'hm3' (script .bat), 'discord' (bot),
+    'ss_upload' (upload manual SS), 'hh_import' (upload ZIP/TXT HH).
+    Validação dos valores fica na camada aplicacional (sem CHECK constraint).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS origin TEXT
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hands_origin
+                ON hands(origin)
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_origin_column: {e}")
+    finally:
+        conn.close()
+
+
 # ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
 # Obtida via scan directo à BD HM3 (handmarkcategories).
 # Cada entrada: (category_id, description).
