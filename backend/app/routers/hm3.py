@@ -542,6 +542,80 @@ def _detect_vpip_hm3(raw_text, hero_name=None):
     return vpip_players
 
 
+def _create_hand_villains_hm3(
+    cur,
+    hand_db_id: int,
+    parsed: dict,
+    hero_name: str,
+    has_showdown: bool,
+    raw_text: str,
+) -> int:
+    """
+    Cria rows em hand_villains para uma mao HM3 (.bat import path).
+
+    Dispatcher:
+      - has_showdown=True: iterar parsed["all_players"] e pegar nao-hero com
+        pdata["cards"] preenchido (showdown-based).
+      - has_showdown=False: fallback para _detect_vpip_hm3 (VPIP preflop).
+
+    Idempotente via ON CONFLICT DO NOTHING no UNIQUE parcial
+    uq_hand_villains_hand_db_player (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL.
+
+    Sem screenshot em HM3: bounty_pct e country ficam NULL.
+    mtt_hand_id=NULL explicito (nao passa pelo pipeline MTT).
+
+    Retorna numero de rows realmente inseridas (cur.rowcount acumulado).
+    """
+    all_players = parsed.get("all_players") or {}
+    inserted = 0
+
+    def _clean_pos(p):
+        return p if p and p != "?" else None
+
+    villains = []  # lista de (player_name, position, stack, vpip_action)
+
+    if has_showdown:
+        for name, pdata in all_players.items():
+            if name == "_meta" or not isinstance(pdata, dict):
+                continue
+            if pdata.get("is_hero"):
+                continue
+            cards = pdata.get("cards")
+            if not cards:
+                continue
+            villains.append((
+                name,
+                _clean_pos(pdata.get("position")),
+                pdata.get("stack"),
+                ", ".join(cards),
+            ))
+    else:
+        vpip_by_name = _detect_vpip_hm3(raw_text, hero_name)
+        for name, action in vpip_by_name.items():
+            if hero_name and name == hero_name:
+                continue
+            pdata = all_players.get(name) if isinstance(all_players.get(name), dict) else {}
+            villains.append((
+                name,
+                _clean_pos(pdata.get("position")),
+                pdata.get("stack"),
+                action,
+            ))
+
+    for player_name, position, stack, vpip_action in villains:
+        cur.execute(
+            """INSERT INTO hand_villains
+                   (hand_db_id, player_name, position, stack, vpip_action, mtt_hand_id)
+               VALUES (%s, %s, %s, %s, %s, NULL)
+               ON CONFLICT (hand_db_id, player_name) DO NOTHING""",
+            (hand_db_id, player_name, position, stack, vpip_action),
+        )
+        if cur.rowcount > 0:
+            inserted += 1
+
+    return inserted
+
+
 # ── CSV Import ────────────────────────────────────────────────────────────────
 
 @router.post("/import")
