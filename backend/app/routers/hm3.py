@@ -1243,6 +1243,105 @@ def admin_parse_failed_stats(current_user=Depends(require_auth)):
         conn.close()
 
 
+# TEMP: remove after parse-failed smoke test completo
+@router.post("/admin/reparse-hand/{hand_id}")
+def admin_reparse_hand(hand_id: int, current_user=Depends(require_auth)):
+    """
+    Smoke test do fix de dedução por blinds. Re-corre _parse_hand para uma
+    mao existente em BD e grava all_players_actions + position_parse_failed
+    com o novo resultado. Devolve snapshot antes/depois.
+    Nao toca em hand_villains.
+    """
+    import json
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, hand_id, raw, site, position_parse_failed,
+                          all_players_actions
+                   FROM hands WHERE id = %s""",
+                (hand_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"hand id={hand_id} nao encontrada")
+            if not row["raw"]:
+                raise HTTPException(status_code=400, detail=f"hand id={hand_id} sem raw")
+
+            def summarise(apa):
+                if isinstance(apa, str):
+                    apa = json.loads(apa)
+                if not isinstance(apa, dict):
+                    return []
+                out = []
+                for name, pdata in apa.items():
+                    if name == "_meta" or not isinstance(pdata, dict):
+                        continue
+                    out.append({
+                        "nick": name,
+                        "is_hero": bool(pdata.get("is_hero")),
+                        "has_cards": bool(pdata.get("cards")),
+                        "position": pdata.get("position"),
+                        "stack": pdata.get("stack"),
+                    })
+                return out
+
+            before = {
+                "position_parse_failed": bool(row["position_parse_failed"]),
+                "all_players": summarise(row["all_players_actions"]),
+            }
+
+            parsed = _parse_hand(row["raw"], row["site"])
+            if not parsed:
+                raise HTTPException(status_code=500, detail="_parse_hand devolveu None")
+
+            all_players = parsed.get("all_players") or {}
+            all_players["_meta"] = {
+                "level": parsed.get("level"),
+                "sb": parsed.get("sb_size", 0),
+                "bb": parsed.get("bb_size", 0),
+                "ante": parsed.get("ante_size", 0),
+                "num_players": parsed.get("num_players", 0),
+            }
+
+            new_parse_failed = bool(parsed.get("position_parse_failed", False))
+
+            cur.execute(
+                """UPDATE hands
+                   SET all_players_actions = %s, position_parse_failed = %s
+                   WHERE id = %s""",
+                (json.dumps(all_players), new_parse_failed, hand_id),
+            )
+
+            cur.execute(
+                """SELECT position_parse_failed, all_players_actions
+                   FROM hands WHERE id = %s""",
+                (hand_id,),
+            )
+            after_row = cur.fetchone()
+            after = {
+                "position_parse_failed": bool(after_row["position_parse_failed"]),
+                "all_players": summarise(after_row["all_players_actions"]),
+            }
+
+        conn.commit()
+        return {
+            "hand_id_db": row["id"],
+            "hand_id_text": row["hand_id"],
+            "before": before,
+            "after": after,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"reparse-hand error for id={hand_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
