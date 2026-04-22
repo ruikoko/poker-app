@@ -586,7 +586,11 @@ function composeTournamentTitle(hands) {
   if (site) segs.push(site)
   if (name) segs.push(name)
   // buyin + fmt combinados num segmento (ex: '250€ PKO'); omitidos se ambos vazios.
-  const buyinFmt = [buyinStr, fmt].filter(Boolean).join(' ')
+  // WPN: omitir fmt — a prize-pool-string (tournament_name) ja e' a categoria,
+  // evita redundancia tipo "... · $30,000 GTD Tournament · Vanilla · #...".
+  const buyinFmt = (site === 'WPN')
+    ? buyinStr
+    : [buyinStr, fmt].filter(Boolean).join(' ')
   if (buyinFmt) segs.push(buyinFmt)
   if (tid) segs.push(`#${tid}`)
   if (timeRange) segs.push(timeRange)
