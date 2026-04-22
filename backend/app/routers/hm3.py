@@ -357,26 +357,47 @@ def _parse_hand(hh_text, site_name):
 
     num_players = len(active_seat_nums)
 
-    # ── Effective button (handles sitting-out BTN) ──
-    effective_button = button_seat
-    if button_seat and active_names and button_seat not in active_names:
-        sorted_all = sorted(all_seat_nums)
-        if button_seat in sorted_all:
-            btn_idx = sorted_all.index(button_seat)
-            for i in range(1, len(sorted_all)):
-                candidate = sorted_all[(btn_idx - i) % len(sorted_all)]
-                if candidate in active_names:
-                    effective_button = candidate
-                    break
-        else:
-            # Raw inconsistente (Winamax): button aponta para seat que não aparece
-            # em "Seat N:" listings. Aceitar a mão com position desconhecida.
+    # ── Effective button: dedução por blinds (autoridade) com fallback ao raw ──
+    # Em Winamax o raw "Seat #X is the button" por vezes aponta para seat vazio,
+    # por isso quem postou a SB e mais fiavel. Só caimos no raw quando a dedução
+    # nao resolve (SB ausente / actor nao mapeavel / 3+max sem BB).
+    deduced_btn = _deduce_button_from_blinds(hh_text, seats, active_seat_nums)
+    position_parse_failed = False
+
+    if deduced_btn is not None:
+        effective_button = deduced_btn
+        if button_seat is not None and button_seat != deduced_btn:
+            logger.info(
+                f"HM3 button deduced by blinds: {deduced_btn} "
+                f"(raw said {button_seat}) for hand_id={result.get('hand_id')}"
+            )
+    else:
+        # Fallback: raw "Seat #X is the button" + recuo para seat activo.
+        effective_button = button_seat
+        if button_seat and active_names and button_seat not in active_names:
+            sorted_all = sorted(all_seat_nums)
+            if button_seat in sorted_all:
+                btn_idx = sorted_all.index(button_seat)
+                for i in range(1, len(sorted_all)):
+                    candidate = sorted_all[(btn_idx - i) % len(sorted_all)]
+                    if candidate in active_names:
+                        effective_button = candidate
+                        break
+            else:
+                logger.warning(
+                    f"HM3 button deduction failed: deduced=None, raw button_seat={button_seat} "
+                    f"not in all_seat_nums={all_seat_nums} for hand_id={result.get('hand_id')}; "
+                    f"accepting with position_parse_failed=True"
+                )
+                effective_button = None
+                position_parse_failed = True
+        elif button_seat is None:
             logger.warning(
-                f"HM3 button mismatch: button_seat={button_seat} not in "
-                f"all_seat_nums={all_seat_nums} for hand_id={result.get('hand_id')}; "
-                f"accepting with position=None"
+                f"HM3 button deduction failed: deduced=None, raw has no button line "
+                f"for hand_id={result.get('hand_id')}; accepting with position_parse_failed=True"
             )
             effective_button = None
+            position_parse_failed = True
 
     # ── Hero position ──
     if effective_button and active_seat_nums and hero_seat:
@@ -524,6 +545,7 @@ def _parse_hand(hh_text, site_name):
     result["bb_size"] = bb_size
     result["ante_size"] = ante_size
     result["num_players"] = num_players
+    result["position_parse_failed"] = position_parse_failed
 
     return result
 
