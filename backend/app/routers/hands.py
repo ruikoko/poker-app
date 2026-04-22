@@ -962,7 +962,14 @@ def admin_hand_villains_dups(current_user=Depends(require_auth)):
                 ) t
             """)
             total_pairs = cur.fetchone()["total"]
-        return {"total_pairs": total_pairs, "rows": rows}
+            cur.execute("""
+                SELECT indexname, indexdef
+                FROM pg_indexes
+                WHERE tablename = 'hand_villains'
+                ORDER BY indexname
+            """)
+            indexes = [{"name": r["indexname"], "def": r["indexdef"]} for r in cur.fetchall()]
+        return {"total_pairs": total_pairs, "rows": rows, "indexes": indexes}
     finally:
         conn.close()
 
