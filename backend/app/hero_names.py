@@ -154,11 +154,14 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
     if not raw_hh:
         return None
     import re
+    import logging
+    _log = logging.getLogger("hero_names.detect_site")
     seat_names = [
         m.group(1).lower().strip()
         for m in re.finditer(r"Seat\s+\d+:\s*(.+?)\s*\(", raw_hh)
     ]
     if not seat_names:
+        _log.info("detect_site_from_hh: no seat lines found in raw (first 200 chars: %r)", raw_hh[:200])
         return None
     score: dict[str, int] = {}
     for site, nicks in ALL_NICKS_BY_SITE.items():
@@ -168,8 +171,16 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
         return None
     best_score = max(score.values())
     if best_score == 0:
+        _log.info(
+            "detect_site_from_hh: zero matches. seats=%r score=%r",
+            seat_names, score,
+        )
         return None
     top_sites = [s for s, sc in score.items() if sc == best_score]
     if len(top_sites) > 1:
+        _log.info(
+            "detect_site_from_hh: tie between %r. seats=%r score=%r",
+            top_sites, seat_names, score,
+        )
         return None
     return top_sites[0]
