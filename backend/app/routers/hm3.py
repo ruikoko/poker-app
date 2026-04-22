@@ -1046,6 +1046,93 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
+# TEMP: remove after Sessao A Passo 5
+@router.post("/admin/test-villain-fix/{hand_id}")
+def admin_test_villain_fix(hand_id: int, current_user=Depends(require_auth)):
+    """
+    Smoke test do fix hand_villains em HM3. Pega uma mao existente por id,
+    re-corre _create_hand_villains_hm3 com os dados ja em BD, e devolve
+    snapshot antes/depois. Idempotente via ON CONFLICT DO NOTHING.
+    """
+    import json
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, hand_id, hm3_tags, has_showdown, all_players_actions, raw
+                   FROM hands WHERE id = %s""",
+                (hand_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"hand id={hand_id} nao encontrada")
+
+            hm3_tags = row["hm3_tags"] or []
+            has_showdown = bool(row["has_showdown"])
+            apa = row["all_players_actions"] or {}
+            if isinstance(apa, str):
+                apa = json.loads(apa)
+            raw_text = row["raw"] or ""
+
+            dealt_m = re.search(r"Dealt to (\S+)", raw_text)
+            hero = dealt_m.group(1) if dealt_m else None
+
+            all_players_summary = []
+            for name, pdata in apa.items():
+                if name == "_meta" or not isinstance(pdata, dict):
+                    continue
+                cards = pdata.get("cards")
+                all_players_summary.append({
+                    "nick": name,
+                    "is_hero": bool(pdata.get("is_hero")),
+                    "has_cards": bool(cards),
+                    "cards": cards,
+                    "position": pdata.get("position"),
+                    "stack": pdata.get("stack"),
+                })
+
+            cur.execute(
+                """SELECT player_name, position, stack, vpip_action
+                   FROM hand_villains WHERE hand_db_id = %s
+                   ORDER BY player_name""",
+                (hand_id,),
+            )
+            villains_before = [dict(r) for r in cur.fetchall()]
+
+            inserted_count = _create_hand_villains_hm3(
+                cur, hand_id, {"all_players": apa}, hero, has_showdown, raw_text,
+            )
+
+            cur.execute(
+                """SELECT player_name, position, stack, vpip_action
+                   FROM hand_villains WHERE hand_db_id = %s
+                   ORDER BY player_name""",
+                (hand_id,),
+            )
+            villains_after = [dict(r) for r in cur.fetchall()]
+
+        conn.commit()
+        return {
+            "hand_id": hand_id,
+            "hm3_tags": hm3_tags,
+            "has_showdown": has_showdown,
+            "hero": hero,
+            "all_players_summary": all_players_summary,
+            "villains_before": villains_before,
+            "villains_after": villains_after,
+            "inserted_count": inserted_count,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"test-villain-fix error for id={hand_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
