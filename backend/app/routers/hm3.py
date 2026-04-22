@@ -197,6 +197,14 @@ def _parse_hand(hh_text, site_name):
     if not hh_text or len(hh_text) < 50:
         return None
 
+    # Normalizar line endings: HM3 exporta WPN com \r\r\n (quirk confirmado),
+    # PS tradicional usa \r\n, Winamax/GG usam \n. Ordem importa:
+    # 1) \r\n -> \n  colapsa CRLF para LF (inclui o "\r\n" interno em \r\r\n)
+    # 2) \r   -> \n  apanha \r orfaos remanescentes (ex: o \r de \r\r\n
+    #                que sobrou apos o passo 1, virando \n\n - linha em branco
+    #                benigna para todas as regex do parser).
+    hh_text = hh_text.replace("\r\n", "\n").replace("\r", "\n")
+
     result = {
         "site": site_name,
         "hand_id": None,
