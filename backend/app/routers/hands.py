@@ -930,6 +930,43 @@ def admin_tag_gg_hands(current_user=Depends(require_auth)):
         conn.close()
 
 
+# TEMP: remove after Passo 1 hand_villains UNIQUE
+@router.get("/admin/hand-villains-dups")
+def admin_hand_villains_dups(current_user=Depends(require_auth)):
+    """
+    Read-only debug: lista duplicados em hand_villains(hand_db_id, player_name)
+    para validar se e seguro criar o indice UNIQUE parcial.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT hand_db_id, player_name, COUNT(*) AS n
+                FROM hand_villains
+                WHERE hand_db_id IS NOT NULL
+                GROUP BY hand_db_id, player_name
+                HAVING COUNT(*) > 1
+                ORDER BY n DESC, hand_db_id
+                LIMIT 50
+            """)
+            rows = [
+                {"hand_db_id": r["hand_db_id"], "player_name": r["player_name"], "n": r["n"]}
+                for r in cur.fetchall()
+            ]
+            cur.execute("""
+                SELECT COUNT(*) AS total FROM (
+                    SELECT 1 FROM hand_villains
+                    WHERE hand_db_id IS NOT NULL
+                    GROUP BY hand_db_id, player_name
+                    HAVING COUNT(*) > 1
+                ) t
+            """)
+            total_pairs = cur.fetchone()["total"]
+        return {"total_pairs": total_pairs, "rows": rows}
+    finally:
+        conn.close()
+
+
 @router.post("/admin/delete-gg-without-screenshot")
 def admin_delete_gg_no_ss(current_user=Depends(require_auth)):
     """
