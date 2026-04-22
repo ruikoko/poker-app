@@ -1225,6 +1225,58 @@ def admin_debug_apr19_count(current_user=Depends(require_auth)):
         conn.close()
 
 
+# TEMP: remove after tournament format canonical rename is validated
+@router.get("/admin/tournament-format-stats")
+def admin_tournament_format_stats(current_user=Depends(require_auth)):
+    """
+    Read-only: distribuicao de hands.tournament_format em maos 2026+.
+    Breakdown global, por site, e total. Usado para avaliar impacto
+    do rename de valores canonicos antes de aplicar D3.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT COALESCE(tournament_format, '(NULL)') AS fmt,
+                          COUNT(*) AS n
+                   FROM hands
+                   WHERE played_at >= '2026-01-01'
+                   GROUP BY tournament_format
+                   ORDER BY n DESC, fmt"""
+            )
+            by_format = [
+                {"fmt": r["fmt"], "n": r["n"]}
+                for r in cur.fetchall()
+            ]
+
+            cur.execute(
+                """SELECT site,
+                          COALESCE(tournament_format, '(NULL)') AS fmt,
+                          COUNT(*) AS n
+                   FROM hands
+                   WHERE played_at >= '2026-01-01'
+                   GROUP BY site, tournament_format
+                   ORDER BY site, n DESC, fmt"""
+            )
+            by_site_format = [
+                {"site": r["site"], "fmt": r["fmt"], "n": r["n"]}
+                for r in cur.fetchall()
+            ]
+
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM hands WHERE played_at >= '2026-01-01'"
+            )
+            total_2026plus = cur.fetchone()["n"]
+
+        return {
+            "total_2026plus": total_2026plus,
+            "by_format": by_format,
+            "by_site_format": by_site_format,
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
