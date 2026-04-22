@@ -603,14 +603,15 @@ async def import_hm3(
                 tags = data["tags"]
                 site_name = SITE_MAP.get(site_id, f"Site{site_id}")
                 hh_text = row.get("handhistory", "")
+                ts = (row.get("handtimestamp", "") or "")[:16]  # 'YYYY-MM-DD HH:MM'
 
                 try:
                     parsed = _parse_hand(hh_text, site_name)
                 except Exception as parse_err:
-                    errors.append(f"Parse error: {gamenumber} ({site_name}): {parse_err}")
+                    errors.append(f"Parse error: {gamenumber} ({site_name}) {ts}: {parse_err}")
                     continue
                 if not parsed or not parsed["hand_id"]:
-                    errors.append(f"Parse failed: {gamenumber} ({site_name})")
+                    errors.append(f"Parse failed: {gamenumber} ({site_name}) {ts}")
                     continue
 
                 # Separar tags HM3 (vieram do CSV) das auto-geradas (showdown, nicks)
