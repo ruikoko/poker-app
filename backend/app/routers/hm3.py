@@ -1295,6 +1295,12 @@ def admin_reparse_hand(hand_id: int, current_user=Depends(require_auth)):
             if not parsed:
                 raise HTTPException(status_code=500, detail="_parse_hand devolveu None")
 
+            # Replicar o merge de actions/cards que o .bat import faz (hm3.py:829, 854-864).
+            # Sem isto, cards mostradas no showdown desaparecem apos UPDATE.
+            actions_by_player, cards_by_player = _parse_actions_from_raw(
+                row["raw"], row["site"] or "",
+            )
+
             all_players = parsed.get("all_players") or {}
             all_players["_meta"] = {
                 "level": parsed.get("level"),
@@ -1303,6 +1309,17 @@ def admin_reparse_hand(hand_id: int, current_user=Depends(require_auth)):
                 "ante": parsed.get("ante_size", 0),
                 "num_players": parsed.get("num_players", 0),
             }
+
+            for player_name, actions in actions_by_player.items():
+                if player_name in all_players and isinstance(all_players[player_name], dict):
+                    all_players[player_name]["actions"] = actions
+                elif player_name != "_meta":
+                    all_players[player_name] = {"actions": actions}
+            for player_name, cards in cards_by_player.items():
+                if player_name in all_players and isinstance(all_players[player_name], dict):
+                    all_players[player_name]["cards"] = cards
+                elif player_name != "_meta":
+                    all_players[player_name] = {"cards": cards}
 
             new_parse_failed = bool(parsed.get("position_parse_failed", False))
 
