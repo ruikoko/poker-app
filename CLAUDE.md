@@ -207,4 +207,3 @@ Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` d
 ### Contexto útil próxima sessão
 - hero_names.py tem HERO_NICKS_BY_SITE e FRIEND_NICKS_BY_SITE novos. FRIEND_NICKS_BY_SITE["GGPoker"] = ["karluz","flightrisk"] — extensível à medida que Rui pede mãos de amigos.
 - Commits session: c499c6f→d6d0505→5ea3db6→9bd40aa→8fdb0a7→42bca81→3305c60→0737d61→b864773→5c7c33b→dd2e960→dee479f→17f5cf1→e3ab933→7ab5ac1→828d736→3aedae5→76b67bc→3493b56
-- Logs temporários em hero_names.py e hm3.py (WARNINGs de detect_site e HM3 primary parse raised) devem ser removidos quando o Bug CRÍTICO for resolvido
