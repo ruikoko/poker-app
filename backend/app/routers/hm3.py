@@ -633,6 +633,12 @@ async def import_hm3(
                             )
                             continue
                     else:
+                        logger.warning(
+                            "HM3 parser genuine bug: site=%s id=%s err=%s: %s\nRAW:\n%s",
+                            site_name, gamenumber,
+                            type(parse_err).__name__, parse_err,
+                            hh_text,
+                        )
                         errors.append(f"Parse error: {gamenumber} ({site_name}) {ts}: {parse_err}")
                         continue
                 if not parsed or not parsed["hand_id"]:
