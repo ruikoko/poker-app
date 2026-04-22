@@ -395,7 +395,7 @@ def list_hands(
                h.hero_cards, h.board, h.result, h.currency, h.notes, h.tags, h.hm3_tags,
                h.study_state, h.entry_id, h.viewed_at, h.studied_at, h.created_at,
                h.all_players_actions, h.screenshot_url, h.player_names,
-               h.tournament_format,
+               h.tournament_format, h.buy_in,
                e.discord_channel, e.discord_posted_at,
                d.channel_name AS discord_channel_name
         FROM hands h

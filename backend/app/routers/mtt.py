@@ -1139,7 +1139,7 @@ def list_mtt_hands(
     # Fetch
     offset = (page - 1) * page_size
     rows = query(
-        f"""SELECT h.id, h.hand_id, h.played_at, h.stakes, h.position,
+        f"""SELECT h.id, h.site, h.hand_id, h.played_at, h.stakes, h.position,
                    h.hero_cards, h.board, h.result, h.study_state,
                    h.screenshot_url, h.player_names, h.all_players_actions,
                    h.entry_id, h.buy_in, h.hm3_tags, h.discord_tags,

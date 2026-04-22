@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { hands, hm3 } from '../api/client'
 import Replayer from '../components/Replayer'
+import HandRow from '../components/HandRow'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -545,71 +546,6 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
 // ── Day Group (collapsible) ───────────────────────────────────────────────────
 
-function HM3HandRow({ hand, onClick, onDelete, idx }) {
-  const level = extractLevel(hand.raw)
-  const meta = hand.all_players_actions?._meta
-  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}` : null
-  const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
-  const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : 'WPN'
-
-  return (
-    <div onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
-      background: zebra, borderBottom: '1px solid rgba(255,255,255,0.03)',
-      cursor: 'pointer', transition: 'background 0.1s',
-    }}
-      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
-      onMouseLeave={e => e.currentTarget.style.background = zebra}
-    >
-      <div style={{ minWidth: 56, flexShrink: 0 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 58, flexShrink: 0 }}>
-        {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 12 }}>&mdash;</span>}
-      </div>
-      <div style={{ minWidth: 44, flexShrink: 0 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ minWidth: 70, flexShrink: 0 }}>
-        {hand.tags?.length > 0 && <Tag t={hand.tags[0]} />}
-      </div>
-      <div style={{ minWidth: 72, flexShrink: 0 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ minWidth: 140, maxWidth: 240, fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{hand.stakes || ''}</div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 130, width: 130, flexShrink: 0 }}>
-        {hand.board?.length > 0 ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="sm" />) : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
-      </div>
-      <div style={{ minWidth: 80, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
-        {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
-      </div>
-      {hand.tournament_format && (() => {
-        const ko = hand.tournament_format !== 'vanilla'
-        return (
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-            fontFamily: 'monospace', padding: '3px 6px', borderRadius: 3,
-            background: ko ? '#064e3b' : '#1e293b',
-            color: ko ? '#6ee7b7' : '#64748b',
-            flexShrink: 0,
-          }}>{ko ? 'KO' : 'NKO'}</span>
-        )
-      })()}
-      <div style={{ minWidth: 28, flexShrink: 0, fontSize: 12, color: '#4b5563' }}>{siteShort}</div>
-      <div style={{ minWidth: 42, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace' }}>
-        {hand.played_at ? hand.played_at.slice(11, 16) : ''}
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1, minWidth: 0 }}>
-        {hand.tags?.slice(0, 3).map(t => <Tag key={t} t={t} />)}
-      </div>
-      {hand.raw && hand.all_players_actions && (
-        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', flexShrink: 0, fontWeight: 600 }}
-        >&#9654;</a>
-      )}
-      <button style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
-        onClick={e => { e.stopPropagation(); onDelete(hand.id) }}
-        onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-        onMouseLeave={e => e.currentTarget.style.color = '#374151'}>&#10005;</button>
-    </div>
-  )
-}
-
 function TournamentSubGroup({ name, hands, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const wins = hands.filter(h => h.result != null && Number(h.result) > 0).length
@@ -639,7 +575,13 @@ function TournamentSubGroup({ name, hands, onOpenDetail, onDeleteHand }) {
         </div>
       </div>
       {open && hands.map((h, idx) => (
-        <HM3HandRow key={h.id} hand={h} idx={idx} onClick={() => onOpenDetail(h.id)} onDelete={onDeleteHand} />
+        <HandRow
+          key={h.id}
+          hand={h}
+          idx={idx}
+          onClick={() => onOpenDetail(h.id)}
+          onDelete={onDeleteHand}
+        />
       ))}
     </div>
   )

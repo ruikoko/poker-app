@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { mtt } from '../api/client'
+import HandRow from '../components/HandRow'
 
 // ── Constantes ───────────────────────────────────────────────────────────────
 
@@ -218,184 +219,85 @@ function VillainRow({ v }) {
 
 // ── Hand Row (inside tournament group) ───────────────────────────────────────
 
-function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot }) {
+// Expansion abaixo da HandRow: villains (VPIP) + mesa (screenshot players) + acções.
+function TournamentDetail({ hand, onDeleteHand, onDeleteScreenshot }) {
+  const hasVillains = hand.villains && hand.villains.length > 0
+  const hasSsPlayers = hand.screenshot_players && Object.keys(hand.screenshot_players).length > 0
+
   return (
-    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-      {/* Summary row */}
-      <div
-        onClick={onToggle}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: '6px 12px',
-          cursor: 'pointer', fontSize: 12,
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-      >
-        <span style={{ color: '#4b5563', fontSize: 11, minWidth: 40 }}>
-          {formatTime(hand.played_at)}
-        </span>
-        <PosBadge pos={hand.hero_position} />
-        <div style={{ display: 'flex', gap: 2 }}>
-          {(hand.hero_cards || []).map((c, i) => <PokerCard key={i} card={c} />)}
-        </div>
-        <div style={{ display: 'flex', gap: 2 }}>
-          {(hand.board || []).map((c, i) => <PokerCard key={i} card={c} />)}
-          {(!hand.board || hand.board.length === 0) && (
-            <span style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>preflop</span>
-          )}
-        </div>
-        {hand.tournament_format && (() => {
-          const ko = hand.tournament_format !== 'vanilla'
-          return (
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-              fontFamily: 'monospace', padding: '3px 6px', borderRadius: 3,
-              background: ko ? '#064e3b' : '#1e293b',
-              color: ko ? '#6ee7b7' : '#64748b',
-            }}>{ko ? 'KO' : 'NKO'}</span>
-          )
-        })()}
-        <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.blinds}</span>
-        {hand.level != null && (
-          <span style={{
-            fontSize: 10, color: '#818cf8',
-            background: 'rgba(99,102,241,0.1)', padding: '1px 5px', borderRadius: 3,
-          }}>Lv {hand.level}</span>
+    <div style={{ padding: '8px 12px 12px 52px', background: 'rgba(255,255,255,0.01)' }}>
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        {hand.raw && (
+          <button onClick={() => navigator.clipboard.writeText(hand.raw)}
+            style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)', cursor: 'pointer' }}
+          >Copiar HH</button>
         )}
-        {hand.bb != null && (
-          <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
-            BB {hand.bb.toLocaleString()}
-          </span>
-        )}
-        <ResultBadge result={hand.hero_result} />
-        {hand.villain_count > 0 && (
-          <span style={{ fontSize: 11, color: '#8b5cf6' }}>{hand.villain_count}V</span>
-        )}
-        {hand.has_screenshot && (
-          <span style={{ fontSize: 11, color: '#22c55e' }}>SS</span>
-        )}
-        {(() => {
-          const tags = [...(hand.hm3_tags || []), ...(hand.discord_tags || [])]
-          if (tags.length === 0) return null
-          return (
-            <span style={{
-              fontSize: 10, color: '#a78bfa',
-              background: 'rgba(139,92,246,0.1)',
-              padding: '1px 6px', borderRadius: 3,
-              maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }} title={tags.join(', ')}>
-              {tags.join(', ')}
-            </span>
-          )
-        })()}
-        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <a href={`/hand/${hand.id}`} onClick={e => e.stopPropagation()}
-            style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}
-          >Detalhe</a>
-          <a href={`/replayer/${hand.id}`} onClick={e => e.stopPropagation()}
-            style={{ fontSize: 10, color: '#22c55e', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', fontWeight: 600 }}
-          >&#9654;</a>
-          <button
-            title="Apagar mão"
-            onClick={(e) => { e.stopPropagation(); onDeleteHand(hand.id) }}
-            style={{
-              background: 'transparent', border: 'none', color: '#4b5563',
-              cursor: 'pointer', fontSize: 11, padding: '0 3px', lineHeight: 1,
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#374151'}
-          >✕</button>
-          <span style={{ color: '#4b5563', fontSize: 11 }}>
-            {expanded ? '▼' : '▶'}
-          </span>
-        </span>
+        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
+          style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', textDecoration: 'none' }}
+        >&#9654; Replayer</a>
+        <a href={`/hand/${hand.id}`} target="_blank" rel="noopener noreferrer"
+          style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)', textDecoration: 'none' }}
+        >Detalhe</a>
       </div>
 
-      {/* Expanded detail */}
-      {expanded && (
-        <div style={{ padding: '8px 12px 12px 52px', background: 'rgba(255,255,255,0.01)' }}>
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            {hand.raw && (
-              <button onClick={() => navigator.clipboard.writeText(hand.raw)}
-                style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)', cursor: 'pointer' }}
-              >Copiar HH</button>
-            )}
-            <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
-              style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', textDecoration: 'none' }}
-            >&#9654; Replayer</a>
-            <a href={`/hand/${hand.id}`} target="_blank" rel="noopener noreferrer"
-              style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)', textDecoration: 'none' }}
-            >Detalhe</a>
+      {/* Villains */}
+      {hasVillains && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
+            Villains (VPIP)
           </div>
-
-          {/* Villains */}
-          {hand.villains && hand.villains.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
-                Villains (VPIP)
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {hand.villains.map((v, i) => <VillainRow key={i} v={v} />)}
-              </div>
-            </div>
-          )}
-
-          {/* Screenshot players */}
-          {hand.screenshot_players && Object.keys(hand.screenshot_players).length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
-                Mesa (Screenshot)
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {Object.entries(hand.screenshot_players).map(([pos, data]) => {
-                  const name = typeof data === 'string' ? data : data?.name || '?'
-                  const bounty = typeof data === 'object' ? (data?.bounty_pct || data?.bounty) : null
-                  const country = typeof data === 'object' ? (data?.country_flag || data?.country) : null
-                  return (
-                    <div key={pos} style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      background: 'rgba(255,255,255,0.02)', borderRadius: 3, padding: '2px 6px',
-                      border: '1px solid rgba(255,255,255,0.04)', fontSize: 11,
-                    }}>
-                      <PosBadge pos={pos} />
-                      <span style={{ color: '#94a3b8' }}>{name}</span>
-                      {bounty ? <span style={{ color: '#f59e0b', fontSize: 9 }}>{bounty}</span> : null}
-                      {country ? <span style={{ fontSize: 9 }}>{country}</span> : null}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {!hand.villains?.length && !hand.screenshot_players && (
-            <div style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>
-              Sem dados adicionais
-            </div>
-          )}
-
-          {/* Delete actions */}
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-            {hand.has_screenshot && hand.screenshot_entry_id && (
-              <button
-                onClick={() => onDeleteScreenshot(hand.screenshot_entry_id)}
-                style={{
-                  padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
-                  background: 'rgba(239,68,68,0.08)', color: '#ef4444',
-                  border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
-                }}
-              >Apagar Screenshot</button>
-            )}
-            <button
-              onClick={() => onDeleteHand(hand.id)}
-              style={{
-                padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
-                background: 'rgba(239,68,68,0.08)', color: '#ef4444',
-                border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
-              }}
-            >Apagar Mão</button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {hand.villains.map((v, i) => <VillainRow key={i} v={v} />)}
           </div>
+        </div>
+      )}
+
+      {/* Screenshot players */}
+      {hasSsPlayers && (
+        <div>
+          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600 }}>
+            Mesa (Screenshot)
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {Object.entries(hand.screenshot_players).map(([pos, data]) => {
+              const name = typeof data === 'string' ? data : data?.name || '?'
+              const bounty = typeof data === 'object' ? (data?.bounty_pct || data?.bounty) : null
+              const country = typeof data === 'object' ? (data?.country_flag || data?.country) : null
+              return (
+                <div key={pos} style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  background: 'rgba(255,255,255,0.02)', borderRadius: 3, padding: '2px 6px',
+                  border: '1px solid rgba(255,255,255,0.04)', fontSize: 11,
+                }}>
+                  <PosBadge pos={pos} />
+                  <span style={{ color: '#94a3b8' }}>{name}</span>
+                  {bounty ? <span style={{ color: '#f59e0b', fontSize: 9 }}>{bounty}</span> : null}
+                  {country ? <span style={{ fontSize: 9 }}>{country}</span> : null}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {!hasVillains && !hasSsPlayers && (
+        <div style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>
+          Sem dados adicionais
+        </div>
+      )}
+
+      {/* Delete SS (apagar mão já está no HandRow) */}
+      {hand.has_screenshot && hand.screenshot_entry_id && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <button
+            onClick={() => onDeleteScreenshot(hand.screenshot_entry_id)}
+            style={{
+              padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+              background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+              border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
+            }}
+          >Apagar Screenshot</button>
         </div>
       )}
     </div>
@@ -480,15 +382,35 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
       {/* Hands list */}
       {open && (
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-          {hands.map(h => (
-            <HandRow
-              key={h.id}
-              hand={h}
-              expanded={expandedHands.has(h.id)}
-              onToggle={() => toggleHand(h.id)}
-              onDeleteHand={onDeleteHand}
-              onDeleteScreenshot={onDeleteScreenshot}
-            />
+          {hands.map((h, idx) => (
+            <div key={h.id}>
+              <HandRow
+                hand={h}
+                idx={idx}
+                onClick={() => toggleHand(h.id)}
+                onDelete={onDeleteHand}
+                extraEnd={
+                  <>
+                    {h.villain_count > 0 && (
+                      <span style={{ fontSize: 11, color: '#8b5cf6', fontWeight: 600 }}>{h.villain_count}V</span>
+                    )}
+                    {h.has_screenshot && (
+                      <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>SS</span>
+                    )}
+                    <span style={{ color: '#4b5563', fontSize: 11 }}>
+                      {expandedHands.has(h.id) ? '▼' : '▶'}
+                    </span>
+                  </>
+                }
+              />
+              {expandedHands.has(h.id) && (
+                <TournamentDetail
+                  hand={h}
+                  onDeleteHand={onDeleteHand}
+                  onDeleteScreenshot={onDeleteScreenshot}
+                />
+              )}
+            </div>
           ))}
         </div>
       )}
