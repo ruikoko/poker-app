@@ -1053,6 +1053,104 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
+# TEMP: remove after Sessao parse-failed fix
+@router.get("/admin/parse-failed-stats")
+def admin_parse_failed_stats(current_user=Depends(require_auth)):
+    """
+    Read-only: blast radius de maos HM3 (2026+) onde o _parse_hand falhou
+    a preencher positions. Criterio: all_players_actions tem jogadores
+    mas nenhum deles tem key 'position' com valor non-null/non-empty.
+    Devolve total_affected, breakdown por site, e sample de 10 ids.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) AS total_affected
+                FROM hands
+                WHERE played_at >= '2026-01-01'
+                  AND origin = 'hm3'
+                  AND all_players_actions IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+                      WHERE k != '_meta'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+                      WHERE k != '_meta'
+                        AND (v ? 'position')
+                        AND (v->>'position') IS NOT NULL
+                        AND (v->>'position') != ''
+                  )
+            """)
+            total_affected = cur.fetchone()["total_affected"]
+
+            cur.execute("""
+                SELECT site, COUNT(*) AS affected
+                FROM hands
+                WHERE played_at >= '2026-01-01'
+                  AND origin = 'hm3'
+                  AND all_players_actions IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+                      WHERE k != '_meta'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+                      WHERE k != '_meta'
+                        AND (v ? 'position')
+                        AND (v->>'position') IS NOT NULL
+                        AND (v->>'position') != ''
+                  )
+                GROUP BY site
+                ORDER BY affected DESC
+            """)
+            by_site = [
+                {"site": r["site"], "affected": r["affected"]}
+                for r in cur.fetchall()
+            ]
+
+            cur.execute("""
+                SELECT id, site, hand_id, played_at, hm3_tags, has_showdown
+                FROM hands
+                WHERE played_at >= '2026-01-01'
+                  AND origin = 'hm3'
+                  AND all_players_actions IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+                      WHERE k != '_meta'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+                      WHERE k != '_meta'
+                        AND (v ? 'position')
+                        AND (v->>'position') IS NOT NULL
+                        AND (v->>'position') != ''
+                  )
+                ORDER BY played_at DESC
+                LIMIT 10
+            """)
+            sample = [
+                {
+                    "id": r["id"],
+                    "site": r["site"],
+                    "hand_id": r["hand_id"],
+                    "played_at": r["played_at"].isoformat() if r["played_at"] else None,
+                    "hm3_tags": r["hm3_tags"] or [],
+                    "has_showdown": bool(r["has_showdown"]),
+                }
+                for r in cur.fetchall()
+            ]
+
+        return {
+            "total_affected": total_affected,
+            "by_site": by_site,
+            "sample": sample,
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
