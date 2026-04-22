@@ -18,6 +18,7 @@ import io
 import logging
 from datetime import datetime
 from collections import defaultdict
+from app.utils.tournament_format import detect_tournament_format
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -144,6 +145,7 @@ def _parse_hand(hh_text, site_name):
         "board": [],
         "result": None,
         "currency": "$",
+        "tournament_format": None,
         "raw": hh_text.strip(),
     }
 
@@ -193,6 +195,11 @@ def _parse_hand(hh_text, site_name):
         m = re.search(r"Tournament\s*#\d+\s*-\s*(.+?)(?:\s*-\s*Holdem)", hh_text)
         if m:
             result["stakes"] = m.group(1).strip()
+
+    # ── Tournament format (keyword no nome OU fallback estrutural por sala) ──
+    result["tournament_format"] = detect_tournament_format(
+        result["stakes"], site=site_name, raw_hh=hh_text,
+    )
 
     # ── Button seat ──
     table_m = re.search(r"Seat\s*#(\d+)\s+is the button", hh_text)
@@ -729,16 +736,19 @@ async def import_hm3(
                     """INSERT INTO hands
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
-                        notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown)
+                        notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown,
+                        tournament_format)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s, %s, 'new', %s, %s)
+                        %s, %s, %s, %s, 'new', %s, %s,
+                        %s)
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
                         all_players_actions = EXCLUDED.all_players_actions,
-                        has_showdown = EXCLUDED.has_showdown
+                        has_showdown = EXCLUDED.has_showdown,
+                        tournament_format = COALESCE(hands.tournament_format, EXCLUDED.tournament_format)
                     RETURNING id""",
                     (
                         parsed["site"],
@@ -756,6 +766,7 @@ async def import_hm3(
                         parsed["raw"],
                         json.dumps(all_players),
                         has_showdown,
+                        parsed["tournament_format"],
                     )
                 )
                 hand_db_id = cur.fetchone()["id"]

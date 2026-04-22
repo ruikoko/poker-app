@@ -723,7 +723,15 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
     hand_id = f"GG-{tm_digits}"
 
     tournament_name = hh_hand.get("tournament_name") or hh_hand.get("blinds", "")
-    tournament_format = detect_tournament_format(tournament_name)
+    screenshot_players = screenshot_data.get("players_list", [])
+    has_player_bounty = any(
+        (p.get("bounty_pct") or 0) > 0 for p in screenshot_players
+    )
+    tournament_format = detect_tournament_format(
+        tournament_name,
+        site="GGPoker",
+        has_player_bounty=has_player_bounty,
+    )
     buyin = _extract_buyin(tournament_name)
     buyin_numeric = _extract_buyin_numeric(tournament_name)
 
@@ -932,8 +940,16 @@ async def import_mtt(
                     "num_players": h.get("num_players", 0),
                 }
 
-                # Classificar formato sempre (persistir em hands.tournament_format)
-                tournament_format = detect_tournament_format(tournament_name)
+                # Classificar formato — enriquecer com bounty_pct da SS (se houver)
+                ss_players = screenshot.get("players_list", []) if has_screenshot else []
+                has_player_bounty = any(
+                    (p.get("bounty_pct") or 0) > 0 for p in ss_players
+                )
+                tournament_format = detect_tournament_format(
+                    tournament_name,
+                    site="GGPoker",
+                    has_player_bounty=has_player_bounty,
+                )
 
                 # Auto-tags
                 tags = []
