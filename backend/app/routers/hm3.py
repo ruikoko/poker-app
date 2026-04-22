@@ -285,7 +285,13 @@ def _parse_hand(hh_text, site_name):
         if tn_m:
             result["tournament_number"] = tn_m.group(1)
 
-        m = re.search(r"Tournament\s*#\d+\s*-\s*(.+?)(?:\s*-\s*Holdem)", hh_text)
+        # WPN recent format: name precedes "Tournament #TID" instead of following it.
+        # Header: "Game Hand #<handId> - <prize_pool_name> #<tournamentId> - Holdem ..."
+        # Captures everything between "Game Hand #N - " and the next " #<digits>"
+        # (i.e. the tournament id), including words like "Tournament" within the name.
+        # Ex: "Game Hand #2720101323 - $60,000 GTD Tournament #34764312 - Holdem ..."
+        #      captures "$60,000 GTD Tournament".
+        m = re.search(r"Game\s+Hand\s+#\d+\s*-\s*(.+?)\s*#\d+", hh_text)
         if m:
             name = m.group(1).strip()
             result["stakes"] = name
