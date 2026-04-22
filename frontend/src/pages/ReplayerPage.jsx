@@ -118,7 +118,7 @@ export default function ReplayerPage() {
     const heroBB = heroEntry[1].stack_bb || (heroEntry[1].stack / (m.bb || 1))
     const heroPos = heroEntry[1].position || ''
     const isPKO = hand.raw && /bounty|PKO|KO|Progressive|Mystery/i.test(hand.raw)
-    const fmt = isPKO ? 'PKO' : 'vanilla'
+    const fmt = isPKO ? 'PKO' : 'Vanilla'
     
     // Get all players sorted by seat order
     const allPlayers = Object.entries(hand.all_players_actions)

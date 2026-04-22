@@ -13,9 +13,21 @@ async function apiFetch(path, opts = {}) {
   return res.json()
 }
 
-const FORMATS = ['PKO', 'KO', 'vanilla', 'mystery']
+// Novos canonicals primeiro; legacy retidos para dual-accept ate backfill
+// (ver backend/app/utils/tournament_format.py, D3 approach).
+const FORMATS = ['Super KO', 'PKO', 'Mystery KO', 'Vanilla', 'KO', 'vanilla', 'mystery']
 const PHASES  = ['early', 'middle', 'bubble', 'itm', 'final_table']
 const POSITIONS = ['UTG', 'UTG1', 'MP', 'MP1', 'HJ', 'CO', 'BTN', 'SB', 'BB']
+
+// Normaliza case + mapeia legacy 'KO' para a cor PKO (mesma familia bounty).
+// Super KO e Mystery KO mantem-se em fallback ('#a74') por nao haver regra
+// visual especifica na spec.
+function formatColor(fmt) {
+  const f = (fmt || '').toLowerCase()
+  if (f === 'pko' || f === 'ko') return '#7c4'
+  if (f === 'vanilla') return '#47a'
+  return '#a74'
+}
 
 function Badge({ label, color = '#444' }) {
   return (
@@ -49,7 +61,7 @@ function TreeRow({ tree, onDelete, onEdit }) {
     <tr style={{ borderBottom: '1px solid #1e1e1e' }}>
       <td style={{ padding: '8px 12px', fontWeight: 600 }}>{tree.name}</td>
       <td style={{ padding: '8px 12px' }}>
-        <Badge label={tree.format || '—'} color={tree.format === 'PKO' ? '#7c4' : tree.format === 'vanilla' ? '#47a' : '#a74'} />
+        <Badge label={tree.format || '—'} color={formatColor(tree.format)} />
       </td>
       <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>{tree.num_players ? `${tree.num_players}-max` : '—'}</td>
       <td style={{ padding: '8px 12px' }}>
@@ -440,7 +452,7 @@ export default function GTOBrainPage() {
             {trees.length} trees · {totalNodes.toLocaleString()} nós
             {Object.entries(byFormat).map(([f, n]) => (
               <span key={f} style={{ marginLeft: 12 }}>
-                <Badge label={`${f}: ${n}`} color={f === 'PKO' ? '#7c4' : f === 'vanilla' ? '#47a' : '#a74'} />
+                <Badge label={`${f}: ${n}`} color={formatColor(f)} />
               </span>
             ))}
           </p>

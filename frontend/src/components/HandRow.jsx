@@ -133,7 +133,8 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
 
   // KO/NKO
   const fmt = hand.tournament_format
-  const isKO = fmt && fmt !== 'vanilla'
+  // Dual-accept: legacy 'vanilla' e novo canonical 'Vanilla' (D3).
+  const isKO = fmt && fmt.toLowerCase() !== 'vanilla'
   const showFmt = !!fmt
 
   // GG.gl link (se existir em raw ou notes)
