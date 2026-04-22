@@ -178,3 +178,33 @@ O modal do vilão mostra **só** mãos presentes em `hand_villains` — não mai
 ### 5. Filtro permanente: só mãos de 2026
 
 Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` deve incluir `played_at >= '2026-01-01'`**. Em produção a UI já filtra; em scripts `query_*.py` / `backfill_*.py` é obrigatório. Histórico anterior existe na BD mas é ruído para qualquer análise actual.
+
+## ESTADO FIM SESSÃO 21-22 ABR 2026
+
+### Concluído hoje
+- Coluna hands.origin criada + backfill 5271 mãos
+- Regra villain A∨B∨C aplicada em /villains/search/hands e /recalculate-hands (VPIP antigo removido)
+- Filtros showdown (Com/Sem) na página Estudo
+- Torneios: aba "GG sem SS", header enriquecido (TM · nome · $buy_in · blinds · horas · N mãos/SS/V), chip buy_in
+- Placeholders Discord excluídos de Torneios
+- Secção HM3 adicionada ao sidebar (/hm3)
+- Coluna hands.tournament_format criada + parser por sala (nome primeiro; fallback: Winamax bounty pattern, PS 3-componentes buyIn, GG bounty_pct) + backfill
+- Badge KO/NKO no HandRow unificado (Estudo, HM3, Torneios)
+- Componente HandRow partilhado em components/HandRow.jsx substituindo 3 HandRows locais
+- Endpoint HM3 .bat agora popula origin='hm3'
+- Fix button seat não presente em seats (Winamax raw bug) — 3 mãos que falhavam agora entram com position=NULL
+- Fallback site detection via hero aliases (HERO_NICKS_BY_SITE por sala) quando SITE_MAP HM3 falha
+
+### Bugs detectados, por resolver
+1. CRÍTICO: _detect_vpip_hm3 em hm3.py só olha VPIP preflop; mãos com tag nota* + showdown não criam entries em hand_villains. Ex: id=182259 (WN-...-157) nota++ sd=True villains=[]. Código escreve em villain_notes mas NUNCA em hand_villains — regra A∨B∨C fica sem rows. Fix: (a) iterar all_players e extrair não-hero com cards preenchidos (showdown-based); fallback VPIP preflop quando sd=False; (b) INSERT em hand_villains além de villain_notes. Modelo equivalente existe em mtt.py _create_villains_for_hand.
+2. Parser WPN incompleto (baixa prioridade — Rui joga pouco em WPN)
+
+### Simulação end-to-end
+- Passo 1 HM3 .bat: VALIDADO (3 mãos button-bug resolvidas, 0 erros)
+- Passo 2 Discord sync: PENDENTE
+- Passo 3 validação UI: PENDENTE
+
+### Contexto útil próxima sessão
+- hero_names.py tem HERO_NICKS_BY_SITE e FRIEND_NICKS_BY_SITE novos. FRIEND_NICKS_BY_SITE["GGPoker"] = ["karluz","flightrisk"] — extensível à medida que Rui pede mãos de amigos.
+- Commits session: c499c6f→d6d0505→5ea3db6→9bd40aa→8fdb0a7→42bca81→3305c60→0737d61→b864773→5c7c33b→dd2e960→dee479f→17f5cf1→e3ab933→7ab5ac1→828d736→3aedae5→76b67bc→3493b56
+- Logs temporários em hero_names.py e hm3.py (WARNINGs de detect_site e HM3 primary parse raised) devem ser removidos quando o Bug CRÍTICO for resolvido
