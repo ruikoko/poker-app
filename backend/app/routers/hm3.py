@@ -1498,6 +1498,45 @@ def admin_reparse_tournament_fields(
         conn.close()
 
 
+# TEMP: remove after WPN tournament_name regex fix
+@router.get("/admin/get-raw/{hand_id}")
+def admin_get_raw(hand_id: int, current_user=Depends(require_auth)):
+    """
+    Read-only: devolve o raw HH (truncado a 3000 chars) + site + colunas
+    tournament_* actuais. Usado para debug do regex WPN de tournament_name
+    em maos recentes que falham a extraccao.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, hand_id, site, raw, stakes,
+                          tournament_name, tournament_number, tournament_format, buy_in
+                   FROM hands WHERE id = %s""",
+                (hand_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"hand id={hand_id} nao encontrada")
+
+            raw_text = row["raw"] or ""
+            return {
+                "hand_id_db": row["id"],
+                "hand_id_text": row["hand_id"],
+                "site": row["site"],
+                "stakes": row["stakes"],
+                "tournament_name": row["tournament_name"],
+                "tournament_number": row["tournament_number"],
+                "tournament_format": row["tournament_format"],
+                "buy_in": float(row["buy_in"]) if row["buy_in"] is not None else None,
+                "raw": raw_text[:3000],
+                "raw_truncated": len(raw_text) > 3000,
+                "raw_full_length": len(raw_text),
+            }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
