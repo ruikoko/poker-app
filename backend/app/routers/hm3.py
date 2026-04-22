@@ -737,18 +737,19 @@ async def import_hm3(
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
                         notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown,
-                        tournament_format)
+                        tournament_format, origin)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, 'new', %s, %s,
-                        %s)
+                        %s, 'hm3')
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
                         all_players_actions = EXCLUDED.all_players_actions,
                         has_showdown = EXCLUDED.has_showdown,
-                        tournament_format = COALESCE(hands.tournament_format, EXCLUDED.tournament_format)
+                        tournament_format = COALESCE(hands.tournament_format, EXCLUDED.tournament_format),
+                        origin = COALESCE(hands.origin, EXCLUDED.origin)
                     RETURNING id""",
                     (
                         parsed["site"],
