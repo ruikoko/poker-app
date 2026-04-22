@@ -609,6 +609,10 @@ async def import_hm3(
                 try:
                     parsed = _parse_hand(hh_text, site_name)
                 except Exception as parse_err:
+                    logger.warning(
+                        f"HM3 primary parse raised for {gamenumber} ({site_name}): "
+                        f"{type(parse_err).__name__}: {parse_err}"
+                    )
                     # Fallback: sala talvez esteja mal-mapeada no site_id da BD HM3.
                     # Tenta detectar sala correcta pelos nicks nos seat lines.
                     detected = detect_site_from_hh(hh_text)
