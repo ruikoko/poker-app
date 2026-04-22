@@ -215,6 +215,8 @@ def _parse_hand(hh_text, site_name):
         "result": None,
         "currency": "$",
         "tournament_format": None,
+        "tournament_name": None,
+        "tournament_number": None,
         "raw": hh_text.strip(),
     }
 
@@ -250,20 +252,46 @@ def _parse_hand(hh_text, site_name):
 
     # ── Tournament name / stakes ──
     if site_name == "Winamax":
+        # tournament_number no Table line: "Table: 'NAME(N)#SEAT'"
+        tn_m = re.search(r"Table:\s*'[^(]+\((\d+)\)#", hh_text)
+        if tn_m:
+            result["tournament_number"] = tn_m.group(1)
+
         m = re.search(r'Tournament\s+"([^"]+)"', hh_text)
         if m:
-            result["stakes"] = m.group(1).strip()
+            name = m.group(1).strip()
+            # tournament_name: nome real limpo, sem buyin suffix.
+            # stakes: mantem o padrao legacy "NAME (buyin)" para retro-compat
+            # com callers que ainda leem stakes (HandRow, HM3, Hands, etc.).
+            result["tournament_name"] = name
+            result["stakes"] = name
         buyin_m = re.search(r'buyIn:\s*([\d\u20ac$,.]+(?:\s*\+\s*[\d\u20ac$,.]+)?)', hh_text)
         if buyin_m and result["stakes"]:
             result["stakes"] += f" ({buyin_m.group(1).strip()})"
     elif site_name == "PokerStars":
+        # tournament_number no header: "Tournament #3983883162"
+        tn_m = re.search(r"Tournament\s*#(\d+)", hh_text)
+        if tn_m:
+            result["tournament_number"] = tn_m.group(1)
+
         m = re.search(r"Tournament\s*#\d+,\s*(.+?)(?:Hold'em|Holdem)", hh_text)
         if m:
             result["stakes"] = m.group(1).strip().rstrip(",- ")
+        # tournament_name fica None: PS nao tem nome real no header,
+        # frontend compoe titulo via buy_in + fmt + #tournament_number.
     elif site_name == "WPN":
+        # tournament_number no header: "Tournament #34790846"
+        tn_m = re.search(r"Tournament\s*#(\d+)", hh_text)
+        if tn_m:
+            result["tournament_number"] = tn_m.group(1)
+
         m = re.search(r"Tournament\s*#\d+\s*-\s*(.+?)(?:\s*-\s*Holdem)", hh_text)
         if m:
-            result["stakes"] = m.group(1).strip()
+            name = m.group(1).strip()
+            result["stakes"] = name
+            # WPN: prize-pool-string e o identificador descritivo (nao ha
+            # nome real separado do prize pool).
+            result["tournament_name"] = name
 
     # ── Tournament format (keyword no nome OU fallback estrutural por sala) ──
     result["tournament_format"] = detect_tournament_format(
