@@ -151,11 +151,12 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
     Sem matches → None.
     Case-insensitive.
     """
-    if not raw_hh:
-        return None
     import re
     import logging
     _log = logging.getLogger("hero_names.detect_site")
+    _log.warning(f"detect_site called: raw_len={len(raw_hh or '')}")
+    if not raw_hh:
+        return None
     seat_names = [
         m.group(1).lower().strip()
         for m in re.finditer(r"Seat\s+\d+:\s*(.+?)\s*\(", raw_hh)
