@@ -156,6 +156,7 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
     _log = logging.getLogger("hero_names.detect_site")
     _log.warning(f"detect_site called: raw_len={len(raw_hh or '')}")
     if not raw_hh:
+        _log.warning("detect_site_from_hh: return None (empty raw)")
         return None
     seat_names = [
         m.group(1).lower().strip()
@@ -169,6 +170,7 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
         lowered = {n.lower() for n in nicks}
         score[site] = sum(1 for n in seat_names if n in lowered)
     if not score:
+        _log.warning("detect_site_from_hh: return None (empty ALL_NICKS_BY_SITE). seats=%r", seat_names)
         return None
     best_score = max(score.values())
     if best_score == 0:
@@ -184,4 +186,8 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
             top_sites, seat_names, score,
         )
         return None
+    _log.warning(
+        "detect_site_from_hh: MATCH site=%r seats=%r score=%r",
+        top_sites[0], seat_names, score,
+    )
     return top_sites[0]
