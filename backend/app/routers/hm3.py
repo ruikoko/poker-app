@@ -1316,6 +1316,188 @@ def admin_tournament_format_stats(current_user=Depends(require_auth)):
         conn.close()
 
 
+# TEMP: remove after reparse-tournament-fields completes and is validated
+#
+# Criterio site-aware partilhado entre preview e execute.
+# - WN / WPN: precisa tournament_name + tournament_number (ambos extraidos
+#   pelo _parse_hand pos-C4b).
+# - PS: parser devolve tournament_name=None sempre (PS nao tem nome real no
+#   header); portanto so tournament_number e validado.
+# GG nao e apanhado porque services/hand_service.py nao set origin (NULL).
+_REPARSE_CRITERIA = """
+    played_at >= '2026-01-01'
+    AND origin = 'hm3'
+    AND (
+        (site IN ('Winamax', 'WPN') AND (tournament_name IS NULL OR tournament_number IS NULL))
+        OR
+        (site = 'PokerStars' AND tournament_number IS NULL)
+    )
+"""
+
+
+@router.get("/admin/preview-reparse-tournament-fields")
+def admin_preview_reparse_tournament_fields(current_user=Depends(require_auth)):
+    """
+    Read-only preview do re-parse de maos HM3 (2026+) com
+    tournament_name / tournament_number em falta (criterio site-aware).
+    Nao mexe em tournament_format, stakes, tags, all_players_actions.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) AS n FROM hands WHERE {_REPARSE_CRITERIA}")
+            total = cur.fetchone()["n"]
+
+            cur.execute(
+                f"""SELECT site, COUNT(*) AS n
+                    FROM hands
+                    WHERE {_REPARSE_CRITERIA}
+                    GROUP BY site ORDER BY n DESC"""
+            )
+            by_site = [{"site": r["site"], "n": r["n"]} for r in cur.fetchall()]
+
+            cur.execute(
+                f"""SELECT id, site, hand_id, played_at,
+                           stakes, tournament_name, tournament_number, buy_in
+                    FROM hands
+                    WHERE {_REPARSE_CRITERIA}
+                    ORDER BY played_at DESC LIMIT 10"""
+            )
+            sample = [
+                {
+                    "id": r["id"],
+                    "site": r["site"],
+                    "hand_id": r["hand_id"],
+                    "played_at": r["played_at"].isoformat() if r["played_at"] else None,
+                    "stakes": r["stakes"],
+                    "tournament_name": r["tournament_name"],
+                    "tournament_number": r["tournament_number"],
+                    "buy_in": float(r["buy_in"]) if r["buy_in"] is not None else None,
+                }
+                for r in cur.fetchall()
+            ]
+
+        return {
+            "total_to_process": total,
+            "by_site": by_site,
+            "sample": sample,
+            "limit_per_run": 500,
+        }
+    finally:
+        conn.close()
+
+
+# TEMP: remove after reparse-tournament-fields completes and is validated
+@router.post("/admin/reparse-tournament-fields")
+def admin_reparse_tournament_fields(
+    confirm: str = "",
+    current_user=Depends(require_auth),
+):
+    """
+    Re-parse em batch de maos HM3 (2026+) com tournament_name /
+    tournament_number em falta (criterio site-aware em _REPARSE_CRITERIA).
+    Por mao corre _parse_hand(raw, site) e faz UPDATE tournament_name,
+    tournament_number; buy_in e actualizado apenas se NULL (COALESCE).
+    NAO mexe em tournament_format, stakes, tags, all_players_actions.
+
+    Transacao por mao. LIMIT 500 por chamada. ORDER BY played_at DESC.
+    Exige ?confirm=yes.
+    """
+    if confirm != "yes":
+        raise HTTPException(
+            status_code=400,
+            detail="Missing ?confirm=yes safety parameter",
+        )
+
+    conn = get_conn()
+    target_ids = []
+    errors = []          # cap 20
+    sample_fixed = []    # cap 10
+    fixed = 0
+    still_null = 0
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT id FROM hands
+                    WHERE {_REPARSE_CRITERIA}
+                    ORDER BY played_at DESC
+                    LIMIT 500"""
+            )
+            target_ids = [r["id"] for r in cur.fetchall()]
+        conn.commit()
+
+        for hand_id in target_ids:
+            new_name = None
+            new_number = None
+            new_buy_in = None
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, raw, site FROM hands WHERE id = %s",
+                        (hand_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row or not row["raw"]:
+                        raise ValueError("missing raw")
+
+                    parsed = _parse_hand(row["raw"], row["site"])
+                    if not parsed:
+                        raise ValueError("_parse_hand returned None")
+
+                    new_name = parsed.get("tournament_name")
+                    new_number = parsed.get("tournament_number")
+                    # Parser HM3 pos-C4b nao extrai buy_in (so gg_hands.py o
+                    # faz). Se alguma versao futura passar a extrair, o
+                    # COALESCE no UPDATE protege valores existentes.
+                    new_buy_in = parsed.get("buy_in")
+
+                    cur.execute(
+                        """UPDATE hands
+                           SET tournament_name = %s,
+                               tournament_number = %s,
+                               buy_in = COALESCE(buy_in, %s)
+                           WHERE id = %s""",
+                        (new_name, new_number, new_buy_in, hand_id),
+                    )
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                if len(errors) < 20:
+                    errors.append({"id": hand_id, "error": f"{type(e).__name__}: {e}"})
+                continue
+
+            if new_name is None and new_number is None:
+                still_null += 1
+            else:
+                fixed += 1
+                if len(sample_fixed) < 10:
+                    sample_fixed.append(hand_id)
+
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) AS n FROM hands WHERE {_REPARSE_CRITERIA}")
+            remaining_in_db = cur.fetchone()["n"]
+
+        return {
+            "executed": True,
+            "total_processed": len(target_ids),
+            "fixed": fixed,
+            "still_null": still_null,
+            "errors": errors,
+            "remaining_in_db": remaining_in_db,
+            "sample_fixed": sample_fixed,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"reparse-tournament-fields error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
