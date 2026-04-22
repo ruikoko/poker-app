@@ -577,6 +577,18 @@ function HM3HandRow({ hand, onClick, onDelete, idx }) {
       <div style={{ minWidth: 80, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600 }}>
         {level || ''}{blindsLabel ? ` ${blindsLabel}` : ''}
       </div>
+      {hand.tournament_format && (() => {
+        const ko = hand.tournament_format !== 'vanilla'
+        return (
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+            fontFamily: 'monospace', padding: '3px 6px', borderRadius: 3,
+            background: ko ? '#064e3b' : '#1e293b',
+            color: ko ? '#6ee7b7' : '#64748b',
+            flexShrink: 0,
+          }}>{ko ? 'KO' : 'NKO'}</span>
+        )
+      })()}
       <div style={{ minWidth: 28, flexShrink: 0, fontSize: 12, color: '#4b5563' }}>{siteShort}</div>
       <div style={{ minWidth: 42, flexShrink: 0, fontSize: 12, color: '#4b5563', fontFamily: 'monospace' }}>
         {hand.played_at ? hand.played_at.slice(11, 16) : ''}

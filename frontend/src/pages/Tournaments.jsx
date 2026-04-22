@@ -244,6 +244,17 @@ function HandRow({ hand, expanded, onToggle, onDeleteHand, onDeleteScreenshot })
             <span style={{ fontSize: 11, color: '#4b5563', fontStyle: 'italic' }}>preflop</span>
           )}
         </div>
+        {hand.tournament_format && (() => {
+          const ko = hand.tournament_format !== 'vanilla'
+          return (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+              fontFamily: 'monospace', padding: '3px 6px', borderRadius: 3,
+              background: ko ? '#064e3b' : '#1e293b',
+              color: ko ? '#6ee7b7' : '#64748b',
+            }}>{ko ? 'KO' : 'NKO'}</span>
+          )
+        })()}
         <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.blinds}</span>
         {hand.level != null && (
           <span style={{
