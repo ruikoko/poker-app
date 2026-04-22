@@ -152,42 +152,24 @@ def detect_site_from_hh(raw_hh: str | None) -> str | None:
     Case-insensitive.
     """
     import re
-    import logging
-    _log = logging.getLogger("hero_names.detect_site")
-    _log.warning(f"detect_site called: raw_len={len(raw_hh or '')}")
     if not raw_hh:
-        _log.warning("detect_site_from_hh: return None (empty raw)")
         return None
     seat_names = [
         m.group(1).lower().strip()
         for m in re.finditer(r"Seat\s+\d+:\s*(.+?)\s*\(", raw_hh)
     ]
     if not seat_names:
-        _log.warning("detect_site_from_hh: no seat lines found in raw (first 200 chars: %r)", raw_hh[:200])
         return None
     score: dict[str, int] = {}
     for site, nicks in ALL_NICKS_BY_SITE.items():
         lowered = {n.lower() for n in nicks}
         score[site] = sum(1 for n in seat_names if n in lowered)
     if not score:
-        _log.warning("detect_site_from_hh: return None (empty ALL_NICKS_BY_SITE). seats=%r", seat_names)
         return None
     best_score = max(score.values())
     if best_score == 0:
-        _log.warning(
-            "detect_site_from_hh: zero matches. seats=%r score=%r",
-            seat_names, score,
-        )
         return None
     top_sites = [s for s, sc in score.items() if sc == best_score]
     if len(top_sites) > 1:
-        _log.warning(
-            "detect_site_from_hh: tie between %r. seats=%r score=%r",
-            top_sites, seat_names, score,
-        )
         return None
-    _log.warning(
-        "detect_site_from_hh: MATCH site=%r seats=%r score=%r",
-        top_sites[0], seat_names, score,
-    )
     return top_sites[0]

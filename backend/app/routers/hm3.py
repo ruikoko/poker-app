@@ -300,12 +300,22 @@ def _parse_hand(hh_text, site_name):
     effective_button = button_seat
     if button_seat and active_names and button_seat not in active_names:
         sorted_all = sorted(all_seat_nums)
-        btn_idx = sorted_all.index(button_seat)
-        for i in range(1, len(sorted_all)):
-            candidate = sorted_all[(btn_idx - i) % len(sorted_all)]
-            if candidate in active_names:
-                effective_button = candidate
-                break
+        if button_seat in sorted_all:
+            btn_idx = sorted_all.index(button_seat)
+            for i in range(1, len(sorted_all)):
+                candidate = sorted_all[(btn_idx - i) % len(sorted_all)]
+                if candidate in active_names:
+                    effective_button = candidate
+                    break
+        else:
+            # Raw inconsistente (Winamax): button aponta para seat que não aparece
+            # em "Seat N:" listings. Aceitar a mão com position desconhecida.
+            logger.warning(
+                f"HM3 button mismatch: button_seat={button_seat} not in "
+                f"all_seat_nums={all_seat_nums} for hand_id={result.get('hand_id')}; "
+                f"accepting with position=None"
+            )
+            effective_button = None
 
     # ── Hero position ──
     if effective_button and active_seat_nums and hero_seat:
@@ -609,10 +619,6 @@ async def import_hm3(
                 try:
                     parsed = _parse_hand(hh_text, site_name)
                 except Exception as parse_err:
-                    logger.warning(
-                        f"HM3 primary parse raised for {gamenumber} ({site_name}): "
-                        f"{type(parse_err).__name__}: {parse_err}"
-                    )
                     # Fallback: sala talvez esteja mal-mapeada no site_id da BD HM3.
                     # Tenta detectar sala correcta pelos nicks nos seat lines.
                     detected = detect_site_from_hh(hh_text)
@@ -633,12 +639,6 @@ async def import_hm3(
                             )
                             continue
                     else:
-                        logger.warning(
-                            "HM3 parser genuine bug: site=%s id=%s err=%s: %s\nRAW:\n%s",
-                            site_name, gamenumber,
-                            type(parse_err).__name__, parse_err,
-                            hh_text,
-                        )
                         errors.append(f"Parse error: {gamenumber} ({site_name}) {ts}: {parse_err}")
                         continue
                 if not parsed or not parsed["hand_id"]:
