@@ -20,6 +20,7 @@ from datetime import datetime
 from collections import defaultdict
 from app.utils.tournament_format import detect_tournament_format
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from pydantic import BaseModel
 from app.auth import require_auth
 from app.db import get_conn, query
 from app.hero_names import HERO_NAMES, detect_site_from_hh
@@ -1143,6 +1144,73 @@ def nota_stats(current_user=Depends(require_auth)):
     if rows:
         return dict(rows[0])
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
+
+
+# TEMP: remove after WPN parser fix
+class _WpnDebugBody(BaseModel):
+    raw: str
+    site: str | None = "WPN"
+
+
+@router.post("/admin/wpn-debug")
+def admin_wpn_debug(body: _WpnDebugBody, current_user=Depends(require_auth)):
+    """
+    Read-only: corre _parse_hand contra um raw HH arbitrario e devolve
+    snapshot do que o parser produziu + indicadores do raw para diagnostico.
+    Nao consulta nem escreve em BD.
+    """
+    raw = body.raw or ""
+    site = body.site or "WPN"
+    if not raw or len(raw) < 50:
+        raise HTTPException(status_code=400, detail="raw ausente ou demasiado curto")
+
+    # Markers usados internamente pelo parser (preflop, filtro de sitting-out, etc.)
+    markers = [
+        "*** ANTE",
+        "*** PRE-FLOP ***",
+        "*** HOLE CARDS ***",
+        "*** POCKET CARDS ***",
+        "*** FLOP ***",
+        "*** TURN ***",
+        "*** RIVER ***",
+        "*** SHOW DOWN ***",
+        "*** SHOWDOWN ***",
+        "*** SUMMARY ***",
+    ]
+    raw_markers_present = {m: (m in raw) for m in markers}
+
+    raw_seat_lines = re.findall(r"^Seat\s+\d+:\s*.+$", raw, flags=re.MULTILINE)
+    raw_post_lines = re.findall(
+        r"^.+?\s+posts\s+(?:the\s+)?(?:small|big)\s+blind\s+[\d,.]+.*$",
+        raw,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    first_lines = raw.splitlines()[:5]
+
+    try:
+        parsed = _parse_hand(raw, site)
+    except Exception as e:
+        return {
+            "site": site,
+            "parsed": None,
+            "parse_error": f"{type(e).__name__}: {e}",
+            "raw_markers_present": raw_markers_present,
+            "raw_seat_lines_count": len(raw_seat_lines),
+            "raw_seat_lines": raw_seat_lines,
+            "raw_post_lines": raw_post_lines,
+            "raw_first_lines": first_lines,
+        }
+
+    return {
+        "site": site,
+        "parsed": parsed,
+        "parse_error": None,
+        "raw_markers_present": raw_markers_present,
+        "raw_seat_lines_count": len(raw_seat_lines),
+        "raw_seat_lines": raw_seat_lines,
+        "raw_post_lines": raw_post_lines,
+        "raw_first_lines": first_lines,
+    }
 
 
 @router.post("/cleanup-old")
