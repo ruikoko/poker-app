@@ -1129,7 +1129,8 @@ def list_nota_hands(
     rows = query(
         """SELECT id, hand_id, played_at, stakes, position,
                   hero_cards, board, result, study_state, site, tags,
-                  all_players_actions
+                  all_players_actions,
+                  tournament_name, tournament_number, tournament_format, buy_in
            FROM hands
            WHERE site IN ('Winamax', 'PokerStars', 'WPN')
              AND EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%%nota%%')
@@ -1151,7 +1152,9 @@ def list_nota_hands(
         if meta.get("sb") and meta.get("bb"):
             hand["blinds"] = f"{meta['sb']}/{meta['bb']}" + (f"({meta['ante']})" if meta.get("ante") else "")
         hand["num_players"] = meta.get("num_players", 0)
-        hand["tournament_name"] = hand.get("stakes")
+        # Preferir coluna real (pos-C4c); fallback para stakes em maos legacy
+        # ainda sem backfill (ficam com hand.tournament_name = None do SELECT).
+        hand["tournament_name"] = hand.get("tournament_name") or hand.get("stakes")
         hand["hero_position"] = hand.get("position")
         hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
         hand["has_screenshot"] = False

@@ -1146,7 +1146,7 @@ def list_mtt_hands(
                    h.hero_cards, h.board, h.result, h.study_state,
                    h.screenshot_url, h.player_names, h.all_players_actions,
                    h.entry_id, h.buy_in, h.hm3_tags, h.discord_tags,
-                   h.tournament_format
+                   h.tournament_format, h.tournament_name, h.tournament_number
             FROM hands h
             {where}
             ORDER BY h.played_at DESC NULLS LAST
@@ -1160,7 +1160,8 @@ def list_mtt_hands(
         # Map to MTT-compatible fields for frontend
         tm_digits = (hand.get("hand_id") or "").replace("GG-", "")
         hand["tm_number"] = f"TM{tm_digits}" if tm_digits else None
-        hand["tournament_name"] = hand.get("stakes")
+        # Preferir coluna real; fallback para stakes em maos legacy sem backfill.
+        hand["tournament_name"] = hand.get("tournament_name") or hand.get("stakes")
         hand["hero_position"] = hand.get("position")
         hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
         hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("player_names"))
@@ -1224,7 +1225,8 @@ def get_mtt_hand(
         """SELECT id, hand_id, played_at, stakes, position,
                   hero_cards, board, result, study_state,
                   screenshot_url, player_names, all_players_actions,
-                  entry_id
+                  entry_id,
+                  tournament_name, tournament_number, tournament_format, buy_in
            FROM hands WHERE id = %s""",
         (hand_id,)
     )
@@ -1235,7 +1237,8 @@ def get_mtt_hand(
     # Map to MTT-compatible fields
     tm_digits = (hand.get("hand_id") or "").replace("GG-", "")
     hand["tm_number"] = f"TM{tm_digits}" if tm_digits else None
-    hand["tournament_name"] = hand.get("stakes")
+    # Preferir coluna real; fallback para stakes em maos legacy sem backfill.
+    hand["tournament_name"] = hand.get("tournament_name") or hand.get("stakes")
     hand["hero_position"] = hand.get("position")
     hand["hero_result"] = float(hand["result"]) if hand.get("result") is not None else None
     hand["has_screenshot"] = bool(hand.get("screenshot_url") or hand.get("player_names"))

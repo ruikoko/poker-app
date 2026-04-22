@@ -153,7 +153,8 @@ def tournament_hands(
         """
         SELECT id, hand_id, played_at, stakes, position,
                hero_cards, board, result, currency, notes, tags,
-               study_state, all_players_actions, screenshot_url, player_names
+               study_state, all_players_actions, screenshot_url, player_names,
+               tournament_name, tournament_number, tournament_format, buy_in
         FROM hands
         WHERE tournament_id = %s
         ORDER BY played_at ASC NULLS LAST, id ASC

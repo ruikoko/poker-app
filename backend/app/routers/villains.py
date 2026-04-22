@@ -220,7 +220,8 @@ def villain_hands(
         f"""SELECT DISTINCT h.id, h.hand_id, h.played_at, h.stakes, h.position,
                    h.hero_cards, h.board, h.result, h.study_state,
                    h.all_players_actions, h.screenshot_url, h.player_names,
-                   h.entry_id, h.raw, h.site
+                   h.entry_id, h.raw, h.site,
+                   h.tournament_name, h.tournament_number, h.tournament_format, h.buy_in
             {base_from_where}
             ORDER BY h.played_at DESC NULLS LAST
             LIMIT %s OFFSET %s""",
