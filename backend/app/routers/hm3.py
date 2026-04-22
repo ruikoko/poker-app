@@ -580,6 +580,11 @@ def _create_hand_villains_hm3(
                 continue
             if pdata.get("is_hero"):
                 continue
+            # Belt-and-suspenders: is_hero pode vir a False em entries criadas
+            # pelo merge de cards (hm3.py L770-774, L826-830) quando o nome so
+            # aparece via enrichment. Reforcar com match por nome.
+            if hero_name and name == hero_name:
+                continue
             cards = pdata.get("cards")
             if not cards:
                 continue
@@ -595,6 +600,8 @@ def _create_hand_villains_hm3(
             if hero_name and name == hero_name:
                 continue
             pdata = all_players.get(name) if isinstance(all_players.get(name), dict) else {}
+            if pdata.get("is_hero"):
+                continue
             villains.append((
                 name,
                 _clean_pos(pdata.get("position")),
@@ -1128,6 +1135,34 @@ def admin_test_villain_fix(hand_id: int, current_user=Depends(require_auth)):
     except Exception as e:
         conn.rollback()
         logger.error(f"test-villain-fix error for id={hand_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+# TEMP: remove after Sessao A Passo 5
+@router.delete("/admin/hand-villain/{hand_id}/{player_name}")
+def admin_delete_hand_villain(
+    hand_id: int, player_name: str, current_user=Depends(require_auth),
+):
+    """
+    DELETE em hand_villains para (hand_db_id, player_name). Usado para
+    limpar rows criadas durante smoke-test antes do fix hero.
+    TEMP — remove no Passo 5.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM hand_villains WHERE hand_db_id = %s AND player_name = %s",
+                (hand_id, player_name),
+            )
+            deleted = cur.rowcount
+        conn.commit()
+        return {"hand_id": hand_id, "player_name": player_name, "deleted": deleted}
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"delete-hand-villain error id={hand_id} name={player_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
