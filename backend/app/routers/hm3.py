@@ -1263,6 +1263,103 @@ def admin_preview_cleanup_since_apr19(current_user=Depends(require_auth)):
         conn.close()
 
 
+# TEMP: remove after cleanup since-apr19 is executed and validated
+@router.post("/admin/execute-cleanup-since-apr19")
+def admin_execute_cleanup_since_apr19(
+    confirm: str = "",
+    current_user=Depends(require_auth),
+):
+    """
+    Destructive: apaga hands >= 2026-04-19, decrementa villain_notes.hands_seen
+    e apaga hand_villains correspondentes. Transacao unica com rollback em erro.
+
+    Exige query param ?confirm=yes. Sem ele devolve 400 sem tocar em nada.
+
+    Ordem importa: UPDATE villain_notes ANTES de DELETE hand_villains (o UPDATE
+    precisa do JOIN hands+hand_villains para calcular decrements). DELETE
+    hand_villains ANTES de DELETE hands (hand_db_id aponta para hands.id sem FK
+    declarado, mas a ordem preserva integridade semantica).
+    """
+    if confirm != "yes":
+        raise HTTPException(
+            status_code=400,
+            detail="Missing ?confirm=yes safety parameter; destructive cleanup refused",
+        )
+
+    cutoff = "2026-04-19 00:00:00"
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # 1) Recolher hand_ids em scope (para DELETE direcionado em hand_villains).
+            cur.execute(
+                "SELECT id FROM hands WHERE played_at >= %s",
+                (cutoff,),
+            )
+            hand_ids = [r["id"] for r in cur.fetchall()]
+
+            # 2) UPDATE villain_notes.hands_seen com decrements computados.
+            #    Single statement, atomico. cur.rowcount = linhas afectadas.
+            cur.execute(
+                """UPDATE villain_notes vn
+                   SET hands_seen = vn.hands_seen - d.decrement,
+                       updated_at = NOW()
+                   FROM (
+                       SELECT h.site AS site,
+                              hv.player_name AS nick,
+                              COUNT(*) AS decrement
+                       FROM hand_villains hv
+                       JOIN hands h ON h.id = hv.hand_db_id
+                       WHERE h.played_at >= %s
+                       GROUP BY h.site, hv.player_name
+                   ) d
+                   WHERE vn.site = d.site AND vn.nick = d.nick""",
+                (cutoff,),
+            )
+            villain_notes_updated = cur.rowcount
+
+            # 3) DELETE hand_villains em scope.
+            cur.execute(
+                "DELETE FROM hand_villains WHERE hand_db_id = ANY(%s)",
+                (hand_ids,),
+            )
+            deleted_hand_villains = cur.rowcount
+
+            # 4) DELETE hands em scope.
+            cur.execute(
+                "DELETE FROM hands WHERE played_at >= %s",
+                (cutoff,),
+            )
+            deleted_hands = cur.rowcount
+
+            # 5) Post-stats (dentro da mesma tx; read-after-write consistente).
+            cur.execute("SELECT COUNT(*) AS n FROM hands")
+            hands_remaining = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM hand_villains")
+            hand_villains_remaining = cur.fetchone()["n"]
+
+        conn.commit()
+        return {
+            "executed": True,
+            "cutoff": "2026-04-19T00:00:00",
+            "deleted_hands": deleted_hands,
+            "deleted_hand_villains": deleted_hand_villains,
+            "villain_notes_updated": villain_notes_updated,
+            "post_stats": {
+                "hands_remaining": hands_remaining,
+                "hand_villains_remaining": hand_villains_remaining,
+            },
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"execute-cleanup-since-apr19 error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
