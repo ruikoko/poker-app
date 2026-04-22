@@ -607,7 +607,7 @@ def _create_hand_villains_hm3(
             """INSERT INTO hand_villains
                    (hand_db_id, player_name, position, stack, vpip_action, mtt_hand_id)
                VALUES (%s, %s, %s, %s, %s, NULL)
-               ON CONFLICT (hand_db_id, player_name) DO NOTHING""",
+               ON CONFLICT (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL DO NOTHING""",
             (hand_db_id, player_name, position, stack, vpip_action),
         )
         if cur.rowcount > 0:
