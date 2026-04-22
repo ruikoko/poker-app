@@ -1264,6 +1264,134 @@ def admin_get_raw(hand_id: int, current_user=Depends(require_auth)):
         conn.close()
 
 
+# TEMP: remove after WPN parser fix
+@router.post("/admin/reparse-all-failed")
+def admin_reparse_all_failed(current_user=Depends(require_auth)):
+    """
+    Re-parse em batch das maos HM3 (2026+) com parse-failed (all_players_actions
+    sem positions). ORDER BY played_at DESC, LIMIT 500. Transacao por mao: se
+    uma rebentar, rollback dessa e continua as outras.
+
+    Scope: apenas all_players_actions + position_parse_failed. has_showdown,
+    tags, hm3_tags, hand_villains nao sao tocados (hand_villains apanhado no
+    proximo .bat via days_back).
+    """
+    import json
+    conn = get_conn()
+    errors = []          # capped at 20
+    sample_fixed = []    # capped at 10
+    fixed = 0
+    still_failed = 0
+    target_ids = []
+
+    # Criterio de "parse-failed" reusado em ambas as queries (inicial + recount)
+    parse_failed_criteria = """
+        played_at >= '2026-01-01'
+        AND origin = 'hm3'
+        AND all_players_actions IS NOT NULL
+        AND EXISTS (
+            SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+            WHERE k != '_meta'
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM jsonb_each(all_players_actions) AS t(k, v)
+            WHERE k != '_meta'
+              AND (v ? 'position')
+              AND (v->>'position') IS NOT NULL
+              AND (v->>'position') != ''
+        )
+    """
+
+    try:
+        # 1) Fetch ids afectados (ordenados, limitados).
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id FROM hands WHERE {parse_failed_criteria} "
+                f"ORDER BY played_at DESC LIMIT 500"
+            )
+            target_ids = [r["id"] for r in cur.fetchall()]
+        conn.commit()
+
+        # 2) Per-hand reparse com transacao individual.
+        for hand_id in target_ids:
+            new_parse_failed = None
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, raw, site FROM hands WHERE id = %s",
+                        (hand_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row or not row["raw"]:
+                        raise ValueError("missing raw")
+
+                    parsed = _parse_hand(row["raw"], row["site"])
+                    if not parsed:
+                        raise ValueError("_parse_hand returned None")
+
+                    actions_by_player, cards_by_player = _parse_actions_from_raw(
+                        row["raw"], row["site"] or "",
+                    )
+
+                    all_players = parsed.get("all_players") or {}
+                    all_players["_meta"] = {
+                        "level": parsed.get("level"),
+                        "sb": parsed.get("sb_size", 0),
+                        "bb": parsed.get("bb_size", 0),
+                        "ante": parsed.get("ante_size", 0),
+                        "num_players": parsed.get("num_players", 0),
+                    }
+                    for player_name, actions in actions_by_player.items():
+                        if player_name in all_players and isinstance(all_players[player_name], dict):
+                            all_players[player_name]["actions"] = actions
+                        elif player_name != "_meta":
+                            all_players[player_name] = {"actions": actions}
+                    for player_name, cards in cards_by_player.items():
+                        if player_name in all_players and isinstance(all_players[player_name], dict):
+                            all_players[player_name]["cards"] = cards
+                        elif player_name != "_meta":
+                            all_players[player_name] = {"cards": cards}
+
+                    new_parse_failed = bool(parsed.get("position_parse_failed", False))
+
+                    cur.execute(
+                        """UPDATE hands
+                           SET all_players_actions = %s, position_parse_failed = %s
+                           WHERE id = %s""",
+                        (json.dumps(all_players), new_parse_failed, hand_id),
+                    )
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                if len(errors) < 20:
+                    errors.append({"id": hand_id, "error": f"{type(e).__name__}: {e}"})
+                continue
+
+            if new_parse_failed:
+                still_failed += 1
+            else:
+                fixed += 1
+                if len(sample_fixed) < 10:
+                    sample_fixed.append(hand_id)
+
+        # 3) Recount de remanescentes no DB (pode ser > 0 se LIMIT 500 foi atingido
+        #    ou se houve erros / still_failed).
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) AS n FROM hands WHERE {parse_failed_criteria}")
+            remaining_in_db = cur.fetchone()["n"]
+
+        return {
+            "total_processed": len(target_ids),
+            "fixed": fixed,
+            "still_failed": still_failed,
+            "errors": errors,
+            "remaining_in_db": remaining_in_db,
+            "sample_fixed": sample_fixed,
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
