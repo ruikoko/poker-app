@@ -91,7 +91,7 @@ def parse_hrc_zip(zb):
     ca=any(hs>s for s in ot); cb=any(hs<s for s in ot)
     return {"settings":settings,"equity":equity,"nodes":nodes,
         "meta":{"num_players":np,"stacks_bb":sbb,"hero_stack_bb":hs,"bb_raw":bb,"bounties":bo,
-            "has_bounty":hb,"format":"PKO" if hb else "vanilla","covers_at_least_one":ca,
+            "has_bounty":hb,"format":"PKO" if hb else "Vanilla","covers_at_least_one":ca,
             "covered_by_at_least_one":cb,"hero_covers":ca and not cb,"node_count":len(nodes)}}
 
 # ── Scoring Engine v3 ─────────────────────────────────────────────────────────

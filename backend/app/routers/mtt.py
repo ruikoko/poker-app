@@ -739,7 +739,9 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
     # Tags de formato/max-players continuam em tags (auto-geradas).
     hm3_tags = ["GG Hands"]
     auto_tags = []
-    if tournament_format != "vanilla":
+    # Dual-accept: aceitar legacy 'vanilla' e novo canonical 'Vanilla'.
+    # Ver backend/app/utils/tournament_format.py (D3, backfill nao obrigatorio).
+    if (tournament_format or "").lower() != "vanilla":
         auto_tags.append(tournament_format.lower())
     num_players = len(hh_hand.get("seats", {}))
     if num_players > 0:
@@ -955,7 +957,8 @@ async def import_mtt(
                 tags = []
                 if has_screenshot:
                     tags.append("Match SS")
-                    if tournament_format != "vanilla":
+                    # Dual-accept legacy 'vanilla' + novo 'Vanilla' (D3).
+                    if (tournament_format or "").lower() != "vanilla":
                         tags.append(tournament_format.lower())
                 num_p = len(seats)
                 if num_p > 0:
