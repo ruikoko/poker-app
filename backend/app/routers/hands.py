@@ -161,6 +161,39 @@ def ensure_tournament_format_column():
         conn.close()
 
 
+def ensure_tournament_name_and_number_columns():
+    """
+    Garante que hands.tournament_name (TEXT) e hands.tournament_number (TEXT)
+    existem. Ambas nullable, default NULL.
+
+    - tournament_name: identificador descritivo por sala. WN/GG guardam o
+      nome real limpo (sem buyin); WPN guarda a prize-pool-string; PS fica
+      NULL (nao ha nome real no header).
+    - tournament_number: string pura do raw HH (ex: '3983883162').
+      Separada de hands.tournament_id (BIGINT, FK para tournaments) que
+      existe para o fluxo GG/MTT agregado.
+
+    Sem index em nenhuma das duas: display data, sem WHERE tipicos hoje.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS tournament_name TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS tournament_number TEXT
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_tournament_name_and_number_columns: {e}")
+    finally:
+        conn.close()
+
+
 # ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
 # Obtida via scan directo à BD HM3 (handmarkcategories).
 # Cada entrada: (category_id, description).
