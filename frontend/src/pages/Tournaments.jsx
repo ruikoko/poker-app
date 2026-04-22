@@ -389,19 +389,6 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
                 idx={idx}
                 onClick={() => toggleHand(h.id)}
                 onDelete={onDeleteHand}
-                extraEnd={
-                  <>
-                    {h.villain_count > 0 && (
-                      <span style={{ fontSize: 11, color: '#8b5cf6', fontWeight: 600 }}>{h.villain_count}V</span>
-                    )}
-                    {h.has_screenshot && (
-                      <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>SS</span>
-                    )}
-                    <span style={{ color: '#4b5563', fontSize: 11 }}>
-                      {expandedHands.has(h.id) ? '▼' : '▶'}
-                    </span>
-                  </>
-                }
               />
               {expandedHands.has(h.id) && (
                 <TournamentDetail

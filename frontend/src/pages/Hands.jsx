@@ -3,6 +3,7 @@ import { hands, equity } from '../api/client'
 import Replayer from '../components/Replayer'
 import { isHero } from '../heroNames'
 import TagEditor from '../components/TagEditor'
+import HandRow from '../components/HandRow'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -1120,117 +1121,6 @@ function extractLevel(raw) {
     return `Lv ${v}`
   }
   return null
-}
-
-function HandRow({ hand, onClick, onDelete, idx }) {
-  const level = extractLevel(hand.raw)
-  const meta = hand.all_players_actions?._meta
-  const blindsLabel = meta ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}` : null
-  const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
-  const siteShort = hand.site === 'Winamax' ? 'WN' : hand.site === 'PokerStars' ? 'PS' : hand.site === 'WPN' ? 'WPN' : hand.site === 'GGPoker' ? 'GG' : '?'
-  const siteColor = hand.site === 'Winamax' ? '#f59e0b' : hand.site === 'PokerStars' ? '#ef4444' : hand.site === 'WPN' ? '#22c55e' : '#6366f1'
-
-  // Buy-in: sum all parts into single value (€45+€45+€10 → €100)
-  const stakesStr = hand.stakes || ''
-  let buyin = ''
-  const bm1 = stakesStr.match(/(\d+(?:\.\d+)?)\s*[€$]\s*\+\s*(\d+(?:\.\d+)?)\s*[€$](?:\s*\+\s*(\d+(?:\.\d+)?)\s*[€$])?/)
-  const bm2 = stakesStr.match(/[€$](\d+(?:\.\d+)?)\s*\+\s*[€$](\d+(?:\.\d+)?)(?:\s*\+\s*[€$](\d+(?:\.\d+)?))?/)
-  const bm3 = stakesStr.match(/(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)(?:\s*\+\s*(\d+(?:\.\d+)?))?/)
-  const bmatch = bm1 || bm2 || bm3
-  if (bmatch) {
-    const total = [bmatch[1], bmatch[2], bmatch[3]].filter(Boolean).map(Number).reduce((a, b) => a + b, 0)
-    buyin = `${stakesStr.includes('$') ? '$' : '€'}${total}`
-  }
-
-  // Tournament name: strip buy-in, currency, parentheses
-  const tourneyName = stakesStr.replace(/\(.*?\)/g, '').replace(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/g, '').replace(/EUR|USD/gi, '').trim() || stakesStr
-
-  // Date + time
-  const dateStr = hand.played_at ? hand.played_at.slice(5, 10) : ''
-  const timeStr = hand.played_at ? hand.played_at.slice(11, 16) : ''
-
-  // Level + blinds combined
-  const lvBlinds = [level, blindsLabel].filter(Boolean).join(' ')
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '5.6% 5.6% 5.6% 5.6% 8.6% 3.9% 23.3% 3.6% 7.9% 8.3% 1fr',
-        alignItems: 'center',
-        padding: '7px 8px',
-        background: zebra,
-        borderBottom: '1px solid rgba(255,255,255,0.03)',
-        cursor: 'pointer', transition: 'background 0.1s',
-      }}
-      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
-      onMouseLeave={e => e.currentTarget.style.background = zebra}
-    >
-      {/* 1. Estado 5.6% */}
-      <div><StateBadge state={hand.study_state} /></div>
-      {/* 2. Hero cards 5.6% */}
-      <div style={{ display: 'flex', gap: 2 }}>
-        {hand.hero_cards?.length > 0
-          ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="sm" />)
-          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
-      </div>
-      {/* 3. Posição 5.6% */}
-      <div><PosBadge pos={hand.position} /></div>
-      {/* 4. Resultado 5.6% */}
-      <div><ResultBadge result={hand.result} /></div>
-      {/* 5. Torneio 8.6% — nome só, com padding à direita para separar do buy-in */}
-      <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, paddingRight: 10 }}>
-        {tourneyName}
-      </div>
-      {/* 6. Buy-in 3.9% — valor total */}
-      <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-        {buyin}
-      </div>
-      {/* 7. Board 23.3% — gaps duplicados: 4px entre cartas flop, 12px antes turn/river */}
-      <div style={{ display: 'flex', gap: 4, minWidth: 0 }}>
-        {hand.board?.length > 0
-          ? hand.board.slice(0, 5).map((c, i) => (
-            <span key={i} style={{ display: 'inline-flex', marginLeft: (i === 3 || i === 4) ? 12 : 0 }}>
-              <PokerCard card={c} size="sm" />
-            </span>
-          ))
-          : <span style={{ color: '#4b5563', fontSize: 10 }}>&mdash;</span>}
-      </div>
-      {/* 8. Sala 3.6% */}
-      <div style={{ textAlign: 'center' }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: siteColor, background: `${siteColor}15`, padding: '2px 5px', borderRadius: 3 }}>{siteShort}</span>
-      </div>
-      {/* 9. Level/Blinds 7.9% — combined */}
-      <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
-        {lvBlinds}
-      </div>
-      {/* 10. Data+Hora 8.3% */}
-      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
-        {dateStr} <span style={{ color: '#94a3b8' }}>{timeStr}</span>
-      </div>
-      {/* 11. Botões 1fr (resto ~26%) */}
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
-        {hand.all_players_actions && (
-          <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            style={{ fontSize: 10, color: '#818cf8', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: 600 }}
-          >&#9654;</a>
-        )}
-        {(() => {
-          const ggMatch = ((hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/))
-          return ggMatch ? <a href={ggMatch[0]} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: '#f59e0b', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', fontWeight: 600 }}>GG</a> : null
-        })()}
-        <TagEditor hand={hand} variant="inline" onUpdate={(patch) => { hand.hm3_tags = patch.hm3_tags }} />
-        <button
-          style={{ background: 'transparent', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
-          onClick={e => { e.stopPropagation(); onDelete() }}
-          onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-          onMouseLeave={e => e.currentTarget.style.color = '#374151'}
-        >&#10005;</button>
-      </div>
-    </div>
-  )
 }
 
 // ── Componente: Tag Group (colapsável) ──────────────────────────────────────
