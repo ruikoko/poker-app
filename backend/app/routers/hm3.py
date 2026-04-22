@@ -1153,6 +1153,116 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
+# TEMP: remove after cleanup since-apr19 is executed and validated
+@router.get("/admin/preview-cleanup-since-apr19")
+def admin_preview_cleanup_since_apr19(current_user=Depends(require_auth)):
+    """
+    Read-only dry-run do cleanup de maos com played_at >= '2026-04-19'.
+    Nao apaga nem escreve nada. Scope: hands + hand_villains + villain_notes.
+
+    Nota sobre villain_notes: decrement = numero de rows em hand_villains a
+    ser apagadas por (site, nick). Pode nao cobrir increments feitos pelo
+    nota++ path que nao chegaram a criar hand_villains — esses ficam
+    ligeiramente sobre-contados em hands_seen. Aceitavel para o scope.
+    """
+    cutoff = "2026-04-19 00:00:00"
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # 1) Hands total / by_site / by_origin
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM hands WHERE played_at >= %s",
+                (cutoff,),
+            )
+            total_hands = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT site, COUNT(*) AS count
+                   FROM hands WHERE played_at >= %s
+                   GROUP BY site ORDER BY count DESC""",
+                (cutoff,),
+            )
+            by_site = [{"site": r["site"], "count": r["count"]} for r in cur.fetchall()]
+
+            cur.execute(
+                """SELECT origin, COUNT(*) AS count
+                   FROM hands WHERE played_at >= %s
+                   GROUP BY origin ORDER BY count DESC""",
+                (cutoff,),
+            )
+            by_origin = [{"origin": r["origin"], "count": r["count"]} for r in cur.fetchall()]
+
+            # 2) hand_villains total
+            cur.execute(
+                """SELECT COUNT(*) AS n
+                   FROM hand_villains hv
+                   JOIN hands h ON h.id = hv.hand_db_id
+                   WHERE h.played_at >= %s""",
+                (cutoff,),
+            )
+            hand_villains_total = cur.fetchone()["n"]
+
+            # 3) villain_notes impacto (top 20 por decrement DESC)
+            cur.execute(
+                """SELECT h.site AS site,
+                          hv.player_name AS nick,
+                          COUNT(*) AS decrement,
+                          COALESCE(vn.hands_seen, 0) AS hands_seen_before
+                   FROM hand_villains hv
+                   JOIN hands h ON h.id = hv.hand_db_id
+                   LEFT JOIN villain_notes vn
+                          ON vn.site = h.site AND vn.nick = hv.player_name
+                   WHERE h.played_at >= %s
+                   GROUP BY h.site, hv.player_name, vn.hands_seen
+                   ORDER BY decrement DESC, nick
+                   LIMIT 20""",
+                (cutoff,),
+            )
+            villain_notes_impacted = [
+                {
+                    "site": r["site"],
+                    "nick": r["nick"],
+                    "hands_seen_before": r["hands_seen_before"],
+                    "decrement": r["decrement"],
+                    "hands_seen_after": r["hands_seen_before"] - r["decrement"],
+                }
+                for r in cur.fetchall()
+            ]
+
+            # 4) Samples
+            cur.execute(
+                """SELECT id FROM hands WHERE played_at >= %s
+                   ORDER BY played_at DESC LIMIT 10""",
+                (cutoff,),
+            )
+            sample_hand_ids = [r["id"] for r in cur.fetchall()]
+
+            cur.execute(
+                """SELECT DISTINCT h.id
+                   FROM hands h
+                   JOIN hand_villains hv ON hv.hand_db_id = h.id
+                   WHERE h.played_at >= %s
+                   ORDER BY h.id DESC LIMIT 5""",
+                (cutoff,),
+            )
+            sample_hand_ids_with_villains = [r["id"] for r in cur.fetchall()]
+
+        return {
+            "cutoff": "2026-04-19T00:00:00",
+            "hands_to_delete": {
+                "total": total_hands,
+                "by_site": by_site,
+                "by_origin": by_origin,
+            },
+            "hand_villains_to_delete": hand_villains_total,
+            "villain_notes_impacted": villain_notes_impacted,
+            "sample_hand_ids": sample_hand_ids,
+            "sample_hand_ids_with_villains": sample_hand_ids_with_villains,
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
