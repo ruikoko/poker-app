@@ -22,7 +22,7 @@ from app.utils.tournament_format import detect_tournament_format
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
-from app.hero_names import HERO_NAMES
+from app.hero_names import HERO_NAMES, detect_site_from_hh
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
 logger = logging.getLogger("hm3")
@@ -594,6 +594,7 @@ async def import_hm3(
     skipped = 0
     errors = []
     villains_created = 0
+    reclassified = 0
 
     conn = get_conn()
     try:
@@ -608,8 +609,28 @@ async def import_hm3(
                 try:
                     parsed = _parse_hand(hh_text, site_name)
                 except Exception as parse_err:
-                    errors.append(f"Parse error: {gamenumber} ({site_name}) {ts}: {parse_err}")
-                    continue
+                    # Fallback: sala talvez esteja mal-mapeada no site_id da BD HM3.
+                    # Tenta detectar sala correcta pelos nicks nos seat lines.
+                    detected = detect_site_from_hh(hh_text)
+                    if detected and detected != site_name:
+                        try:
+                            parsed = _parse_hand(hh_text, detected)
+                            logger.warning(
+                                f"HM3 site mismatch: site_id={site_id} ({site_name}) "
+                                f"reclassified as {detected} via hero-nick detection "
+                                f"(gamenumber={gamenumber})"
+                            )
+                            site_name = detected
+                            reclassified += 1
+                        except Exception as fallback_err:
+                            errors.append(
+                                f"Parse error: {gamenumber} ({site_name}→{detected}) {ts}: "
+                                f"primary={parse_err} fallback={fallback_err}"
+                            )
+                            continue
+                    else:
+                        errors.append(f"Parse error: {gamenumber} ({site_name}) {ts}: {parse_err}")
+                        continue
                 if not parsed or not parsed["hand_id"]:
                     errors.append(f"Parse failed: {gamenumber} ({site_name}) {ts}")
                     continue
@@ -811,6 +832,7 @@ async def import_hm3(
         "skipped_date_filter": skipped_date,
         "skipped_nota_filter": skipped_nota,
         "villains_created": villains_created,
+        "site_reclassified": reclassified,
         "errors": len(errors),
         "error_log": errors[:20],
         "sites": {

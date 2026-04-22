@@ -95,6 +95,28 @@ _FRIEND_ONLY_NICKS: set[str] = {
 FRIEND_NICKS: set[str] = HERO_NAMES | _FRIEND_ONLY_NICKS
 
 
+# ── Distribuição por sala (site-detection) ──────────────────────────────────
+# Usado pelo fallback do parser HM3 quando o site_id vem errado na BD HM3.
+# Lowercased para matching case-insensitive.
+
+HERO_NICKS_BY_SITE: dict[str, list[str]] = {
+    "PokerStars": ["kokonakueka", "misterpoker1973"],
+    "Winamax":    ["thinvalium"],
+    "WPN":        ["cringemeariver"],
+    "GGPoker":    ["lauro dermio", "koumpounophobia"],
+}
+
+FRIEND_NICKS_BY_SITE: dict[str, list[str]] = {
+    "GGPoker": ["karluz", "flightrisk"],
+}
+
+# Nicks combinados por sala (hero + amigos)
+ALL_NICKS_BY_SITE: dict[str, list[str]] = {
+    site: HERO_NICKS_BY_SITE.get(site, []) + FRIEND_NICKS_BY_SITE.get(site, [])
+    for site in set(HERO_NICKS_BY_SITE) | set(FRIEND_NICKS_BY_SITE)
+}
+
+
 def is_hero(name: str | None) -> bool:
     """Case-insensitive hero check. Returns False for None/empty."""
     if not name:
@@ -120,3 +142,34 @@ def is_friend_prefix(name: str | None) -> bool:
     if n in FRIEND_NICKS:
         return True
     return any(f.startswith(n) or n.startswith(f) for f in FRIEND_NICKS if len(f) >= 4)
+
+
+def detect_site_from_hh(raw_hh: str | None) -> str | None:
+    """Varre 'Seat N: <nick>' no raw e retorna a sala cujos nicks batem.
+
+    Prioridade: sala com mais matches. Empate → None (evita adivinhação).
+    Sem matches → None.
+    Case-insensitive.
+    """
+    if not raw_hh:
+        return None
+    import re
+    seat_names = [
+        m.group(1).lower().strip()
+        for m in re.finditer(r"Seat\s+\d+:\s*(.+?)\s*\(", raw_hh)
+    ]
+    if not seat_names:
+        return None
+    score: dict[str, int] = {}
+    for site, nicks in ALL_NICKS_BY_SITE.items():
+        lowered = {n.lower() for n in nicks}
+        score[site] = sum(1 for n in seat_names if n in lowered)
+    if not score:
+        return None
+    best_score = max(score.values())
+    if best_score == 0:
+        return None
+    top_sites = [s for s, sc in score.items() if sc == best_score]
+    if len(top_sites) > 1:
+        return None
+    return top_sites[0]
