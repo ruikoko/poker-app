@@ -546,11 +546,76 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
 // ── Day Group (collapsible) ───────────────────────────────────────────────────
 
-function TournamentSubGroup({ name, hands, onOpenDetail, onDeleteHand }) {
+// Normaliza tournament_format legacy (dual-accept) para display case-exact.
+// Legacy 'KO' e' mapeado para 'PKO' conforme decidido no D3.
+function normalizeFormat(fmt) {
+  if (!fmt) return null
+  const f = fmt.toString().trim().toLowerCase()
+  if (f === 'super ko') return 'Super KO'
+  if (f === 'mystery ko' || f === 'mystery') return 'Mystery KO'
+  if (f === 'vanilla') return 'Vanilla'
+  if (f === 'pko' || f === 'ko') return 'PKO'
+  return fmt
+}
+
+// Compoe o titulo unificado a partir dos campos estruturados das maos do grupo.
+// Segmentos em falta sao omitidos (separador ' · ' nao aparece entre vazios).
+// H1/H2 vem de min/max de played_at do grupo.
+// Cada campo faz fallback-through-all: procura a primeira mao do grupo que
+// tenha o campo populado (defensivo contra primeira mao ter NULL isolado).
+function composeTournamentTitle(hands) {
+  if (!hands || hands.length === 0) return 'Sem torneio'
+
+  const site = hands.find(h => h.site)?.site || ''
+  const name = hands.find(h => h.tournament_name)?.tournament_name || ''
+  const tid = hands.find(h => h.tournament_number)?.tournament_number || ''
+  const rawFmt = hands.find(h => h.tournament_format)?.tournament_format
+  const fmt = normalizeFormat(rawFmt) || ''
+  const buyinHand = hands.find(h => h.buy_in != null)
+  const buyinNum = buyinHand ? Number(buyinHand.buy_in) : null
+  // Currency heuristic: WPN usa $; outras salas usam €.
+  const currency = (site === 'WPN') ? '$' : '€'
+  const buyinStr = (buyinNum != null && !isNaN(buyinNum)) ? `${buyinNum}${currency}` : ''
+
+  const times = hands.map(h => h.played_at).filter(Boolean).sort()
+  const h1 = times.length ? times[0].slice(11, 16) : ''
+  const h2 = times.length ? times[times.length - 1].slice(11, 16) : ''
+  const timeRange = (h1 && h2) ? `${h1} → ${h2}` : ''
+
+  const segs = []
+  if (site) segs.push(site)
+  if (name) segs.push(name)
+  // buyin + fmt combinados num segmento (ex: '250€ PKO'); omitidos se ambos vazios.
+  const buyinFmt = [buyinStr, fmt].filter(Boolean).join(' ')
+  if (buyinFmt) segs.push(buyinFmt)
+  if (tid) segs.push(`#${tid}`)
+  if (timeRange) segs.push(timeRange)
+  return segs.join(' · ')
+}
+
+// Agrega tags unicas das maos do grupo, ordenadas por frequencia DESC,
+// depois alfabeticamente como tie-breaker.
+function aggregateTags(hands) {
+  const counts = {}
+  for (const h of hands) {
+    for (const t of (h.hm3_tags || [])) {
+      if (!t) continue
+      counts[t] = (counts[t] || 0) + 1
+    }
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([t]) => t)
+}
+
+function TournamentSubGroup({ hands, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const wins = hands.filter(h => h.result != null && Number(h.result) > 0).length
   const losses = hands.filter(h => h.result != null && Number(h.result) < 0).length
   const totalBB = hands.reduce((a, h) => a + (Number(h.result) || 0), 0)
+
+  const title = composeTournamentTitle(hands)
+  const tags = aggregateTags(hands)
 
   return (
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
@@ -561,12 +626,19 @@ function TournamentSubGroup({ name, hands, onOpenDetail, onDeleteHand }) {
         onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 10, color: '#6366f1', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>&#9654;</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', maxWidth: 350, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-          <span style={{ fontSize: 11, color: '#4b5563' }}>{hands.length} {hands.length === 1 ? 'mão' : 'mãos'}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: '#6366f1', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>&#9654;</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{title}</span>
+            <span style={{ fontSize: 11, color: '#4b5563' }}>{hands.length} {hands.length === 1 ? 'mão' : 'mãos'}</span>
+          </div>
+          {tags.length > 0 && (
+            <div style={{ marginLeft: 18, marginTop: 2, fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {tags.join(' · ')}
+            </div>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, marginLeft: 12, flexShrink: 0 }}>
           <span style={{ color: '#22c55e' }}>{wins}W</span>
           <span style={{ color: '#ef4444' }}>{losses}L</span>
           <span style={{ color: totalBB >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600, fontFamily: 'monospace' }}>
@@ -590,14 +662,19 @@ function TournamentSubGroup({ name, hands, onOpenDetail, onDeleteHand }) {
 function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
 
-  // Sub-group by tournament (stakes field)
+  // Sub-group by tournament_number (fallback stakes for legacy rows).
+  // Grupos ordenados por min(played_at) ASC dentro do dia (ordem de inicio).
   const byTourney = {}
   for (const h of hands) {
-    const key = h.stakes || 'Sem torneio'
+    const key = h.tournament_number || h.stakes || 'Sem torneio'
     if (!byTourney[key]) byTourney[key] = []
     byTourney[key].push(h)
   }
-  const tourneyKeys = Object.keys(byTourney).sort()
+  const tourneyKeys = Object.keys(byTourney).sort((a, b) => {
+    const ta = byTourney[a].reduce((m, h) => h.played_at && (m == null || h.played_at < m) ? h.played_at : m, null) || ''
+    const tb = byTourney[b].reduce((m, h) => h.played_at && (m == null || h.played_at < m) ? h.played_at : m, null) || ''
+    return ta.localeCompare(tb)
+  })
 
   return (
     <div style={{ marginBottom: 6, border: `1px solid ${open ? 'rgba(139,92,246,0.3)' : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
@@ -628,7 +705,6 @@ function DayGroup({ dateKey, dateLabel, hands, wins, losses, totalBB, onOpenDeta
           {tourneyKeys.map(tk => (
             <TournamentSubGroup
               key={tk}
-              name={tk}
               hands={byTourney[tk]}
               onOpenDetail={onOpenDetail}
               onDeleteHand={onDeleteHand}
