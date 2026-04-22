@@ -121,6 +121,10 @@ def ensure_entries_schema():
         ALTER TABLE hand_villains
         ALTER COLUMN mtt_hand_id DROP NOT NULL
         """,
+        # UNIQUE parcial para idempotencia via ON CONFLICT no INSERT de hand_villains
+        # pelo pipeline HM3 (hm3.py:_create_hand_villains_hm3). Parcial porque rows
+        # legacy so com mtt_hand_id tem hand_db_id NULL e nao devem ficar no indice.
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_hand_villains_hand_db_player ON hand_villains(hand_db_id, player_name) WHERE hand_db_id IS NOT NULL",
     ]
 
     conn = get_conn()
