@@ -787,6 +787,16 @@ async def import_hm3(
                         (merged_tags, merged_hm3, json.dumps(all_players), has_showdown, existing["id"])
                     )
 
+                    # Criar entries em hand_villains (regra A or B or C: tag nota* ou showdown).
+                    # B/C exigem match_method (nao aplicavel a HM3 puro); cobrimos A + showdown
+                    # para qualquer sala. Sem guard, saltavamos villains em maos sd sem nota*.
+                    if any(t and t.lower().startswith("nota") for t in (hm3_tags_clean or [])) or has_showdown:
+                        dealt_m = re.search(r"Dealt to (\S+)", raw_text)
+                        hero = dealt_m.group(1) if dealt_m else None
+                        _create_hand_villains_hm3(
+                            cur, existing["id"], parsed, hero, has_showdown, raw_text,
+                        )
+
                     # Extract villains for nota++ hands (existing too)
                     if any("nota" in t.lower() for t in hm3_tags_clean):
                         dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
@@ -878,6 +888,16 @@ async def import_hm3(
                 )
                 hand_db_id = cur.fetchone()["id"]
                 inserted += 1
+
+                # Criar entries em hand_villains (regra A or B or C: tag nota* ou showdown).
+                # B/C exigem match_method (nao aplicavel a HM3 puro); cobrimos A + showdown
+                # para qualquer sala. Sem guard, saltavamos villains em maos sd sem nota*.
+                if any(t and t.lower().startswith("nota") for t in (hm3_tags_clean or [])) or has_showdown:
+                    dealt_m = re.search(r"Dealt to (\S+)", raw_text)
+                    hero = dealt_m.group(1) if dealt_m else None
+                    _create_hand_villains_hm3(
+                        cur, hand_db_id, parsed, hero, has_showdown, raw_text,
+                    )
 
                 # Extract villains for nota++ hands
                 if any("nota" in t.lower() for t in hm3_tags_clean):
