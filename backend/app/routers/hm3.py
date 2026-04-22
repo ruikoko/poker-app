@@ -129,6 +129,67 @@ def _normalise_position(pos):
     return pos.replace("+", "")
 
 
+def _deduce_button_from_blinds(
+    raw_text: str,
+    seats: dict,
+    active_seat_nums: list,
+):
+    """
+    Deduz o seat do BTN a partir de quem postou small blind (e big blind
+    como sanity check para mesas 3+max). Mais fiavel que o raw
+    "Seat #X is the button" porque em Winamax o botao as vezes aponta
+    para um seat vazio.
+
+    Regras:
+      - 2 seats activos + SB encontrada no raw + actor em seats e em active:
+        BTN = seat da SB (heads-up, SB == BTN).
+      - 3+ seats activos + SB e BB ambas encontradas + actor da SB em seats
+        e em active: BTN = seat imediatamente antes de sb_seat na ordem
+        circular de active_seat_nums.
+      - Qualquer outra situacao: None.
+
+    Devolve: int (seat do BTN) ou None.
+    """
+    if not raw_text or len(active_seat_nums) < 2:
+        return None
+
+    sb_re = re.compile(
+        r"^(.+?)(?::)?\s+posts\s+(?:the\s+)?small\s+blind\s+[\d,.]+",
+        re.MULTILINE | re.IGNORECASE,
+    )
+    bb_re = re.compile(
+        r"^(.+?)(?::)?\s+posts\s+(?:the\s+)?big\s+blind\s+[\d,.]+",
+        re.MULTILINE | re.IGNORECASE,
+    )
+
+    sb_m = sb_re.search(raw_text)
+    if not sb_m:
+        return None
+    sb_actor = sb_m.group(1).strip()
+    if not sb_actor:
+        return None
+
+    # Resolver actor -> seat
+    name_to_seat = {info["name"]: seat for seat, info in seats.items()}
+    sb_seat = name_to_seat.get(sb_actor)
+    if sb_seat is None or sb_seat not in active_seat_nums:
+        return None
+
+    if len(active_seat_nums) == 2:
+        return sb_seat
+
+    # 3+ max: exigir BB como sanity check
+    if not bb_re.search(raw_text):
+        return None
+
+    sorted_active = sorted(active_seat_nums)
+    try:
+        idx_sb = sorted_active.index(sb_seat)
+    except ValueError:
+        return None
+    return sorted_active[(idx_sb - 1) % len(sorted_active)]
+
+
 # ── Hand History Parser (multi-site) ─────────────────────────────────────────
 
 def _parse_hand(hh_text, site_name):
