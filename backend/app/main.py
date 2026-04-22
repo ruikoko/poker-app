@@ -110,6 +110,14 @@ def ensure_entries_schema():
         "CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id)",
         "CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state)",
         "CREATE INDEX IF NOT EXISTS idx_hands_tournament_id ON hands(tournament_id)",
+        # Flag setada por _parse_hand (hm3.py) quando nao consegue deduzir BTN
+        # nem via dedução por blinds nem via raw "Seat #X is the button". A mao
+        # e importada na mesma (all_players esqueletico, so nicks). Default FALSE
+        # preserva maos existentes como "parse OK" ate backfill explicito.
+        """
+        ALTER TABLE hands
+        ADD COLUMN IF NOT EXISTS position_parse_failed BOOLEAN DEFAULT FALSE
+        """,
         # hand_villains universal FK: hand_db_id points to hands.id
         """
         ALTER TABLE hand_villains
