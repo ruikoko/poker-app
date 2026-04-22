@@ -909,13 +909,15 @@ async def import_hm3(
                     )
 
                     cur.execute(
-                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s, position_parse_failed = %s WHERE id = %s",
+                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s, position_parse_failed = %s, tournament_name = %s, tournament_number = %s WHERE id = %s",
                         (
                             merged_tags,
                             merged_hm3,
                             json.dumps(all_players),
                             has_showdown,
                             parsed.get("position_parse_failed", False),
+                            parsed.get("tournament_name"),
+                            parsed.get("tournament_number"),
                             existing["id"],
                         )
                     )
@@ -986,12 +988,12 @@ async def import_hm3(
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
                         notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown, position_parse_failed,
-                        tournament_format, origin)
+                        tournament_format, tournament_name, tournament_number, origin)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, 'new', %s, %s, %s,
-                        %s, 'hm3')
+                        %s, %s, %s, 'hm3')
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
@@ -999,6 +1001,10 @@ async def import_hm3(
                         has_showdown = EXCLUDED.has_showdown,
                         position_parse_failed = EXCLUDED.position_parse_failed,
                         tournament_format = COALESCE(hands.tournament_format, EXCLUDED.tournament_format),
+                        -- OVERWRITE (nao COALESCE): campos deterministicos do parser, sem
+                        -- valor manual. Re-parse propaga correccoes de regex/logica.
+                        tournament_name = EXCLUDED.tournament_name,
+                        tournament_number = EXCLUDED.tournament_number,
                         origin = COALESCE(hands.origin, EXCLUDED.origin)
                     RETURNING id""",
                     (
@@ -1019,6 +1025,8 @@ async def import_hm3(
                         has_showdown,
                         parsed.get("position_parse_failed", False),
                         parsed["tournament_format"],
+                        parsed.get("tournament_name"),
+                        parsed.get("tournament_number"),
                     )
                 )
                 hand_db_id = cur.fetchone()["id"]

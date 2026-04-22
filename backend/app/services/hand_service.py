@@ -75,12 +75,12 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 (site, hand_id, played_at, stakes, position,
                  hero_cards, board, result, currency,
                  raw, entry_id, study_state, all_players_actions, tournament_id,
-                 has_showdown, buy_in, tournament_format)
+                 has_showdown, buy_in, tournament_format, tournament_name, tournament_number)
             VALUES
                 (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
                  %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
                  %(raw)s, %(entry_id)s, %(study_state)s, %(all_players_actions)s, %(tournament_id)s,
-                 %(has_showdown)s, %(buy_in)s, %(tournament_format)s)
+                 %(has_showdown)s, %(buy_in)s, %(tournament_format)s, %(tournament_name)s, %(tournament_number)s)
             """,
             {
                 "site": h["site"],
@@ -100,6 +100,13 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 "has_showdown": has_showdown,
                 "buy_in": h.get("buy_in"),
                 "tournament_format": h.get("tournament_format"),
+                # tournament_name: nome real limpo devolvido pelo parser GG.
+                # tournament_number: string crua do raw; o parser GG chama-lhe
+                # "tournament_id" por historia, mas o valor string vai para
+                # a coluna nova hands.tournament_number TEXT. A coluna FK
+                # hands.tournament_id BIGINT continua a receber o t_pk resolvido.
+                "tournament_name": h.get("tournament_name"),
+                "tournament_number": h.get("tournament_id"),
             },
         )
         return True
