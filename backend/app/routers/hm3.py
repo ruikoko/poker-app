@@ -1213,6 +1213,49 @@ def admin_wpn_debug(body: _WpnDebugBody, current_user=Depends(require_auth)):
     }
 
 
+# TEMP: remove after WPN parser fix
+@router.get("/admin/get-raw/{hand_id}")
+def admin_get_raw(hand_id: int, current_user=Depends(require_auth)):
+    """
+    Read-only: devolve o raw HH (truncado a 3000 chars) e o estado actual
+    de all_players_actions de uma mao existente, para alimentar o
+    /admin/wpn-debug com um caso real da BD.
+    """
+    import json
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, hand_id, site, raw, all_players_actions
+                   FROM hands WHERE id = %s""",
+                (hand_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"hand id={hand_id} nao encontrada")
+
+            apa = row["all_players_actions"]
+            if isinstance(apa, str):
+                try:
+                    apa = json.loads(apa)
+                except Exception:
+                    pass
+
+            raw_text = row["raw"] or ""
+            raw_truncated = raw_text[:3000]
+            return {
+                "hand_id_db": row["id"],
+                "hand_id_text": row["hand_id"],
+                "site": row["site"],
+                "raw": raw_truncated,
+                "raw_truncated": len(raw_text) > 3000,
+                "raw_full_length": len(raw_text),
+                "all_players_actions_current": apa,
+            }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
