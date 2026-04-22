@@ -1153,6 +1153,78 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
+# TEMP: remove after apr19-count investigation
+@router.get("/admin/debug-apr19-count")
+def admin_debug_apr19_count(current_user=Depends(require_auth)):
+    """
+    Read-only: contagem de maos origin='hm3' jogadas em 2026-04-19
+    (criterio played_at::date). Breakdown por estado de hm3_tags +
+    top 10 tags. Usado para confirmar se o count vem do export ou da
+    UI/BD.
+    """
+    cutoff_date = "2026-04-19"
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT COUNT(*) AS n FROM hands
+                   WHERE origin = 'hm3' AND played_at::date = %s""",
+                (cutoff_date,),
+            )
+            total = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT COUNT(*) AS n FROM hands
+                   WHERE origin = 'hm3' AND played_at::date = %s
+                     AND hm3_tags IS NULL""",
+                (cutoff_date,),
+            )
+            without_tags_null = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT COUNT(*) AS n FROM hands
+                   WHERE origin = 'hm3' AND played_at::date = %s
+                     AND hm3_tags IS NOT NULL
+                     AND array_length(hm3_tags, 1) IS NULL""",
+                (cutoff_date,),
+            )
+            without_tags_empty = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT COUNT(*) AS n FROM hands
+                   WHERE origin = 'hm3' AND played_at::date = %s
+                     AND hm3_tags IS NOT NULL
+                     AND array_length(hm3_tags, 1) > 0""",
+                (cutoff_date,),
+            )
+            with_tags = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT t AS tag, COUNT(*) AS n
+                   FROM hands h, unnest(h.hm3_tags) AS t
+                   WHERE h.origin = 'hm3' AND h.played_at::date = %s
+                   GROUP BY t
+                   ORDER BY n DESC, t
+                   LIMIT 10""",
+                (cutoff_date,),
+            )
+            top_tags = [
+                {"tag": r["tag"], "count": r["n"]}
+                for r in cur.fetchall()
+            ]
+
+        return {
+            "cutoff_date": cutoff_date,
+            "hm3_origin_total": total,
+            "with_tags": with_tags,
+            "without_tags_null": without_tags_null,
+            "without_tags_empty_array": without_tags_empty,
+            "top_tags": top_tags,
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
