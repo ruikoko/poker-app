@@ -873,8 +873,15 @@ async def import_hm3(
                     )
 
                     cur.execute(
-                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s WHERE id = %s",
-                        (merged_tags, merged_hm3, json.dumps(all_players), has_showdown, existing["id"])
+                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s, position_parse_failed = %s WHERE id = %s",
+                        (
+                            merged_tags,
+                            merged_hm3,
+                            json.dumps(all_players),
+                            has_showdown,
+                            parsed.get("position_parse_failed", False),
+                            existing["id"],
+                        )
                     )
 
                     # Criar entries em hand_villains (regra A or B or C: tag nota* ou showdown).
@@ -942,18 +949,19 @@ async def import_hm3(
                     """INSERT INTO hands
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
-                        notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown,
+                        notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown, position_parse_failed,
                         tournament_format, origin)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s, %s, 'new', %s, %s,
+                        %s, %s, %s, %s, 'new', %s, %s, %s,
                         %s, 'hm3')
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
                         all_players_actions = EXCLUDED.all_players_actions,
                         has_showdown = EXCLUDED.has_showdown,
+                        position_parse_failed = EXCLUDED.position_parse_failed,
                         tournament_format = COALESCE(hands.tournament_format, EXCLUDED.tournament_format),
                         origin = COALESCE(hands.origin, EXCLUDED.origin)
                     RETURNING id""",
@@ -973,6 +981,7 @@ async def import_hm3(
                         parsed["raw"],
                         json.dumps(all_players),
                         has_showdown,
+                        parsed.get("position_parse_failed", False),
                         parsed["tournament_format"],
                     )
                 )
