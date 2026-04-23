@@ -971,7 +971,7 @@ async def import_hm3(
                     )
 
                     cur.execute(
-                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s, position_parse_failed = %s, tournament_name = %s, tournament_number = %s WHERE id = %s",
+                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s, position_parse_failed = %s, tournament_name = %s, tournament_number = %s, buy_in = %s WHERE id = %s",
                         (
                             merged_tags,
                             merged_hm3,
@@ -980,6 +980,7 @@ async def import_hm3(
                             parsed.get("position_parse_failed", False),
                             parsed.get("tournament_name"),
                             parsed.get("tournament_number"),
+                            parsed.get("buy_in"),
                             existing["id"],
                         )
                     )
@@ -1050,12 +1051,12 @@ async def import_hm3(
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
                         notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown, position_parse_failed,
-                        tournament_format, tournament_name, tournament_number, origin)
+                        tournament_format, tournament_name, tournament_number, buy_in, origin)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, 'new', %s, %s, %s,
-                        %s, %s, %s, 'hm3')
+                        %s, %s, %s, %s, 'hm3')
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
@@ -1067,6 +1068,7 @@ async def import_hm3(
                         -- valor manual. Re-parse propaga correccoes de regex/logica.
                         tournament_name = EXCLUDED.tournament_name,
                         tournament_number = EXCLUDED.tournament_number,
+                        buy_in = EXCLUDED.buy_in,
                         origin = COALESCE(hands.origin, EXCLUDED.origin)
                     RETURNING id""",
                     (
@@ -1089,6 +1091,7 @@ async def import_hm3(
                         parsed["tournament_format"],
                         parsed.get("tournament_name"),
                         parsed.get("tournament_number"),
+                        parsed.get("buy_in"),
                     )
                 )
                 hand_db_id = cur.fetchone()["id"]
