@@ -306,23 +306,51 @@ function TournamentDetail({ hand, onDeleteHand, onDeleteScreenshot }) {
 
 // ── Tournament Group ─────────────────────────────────────────────────────────
 
-function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot }) {
+function TournamentGroup({
+  tmNumber, tournamentName, hands, tmSummary, onLoadHands,
+  expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot,
+}) {
   const [open, setOpen] = useState(false)
-  const ssCount = hands.filter(h => h.has_screenshot).length
-  const totalVillains = hands.reduce((a, h) => a + (h.villain_count || 0), 0)
+  const [loadingHands, setLoadingHands] = useState(false)
+  const isLazy = hands === undefined
+  const loadedHands = hands || []
 
-  const buyIn = hands.find(h => h.buy_in != null)?.buy_in
+  // Quando é lazy e o grupo abre pela primeira vez, dispara o fetch.
+  useEffect(() => {
+    if (open && isLazy && !loadingHands && onLoadHands) {
+      setLoadingHands(true)
+      Promise.resolve(onLoadHands(tmNumber)).finally(() => setLoadingHands(false))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // Header stats — preferir tmSummary (vem do endpoint /dates, sempre presente em lazy).
+  const ssCount = loadedHands.filter(h => h.has_screenshot).length
+  const totalVillains = loadedHands.reduce((a, h) => a + (h.villain_count || 0), 0)
+  const handCount = tmSummary?.hand_count ?? loadedHands.length
+
+  const buyIn = tmSummary?.buy_in ?? loadedHands.find(h => h.buy_in != null)?.buy_in
   const fmtBuyIn = v => (v % 1 === 0 ? `$${v}` : `$${v.toFixed(2)}`)
 
-  // hands vêm ordenadas DESC por played_at → [0]=mais recente, [last]=mais antiga
-  const newest = hands[0]
-  const oldest = hands[hands.length - 1]
-  const blindsLabel = !oldest ? ''
-    : (oldest.blinds === newest.blinds ? oldest.blinds : `${oldest.blinds} → ${newest.blinds}`)
-  const timeRange = !oldest ? ''
-    : (oldest.played_at === newest.played_at
-        ? formatTime(oldest.played_at)
-        : `${formatTime(oldest.played_at)} → ${formatTime(newest.played_at)}`)
+  // Sumário pode vir do servidor (lazy) ou derivar-se das hands (eager).
+  const newest = loadedHands[0]
+  const oldest = loadedHands[loadedHands.length - 1]
+  const blindsLabel = tmSummary
+    ? (tmSummary.blinds_first === tmSummary.blinds_last
+        ? tmSummary.blinds_first
+        : `${tmSummary.blinds_first} → ${tmSummary.blinds_last}`)
+    : (!oldest ? ''
+        : (oldest.blinds === newest.blinds
+            ? oldest.blinds
+            : `${oldest.blinds} → ${newest.blinds}`))
+  const firstTs = tmSummary?.first_played_at ?? oldest?.played_at
+  const lastTs  = tmSummary?.last_played_at  ?? newest?.played_at
+  const timeRange = !firstTs ? ''
+    : (firstTs === lastTs
+        ? formatTime(firstTs)
+        : `${formatTime(firstTs)} → ${formatTime(lastTs)}`)
+  const formatBadge = tmSummary?.tournament_format
+    ?? loadedHands.find(h => h.tournament_format)?.tournament_format
 
   const sep = { fontSize: 11, color: '#4b5563' }
 
@@ -371,8 +399,15 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
           </>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
-          <span style={{ fontSize: 11, color: '#94a3b8' }}>{hands.length} mãos</span>
-          <span style={{ fontSize: 11, color: '#22c55e' }}>{ssCount} SS</span>
+          {formatBadge && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
+              color: formatBadge === 'PKO' ? '#f59e0b' : '#64748b',
+              background: formatBadge === 'PKO' ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)',
+            }}>{formatBadge}</span>
+          )}
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>{handCount} mãos</span>
+          {!isLazy && <span style={{ fontSize: 11, color: '#22c55e' }}>{ssCount} SS</span>}
           {totalVillains > 0 && (
             <span style={{ fontSize: 11, color: '#8b5cf6' }}>{totalVillains} V</span>
           )}
@@ -382,7 +417,12 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
       {/* Hands list */}
       {open && (
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-          {hands.map((h, idx) => (
+          {loadingHands && loadedHands.length === 0 && (
+            <div style={{ padding: '10px 12px', fontSize: 11, color: '#f59e0b' }}>
+              A carregar mãos...
+            </div>
+          )}
+          {loadedHands.map((h, idx) => (
             <div key={h.id}>
               <HandRow
                 hand={h}
@@ -407,11 +447,27 @@ function TournamentGroup({ tmNumber, tournamentName, hands, expandedHands, toggl
 
 // ── Date Group ───────────────────────────────────────────────────────────────
 
-function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot }) {
+function DateGroup({
+  dateKey, dateLabel, tournaments, dateSummary, onLoadTournamentHands, handsByTm,
+  expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot,
+}) {
   const [open, setOpen] = useState(false)
-  const tmKeys = Object.keys(tournaments)
-  const totalHands = tmKeys.reduce((a, k) => a + tournaments[k].hands.length, 0)
-  const totalSS = tmKeys.reduce((a, k) => a + tournaments[k].hands.filter(h => h.has_screenshot).length, 0)
+
+  // `tournaments` pode vir em 2 formatos:
+  //  - Array (lazy, /mtt/dates): [{tm, name, hand_count, ...}]
+  //  - Objecto (eager, aba Com SS): { TM123: {name, hands: [...]} }
+  const isLazy = Array.isArray(tournaments)
+
+  const tmList = isLazy
+    ? tournaments
+    : Object.entries(tournaments).map(([tm, v]) => ({ tm, name: v.name, hands: v.hands }))
+
+  const totalHands = isLazy
+    ? (dateSummary?.hand_count ?? tmList.reduce((a, t) => a + (t.hand_count || 0), 0))
+    : tmList.reduce((a, t) => a + t.hands.length, 0)
+  const totalSS = isLazy
+    ? null  // desconhecido sem fetch de mãos; na aba "Sem SS" é sempre 0 por definição
+    : tmList.reduce((a, t) => a + t.hands.filter(h => h.has_screenshot).length, 0)
 
   return (
     <div style={{ marginBottom: 8 }}>
@@ -429,11 +485,13 @@ function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand,
         <span style={{ color: '#f59e0b', fontSize: 13 }}>{open ? '▼' : '▶'}</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{dateLabel}</span>
         <span style={{ fontSize: 11, color: '#6366f1' }}>
-          {tmKeys.length} torneio{tmKeys.length !== 1 ? 's' : ''}
+          {tmList.length} torneio{tmList.length !== 1 ? 's' : ''}
         </span>
-        <span style={{ fontSize: 11, color: '#22c55e' }}>
-          {totalSS} SS
-        </span>
+        {totalSS !== null && (
+          <span style={{ fontSize: 11, color: '#22c55e' }}>
+            {totalSS} SS
+          </span>
+        )}
         <span style={{ fontSize: 11, color: '#94a3b8' }}>
           {totalHands} mãos
         </span>
@@ -442,12 +500,14 @@ function DateGroup({ dateKey, dateLabel, tournaments, expandedHands, toggleHand,
       {/* Tournaments */}
       {open && (
         <div style={{ paddingLeft: 16, paddingTop: 4 }}>
-          {tmKeys.map(tm => (
+          {tmList.map(t => (
             <TournamentGroup
-              key={tm}
-              tmNumber={tm}
-              tournamentName={tournaments[tm].name}
-              hands={tournaments[tm].hands}
+              key={t.tm}
+              tmNumber={t.tm}
+              tournamentName={t.name}
+              hands={isLazy ? handsByTm?.[t.tm] : t.hands}
+              tmSummary={isLazy ? t : undefined}
+              onLoadHands={isLazy ? onLoadTournamentHands : undefined}
               expandedHands={expandedHands}
               toggleHand={toggleHand}
               onDeleteHand={onDeleteHand}
@@ -471,15 +531,43 @@ export default function TournamentsPage() {
   const [filter, setFilter] = useState({ ss_filter: 'with' })
   const [expandedHands, setExpandedHands] = useState(new Set())
 
+  // ── Estado lazy (aba Sem SS) ─────────────────────────────────────────────
+  const [dateIndex, setDateIndex] = useState({ dates: [], total_dates: 0, total_hands: 0, has_more: false })
+  const [dateOffset, setDateOffset] = useState(0)
+  const [dateRange, setDateRange] = useState(null)     // null | '1d' | '3d' | '7d' | '15d' | '30d'
+  const [formatFilter, setFormatFilter] = useState(null) // null | 'PKO' | 'NPKO'
+  const [handsByTm, setHandsByTm] = useState({})         // { TM123: [hands...] } cache por expansão
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  const isLazyTab = tab === 'gg' && filter.ss_filter === 'without'
+
   const loadHands = useCallback(async () => {
     setLoading(true)
     try {
       if (tab === 'gg') {
-        const params = { page: 1, page_size: 200 }
-        if (filter.ss_filter) params.ss_filter = filter.ss_filter
-        if (filter.tm_search) params.tm_search = filter.tm_search
-        const data = await mtt.hands(params)
-        setHands(data.hands || [])
+        if (filter.ss_filter === 'without') {
+          // Fluxo lazy: carrega só agregados por data via /mtt/dates.
+          const params = {
+            ss_filter: 'without',
+            limit_dates: 8,
+            offset_dates: 0,
+          }
+          if (dateRange) params.date_range = dateRange
+          if (formatFilter) params.format = formatFilter
+          if (filter.tm_search) params.tm_search = filter.tm_search
+          const data = await mtt.dates(params)
+          setDateIndex(data)
+          setDateOffset(0)
+          setHandsByTm({})
+          setHands([])
+        } else {
+          // Fluxo eager existente (aba Com SS).
+          const params = { page: 1, page_size: 200 }
+          if (filter.ss_filter) params.ss_filter = filter.ss_filter
+          if (filter.tm_search) params.tm_search = filter.tm_search
+          const data = await mtt.hands(params)
+          setHands(data.hands || [])
+        }
       } else {
         const { hm3 } = await import('../api/client')
         const data = await hm3.notaHands({ page: 1, page_size: 200 })
@@ -490,7 +578,50 @@ export default function TournamentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [filter, tab])
+  }, [filter, tab, dateRange, formatFilter])
+
+  const loadMoreDates = useCallback(async () => {
+    if (!isLazyTab || !dateIndex.has_more || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const nextOffset = dateOffset + 8
+      const params = {
+        ss_filter: 'without',
+        limit_dates: 8,
+        offset_dates: nextOffset,
+      }
+      if (dateRange) params.date_range = dateRange
+      if (formatFilter) params.format = formatFilter
+      if (filter.tm_search) params.tm_search = filter.tm_search
+      const data = await mtt.dates(params)
+      setDateIndex(prev => ({
+        ...data,
+        dates: [...prev.dates, ...data.dates],
+      }))
+      setDateOffset(nextOffset)
+    } catch (e) {
+      console.error('Erro a carregar mais datas:', e)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [isLazyTab, dateIndex.has_more, dateOffset, dateRange, formatFilter, filter.tm_search, loadingMore])
+
+  const loadTournamentHands = useCallback(async (tmNumber) => {
+    // tmNumber vem como "TM1234..." — usar como tm_search no endpoint existente.
+    try {
+      const tmDigits = tmNumber.startsWith('TM') ? tmNumber.slice(2) : tmNumber
+      const data = await mtt.hands({
+        ss_filter: 'without',
+        tm_search: tmDigits,
+        page: 1,
+        page_size: 200,
+      })
+      setHandsByTm(prev => ({ ...prev, [tmNumber]: data.hands || [] }))
+    } catch (e) {
+      console.error(`Erro a carregar mãos do torneio ${tmNumber}:`, e)
+      setHandsByTm(prev => ({ ...prev, [tmNumber]: [] }))
+    }
+  }, [])
 
   const loadStats = useCallback(async () => {
     try {
@@ -538,16 +669,18 @@ export default function TournamentsPage() {
     }
   }
 
-  // Agrupar por data > torneio
+  // Agrupar por data > torneio (apenas fluxo eager: aba Com SS e HM3).
   const grouped = {}
-  for (const h of hands) {
-    const dateKey = formatDateKey(h.played_at)
-    if (!grouped[dateKey]) grouped[dateKey] = {}
-    const tourneyKey = h.tournament_name || h.tm_number || h.stakes || 'unknown'
-    if (!grouped[dateKey][tourneyKey]) {
-      grouped[dateKey][tourneyKey] = { name: h.tournament_name || h.stakes, hands: [] }
+  if (!isLazyTab) {
+    for (const h of hands) {
+      const dateKey = formatDateKey(h.played_at)
+      if (!grouped[dateKey]) grouped[dateKey] = {}
+      const tourneyKey = h.tournament_name || h.tm_number || h.stakes || 'unknown'
+      if (!grouped[dateKey][tourneyKey]) {
+        grouped[dateKey][tourneyKey] = { name: h.tournament_name || h.stakes, hands: [] }
+      }
+      grouped[dateKey][tourneyKey].hands.push(h)
     }
-    grouped[dateKey][tourneyKey].hands.push(h)
   }
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
 
@@ -641,33 +774,141 @@ export default function TournamentsPage() {
             }}
           />
         )}
+
+        {/* Pills de janela temporal + filtro formato — só aba Sem SS. */}
+        {isLazyTab && (
+          <>
+            <div style={{
+              display: 'inline-flex', gap: 2, padding: 2,
+              background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 6,
+            }}>
+              {[
+                { value: null,  label: 'Default' },
+                { value: '1d',  label: '1d' },
+                { value: '3d',  label: '3d' },
+                { value: '7d',  label: '7d' },
+                { value: '15d', label: '15d' },
+                { value: '30d', label: '30d' },
+              ].map(({ value, label }) => {
+                const active = dateRange === value
+                return (
+                  <button
+                    key={label}
+                    onClick={() => setDateRange(value)}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                      border: 'none', cursor: 'pointer',
+                      background: active ? '#6366f1' : 'transparent',
+                      color: active ? '#0a0c14' : '#94a3b8',
+                    }}
+                  >{label}</button>
+                )
+              })}
+            </div>
+
+            <div style={{
+              display: 'inline-flex', gap: 2, padding: 2,
+              background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 6,
+            }}>
+              {[
+                { value: null,   label: 'Todos', color: '#94a3b8' },
+                { value: 'PKO',  label: 'PKO',   color: '#f59e0b' },
+                { value: 'NPKO', label: 'NPKO',  color: '#64748b' },
+              ].map(({ value, label, color }) => {
+                const active = formatFilter === value
+                return (
+                  <button
+                    key={label}
+                    onClick={() => setFormatFilter(value)}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                      border: 'none', cursor: 'pointer',
+                      background: active ? color : 'transparent',
+                      color: active ? '#0a0c14' : color,
+                    }}
+                  >{label}</button>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
-      {loading ? (
-        <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
-      ) : sortedDates.length === 0 ? (
-        <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
-          {tab === 'gg'
-            ? (filter.ss_filter === 'without'
-                ? 'Nenhuma mão GG sem SS encontrada.'
-                : 'Nenhuma mão GG com SS encontrada.')
-            : 'Nenhuma mão HM3 com tag nota encontrada.'}
-        </div>
-      ) : (
-        <div>
-          {sortedDates.map(dateKey => (
-            <DateGroup
-              key={dateKey}
-              dateKey={dateKey}
-              dateLabel={formatDateLabel(dateKey + 'T12:00:00')}
-              tournaments={grouped[dateKey]}
-              expandedHands={expandedHands}
-              toggleHand={toggleHand}
-              onDeleteHand={handleDeleteHand}
-              onDeleteScreenshot={handleDeleteScreenshot}
-            />
-          ))}
-        </div>
+      {/* Render eager (Com SS, HM3) */}
+      {!isLazyTab && (
+        loading ? (
+          <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
+        ) : sortedDates.length === 0 ? (
+          <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
+            {tab === 'gg'
+              ? 'Nenhuma mão GG com SS encontrada.'
+              : 'Nenhuma mão HM3 com tag nota encontrada.'}
+          </div>
+        ) : (
+          <div>
+            {sortedDates.map(dateKey => (
+              <DateGroup
+                key={dateKey}
+                dateKey={dateKey}
+                dateLabel={formatDateLabel(dateKey + 'T12:00:00')}
+                tournaments={grouped[dateKey]}
+                expandedHands={expandedHands}
+                toggleHand={toggleHand}
+                onDeleteHand={handleDeleteHand}
+                onDeleteScreenshot={handleDeleteScreenshot}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* Render lazy (Sem SS) */}
+      {isLazyTab && (
+        loading ? (
+          <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
+        ) : dateIndex.dates.length === 0 ? (
+          <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
+            Nenhuma mão GG sem SS encontrada.
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+              {dateIndex.total_hands.toLocaleString()} mãos em {dateIndex.total_dates} dia{dateIndex.total_dates !== 1 ? 's' : ''}
+              {dateIndex.dates.length < dateIndex.total_dates && ` · ${dateIndex.dates.length} visíveis`}
+            </div>
+            {dateIndex.dates.map(d => (
+              <DateGroup
+                key={d.date_key}
+                dateKey={d.date_key}
+                dateLabel={formatDateLabel(d.date_key + 'T12:00:00')}
+                tournaments={d.tournaments}
+                dateSummary={d}
+                handsByTm={handsByTm}
+                onLoadTournamentHands={async (tm) => {
+                  if (handsByTm[tm] !== undefined) return
+                  await loadTournamentHands(tm)
+                }}
+                expandedHands={expandedHands}
+                toggleHand={toggleHand}
+                onDeleteHand={handleDeleteHand}
+                onDeleteScreenshot={handleDeleteScreenshot}
+              />
+            ))}
+            {dateIndex.has_more && !dateRange && (
+              <div style={{ textAlign: 'center', marginTop: 12 }}>
+                <button
+                  onClick={loadMoreDates}
+                  disabled={loadingMore}
+                  style={{
+                    padding: '8px 20px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                    background: 'rgba(99,102,241,0.1)', color: '#818cf8',
+                    border: '1px solid rgba(99,102,241,0.2)', cursor: loadingMore ? 'wait' : 'pointer',
+                  }}
+                >{loadingMore ? 'A carregar...' : 'Ver mais 8 dias'}</button>
+              </div>
+            )}
+          </div>
+        )
       )}
     </div>
   )

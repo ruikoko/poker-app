@@ -150,6 +150,12 @@ export const mtt = {
     ).toString()
     return req('GET', `/mtt/hands${qs ? '?' + qs : ''}`)
   },
+  dates: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/mtt/dates${qs ? '?' + qs : ''}`)
+  },
   hand: (id) => req('GET', `/mtt/hands/${id}`),
   stats: () => req('GET', '/mtt/stats'),
   orphans: () => req('GET', '/mtt/orphan-screenshots'),
