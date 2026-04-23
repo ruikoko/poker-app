@@ -697,6 +697,63 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
     return created
 
 
+def _create_ggpoker_villain_notes_for_hand(
+    conn,
+    hand_db_id: int,
+    players_list: list,
+    hero_name: str,
+) -> int:
+    """
+    Cria/actualiza entries em villain_notes para jogadores VPIP de uma hand
+    GGPoker enriquecida por Vision (SS Discord / upload manual SS).
+
+    Le hands.all_players_actions da BD para detectar VPIP. Itera players_list
+    (vindo do raw_json da entry screenshot) e para cada nao-hero com VPIP,
+    faz UPSERT em villain_notes(site='GGPoker', nick=pname).
+
+    Helper partilhado entre as fases SS→HH e HH→SS de /mtt/rematch. Extraido
+    para evitar drift da logica VPIP entre os dois paths.
+
+    Retorna numero de UPSERTs efectuados.
+    """
+    from app.db import query as _q
+    updated_hand = _q(
+        "SELECT all_players_actions FROM hands WHERE id = %s",
+        (hand_db_id,)
+    )
+    apa = (updated_hand[0].get("all_players_actions") or {}) if updated_hand else {}
+
+    created = 0
+    with conn.cursor() as cur:
+        for player in (players_list or []):
+            pname = player.get("name", "")
+            if not pname or pname == "Unknown" or pname == hero_name:
+                continue
+
+            player_data = apa.get(pname, {})
+            actions = player_data.get("actions", {}) if isinstance(player_data, dict) else {}
+            preflop_action = actions.get("preflop", "")
+            has_vpip = (
+                actions.get("flop") is not None
+                or actions.get("turn") is not None
+                or actions.get("river") is not None
+                or (preflop_action and "fold" not in preflop_action.lower())
+            )
+            if not has_vpip:
+                continue
+
+            cur.execute(
+                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                   VALUES ('GGPoker', %s, 1, NOW())
+                   ON CONFLICT (site, nick) DO UPDATE SET
+                       hands_seen = villain_notes.hands_seen + 1,
+                       updated_at = NOW()""",
+                (pname,)
+            )
+            created += 1
+    return created
+
+
 def _extract_buyin(tournament_name: str) -> str | None:
     """Extract buy-in from tournament name."""
     if not tournament_name:
@@ -1479,48 +1536,18 @@ async def rematch_screenshots(
                     enrich_result = _enrich_hand_from_orphan_entry(
                         ss_entry["id"], hand_rows[0]["id"], raw
                     )
-                    
-                    # Criar villain_notes — só para jogadores com VPIP
-                    players_list = raw.get("players_list", [])
-                    hero_name = raw.get("hero", "")
-                    
-                    # Get updated all_players_actions
-                    updated_hand = query("SELECT all_players_actions FROM hands WHERE id = %s", (hand_rows[0]["id"],))
-                    apa = (updated_hand[0].get("all_players_actions") or {}) if updated_hand else {}
-                    
-                    with conn.cursor() as cur:
-                        for player in players_list:
-                            pname = player.get("name", "")
-                            if not pname or pname == "Unknown" or pname == hero_name:
-                                continue
-                            
-                            # Check VPIP
-                            player_data = apa.get(pname, {})
-                            actions = player_data.get("actions", {})
-                            preflop_action = actions.get("preflop", "")
-                            has_vpip = (
-                                actions.get("flop") is not None
-                                or actions.get("turn") is not None
-                                or actions.get("river") is not None
-                                or (preflop_action and "fold" not in preflop_action.lower())
-                            )
-                            
-                            if not has_vpip:
-                                continue
-                            
-                            cur.execute(
-                                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                                   VALUES ('GGPoker', %s, 1, NOW())
-                                   ON CONFLICT (site, nick) DO UPDATE SET
-                                       hands_seen = villain_notes.hands_seen + 1,
-                                       updated_at = NOW()""",
-                                (pname,)
-                            )
-                            villains_created += 1
-                    
+
+                    # Criar villain_notes por VPIP (helper partilhado com HH→SS).
+                    villains_created += _create_ggpoker_villain_notes_for_hand(
+                        conn,
+                        hand_db_id=hand_rows[0]["id"],
+                        players_list=raw.get("players_list", []),
+                        hero_name=raw.get("hero", ""),
+                    )
+
                     matched += 1
                     promoted += 1
-                    logger.info(f"Rematch via hands table: entry {ss_entry['id']} → hand {hand_rows[0]['id']} ({hand_id_pattern}), {len(players_list)} players")
+                    logger.info(f"Rematch via hands table: entry {ss_entry['id']} → hand {hand_rows[0]['id']} ({hand_id_pattern}), {len(raw.get('players_list', []))} players")
                 except Exception as e:
                     logger.warning(f"Rematch enrich failed for entry {ss_entry['id']}: {e}")
                 continue
@@ -1589,6 +1616,71 @@ async def rematch_screenshots(
                 matched += 1
                 logger.info(f"GGDiscord reconciliado: placeholder {gd['hand_id']} apagado, HH real preservada ({real_hand[0]['hand_id']})")
 
+        # ── FASE HH→SS: para hands GG 2026+ sem SS associada, procurar entry ──
+        # Apanha o caso reverso da fase 1: HH chegou primeiro (via HM3 .bat ou
+        # import ZIP), SS Discord chegou depois mas o rematch SS→HH nao tinha
+        # candidata porque a entry ainda nao existia. Disjunto das fases 1+2:
+        # aqui itera hands (nao entries). Filtro entry_id IS NULL isola hands
+        # que nunca tiveram SS associada (exclui placeholders GGDiscord, que
+        # tem entry_id preenchido).
+        hh_to_ss_matched = 0
+        hh_to_ss_villains = 0
+        hh_to_ss_no_ss = 0
+
+        pending_hands = query("""
+            SELECT id, hand_id
+            FROM hands
+            WHERE played_at >= '2026-01-01'
+              AND site = 'GGPoker'
+              AND entry_id IS NULL
+              AND (player_names IS NULL OR player_names ->> 'match_method' IS NULL)
+              AND hand_id LIKE 'GG-%'
+            ORDER BY played_at DESC
+        """)
+        total_hands_checked = len(pending_hands)
+
+        for h in pending_hands:
+            hand_id_str = h.get("hand_id") or ""
+            m = re.match(r"^GG-(\d+)", hand_id_str)
+            if not m:
+                hh_to_ss_no_ss += 1
+                continue
+            tm_digits = m.group(1)
+            tm_with_prefix = f"TM{tm_digits}"
+
+            ss_rows = query("""
+                SELECT id, raw_json
+                FROM entries
+                WHERE entry_type = 'screenshot'
+                  AND (raw_json->>'vision_done')::boolean = true
+                  AND raw_json->>'tm' = %s
+                  AND NOT EXISTS (SELECT 1 FROM hands h2 WHERE h2.entry_id = entries.id)
+                ORDER BY id
+                LIMIT 1
+            """, (tm_with_prefix,))
+
+            if not ss_rows:
+                hh_to_ss_no_ss += 1
+                continue
+
+            ss_entry_hh = ss_rows[0]
+            ss_raw = ss_entry_hh.get("raw_json") or {}
+
+            try:
+                from app.routers.screenshot import _enrich_hand_from_orphan_entry
+                _enrich_hand_from_orphan_entry(ss_entry_hh["id"], h["id"], ss_raw)
+
+                hh_to_ss_villains += _create_ggpoker_villain_notes_for_hand(
+                    conn,
+                    hand_db_id=h["id"],
+                    players_list=ss_raw.get("players_list", []),
+                    hero_name=ss_raw.get("hero", ""),
+                )
+                hh_to_ss_matched += 1
+                logger.info(f"Rematch HH→SS: hand {h['id']} ({hand_id_str}) ← entry {ss_entry_hh['id']}")
+            except Exception as e:
+                logger.warning(f"HH→SS enrich failed for hand {h['id']}: {e}")
+
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1596,7 +1688,7 @@ async def rematch_screenshots(
         raise HTTPException(status_code=500, detail=f"Erro no rematch: {e}")
     finally:
         conn.close()
-    
+
     return {
         "matched": matched,
         "villains_created": villains_created,
@@ -1604,6 +1696,13 @@ async def rematch_screenshots(
         "already_matched": already_matched,
         "no_hh_found": no_hh,
         "total_screenshots": len(screenshot_entries),
+        "hh_to_ss": {
+            "matched": hh_to_ss_matched,
+            "villains_created": hh_to_ss_villains,
+            "no_ss_found": hh_to_ss_no_ss,
+            "total_hands_checked": total_hands_checked,
+        },
+        "total_matched": matched + hh_to_ss_matched,
     }
 
 
