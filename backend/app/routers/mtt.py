@@ -1336,9 +1336,12 @@ def list_mtt_dates(
         )
     # 'both' → sem filtro SS
 
-    if format in ('PKO', 'NPKO'):
+    # 'PKO' = umbrella (PKO + Super KO + Mystery KO); 'Vanilla' literal; null = sem filtro.
+    if format == 'PKO':
+        conditions.append("(tournament_format ILIKE '%%KO%%' OR tournament_format = 'PKO')")
+    elif format == 'Vanilla':
         conditions.append("tournament_format = %s")
-        params.append(format)
+        params.append('Vanilla')
 
     if tm_search:
         conditions.append("hand_id ILIKE %s")
