@@ -1322,87 +1322,13 @@ def admin_audit_discord_state(current_user=Depends(require_auth)):
             )
             discord_tables = [r["tablename"] for r in cur.fetchall()]
 
-            # 6. hand_villains das hands GG de 19-Abr (cohort do backfill).
-            # Valida se o live path cria rows em hand_villains para hands
-            # Discord enriquecidas. Esperado: 0 — bug conhecido: /mtt/rematch
-            # só escreve em villain_notes, não em hand_villains.
-            cur.execute(
-                """SELECT COUNT(DISTINCT hv.hand_db_id) AS hands_with_villains,
-                          COUNT(*) AS villain_rows,
-                          COUNT(DISTINCT CASE
-                              WHEN 'nota' = ANY(COALESCE(h.discord_tags, ARRAY[]::text[]))
-                              THEN hv.hand_db_id
-                          END) AS nota_channel_hands_with_villains
-                   FROM hand_villains hv
-                   JOIN hands h ON h.id = hv.hand_db_id
-                   WHERE h.played_at >= '2026-04-19' AND h.played_at < '2026-04-20'
-                     AND h.site = 'GGPoker'"""
-            )
-            bf_row = cur.fetchone()
-            backfilled_19abr_villains = {
-                "hands_with_villains": bf_row["hands_with_villains"],
-                "villain_rows": bf_row["villain_rows"],
-                "nota_channel_hands_with_villains": bf_row["nota_channel_hands_with_villains"],
-            }
-
         return {
             "by_origin": by_origin,
             "with_discord_tags": with_discord_tags,
             "via_discord_entries": via_discord_entries,
             "sync_state": sync_state,
             "discord_tables": discord_tables,
-            "backfilled_19abr_villains": backfilled_19abr_villains,
         }
-    finally:
-        conn.close()
-
-
-# TEMP: remove after Discord UI validation is complete
-@router.get("/admin/list-discord-hands")
-def admin_list_discord_hands(current_user=Depends(require_auth)):
-    """
-    Read-only: ultimas 20 hands com origin='discord'. Devolve informacao
-    minima para navegar visualmente pela UI e confirmar onde cada hand
-    aparece (Estudo vs Viloes vs Dashboard sem-match).
-
-    Campos:
-      - id, hand_id, played_at
-      - discord_tags        → decide grupo na UI (ex: 'nota' → Viloes modal)
-      - channel_name        → resolved via discord_sync_state
-      - match_method        → player_names ->> 'match_method' (NULL = placeholder)
-      - has_screenshot      → boolean (true se screenshot_url populado)
-    """
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT h.id,
-                          h.hand_id,
-                          h.played_at,
-                          h.discord_tags,
-                          h.player_names ->> 'match_method' AS match_method,
-                          (h.screenshot_url IS NOT NULL) AS has_screenshot,
-                          (SELECT s.channel_name FROM discord_sync_state s
-                           WHERE s.channel_id = e.discord_channel) AS channel_name
-                   FROM hands h
-                   LEFT JOIN entries e ON h.entry_id = e.id
-                   WHERE h.origin = 'discord'
-                   ORDER BY h.played_at DESC NULLS LAST
-                   LIMIT 20"""
-            )
-            rows = [
-                {
-                    "id": r["id"],
-                    "hand_id": r["hand_id"],
-                    "played_at": r["played_at"].isoformat() if r["played_at"] else None,
-                    "discord_tags": list(r["discord_tags"] or []),
-                    "channel_name": r["channel_name"],
-                    "match_method": r["match_method"],
-                    "has_screenshot": bool(r["has_screenshot"]),
-                }
-                for r in cur.fetchall()
-            ]
-        return {"total": len(rows), "hands": rows}
     finally:
         conn.close()
 
