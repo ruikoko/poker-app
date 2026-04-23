@@ -790,3 +790,201 @@ def fix_ggdiscord_played_at(
         conn.close()
 
 
+# ─── TEMP: backfill metadados Discord perdidos em placeholders ────────────────
+# Para mãos GG 2026+ onde o placeholder Discord foi apagado pelo _insert_hand
+# antigo (pré-fix 823a9f4) e os metadados Discord se perderam (origin=NULL,
+# discord_tags=NULL, entry_id → HH importer em vez de Discord entry).
+#
+# Remover este endpoint após cohort 19-Abr processada e validada.
+# Ver CLAUDE.md sessão 22-23-Abr.
+
+
+@router.post("/admin/backfill-lost-placeholder-metadata")
+def backfill_lost_placeholder_metadata(
+    mode: str = Query("preview", regex="^(preview|execute)$"),
+    current_user=Depends(require_auth),
+):
+    """
+    TEMP. Repõe metadados Discord em mãos GG 2026+ onde o placeholder foi
+    apagado pelo _insert_hand antigo (antes do fix 823a9f4).
+
+    Cohort: hands.site='GGPoker' AND played_at>='2026-01-01' AND origin IS NULL
+            AND hand_id LIKE 'GG-%' AND EXISTS discord entry com mesmo TM.
+
+    ?mode=preview (default): dry-run, mostra plan até 10 hands.
+    ?mode=execute: aplica UPDATE por hand, commit individual, erros em errors[].
+
+    Metadados repostos:
+      - entry_id ← Discord entry mais antiga (sobrescreve HH importer)
+      - origin = 'discord'
+      - discord_tags = ARRAY dos channel_names (acumula se múltiplas entries)
+      - screenshot_url = file_meta.og_image_url do entry canónico
+      - player_names = {players_list, hero, vision_sb, vision_bb, file_meta,
+                        match_method='discord_placeholder_backfill_after_hh_delete'}
+
+    NÃO toca em all_players_actions (mantém o parse HH). Re-match SS↔HH via
+    /api/mtt/rematch após este backfill para recuperar anon_map enriquecido.
+    """
+    import json as _json
+    from app.db import get_conn
+    from app.discord_bot import _resolve_channel_name_for_entry
+
+    cohort = query("""
+        SELECT h.id           AS hand_db_id,
+               h.hand_id,
+               h.played_at,
+               h.entry_id     AS current_entry_id,
+               substring(h.hand_id from 4) AS tm_digits
+        FROM hands h
+        WHERE h.played_at >= '2026-01-01'
+          AND h.site = 'GGPoker'
+          AND h.origin IS NULL
+          AND h.hand_id LIKE 'GG-%'
+          AND EXISTS (
+              SELECT 1 FROM entries e
+              WHERE e.source = 'discord'
+                AND e.entry_type = 'replayer_link'
+                AND e.site = 'GGPoker'
+                AND e.raw_json->>'tm' = 'TM' || substring(h.hand_id from 4)
+          )
+        ORDER BY h.played_at DESC
+        LIMIT 200
+    """)
+
+    plans = []
+    by_channel_count = {}
+    multi_channel = 0
+    errors = []
+    updated = 0
+
+    conn = get_conn() if mode == "execute" else None
+
+    try:
+        for h in cohort:
+            tm_digits = h["tm_digits"]
+            tm_str = f"TM{tm_digits}"
+
+            matches = query(
+                """
+                SELECT e.id, e.discord_posted_at, e.raw_json, e.discord_channel
+                FROM entries e
+                WHERE e.source = 'discord'
+                  AND e.entry_type = 'replayer_link'
+                  AND e.site = 'GGPoker'
+                  AND e.raw_json->>'tm' = %s
+                ORDER BY e.discord_posted_at ASC NULLS LAST, e.id ASC
+                """,
+                (tm_str,),
+            )
+            if not matches:
+                errors.append({
+                    "hand_id": h["hand_id"],
+                    "reason": "no discord entry matched (raro — cohort já exigia EXISTS)"
+                })
+                continue
+
+            canonical = matches[0]
+            canonical_entry_id = canonical["id"]
+            canonical_rj = canonical["raw_json"] or {}
+
+            channel_names = []
+            for m in matches:
+                cn = _resolve_channel_name_for_entry(m["id"])
+                if cn and cn not in channel_names:
+                    channel_names.append(cn)
+
+            if len(matches) > 1:
+                multi_channel += 1
+
+            for cn in channel_names:
+                by_channel_count[cn] = by_channel_count.get(cn, 0) + 1
+
+            file_meta = canonical_rj.get("file_meta") or {}
+            screenshot_url = file_meta.get("og_image_url")
+            pn_new = {
+                "players_list": canonical_rj.get("players_list") or [],
+                "hero": canonical_rj.get("hero"),
+                "vision_sb": canonical_rj.get("vision_sb"),
+                "vision_bb": canonical_rj.get("vision_bb"),
+                "file_meta": file_meta,
+                "match_method": "discord_placeholder_backfill_after_hh_delete",
+            }
+
+            plan_entry = {
+                "hand_db_id": h["hand_db_id"],
+                "hand_id": h["hand_id"],
+                "played_at": h["played_at"].isoformat() if h["played_at"] else None,
+                "current_entry_id": h["current_entry_id"],
+                "discord_entries_matched": [
+                    {
+                        "entry_id": m["id"],
+                        "posted_at": m["discord_posted_at"].isoformat() if m["discord_posted_at"] else None,
+                    }
+                    for m in matches
+                ],
+                "would_become": {
+                    "entry_id": canonical_entry_id,
+                    "origin": "discord",
+                    "discord_tags": channel_names,
+                    "screenshot_url": screenshot_url,
+                    "player_names_players_list_count": len(pn_new["players_list"]),
+                    "player_names_hero": pn_new["hero"],
+                    "player_names_match_method": pn_new["match_method"],
+                },
+            }
+
+            if mode == "preview":
+                if len(plans) < 10:
+                    plans.append(plan_entry)
+                continue
+
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE hands SET
+                            entry_id       = %(entry_id)s,
+                            origin         = 'discord',
+                            discord_tags   = ARRAY(SELECT DISTINCT unnest(
+                                               COALESCE(discord_tags, '{}'::text[])
+                                               || %(channel_names)s::text[]
+                                             )),
+                            screenshot_url = COALESCE(screenshot_url, %(screenshot_url)s),
+                            player_names   = COALESCE(player_names, %(player_names)s::jsonb)
+                        WHERE id = %(hand_db_id)s
+                        """,
+                        {
+                            "entry_id": canonical_entry_id,
+                            "channel_names": channel_names,
+                            "screenshot_url": screenshot_url,
+                            "player_names": _json.dumps(pn_new),
+                            "hand_db_id": h["hand_db_id"],
+                        },
+                    )
+                conn.commit()
+                updated += 1
+                if len(plans) < 10:
+                    plans.append(plan_entry)
+            except Exception as e:
+                conn.rollback()
+                errors.append({
+                    "hand_id": h["hand_id"],
+                    "hand_db_id": h["hand_db_id"],
+                    "error": str(e),
+                })
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {
+        "preview": mode == "preview",
+        "cohort_size": len(cohort),
+        "updated": updated if mode == "execute" else 0,
+        "shown": len(plans),
+        "by_channel": by_channel_count,
+        "multi_channel_hands": multi_channel,
+        "plan": plans,
+        "errors": errors,
+        "note": "Re-match SS↔HH via POST /api/mtt/rematch para recuperar all_players_actions enriquecido",
+    }
