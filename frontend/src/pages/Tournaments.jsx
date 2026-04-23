@@ -86,6 +86,16 @@ function formatTime(iso) {
   return d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
 }
 
+// Remove buy-in monetário ($N, $N.M, $N,M) do nome do torneio. Preserva
+// sufixos tipo "$1M GTD" — o "M" a seguir ao número falha o lookahead.
+function cleanTournamentName(name) {
+  if (!name) return name
+  return name
+    .replace(/(?<=^|\s)\$\d+(?:[.,]\d+)?(?=\s|$)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 // ── Import Panel ─────────────────────────────────────────────────────────────
 
 function ImportPanel({ onImported }) {
@@ -352,7 +362,8 @@ function TournamentGroup({
   const formatBadge = tmSummary?.tournament_format
     ?? loadedHands.find(h => h.tournament_format)?.tournament_format
 
-  const sep = { fontSize: 11, color: '#4b5563' }
+  const displayName = cleanTournamentName(tournamentName)
+  const sep = { fontSize: 11, color: '#4b5563', flex: '0 0 auto' }
 
   return (
     <div style={{
@@ -360,50 +371,50 @@ function TournamentGroup({
       border: '1px solid rgba(255,255,255,0.05)',
       borderRadius: 6, marginBottom: 4, overflow: 'hidden',
     }}>
-      {/* Tournament header */}
+      {/* Tournament header — colunas fixas calibradas pela linha mais longa. */}
       <div
         onClick={() => setOpen(!open)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+          display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
           cursor: 'pointer', background: 'rgba(255,255,255,0.02)',
         }}
         onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
         onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
       >
-        <span style={{ color: '#6366f1', fontSize: 12 }}>{open ? '▼' : '▶'}</span>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>{tmNumber}</span>
-        {tournamentName && (
-          <>
-            <span style={sep}>·</span>
-            <span style={{ fontSize: 11, color: '#94a3b8', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {tournamentName}
-            </span>
-          </>
-        )}
-        {buyIn != null && (
-          <>
-            <span style={sep}>·</span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#f59e0b' }}>{fmtBuyIn(buyIn)}</span>
-          </>
-        )}
-        {blindsLabel && (
-          <>
-            <span style={sep}>·</span>
-            <span style={{ fontSize: 11, color: '#64748b' }}>{blindsLabel}</span>
-          </>
-        )}
-        {timeRange && (
-          <>
-            <span style={sep}>·</span>
-            <span style={{ fontSize: 11, color: '#64748b' }}>{timeRange}</span>
-          </>
-        )}
+        <span style={{ color: '#6366f1', fontSize: 12, flex: '0 0 14px' }}>{open ? '▼' : '▶'}</span>
+        <span style={{
+          flex: '0 0 110px', fontSize: 12, fontWeight: 700, color: '#e2e8f0',
+          fontFamily: "'Fira Code', monospace",
+        }}>{tmNumber}</span>
+        <span style={sep}>·</span>
+        <span
+          title={displayName || ''}
+          style={{
+            flex: '0 0 320px', fontSize: 11, color: '#94a3b8',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >{displayName || ''}</span>
+        <span style={sep}>·</span>
+        <span style={{ flex: '0 0 56px', fontSize: 11, fontWeight: 600, color: '#f59e0b' }}>
+          {buyIn != null ? fmtBuyIn(buyIn) : ''}
+        </span>
+        <span style={sep}>·</span>
+        <span style={{
+          flex: '0 0 260px', fontSize: 11, color: '#64748b',
+          fontFamily: "'Fira Code', monospace",
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{blindsLabel || ''}</span>
+        <span style={sep}>·</span>
+        <span style={{
+          flex: '0 0 100px', fontSize: 11, color: '#64748b',
+          fontFamily: "'Fira Code', monospace",
+        }}>{timeRange || ''}</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
           {formatBadge && (
             <span style={{
               fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
-              color: formatBadge === 'PKO' ? '#f59e0b' : '#64748b',
-              background: formatBadge === 'PKO' ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)',
+              color: /KO/i.test(formatBadge) ? '#f59e0b' : '#64748b',
+              background: /KO/i.test(formatBadge) ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)',
             }}>{formatBadge}</span>
           )}
           <span style={{ fontSize: 11, color: '#94a3b8' }}>{handCount} mãos</span>
@@ -811,9 +822,9 @@ export default function TournamentsPage() {
               background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 6,
             }}>
               {[
-                { value: null,   label: 'Todos', color: '#94a3b8' },
-                { value: 'PKO',  label: 'PKO',   color: '#f59e0b' },
-                { value: 'NPKO', label: 'NPKO',  color: '#64748b' },
+                { value: null,      label: 'Todos',   color: '#94a3b8' },
+                { value: 'PKO',     label: 'PKO',     color: '#f59e0b' },
+                { value: 'Vanilla', label: 'Vanilla', color: '#64748b' },
               ].map(({ value, label, color }) => {
                 const active = formatFilter === value
                 return (
