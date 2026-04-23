@@ -76,6 +76,12 @@ MTT_SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_hand_villains_mtt_hand ON hand_villains(mtt_hand_id)",
     "CREATE INDEX IF NOT EXISTS idx_hand_villains_name ON hand_villains(player_name)",
+    # Índice parcial para aba "Sem SS" do MTT: acelera GROUP BY por data em ~47k mãos GG sem match.
+    """
+    CREATE INDEX IF NOT EXISTS idx_hands_gg_no_ss_played
+      ON hands (played_at DESC)
+      WHERE site = 'GGPoker' AND hand_id LIKE 'GG-%' AND screenshot_url IS NULL
+    """,
 ]
 
 
@@ -1263,20 +1269,24 @@ def list_mtt_hands(
         if isinstance(pn, str):
             pn = json.loads(pn)
         hand["screenshot_entry_id"] = hand.get("entry_id") or pn.get("screenshot_entry_id")
-        # Villains from hand_villains (try both FK columns)
-        try:
-            villains = query(
-                """SELECT * FROM hand_villains 
-                   WHERE mtt_hand_id = %s OR hand_db_id = %s
-                   ORDER BY position""",
-                (hand["id"], hand["id"])
-            )
-        except Exception:
-            # hand_db_id column may not exist yet
-            villains = query(
-                "SELECT * FROM hand_villains WHERE mtt_hand_id = %s ORDER BY position",
-                (hand["id"],)
-            )
+        # Villains from hand_villains — skip para ss_filter='without': pela regra A∨B∨C
+        # nenhuma mão sem match pode ter villain, logo a subquery é desperdício em N+1.
+        if ss_filter == 'without':
+            villains = []
+        else:
+            try:
+                villains = query(
+                    """SELECT * FROM hand_villains
+                       WHERE mtt_hand_id = %s OR hand_db_id = %s
+                       ORDER BY position""",
+                    (hand["id"], hand["id"])
+                )
+            except Exception:
+                # hand_db_id column may not exist yet
+                villains = query(
+                    "SELECT * FROM hand_villains WHERE mtt_hand_id = %s ORDER BY position",
+                    (hand["id"],)
+                )
         hand["villains"] = [dict(v) for v in villains]
         hand["villain_count"] = len(villains)
         # Cleanup: don't send heavy fields
@@ -1289,6 +1299,191 @@ def list_mtt_hands(
         "page": page,
         "page_size": page_size,
         "hands": result,
+    }
+
+
+@router.get("/dates")
+def list_mtt_dates(
+    ss_filter: str = Query("without", description="'with' | 'without' | 'both'"),
+    limit_dates: int = Query(8, ge=1, le=50),
+    offset_dates: int = Query(0, ge=0),
+    date_range: str | None = Query(None, description="'1d'|'3d'|'7d'|'15d'|'30d' — sobrescreve limit/offset"),
+    format: str | None = Query(None, description="'PKO' | 'NPKO'"),
+    tm_search: str | None = None,
+    current_user=Depends(require_auth),
+):
+    """
+    Index lazy por data para a aba MTT > GG. Devolve agregados por dia (sem mãos
+    individuais) e, dentro de cada dia, a lista de torneios com contadores.
+
+    Datas agrupadas em UTC — consistente com o agrupamento do frontend (iso.slice(0,10)).
+    """
+    conditions = [
+        "site = 'GGPoker'",
+        "hand_id LIKE 'GG-%%'",
+        "(all_players_actions -> '_meta' ->> 'from_discord_placeholder') IS DISTINCT FROM 'true'",
+    ]
+    params: list = []
+
+    if ss_filter == 'with':
+        conditions.append(
+            "(screenshot_url IS NOT NULL OR player_names ->> 'match_method' IS NOT NULL)"
+        )
+    elif ss_filter == 'without':
+        conditions.append(
+            "screenshot_url IS NULL "
+            "AND (player_names IS NULL OR player_names->>'match_method' IS NULL)"
+        )
+    # 'both' → sem filtro SS
+
+    if format in ('PKO', 'NPKO'):
+        conditions.append("tournament_format = %s")
+        params.append(format)
+
+    if tm_search:
+        conditions.append("hand_id ILIKE %s")
+        params.append(f"%{tm_search}%")
+
+    # Janela temporal via pills. Quando activa, ignora offset_dates; limit_dates
+    # é clampado para um valor defensivo elevado porque o utilizador quer tudo
+    # dentro da janela.
+    if date_range:
+        days_map = {'1d': 1, '3d': 3, '7d': 7, '15d': 15, '30d': 30}
+        days = days_map.get(date_range)
+        if days:
+            conditions.append("played_at >= (NOW() - INTERVAL '%s days')" % days)
+            effective_offset = 0
+            effective_limit = 50
+        else:
+            effective_offset = offset_dates
+            effective_limit = limit_dates
+    else:
+        effective_offset = offset_dates
+        effective_limit = limit_dates
+
+    where = "WHERE " + " AND ".join(conditions)
+
+    # Counts globais (agnósticos de limit/offset) — feed do "total_dates" / "total_hands".
+    totals_row = query(
+        f"""
+        SELECT
+          COUNT(*) AS total_hands,
+          COUNT(DISTINCT (played_at AT TIME ZONE 'UTC')::date) AS total_dates
+        FROM hands
+        {where}
+        """,
+        tuple(params),
+    )
+    total_hands = totals_row[0]["total_hands"] if totals_row else 0
+    total_dates = totals_row[0]["total_dates"] if totals_row else 0
+
+    # Datas paginadas. ORDER BY DESC → dias mais recentes primeiro.
+    date_rows = query(
+        f"""
+        WITH eligible AS (
+          SELECT (played_at AT TIME ZONE 'UTC')::date AS date_key
+          FROM hands
+          {where}
+        )
+        SELECT date_key, COUNT(*) AS hand_count
+        FROM eligible
+        GROUP BY date_key
+        ORDER BY date_key DESC
+        LIMIT %s OFFSET %s
+        """,
+        tuple(params) + (effective_limit, effective_offset),
+    )
+
+    if not date_rows:
+        return {
+            "total_dates": total_dates,
+            "total_hands": total_hands,
+            "offset": effective_offset,
+            "limit": effective_limit,
+            "has_more": False,
+            "dates": [],
+        }
+
+    date_keys = [r["date_key"] for r in date_rows]
+
+    # Torneios para as datas retornadas (1 query, sem N+1).
+    tourney_rows = query(
+        f"""
+        WITH eligible AS (
+          SELECT
+            id, hand_id, played_at, tournament_name, tournament_number,
+            tournament_format, buy_in,
+            all_players_actions -> '_meta' ->> 'sb'   AS sb,
+            all_players_actions -> '_meta' ->> 'bb'   AS bb,
+            all_players_actions -> '_meta' ->> 'ante' AS ante,
+            (played_at AT TIME ZONE 'UTC')::date      AS date_key
+          FROM hands
+          {where}
+        )
+        SELECT
+          date_key,
+          COALESCE(tournament_number, regexp_replace(hand_id, '^GG-', '')) AS tm,
+          MAX(tournament_name)                           AS tournament_name,
+          MAX(tournament_format)                         AS tournament_format,
+          MAX(buy_in)                                    AS buy_in,
+          COUNT(*)                                       AS hand_count,
+          MIN(played_at)                                 AS first_played_at,
+          MAX(played_at)                                 AS last_played_at,
+          (array_agg(sb   ORDER BY played_at ASC))[1]    AS sb_first,
+          (array_agg(bb   ORDER BY played_at ASC))[1]    AS bb_first,
+          (array_agg(ante ORDER BY played_at ASC))[1]    AS ante_first,
+          (array_agg(sb   ORDER BY played_at DESC))[1]   AS sb_last,
+          (array_agg(bb   ORDER BY played_at DESC))[1]   AS bb_last,
+          (array_agg(ante ORDER BY played_at DESC))[1]   AS ante_last
+        FROM eligible
+        WHERE date_key = ANY(%s)
+        GROUP BY date_key, tm
+        ORDER BY date_key DESC, MIN(played_at) ASC
+        """,
+        tuple(params) + (date_keys,),
+    )
+
+    def _blinds(sb, bb, ante):
+        if not sb or not bb:
+            return None
+        return f"{sb}/{bb}" + (f"({ante})" if ante else "")
+
+    tourneys_by_date: dict = {}
+    for r in tourney_rows:
+        dk = r["date_key"]
+        bucket = tourneys_by_date.setdefault(dk, [])
+        bucket.append({
+            "tm": f"TM{r['tm']}" if r["tm"] and not r["tm"].startswith("TM") else r["tm"],
+            "name": r["tournament_name"],
+            "buy_in": float(r["buy_in"]) if r["buy_in"] is not None else None,
+            "tournament_format": r["tournament_format"],
+            "hand_count": r["hand_count"],
+            "first_played_at": r["first_played_at"].isoformat() if r["first_played_at"] else None,
+            "last_played_at":  r["last_played_at"].isoformat()  if r["last_played_at"]  else None,
+            "blinds_first": _blinds(r["sb_first"], r["bb_first"], r["ante_first"]),
+            "blinds_last":  _blinds(r["sb_last"],  r["bb_last"],  r["ante_last"]),
+        })
+
+    dates = []
+    for r in date_rows:
+        dk = r["date_key"]
+        bucket = tourneys_by_date.get(dk, [])
+        dates.append({
+            "date_key": dk.isoformat() if hasattr(dk, "isoformat") else str(dk),
+            "hand_count": r["hand_count"],
+            "tournament_count": len(bucket),
+            "tournaments": bucket,
+        })
+
+    has_more = (effective_offset + len(dates)) < total_dates
+
+    return {
+        "total_dates": total_dates,
+        "total_hands": total_hands,
+        "offset": effective_offset,
+        "limit": effective_limit,
+        "has_more": has_more,
+        "dates": dates,
     }
 
 
