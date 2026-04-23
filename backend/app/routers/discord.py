@@ -668,15 +668,22 @@ def backfill_ggdiscord(
                     except (ValueError, OSError):
                         pass
 
+            # Resolve channel_name para popular discord_tags (nome raw, spec Opção X).
+            from app.discord_bot import _resolve_channel_name_for_entry
+            channel_name = _resolve_channel_name_for_entry(entry_id)
+            channel_bruto_list = [channel_name] if channel_name else []
+
             try:
                 with conn.cursor() as cur:
                     cur.execute(
                         """INSERT INTO hands
                            (site, hand_id, played_at, notes, tags, hm3_tags,
                             entry_id, study_state, screenshot_url,
-                            all_players_actions, player_names)
+                            all_players_actions, player_names,
+                            origin, discord_tags)
                            VALUES ('GGPoker', %s, %s, %s, %s, %s, %s, 'new', %s,
-                                   %s::jsonb, %s::jsonb)
+                                   %s::jsonb, %s::jsonb,
+                                   'discord', %s::text[])
                            ON CONFLICT (hand_id) DO NOTHING
                            RETURNING id""",
                         (
@@ -689,6 +696,7 @@ def backfill_ggdiscord(
                             (rj.get("file_meta") or {}).get("og_image_url"),
                             _json.dumps(apa),
                             _json.dumps(pn),
+                            channel_bruto_list,
                         )
                     )
                     inserted = cur.fetchone()

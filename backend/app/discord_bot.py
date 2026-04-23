@@ -79,6 +79,24 @@ def _channel_to_tags(channel_name: str) -> list[str]:
     return tags
 
 
+def _resolve_channel_name_for_entry(entry_id: int) -> str | None:
+    """
+    Resolve raw channel_name de uma entry Discord via discord_sync_state.
+    Devolve None se entry nao existe, nao e' source='discord', ou o canal
+    nao esta em discord_sync_state. Usado pelos paths replayer_link/image
+    que precisam popular hands.discord_tags na criacao/enriquecimento.
+    """
+    from app.db import query as _q
+    rows = _q(
+        """SELECT s.channel_name
+           FROM entries e
+           LEFT JOIN discord_sync_state s ON s.channel_id = e.discord_channel
+           WHERE e.id = %s AND e.source = 'discord'""",
+        (entry_id,)
+    )
+    return rows[0]["channel_name"] if rows and rows[0].get("channel_name") else None
+
+
 def _detect_content_type(text: str, attachments: list) -> list[dict]:
     """
     Analisa o texto e attachments de uma mensagem Discord.

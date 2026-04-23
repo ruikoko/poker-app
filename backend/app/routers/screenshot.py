@@ -953,6 +953,11 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                         except (ValueError, OSError):
                             pass
 
+                # Resolve channel_name para popular discord_tags (nome raw, spec Opção X).
+                from app.discord_bot import _resolve_channel_name_for_entry
+                channel_name = _resolve_channel_name_for_entry(entry_id)
+                channel_bruto_list = [channel_name] if channel_name else []
+
                 conn = get_conn()
                 try:
                     with conn.cursor() as cur:
@@ -960,9 +965,11 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                             """INSERT INTO hands
                                (site, hand_id, played_at, notes, tags, hm3_tags,
                                 entry_id, study_state, screenshot_url,
-                                all_players_actions, player_names)
+                                all_players_actions, player_names,
+                                origin, discord_tags)
                                VALUES ('GGPoker', %s, %s, %s, %s, %s, %s, 'new', %s,
-                                       %s::jsonb, %s::jsonb)
+                                       %s::jsonb, %s::jsonb,
+                                       'discord', %s::text[])
                                ON CONFLICT (hand_id) DO NOTHING""",
                             (
                                 hand_id,
@@ -974,6 +981,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 file_meta.get("og_image_url") if file_meta else None,
                                 json.dumps(apa),
                                 json.dumps(pn_json),
+                                channel_bruto_list,
                             )
                         )
                         logger.info(f"[bg] Created GGDiscord placeholder for entry {entry_id} ({hand_id}, played_at={played_at_extracted})")
@@ -1144,6 +1152,18 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
 
     # Study state: promote to 'new' if was mtt_archive
     extra_updates.append("study_state = 'new'")
+
+    # Se a entry veio do Discord, append discord_tags com o nome raw do canal.
+    # NAO tocamos em origin nem em tags: a hand ja veio de um path primario
+    # (HM3 .bat ou HH import) e so esta a ser enriquecida com dados Vision;
+    # preservar origem. discord_tags e' additive metadata (regra C villain).
+    from app.discord_bot import _resolve_channel_name_for_entry
+    _discord_channel = _resolve_channel_name_for_entry(entry_id)
+    if _discord_channel:
+        extra_updates.append(
+            "discord_tags = ARRAY(SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[]))"
+        )
+        extra_params.append([_discord_channel])
 
     conn = get_conn()
     try:
