@@ -1322,12 +1322,36 @@ def admin_audit_discord_state(current_user=Depends(require_auth)):
             )
             discord_tables = [r["tablename"] for r in cur.fetchall()]
 
+            # 6. hand_villains das hands GG de 19-Abr (cohort do backfill).
+            # Valida se o live path cria rows em hand_villains para hands
+            # Discord enriquecidas. Esperado: 0 — bug conhecido: /mtt/rematch
+            # só escreve em villain_notes, não em hand_villains.
+            cur.execute(
+                """SELECT COUNT(DISTINCT hv.hand_db_id) AS hands_with_villains,
+                          COUNT(*) AS villain_rows,
+                          COUNT(DISTINCT CASE
+                              WHEN 'nota' = ANY(COALESCE(h.discord_tags, ARRAY[]::text[]))
+                              THEN hv.hand_db_id
+                          END) AS nota_channel_hands_with_villains
+                   FROM hand_villains hv
+                   JOIN hands h ON h.id = hv.hand_db_id
+                   WHERE h.played_at >= '2026-04-19' AND h.played_at < '2026-04-20'
+                     AND h.site = 'GGPoker'"""
+            )
+            bf_row = cur.fetchone()
+            backfilled_19abr_villains = {
+                "hands_with_villains": bf_row["hands_with_villains"],
+                "villain_rows": bf_row["villain_rows"],
+                "nota_channel_hands_with_villains": bf_row["nota_channel_hands_with_villains"],
+            }
+
         return {
             "by_origin": by_origin,
             "with_discord_tags": with_discord_tags,
             "via_discord_entries": via_discord_entries,
             "sync_state": sync_state,
             "discord_tables": discord_tables,
+            "backfilled_19abr_villains": backfilled_19abr_villains,
         }
     finally:
         conn.close()
