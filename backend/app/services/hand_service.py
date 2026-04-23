@@ -58,6 +58,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                     placeholder_metadata = {
                         "origin": existing.get("origin"),
                         "discord_tags": existing.get("discord_tags"),
+                        "hm3_tags": existing.get("hm3_tags"),
                         "entry_id": existing.get("placeholder_entry_id"),
                         "player_names": existing.get("player_names"),
                         "screenshot_url": existing.get("screenshot_url"),
@@ -143,16 +144,33 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                     -- Regra: primeiro ingress ganha no campo scalar origin; outras fontes ficam
                     -- rastreáveis via discord_tags / hm3_tags.
                     origin         = COALESCE(%(origin)s, origin),
-                    discord_tags   = COALESCE(discord_tags, %(discord_tags)s),
+                    -- NULLIF obrigatório nas colunas TEXT[]: schema default é ARRAY[]::text[]
+                    -- (empty, não NULL). COALESCE nu preserva o array vazio do INSERT e
+                    -- descarta o valor do placeholder. Com NULLIF, empty-array → NULL →
+                    -- COALESCE cai no placeholder_metadata.
+                    discord_tags   = COALESCE(NULLIF(discord_tags, ARRAY[]::text[]), %(discord_tags)s),
+                    -- hm3_tags: preservar + strip 'GGDiscord' (marker interno de placeholder
+                    -- Discord, não deve persistir no row final). Se hm3_tags real for None,
+                    -- array_remove aplica-se a '{}' que é no-op.
+                    hm3_tags       = array_remove(
+                                        COALESCE(NULLIF(hm3_tags, ARRAY[]::text[]), %(hm3_tags)s),
+                                        'GGDiscord'
+                                     ),
                     entry_id       = COALESCE(%(placeholder_entry_id)s, entry_id),
                     player_names   = COALESCE(player_names, %(player_names)s),
                     screenshot_url = COALESCE(screenshot_url, %(screenshot_url)s),
-                    tags = ARRAY(SELECT DISTINCT unnest(COALESCE(tags, '{}'::text[]) || COALESCE(%(tags)s, '{}'::text[])))
+                    -- tags: manter pattern aditivo (merge dedup), com NULLIF defensivo
+                    -- nos dois lados para normalizar empty-array → NULL antes do COALESCE.
+                    tags           = ARRAY(SELECT DISTINCT unnest(
+                                        COALESCE(NULLIF(tags, ARRAY[]::text[]), '{}'::text[])
+                                        || COALESCE(NULLIF(%(tags)s, ARRAY[]::text[]), '{}'::text[])
+                                     ))
                 WHERE hand_id = %(hand_id)s
                 """,
                 {
                     "origin": placeholder_metadata["origin"],
                     "discord_tags": placeholder_metadata["discord_tags"],
+                    "hm3_tags": placeholder_metadata["hm3_tags"],
                     "placeholder_entry_id": placeholder_metadata["entry_id"],
                     "player_names": json.dumps(placeholder_metadata["player_names"]) if placeholder_metadata["player_names"] else None,
                     "screenshot_url": placeholder_metadata["screenshot_url"],
