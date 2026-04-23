@@ -6,3 +6,12 @@ frontend/.vite/
 query.py
 query_*.py
 *_output.txt
+
+# Snapshots CSV de scripts ad-hoc / backfills / reparses — audit logs locais,
+# não versionados. Apanha tanto o padrão no root (execuções antigas) como
+# dentro de scripts/archived/ (os scripts arquivados continuam a gerar CSVs
+# se alguém os reactivar manualmente — esses ficam só em disco local).
+/backfill_*_snapshot_*.csv
+/reparse_*_snapshot_*.csv
+scripts/archived/backfill_*_snapshot_*.csv
+scripts/archived/reparse_*_snapshot_*.csv
