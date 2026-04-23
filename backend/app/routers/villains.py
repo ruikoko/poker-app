@@ -1,3 +1,5 @@
+import re
+import json
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -196,6 +198,79 @@ def delete_villain(villain_id: int, current_user=Depends(require_auth)):
     return {"ok": True}
 
 
+def _compute_villain_result(raw: str, villain_nick: str, bb_size: float) -> float | None:
+    """
+    Computa resultado do villain em BB (net) a partir do raw HH.
+    Mesma formula do _parse_hand para hero (hm3.py), aplicada ao villain.
+
+    Suporta sintaxes das 4 salas:
+      - Winamax:   "nick posts ante N"      "nick calls N"       "nick raises X to Y"
+      - PokerStars:"nick: posts the ante N" "nick: calls N"      "nick: raises X to Y"
+      - WPN:       "nick posts ante N.00"   "nick bets N.00"     (similar a WN)
+      - GG:        parecido a WN mas raw GG usa hashes anonimos; se villain_nick for
+                   o nome real (pos-match SS), regex nao apanha e devolve 0 bb —
+                   fallback no frontend mostra h.result hero. Bug latente, fora
+                   de scope.
+
+    Regex flexibilidade:
+      - '(?::)?'         colon opcional pos-nick (PS style)
+      - '(?:the\\s+)?'   "the" opcional antes de ante/blind (PS style)
+      - '[\\d,.]+'       decimais (WPN .00) + virgulas milhares (pots grandes)
+      - re.escape(nick)  protege chars especiais em nicks ([m], -, etc.)
+
+    Multi-way / side pots: re.finditer soma todas as ocorrencias de "collected"
+    e "wins" para o villain (inclui "from main pot" / "from side pot" naturalmente).
+
+    Devolve None se bb_size invalido ou nick vazio. Nunca lanca.
+
+    Caveat: soma de raises usa o 'to' value (mesmo comportamento do hero parser;
+    em pots com multi-raise o invested fica sobre-estimado, mas consistente com
+    o hero — o delta de perspectiva mantem-se coerente).
+    """
+    if not raw or not villain_nick or not bb_size or bb_size <= 0:
+        return None
+
+    nick_re = re.escape(villain_nick)
+    invested = 0.0
+    won = 0.0
+
+    try:
+        for m in re.finditer(
+            rf"{nick_re}(?::)?\s+posts\s+(?:the\s+)?(?:ante|small blind|big blind)\s+([\d,.]+)",
+            raw,
+        ):
+            invested += float(m.group(1).replace(",", ""))
+
+        for m in re.finditer(
+            rf"{nick_re}(?::)?\s+(?:calls|bets)\s+([\d,.]+)",
+            raw,
+        ):
+            invested += float(m.group(1).replace(",", ""))
+
+        for m in re.finditer(
+            rf"{nick_re}(?::)?\s+raises\s+[\d,.]+\s+to\s+([\d,.]+)",
+            raw,
+        ):
+            invested += float(m.group(1).replace(",", ""))
+
+        uncalled_m = re.search(
+            rf"Uncalled bet \(([\d,.]+)\) returned to {nick_re}",
+            raw,
+        )
+        if uncalled_m:
+            invested -= float(uncalled_m.group(1).replace(",", ""))
+
+        for m in re.finditer(rf"{nick_re} collected ([\d,.]+)", raw):
+            won += float(m.group(1).replace(",", ""))
+
+        for m in re.finditer(rf"{nick_re} wins ([\d,.]+)", raw):
+            won += float(m.group(1).replace(",", ""))
+
+        return round((won - invested) / bb_size, 2)
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 @router.get("/search/hands")
 def villain_hands(
     nick: str = Query(..., description="Nick do vilão"),
@@ -234,10 +309,33 @@ def villain_hands(
     )
     total = total_rows[0]["total"] if total_rows else 0
 
+    # Enrich: villain_result (net BB na perspectiva do villain, computado do raw).
+    # bb_size vive em all_players_actions._meta.bb; defensivo contra apa=str/None.
+    data = []
+    for r in rows:
+        d = dict(r)
+        apa = d.get("all_players_actions")
+        if isinstance(apa, str):
+            try:
+                apa = json.loads(apa)
+            except Exception:
+                apa = None
+        bb_size = None
+        if isinstance(apa, dict):
+            meta = apa.get("_meta")
+            if isinstance(meta, dict):
+                bb_size = meta.get("bb")
+        try:
+            bb_size_f = float(bb_size) if bb_size is not None else 0.0
+        except (TypeError, ValueError):
+            bb_size_f = 0.0
+        d["villain_result"] = _compute_villain_result(d.get("raw") or "", nick, bb_size_f)
+        data.append(d)
+
     return {
         "total": total, "page": page, "page_size": page_size,
         "pages": (total + page_size - 1) // page_size,
-        "data": [dict(r) for r in rows],
+        "data": data,
     }
 
 
