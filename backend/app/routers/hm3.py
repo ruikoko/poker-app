@@ -1257,6 +1257,83 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
+# TEMP: remove after Discord audit conclusions are acted upon
+@router.get("/admin/audit-discord-state")
+def admin_audit_discord_state(current_user=Depends(require_auth)):
+    """
+    Read-only audit do pipeline Discord. Consolida 5 queries para validar
+    gaps vs spec:
+      1. Distribuicao de hands.origin em 2026+ (esperado: 'discord' deveria
+         existir mas pipeline actual nao o escreve).
+      2. Contagem de hands com discord_tags populada (esperado: 0 — coluna
+         existe mas nenhum path a escreve).
+      3. Contagem de hands via entries.source='discord' (proxy de origem).
+      4. Estado de sync por canal (discord_sync_state).
+      5. Lista de tabelas public.* que comecam por 'discord'.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT COALESCE(origin, '(NULL)') AS origin, COUNT(*) AS n
+                   FROM hands
+                   WHERE played_at >= '2026-01-01'
+                   GROUP BY origin
+                   ORDER BY n DESC, origin"""
+            )
+            by_origin = [
+                {"origin": r["origin"], "n": r["n"]}
+                for r in cur.fetchall()
+            ]
+
+            cur.execute(
+                """SELECT COUNT(*) AS n FROM hands
+                   WHERE played_at >= '2026-01-01'
+                     AND discord_tags IS NOT NULL
+                     AND array_length(discord_tags, 1) > 0"""
+            )
+            with_discord_tags = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT COUNT(*) AS n
+                   FROM hands h
+                   JOIN entries e ON h.entry_id = e.id
+                   WHERE h.played_at >= '2026-01-01' AND e.source = 'discord'"""
+            )
+            via_discord_entries = cur.fetchone()["n"]
+
+            cur.execute(
+                """SELECT channel_name, messages_synced, last_sync_at
+                   FROM discord_sync_state
+                   ORDER BY last_sync_at DESC NULLS LAST"""
+            )
+            sync_state = [
+                {
+                    "channel_name": r["channel_name"],
+                    "messages_synced": r["messages_synced"],
+                    "last_sync_at": r["last_sync_at"].isoformat() if r["last_sync_at"] else None,
+                }
+                for r in cur.fetchall()
+            ]
+
+            cur.execute(
+                """SELECT tablename FROM pg_tables
+                   WHERE schemaname = 'public' AND tablename LIKE 'discord%'
+                   ORDER BY tablename"""
+            )
+            discord_tables = [r["tablename"] for r in cur.fetchall()]
+
+        return {
+            "by_origin": by_origin,
+            "with_discord_tags": with_discord_tags,
+            "via_discord_entries": via_discord_entries,
+            "sync_state": sync_state,
+            "discord_tables": discord_tables,
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/cleanup-old")
 def cleanup_old_hands(
     before_date: str = "2026-01-01",
