@@ -788,3 +788,137 @@ def fix_ggdiscord_played_at(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+# ─── TEMP: backfill discord_tags vazias pos-import ZIP ────────────────────────
+# Cohort corrompida pelo bug do schema default + COALESCE (fix em 7de889f).
+# Maos com origin='discord' mas discord_tags=[] ou NULL, com entry_id a apontar
+# para entries.discord_channel resolvivel via discord_sync_state.
+#
+# Remover este endpoint apos cohort processada e validada.
+
+
+@router.post("/admin/backfill-empty-discord-tags")
+def backfill_empty_discord_tags(
+    mode: str = Query("preview", regex="^(preview|execute)$"),
+    current_user=Depends(require_auth),
+):
+    """
+    TEMP. Repoe hands.discord_tags para cohort afectada pelo bug COALESCE/empty-array
+    (pre-fix 7de889f). Resolve channel_name via entries.discord_channel ->
+    discord_sync_state.channel_name.
+
+    ?mode=preview (default): dry-run, cohort_size + by_channel + 10 samples.
+    ?mode=execute: per-hand commit, erros em errors[].
+    """
+    from app.db import get_conn
+
+    cohort = query("""
+        SELECT h.id, h.hand_id, h.played_at, h.entry_id,
+               e.discord_channel AS channel_id,
+               dss.channel_name
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        LEFT JOIN discord_sync_state dss ON dss.channel_id = e.discord_channel
+        WHERE h.origin = 'discord'
+          AND (h.discord_tags IS NULL
+               OR array_length(h.discord_tags, 1) IS NULL
+               OR array_length(h.discord_tags, 1) = 0)
+          AND h.entry_id IS NOT NULL
+        ORDER BY h.played_at DESC
+        LIMIT 200
+    """)
+
+    by_channel = {}
+    for h in cohort:
+        if h["channel_name"]:
+            key = h["channel_name"]
+        elif h["channel_id"]:
+            key = f"(unresolved:{h['channel_id']})"
+        else:
+            key = "(no_channel)"
+        by_channel[key] = by_channel.get(key, 0) + 1
+
+    plans = []
+    skips_preview = []
+    errors = []
+    processed = 0
+    hands_updated = 0
+    hands_skipped_no_entry = 0
+    hands_skipped_no_channel_id = 0
+    hands_skipped_no_channel_name = 0
+
+    conn = get_conn() if mode == "execute" else None
+
+    try:
+        for h in cohort:
+            skip_reason = None
+            if not h["entry_id"]:
+                skip_reason = "entry_id NULL"
+            elif not h["channel_id"]:
+                skip_reason = "entries.discord_channel NULL"
+            elif not h["channel_name"]:
+                skip_reason = f"channel_id {h['channel_id']} nao esta em discord_sync_state"
+
+            if mode == "preview":
+                if skip_reason and len(skips_preview) < 10:
+                    skips_preview.append({"hand_id": h["hand_id"], "reason": skip_reason})
+                elif not skip_reason and len(plans) < 10:
+                    plans.append({
+                        "hand_db_id": h["id"],
+                        "hand_id": h["hand_id"],
+                        "played_at": h["played_at"].isoformat() if h["played_at"] else None,
+                        "entry_id": h["entry_id"],
+                        "channel_id": h["channel_id"],
+                        "channel_name": h["channel_name"],
+                        "new_discord_tags": [h["channel_name"]],
+                    })
+                continue
+
+            # mode == "execute"
+            if skip_reason == "entry_id NULL":
+                hands_skipped_no_entry += 1
+                continue
+            if skip_reason == "entries.discord_channel NULL":
+                hands_skipped_no_channel_id += 1
+                continue
+            if skip_reason and skip_reason.startswith("channel_id"):
+                hands_skipped_no_channel_name += 1
+                continue
+
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE hands SET discord_tags = ARRAY[%s]::text[] WHERE id = %s",
+                        (h["channel_name"], h["id"]),
+                    )
+                    if cur.rowcount > 0:
+                        hands_updated += 1
+                conn.commit()
+                processed += 1
+            except Exception as e:
+                conn.rollback()
+                errors.append({
+                    "hand_id": h["hand_id"],
+                    "hand_db_id": h["id"],
+                    "error": str(e),
+                })
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {
+        "preview": mode == "preview",
+        "cohort_size": len(cohort),
+        "by_channel": by_channel,
+        "processed": processed if mode == "execute" else 0,
+        "hands_updated": hands_updated if mode == "execute" else 0,
+        "hands_skipped_no_entry": hands_skipped_no_entry if mode == "execute" else 0,
+        "hands_skipped_no_channel_id": hands_skipped_no_channel_id if mode == "execute" else 0,
+        "hands_skipped_no_channel_name": hands_skipped_no_channel_name if mode == "execute" else 0,
+        "errors": errors,
+        "shown": len(plans),
+        "plan": plans,
+        "skips_preview": skips_preview,
+    }
