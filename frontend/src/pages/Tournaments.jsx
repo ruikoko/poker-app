@@ -75,15 +75,39 @@ function formatDateLabel(iso) {
   return `${weekdays[d.getDay()]}, ${d.toLocaleDateString('pt-PT', { day: '2-digit', month: 'long', year: 'numeric' })}`
 }
 
+// Todas as funções de data/hora usam TZ local do browser (Portugal). Coerente
+// com o que o utilizador espera ver — a hora a que realmente jogou.
 function formatDateKey(iso) {
   if (!iso) return 'unknown'
-  return iso.slice(0, 10)
+  const d = new Date(iso)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function formatDayMonth(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 function formatTime(iso) {
   if (!iso) return ''
   const d = new Date(iso)
-  return d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function formatDayTimeRange(firstIso, lastIso) {
+  if (!firstIso) return ''
+  const fDay = formatDayMonth(firstIso)
+  const fTime = formatTime(firstIso)
+  if (!lastIso || firstIso === lastIso) return `${fDay} ${fTime}`
+  const lDay = formatDayMonth(lastIso)
+  const lTime = formatTime(lastIso)
+  return fDay === lDay
+    ? `${fDay} ${fTime} → ${lTime}`
+    : `${fDay} ${fTime} → ${lDay} ${lTime}`
 }
 
 // Remove buy-in monetário ($N, $N.M, $N,M) do nome do torneio. Preserva
@@ -94,6 +118,12 @@ function cleanTournamentName(name) {
     .replace(/(?<=^|\s)\$\d+(?:[.,]\d+)?(?=\s|$)/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// Strip ".0"/".00" de números inteiros no string de blinds. Preserva 2.5, 100.50.
+function cleanBlinds(s) {
+  if (!s) return s
+  return s.replace(/(\d+)\.0+(?=\D|$)/g, '$1')
 }
 
 // ── Import Panel ─────────────────────────────────────────────────────────────
@@ -336,7 +366,8 @@ function TournamentGroup({
 
   // Header stats — preferir tmSummary (vem do endpoint /dates, sempre presente em lazy).
   const ssCount = loadedHands.filter(h => h.has_screenshot).length
-  const totalVillains = loadedHands.reduce((a, h) => a + (h.villain_count || 0), 0)
+  const totalVillains = tmSummary?.villain_count
+    ?? loadedHands.reduce((a, h) => a + (h.villain_count || 0), 0)
   const handCount = tmSummary?.hand_count ?? loadedHands.length
 
   const buyIn = tmSummary?.buy_in ?? loadedHands.find(h => h.buy_in != null)?.buy_in
@@ -347,18 +378,15 @@ function TournamentGroup({
   const oldest = loadedHands[loadedHands.length - 1]
   const blindsLabel = tmSummary
     ? (tmSummary.blinds_first === tmSummary.blinds_last
-        ? tmSummary.blinds_first
-        : `${tmSummary.blinds_first} → ${tmSummary.blinds_last}`)
+        ? cleanBlinds(tmSummary.blinds_first)
+        : `${cleanBlinds(tmSummary.blinds_first)} → ${cleanBlinds(tmSummary.blinds_last)}`)
     : (!oldest ? ''
         : (oldest.blinds === newest.blinds
-            ? oldest.blinds
-            : `${oldest.blinds} → ${newest.blinds}`))
+            ? cleanBlinds(oldest.blinds)
+            : `${cleanBlinds(oldest.blinds)} → ${cleanBlinds(newest.blinds)}`))
   const firstTs = tmSummary?.first_played_at ?? oldest?.played_at
   const lastTs  = tmSummary?.last_played_at  ?? newest?.played_at
-  const timeRange = !firstTs ? ''
-    : (firstTs === lastTs
-        ? formatTime(firstTs)
-        : `${formatTime(firstTs)} → ${formatTime(lastTs)}`)
+  const timeRange = formatDayTimeRange(firstTs, lastTs)
   const formatBadge = tmSummary?.tournament_format
     ?? loadedHands.find(h => h.tournament_format)?.tournament_format
 
@@ -406,8 +434,9 @@ function TournamentGroup({
         }}>{blindsLabel || ''}</span>
         <span style={sep}>·</span>
         <span style={{
-          flex: '0 0 100px', fontSize: 11, color: '#64748b',
+          flex: '0 0 170px', fontSize: 11, color: '#64748b',
           fontFamily: "'Fira Code', monospace",
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>{timeRange || ''}</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
           {formatBadge && (
@@ -550,35 +579,28 @@ export default function TournamentsPage() {
   const [handsByTm, setHandsByTm] = useState({})         // { TM123: [hands...] } cache por expansão
   const [loadingMore, setLoadingMore] = useState(false)
 
-  const isLazyTab = tab === 'gg' && filter.ss_filter === 'without'
+  // GG (Com SS e Sem SS) passa a usar o fluxo lazy /mtt/dates. HM3 continua eager.
+  const isLazyTab = tab === 'gg'
+  // Pills de range/formato só fazem sentido em "Sem SS" (46k+ mãos).
+  const showRangeAndFormatPills = tab === 'gg' && filter.ss_filter === 'without'
 
   const loadHands = useCallback(async () => {
     setLoading(true)
     try {
       if (tab === 'gg') {
-        if (filter.ss_filter === 'without') {
-          // Fluxo lazy: carrega só agregados por data via /mtt/dates.
-          const params = {
-            ss_filter: 'without',
-            limit_dates: 8,
-            offset_dates: 0,
-          }
-          if (dateRange) params.date_range = dateRange
-          if (formatFilter) params.format = formatFilter
-          if (filter.tm_search) params.tm_search = filter.tm_search
-          const data = await mtt.dates(params)
-          setDateIndex(data)
-          setDateOffset(0)
-          setHandsByTm({})
-          setHands([])
-        } else {
-          // Fluxo eager existente (aba Com SS).
-          const params = { page: 1, page_size: 200 }
-          if (filter.ss_filter) params.ss_filter = filter.ss_filter
-          if (filter.tm_search) params.tm_search = filter.tm_search
-          const data = await mtt.hands(params)
-          setHands(data.hands || [])
+        const params = {
+          ss_filter: filter.ss_filter || 'without',
+          limit_dates: 8,
+          offset_dates: 0,
         }
+        if (showRangeAndFormatPills && dateRange) params.date_range = dateRange
+        if (showRangeAndFormatPills && formatFilter) params.format = formatFilter
+        if (filter.tm_search) params.tm_search = filter.tm_search
+        const data = await mtt.dates(params)
+        setDateIndex(data)
+        setDateOffset(0)
+        setHandsByTm({})
+        setHands([])
       } else {
         const { hm3 } = await import('../api/client')
         const data = await hm3.notaHands({ page: 1, page_size: 200 })
@@ -589,7 +611,7 @@ export default function TournamentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [filter, tab, dateRange, formatFilter])
+  }, [filter, tab, dateRange, formatFilter, showRangeAndFormatPills])
 
   const loadMoreDates = useCallback(async () => {
     if (!isLazyTab || !dateIndex.has_more || loadingMore) return
@@ -597,12 +619,12 @@ export default function TournamentsPage() {
     try {
       const nextOffset = dateOffset + 8
       const params = {
-        ss_filter: 'without',
+        ss_filter: filter.ss_filter || 'without',
         limit_dates: 8,
         offset_dates: nextOffset,
       }
-      if (dateRange) params.date_range = dateRange
-      if (formatFilter) params.format = formatFilter
+      if (showRangeAndFormatPills && dateRange) params.date_range = dateRange
+      if (showRangeAndFormatPills && formatFilter) params.format = formatFilter
       if (filter.tm_search) params.tm_search = filter.tm_search
       const data = await mtt.dates(params)
       setDateIndex(prev => ({
@@ -615,14 +637,15 @@ export default function TournamentsPage() {
     } finally {
       setLoadingMore(false)
     }
-  }, [isLazyTab, dateIndex.has_more, dateOffset, dateRange, formatFilter, filter.tm_search, loadingMore])
+  }, [isLazyTab, dateIndex.has_more, dateOffset, dateRange, formatFilter,
+      filter.ss_filter, filter.tm_search, loadingMore, showRangeAndFormatPills])
 
   const loadTournamentHands = useCallback(async (tmNumber) => {
     // tmNumber vem como "TM1234..." — usar como tm_search no endpoint existente.
     try {
       const tmDigits = tmNumber.startsWith('TM') ? tmNumber.slice(2) : tmNumber
       const data = await mtt.hands({
-        ss_filter: 'without',
+        ss_filter: filter.ss_filter || 'without',
         tm_search: tmDigits,
         page: 1,
         page_size: 200,
@@ -632,7 +655,7 @@ export default function TournamentsPage() {
       console.error(`Erro a carregar mãos do torneio ${tmNumber}:`, e)
       setHandsByTm(prev => ({ ...prev, [tmNumber]: [] }))
     }
-  }, [])
+  }, [filter.ss_filter])
 
   const loadStats = useCallback(async () => {
     try {
@@ -680,11 +703,10 @@ export default function TournamentsPage() {
     }
   }
 
-  // Agrupar por data > torneio (apenas fluxo eager: aba Com SS e HM3).
-  // Chave = TM number sempre que possível — assim DateGroup emite
-  // { tm: 'TM5672...', name: '...' } em vez de { tm: '<nome>', name: '<nome>' }.
+  // Agrupar por data > torneio — só HM3 (GG passou a lazy via /mtt/dates).
+  // Chave = TM number sempre que possível.
   const grouped = {}
-  if (!isLazyTab) {
+  if (tab === 'hm3') {
     for (const h of hands) {
       const dateKey = formatDateKey(h.played_at)
       if (!grouped[dateKey]) grouped[dateKey] = {}
@@ -792,7 +814,7 @@ export default function TournamentsPage() {
         )}
 
         {/* Pills de janela temporal + filtro formato — só aba Sem SS. */}
-        {isLazyTab && (
+        {showRangeAndFormatPills && (
           <>
             <div style={{
               display: 'inline-flex', gap: 2, padding: 2,
@@ -850,15 +872,13 @@ export default function TournamentsPage() {
         )}
       </div>
 
-      {/* Render eager (Com SS, HM3) */}
-      {!isLazyTab && (
+      {/* Render eager — só HM3 agora. */}
+      {tab === 'hm3' && (
         loading ? (
           <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
         ) : sortedDates.length === 0 ? (
           <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
-            {tab === 'gg'
-              ? 'Nenhuma mão GG com SS encontrada.'
-              : 'Nenhuma mão HM3 com tag nota encontrada.'}
+            Nenhuma mão HM3 com tag nota encontrada.
           </div>
         ) : (
           <div>
@@ -878,13 +898,15 @@ export default function TournamentsPage() {
         )
       )}
 
-      {/* Render lazy (Sem SS) */}
-      {isLazyTab && (
+      {/* Render lazy — toda a aba GG (Com SS e Sem SS). */}
+      {tab === 'gg' && (
         loading ? (
           <div style={{ color: '#f59e0b', padding: 20 }}>A carregar...</div>
         ) : dateIndex.dates.length === 0 ? (
           <div style={{ color: '#4b5563', padding: 20, textAlign: 'center' }}>
-            Nenhuma mão GG sem SS encontrada.
+            {filter.ss_filter === 'without'
+              ? 'Nenhuma mão GG sem SS encontrada.'
+              : 'Nenhuma mão GG com SS encontrada.'}
           </div>
         ) : (
           <div>

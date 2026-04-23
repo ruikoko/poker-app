@@ -128,8 +128,15 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
     .replace(/EUR|USD/gi, '')
     .trim() || stakesStr
 
-  const dateStr = hand.played_at ? hand.played_at.slice(5, 10) : ''
-  const timeStr = hand.played_at ? hand.played_at.slice(11, 16) : ''
+  // DD/MM + HH:MM em TZ local. Antes slicava a string ISO (UTC), agora
+  // converte via Date para bater com as horas a que o utilizador jogou.
+  const playedDt = hand.played_at ? new Date(hand.played_at) : null
+  const dateStr = playedDt
+    ? `${String(playedDt.getDate()).padStart(2, '0')}/${String(playedDt.getMonth() + 1).padStart(2, '0')}`
+    : ''
+  const timeStr = playedDt
+    ? `${String(playedDt.getHours()).padStart(2, '0')}:${String(playedDt.getMinutes()).padStart(2, '0')}`
+    : ''
 
   // KO/NKO
   const fmt = hand.tournament_format
