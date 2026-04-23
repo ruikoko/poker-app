@@ -265,6 +265,37 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
             }}
           >GG</a>
         )}
+        {hand.discord_tags?.length > 0 && (
+          <div
+            style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}
+            onClick={e => e.stopPropagation()}
+            title={`Canais Discord (readonly): ${hand.discord_tags.join(', ')}`}
+          >
+            {hand.discord_tags.slice(0, 2).map((ch, i) => (
+              <span
+                key={i}
+                style={{
+                  fontSize: 10, padding: '2px 6px', borderRadius: 3,
+                  background: 'rgba(88,101,242,0.18)',
+                  border: '1px solid rgba(88,101,242,0.45)',
+                  color: '#5865F2',
+                  fontWeight: 700, fontFamily: 'monospace',
+                  whiteSpace: 'nowrap',
+                }}
+              >#{ch}</span>
+            ))}
+            {hand.discord_tags.length > 2 && (
+              <span
+                style={{
+                  fontSize: 10, padding: '2px 5px', borderRadius: 3,
+                  background: 'rgba(88,101,242,0.1)',
+                  color: '#5865F2', fontWeight: 700,
+                  fontFamily: 'monospace',
+                }}
+              >+{hand.discord_tags.length - 2}</span>
+            )}
+          </div>
+        )}
         <div onClick={e => e.stopPropagation()}>
           <TagEditor
             hand={hand}
