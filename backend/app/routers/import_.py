@@ -302,7 +302,7 @@ async def import_file(
                         conn = get_conn()
                         try:
                             for h in hands_parsed:
-                                ok = _insert_hand(conn, h, entry_id, study_state='new')
+                                ok = _insert_hand(conn, h, entry_id, study_state='new', origin='hh_import')
                                 if ok:
                                     total_inserted += 1
                                 else:
@@ -322,7 +322,7 @@ async def import_file(
             conn = get_conn()
             try:
                 for h in hands_parsed:
-                    ok = _insert_hand(conn, h, entry_id, study_state='new')
+                    ok = _insert_hand(conn, h, entry_id, study_state='new', origin='hh_import')
                     if ok:
                         total_inserted += 1
                     else:

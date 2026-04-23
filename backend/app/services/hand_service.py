@@ -28,7 +28,7 @@ def _get_or_create_tournament_pk(conn, tournament_id_str: str, site: str) -> int
 import logging
 logger = logging.getLogger("hand_service")
 
-def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None, study_state: str = 'mtt_archive') -> bool:
+def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None, study_state: str = 'mtt_archive', origin: str | None = None) -> bool:
     """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
     placeholder_metadata = None
     with conn.cursor() as cur:
@@ -94,12 +94,12 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 (site, hand_id, played_at, stakes, position,
                  hero_cards, board, result, currency,
                  raw, entry_id, study_state, all_players_actions, tournament_id,
-                 has_showdown, buy_in, tournament_format, tournament_name, tournament_number)
+                 has_showdown, buy_in, tournament_format, tournament_name, tournament_number, origin)
             VALUES
                 (%(site)s, %(hand_id)s, %(played_at)s, %(stakes)s, %(position)s,
                  %(hero_cards)s, %(board)s, %(result)s, %(currency)s,
                  %(raw)s, %(entry_id)s, %(study_state)s, %(all_players_actions)s, %(tournament_id)s,
-                 %(has_showdown)s, %(buy_in)s, %(tournament_format)s, %(tournament_name)s, %(tournament_number)s)
+                 %(has_showdown)s, %(buy_in)s, %(tournament_format)s, %(tournament_name)s, %(tournament_number)s, %(origin)s)
             """,
             {
                 "site": h["site"],
@@ -126,6 +126,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 # hands.tournament_id BIGINT continua a receber o t_pk resolvido.
                 "tournament_name": h.get("tournament_name"),
                 "tournament_number": h.get("tournament_id"),
+                "origin": origin,
             },
         )
 
@@ -137,7 +138,11 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
             cur.execute(
                 """
                 UPDATE hands SET
-                    origin         = COALESCE(origin, %(origin)s),
+                    -- reverse COALESCE em origin: preserva o origin do placeholder (ex: 'discord')
+                    -- sobre o que o INSERT acabou de escrever (ex: 'hh_import' vindo de ZIP import).
+                    -- Regra: primeiro ingress ganha no campo scalar origin; outras fontes ficam
+                    -- rastreáveis via discord_tags / hm3_tags.
+                    origin         = COALESCE(%(origin)s, origin),
                     discord_tags   = COALESCE(discord_tags, %(discord_tags)s),
                     entry_id       = COALESCE(%(placeholder_entry_id)s, entry_id),
                     player_names   = COALESCE(player_names, %(player_names)s),
