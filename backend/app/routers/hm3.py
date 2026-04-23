@@ -23,6 +23,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
 from app.hero_names import HERO_NAMES, detect_site_from_hh
+from app.routers.screenshot import _enrich_hand_from_orphan_entry
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
 logger = logging.getLogger("hm3")
@@ -1152,6 +1153,40 @@ async def import_hm3(
     finally:
         conn.close()
 
+    # ── Auto-rematch de screenshots órfãos ──
+    # Mesmo padrão de import_.py: GG hands recém-inseridas/actualizadas podem
+    # agora casar com SSs Discord pendentes (status='new'). Match via TM em
+    # hand_id=GG-{tm}; Winamax/PS/WPN são no-op (não têm TM). Corre após
+    # commit para as hands serem visíveis à query.
+    rematched = []
+    try:
+        orphan_rows = query(
+            "SELECT id, raw_json FROM entries WHERE entry_type = 'screenshot' AND status = 'new'"
+        )
+        for orphan in orphan_rows:
+            raw = orphan.get("raw_json") or {}
+            tm = raw.get("tm")
+            if not tm:
+                continue
+            tm_digits = tm.replace("TM", "")
+            hand_rows = query(
+                "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                (f"GG-{tm_digits}",)
+            )
+            if hand_rows:
+                enrich_result = _enrich_hand_from_orphan_entry(
+                    orphan["id"], hand_rows[0]["id"], raw
+                )
+                rematched.append({
+                    "entry_id": orphan["id"],
+                    "tm": tm,
+                    "hand_id": hand_rows[0]["id"],
+                    "players_mapped": enrich_result.get("players_mapped", 0),
+                    "enrich_status": enrich_result.get("status"),
+                })
+    except Exception as e:
+        logger.error(f"HM3 auto-rematch error: {e}")
+
     return {
         "status": "ok",
         "total_rows": len(hands_map),
@@ -1172,6 +1207,8 @@ async def import_hm3(
              for t in set(t for d in hands_map.values() for t in d["tags"])}.items(),
             key=lambda x: -x[1]
         )[:15],
+        "rematched_screenshots": len(rematched),
+        "rematched": rematched,
     }
 
 
