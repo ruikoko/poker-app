@@ -180,7 +180,7 @@ def _save_to_db(
             )
             # Aplicar tags do canal às mãos criadas
             if tags and result["inserted"] > 0:
-                _apply_channel_tags(entry_id, tags)
+                _apply_channel_tags(entry_id, tags, channel_name)
         except Exception as e:
             logger.error(f"Erro ao parsear HH: {e}")
     # Para links e imagens: NÃO criar mão placeholder aqui.
@@ -191,9 +191,27 @@ def _save_to_db(
     return entry_id
 
 
-def _apply_channel_tags(entry_id: int, tags: list[str]):
-    """Aplica as tags do canal às mãos que foram criadas a partir desta entry."""
+def _apply_channel_tags(entry_id: int, tags: list[str], channel_name: str | None):
+    """Aplica metadata Discord as maos criadas a partir desta entry:
+
+      - tags         (legacy): append de tags derivadas de _channel_to_tags,
+                               ex: ['icm', 'pko'] (parts split por '-'). Preserva
+                               retro-compat com consumers frontend (Hands.jsx,
+                               Discord.jsx) que ainda agrupam por esta coluna.
+
+      - discord_tags (canonical): append do NOME BRUTO do canal como single
+                                   element, ex: ['icm-pko']. E' o que a regra C
+                                   de villain-eligibility le (villains.py:79).
+                                   Se channel_name e' falsy, nada e' acrescentado.
+
+      - origin:     COALESCE(origin, 'discord') — so escreve se NULL, preserva
+                    valores existentes (hm3/hh_import/etc.).
+
+    Todos os writes sao idempotentes (DISTINCT unnest + COALESCE).
+    """
     from app.db import get_conn
+
+    channel_bruto_list = [channel_name] if channel_name else []
 
     conn = get_conn()
     try:
@@ -202,16 +220,20 @@ def _apply_channel_tags(entry_id: int, tags: list[str]):
                 """
                 UPDATE hands
                 SET tags = ARRAY(
-                    SELECT DISTINCT unnest(COALESCE(tags, '{}'::text[]) || %s::text[])
-                )
+                        SELECT DISTINCT unnest(COALESCE(tags, '{}'::text[]) || %s::text[])
+                    ),
+                    discord_tags = ARRAY(
+                        SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[])
+                    ),
+                    origin = COALESCE(origin, 'discord')
                 WHERE entry_id = %s
                 """,
-                (tags, entry_id),
+                (tags, channel_bruto_list, entry_id),
             )
         conn.commit()
     except Exception as e:
         conn.rollback()
-        logger.error(f"Erro ao aplicar tags: {e}")
+        logger.error(f"Erro ao aplicar tags Discord: {e}")
     finally:
         conn.close()
 
