@@ -82,6 +82,9 @@ MTT_SCHEMA_STATEMENTS = [
       ON hands (played_at DESC)
       WHERE site = 'GGPoker' AND hand_id LIKE 'GG-%' AND screenshot_url IS NULL
     """,
+    # Acelera o filtro tm_search quando o fluxo lazy /mtt/dates faz fetch
+    # de mãos por tournament_number.
+    "CREATE INDEX IF NOT EXISTS idx_hands_tournament_number ON hands(tournament_number)",
 ]
 
 
@@ -1210,8 +1213,11 @@ def list_mtt_hands(
             conditions.append("h.screenshot_url IS NULL AND h.player_names IS NULL")
     
     if tm_search:
-        conditions.append("h.hand_id ILIKE %s")
-        params.append(f"%{tm_search}%")
+        # Aceita pesquisa por hand_id (único por mão) OU tournament_number
+        # (partilhado por mãos do mesmo torneio). O fluxo lazy do /mtt/dates
+        # passa tournament_number; o input manual do utilizador pode ser ambos.
+        conditions.append("(h.hand_id ILIKE %s OR h.tournament_number ILIKE %s)")
+        params.extend([f"%{tm_search}%", f"%{tm_search}%"])
     
     where = "WHERE " + " AND ".join(conditions)
     
