@@ -270,7 +270,11 @@ function VillainProfile({ villain, onClose, onSave }) {
                         <div style={{ display: 'flex', gap: 2, flex: 1 }}>
                           {h.board?.slice(0, 5).map((c, j) => <MiniCard key={j} card={c} />)}
                         </div>
-                        <ResultBadge result={h.result} />
+                        {/* Perspectiva do villain quando disponivel (backend computa
+                            villain_result per-hand via _compute_villain_result);
+                            fallback para h.result (hero) em GG anonimizado ou quando
+                            bb_size esta em falta em all_players_actions._meta. */}
+                        <ResultBadge result={h.villain_result ?? h.result} />
                         {h.stakes && (
                           <span style={{ fontSize: 11, color: '#4b5563', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {h.stakes}
