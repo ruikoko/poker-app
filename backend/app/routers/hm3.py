@@ -747,6 +747,13 @@ def _create_hand_villains_hm3(
 
     Retorna numero de rows realmente inseridas (cur.rowcount acumulado).
     """
+    # GG anonimizada: raw so tem hashes, nao nicks. Inserir hashes em
+    # hand_villains viola o invariante A∨B∨C. O SS pipeline (Discord/upload)
+    # e o ja-idempotente _create_villains_for_hand cobrem GG com match;
+    # sem match, invariante diz "sem villain". Saltar em ambos os casos.
+    if parsed.get("site") == "GGPoker":
+        return 0
+
     all_players = parsed.get("all_players") or {}
     inserted = 0
 
@@ -1060,7 +1067,16 @@ async def import_hm3(
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
-                        all_players_actions = EXCLUDED.all_players_actions,
+                        -- GG com match SS↔HH: preservar all_players_actions existente
+                        -- (tem nicks reais resolvidos por Vision + stack-match).
+                        -- Overwrite para GG sem match (ainda hashes → re-parse útil)
+                        -- e para todas as non-GG (nicks reais no raw → overwrite OK).
+                        all_players_actions = CASE
+                            WHEN hands.site = 'GGPoker'
+                                 AND (hands.player_names ->> 'match_method') IS NOT NULL
+                                THEN hands.all_players_actions
+                            ELSE EXCLUDED.all_players_actions
+                        END,
                         has_showdown = EXCLUDED.has_showdown,
                         position_parse_failed = EXCLUDED.position_parse_failed,
                         tournament_format = COALESCE(hands.tournament_format, EXCLUDED.tournament_format),
