@@ -681,12 +681,17 @@ export default function TournamentsPage() {
   }
 
   // Agrupar por data > torneio (apenas fluxo eager: aba Com SS e HM3).
+  // Chave = TM number sempre que possível — assim DateGroup emite
+  // { tm: 'TM5672...', name: '...' } em vez de { tm: '<nome>', name: '<nome>' }.
   const grouped = {}
   if (!isLazyTab) {
     for (const h of hands) {
       const dateKey = formatDateKey(h.played_at)
       if (!grouped[dateKey]) grouped[dateKey] = {}
-      const tourneyKey = h.tournament_name || h.tm_number || h.stakes || 'unknown'
+      const tmLabel =
+        h.tm_number
+        || (h.tournament_number ? `TM${h.tournament_number}` : null)
+      const tourneyKey = tmLabel || h.tournament_name || h.stakes || 'unknown'
       if (!grouped[dateKey][tourneyKey]) {
         grouped[dateKey][tourneyKey] = { name: h.tournament_name || h.stakes, hands: [] }
       }
