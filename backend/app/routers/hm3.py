@@ -190,6 +190,58 @@ def _deduce_button_from_blinds(
     return sorted_active[(idx_sb - 1) % len(sorted_active)]
 
 
+def _extract_buyin_hm3(hh_text: str, site_name: str) -> float | None:
+    """
+    Extrai buy-in numerico total (soma de todas as parcelas) do raw HH.
+    Currency (EUR/USD) e' descartada — a coluna hands.buy_in e' NUMERIC sem
+    tag; o site infere a moeda no frontend.
+
+    Formatos aceites:
+      - Winamax header: "buyIn: 90€ + 10€" (2 ou 3 parcelas, €/$, decimais
+        com '.' ou ',' — defensivo contra locale europeu).
+        Ex: "buyIn: 232€ + 18€" -> 250.0
+            "buyIn: $50 + $5"   -> 55.0
+      - PokerStars header: "Tournament #N, €57+€57+€11 EUR Hold'em"
+        Exige >= 2 parcelas (PS torneios nunca tem 1 componente).
+        Ex: "€57+€57+€11 EUR"   -> 125.0
+            "€50+€5 EUR"        -> 55.0
+            "$20+$2 USD"        -> 22.0
+      - WPN e outros sites: devolve None (header nao tem padrao numerico
+        extraivel; WPN so tem prize-pool-string).
+
+    Devolve None se nao encontrar padrao.
+    """
+    if not hh_text:
+        return None
+
+    if site_name == "Winamax":
+        m = re.search(
+            r"buyIn:\s*(\d+(?:[.,]\d+)?)\s*[€$]\s*"
+            r"(?:\+\s*(\d+(?:[.,]\d+)?)\s*[€$])?"
+            r"(?:\s*\+\s*(\d+(?:[.,]\d+)?)\s*[€$])?",
+            hh_text,
+        )
+    elif site_name == "PokerStars":
+        # Scan restrito ao header (~500 chars) para evitar match em summary.
+        m = re.search(
+            r"[€$](\d+(?:[.,]\d+)?)\s*\+\s*[€$](\d+(?:[.,]\d+)?)"
+            r"(?:\s*\+\s*[€$](\d+(?:[.,]\d+)?))?",
+            hh_text[:500],
+        )
+    else:
+        return None
+
+    if not m:
+        return None
+
+    total = 0.0
+    for g in m.groups():
+        if g:
+            # Normalizar separador decimal virgula -> ponto antes de float().
+            total += float(g.replace(",", "."))
+    return round(total, 2)
+
+
 # ── Hand History Parser (multi-site) ─────────────────────────────────────────
 
 def _parse_hand(hh_text, site_name):
@@ -217,6 +269,7 @@ def _parse_hand(hh_text, site_name):
         "tournament_format": None,
         "tournament_name": None,
         "tournament_number": None,
+        "buy_in": None,
         "raw": hh_text.strip(),
     }
 
@@ -298,6 +351,9 @@ def _parse_hand(hh_text, site_name):
             # WPN: prize-pool-string e o identificador descritivo (nao ha
             # nome real separado do prize pool).
             result["tournament_name"] = name
+
+    # ── Buy-in numerico (WN/PS; WPN fica None) ──────────────────────────────
+    result["buy_in"] = _extract_buyin_hm3(hh_text, site_name)
 
     # ── Tournament format (keyword no nome OU fallback estrutural por sala) ──
     result["tournament_format"] = detect_tournament_format(
