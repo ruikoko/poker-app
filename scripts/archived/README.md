@@ -6,10 +6,11 @@ pipeline live passar a cobrir estes casos nativamente.
 
 ## ⚠️ NÃO RE-EXECUTAR
 
-Os dois scripts foram **substituídos pelo pipeline live** nos commits:
+Os scripts foram **substituídos pelo pipeline live** nos commits:
 
 - **`8b60710`** `feat(discord): write origin and discord_tags from live ingest pipeline (Opção X)`
 - **`87c79c2`** `feat(discord): write discord_tags + origin from replayer-link and SS-match paths`
+- **`2844b94`** `fix(import): populate origin='hh_import' on ZIP/TXT HH import`
 
 A partir destes commits, mãos novas vindas de Discord (HH texto, placeholders
 de replayer_link, match SS↔HH) recebem `hands.origin = 'discord'` e
@@ -39,6 +40,20 @@ preciso investigar execuções passadas.
   pipeline live resolve isto — agora **todos** os canais populam `discord_tags`
   com o nome bruto do canal.
 
+- **`check_origin_buckets.py`** — diagnóstico read-only (23 Abr 2026) que
+  particionou `hands` com `origin IS NULL` (2026+) por sinais distintivos
+  (entry.source, site, study_state, hm3_tags, discord_tags). Confirmou que
+  todas as 1146 NULL partilhavam a mesma impressão digital
+  (`entry.source='hh_text'`), todas vindas de `/api/import`. Só print — sem
+  CSV nem UPDATE.
+
+- **`backfill_origin_hh_import.py`** — backfill único (23 Abr 2026) que
+  preencheu `origin='hh_import'` nas 1146 mãos órfãs do `/api/import`
+  (bug fixado em `2844b94`). Guard EXISTS: só toca `hands` cujo `entry_id`
+  aponta para `entries.source='hh_text' AND entry_type='hand_history'`.
+  Aborta se o COUNT pré-UPDATE divergir de 1146; rollback se o UPDATE
+  rowcount divergir. Não escreve CSV.
+
 ### Snapshots CSV (gitignored — não versionados)
 
 Cada run do script (dry-run ou execute) escreve um CSV com o plano completo
@@ -61,12 +76,17 @@ CSVs conhecidos de 21 Abr 2026 (existentes no disco local, gitignored):
 
 ### Última execução conhecida
 
-**21 de Abril de 2026** (inferido dos timestamps dos CSVs). Após esta data:
+**23 de Abril de 2026** — `backfill_origin_hh_import.py` (1146 linhas
+actualizadas). Antes disso:
 
-- Pipeline live passou a escrever `origin` + `discord_tags` nativamente (commits
-  `8b60710` e `87c79c2`).
-- Auditoria read-only disponível via `GET /api/hm3/admin/audit-discord-state`
-  (endpoint permanente).
+- **21 de Abril de 2026** — `backfill_origin.py` + `backfill_discord_tags.py`
+  (inferido dos timestamps dos CSVs). Pipeline live passou a escrever
+  `origin` + `discord_tags` nativamente (commits `8b60710` e `87c79c2`).
+- **23 de Abril de 2026** — `/api/import` passou a escrever `origin='hh_import'`
+  nativamente (commit `2844b94`).
+
+Auditoria read-only disponível via `GET /api/hm3/admin/audit-discord-state`
+(endpoint permanente).
 
 ## Cenários onde *talvez* reactivar
 
