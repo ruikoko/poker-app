@@ -30,20 +30,39 @@ logger = logging.getLogger("hand_service")
 
 def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None = None, study_state: str = 'mtt_archive') -> bool:
     """Insere uma mão na BD. Retorna True se inserida, False se duplicada."""
+    placeholder_metadata = None
     with conn.cursor() as cur:
         if h["hand_id"]:
             logger.info(f"[_insert_hand] Processando hand_id: {h['hand_id']}")
-            cur.execute("SELECT id, raw, hm3_tags FROM hands WHERE hand_id = %s", (h["hand_id"],))
+            cur.execute(
+                """
+                SELECT id, raw, hm3_tags,
+                       origin, discord_tags, entry_id AS placeholder_entry_id,
+                       player_names, screenshot_url, tags
+                FROM hands WHERE hand_id = %s
+                """,
+                (h["hand_id"],),
+            )
             existing = cur.fetchone()
             if existing:
                 logger.info(f"[_insert_hand] hand_id {h['hand_id']} já existe. ID: {existing['id']}, raw_len: {len(existing['raw']) if existing['raw'] else 0}, tags: {existing['hm3_tags']}")
-                # Se for placeholder GGDiscord (raw vazio + tag GGDiscord), apaga-o para dar lugar à HH real
+                # Se for placeholder GGDiscord (raw vazio + tag GGDiscord), apaga-o para dar lugar à HH real.
+                # Captura metadados Discord do placeholder antes do DELETE para reaplicar via UPDATE pós-INSERT —
+                # senão perdíamos origin, discord_tags, entry_id (→ entry Discord), player_names (Vision) e screenshot_url.
                 is_placeholder = (
                     (not existing["raw"] or existing["raw"].strip() == "") and
                     existing["hm3_tags"] and "GGDiscord" in existing["hm3_tags"]
                 )
                 if is_placeholder:
-                    logger.info(f"[_insert_hand] hand_id {h['hand_id']} é placeholder GGDiscord. A apagar para substituir.")
+                    logger.info(f"[_insert_hand] hand_id {h['hand_id']} é placeholder GGDiscord. Capturando metadados Discord antes do DELETE.")
+                    placeholder_metadata = {
+                        "origin": existing.get("origin"),
+                        "discord_tags": existing.get("discord_tags"),
+                        "entry_id": existing.get("placeholder_entry_id"),
+                        "player_names": existing.get("player_names"),
+                        "screenshot_url": existing.get("screenshot_url"),
+                        "tags": existing.get("tags"),
+                    }
                     cur.execute("DELETE FROM hands WHERE id = %s", (existing["id"],))
                 else:
                     logger.info(f"[_insert_hand] hand_id {h['hand_id']} NÃO é placeholder. Ignorando (duplicado).")
@@ -109,6 +128,33 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                 "tournament_number": h.get("tournament_id"),
             },
         )
+
+        # Reaplica metadados do placeholder Discord (se aplicável).
+        # COALESCE normal para campos onde queremos preservar o que o INSERT já escreveu;
+        # reverse COALESCE em entry_id para preferir a entry Discord (primeira fonte no ciclo).
+        if placeholder_metadata:
+            logger.info(f"[_insert_hand] Reaplicando metadados Discord do placeholder para hand_id {h['hand_id']}.")
+            cur.execute(
+                """
+                UPDATE hands SET
+                    origin         = COALESCE(origin, %(origin)s),
+                    discord_tags   = COALESCE(discord_tags, %(discord_tags)s),
+                    entry_id       = COALESCE(%(placeholder_entry_id)s, entry_id),
+                    player_names   = COALESCE(player_names, %(player_names)s),
+                    screenshot_url = COALESCE(screenshot_url, %(screenshot_url)s),
+                    tags = ARRAY(SELECT DISTINCT unnest(COALESCE(tags, '{}'::text[]) || COALESCE(%(tags)s, '{}'::text[])))
+                WHERE hand_id = %(hand_id)s
+                """,
+                {
+                    "origin": placeholder_metadata["origin"],
+                    "discord_tags": placeholder_metadata["discord_tags"],
+                    "placeholder_entry_id": placeholder_metadata["entry_id"],
+                    "player_names": json.dumps(placeholder_metadata["player_names"]) if placeholder_metadata["player_names"] else None,
+                    "screenshot_url": placeholder_metadata["screenshot_url"],
+                    "tags": placeholder_metadata["tags"],
+                    "hand_id": h["hand_id"],
+                },
+            )
         return True
 
 
