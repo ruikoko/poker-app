@@ -1371,7 +1371,7 @@ def list_mtt_dates(
         f"""
         SELECT
           COUNT(*) AS total_hands,
-          COUNT(DISTINCT (played_at AT TIME ZONE 'UTC')::date) AS total_dates
+          COUNT(DISTINCT (played_at AT TIME ZONE 'Europe/Lisbon')::date) AS total_dates
         FROM hands
         {where}
         """,
@@ -1384,7 +1384,7 @@ def list_mtt_dates(
     date_rows = query(
         f"""
         WITH eligible AS (
-          SELECT (played_at AT TIME ZONE 'UTC')::date AS date_key
+          SELECT (played_at AT TIME ZONE 'Europe/Lisbon')::date AS date_key
           FROM hands
           {where}
         )
@@ -1409,7 +1409,22 @@ def list_mtt_dates(
 
     date_keys = [r["date_key"] for r in date_rows]
 
-    # Torneios para as datas retornadas (1 query, sem N+1).
+    # Para ss_filter != 'without', LEFT JOIN com contagens agregadas de hand_villains
+    # por mão para expor villain_count por torneio. Em 'without' é sempre 0 (A∨B∨C).
+    if ss_filter == 'without':
+        villain_expr = "0"
+        villain_join = ""
+    else:
+        villain_expr = "COALESCE(SUM(hvc.n), 0)"
+        villain_join = """
+          LEFT JOIN (
+            SELECT hand_db_id, COUNT(*) AS n
+            FROM hand_villains
+            WHERE hand_db_id IN (SELECT id FROM eligible)
+            GROUP BY hand_db_id
+          ) hvc ON hvc.hand_db_id = eligible.id
+        """
+
     tourney_rows = query(
         f"""
         WITH eligible AS (
@@ -1419,7 +1434,7 @@ def list_mtt_dates(
             all_players_actions -> '_meta' ->> 'sb'   AS sb,
             all_players_actions -> '_meta' ->> 'bb'   AS bb,
             all_players_actions -> '_meta' ->> 'ante' AS ante,
-            (played_at AT TIME ZONE 'UTC')::date      AS date_key
+            (played_at AT TIME ZONE 'Europe/Lisbon')::date      AS date_key
           FROM hands
           {where}
         )
@@ -1430,6 +1445,7 @@ def list_mtt_dates(
           MAX(tournament_format)                         AS tournament_format,
           MAX(buy_in)                                    AS buy_in,
           COUNT(*)                                       AS hand_count,
+          {villain_expr}                                 AS villain_count,
           MIN(played_at)                                 AS first_played_at,
           MAX(played_at)                                 AS last_played_at,
           (array_agg(sb   ORDER BY played_at ASC))[1]    AS sb_first,
@@ -1439,6 +1455,7 @@ def list_mtt_dates(
           (array_agg(bb   ORDER BY played_at DESC))[1]   AS bb_last,
           (array_agg(ante ORDER BY played_at DESC))[1]   AS ante_last
         FROM eligible
+        {villain_join}
         WHERE date_key = ANY(%s)
         GROUP BY date_key, tm
         ORDER BY date_key DESC, MIN(played_at) ASC
@@ -1461,6 +1478,7 @@ def list_mtt_dates(
             "buy_in": float(r["buy_in"]) if r["buy_in"] is not None else None,
             "tournament_format": r["tournament_format"],
             "hand_count": r["hand_count"],
+            "villain_count": int(r["villain_count"]) if r.get("villain_count") is not None else 0,
             "first_played_at": r["first_played_at"].isoformat() if r["first_played_at"] else None,
             "last_played_at":  r["last_played_at"].isoformat()  if r["last_played_at"]  else None,
             "blinds_first": _blinds(r["sb_first"], r["bb_first"], r["ante_first"]),
