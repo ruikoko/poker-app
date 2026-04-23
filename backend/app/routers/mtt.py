@@ -678,7 +678,8 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
             cur.execute(
                 """INSERT INTO hand_villains
                    (mtt_hand_id, hand_db_id, player_name, position, stack, bounty_pct, country, vpip_action)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL DO NOTHING""",
                 (mtt_hand_id, hand_db_id, player_name, position, stack, bounty_pct, country, vpip_action)
             )
             created += 1
@@ -702,6 +703,7 @@ def _create_ggpoker_villain_notes_for_hand(
     hand_db_id: int,
     players_list: list,
     hero_name: str,
+    screenshot_data: dict | None = None,
 ) -> int:
     """
     Cria/actualiza entries em villain_notes para jogadores VPIP de uma hand
@@ -711,17 +713,24 @@ def _create_ggpoker_villain_notes_for_hand(
     (vindo do raw_json da entry screenshot) e para cada nao-hero com VPIP,
     faz UPSERT em villain_notes(site='GGPoker', nick=pname).
 
+    Quando screenshot_data é passado (dict com players_list/hero/vision_sb/
+    vision_bb/file_meta — tipicamente entries.raw_json), chama também
+    _create_villains_for_hand para popular hand_villains (regra A∨B∨C).
+    Sem screenshot_data, mantém comportamento legacy (só villain_notes).
+
     Helper partilhado entre as fases SS→HH e HH→SS de /mtt/rematch. Extraido
     para evitar drift da logica VPIP entre os dois paths.
 
-    Retorna numero de UPSERTs efectuados.
+    Retorna numero de UPSERTs efectuados em villain_notes.
     """
     from app.db import query as _q
     updated_hand = _q(
-        "SELECT all_players_actions FROM hands WHERE id = %s",
+        "SELECT all_players_actions, raw FROM hands WHERE id = %s",
         (hand_db_id,)
     )
-    apa = (updated_hand[0].get("all_players_actions") or {}) if updated_hand else {}
+    hand_row = updated_hand[0] if updated_hand else {}
+    apa = hand_row.get("all_players_actions") or {}
+    hand_raw = hand_row.get("raw") or ""
 
     created = 0
     with conn.cursor() as cur:
@@ -751,6 +760,17 @@ def _create_ggpoker_villain_notes_for_hand(
                 (pname,)
             )
             created += 1
+
+    # Populate hand_villains via _create_villains_for_hand se screenshot_data
+    # passado. Usa parsed fresh da HH + screenshot_data (Vision) para construir
+    # seat→nome. ON CONFLICT no helper garante idempotência.
+    if screenshot_data and hand_raw:
+        parsed = _parse_mtt_hand(hand_raw)
+        if parsed:
+            _create_villains_for_hand(
+                conn, parsed, screenshot_data,
+                hand_db_id=hand_db_id, showdown_only=False,
+            )
     return created
 
 
@@ -1543,6 +1563,7 @@ async def rematch_screenshots(
                         hand_db_id=hand_rows[0]["id"],
                         players_list=raw.get("players_list", []),
                         hero_name=raw.get("hero", ""),
+                        screenshot_data=raw,
                     )
 
                     matched += 1
@@ -1675,6 +1696,7 @@ async def rematch_screenshots(
                     hand_db_id=h["id"],
                     players_list=ss_raw.get("players_list", []),
                     hero_name=ss_raw.get("hero", ""),
+                    screenshot_data=ss_raw,
                 )
                 hh_to_ss_matched += 1
                 logger.info(f"Rematch HH→SS: hand {h['id']} ({hand_id_str}) ← entry {ss_entry_hh['id']}")
