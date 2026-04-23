@@ -1257,7 +1257,6 @@ def nota_stats(current_user=Depends(require_auth)):
     return {"total_hands": 0, "with_showdown": 0, "tournaments": 0, "sites": 0}
 
 
-# TEMP: remove after Discord audit conclusions are acted upon
 @router.get("/admin/audit-discord-state")
 def admin_audit_discord_state(current_user=Depends(require_auth)):
     """
@@ -1323,41 +1322,12 @@ def admin_audit_discord_state(current_user=Depends(require_auth)):
             )
             discord_tables = [r["tablename"] for r in cur.fetchall()]
 
-            # 6. Entries Discord recentes com resolved channel_name + hand_count.
-            #    Usado para identificar entries alvo para validar
-            #    /api/discord/admin/test-apply-channel-tags.
-            cur.execute(
-                """SELECT e.id,
-                          e.entry_type,
-                          e.discord_channel,
-                          e.discord_posted_at,
-                          (SELECT channel_name FROM discord_sync_state
-                           WHERE channel_id = e.discord_channel) AS channel_name,
-                          (SELECT COUNT(*) FROM hands WHERE entry_id = e.id) AS hand_count
-                   FROM entries e
-                   WHERE e.source = 'discord'
-                   ORDER BY e.id DESC
-                   LIMIT 20"""
-            )
-            recent_discord_entries = [
-                {
-                    "id": r["id"],
-                    "entry_type": r["entry_type"],
-                    "channel_id": r["discord_channel"],
-                    "channel_name": r["channel_name"],
-                    "discord_posted_at": r["discord_posted_at"].isoformat() if r["discord_posted_at"] else None,
-                    "hand_count": r["hand_count"],
-                }
-                for r in cur.fetchall()
-            ]
-
         return {
             "by_origin": by_origin,
             "with_discord_tags": with_discord_tags,
             "via_discord_entries": via_discord_entries,
             "sync_state": sync_state,
             "discord_tables": discord_tables,
-            "recent_discord_entries": recent_discord_entries,
         }
     finally:
         conn.close()
