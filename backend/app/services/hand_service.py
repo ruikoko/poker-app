@@ -46,21 +46,48 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
             existing = cur.fetchone()
             if existing:
                 logger.info(f"[_insert_hand] hand_id {h['hand_id']} já existe. ID: {existing['id']}, raw_len: {len(existing['raw']) if existing['raw'] else 0}, tags: {existing['hm3_tags']}")
-                # Se for placeholder GGDiscord (raw vazio + tag GGDiscord), apaga-o para dar lugar à HH real.
-                # Captura metadados Discord do placeholder antes do DELETE para reaplicar via UPDATE pós-INSERT —
-                # senão perdíamos origin, discord_tags, entry_id (→ entry Discord), player_names (Vision) e screenshot_url.
+                # Se for placeholder (raw vazio + marker de placeholder), apaga-o para dar
+                # lugar à HH real. Captura metadados antes do DELETE para reaplicar via
+                # UPDATE pós-INSERT — senão perdíamos origin, discord_tags, entry_id,
+                # player_names (Vision) e screenshot_url.
+                #
+                # Marker canónico: player_names.match_method LIKE 'discord_placeholder_%'.
+                # Fallbacks preservados para compat com rows antigos: GGDiscord em hm3_tags
+                # (legado Discord) e SSMatch em tags (legado SS upload).
+                existing_pn = existing.get("player_names") or {}
+                if isinstance(existing_pn, str):
+                    try:
+                        existing_pn = json.loads(existing_pn)
+                    except (ValueError, TypeError):
+                        existing_pn = {}
+                existing_mm = existing_pn.get("match_method", "") if isinstance(existing_pn, dict) else ""
                 is_placeholder = (
-                    (not existing["raw"] or existing["raw"].strip() == "") and
-                    existing["hm3_tags"] and "GGDiscord" in existing["hm3_tags"]
+                    (not existing["raw"] or existing["raw"].strip() == "")
+                    and (
+                        existing_mm.startswith("discord_placeholder_")
+                        or "GGDiscord" in (existing["hm3_tags"] or [])
+                        or "SSMatch" in (existing["tags"] or [])
+                    )
                 )
                 if is_placeholder:
-                    logger.info(f"[_insert_hand] hand_id {h['hand_id']} é placeholder GGDiscord. Capturando metadados Discord antes do DELETE.")
+                    logger.info(f"[_insert_hand] hand_id {h['hand_id']} é placeholder (mm={existing_mm!r}, hm3_tags={existing['hm3_tags']}, tags={existing['tags']}). Capturando metadados antes do DELETE.")
+                    # Stripar placeholder marker: HH real agora presente, mas preserva
+                    # dados Vision (hero, board, players_list). Sem isto, a hand canonical
+                    # ficaria com match_method='discord_placeholder_*' e continuaria
+                    # excluída de Estudo pelo STUDY_VIEW_GG_MATCH_FILTER.
+                    pn_clean = dict(existing_pn) if isinstance(existing_pn, dict) else {}
+                    if pn_clean.get("match_method", "").startswith("discord_placeholder_"):
+                        if pn_clean.get("players_list"):
+                            # Há dados Vision → upgrade para marker de match real.
+                            pn_clean["match_method"] = "anchors_stack_elimination_v2"
+                        else:
+                            pn_clean.pop("match_method", None)
                     placeholder_metadata = {
                         "origin": existing.get("origin"),
                         "discord_tags": existing.get("discord_tags"),
                         "hm3_tags": existing.get("hm3_tags"),
                         "entry_id": existing.get("placeholder_entry_id"),
-                        "player_names": existing.get("player_names"),
+                        "player_names": pn_clean,
                         "screenshot_url": existing.get("screenshot_url"),
                         "tags": existing.get("tags"),
                     }
