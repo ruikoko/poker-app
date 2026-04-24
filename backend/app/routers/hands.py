@@ -452,6 +452,7 @@ def list_hands(
         f"""
         SELECT h.id, h.site, h.hand_id, h.played_at, h.stakes, h.position,
                h.hero_cards, h.board, h.result, h.currency, h.notes, h.tags, h.hm3_tags,
+               h.discord_tags,
                h.study_state, h.entry_id, h.viewed_at, h.studied_at, h.created_at,
                h.all_players_actions, h.screenshot_url, h.player_names,
                h.tournament_format, h.tournament_name, h.tournament_number, h.buy_in,
