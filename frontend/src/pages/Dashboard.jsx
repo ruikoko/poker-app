@@ -117,7 +117,7 @@ export default function DashboardPage() {
   const [studyWeek, setStudyWeek] = useState(null)
   const [recentVillains, setRecentVillains] = useState([])
   const [error, setError] = useState('')
-  const [ssMatchExpanded, setSsMatchExpanded] = useState(false)
+  const [ssMatchModalOpen, setSsMatchModalOpen] = useState(false)
 
   function reloadStats() {
     hands.stats().then(setStats).catch(e => setError(e.message))
@@ -413,16 +413,15 @@ export default function DashboardPage() {
               padding: '16px 20px',
               borderLeft: '1px solid var(--border)',
               cursor: stats?.ss_match_pending > 0 ? 'pointer' : 'default',
-              background: ssMatchExpanded ? 'rgba(99,102,241,0.06)' : 'transparent',
               transition: 'background 0.15s',
               userSelect: 'none',
             }}
-            onClick={() => stats?.ss_match_pending > 0 && setSsMatchExpanded(v => !v)}
+            onClick={() => stats?.ss_match_pending > 0 && setSsMatchModalOpen(true)}
+            onMouseEnter={e => { if (stats?.ss_match_pending > 0) e.currentTarget.style.background = 'rgba(99,102,241,0.06)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           >
             <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-              SSMatch {stats?.ss_match_pending > 0 && (
-                <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>{ssMatchExpanded ? '▼' : '▶'}</span>
-              )}
+              SSMatch
             </div>
             <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_match_pending > 0 ? '#6366f1' : 'var(--text)' }}>
               {stats?.ss_match_pending != null ? Number(stats.ss_match_pending).toLocaleString('pt-PT') : '—'}
@@ -430,50 +429,123 @@ export default function DashboardPage() {
           </div>
         </div>
         {stats?.orphan_screenshots > 0 && <OrphanList onRematchComplete={reloadStats} />}
-        {ssMatchExpanded && stats?.ss_match_pending > 0 && (
-          <SSMatchList key={stats.ss_match_pending} />
-        )}
       </div>
+
+      {ssMatchModalOpen && (
+        <SSMatchModal
+          onClose={() => setSsMatchModalOpen(false)}
+          onHandClick={(handDbId) => {
+            setSsMatchModalOpen(false)
+            navigate('/hand/' + handDbId)
+          }}
+        />
+      )}
     </>
   )
 }
 
-// ── SSMatch Pending List ─────────────────────────────────────────────────────
+// ── SSMatch Pending Modal ────────────────────────────────────────────────────
 // Placeholders criados por upload manual de SS sem HH correspondente. Saem
 // automaticamente quando a HH chega (via HM3/ZIP) — _insert_hand apaga o
 // placeholder e o contador decrementa.
 
-function SSMatchList() {
+function SSMatchModal({ onClose, onHandClick }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    console.log('[SSMatch] mount → fetching')
     hands.ssMatchPending()
-      .then(data => {
-        console.log('[SSMatch] got data:', data)
-        setItems(Array.isArray(data) ? data : [])
-      })
-      .catch(e => {
-        console.error('[SSMatch] fetch error:', e)
-      })
+      .then(data => setItems(Array.isArray(data) ? data : []))
+      .catch(e => console.error('[SSMatch] fetch error:', e))
       .finally(() => setLoading(false))
   }, [])
 
-  console.log('[SSMatch] render — loading:', loading, 'items.length:', items.length)
-
-  if (loading) {
-    return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar…</div>
-  }
-  if (items.length === 0) return null
-
-  // TEMP diagnostic: dump raw JSON to confirm items arrive na árvore do React.
-  // Se aparecer → bug CSS grid, reescrever render. Se não aparecer → bug
-  // estrutural (reconciliation, StrictMode, memoization, etc.).
   return (
-    <pre style={{ fontSize: 10, padding: 16, color: 'white', background: '#0a0c14', overflow: 'auto', margin: 0 }}>
-      {JSON.stringify(items, null, 2)}
-    </pre>
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '92%', maxWidth: 800, maxHeight: '85vh',
+          background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 12,
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '16px 20px', borderBottom: '1px solid #2a2d3a',
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0' }}>SSMatch</div>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+              {loading
+                ? 'A carregar…'
+                : `${items.length} ${items.length === 1 ? 'mão' : 'mãos'} à espera de HH`}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent', border: 'none', color: '#64748b',
+              cursor: 'pointer', fontSize: 20, padding: '0 4px', lineHeight: 1,
+            }}
+          >×</button>
+        </div>
+
+        {/* Lista */}
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {loading && (
+            <div style={{ padding: 32, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+              A carregar…
+            </div>
+          )}
+          {!loading && items.length === 0 && (
+            <div style={{ padding: 32, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+              Sem mãos pendentes.
+            </div>
+          )}
+          {!loading && items.map(it => (
+            <div
+              key={it.hand_db_id}
+              onClick={() => onHandClick(it.hand_db_id)}
+              style={{
+                padding: '12px 20px',
+                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                cursor: 'pointer',
+                transition: 'background 0.1s',
+                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span style={{ fontFamily: 'monospace', color: '#6366f1', fontWeight: 700, fontSize: 13, minWidth: 130 }}>
+                {it.hand_id}
+              </span>
+              <span style={{ color: '#e2e8f0', fontSize: 13, minWidth: 100 }}>
+                {it.hero || '—'}
+              </span>
+              <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 12, minWidth: 130 }}>
+                {it.tm || '—'}
+              </span>
+              <span style={{ color: '#64748b', fontSize: 12, flex: 1, minWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {it.file_name || '—'}
+              </span>
+              <span style={{ fontFamily: 'monospace', color: '#4b5563', fontSize: 11, minWidth: 130, textAlign: 'right' }}>
+                {it.created_at ? new Date(it.created_at).toLocaleString('pt-PT') : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
