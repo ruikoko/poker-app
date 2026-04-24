@@ -467,39 +467,13 @@ function SSMatchList() {
   }
   if (items.length === 0) return null
 
+  // TEMP diagnostic: dump raw JSON to confirm items arrive na árvore do React.
+  // Se aparecer → bug CSS grid, reescrever render. Se não aparecer → bug
+  // estrutural (reconciliation, StrictMode, memoization, etc.).
   return (
-    <div>
-      <div style={{
-        padding: '8px 20px',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        background: 'rgba(99,102,241,0.06)',
-        fontSize: 11, color: '#818cf8', fontWeight: 600,
-        textTransform: 'uppercase', letterSpacing: 0.5,
-      }}>
-        {items.length} SS{items.length !== 1 ? 's' : ''} à espera de HH
-      </div>
-      {items.map(it => (
-        <div key={it.hand_db_id} style={{
-          display: 'grid',
-          gridTemplateColumns: '120px 1fr 140px 140px 160px',
-          gap: 12,
-          padding: '8px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.03)',
-          fontSize: 12,
-          alignItems: 'center',
-        }}>
-          <span style={{ fontFamily: 'monospace', color: '#6366f1', fontWeight: 600 }}>{it.hand_id}</span>
-          <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {it.file_name || '—'}
-          </span>
-          <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{it.tm || '—'}</span>
-          <span style={{ color: '#e2e8f0' }}>{it.hero || '—'}</span>
-          <span style={{ fontFamily: 'monospace', color: '#64748b', fontSize: 11 }}>
-            {it.created_at ? new Date(it.created_at).toLocaleString('pt-PT') : '—'}
-          </span>
-        </div>
-      ))}
-    </div>
+    <pre style={{ fontSize: 10, padding: 16, color: 'white', background: '#0a0c14', overflow: 'auto', margin: 0 }}>
+      {JSON.stringify(items, null, 2)}
+    </pre>
   )
 }
 
