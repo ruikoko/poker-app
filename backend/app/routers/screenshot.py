@@ -755,6 +755,126 @@ def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | No
 
 _vision_sem = asyncio.Semaphore(2)
 
+
+def _link_second_discord_entry_to_existing_hand(
+    entry_id: int,
+    hand_db_id: int,
+    vision_players,
+    hero_name,
+    vision_sb,
+    vision_bb,
+    file_meta,
+) -> None:
+    """
+    Quando a 2ª entry Discord chega para o mesmo TM e a hand já existe (do 1º
+    match / placeholder / HH import), em vez de bail silencioso:
+      1. Append do canal desta entry a hands.discord_tags (idempotente).
+      2. Mark entries.status='resolved'.
+      3. Se regra C passa a cumprir (canal 'nota' + match_method populado)
+         E a hand tem raw HH real E ainda não tem hand_villains:
+         dispara _create_villains_for_hand. Placeholders Discord (raw vazio)
+         são skipados — villain creation precisa da HH real para parse.
+    entry_id da 1ª entry é preservado — primeiro ingress continua a ser a
+    fonte primária da hand.
+    """
+    from app.discord_bot import _resolve_channel_name_for_entry
+    channel = _resolve_channel_name_for_entry(entry_id)
+
+    conn = get_conn()
+    row = None
+    try:
+        with conn.cursor() as cur:
+            if channel:
+                cur.execute(
+                    """UPDATE hands SET
+                         discord_tags = ARRAY(SELECT DISTINCT unnest(
+                           COALESCE(discord_tags, '{}'::text[]) || %s::text[]
+                         ))
+                       WHERE id = %s
+                       RETURNING discord_tags, player_names, raw, has_showdown""",
+                    ([channel], hand_db_id),
+                )
+            else:
+                cur.execute(
+                    "SELECT discord_tags, player_names, raw, has_showdown FROM hands WHERE id = %s",
+                    (hand_db_id,),
+                )
+            row = cur.fetchone()
+            cur.execute(
+                "UPDATE entries SET status = 'resolved' WHERE id = %s",
+                (entry_id,),
+            )
+        conn.commit()
+        logger.info(
+            f"[bg] Linked 2nd Discord entry {entry_id} -> hand {hand_db_id} "
+            f"(channel={channel}, discord_tags={row['discord_tags'] if row else None})"
+        )
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[bg] link_second failed entry={entry_id} hand={hand_db_id}: {e}")
+        return
+    finally:
+        conn.close()
+
+    if not row:
+        return
+
+    # Gatilho regra C: discord_tags passa a ter 'nota' + match_method populado
+    # + hand tem raw HH real + ainda sem villains.
+    discord_tags = list(row["discord_tags"] or [])
+    pn = row["player_names"] or {}
+    if isinstance(pn, str):
+        try:
+            pn = json.loads(pn)
+        except Exception:
+            pn = {}
+    match_method = pn.get("match_method") if isinstance(pn, dict) else None
+    hand_raw = row["raw"] or ""
+
+    if 'nota' not in discord_tags:
+        return
+    if not match_method or not hand_raw:
+        return
+
+    already = query(
+        "SELECT 1 FROM hand_villains WHERE hand_db_id = %s LIMIT 1",
+        (hand_db_id,),
+    )
+    if already:
+        return
+
+    try:
+        from app.routers.mtt import _parse_mtt_hand, _create_villains_for_hand
+        parsed = _parse_mtt_hand(hand_raw)
+        if not parsed:
+            return
+        screenshot_data = {
+            "entry_id": entry_id,
+            "players_list": vision_players,
+            "players_by_position": {},
+            "hero": hero_name,
+            "vision_sb": vision_sb,
+            "vision_bb": vision_bb,
+            "file_meta": file_meta,
+        }
+        conn2 = get_conn()
+        try:
+            _create_villains_for_hand(
+                conn2, parsed, screenshot_data,
+                hand_db_id=hand_db_id,
+                showdown_only=bool(row["has_showdown"]),
+            )
+            conn2.commit()
+            logger.info(f"[bg] Rule-C villain created for hand {hand_db_id} via 2nd entry {entry_id}")
+        except Exception as e:
+            conn2.rollback()
+            logger.error(f"[bg] villain create rule-C trigger failed hand={hand_db_id}: {e}")
+        finally:
+            conn2.close()
+    except Exception as e:
+        logger.error(f"[bg] villain rule-C gate failed entry={entry_id}: {e}")
+
+
 async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 tm_number: str, file_meta: dict, img_b64: str):
     """
@@ -911,12 +1031,18 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                 hand_id = f"GG-{tm_digits}"
 
                 # Não substituir se já existe uma mão GG-<tm> (para não apagar uma
-                # mão bulk ou outra SS)
+                # mão bulk ou outra SS).
                 existing_hand = query(
                     "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
                     (hand_id,)
                 )
                 if existing_hand:
+                    # 2ª entry Discord para o mesmo TM. Em vez de bail silencioso,
+                    # linkar canal + resolve entry + (condicional) villain C.
+                    _link_second_discord_entry_to_existing_hand(
+                        entry_id, existing_hand[0]["id"],
+                        vision_players, hero_name, vision_sb, vision_bb, file_meta,
+                    )
                     return
 
                 # all_players_actions minimal com _meta vindo do Vision data
