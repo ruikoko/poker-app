@@ -13,6 +13,7 @@ from app.services.entry_service import create_entry
 from app.services.hand_service import process_entry_to_hands, _insert_hand
 from app.routers.screenshot import _enrich_hand_from_orphan_entry
 from app.routers.hm3 import _parse_hand as hm3_parse_hand
+from app.ingest_filters import is_pre_2026
 
 logger = logging.getLogger("import")
 
@@ -288,6 +289,7 @@ async def import_file(
     if content_type == "hand_history":
         total_inserted = 0
         total_skipped = 0
+        total_rejected_pre_2026 = 0
         all_errors = []
 
         if is_zip:
@@ -302,6 +304,10 @@ async def import_file(
                         conn = get_conn()
                         try:
                             for h in hands_parsed:
+                                if is_pre_2026(h.get("played_at")):
+                                    total_rejected_pre_2026 += 1
+                                    logger.warning(f"[import] Rejeitada hand_id={h.get('hand_id')} played_at={h.get('played_at')} (<2026)")
+                                    continue
                                 ok = _insert_hand(conn, h, entry_id, study_state='new', origin='hh_import')
                                 if ok:
                                     total_inserted += 1
@@ -322,6 +328,10 @@ async def import_file(
             conn = get_conn()
             try:
                 for h in hands_parsed:
+                    if is_pre_2026(h.get("played_at")):
+                        total_rejected_pre_2026 += 1
+                        logger.warning(f"[import] Rejeitada hand_id={h.get('hand_id')} played_at={h.get('played_at')} (<2026)")
+                        continue
                     ok = _insert_hand(conn, h, entry_id, study_state='new', origin='hh_import')
                     if ok:
                         total_inserted += 1
@@ -411,6 +421,7 @@ async def import_file(
             "hands_found": total_inserted + total_skipped,
             "hands_inserted": total_inserted,
             "hands_skipped": total_skipped,
+            "hands_rejected_pre_2026": total_rejected_pre_2026,
             "errors": len(all_errors),
             "error_log": all_errors[:20],
             "rematched_screenshots": len(rematched),

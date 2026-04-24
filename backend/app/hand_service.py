@@ -3,8 +3,12 @@ Serviço de processamento de mãos.
 Liga entries a hands: extrai mãos de uma entry e insere-as na tabela hands.
 """
 import json
+import logging
 from app.db import get_conn, query, execute_returning
 from app.parsers.gg_hands import parse_hands
+from app.ingest_filters import is_pre_2026
+
+logger = logging.getLogger("hand_service")
 
 
 def _get_or_create_tournament_pk(conn, tournament_id_str: str, site: str) -> int | None:
@@ -34,6 +38,9 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
       Sem isto, HHs importadas depois do placeholder ficavam presas como
       GGDiscord para sempre.
     """
+    if is_pre_2026(h.get("played_at")):
+        logger.warning(f"[hand_service legacy] Rejeitada hand_id={h.get('hand_id')} played_at={h.get('played_at')} (<2026)")
+        return False
     with conn.cursor() as cur:
         if h["hand_id"]:
             cur.execute(

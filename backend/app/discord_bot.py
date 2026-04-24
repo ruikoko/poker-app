@@ -17,6 +17,8 @@ import discord
 from discord import Intents
 from datetime import datetime, timezone
 
+from app.ingest_filters import is_pre_2026
+
 logger = logging.getLogger("discord_bot")
 
 # ── Configuração ──────────────────────────────────────────────────────────────
@@ -139,6 +141,11 @@ def _save_to_db(
     message_created_at: datetime,
 ):
     """Guarda um item extraído na tabela entries e, se for HH texto, tenta parsear para hands."""
+    # Barreira pre-2026: mensagem Discord anterior a 2026 não cria entry.
+    if is_pre_2026(message_created_at):
+        logger.warning(f"[discord] Mensagem rejeitada: msg_id={message_id} posted_at={message_created_at} (<2026)")
+        return None
+
     from app.db import get_conn
     from app.services.entry_service import create_entry
 

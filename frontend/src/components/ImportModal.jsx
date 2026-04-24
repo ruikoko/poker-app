@@ -76,6 +76,7 @@ function formatResult(type, result) {
         result.skipped_date_filter && `${result.skipped_date_filter} fora do período`,
         result.villains_created && `${result.villains_created} vilões`,
         result.migrated_to_study > 0 && `${result.migrated_to_study} → Estudo`,
+        result.rejected_pre_2026 > 0 && `${result.rejected_pre_2026} <2026 rejeitadas`,
         result.errors && `${result.errors} erros`,
       ].filter(Boolean).join(' · ') || 'Importado'
 
@@ -87,6 +88,7 @@ function formatResult(type, result) {
           `${result.hands_found - result.hands_inserted} ignoradas`,
         result.rematched?.length && `${result.rematched.length} screenshots matched`,
         result.migrated_to_study > 0 && `${result.migrated_to_study} → Estudo`,
+        result.hands_rejected_pre_2026 > 0 && `${result.hands_rejected_pre_2026} <2026 rejeitadas`,
       ].filter(Boolean).join(' · ') || 'Importado'
 
     case 'gto':

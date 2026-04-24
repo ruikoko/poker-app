@@ -29,6 +29,7 @@ from PIL import Image
 from app.auth import require_auth
 from app.db import get_conn, query
 from app.hero_names import HERO_NAMES_ALL, ALL_NICKS_BY_SITE
+from app.ingest_filters import is_pre_2026
 
 router = APIRouter(prefix="/api/screenshots", tags=["screenshots"])
 logger = logging.getLogger("screenshots")
@@ -1121,6 +1122,13 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 pass
                     screenshot_url_val = og_url
 
+                # Defensiva: se a data extraída via og:image é <2026, abortar
+                # criação do placeholder. Discord bot já filtra `_save_to_db`
+                # mas placeholders podem vir de paths admin ou reprocessing.
+                if is_pre_2026(played_at_extracted):
+                    logger.warning(f"[placeholder] Rejeitado entry {entry_id}: played_at={played_at_extracted} <2026")
+                    return
+
                 # discord_tags: Discord resolve canal; upload manual fica vazio.
                 channel_bruto_list = []
                 if is_discord:
@@ -1212,6 +1220,20 @@ async def upload_screenshot(
     file_meta = _parse_filename(filename)
     tm_number = file_meta.get("tm")
     logger.info(f"Filename parsed: {file_meta}")
+
+    # Barreira pre-2026: filename com data clara <2026 rejeita upload.
+    # Filename sem data (ex: peco1.png) passa — placeholder com played_at=None aceito.
+    fm_date = file_meta.get("date")
+    fm_time = (file_meta.get("time") or "00:00") if file_meta else "00:00"
+    if fm_date:
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            ss_dt = _dt.fromisoformat(f"{fm_date}T{fm_time}").replace(tzinfo=_tz.utc)
+            if is_pre_2026(ss_dt):
+                logger.warning(f"[ss-upload] Rejeitado {filename}: played_at={ss_dt} <2026")
+                raise HTTPException(status_code=400, detail=f"Screenshot rejeitado: data {fm_date} é anterior a 2026.")
+        except (ValueError, TypeError):
+            pass  # parse fail → deixa passar (filename ambíguo não bloqueia)
 
     # Comprimir para BD (original fica em memória para Vision)
     compressed_b64, compressed_mime = _compress_image(content)

@@ -24,6 +24,7 @@ from app.auth import require_auth
 from app.db import get_conn, query
 from app.hero_names import HERO_NAMES_ALL, detect_site_from_hh
 from app.routers.screenshot import _enrich_hand_from_orphan_entry
+from app.ingest_filters import is_pre_2026
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
 logger = logging.getLogger("hm3")
@@ -875,6 +876,7 @@ async def import_hm3(
     errors = []
     villains_created = 0
     reclassified = 0
+    rejected_pre_2026 = 0
 
     conn = get_conn()
     try:
@@ -913,6 +915,11 @@ async def import_hm3(
                         continue
                 if not parsed or not parsed["hand_id"]:
                     errors.append(f"Parse failed: {gamenumber} ({site_name}) {ts}")
+                    continue
+
+                if is_pre_2026(parsed.get("played_at")):
+                    rejected_pre_2026 += 1
+                    logger.warning(f"[hm3] Rejeitada hand_id={parsed.get('hand_id')} played_at={parsed.get('played_at')} (<2026)")
                     continue
 
                 # Separar tags HM3 (vieram do CSV) das auto-geradas (showdown, nicks)
@@ -1202,6 +1209,7 @@ async def import_hm3(
         "skipped_duplicates": skipped,
         "skipped_date_filter": skipped_date,
         "skipped_nota_filter": skipped_nota,
+        "rejected_pre_2026": rejected_pre_2026,
         "villains_created": villains_created,
         "site_reclassified": reclassified,
         "errors": len(errors),
