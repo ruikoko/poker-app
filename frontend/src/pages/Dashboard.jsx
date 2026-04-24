@@ -117,6 +117,7 @@ export default function DashboardPage() {
   const [studyWeek, setStudyWeek] = useState(null)
   const [recentVillains, setRecentVillains] = useState([])
   const [error, setError] = useState('')
+  const [ssMatchExpanded, setSsMatchExpanded] = useState(false)
 
   function reloadStats() {
     hands.stats().then(setStats).catch(e => setError(e.message))
@@ -394,7 +395,7 @@ export default function DashboardPage() {
 
       {/* ── Screenshots ── */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 24 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid var(--border)' }}>
           <div style={{ padding: '16px 20px' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Screenshots na BD</div>
             <div style={{ fontSize: 24, fontWeight: 600 }}>
@@ -407,10 +408,90 @@ export default function DashboardPage() {
               {stats?.orphan_screenshots != null ? Number(stats.orphan_screenshots).toLocaleString('pt-PT') : '—'}
             </div>
           </div>
+          <div
+            style={{
+              padding: '16px 20px',
+              borderLeft: '1px solid var(--border)',
+              cursor: stats?.ss_match_pending > 0 ? 'pointer' : 'default',
+              background: ssMatchExpanded ? 'rgba(99,102,241,0.06)' : 'transparent',
+              transition: 'background 0.15s',
+              userSelect: 'none',
+            }}
+            onClick={() => stats?.ss_match_pending > 0 && setSsMatchExpanded(v => !v)}
+          >
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+              SSMatch {stats?.ss_match_pending > 0 && (
+                <span style={{ fontSize: 9, color: '#6366f1', marginLeft: 4 }}>{ssMatchExpanded ? '▼' : '▶'}</span>
+              )}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_match_pending > 0 ? '#6366f1' : 'var(--text)' }}>
+              {stats?.ss_match_pending != null ? Number(stats.ss_match_pending).toLocaleString('pt-PT') : '—'}
+            </div>
+          </div>
         </div>
         {stats?.orphan_screenshots > 0 && <OrphanList onRematchComplete={reloadStats} />}
+        {ssMatchExpanded && stats?.ss_match_pending > 0 && (
+          <SSMatchList key={stats.ss_match_pending} />
+        )}
       </div>
     </>
+  )
+}
+
+// ── SSMatch Pending List ─────────────────────────────────────────────────────
+// Placeholders criados por upload manual de SS sem HH correspondente. Saem
+// automaticamente quando a HH chega (via HM3/ZIP) — _insert_hand apaga o
+// placeholder e o contador decrementa.
+
+function SSMatchList() {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    hands.ssMatchPending()
+      .then(data => setItems(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar…</div>
+  }
+  if (items.length === 0) return null
+
+  return (
+    <div>
+      <div style={{
+        padding: '8px 20px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        background: 'rgba(99,102,241,0.06)',
+        fontSize: 11, color: '#818cf8', fontWeight: 600,
+        textTransform: 'uppercase', letterSpacing: 0.5,
+      }}>
+        {items.length} SS{items.length !== 1 ? 's' : ''} à espera de HH
+      </div>
+      {items.map(it => (
+        <div key={it.hand_db_id} style={{
+          display: 'grid',
+          gridTemplateColumns: '120px 1fr 140px 140px 160px',
+          gap: 12,
+          padding: '8px 20px',
+          borderBottom: '1px solid rgba(255,255,255,0.03)',
+          fontSize: 12,
+          alignItems: 'center',
+        }}>
+          <span style={{ fontFamily: 'monospace', color: '#6366f1', fontWeight: 600 }}>{it.hand_id}</span>
+          <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {it.file_name || '—'}
+          </span>
+          <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{it.tm || '—'}</span>
+          <span style={{ color: '#e2e8f0' }}>{it.hero || '—'}</span>
+          <span style={{ fontFamily: 'monospace', color: '#64748b', fontSize: 11 }}>
+            {it.created_at ? new Date(it.created_at).toLocaleString('pt-PT') : '—'}
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 

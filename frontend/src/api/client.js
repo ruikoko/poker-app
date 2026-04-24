@@ -70,6 +70,7 @@ export const hands = {
   delete: (id)          => req('DELETE', `/hands/${id}`),
   screenshot: (id)      => req('GET',    `/hands/${id}/screenshot`),
   stats:  ()            => req('GET',    '/hands/stats'),
+  ssMatchPending: ()    => req('GET',    '/hands/ss-match-pending'),
   tagGroups: (params = {}) => {
     const qs = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

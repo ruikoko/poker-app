@@ -657,7 +657,43 @@ def hand_stats(current_user=Depends(require_auth)):
     # Contagem unificada — o que o painel "Sem match" do Dashboard mostra
     result["orphan_screenshots"] = orphan_ss + gg_discord
 
+    # SSMatch — placeholders criados por upload manual de SS (origin='ss_upload')
+    # cujo match_method ainda é 'discord_placeholder_no_hh'. Quando HH chegar,
+    # placeholder é substituído (match_method → 'anchors_stack_elimination_v2')
+    # e hand sai do contador automaticamente.
+    try:
+        ssmatch_rows = query("""
+            SELECT COUNT(*) AS n FROM hands
+            WHERE origin = 'ss_upload'
+              AND (player_names->>'match_method') = 'discord_placeholder_no_hh'
+        """)
+        result["ss_match_pending"] = ssmatch_rows[0]["n"] if ssmatch_rows else 0
+    except Exception:
+        result["ss_match_pending"] = 0
+
     return result
+
+
+@router.get("/ss-match-pending")
+def ss_match_pending_list(current_user=Depends(require_auth)):
+    """Lista placeholders SS upload sem HH ainda — painel SSMatch do Dashboard.
+
+    Filtro: origin='ss_upload' AND match_method='discord_placeholder_no_hh'.
+    Quando HH chegar (via HM3/ZIP), _insert_hand apaga o placeholder e insere
+    a hand canónica → esta query deixa de devolver essa row automaticamente.
+    """
+    rows = query("""
+        SELECT h.id AS hand_db_id, h.hand_id, h.entry_id, h.created_at,
+               h.player_names->>'hero' AS hero,
+               e.file_name,
+               (e.raw_json->>'tm') AS tm
+        FROM hands h
+        LEFT JOIN entries e ON e.id = h.entry_id
+        WHERE h.origin = 'ss_upload'
+          AND (h.player_names->>'match_method') = 'discord_placeholder_no_hh'
+        ORDER BY h.created_at DESC, h.id DESC
+    """)
+    return [dict(r) for r in rows]
 
 
 @router.get("/{hand_pk}")
