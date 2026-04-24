@@ -342,14 +342,34 @@ async def import_file(
             # placeholder Discord foi substituído por HH real neste import.
             # Sem isto, as mãos ficam com match_method='discord_placeholder_no_hh'
             # (stale) e falham na regra B/C de villains.
+            #
+            # status='resolved' também apanhado: _create_placeholder_if_needed
+            # (fix f70ae05) marca entries resolved imediatamente ao criar
+            # placeholder. Quando _insert_hand substitui o placeholder por HH
+            # real, all_players_actions fica com hashes do HH GG anonimizado —
+            # _enrich_hand_from_orphan_entry substitui pelos nicks Vision.
+            # Guard-rail: só re-corre se a hand existe e tem raw real (já foi
+            # substituída), e o match_method indica dados Vision disponíveis.
+            # _enrich é idempotente — repeat no-op para hands já enriched.
             orphan_rows = query(
-                """SELECT id, raw_json FROM entries
-                   WHERE status = 'new'
-                     AND (
-                       entry_type = 'screenshot'
-                       OR (source = 'discord' AND entry_type IN ('replayer_link','image'))
+                """SELECT e.id, e.raw_json FROM entries e
+                   WHERE (
+                     e.status = 'new'
+                     OR (
+                       e.status = 'resolved'
+                       AND EXISTS (
+                         SELECT 1 FROM hands h
+                         WHERE h.entry_id = e.id
+                           AND (h.player_names->>'match_method') IS NOT NULL
+                           AND h.raw IS NOT NULL AND h.raw <> ''
+                       )
                      )
-                     AND raw_json ? 'tm'"""
+                   )
+                   AND (
+                     e.entry_type = 'screenshot'
+                     OR (e.source = 'discord' AND e.entry_type IN ('replayer_link','image'))
+                   )
+                   AND e.raw_json ? 'tm'"""
             )
             for orphan in orphan_rows:
                 raw = orphan.get("raw_json") or {}
