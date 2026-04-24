@@ -21,7 +21,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from app.auth import require_auth
 from app.db import get_conn, query, execute
-from app.hero_names import HERO_NAMES
+from app.hero_names import HERO_NAMES_ALL
 from app.parsers.gg_hands import _extract_buyin_numeric
 from app.utils.tournament_format import detect_tournament_format
 
@@ -29,7 +29,6 @@ router = APIRouter(prefix="/api/mtt", tags=["mtt"])
 logger = logging.getLogger("mtt")
 
 # ── Hero nicks seen in GG screenshots (same subset as screenshot.py) ─────────
-_GG_HERO_ALIASES = ["lauro dermio", "koumpounophobia", "lauro derm"]
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -507,7 +506,7 @@ def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
 
     seat_to_name = {}  # seat_num → nome_real
     used_vision = set()
-    hero_names = _GG_HERO_ALIASES
+    hero_names = HERO_NAMES_ALL
 
     # ── Fase 1: Âncoras fixas ────────────────────────────────────────
 

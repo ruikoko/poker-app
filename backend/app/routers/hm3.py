@@ -22,7 +22,7 @@ from app.utils.tournament_format import detect_tournament_format
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
-from app.hero_names import HERO_NAMES, detect_site_from_hh
+from app.hero_names import HERO_NAMES_ALL, detect_site_from_hh
 from app.routers.screenshot import _enrich_hand_from_orphan_entry
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
@@ -60,7 +60,7 @@ def _extract_showdown_villain_tags(raw_text: str) -> list[str]:
         if not cards:
             continue
         # Skip hero
-        if name.lower() in HERO_NAMES:
+        if name.lower() in HERO_NAMES_ALL:
             continue
         if name.lower() == 'hero':
             continue
@@ -398,7 +398,7 @@ def _parse_hand(hh_text, site_name):
                         bounty = float(bm2.group(1))
             seats[seat_num] = {"name": name, "stack": stack, "bounty": bounty}
             all_seat_nums.append(seat_num)
-            if name.lower() in HERO_NAMES:
+            if name.lower() in HERO_NAMES_ALL:
                 hero_seat = seat_num
                 hero_name = name
     else:
@@ -415,7 +415,7 @@ def _parse_hand(hh_text, site_name):
                     bounty = float(bm.group(1))
             seats[seat_num] = {"name": name, "stack": stack, "bounty": bounty}
             all_seat_nums.append(seat_num)
-            if name.lower() in HERO_NAMES:
+            if name.lower() in HERO_NAMES_ALL:
                 hero_seat = seat_num
                 hero_name = name
 
@@ -698,7 +698,7 @@ def _detect_vpip_hm3(raw_text, hero_name=None):
         # Skip hero
         if hero_name and actor == hero_name:
             continue
-        if actor.lower() in HERO_NAMES:
+        if actor.lower() in HERO_NAMES_ALL:
             continue
 
         # Check VPIP

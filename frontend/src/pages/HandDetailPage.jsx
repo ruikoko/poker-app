@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi } from '../api/client'
-import { HERO_NAMES } from '../heroNames'
+import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import { parseStreetsForDisplay } from '../lib/handParser'
 
@@ -157,7 +157,7 @@ export default function HandDetailPage() {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1d2a' }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#94a3b8', marginBottom: 12 }}>MESA ({players.length} JOGADORES)</div>
           {players.map((p, i) => {
-            const isHero = p.is_hero || HERO_NAMES.has(p.name.toLowerCase())
+            const isHero = p.is_hero || HERO_NAMES_ALL.has(p.name.toLowerCase())
             const realName = p.real_name || p.name
             const bounty = playerBounties[realName] || p.bounty || p.bounty_pct
             return (
@@ -222,7 +222,7 @@ export default function HandDetailPage() {
                   </div>
                   <div style={{ paddingLeft: 16, borderLeft: `3px solid ${STREET_COLORS[st.name] || '#2a2d3a'}30` }}>
                     {st.actions.map((a, ai) => {
-                      const isHero = HERO_NAMES.has(a.actor.toLowerCase())
+                      const isHero = HERO_NAMES_ALL.has(a.actor.toLowerCase())
                       const player = players.find(p => p.name === a.actor)
                       const pos = player?.position
 

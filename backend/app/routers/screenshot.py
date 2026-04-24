@@ -28,7 +28,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Backgro
 from PIL import Image
 from app.auth import require_auth
 from app.db import get_conn, query
-from app.hero_names import HERO_NAMES
+from app.hero_names import HERO_NAMES_ALL, ALL_NICKS_BY_SITE
 
 router = APIRouter(prefix="/api/screenshots", tags=["screenshots"])
 logger = logging.getLogger("screenshots")
@@ -37,7 +37,6 @@ logger = logging.getLogger("screenshots")
 # GG uses anonymised display names for non-hero players, so the hero's
 # real nickname is always visible in the bottom-center seat. Keep this list
 # restricted to aliases actually used on GGPoker by the user.
-_GG_HERO_ALIASES = ["lauro dermio", "koumpounophobia", "lauro derm"]
 
 
 # ── Posições por número de jogadores ────────────────────────────────────────
@@ -200,10 +199,15 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         data_url = f"data:{mime_type};base64,{b64}"
 
+        # Lista dinâmica de heroes GG (Rui + FRIEND_HEROES aplicáveis a GG).
+        # 4 nicks — pequeno o suficiente para não confundir o modelo.
+        gg_heroes = sorted(n.title() for n in ALL_NICKS_BY_SITE.get("GGPoker", []))
+        hero_list_str = ", ".join(f"'{n}'" for n in gg_heroes) if gg_heroes else "'Lauro Dermio'"
+
         prompt = (
             "This is a GGPoker hand replayer screenshot.\n\n"
             "KNOWN FACTS:\n"
-            "- The HERO is always 'Lauro Dermio' or 'koumpounophobia' (bottom center of table).\n"
+            f"- The HERO is one of these names (centered at bottom of table): {hero_list_str}.\n"
             "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
             "- The tournament LEVEL number is shown in the LEFT PANEL (e.g. 'Lv 5' or 'Level 5').\n"
             "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
@@ -547,7 +551,7 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
         vision_list = vision_data.get("players_list", [])
 
     used_vision = set()
-    hero_names = _GG_HERO_ALIASES
+    hero_names = HERO_NAMES_ALL
 
     # ── Fase 1: Âncoras fixas ────────────────────────────────────────────
 

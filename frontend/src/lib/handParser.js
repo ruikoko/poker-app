@@ -20,7 +20,7 @@
  * Suporta HH de: Winamax, PokerStars, WPN, GGPoker
  */
 
-import { HERO_NAMES } from '../heroNames'
+import { HERO_NAMES_ALL } from '../heroNames'
 
 const SEAT_ORDER = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
 
@@ -114,7 +114,7 @@ export function parseHH(raw, apa) {
       return ai - bi
     })
 
-  const heroIdx = players.findIndex(p => p.is_hero || HERO_NAMES.has(p.name.toLowerCase()))
+  const heroIdx = players.findIndex(p => p.is_hero || HERO_NAMES_ALL.has(p.name.toLowerCase()))
 
   // ── Build nameMap: anon hash → real name (GG specific) ───────────────────
   const nameMap = {}
@@ -142,7 +142,7 @@ export function parseHH(raw, apa) {
     stack: p.stack || 0,
     stackBB: p.stack_bb != null ? p.stack_bb : (bb > 1 ? +((p.stack || 0) / bb).toFixed(1) : 0),
     bounty: p.bounty,
-    isHero: p.is_hero || HERO_NAMES.has(p.name.toLowerCase()),
+    isHero: p.is_hero || HERO_NAMES_ALL.has(p.name.toLowerCase()),
     cards: [],
     folded: false,
     currentBet: 0,

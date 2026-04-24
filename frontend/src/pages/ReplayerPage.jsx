@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi, equity, gto as gtoApi } from '../api/client'
-import { HERO_NAMES } from '../heroNames'
+import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import { parseHH } from '../lib/handParser'
 
@@ -113,7 +113,7 @@ export default function ReplayerPage() {
     if (!hand?.all_players_actions) return
     const m = hand.all_players_actions._meta
     if (!m) return
-    const heroEntry = Object.entries(hand.all_players_actions).find(([k, v]) => k !== '_meta' && HERO_NAMES.has(k.toLowerCase()))
+    const heroEntry = Object.entries(hand.all_players_actions).find(([k, v]) => k !== '_meta' && HERO_NAMES_ALL.has(k.toLowerCase()))
     if (!heroEntry) return
     const heroBB = heroEntry[1].stack_bb || (heroEntry[1].stack / (m.bb || 1))
     const heroPos = heroEntry[1].position || ''
@@ -128,7 +128,7 @@ export default function ReplayerPage() {
     // Determine active players (in pot) and remaining (yet to act after hero)
     const SEAT_ORD = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
     const heroSeatIdx = SEAT_ORD.indexOf(heroPos)
-    const otherPlayers = allPlayers.filter(p => !HERO_NAMES.has(p.name.toLowerCase()))
+    const otherPlayers = allPlayers.filter(p => !HERO_NAMES_ALL.has(p.name.toLowerCase()))
     const activeStacks = otherPlayers.map(p => p.stack_bb || (p.stack / (m.bb || 1))).filter(s => s > 0)
     const activePositions = otherPlayers.map(p => p.position).filter(Boolean)
     
@@ -213,7 +213,7 @@ export default function ReplayerPage() {
             const ai2 = SEAT_ORD2.indexOf(a.position); const bi2 = SEAT_ORD2.indexOf(b.position)
             return (ai2===-1?99:ai2) - (bi2===-1?99:bi2)
           })
-          return sorted.findIndex(p => HERO_NAMES.has(p.name.toLowerCase()))
+          return sorted.findIndex(p => HERO_NAMES_ALL.has(p.name.toLowerCase()))
         })()
         
         // Navigate to hero's node: send all actions BEFORE hero

@@ -62,6 +62,19 @@ export const HERO_NAMES = new Set([
   'iuse2bspewer',
 ])
 
+// Friends who share their own hands as heroes. Processed identically to
+// HERO_NAMES in the pipeline but still filtered out of villains via
+// FRIEND_NICKS (they remain friends, not villains).
+export const FRIEND_HEROES = new Set([
+  'karluz',
+  'flightrisk',
+])
+
+// All nicks that count as "hero" in any hand. Use this everywhere that
+// asks "is this player the hero?". Use plain HERO_NAMES only when you
+// specifically need "is this Rui?".
+export const HERO_NAMES_ALL = new Set([...HERO_NAMES, ...FRIEND_HEROES])
+
 // Friend / team group nicks — NOT hero, but also NOT villains.
 // Used to filter these players out of the villain profile database.
 const FRIEND_ONLY_NICKS = [
@@ -70,10 +83,10 @@ const FRIEND_ONLY_NICKS = [
   'cattleking', 'cavalitos', 'cmaculatum', 'coconacueca',
   'crashcow', 'decode', 'deusfumo', 'djobidjoba87',
   'dlncredible', 'eitaqdelicia', 'el kingzaur', 'etonelespute',
-  'flightrisk', 'floptwist', 'godsmoke', 'golimar666',
+  'floptwist', 'godsmoke', 'golimar666',
   'grenouille', 'grenouiile', 'hmhm', 'huntermilf',
   'i<3kebab', 'ipaysor', 'jackpito', 'joao barbosa',
-  'johngeologic', 'karluz', 'klklwoku', 'lendiadbisca',
+  'johngeologic', 'klklwoku', 'lendiadbisca',
   'lewinsky', 'ltbau', 'luckytobme', 'luckytobvsu',
   'milffinder', 'milfodds', 'mmaboss', 'mrpeco',
   'mrpecoo', 'neurose', 'obviamente.', 'ohum',
@@ -90,13 +103,13 @@ const FRIEND_ONLY_NICKS = [
   'andacasa', 'jeandouca',
 ]
 
-// FRIEND_NICKS = all hero accounts + friend-only accounts.
-// Using a Set automatically deduplicates any overlap.
-export const FRIEND_NICKS = new Set([...HERO_NAMES, ...FRIEND_ONLY_NICKS])
+// FRIEND_NICKS = all heroes (Rui + friend-heroes) + friend-only.
+// Invariante: nick em FRIEND_NICKS nunca entra em hand_villains.
+export const FRIEND_NICKS = new Set([...HERO_NAMES_ALL, ...FRIEND_ONLY_NICKS])
 
 export function isHero(name) {
   if (!name) return false
-  return HERO_NAMES.has(String(name).toLowerCase().trim())
+  return HERO_NAMES_ALL.has(String(name).toLowerCase().trim())
 }
 
 export function isFriend(name) {

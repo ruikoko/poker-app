@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from app.auth import require_auth
-from app.hero_names import HERO_NAMES
+from app.hero_names import HERO_NAMES_ALL
 
 router = APIRouter(prefix="/api/equity", tags=["equity"])
 logger = logging.getLogger("equity")
@@ -467,7 +467,7 @@ def hand_analysis(hand_id: int, current_user=Depends(require_auth)):
 
             # Update pot for non-hero actions
             is_hero = hero_name and actor == hero_name
-            if not is_hero and actor.lower() in HERO_NAMES:
+            if not is_hero and actor.lower() in HERO_NAMES_ALL:
                 is_hero = True
 
             if action in ("calls", "bets"):

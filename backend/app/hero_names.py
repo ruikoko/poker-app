@@ -1,12 +1,20 @@
 """Central list of hero aliases and friend group — single source of truth.
 
-HERO_NAMES   → user's own accounts across all poker sites.
-               Used to mark the hero seat in HH parsing, screenshots,
-               MTT processing and equity calculations.
+HERO_NAMES     → user's own accounts across all poker sites.
+                 Used to mark the hero seat in HH parsing, screenshots,
+                 MTT processing and equity calculations.
 
-FRIEND_NICKS → hero + team/friend accounts that should be EXCLUDED
-               from the villain database (routers/villains.py,
-               routers/mtt.py friend filter, etc.).
+FRIEND_HEROES  → friend accounts that share their own HHs/SSs with the
+                 user. When present in a hand, they ARE the hero of that
+                 hand — processed identically to Rui's accounts.
+
+HERO_NAMES_ALL = HERO_NAMES | FRIEND_HEROES. Use this everywhere that
+                 asks "is this player the hero of this hand?". Use plain
+                 HERO_NAMES only when you specifically need "is this Rui?".
+
+FRIEND_NICKS   → all heroes (Rui + friend-heroes) + friend-only accounts
+                 that should be EXCLUDED from the villain database
+                 (routers/villains.py, routers/mtt.py friend filter, etc.).
 
 Matching is always case-insensitive. Values are stored lowercase.
 When a nickname appears in different forms on different sites
@@ -63,6 +71,18 @@ HERO_NAMES: set[str] = {
     "iuse2bspewer",
 }
 
+# Friends who share their own hands as heroes (ex: Karluz partilha HH/SS
+# dele e é o hero nessas mãos). Processados identicamente a HERO_NAMES
+# no pipeline (vision, parser, equity, match); continuam excluídos da
+# BD de villains via FRIEND_NICKS abaixo.
+FRIEND_HEROES: set[str] = {
+    "karluz",
+    "flightrisk",
+}
+
+# Todos os nicks considerados "hero" em qualquer contexto.
+HERO_NAMES_ALL: set[str] = HERO_NAMES | FRIEND_HEROES
+
 # Friend / team group nicks — NOT hero, but also NOT villains.
 # Used to filter these players out of the villain profile database.
 _FRIEND_ONLY_NICKS: set[str] = {
@@ -71,10 +91,10 @@ _FRIEND_ONLY_NICKS: set[str] = {
     "cattleking", "cavalitos", "cmaculatum", "coconacueca",
     "crashcow", "decode", "deusfumo", "djobidjoba87",
     "dlncredible", "eitaqdelicia", "el kingzaur", "etonelespute",
-    "flightrisk", "floptwist", "godsmoke", "golimar666",
+    "floptwist", "godsmoke", "golimar666",
     "grenouille", "grenouiile", "hmhm", "huntermilf",
     "i<3kebab", "ipaysor", "jackpito", "joao barbosa",
-    "johngeologic", "karluz", "klklwoku", "lendiadbisca",
+    "johngeologic", "klklwoku", "lendiadbisca",
     "lewinsky", "ltbau", "luckytobme", "luckytobvsu",
     "milffinder", "milfodds", "mmaboss", "mrpeco",
     "mrpecoo", "neurose", "obviamente.", "ohum",
@@ -91,8 +111,9 @@ _FRIEND_ONLY_NICKS: set[str] = {
     "andacasa", "jeandouca",
 }
 
-# FRIEND_NICKS = all hero accounts + friend-only accounts
-FRIEND_NICKS: set[str] = HERO_NAMES | _FRIEND_ONLY_NICKS
+# FRIEND_NICKS = todos os heroes (Rui + friend-heroes) + friend-only.
+# Invariante: nick em FRIEND_NICKS nunca entra em hand_villains.
+FRIEND_NICKS: set[str] = HERO_NAMES_ALL | _FRIEND_ONLY_NICKS
 
 
 # ── Distribuição por sala (site-detection) ──────────────────────────────────
@@ -121,7 +142,7 @@ def is_hero(name: str | None) -> bool:
     """Case-insensitive hero check. Returns False for None/empty."""
     if not name:
         return False
-    return name.lower().strip() in HERO_NAMES
+    return name.lower().strip() in HERO_NAMES_ALL
 
 
 def is_friend(name: str | None) -> bool:
