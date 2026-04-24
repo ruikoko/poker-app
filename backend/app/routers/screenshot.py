@@ -205,18 +205,21 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
             "KNOWN FACTS:\n"
             "- The HERO is always 'Lauro Dermio' or 'koumpounophobia' (bottom center of table).\n"
             "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
+            "- The tournament LEVEL number is shown in the LEFT PANEL (e.g. 'Lv 5' or 'Level 5').\n"
             "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
             "- Players with 'WIN' overlay on their avatar must still be included.\n"
             "- Players who went all-in may show stack 0.\n\n"
             "YOUR TASKS:\n"
             "1. Read the title bar for TM number and tournament name.\n"
             "2. Read the LEFT PANEL to identify the SB and BB player names.\n"
-            "3. For EVERY player seated at the table, read their nickname, chip stack,\n"
+            "3. Read the LEFT PANEL for the current tournament LEVEL number.\n"
+            "4. For EVERY player seated at the table, read their nickname, chip stack,\n"
             "   bounty percentage (if shown), and country flag.\n"
             "   The chip stack is the colored number shown directly below each player's name.\n\n"
             "Reply in EXACTLY this format (no extra text, no markdown):\n"
             "TM: <TM number, e.g. TM5672663145>\n"
             "TOURNAMENT: <tournament name from title>\n"
+            "LEVEL: <integer level number from LEFT PANEL, e.g. 5, or NONE>\n"
             "HERO: <hero player name>\n"
             "BOARD: <community cards, e.g. 7s 9d 5d Jc Kd, or NONE>\n"
             "POT: <pot size number, or NONE>\n"
@@ -230,6 +233,7 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
             "- If a player's stack shows 0, write 0\n"
             "- Bounty_pct is the percentage in the badge (e.g. 18%), or 0 if none\n"
             "- Country is the 2-letter code from the flag, or NONE\n"
+            "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
             "- Include ALL players visible at the table, even if eliminated\n"
             "- Do NOT guess positions — only output SB and BB from the left panel\n\n"
             "Output ONLY the structured lines above. No explanations."
@@ -279,6 +283,7 @@ def _parse_vision_response(text: str) -> dict:
         "pot": None,
         "vision_sb": None,
         "vision_bb": None,
+        "vision_level": None,
         "players_by_position": {},
         "players_list": [],
     }
@@ -298,6 +303,17 @@ def _parse_vision_response(text: str) -> dict:
 
         elif line.startswith("TOURNAMENT:"):
             result["tournament"] = line[11:].strip()
+
+        elif line.startswith("LEVEL:"):
+            val = line[6:].strip()
+            if val and val.upper() != "NONE":
+                # Tolera "5", "Lv 5", "Level 5" — extrai o primeiro inteiro.
+                m = re.search(r'\d+', val)
+                if m:
+                    try:
+                        result["vision_level"] = int(m.group(0))
+                    except ValueError:
+                        pass
 
         elif line.startswith("HERO:"):
             val = line[5:].strip()
@@ -893,8 +909,9 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
         board = vision_data.get("board", [])
         vision_sb = vision_data.get("vision_sb")
         vision_bb = vision_data.get("vision_bb")
+        vision_level = vision_data.get("vision_level")
         logger.info(f"[bg] Vision OK entry {entry_id} -- TM: {tm_final}, "
-                    f"players: {len(vision_players)}, SB={vision_sb}, BB={vision_bb}")
+                    f"players: {len(vision_players)}, SB={vision_sb}, BB={vision_bb}, Lv={vision_level}")
 
         # Comprimir imagem DEPOIS do Vision (Vision já recebeu original)
         compressed_b64, compressed_mime = await asyncio.to_thread(_compress_image, content)
@@ -914,6 +931,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                             "board": board,
                             "vision_sb": vision_sb,
                             "vision_bb": vision_bb,
+                            "vision_level": vision_level,
                             "raw_vision": vision_text,
                             "vision_done": True,
                         })
