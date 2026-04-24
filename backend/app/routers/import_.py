@@ -337,8 +337,18 @@ async def import_file(
         # ── Auto-rematch de screenshots órfãos ──
         rematched = []
         try:
+            # Inclui Discord replayer_link/image — cobre o caso em que um
+            # placeholder Discord foi substituído por HH real neste import.
+            # Sem isto, as mãos ficam com match_method='discord_placeholder_no_hh'
+            # (stale) e falham na regra B/C de villains.
             orphan_rows = query(
-                "SELECT id, raw_json FROM entries WHERE entry_type = 'screenshot' AND status = 'new'"
+                """SELECT id, raw_json FROM entries
+                   WHERE status = 'new'
+                     AND (
+                       entry_type = 'screenshot'
+                       OR (source = 'discord' AND entry_type IN ('replayer_link','image'))
+                     )
+                     AND raw_json ? 'tm'"""
             )
             for orphan in orphan_rows:
                 raw = orphan.get("raw_json") or {}
