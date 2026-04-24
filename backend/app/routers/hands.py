@@ -338,8 +338,11 @@ def _build_conditions(
             params.append(tag)
 
     if hm3_tag:
-        conditions.append("%s = ANY(h.hm3_tags)")
-        params.append(hm3_tag)
+        if hm3_tag == '__none__':
+            conditions.append("(h.hm3_tags IS NULL OR h.hm3_tags = '{}')")
+        else:
+            conditions.append("%s = ANY(h.hm3_tags)")
+            params.append(hm3_tag)
 
     if study_state:
         conditions.append("h.study_state = %s")
@@ -480,7 +483,8 @@ def tag_groups(
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
 
-    Se use_hm3_tags=true, usa coluna hm3_tags (tags reais HM3) e IGNORA mãos sem hm3_tags.
+    Se use_hm3_tags=true, usa coluna hm3_tags (tags reais HM3) para agrupar.
+    Mãos sem hm3_tags caem num grupo "(sem tag)" retornado no fim da lista.
     """
     conditions, params = _build_conditions(
         site, None, study_state, position, search, date_from, exclude_mtt_only,
@@ -493,10 +497,6 @@ def tag_groups(
         conditions.append(STUDY_VIEW_GG_MATCH_FILTER)
 
     tag_col = "hm3_tags" if use_hm3_tags else "tags"
-
-    # Quando use_hm3_tags=true, só queremos mãos que TÊM pelo menos uma hm3_tag
-    if use_hm3_tags:
-        conditions.append("h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

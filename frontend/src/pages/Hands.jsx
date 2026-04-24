@@ -1217,7 +1217,7 @@ function TierCollapsible({ label, subtitle, count, defaultOpen = false, children
 }
 
 
-function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenDetail, onDeleteHand }) {
+function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, useHm3Tags, studyView, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
   const [loadingHands, setLoadingHands] = useState(false)
@@ -1228,9 +1228,13 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, onOpenD
       try {
         const params = { ...filters, page_size: 500, page: 1 }
         if (!params.date_from) delete params.date_from
+        if (studyView) params.study_view = true
         if (tags.length === 0) {
-          // sem-tag: buscar mãos sem hm3_tags
-          params.tag = '__none__'
+          // Grupo "(sem tag)" — filtra pela coluna consistente com o
+          // agrupamento da vista. Em Estudo (use_hm3_tags=true) isto
+          // significa "sem hm3_tags"; caso contrário, sem coluna tags.
+          if (useHm3Tags) params.hm3_tag = '__none__'
+          else params.tag = '__none__'
         } else {
           // Filtrar pela tag HM3 principal do grupo (tema).
           // Com a nova lógica, cada grupo é definido por UMA tag HM3.
@@ -1664,11 +1668,11 @@ export default function HandsPage() {
         const themeAgg = {}
         for (const g of tagGroupsData.groups) {
           const theme = pickTheme(g.tags)
-          if (!theme) continue
-          if (!themeAgg[theme]) {
-            themeAgg[theme] = { tags: [theme], count: 0, wins: 0, losses: 0, total_bb: 0 }
+          const key = theme || '__no_tag__'
+          if (!themeAgg[key]) {
+            themeAgg[key] = { tags: theme ? [theme] : [], count: 0, wins: 0, losses: 0, total_bb: 0 }
           }
-          const t = themeAgg[theme]
+          const t = themeAgg[key]
           t.count    += g.count
           t.wins     += g.wins
           t.losses   += g.losses
@@ -1692,6 +1696,8 @@ export default function HandsPage() {
               losses={group.losses}
               totalBB={group.total_bb}
               filters={filters}
+              useHm3Tags={true}
+              studyView={true}
               onOpenDetail={openDetail}
               onDeleteHand={deleteHand}
             />
