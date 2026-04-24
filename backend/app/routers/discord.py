@@ -981,3 +981,102 @@ def backfill_duplicate_entries(
     finally:
         conn.close()
 
+
+# ─── TEMP: re-enrichment para mãos com match_method placeholder stale após ─
+# import de HH real (gap do auto-rematch em import_.py fixo em c452e12).
+# Remover após validação (padrão 584cab2).
+
+@router.get("/admin/rematch-discord-after-hh/preview")
+def rematch_discord_after_hh_preview(current_user=Depends(require_auth)):
+    """
+    DRY-RUN. Cohort: entries Discord 'new' com TM, cujo hand_id 'GG-<TM>'
+    existe em hands com raw HH real E match_method ainda é
+    'discord_placeholder_*' (não foi re-enriquecido após o import da HH).
+    """
+    rows = query("""
+        SELECT e.id AS entry_id,
+               e.raw_json->>'tm' AS tm,
+               dss.channel_name,
+               h.id AS hand_db_id,
+               h.player_names->>'match_method' AS match_method,
+               (h.raw IS NOT NULL AND h.raw <> '') AS has_hh_raw
+        FROM entries e
+        LEFT JOIN discord_sync_state dss ON dss.channel_id = e.discord_channel
+        JOIN hands h ON h.hand_id = 'GG-' || regexp_replace(e.raw_json->>'tm', '^TM', '')
+        WHERE e.source='discord'
+          AND e.entry_type IN ('replayer_link','image')
+          AND e.status='new'
+          AND (e.raw_json ? 'tm')
+          AND h.raw IS NOT NULL AND h.raw <> ''
+          AND h.player_names->>'match_method' LIKE 'discord_placeholder%%'
+        ORDER BY e.id DESC
+    """)
+    by_channel = {}
+    by_match_method = {}
+    for r in rows:
+        ch = r["channel_name"] or "(unknown)"
+        by_channel[ch] = by_channel.get(ch, 0) + 1
+        mm = r["match_method"] or "(null)"
+        by_match_method[mm] = by_match_method.get(mm, 0) + 1
+    return {
+        "ok": True,
+        "cohort_size": len(rows),
+        "by_channel": sorted(by_channel.items(), key=lambda kv: -kv[1]),
+        "by_match_method": sorted(by_match_method.items(), key=lambda kv: -kv[1]),
+        "sample": [dict(r) for r in rows[:20]],
+    }
+
+
+@router.post("/admin/rematch-discord-after-hh")
+def rematch_discord_after_hh(
+    confirm: bool = False,
+    current_user=Depends(require_auth),
+):
+    """Aplica _enrich_hand_from_orphan_entry aos candidatos do /preview."""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Adicionar ?confirm=true. Corre /preview primeiro."
+        )
+
+    from app.routers.screenshot import _enrich_hand_from_orphan_entry
+
+    rows = query("""
+        SELECT e.id AS entry_id, e.raw_json,
+               h.id AS hand_db_id
+        FROM entries e
+        JOIN hands h ON h.hand_id = 'GG-' || regexp_replace(e.raw_json->>'tm', '^TM', '')
+        WHERE e.source='discord'
+          AND e.entry_type IN ('replayer_link','image')
+          AND e.status='new'
+          AND (e.raw_json ? 'tm')
+          AND h.raw IS NOT NULL AND h.raw <> ''
+          AND h.player_names->>'match_method' LIKE 'discord_placeholder%%'
+    """)
+
+    enriched = 0
+    errors = []
+    for r in rows:
+        try:
+            result = _enrich_hand_from_orphan_entry(
+                r["entry_id"], r["hand_db_id"], r["raw_json"] or {}
+            )
+            if result.get("status") == "enriched":
+                enriched += 1
+            else:
+                errors.append({
+                    "entry_id": r["entry_id"],
+                    "status": result.get("status"),
+                    "error": result.get("error"),
+                })
+        except Exception as e:
+            errors.append({"entry_id": r["entry_id"], "error": str(e)})
+
+    return {
+        "ok": True,
+        "cohort_size": len(rows),
+        "enriched": enriched,
+        "errors_count": len(errors),
+        "errors": errors[:20],
+    }
+
