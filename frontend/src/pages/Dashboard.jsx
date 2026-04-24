@@ -448,11 +448,19 @@ function SSMatchList() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    console.log('[SSMatch] mount → fetching')
     hands.ssMatchPending()
-      .then(data => setItems(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .then(data => {
+        console.log('[SSMatch] got data:', data)
+        setItems(Array.isArray(data) ? data : [])
+      })
+      .catch(e => {
+        console.error('[SSMatch] fetch error:', e)
+      })
       .finally(() => setLoading(false))
   }, [])
+
+  console.log('[SSMatch] render — loading:', loading, 'items.length:', items.length)
 
   if (loading) {
     return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar…</div>
