@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { hands as handsApi } from '../api/client'
+import { hands as handsApi, screenshots } from '../api/client'
 import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import { parseStreetsForDisplay } from '../lib/handParser'
@@ -40,6 +40,13 @@ export default function HandDetailPage() {
   if (loading) return <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: 16 }}>A carregar...</div>
   if (error) return <div style={{ padding: 60, textAlign: 'center', color: '#ef4444', fontSize: 16 }}>{error}</div>
   if (!hand) return null
+
+  // Placeholder SS upload / Discord sem HH real: render dedicado com Vision dump.
+  // Quando HH chegar, _insert_hand apaga o placeholder e a hand canonical toma o lugar.
+  const isPlaceholder = (hand.player_names?.match_method || '').startsWith('discord_placeholder_')
+  if (isPlaceholder) {
+    return <PlaceholderView hand={hand} navigate={navigate} onUpdate={(patch) => setHand(h => ({ ...h, ...patch }))} />
+  }
 
   const meta = hand.all_players_actions?._meta || {}
   const bb = meta.bb || 1
@@ -281,6 +288,129 @@ export default function HandDetailPage() {
           })()}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Placeholder View ────────────────────────────────────────────────────────
+// Render dedicado para placeholders (match_method='discord_placeholder_*').
+// Mostra dados Vision (hero, board, players, SB/BB) e SS grande. Esconde
+// secções que exigem HH real: replayer, copy HH, acções por street, pot.
+
+function PlaceholderView({ hand, navigate, onUpdate }) {
+  const pn = hand.player_names || {}
+  const hero = pn.hero
+  const board = pn.board || []
+  const visionSb = pn.vision_sb
+  const visionBb = pn.vision_bb
+  const visionLevel = pn.vision_level
+  const playersList = pn.players_list || []
+  const playedDate = hand.played_at
+    ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '—'
+  const imgUrl = hand.entry_id ? screenshots.imageUrl(hand.entry_id) : null
+
+  return (
+    <div style={{ maxWidth: 880, margin: '0 auto', padding: '28px 24px' }}>
+      {/* Header — só voltar + tags (editáveis) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12 }}>
+        <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 16, fontWeight: 600, flexShrink: 0 }}>&larr; Voltar</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TagEditor hand={hand} onUpdate={onUpdate} />
+        </div>
+      </div>
+
+      {/* Banner placeholder */}
+      <div style={{
+        background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)',
+        borderRadius: 8, padding: '14px 18px', marginBottom: 16,
+        color: '#a5b4fc', fontSize: 13, lineHeight: 1.5,
+      }}>
+        <strong style={{ color: '#c7d2fe' }}>Mão sem HH ainda.</strong>{' '}
+        Dados extraídos via Vision da SS. Serão substituídos pelos dados canónicos quando a HH for importada (HM3 ou ZIP).
+      </div>
+
+      {/* Info grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
+        {[
+          { l: 'SALA', v: hand.site },
+          { l: 'DATA', v: playedDate },
+          { l: 'HAND ID', v: hand.hand_id },
+          { l: 'HERO', v: hero || '—' },
+          { l: 'LEVEL', v: visionLevel != null ? `Lv ${visionLevel}` : '—' },
+          { l: 'JOGADORES', v: playersList.length || '—' },
+        ].map(({ l, v }) => (
+          <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '12px 16px' }}>
+            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>{l}</div>
+            <div style={{ fontSize: 15, color: '#f1f5f9', fontWeight: 700, wordBreak: 'break-all' }}>{v || '—'}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Board (se existir) */}
+      {board.length > 0 && (
+        <div style={{ background: '#0f1117', borderRadius: 8, padding: '16px 20px', marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>BOARD</div>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {board.map((c, i) => <RCard key={i} card={c} size="lg" />)}
+          </div>
+        </div>
+      )}
+
+      {/* Screenshot (prominent) */}
+      {imgUrl && (
+        <div style={{ background: '#0f1117', borderRadius: 8, padding: 16, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 10 }}>SCREENSHOT</div>
+          <img
+            src={imgUrl}
+            alt="Screenshot"
+            style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 6, border: '1px solid #2a2d3a', display: 'block' }}
+          />
+        </div>
+      )}
+
+      {/* Mesa (players_list) */}
+      {playersList.length > 0 && (
+        <div style={{ background: '#0f1117', borderRadius: 8, padding: '16px 20px' }}>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 12 }}>MESA ({playersList.length} JOGADORES)</div>
+          {playersList.map((p, i) => {
+            const nameLower = (p.name || '').toLowerCase()
+            const isHero = p.name === hero || HERO_NAMES_ALL.has(nameLower)
+            const isSb = p.name === visionSb
+            const isBb = p.name === visionBb
+            const label = isSb ? 'SB' : isBb ? 'BB' : null
+            const stackDisplay = p.stack_unit === 'bb'
+              ? `${p.stack_raw ?? p.stack} BB`
+              : (p.stack_chips || p.stack ? Math.round(p.stack_chips || p.stack).toLocaleString() : '—')
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 14, padding: '9px 14px',
+                borderBottom: i < playersList.length - 1 ? '1px solid #14171f' : 'none',
+                background: isHero ? 'rgba(99,102,241,0.05)' : 'transparent', borderRadius: 4,
+              }}>
+                {label ? <PosBadge pos={label} /> : <span style={{ minWidth: 48 }} />}
+                <span style={{ fontSize: 16, fontWeight: isHero ? 700 : 500, color: isHero ? '#a5b4fc' : '#f1f5f9', minWidth: 160 }}>
+                  {p.name || '—'}
+                  {isHero && <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', marginLeft: 6 }}>HERO</span>}
+                </span>
+                <span style={{ fontSize: 15, color: '#64748b', fontFamily: 'monospace', minWidth: 90, textAlign: 'right' }}>
+                  {stackDisplay}
+                </span>
+                {p.bounty_pct != null && p.bounty_pct > 0 && (
+                  <span style={{
+                    fontSize: 14, color: '#7dd3fc', fontWeight: 700,
+                    padding: '2px 8px', borderRadius: 4,
+                    background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.15)',
+                  }}>{p.bounty_pct}%</span>
+                )}
+                {p.country && (
+                  <span style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace' }}>{p.country}</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

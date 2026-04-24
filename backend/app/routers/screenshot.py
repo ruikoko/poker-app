@@ -1093,8 +1093,10 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                 pn_json = {
                     "players_list": vision_players,
                     "hero": hero_name,
+                    "board": board,
                     "vision_sb": vision_sb,
                     "vision_bb": vision_bb,
+                    "vision_level": vision_level,
                     "file_meta": file_meta,
                     "match_method": "discord_placeholder_no_hh",
                 }
