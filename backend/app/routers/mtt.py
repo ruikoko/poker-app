@@ -749,12 +749,24 @@ def _create_ggpoker_villain_notes_for_hand(
 
             player_data = apa.get(pname, {})
             actions = player_data.get("actions", {}) if isinstance(player_data, dict) else {}
-            preflop_action = actions.get("preflop", "")
+            # Normalizar acções para string: parser GG bulk (path SS upload + ZIP
+            # import + _enrich) produz lista de strings; parser MTT legacy produz
+            # string única. Fundir ambos os formatos antes de qualquer .lower().
+            def _street_str(v):
+                if v is None:
+                    return ""
+                if isinstance(v, list):
+                    return " ".join(str(x) for x in v)
+                return str(v)
+            preflop_str = _street_str(actions.get("preflop"))
+            flop_str    = _street_str(actions.get("flop"))
+            turn_str    = _street_str(actions.get("turn"))
+            river_str   = _street_str(actions.get("river"))
             has_vpip = (
-                actions.get("flop") is not None
-                or actions.get("turn") is not None
-                or actions.get("river") is not None
-                or (preflop_action and "fold" not in preflop_action.lower())
+                flop_str
+                or turn_str
+                or river_str
+                or (preflop_str and "fold" not in preflop_str.lower())
             )
             if not has_vpip:
                 continue
