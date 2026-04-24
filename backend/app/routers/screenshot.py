@@ -1388,6 +1388,28 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     finally:
         conn.close()
 
+    # Criar villains usando dados Vision + HH enriched. _create_ggpoker_villain_notes_for_hand
+    # faz lookup do all_players_actions já committed acima (query interna abre nova conn,
+    # vê estado actualizado). Cobre regra B∨C: match_method populado + VPIP / showdown.
+    # Conn nova porque a anterior está fechada. Falha aqui não bloqueia enrichment —
+    # só log error.
+    try:
+        from app.routers.mtt import _create_ggpoker_villain_notes_for_hand
+        villains_conn = get_conn()
+        try:
+            n_villain_notes = _create_ggpoker_villain_notes_for_hand(
+                villains_conn, hand_db_id,
+                players_list=raw_json.get("players_list", []),
+                hero_name=hero_name,
+                screenshot_data=raw_json,
+            )
+            villains_conn.commit()
+            logger.info(f"Villain creation hand {hand_db_id}: {n_villain_notes} villain_notes upsert + hand_villains via _create_villains_for_hand")
+        finally:
+            villains_conn.close()
+    except Exception as e:
+        logger.error(f"Villain creation error for hand {hand_db_id}: {e}")
+
     return {
         "status": "enriched",
         "hand_id": hand_db_id,
