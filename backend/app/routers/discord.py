@@ -789,3 +789,195 @@ def fix_ggdiscord_played_at(
     finally:
         conn.close()
 
+
+# ─── TEMP: backfill para entries Discord 'new' orfas por 2ª-entry-mesmo-TM ──
+# Contexto: antes do fix em _create_discord_placeholder_if_needed
+# (commit f8a8238), a 2ª entry para o mesmo TM bailava silenciosamente. Este
+# endpoint aplica os 3 passos (append canal + resolve + villain C) aos casos
+# legacy. Remover após validação (padrão 584cab2).
+
+@router.get("/admin/backfill-duplicate-entries/preview")
+def backfill_duplicate_entries_preview(current_user=Depends(require_auth)):
+    """
+    DRY-RUN. Cohort: entries Discord status='new' com TM, cujo hand_id
+    'GG-<TM>' existe em hands MAS hands.entry_id aponta para outra entry
+    (ou é NULL). São candidatos ao backfill de 2ª entry.
+    """
+    rows = query("""
+        SELECT e.id AS entry_id,
+               e.raw_json->>'tm' AS tm,
+               dss.channel_name,
+               h.id AS hand_db_id,
+               h.entry_id AS hand_current_entry_id,
+               h.discord_tags,
+               (h.raw IS NOT NULL AND h.raw <> '') AS has_hh_raw
+        FROM entries e
+        LEFT JOIN discord_sync_state dss ON dss.channel_id = e.discord_channel
+        JOIN hands h ON h.hand_id = 'GG-' || regexp_replace(e.raw_json->>'tm', '^TM', '')
+        WHERE e.source='discord' AND e.status='new'
+          AND (e.raw_json ? 'tm')
+          AND (h.entry_id IS NULL OR h.entry_id <> e.id)
+        ORDER BY e.id DESC
+    """)
+
+    by_channel = {}
+    with_raw = 0
+    sample = []
+    for r in rows:
+        ch = r["channel_name"] or "(unknown)"
+        by_channel[ch] = by_channel.get(ch, 0) + 1
+        if r["has_hh_raw"]:
+            with_raw += 1
+        if len(sample) < 20:
+            tags = r["discord_tags"] or []
+            sample.append({
+                "entry_id": r["entry_id"],
+                "tm": r["tm"],
+                "channel_name": r["channel_name"],
+                "hand_db_id": r["hand_db_id"],
+                "hand_current_entry_id": r["hand_current_entry_id"],
+                "channel_already_in_tags": (
+                    r["channel_name"] in tags if r["channel_name"] else None
+                ),
+                "has_hh_raw": r["has_hh_raw"],
+            })
+    return {
+        "ok": True,
+        "cohort_size": len(rows),
+        "with_hh_raw": with_raw,
+        "by_channel": sorted(by_channel.items(), key=lambda kv: -kv[1]),
+        "sample": sample,
+    }
+
+
+@router.post("/admin/backfill-duplicate-entries")
+def backfill_duplicate_entries(
+    confirm: bool = False,
+    current_user=Depends(require_auth),
+):
+    """
+    Aplica aos candidatos (mesmo cohort do /preview):
+      1. Append canal a hands.discord_tags (idempotente).
+      2. UPDATE entries.status='resolved'.
+      3. Se ('nota' in discord_tags) AND match_method AND raw AND sem villains:
+         dispara _create_villains_for_hand.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Adicionar ?confirm=true. Corre /preview primeiro."
+        )
+
+    import json as _json
+    from app.db import get_conn
+
+    rows = query("""
+        SELECT e.id AS entry_id,
+               dss.channel_name,
+               h.id AS hand_db_id,
+               h.raw AS hand_raw,
+               h.has_showdown,
+               h.player_names,
+               h.discord_tags
+        FROM entries e
+        LEFT JOIN discord_sync_state dss ON dss.channel_id = e.discord_channel
+        JOIN hands h ON h.hand_id = 'GG-' || regexp_replace(e.raw_json->>'tm', '^TM', '')
+        WHERE e.source='discord' AND e.status='new'
+          AND (e.raw_json ? 'tm')
+          AND (h.entry_id IS NULL OR h.entry_id <> e.id)
+    """)
+
+    appended = 0
+    resolved = 0
+    villains_triggered = 0
+    errors = []
+
+    conn = get_conn()
+    try:
+        for r in rows:
+            entry_id = r["entry_id"]
+            hand_db_id = r["hand_db_id"]
+            channel = r["channel_name"]
+            try:
+                with conn.cursor() as cur:
+                    if channel:
+                        cur.execute(
+                            """UPDATE hands SET discord_tags = ARRAY(
+                                 SELECT DISTINCT unnest(
+                                   COALESCE(discord_tags, '{}'::text[]) || %s::text[]
+                                 ))
+                               WHERE id = %s""",
+                            ([channel], hand_db_id)
+                        )
+                        appended += cur.rowcount
+                    cur.execute(
+                        "UPDATE entries SET status='resolved' WHERE id=%s",
+                        (entry_id,)
+                    )
+                    resolved += cur.rowcount
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                errors.append({"entry_id": entry_id, "error": f"step1-2: {e}"})
+                continue
+
+            # Regra C: 'nota' em discord_tags + match_method + hand raw + sem villains.
+            new_tags = list(r["discord_tags"] or [])
+            if channel and channel not in new_tags:
+                new_tags.append(channel)
+            if 'nota' not in new_tags:
+                continue
+
+            pn = r["player_names"] or {}
+            if isinstance(pn, str):
+                try: pn = _json.loads(pn)
+                except Exception: pn = {}
+            mm = pn.get("match_method") if isinstance(pn, dict) else None
+            hand_raw = r["hand_raw"] or ""
+            if not mm or not hand_raw:
+                continue
+
+            already = query(
+                "SELECT 1 FROM hand_villains WHERE hand_db_id=%s LIMIT 1",
+                (hand_db_id,)
+            )
+            if already:
+                continue
+
+            try:
+                from app.routers.mtt import _parse_mtt_hand, _create_villains_for_hand
+                parsed = _parse_mtt_hand(hand_raw)
+                if not parsed:
+                    continue
+                ss = {
+                    "entry_id": entry_id,
+                    "players_list": pn.get("players_list") or [],
+                    "players_by_position": pn.get("players_by_position") or {},
+                    "hero": pn.get("hero"),
+                    "vision_sb": pn.get("vision_sb"),
+                    "vision_bb": pn.get("vision_bb"),
+                    "file_meta": pn.get("file_meta") or {},
+                }
+                _create_villains_for_hand(
+                    conn, parsed, ss,
+                    hand_db_id=hand_db_id,
+                    showdown_only=bool(r["has_showdown"]),
+                )
+                conn.commit()
+                villains_triggered += 1
+            except Exception as e:
+                conn.rollback()
+                errors.append({"entry_id": entry_id, "villain_error": str(e)})
+
+        return {
+            "ok": True,
+            "cohort_size": len(rows),
+            "appended": appended,
+            "resolved": resolved,
+            "villains_triggered": villains_triggered,
+            "errors_count": len(errors),
+            "errors": errors[:20],
+        }
+    finally:
+        conn.close()
+
