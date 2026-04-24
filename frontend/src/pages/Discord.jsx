@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { discord, hands as handsApi } from '../api/client'
+import HandRow from '../components/HandRow'
 
 // ── Constantes ──────────────────────────────────────────────────────────────
 
@@ -83,63 +84,9 @@ function TagBadge({ t }) {
   return <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, marginRight: 3, color: c, background: `${c}18`, border: `1px solid ${c}30` }}>#{t}</span>
 }
 
-// ── Hand Row (dentro de tag group) ──────────────────────────────────────────
-
-function HandRow({ hand, onClick }) {
-  // Extract gg.gl link from raw or notes
-  const ggMatch = (hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/)
-  const ggLink = ggMatch ? ggMatch[0] : null
-
-  const discordDate = hand.discord_posted_at ? new Date(hand.discord_posted_at).toLocaleDateString('pt-PT') : '—'
-  const importDate = hand.created_at ? new Date(hand.created_at).toLocaleDateString('pt-PT') : '—'
-
-  return (
-    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: '#1a1d27', borderBottom: '1px solid #1e2130', cursor: 'pointer', transition: 'background 0.1s' }}
-      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
-      onMouseLeave={e => e.currentTarget.style.background = '#1a1d27'}>
-      <div style={{ minWidth: 55 }}><StateBadge state={hand.study_state} /></div>
-      <div style={{ minWidth: 40 }}><PosBadge pos={hand.position} /></div>
-      <div style={{ display: 'flex', gap: 3, minWidth: 55 }}>
-        {hand.hero_cards?.length > 0
-          ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} />)
-          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
-      </div>
-      <div style={{ display: 'flex', gap: 2, minWidth: 120 }}>
-        {hand.board?.length > 0
-          ? hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} />)
-          : <span style={{ color: '#4b5563', fontSize: 11 }}>&mdash;</span>}
-      </div>
-      <div style={{ minWidth: 65 }}><ResultBadge result={hand.result} /></div>
-      <div style={{ flex: 1, fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hand.stakes || ''}</div>
-      <div style={{ fontSize: 11, color: '#64748b', minWidth: 70, textAlign: 'right' }}>{discordDate}</div>
-      <div style={{ fontSize: 11, color: '#64748b', minWidth: 70, textAlign: 'right' }}>{importDate}</div>
-      {hand.raw && hand.all_players_actions && (
-        <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          style={{ fontSize: 10, color: '#22c55e', textDecoration: 'none', padding: '2px 6px', borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', flexShrink: 0, fontWeight: 600 }}
-        >&#9654;</a>
-      )}
-      {ggLink && (
-        <a href={ggLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{
-          fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '2px 8px',
-          borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
-          whiteSpace: 'nowrap', flexShrink: 0,
-        }}>&#9654; GG</a>
-      )}
-      {hand.screenshot_url && !ggLink && (
-        <a href={hand.screenshot_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{
-          fontSize: 11, color: '#22c55e', textDecoration: 'none', padding: '2px 8px',
-          borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)',
-          whiteSpace: 'nowrap', flexShrink: 0,
-        }}>&#128247; SS</a>
-      )}
-    </div>
-  )
-}
-
 // ── Tag Group (colapsável) ──────────────────────────────────────────────────
 
-function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
+function TagGroup({ tagKey, tagHands, onOpenDetail, onDeleteHand, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen)
 
   const wins = tagHands.filter(h => h.result != null && Number(h.result) > 0).length
@@ -177,19 +124,14 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
       </div>
       {open && (
         <div>
-          {/* Header das colunas */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 16px', borderBottom: '1px solid #1e2130', fontSize: 11, color: '#4b5563', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            <div style={{ minWidth: 60 }}>Estado</div>
-            <div style={{ minWidth: 50 }}>Pos</div>
-            <div style={{ minWidth: 60 }}>Cartas</div>
-            <div style={{ minWidth: 140 }}>Board</div>
-            <div style={{ minWidth: 80 }}>Resultado</div>
-            <div style={{ flex: 1 }}>Torneio</div>
-            <div style={{ minWidth: 60, textAlign: 'right' }}>Discord</div>
-            <div style={{ minWidth: 60, textAlign: 'right' }}>Import.</div>
-          </div>
-          {tagHands.map(h => (
-            <HandRow key={h.id} hand={h} onClick={() => onOpenDetail(h.id)} />
+          {tagHands.map((h, idx) => (
+            <HandRow
+              key={h.id}
+              hand={h}
+              idx={idx}
+              onClick={() => onOpenDetail(h.id)}
+              onDelete={onDeleteHand}
+            />
           ))}
         </div>
       )}
@@ -350,6 +292,16 @@ export default function DiscordPage() {
     catch (e) { setError(e.message) }
   }
 
+  async function deleteHand(id) {
+    if (!confirm('Apagar esta mão?')) return
+    try {
+      await handsApi.delete(id)
+      loadHands()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   // Agrupar por discord_tags — o canal Discord é a classificação correcta
   // para esta vista. 'GGDiscord' em hm3_tags é marca interna de placeholder
   // (HH não chegou ainda); não é canal. Mãos substituídas por HH real já
@@ -473,10 +425,21 @@ export default function DiscordPage() {
           {!loadingHands && handsList.length > 0 && (
             <div>
               {sortedGroups.map(([tagKey, group]) => (
-                <TagGroup key={tagKey} tagKey={tagKey} tagHands={group.hands} onOpenDetail={openDetail} />
+                <TagGroup
+                  key={tagKey}
+                  tagKey={tagKey}
+                  tagHands={group.hands}
+                  onOpenDetail={openDetail}
+                  onDeleteHand={deleteHand}
+                />
               ))}
               {noTagHands.length > 0 && (
-                <TagGroup tagKey="sem-tag" tagHands={noTagHands} onOpenDetail={openDetail} />
+                <TagGroup
+                  tagKey="sem-tag"
+                  tagHands={noTagHands}
+                  onOpenDetail={openDetail}
+                  onDeleteHand={deleteHand}
+                />
               )}
             </div>
           )}
