@@ -1168,6 +1168,15 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                             f"[bg] Created {origin_val} placeholder for entry {entry_id} "
                             f"({hand_id}, played_at={played_at_extracted})"
                         )
+                        # Marcar entry resolved — placeholder criado (ou já existia
+                        # via ON CONFLICT DO NOTHING). Em ambos os casos a entry
+                        # passa a estar "coberta" por uma hand com este hand_id.
+                        # Consistente com _link_second_discord_entry_to_existing_hand
+                        # e _enrich_hand_from_orphan_entry, que também marcam resolved.
+                        cur.execute(
+                            "UPDATE entries SET status = 'resolved' WHERE id = %s",
+                            (entry_id,),
+                        )
                     conn.commit()
                 except Exception as e:
                     conn.rollback()
