@@ -1080,3 +1080,167 @@ def rematch_discord_after_hh(
         "errors": errors[:20],
     }
 
+
+# ─── TEMP: backfill hand_villains retroactivo para cohort A∨B∨C ──────────────
+# Re-add do af563a8 (removido no cleanup 584cab2). Necessário porque
+# _enrich_hand_from_orphan_entry faz anchoring mas não dispara villain creation.
+# Remover após cohort validada.
+
+@router.post("/admin/backfill-missing-hand-villains")
+def backfill_missing_hand_villains(
+    mode: str = Query("preview", regex="^(preview|execute)$"),
+    current_user=Depends(require_auth),
+):
+    """
+    TEMP. Cria rows em hand_villains para hands GG 2026+ cumprindo regra A∨B∨C
+    sem entries existentes em hand_villains.
+
+    Usa h.player_names directamente como screenshot_data e _parse_mtt_hand(h.raw)
+    para hh_hand. Chama _create_villains_for_hand com showdown_only=False.
+    ON CONFLICT no INSERT garante idempotência.
+
+    ?mode=preview (default): dry-run, cohort stats + 10 samples.
+    ?mode=execute: per-hand commit, erros em errors[].
+    """
+    from app.db import get_conn
+    from app.routers.mtt import _parse_mtt_hand, _create_villains_for_hand
+
+    cohort = query("""
+        SELECT h.id, h.hand_id, h.played_at,
+               h.discord_tags, h.hm3_tags, h.entry_id,
+               h.player_names, h.has_showdown, h.raw,
+               EXISTS (
+                   SELECT 1 FROM unnest(COALESCE(h.hm3_tags, ARRAY[]::text[])) t
+                   WHERE t ILIKE 'nota%%'
+               ) AS rule_a,
+               (h.player_names ->> 'match_method' IS NOT NULL AND h.has_showdown = TRUE) AS rule_b,
+               ('nota' = ANY(COALESCE(h.discord_tags, ARRAY[]::text[]))
+                AND h.player_names ->> 'match_method' IS NOT NULL) AS rule_c
+        FROM hands h
+        WHERE h.played_at >= '2026-01-01'
+          AND h.site = 'GGPoker'
+          AND (
+              EXISTS (
+                  SELECT 1 FROM unnest(COALESCE(h.hm3_tags, ARRAY[]::text[])) t
+                  WHERE t ILIKE 'nota%%'
+              )
+              OR (h.player_names ->> 'match_method' IS NOT NULL AND h.has_showdown = TRUE)
+              OR ('nota' = ANY(COALESCE(h.discord_tags, ARRAY[]::text[]))
+                  AND h.player_names ->> 'match_method' IS NOT NULL)
+          )
+          AND NOT EXISTS (SELECT 1 FROM hand_villains hv WHERE hv.hand_db_id = h.id)
+        ORDER BY h.played_at DESC
+        LIMIT 200
+    """)
+
+    by_rule = {"rule_a_only": 0, "rule_b_only": 0, "rule_c_only": 0, "overlap": 0}
+    for h in cohort:
+        flags = (bool(h["rule_a"]), bool(h["rule_b"]), bool(h["rule_c"]))
+        if sum(flags) > 1:
+            by_rule["overlap"] += 1
+        elif flags[0]:
+            by_rule["rule_a_only"] += 1
+        elif flags[1]:
+            by_rule["rule_b_only"] += 1
+        elif flags[2]:
+            by_rule["rule_c_only"] += 1
+
+    plans = []
+    skips_preview = []
+    errors = []
+    processed = 0
+    hands_updated = 0
+    villains_created_total = 0
+    hands_skipped_no_player_names = 0
+    hands_skipped_no_raw = 0
+    hands_skipped_parse_failed = 0
+    hands_with_zero_villains = 0
+
+    conn = get_conn() if mode == "execute" else None
+
+    try:
+        for h in cohort:
+            pn = h.get("player_names") or {}
+            raw = h.get("raw") or ""
+            rules_matched = [r for r, flag in zip(
+                ["A", "B", "C"], [h["rule_a"], h["rule_b"], h["rule_c"]]
+            ) if flag]
+
+            skip_reason = None
+            if not pn:
+                skip_reason = "player_names NULL"
+            elif not pn.get("players_list"):
+                skip_reason = "player_names.players_list empty (no Vision nicks)"
+            elif not raw:
+                skip_reason = "hands.raw vazio"
+
+            if mode == "preview":
+                if skip_reason and len(skips_preview) < 10:
+                    skips_preview.append({"hand_id": h["hand_id"], "reason": skip_reason})
+                elif not skip_reason and len(plans) < 10:
+                    plans.append({
+                        "hand_db_id": h["id"],
+                        "hand_id": h["hand_id"],
+                        "played_at": h["played_at"].isoformat() if h["played_at"] else None,
+                        "rules_matched": rules_matched,
+                        "has_player_names": bool(pn),
+                        "has_raw": bool(raw),
+                        "players_list_count": len(pn.get("players_list") or []),
+                        "match_method": pn.get("match_method"),
+                    })
+                continue
+
+            # mode == "execute"
+            if skip_reason in ("player_names NULL", "player_names.players_list empty (no Vision nicks)"):
+                hands_skipped_no_player_names += 1
+                continue
+            if skip_reason == "hands.raw vazio":
+                hands_skipped_no_raw += 1
+                continue
+
+            parsed = _parse_mtt_hand(raw)
+            if not parsed:
+                hands_skipped_parse_failed += 1
+                continue
+
+            try:
+                n_created = _create_villains_for_hand(
+                    conn, parsed, pn,
+                    hand_db_id=h["id"], showdown_only=False,
+                )
+                conn.commit()
+                processed += 1
+                if n_created > 0:
+                    hands_updated += 1
+                    villains_created_total += n_created
+                else:
+                    hands_with_zero_villains += 1
+            except Exception as e:
+                conn.rollback()
+                errors.append({
+                    "hand_id": h["hand_id"],
+                    "hand_db_id": h["id"],
+                    "error": str(e),
+                })
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {
+        "preview": mode == "preview",
+        "cohort_size": len(cohort),
+        "by_rule": by_rule,
+        "processed": processed if mode == "execute" else 0,
+        "villains_created_total": villains_created_total if mode == "execute" else 0,
+        "hands_updated": hands_updated if mode == "execute" else 0,
+        "hands_skipped_no_player_names": hands_skipped_no_player_names if mode == "execute" else 0,
+        "hands_skipped_no_raw": hands_skipped_no_raw if mode == "execute" else 0,
+        "hands_skipped_parse_failed": hands_skipped_parse_failed if mode == "execute" else 0,
+        "hands_with_zero_villains": hands_with_zero_villains if mode == "execute" else 0,
+        "errors": errors,
+        "shown": len(plans),
+        "plan": plans,
+        "skips_preview": skips_preview,
+    }
+
