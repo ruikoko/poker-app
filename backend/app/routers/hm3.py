@@ -1159,6 +1159,7 @@ async def import_hm3(
     # hand_id=GG-{tm}; Winamax/PS/WPN são no-op (não têm TM). Corre após
     # commit para as hands serem visíveis à query.
     rematched = []
+    migrated_to_study = 0
     try:
         orphan_rows = query(
             "SELECT id, raw_json FROM entries WHERE entry_type = 'screenshot' AND status = 'new'"
@@ -1170,13 +1171,20 @@ async def import_hm3(
                 continue
             tm_digits = tm.replace("TM", "")
             hand_rows = query(
-                "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                "SELECT id, (player_names->>'match_method') AS mm "
+                "FROM hands WHERE hand_id = %s LIMIT 1",
                 (f"GG-{tm_digits}",)
             )
             if hand_rows:
+                prev_mm = hand_rows[0].get("mm")
+                was_anon = prev_mm is None or (
+                    isinstance(prev_mm, str) and prev_mm.startswith("discord_placeholder_")
+                )
                 enrich_result = _enrich_hand_from_orphan_entry(
                     orphan["id"], hand_rows[0]["id"], raw
                 )
+                if was_anon and enrich_result.get("status") == "ok":
+                    migrated_to_study += 1
                 rematched.append({
                     "entry_id": orphan["id"],
                     "tm": tm,
@@ -1209,6 +1217,7 @@ async def import_hm3(
         )[:15],
         "rematched_screenshots": len(rematched),
         "rematched": rematched,
+        "migrated_to_study": migrated_to_study,
     }
 
 

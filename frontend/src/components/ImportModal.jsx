@@ -75,6 +75,7 @@ function formatResult(type, result) {
         result.skipped_duplicates && `${result.skipped_duplicates} duplicados`,
         result.skipped_date_filter && `${result.skipped_date_filter} fora do período`,
         result.villains_created && `${result.villains_created} vilões`,
+        result.migrated_to_study > 0 && `${result.migrated_to_study} → Estudo`,
         result.errors && `${result.errors} erros`,
       ].filter(Boolean).join(' · ') || 'Importado'
 
@@ -85,6 +86,7 @@ function formatResult(type, result) {
         result.hands_found && result.hands_inserted && result.hands_found > result.hands_inserted &&
           `${result.hands_found - result.hands_inserted} ignoradas`,
         result.rematched?.length && `${result.rematched.length} screenshots matched`,
+        result.migrated_to_study > 0 && `${result.migrated_to_study} → Estudo`,
       ].filter(Boolean).join(' · ') || 'Importado'
 
     case 'gto':

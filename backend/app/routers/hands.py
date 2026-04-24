@@ -300,6 +300,17 @@ class HandUpdate(BaseModel):
     study_state: Optional[str] = None
 
 
+# Filtro extra para a página Estudo: exclui GG anonimizada (sem match real).
+# Blacklist > whitelist — cobre mtt_promote_v2, mtt_import_v3, refix sem
+# manutenção quando novos match_methods surgirem. Único corte: placeholders
+# Discord criados antes da HH chegar (match_method='discord_placeholder_*').
+STUDY_VIEW_GG_MATCH_FILTER = (
+    "(h.site != 'GGPoker' "
+    "OR ((h.player_names->>'match_method') IS NOT NULL "
+    "    AND (h.player_names->>'match_method') NOT LIKE 'discord_placeholder_%%'))"
+)
+
+
 def _build_conditions(
     site, tag, study_state, position, search, date_from,
     exclude_mtt_only: bool = False,
@@ -399,6 +410,7 @@ def list_hands(
     source:           Optional[str] = Query(None, description="Filtrar por source da entry (ex: discord)"),
     villain:          Optional[str] = Query(None, description="Filtrar por vilão (nick exacto em all_players_actions)"),
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
+    study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
     page:             int = Query(1, ge=1),
     page_size:        int = Query(50, ge=1, le=2000),
     current_user=Depends(require_auth)
@@ -411,6 +423,8 @@ def list_hands(
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':
         conditions.append("h.study_state != 'mtt_archive'")
+    if study_view:
+        conditions.append(STUDY_VIEW_GG_MATCH_FILTER)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total = query(
@@ -461,6 +475,7 @@ def tag_groups(
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT"),
     use_hm3_tags:     bool = Query(False, description="Agrupar por hm3_tags em vez de tags"),
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
+    study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
@@ -474,6 +489,8 @@ def tag_groups(
     # Excluir arquivo MTT por defeito
     if not include_archive and study_state != 'mtt_archive':
         conditions.append("h.study_state != 'mtt_archive'")
+    if study_view:
+        conditions.append(STUDY_VIEW_GG_MATCH_FILTER)
 
     tag_col = "hm3_tags" if use_hm3_tags else "tags"
 

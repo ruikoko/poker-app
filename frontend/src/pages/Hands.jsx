@@ -1436,7 +1436,7 @@ export default function HandsPage() {
     setError('')
     // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo).
     // use_hm3_tags=true: agrupa por hm3_tags (tags reais do HM3) e esconde mãos sem hm3_tags
-    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, use_hm3_tags: true })
+    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, use_hm3_tags: true, study_view: true })
     hands.tagGroups(params)
       .then(setTagGroupsData)
       .catch(e => setError(e.message))
@@ -1449,7 +1449,7 @@ export default function HandsPage() {
     setLoading(true)
     setError('')
     const ps = viewMode === 'tournament' ? 1000 : 200
-    const params = applyFilterTransform({ ...filters, page, page_size: ps, exclude_mtt_only: true })
+    const params = applyFilterTransform({ ...filters, page, page_size: ps, exclude_mtt_only: true, study_view: true })
     hands.list(params)
       .then(setData)
       .catch(e => setError(e.message))

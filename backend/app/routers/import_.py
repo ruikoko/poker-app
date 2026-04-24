@@ -336,6 +336,7 @@ async def import_file(
 
         # ── Auto-rematch de screenshots órfãos ──
         rematched = []
+        migrated_to_study = 0
         try:
             # Inclui Discord replayer_link/image — cobre o caso em que um
             # placeholder Discord foi substituído por HH real neste import.
@@ -357,13 +358,20 @@ async def import_file(
                     continue
                 tm_digits = tm.replace("TM", "")
                 hand_rows = query(
-                    "SELECT id FROM hands WHERE hand_id = %s LIMIT 1",
+                    "SELECT id, (player_names->>'match_method') AS mm "
+                    "FROM hands WHERE hand_id = %s LIMIT 1",
                     (f"GG-{tm_digits}",)
                 )
                 if hand_rows:
+                    prev_mm = hand_rows[0].get("mm")
+                    was_anon = prev_mm is None or (
+                        isinstance(prev_mm, str) and prev_mm.startswith("discord_placeholder_")
+                    )
                     enrich_result = _enrich_hand_from_orphan_entry(
                         orphan["id"], hand_rows[0]["id"], raw
                     )
+                    if was_anon and enrich_result.get("status") == "ok":
+                        migrated_to_study += 1
                     rematched.append({
                         "entry_id": orphan["id"],
                         "tm": tm,
@@ -387,6 +395,7 @@ async def import_file(
             "error_log": all_errors[:20],
             "rematched_screenshots": len(rematched),
             "rematched": rematched,
+            "migrated_to_study": migrated_to_study,
         }
 
     # ── TOURNAMENT SUMMARY / REPORT → vai para tournaments (P&L) ──
