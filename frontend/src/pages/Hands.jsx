@@ -1217,7 +1217,7 @@ function TierCollapsible({ label, subtitle, count, defaultOpen = false, children
 }
 
 
-function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, useHm3Tags, studyView, onOpenDetail, onDeleteHand }) {
+function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters, useHm3Tags, studyView, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
   const [loadingHands, setLoadingHands] = useState(false)
@@ -1230,14 +1230,20 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, useHm3T
         if (!params.date_from) delete params.date_from
         if (studyView) params.study_view = true
         if (tags.length === 0) {
-          // Grupo "(sem tag)" — filtra pela coluna consistente com o
-          // agrupamento da vista. Em Estudo (use_hm3_tags=true) isto
-          // significa "sem hm3_tags"; caso contrário, sem coluna tags.
-          if (useHm3Tags) params.hm3_tag = '__none__'
-          else params.tag = '__none__'
+          // Grupo "(sem tag)" em modo auto (source='none'): nem hm3 nem discord.
+          // Legado use_hm3_tags: só hm3 ausente. Default: coluna tags auto.
+          if (source === 'none') {
+            params.hm3_tag = '__none__'
+            params.discord_tag = '__none__'
+          } else if (useHm3Tags) {
+            params.hm3_tag = '__none__'
+          } else {
+            params.tag = '__none__'
+          }
+        } else if (source === 'discord') {
+          params.discord_tag = tags[0]
         } else {
           // Filtrar pela tag HM3 principal do grupo (tema).
-          // Com a nova lógica, cada grupo é definido por UMA tag HM3.
           params.hm3_tag = tags[0]
         }
         const result = await hands.list(params)
@@ -1252,15 +1258,15 @@ function TagGroup({ tagKey, tags, count, wins, losses, totalBB, filters, useHm3T
     setOpen(o => !o)
   }
 
-  // Cor baseada na primeira tag
+  // Cor: Discord sempre azul (#5865F2). HM3 mantém mapa por tema. "(sem tag)" cinzento.
   const tag = tags.length > 0 ? tags[0] : 'sem-tag'
-  const colors = {
+  const HM3_COLORS = {
     icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e',
     bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b',
     cbet: '#a78bfa', ip: '#34d399', mw: '#fb923c',
     speed: '#ec4899', racer: '#ec4899',
   }
-  const tagColor = colors[tag] || '#64748b'
+  const tagColor = source === 'discord' ? '#5865F2' : (HM3_COLORS[tag] || '#64748b')
 
   return (
     <div style={{
@@ -1440,7 +1446,7 @@ export default function HandsPage() {
     setError('')
     // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo).
     // use_hm3_tags=true: agrupa por hm3_tags (tags reais do HM3) e esconde mãos sem hm3_tags
-    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, use_hm3_tags: true, study_view: true })
+    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, tag_source: 'auto', study_view: true })
     hands.tagGroups(params)
       .then(setTagGroupsData)
       .catch(e => setError(e.message))
@@ -1664,13 +1670,15 @@ export default function HandsPage() {
           return themes.length > 0 ? themes[0] : sorted[0]
         }
 
-        // Re-agregar
+        // Re-agregar: chave inclui source para hm3 e discord não se fundirem
+        // (improvável no dataset porque são disjuntos, mas defensivo).
         const themeAgg = {}
         for (const g of tagGroupsData.groups) {
           const theme = pickTheme(g.tags)
-          const key = theme || '__no_tag__'
+          const src = g.source || 'none'
+          const key = theme ? `${src}:${theme}` : '__no_tag__'
           if (!themeAgg[key]) {
-            themeAgg[key] = { tags: theme ? [theme] : [], count: 0, wins: 0, losses: 0, total_bb: 0 }
+            themeAgg[key] = { tags: theme ? [theme] : [], source: src, count: 0, wins: 0, losses: 0, total_bb: 0 }
           }
           const t = themeAgg[key]
           t.count    += g.count
@@ -1680,17 +1688,23 @@ export default function HandsPage() {
         }
         const merged = Object.values(themeAgg).sort((a, b) => b.count - a.count)
 
-        const tierA = merged.filter(g => g.count > 100)
-        const tierB = merged.filter(g => g.count > 10 && g.count <= 100)
-        const tierC = merged.filter(g => g.count <= 10)
+        // Secções: HM3 em tiers A/B/C, Discord em secção própria, (sem tag) no fim.
+        const hm3Groups     = merged.filter(g => g.source === 'hm3')
+        const discordGroups = merged.filter(g => g.source === 'discord')
+        const noTagGroup    = merged.find(g => g.source === 'none' && g.tags.length === 0)
+
+        const tierA = hm3Groups.filter(g => g.count > 100)
+        const tierB = hm3Groups.filter(g => g.count > 10 && g.count <= 100)
+        const tierC = hm3Groups.filter(g => g.count <= 10)
 
         const renderGroup = (group, i) => {
           const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.slice().sort().join('+')
           return (
             <TagGroup
-              key={tagKey + i}
+              key={(group.source || 'none') + ':' + tagKey + i}
               tagKey={tagKey}
               tags={group.tags}
+              source={group.source}
               count={group.count}
               wins={group.wins}
               losses={group.losses}
@@ -1720,6 +1734,26 @@ export default function HandsPage() {
             {tierC.length > 0 && (
               <TierCollapsible label="Spots específicos" subtitle="<10 mãos" count={tierC.length} defaultOpen={false}>
                 {tierC.map(renderGroup)}
+              </TierCollapsible>
+            )}
+            {discordGroups.length > 0 && (
+              <TierCollapsible
+                label="Canais Discord"
+                subtitle={`${discordGroups.length} canal${discordGroups.length === 1 ? '' : 'is'}`}
+                count={discordGroups.length}
+                defaultOpen={tierA.length === 0 && tierB.length === 0}
+              >
+                {discordGroups.map(renderGroup)}
+              </TierCollapsible>
+            )}
+            {noTagGroup && noTagGroup.count > 0 && (
+              <TierCollapsible
+                label="(Sem tag)"
+                subtitle={`${noTagGroup.count} mã${noTagGroup.count === 1 ? 'o' : 'os'}`}
+                count={1}
+                defaultOpen={false}
+              >
+                {renderGroup(noTagGroup, 0)}
               </TierCollapsible>
             )}
           </div>

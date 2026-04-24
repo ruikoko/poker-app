@@ -320,6 +320,7 @@ def _build_conditions(
     villain: str = None,
     date_to: str = None,
     hm3_tag: str = None,
+    discord_tag: str = None,
     has_showdown: Optional[bool] = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
@@ -343,6 +344,13 @@ def _build_conditions(
         else:
             conditions.append("%s = ANY(h.hm3_tags)")
             params.append(hm3_tag)
+
+    if discord_tag:
+        if discord_tag == '__none__':
+            conditions.append("(h.discord_tags IS NULL OR h.discord_tags = '{}')")
+        else:
+            conditions.append("%s = ANY(h.discord_tags)")
+            params.append(discord_tag)
 
     if study_state:
         conditions.append("h.study_state = %s")
@@ -401,6 +409,7 @@ def list_hands(
     site:             Optional[str] = Query(None),
     tag:              Optional[str] = Query(None, description="Filtrar por tag (na coluna tags)"),
     hm3_tag:          Optional[str] = Query(None, description="Filtrar por tag HM3 (na coluna hm3_tags)"),
+    discord_tag:      Optional[str] = Query(None, description="Filtrar por tag Discord (coluna discord_tags). '__none__' para mãos sem discord_tags."),
     study_state:      Optional[str] = Query(None, description="Filtrar por estado de estudo"),
     position:         Optional[str] = Query(None, description="Filtrar por posição"),
     search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
@@ -421,7 +430,7 @@ def list_hands(
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only,
         result_min, result_max, source=source, villain=villain, date_to=date_to,
-        hm3_tag=hm3_tag, has_showdown=has_showdown,
+        hm3_tag=hm3_tag, discord_tag=discord_tag, has_showdown=has_showdown,
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':
@@ -477,14 +486,19 @@ def tag_groups(
     exclude_mtt_only: bool = Query(False, description="Excluir mãos que só têm tag #mtt"),
     include_archive:  bool = Query(False, description="Incluir mãos de arquivo MTT"),
     use_hm3_tags:     bool = Query(False, description="Agrupar por hm3_tags em vez de tags"),
+    tag_source:       Optional[str] = Query(None, description="'auto' agrupa por hm3_tags (prioridade) senão discord_tags senão '(sem tag)'. Sobrescreve use_hm3_tags."),
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
     study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
 
-    Se use_hm3_tags=true, usa coluna hm3_tags (tags reais HM3) para agrupar.
-    Mãos sem hm3_tags caem num grupo "(sem tag)" retornado no fim da lista.
+    Modos:
+      - tag_source='auto': cada mão cai num grupo per coluna prioritária:
+        hm3_tags > discord_tags > "(sem tag)". Cada grupo vem com campo
+        'source' ∈ {'hm3','discord','none'}.
+      - use_hm3_tags=true (legado): agrupa por hm3_tags.
+      - default: agrupa por coluna 'tags' (auto-tags).
     """
     conditions, params = _build_conditions(
         site, None, study_state, position, search, date_from, exclude_mtt_only,
@@ -496,21 +510,44 @@ def tag_groups(
     if study_view:
         conditions.append(STUDY_VIEW_GG_MATCH_FILTER)
 
-    tag_col = "hm3_tags" if use_hm3_tags else "tags"
-
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    rows = query(
-        f"SELECT h.id, h.{tag_col} AS tags, h.result, h.study_state FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST",
-        params
-    )
+    if tag_source == 'auto':
+        # CASE per-row: hm3 > discord > none. COALESCE não serve — arrays
+        # vazios '{}' são não-NULL em PG, ignorar length é preciso explícito.
+        sql = f"""
+            SELECT h.id, h.result, h.study_state,
+                   CASE
+                       WHEN h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0 THEN h.hm3_tags
+                       WHEN h.discord_tags IS NOT NULL AND array_length(h.discord_tags, 1) > 0 THEN h.discord_tags
+                       ELSE ARRAY[]::text[]
+                   END AS tags,
+                   CASE
+                       WHEN h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0 THEN 'hm3'
+                       WHEN h.discord_tags IS NOT NULL AND array_length(h.discord_tags, 1) > 0 THEN 'discord'
+                       ELSE 'none'
+                   END AS source
+            FROM hands h
+            {where}
+            ORDER BY h.played_at DESC NULLS LAST
+        """
+    else:
+        tag_col = "hm3_tags" if use_hm3_tags else "tags"
+        src_label = 'hm3' if use_hm3_tags else 'tags'
+        sql = (
+            f"SELECT h.id, h.{tag_col} AS tags, h.result, h.study_state, "
+            f"'{src_label}' AS source "
+            f"FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST"
+        )
+    rows = query(sql, params)
 
     # Group by sorted tag combination
     groups = {}  # tagKey -> {tags, count, wins, losses, total_bb}
-    no_tag = {"tags": [], "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
+    no_tag = {"tags": [], "source": "none", "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
 
     for r in rows:
         tags = r["tags"] or []
+        src = r.get("source") or "none"
         result = float(r["result"] or 0.0)
         win = 1 if result > 0 else 0
         loss = 1 if result < 0 else 0
@@ -521,9 +558,10 @@ def tag_groups(
             no_tag["losses"] += loss
             no_tag["total_bb"] += result
         else:
-            key = "+".join(sorted(tags))
+            # source na chave evita colisão entre hm3/discord (ex: 'nota' em ambos).
+            key = f"{src}:" + "+".join(sorted(tags))
             if key not in groups:
-                groups[key] = {"tags": sorted(tags), "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
+                groups[key] = {"tags": sorted(tags), "source": src, "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
             groups[key]["count"] += 1
             groups[key]["wins"] += win
             groups[key]["losses"] += loss
