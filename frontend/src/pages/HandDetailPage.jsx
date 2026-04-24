@@ -298,6 +298,7 @@ export default function HandDetailPage() {
 // secções que exigem HH real: replayer, copy HH, acções por street, pot.
 
 function PlaceholderView({ hand, navigate, onUpdate }) {
+  const [ssFullscreen, setSsFullscreen] = useState(false)
   const pn = hand.player_names || {}
   const hero = pn.hero
   const board = pn.board || []
@@ -364,7 +365,8 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
           <img
             src={imgUrl}
             alt="Screenshot"
-            style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 6, border: '1px solid #2a2d3a', display: 'block' }}
+            style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 6, border: '1px solid #2a2d3a', display: 'block', cursor: 'pointer' }}
+            onClick={() => setSsFullscreen(true)}
           />
         </div>
       )}
@@ -409,6 +411,33 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Screenshot fullscreen overlay (mesmo padrão de Hands/Villains/Inbox) */}
+      {ssFullscreen && imgUrl && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+            cursor: 'pointer',
+          }}
+          onClick={() => setSsFullscreen(false)}
+        >
+          <img
+            src={imgUrl}
+            alt="Screenshot"
+            style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }}
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setSsFullscreen(false)}
+            style={{
+              position: 'absolute', top: 20, right: 20,
+              background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff',
+              fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px',
+            }}
+          >✕</button>
         </div>
       )}
     </div>
