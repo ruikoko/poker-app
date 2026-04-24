@@ -1026,12 +1026,16 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
             
             await asyncio.to_thread(_try_match)
 
-            # Fallback GGDiscord: se nenhuma mão foi criada/ligada a este entry
+            # Fallback placeholder: se nenhuma mão foi criada/ligada a este entry
             # (ex: SS chega mas HH ainda não foi importada), criar uma mão
-            # placeholder para ficar visível em /discord com tag GGDiscord.
+            # placeholder para ficar visível. Discord → tag GGDiscord + origin
+            # 'discord'; upload manual → tag SSMatch + origin 'ss_upload'.
             # Quando a HH for importada via bulk, _promote_to_study apaga esta
             # via DELETE FROM hands WHERE hand_id = %s e insere a versão completa.
-            def _create_discord_placeholder_if_needed():
+            # match_method 'discord_placeholder_no_hh' é reutilizado em ambos os
+            # casos — descreve o estado de enrichment (placeholder sem HH), o
+            # canal de ingress vive em `origin`.
+            def _create_placeholder_if_needed():
                 if not tm_final:
                     return
                 existing = query(
@@ -1041,12 +1045,16 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                 if existing:
                     return  # match correu, já há mão
 
-                # Verificar se entry veio do Discord
                 ent = query(
                     "SELECT source, discord_channel, discord_posted_at FROM entries WHERE id = %s",
                     (entry_id,)
                 )
-                if not ent or ent[0].get("source") != "discord":
+                if not ent:
+                    return
+                source = ent[0].get("source")
+                is_discord = source == "discord"
+                is_ss_upload = source == "screenshot"
+                if not (is_discord or is_ss_upload):
                     return
 
                 tm_digits = tm_final.replace("TM", "")
@@ -1059,15 +1067,22 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                     (hand_id,)
                 )
                 if existing_hand:
-                    # 2ª entry Discord para o mesmo TM. Em vez de bail silencioso,
-                    # linkar canal + resolve entry + (condicional) villain C.
-                    _link_second_discord_entry_to_existing_hand(
-                        entry_id, existing_hand[0]["id"],
-                        vision_players, hero_name, vision_sb, vision_bb, file_meta,
-                    )
+                    if is_discord:
+                        # 2ª entry Discord para o mesmo TM. Linkar canal + resolve
+                        # entry + (condicional) villain C.
+                        _link_second_discord_entry_to_existing_hand(
+                            entry_id, existing_hand[0]["id"],
+                            vision_players, hero_name, vision_sb, vision_bb, file_meta,
+                        )
+                    # Upload manual de SS duplicado para mesmo TM já com mão:
+                    # deixamos existir sem criar placeholder; entry fica ligada
+                    # por Vision mas não substitui a mão canónica.
                     return
 
-                # all_players_actions minimal com _meta vindo do Vision data
+                # all_players_actions minimal com _meta vindo do Vision data.
+                # from_discord_placeholder kept como flag genérica "este é um
+                # placeholder sem HH" — é consumido por filtros (ex: MTT exclui
+                # placeholders de listas). Mantém nome legado por compatibilidade.
                 apa = {
                     "_meta": {
                         "num_players": len(vision_players) if vision_players else 0,
@@ -1084,27 +1099,43 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                     "match_method": "discord_placeholder_no_hh",
                 }
 
-                # Extrair played_at do nome do ficheiro PNG da og:image URL.
-                # Pattern: https://user.gg-global-cdn.com/.../<unix_ms>.png
-                # O número é unix timestamp em ms — momento em que o GG gerou a imagem
-                # do replayer (poucos segundos depois do showdown). Aproximação fiel.
+                # played_at: Discord → extrair do unix ms em og:image URL;
+                # upload manual → None (filename pode não ter data/hora, e
+                # mesmo quando tem, TZ é ambígua). Quando HH real chegar,
+                # played_at canónico vem do parser.
                 played_at_extracted = None
-                og_url = (file_meta or {}).get("og_image_url")
-                if og_url:
-                    import re as _re
-                    from datetime import datetime as _dt, timezone as _tz
-                    m = _re.search(r"/(\d{13})\.png", og_url)
-                    if m:
-                        try:
-                            ts_ms = int(m.group(1))
-                            played_at_extracted = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
-                        except (ValueError, OSError):
-                            pass
+                screenshot_url_val = None
+                if is_discord:
+                    og_url = (file_meta or {}).get("og_image_url")
+                    if og_url:
+                        import re as _re
+                        from datetime import datetime as _dt, timezone as _tz
+                        m = _re.search(r"/(\d{13})\.png", og_url)
+                        if m:
+                            try:
+                                ts_ms = int(m.group(1))
+                                played_at_extracted = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                            except (ValueError, OSError):
+                                pass
+                    screenshot_url_val = og_url
 
-                # Resolve channel_name para popular discord_tags (nome raw, spec Opção X).
-                from app.discord_bot import _resolve_channel_name_for_entry
-                channel_name = _resolve_channel_name_for_entry(entry_id)
-                channel_bruto_list = [channel_name] if channel_name else []
+                # discord_tags: Discord resolve canal; upload manual fica vazio.
+                channel_bruto_list = []
+                if is_discord:
+                    from app.discord_bot import _resolve_channel_name_for_entry
+                    channel_name = _resolve_channel_name_for_entry(entry_id)
+                    if channel_name:
+                        channel_bruto_list = [channel_name]
+
+                # Valores parametrizados por origem
+                origin_val = "discord" if is_discord else "ss_upload"
+                tags_val = [] if is_discord else ["SSMatch"]
+                hm3_tags_val = ["GGDiscord"] if is_discord else []
+                notes_val = (
+                    f"Discord SS sem HH ainda. TM: {tm_final}"
+                    if is_discord
+                    else f"SS upload sem HH. TM: {tm_final}"
+                )
 
                 conn = get_conn()
                 try:
@@ -1117,30 +1148,34 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                                 origin, discord_tags)
                                VALUES ('GGPoker', %s, %s, %s, %s, %s, %s, 'new', %s,
                                        %s::jsonb, %s::jsonb,
-                                       'discord', %s::text[])
+                                       %s, %s::text[])
                                ON CONFLICT (hand_id) DO NOTHING""",
                             (
                                 hand_id,
                                 played_at_extracted,
-                                f"Discord SS sem HH ainda. TM: {tm_final}",
-                                [],  # tags
-                                ["GGDiscord"],  # hm3_tags
+                                notes_val,
+                                tags_val,
+                                hm3_tags_val,
                                 entry_id,
-                                file_meta.get("og_image_url") if file_meta else None,
+                                screenshot_url_val,
                                 json.dumps(apa),
                                 json.dumps(pn_json),
+                                origin_val,
                                 channel_bruto_list,
                             )
                         )
-                        logger.info(f"[bg] Created GGDiscord placeholder for entry {entry_id} ({hand_id}, played_at={played_at_extracted})")
+                        logger.info(
+                            f"[bg] Created {origin_val} placeholder for entry {entry_id} "
+                            f"({hand_id}, played_at={played_at_extracted})"
+                        )
                     conn.commit()
                 except Exception as e:
                     conn.rollback()
-                    logger.error(f"[bg] Failed to create GGDiscord placeholder: {e}")
+                    logger.error(f"[bg] Failed to create {origin_val} placeholder: {e}")
                 finally:
                     conn.close()
 
-            await asyncio.to_thread(_create_discord_placeholder_if_needed)
+            await asyncio.to_thread(_create_placeholder_if_needed)
 
     except Exception as e:
         logger.error(f"[bg] Vision failed for entry {entry_id}: {e}")
