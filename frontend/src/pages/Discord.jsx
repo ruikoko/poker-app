@@ -35,8 +35,12 @@ const TAG_COLORS = {
   bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b',
   cbet: '#a78bfa', ip: '#34d399', mw: '#fb923c',
   speed: '#ec4899', racer: '#ec4899',
-  GGDiscord: '#f43f5e', 'GG Hands': '#10b981',
 }
+
+// Cor uniforme para canais Discord na vista "Mãos Importadas" (consistente
+// com secção "Canais Discord" em Estudo). Usada no header do TagGroup e nos
+// badges dentro dele. TagBadge genérica (modal) mantém TAG_COLORS.
+const DISCORD_COLOR = '#5865F2'
 
 // ── Mini Componentes ────────────────────────────────────────────────────────
 
@@ -142,9 +146,9 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
   const losses = tagHands.filter(h => h.result != null && Number(h.result) < 0).length
   const totalBB = tagHands.reduce((sum, h) => sum + (Number(h.result) || 0), 0)
 
-  // Determinar a cor pela primeira tag individual
-  const firstTag = tagKey.split('+')[0]
-  const tagColor = TAG_COLORS[firstTag] || '#64748b'
+  // Cor uniforme azul Discord para canais reais. Grupo "sem-tag" fica cinzento.
+  const isNoTag = tagKey === 'sem-tag'
+  const tagColor = isNoTag ? '#64748b' : DISCORD_COLOR
 
   return (
     <div style={{ marginBottom: 8, border: `1px solid ${open ? `${tagColor}40` : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
@@ -154,7 +158,14 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, defaultOpen = false }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ display: 'inline-block', fontSize: 11, color: tagColor, transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
           <div style={{ display: 'flex', gap: 4 }}>
-            {tagKey.split('+').map(t => <TagBadge key={t} t={t} />)}
+            {tagKey.split('+').map(t => (
+              <span key={t} style={{
+                display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11,
+                fontWeight: 600, marginRight: 3,
+                color: tagColor, background: `${tagColor}18`,
+                border: `1px solid ${tagColor}30`,
+              }}>#{t}</span>
+            ))}
           </div>
           <span style={{ fontSize: 12, color: '#64748b' }}>{tagHands.length} {tagHands.length === 1 ? 'mão' : 'mãos'}</span>
         </div>
@@ -307,7 +318,7 @@ export default function DiscordPage() {
 
   const loadHands = useCallback(() => {
     setLoadingHands(true)
-    const params = { page_size: 200, source: 'discord' }
+    const params = { page_size: 1000, source: 'discord' }
     if (dateFrom) params.date_from = dateFrom
     handsApi.list(params)
       .then(r => setHandsList(r.data || []))
@@ -339,14 +350,14 @@ export default function DiscordPage() {
     catch (e) { setError(e.message) }
   }
 
-  // Agrupar por tags
-  // Combina tags (canal Discord, format, max-players) + hm3_tags (GG Hands, GGDiscord, etc.)
-  // Mãos GGDiscord têm tags=[] mas hm3_tags=['GGDiscord'] e devem aparecer no seu próprio grupo,
-  // não em "sem-tag".
+  // Agrupar por discord_tags — o canal Discord é a classificação correcta
+  // para esta vista. 'GGDiscord' em hm3_tags é marca interna de placeholder
+  // (HH não chegou ainda); não é canal. Mãos substituídas por HH real já
+  // não têm 'GGDiscord' mas continuam com discord_tags preenchido.
   const tagGroups = {}
   const noTagHands = []
   handsList.forEach(h => {
-    const allTags = [...(h.tags || []), ...(h.hm3_tags || [])]
+    const allTags = h.discord_tags || []
     if (allTags.length > 0) {
       const tagKey = [...allTags].sort().join('+')
       if (!tagGroups[tagKey]) tagGroups[tagKey] = { tags: allTags, hands: [] }
@@ -390,7 +401,7 @@ export default function DiscordPage() {
         <div>
           <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>Discord</div>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 3 }}>
-            {handsList.length} mãos importadas &middot; {Object.keys(tagGroups).length} tags
+            {handsList.length} mãos importadas &middot; {Object.keys(tagGroups).length} {Object.keys(tagGroups).length === 1 ? 'canal' : 'canais'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
