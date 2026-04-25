@@ -43,7 +43,7 @@ AUTO_SYNC = os.getenv("DISCORD_AUTO_SYNC", "false").lower() in ("true", "1", "ye
 
 PATTERNS = {
     "gg_replayer": re.compile(
-        r"https?://(?:gg\.gl/\w+|my\.pokercraft\.com/embedded/shared/client/\w+)",
+        r"https?://(?:gg\.gl/[\w-]+|my\.pokercraft\.com/embedded/shared/client/[\w-]+)",
         re.IGNORECASE,
     ),
     "gyazo": re.compile(
