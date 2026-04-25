@@ -185,6 +185,12 @@ def _save_to_db(
         discord_posted_at=message_created_at,
     )
 
+    # entry=None → ON CONFLICT DO NOTHING disparou em entry_service.py
+    # (discord_message_id já existia em BD). Caso típico em re-sync. Silencioso.
+    if entry is None:
+        logger.info(f"[discord] Duplicado silenciado: msg_id={message_id} já existia")
+        return None
+
     entry_id = entry["id"]
 
     # Se for HH texto, tentar parsear directamente para hands

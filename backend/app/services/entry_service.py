@@ -20,6 +20,14 @@ def create_entry(
     discord_author: str | None = None,
     discord_posted_at=None,
 ):
+    # ON CONFLICT (discord_message_id) WHERE discord_message_id IS NOT NULL:
+    # bate o partial unique index uniq_entries_discord_message. Re-sync de
+    # mensagens já capturadas (caso típico após reset BD ou refresh manual)
+    # passa a ser silenciado em vez de levantar UniqueViolation. RETURNING
+    # devolve zero rows quando há conflict — caller deve tratar None como
+    # "duplicado, OK".
+    # Para entries não-Discord (discord_message_id IS NULL), o partial
+    # index não cobre a row → INSERT normal sem inferência de conflict.
     sql = """
     INSERT INTO entries (
         source, entry_type, site, file_name, external_id,
@@ -33,6 +41,7 @@ def create_entry(
         %(discord_server)s, %(discord_channel)s, %(discord_message_id)s,
         %(discord_message_url)s, %(discord_author)s, %(discord_posted_at)s
     )
+    ON CONFLICT (discord_message_id) WHERE discord_message_id IS NOT NULL DO NOTHING
     RETURNING id, source, entry_type, site, file_name, external_id, status, created_at
     """
     return execute_returning(sql, {
