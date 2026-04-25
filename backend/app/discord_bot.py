@@ -46,10 +46,6 @@ PATTERNS = {
         r"https?://(?:gg\.gl/\w+|my\.pokercraft\.com/embedded/shared/client/\w+)",
         re.IGNORECASE,
     ),
-    "winamax_replayer": re.compile(
-        r"https?://(?:www\.)?winamax\.fr/replayer/replayer\.html\S+",
-        re.IGNORECASE,
-    ),
     "gyazo": re.compile(
         r"https?://(?:i\.)?gyazo\.com/\w+(?:\.\w+)?",
         re.IGNORECASE,
@@ -103,7 +99,7 @@ def _detect_content_type(text: str, attachments: list) -> list[dict]:
     """
     Analisa o texto e attachments de uma mensagem Discord.
     Devolve uma lista de items encontrados, cada um com:
-      - type: 'hh_text' | 'gg_replayer' | 'winamax_replayer' | 'gyazo' | 'discord_image'
+      - type: 'hh_text' | 'gg_replayer' | 'gyazo' | 'discord_image'
       - content: o texto ou URL
     """
     items = []
@@ -113,7 +109,7 @@ def _detect_content_type(text: str, attachments: list) -> list[dict]:
         items.append({"type": "hh_text", "content": text})
 
     # Links de replayers e imagens no texto
-    for ptype in ["gg_replayer", "winamax_replayer", "gyazo", "discord_image"]:
+    for ptype in ["gg_replayer", "gyazo", "discord_image"]:
         for match in PATTERNS[ptype].finditer(text or ""):
             items.append({"type": ptype, "content": match.group(0)})
 
@@ -153,8 +149,6 @@ def _save_to_db(
     site = None
     if content_type in ("gg_replayer",):
         site = "GGPoker"
-    elif content_type in ("winamax_replayer",):
-        site = "Winamax"
     elif content_type == "hh_text":
         if "ggpoker" in content.lower() or content.strip().startswith("Poker Hand #"):
             site = "GGPoker"
@@ -165,7 +159,6 @@ def _save_to_db(
     entry_type_map = {
         "hh_text": "hand_history",
         "gg_replayer": "replayer_link",
-        "winamax_replayer": "replayer_link",
         "gyazo": "image",
         "discord_image": "image",
     }
@@ -290,7 +283,6 @@ def _create_placeholder_hand(
 
     type_labels = {
         "gg_replayer": "Replayer GG",
-        "winamax_replayer": "Replayer Winamax",
         "gyazo": "Screenshot Gyazo",
         "discord_image": "Imagem Discord",
     }
