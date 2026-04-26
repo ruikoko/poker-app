@@ -771,6 +771,90 @@ def ss_match_pending_list(current_user=Depends(require_auth)):
     return [dict(r) for r in rows]
 
 
+@router.get("/ss-without-match")
+def ss_without_match(current_user=Depends(require_auth)):
+    """
+    Lista unificada das SSs sem match real — alimenta a "lista corrida" do
+    Dashboard (Fase 4 da reforma SS↔HH).
+
+    Universo:
+      - entries source='screenshot' AND entry_type='screenshot' (manual upload)
+      - entries source='discord'    AND entry_type='replayer_link'
+      - entries source='discord'    AND entry_type='image'
+
+    Critério "sem match real": entry sem hand associada OU hand com
+    match_method NULL OU LIKE 'discord_placeholder_%'. Mesmo predicado dos
+    contadores ss_dashboard.no_match_* — soma de tipos == ss_dashboard.no_match_total.
+
+    Discriminador `type` ∈ {'manual', 'replayer', 'image'} para o badge da UI.
+    Frontend OrphanList consome os mesmos campos (raw_json, screenshot_url,
+    played_at, discord_posted_at, file_name, hand_db_id) + os novos
+    `type` e `channel_name`.
+
+    Ordenação: played_at > discord_posted_at > created_at, DESC.
+    """
+    rows = query("""
+        WITH ss_no_match AS (
+            SELECT
+                e.id              AS entry_id,
+                e.source,
+                e.entry_type,
+                e.file_name,
+                e.discord_channel,
+                e.discord_posted_at,
+                e.created_at,
+                e.raw_json,
+                h.id              AS hand_db_id,
+                h.played_at,
+                h.screenshot_url  AS hand_screenshot_url,
+                h.player_names ->> 'match_method' AS mm
+            FROM entries e
+            LEFT JOIN hands h ON h.entry_id = e.id
+            WHERE
+                (e.source = 'screenshot' AND e.entry_type = 'screenshot')
+                OR (e.source = 'discord'    AND e.entry_type IN ('replayer_link', 'image'))
+        )
+        SELECT
+            entry_id, source, entry_type, file_name,
+            discord_channel, discord_posted_at, created_at,
+            raw_json, hand_db_id, played_at, hand_screenshot_url, mm,
+            CASE
+                WHEN source = 'screenshot' THEN 'manual'
+                WHEN source = 'discord' AND entry_type = 'replayer_link' THEN 'replayer'
+                WHEN source = 'discord' AND entry_type = 'image' THEN 'image'
+            END AS type,
+            (SELECT s.channel_name FROM discord_sync_state s WHERE s.channel_id = ss_no_match.discord_channel) AS channel_name
+        FROM ss_no_match
+        WHERE hand_db_id IS NULL
+           OR mm IS NULL
+           OR mm LIKE 'discord_placeholder_%%'
+        ORDER BY COALESCE(played_at, discord_posted_at, created_at) DESC
+    """)
+
+    items = []
+    for r in rows:
+        raw = r.get("raw_json") or {}
+        items.append({
+            "type": r["type"],
+            "entry_id": r["entry_id"],
+            "hand_db_id": r["hand_db_id"],
+            "tm": raw.get("tm"),
+            "vision_done": raw.get("vision_done", False),
+            "hero": raw.get("hero"),
+            "file_name": r["file_name"],
+            "file_meta": raw.get("file_meta", {}),
+            # screenshot_url: prefere o da hand (CDN GG og:image) sobre raw_json
+            # para placeholders Discord; manual upload usa imageUrl(entry_id) no FE.
+            "screenshot_url": r["hand_screenshot_url"] or raw.get("img_url"),
+            "played_at": r["played_at"].isoformat() if r["played_at"] else None,
+            "discord_posted_at": r["discord_posted_at"].isoformat() if r["discord_posted_at"] else None,
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "channel_name": r["channel_name"],
+            "raw_json": raw,
+        })
+    return items
+
+
 @router.get("/{hand_pk}")
 def get_hand(hand_pk: int, current_user=Depends(require_auth)):
     rows = query("""
