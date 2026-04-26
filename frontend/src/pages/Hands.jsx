@@ -1472,15 +1472,19 @@ function PlaceholderHandRow({ hand, onDelete }) {
       {/* SS inline */}
       <div style={{ flexShrink: 0, width: 200 }}>
         {imgSrc ? (
-          <img
-            src={imgSrc}
-            alt="screenshot"
-            style={{
-              width: 200, height: 'auto', borderRadius: 4,
-              border: '1px solid rgba(255,255,255,0.08)',
-              display: 'block',
-            }}
-          />
+          <a href={imgSrc} target="_blank" rel="noopener noreferrer" style={{ lineHeight: 0 }}>
+            <img
+              src={imgSrc}
+              alt="screenshot"
+              title="Abrir SS em nova aba"
+              style={{
+                width: 200, height: 'auto', borderRadius: 4,
+                border: '1px solid rgba(255,255,255,0.08)',
+                display: 'block',
+                cursor: 'zoom-in',
+              }}
+            />
+          </a>
         ) : (
           <div style={{
             width: 200, height: 120, borderRadius: 4,
