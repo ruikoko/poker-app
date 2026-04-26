@@ -21,6 +21,7 @@ from app.routers.hm3 import router as hm3_router
 from app.routers.stats import router as stats_router
 from app.routers.equity import router as equity_router
 from app.routers.study import router as study_router, ensure_study_schema
+from app.routers.attachments import router as attachments_router
 
 load_dotenv()
 
@@ -242,6 +243,7 @@ app.include_router(hm3_router)
 app.include_router(stats_router)
 app.include_router(equity_router)
 app.include_router(study_router)
+app.include_router(attachments_router)
 
 # Serve uploaded screenshots as static files
 import os
