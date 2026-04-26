@@ -132,7 +132,9 @@ Regra operacional do match imagem ↔ mão:
 
 **Comportamento esperado da app** quando o Rui estuda uma mão: ver a imagem de contexto **inline** ao lado da mão (não num separador, não num click extra). A imagem **acompanha visualmente** a mão durante o estudo. Sem isto, o anexo perde o propósito.
 
-**Implicação para o pipeline:** imagens directas Discord **NÃO devem** ser tratadas como mãos (nem virar entries que disparam Vision para extrair TM, nem virar placeholders em `hands`). Devem ser anexos a mãos existentes em BD, ligadas via tabela tipo `hand_attachments` (a desenhar). Qualquer fluxo que crie hands a partir de `entry_type='image'` está a violar esta regra.
+**Implicação para o pipeline:** imagens directas Discord **NÃO devem** ser tratadas como mãos (nem virar entries que disparam Vision para extrair TM, nem virar placeholders em `hands`). Devem ser anexos a mãos existentes em BD, ligadas via tabela `hand_attachments`. Qualquer fluxo que crie hands a partir de `entry_type='image'` está a violar esta regra.
+
+**Implementação (Bucket 1, Abr 2026):** tabela `hand_attachments` + worker `POST /api/attachments/match` (com `GET /preview` dry-run) + triggers fire-and-forget em `sync_and_process` e `import_hm3` que reanexam imagens órfãs após cada operação. Detalhes técnicos completos no MAPA §2.11; spec original em `docs/SPEC_BUCKET_1_anexos_imagem.md`.
 
 ## Auth
 

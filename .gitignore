@@ -15,3 +15,11 @@ query_*.py
 /reparse_*_snapshot_*.csv
 scripts/archived/backfill_*_snapshot_*.csv
 scripts/archived/reparse_*_snapshot_*.csv
+
+# Snapshots de backfills (redundante com /backfill_*_snapshot_*.csv acima,
+# mantido explícito para defesa em profundidade — apanha qualquer subpasta).
+backfill_*_snapshot_*.csv
+
+# Documentos pessoais que NÃO devem ir para o repo público
+docs/auditoria-*.pdf
+docs/*.pdf

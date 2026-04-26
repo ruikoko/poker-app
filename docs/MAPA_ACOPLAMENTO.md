@@ -25,6 +25,7 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [2.8 `has_showdown`](#28-has_showdown)  *(adicionado ao índice)*
   - [2.9 `position_parse_failed`](#29-position_parse_failed)  *(adicionado ao índice)*
   - [2.10 `tournament_format` / `tournament_name` / `tournament_number` / `buy_in`](#210-tournament_format--tournament_name--tournament_number--buy_in)  *(adicionado ao índice)*
+  - [2.11 `hand_attachments`](#211-hand_attachments)  *(adicionado pós-Bucket 1)*
 - [3. Estado / marcação de entries](#3-estado--marcação-de-entries)
   - [3.1 `entry_type`](#31-entry_type)
   - [3.2 `source`](#32-source)
@@ -596,6 +597,82 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 - PS tem `tournament_name=NULL` por design — frontend compõe título via `buy_in + format + #tournament_number`.
 
 **Cross-references:** [`tags`](#25-tags), [Torneios](#65-torneios-gg-com-ss--sem-ss-hm3-tab), [HM3](#66-hm3).
+
+---
+
+### 2.11 `hand_attachments`
+
+**Em linguagem simples:** tabela que liga uma imagem Discord a uma mão como contexto, sem criar mão nova.
+
+**O que é (humano):** quando o Rui partilha uma imagem num canal Discord (anexo `.png`/`.jpg`/`.webp`, link Gyazo) é contexto duma mão já partilhada (replayer link no mesmo canal ±90s) ou duma mão importada via HM3 (±90s, qualquer canal). A tabela `hand_attachments` representa essa ligação 1:1 entre uma entry image e a hand a que pertence.
+
+A tabela existe porque imagens directas Discord **não devem** virar hands (regra de produto em CLAUDE.md "Imagens de contexto Discord"). Antes deste Bucket 1 (Abr 2026), o pipeline tentava processar imagens via Vision para extrair TM e criar placeholder — abordagem revertida em commit `ab1953e`. Modelo correcto: imagem → row em `hand_attachments` ligada a uma mão existente. Sem ligação possível, a imagem fica órfã (entry continua `status='new'`, sem row em `hand_attachments`).
+
+**Detalhes (técnico):**
+
+| Onde é produzido | Função |
+|---|---|
+| `backend/app/routers/attachments.py:288 _apply_match` | INSERT após match calculado por `_compute_match_candidates` |
+| `backend/app/routers/discord.py:147 sync_and_process` | Trigger fire-and-forget via `asyncio.create_task` (Fase IV) |
+| `backend/app/routers/hm3.py:1205 import_hm3` | Trigger fire-and-forget via `asyncio.create_task` (Fase IV) |
+| `backfill_attach_orphan_images.py` | Backfill manual das 3 entries 13/17/87 (executado 26-Abr) |
+
+| Onde é consumido | Função |
+|---|---|
+| `backend/app/routers/hands.py:543 list_hands` | subquery `attachment_count::int` em `GET /api/hands` |
+| `backend/app/routers/hands.py:980 get_hand` | 2ª query devolve `attachments: [...]` em `GET /api/hands/{id}` |
+| `frontend/src/components/HandRow.jsx:249-261` | Ícone `📎 N` se `hand.attachment_count > 0` |
+| `frontend/src/pages/HandDetailPage.jsx:161-205` | Secção CONTEXTO com thumbnails 200px |
+
+Schema (criado por `ensure_hand_attachments_schema()` em `hands.py:197`):
+
+```sql
+id            BIGSERIAL PK
+hand_db_id    BIGINT NOT NULL FK hands(id) ON DELETE CASCADE
+entry_id      BIGINT FK entries(id) ON DELETE SET NULL
+image_url     TEXT          -- URL original (gyazo, discord cdn)
+cached_url    TEXT          -- não usado actualmente
+img_b64       TEXT          -- bytes base64 (cache só para Gyazo, decisão Q2 SPEC)
+mime_type     TEXT
+posted_at     TIMESTAMPTZ NOT NULL
+channel_name  TEXT
+match_method  TEXT NOT NULL
+delta_seconds INTEGER       -- |posted_at - hand.played_at|, magnitude (sem sinal)
+created_at    TIMESTAMPTZ DEFAULT NOW()
+```
+
+Índices: `idx_hand_attachments_hand` (hand_db_id), `idx_hand_attachments_entry` (entry_id), `uq_hand_attachments_hand_entry` UNIQUE parcial em `(hand_db_id, entry_id) WHERE entry_id IS NOT NULL`.
+
+| Valor `match_method` | Significado |
+|---|---|
+| `discord_channel_temporal` | Match primário: entry image + entry replayer_link no mesmo `discord_channel` ±90s (sibling delta) |
+| `hm3_temporal_fallback` | Match fallback: hand com `origin IN ('hm3','hh_import')` ±90s entre `played_at` e `discord_posted_at` (qualquer canal) |
+| `manual` | Reservado para anexação manual via UI (não implementado) |
+
+**Comportamento esperado quando muda:**
+
+- INSERT: `attachment_count` na lista (`GET /api/hands`) incrementa em 1; `GET /api/hands/{id}` passa a incluir o novo attachment em `attachments[]` ordenado por `posted_at ASC, id ASC`. Frontend renderiza ícone na lista + secção CONTEXTO no detalhe.
+- DELETE de hand: cascade apaga attachments (FK CASCADE).
+- DELETE de entry: attachment fica órfão (`entry_id` SET NULL), `image_url` preservado.
+- Janela ±90s: literal hard-coded em `_find_primary_match` e `_find_fallback_match`. Mexer abre risco de cross-talk entre mãos consecutivas (ver SPEC §1).
+- `entries.status` **não** é tocado pelo worker (ver Armadilha 4 abaixo).
+
+**Armadilhas conhecidas:**
+
+1. **`PlaceholderHandRow` não mostra ícone 📎 nem link para detalhe.** Hands placeholder Discord (sem HH real) usam o componente `PlaceholderHandRow` em `frontend/src/pages/Hands.jsx:1444`, não `HandRow.jsx`. O ícone 📎 só está em `HandRow.jsx`. Resultado: as 3 attachments inseridas a 26-Abr (att_ids 58/59/60, ligadas a hands 117/115/67 que são placeholders) ficam invisíveis na UI até as HHs reais chegarem. Não-bloqueante; `_insert_hand` apaga placeholders quando HH chega e re-insere com `raw` populado, hand vira matched, e o `HandRow.jsx` passa a renderizar. **Subtileza:** ao apagar o placeholder, o ON DELETE CASCADE em `hand_db_id` apaga também as rows de `hand_attachments` associadas. `_insert_hand` re-insere a hand com novo id, `attachment_count` cai para 0 momentaneamente. O trigger retroactivo da Fase IV (`asyncio.create_task` em `sync_and_process`/`import_hm3`, depois do INSERT) corre `_compute_match_candidates` + `_apply_match` e reanexa via match primário (entries image continuam em `entries` com `status='new'`). Gap visual: milissegundos. Futuro Claude que veja `attachment_count=0` logo após import deve esperar pelo trigger antes de assumir bug.
+
+2. **`img_b64` NULL inesperado.** `_fetch_entry_image_bytes` (`attachments.py:42`) engole erros silenciosamente — `logger.warning`, retorna None, e `_apply_match` insere a row com `img_b64=NULL` mesmo assim (frontend faz fallback para `image_url`). Sintoma observado a 26-Abr para entry 17: `image fetch: unexpected content-type text/html for https://gyazo.com/fd1a6adb7c99...` — possível causa: HEAD a `i.gyazo.com/<id>.png` falhou, fallback para URL HTML, content-type validation rejeitou. Investigar se padrão se repetir; sugestão de melhoria: enriquecer warnings com `resp.headers` para deixar rasto da causa concreta.
+
+3. **`channel_name` é ID numérico, não nome resolvido.** `_apply_match` guarda `candidate["channel"]` que é `discord_channel` da entry (ID Discord, ex: `1484600506109267988`), não o nome (`icm-pko`). Frontend mostra ID na metadata por baixo do thumbnail — não user-friendly. Fix possível: resolver nome via JOIN com `discord_sync_state.channel_name` no INSERT ou no `get_hand` SELECT. Por agora cosmético.
+
+4. **`entries.status` nunca toma o valor `'attached'`.** O CHECK constraint `entries_status_check` aceita apenas `new/processed/partial/failed/archived/resolved` — descoberto a 26-Abr durante backfill Fase VI quando o `_apply_match` original tentava `UPDATE entries SET status='attached'` e rebentava. Fix opção (C): worker não toca em `entries.status`. O estado "anexada" é representado **apenas** pela existência de row em `hand_attachments` (filtro `NOT IN` em `_pending_image_entries`). Se algum código futuro precisar de saber se uma entry image foi anexada, **não** verificar `entries.status` — verificar `EXISTS (SELECT 1 FROM hand_attachments WHERE entry_id = e.id)`.
+
+**Cross-references:**
+- [`match_method`](#21-match_method) — distinto do `hands.player_names ->> 'match_method'` (que rastreia match SS↔HH).
+- [§5.3 `discord`](#53-discord-bot-via-post-apidiscordsync-and-process) — entries `image` Discord chegam aqui mas não criam mão.
+- [§5.2 `hm3`](#52-hm3-post-apihm3import--csv) — hands `hm3` podem disparar match fallback retroactivo.
+- CLAUDE.md secção "Imagens de contexto Discord — comportamento de produto".
+- `docs/SPEC_BUCKET_1_anexos_imagem.md` — spec original com decisões Q1-Q5.
 
 ---
 
@@ -1437,15 +1514,11 @@ Investigação a 2026-04-26 contra prod confirmou que a discrepância (119 hands
 | 2 | 3 | Vision processou mas TM não detectado pela imagem; `_create_placeholder_if_needed` faz early return se `tm_final IS NULL` | Aceitar como falha ocasional do Vision |
 | 3 | 27 | Cross-post: mesmo TM em múltiplos canais Discord → 1 hand por TM (UNIQUE em `hand_id`); `_link_second_discord_entry_to_existing_hand` agrega canais em `discord_tags` em vez de criar hand nova | **By design** — entries 2-N órfãs do JOIN mas agregadas via tags |
 
-### 8.5.10 Tabela `hand_attachments` planeada (não criada)
+### 8.5.10 Tabela `hand_attachments` — implementada
 
-**Estado:** spec aprovada, implementação adiada para sessão dedicada.
+**Estado:** implementado a 26-Abr-2026 (Bucket 1 fases I-VI). Ver entrada conceito completa em **[§2.11 `hand_attachments`](#211-hand_attachments)**.
 
-Bucket 1 do diagnóstico (8 imagens directas Discord) tratado como **redesign**, não fix de superfície. Imagens directas Discord vão deixar de ser tratadas como mãos (regra de produto em CLAUDE.md, secção "Imagens de contexto Discord"). Vão ser anexos a mãos existentes via tabela nova `hand_attachments`.
-
-Schema, pipeline, edge cases, plano de implementação em 7 fases ordenadas: ver `docs/SPEC_BUCKET_1_anexos_imagem.md`. Decisões Q1-Q5 do Rui também documentadas lá.
-
-Implicação para o MAPA: quando `hand_attachments` for criada, esta secção §8.5.10 deve ser substituída por uma entrada conceito completa (formato §2.x ou §8.1) integrada no corpo principal do MAPA.
+Tabela criada via `ensure_hand_attachments_schema()` em `hands.py:197`. 3 attachments inseridos via backfill (att_ids 58/59/60, hands 117/115/67). 5 entries imagem continuam órfãs (sem mão sibling ±90s).
 
 ---
 
