@@ -1617,6 +1617,14 @@ export default function HandsPage() {
     const allReq = hands.tagGroups({ ...baseParams, include_discord_placeholders: true })
     Promise.all([matchedReq, allReq])
       .then(([matched, all]) => {
+        // [DEBUG TEMP — remover após confirmação] sub-fase 4b placeholder diff
+        console.log('[ph-debug] response1 (matched only):', matched)
+        console.log('[ph-debug] response1.groups:', matched?.groups)
+        console.log('[ph-debug] response2 (with placeholders):', all)
+        console.log('[ph-debug] response2.groups:', all?.groups)
+        console.log('[ph-debug] response2.groups source=discord:',
+          (all?.groups || []).filter(g => g.source === 'discord'))
+
         setTagGroupsData(matched)
         // Diff por chave source+sorted(tags). Subtracção por count: para cada
         // group em `all`, count_placeholder = all.count - matched.count (se key
@@ -1639,6 +1647,10 @@ export default function HandsPage() {
             })
           }
         }
+        // [DEBUG TEMP] resultado da diff
+        console.log('[ph-debug] placeholderGroups computed (', placeholders.length, '):', placeholders)
+        console.log('[ph-debug] tagGroupsData.groups.length (matched):', (matched?.groups || []).length,
+          '— gate render exige > 0; secção placeholders NÃO renderiza se este for 0')
         setPlaceholderGroups(placeholders)
       })
       .catch(e => {
@@ -1852,6 +1864,15 @@ export default function HandsPage() {
         </div>
       )}
 
+      {/* [DEBUG TEMP — remover após confirmação] log do estado do gate */}
+      {viewMode === 'tags' && (() => {
+        console.log('[ph-debug] render gate: loading=', loading,
+          'matched.groups.length=', tagGroupsData.groups.length,
+          'placeholderGroups.length=', placeholderGroups.length,
+          '→ IIFE renderiza =', !loading && tagGroupsData.groups.length > 0,
+          '(secção placeholders SÓ aparece se IIFE renderizar)')
+        return null
+      })()}
       {/* Tags View (default) — grupos com contagens reais, lazy-load ao expandir.
           Re-agrega por TEMA (primeira tag que não seja 'nota*'); se só houver notas, usa a tag de nota.
           Depois parte em tiers: A (>100), B (10-100), C (<10). */}
