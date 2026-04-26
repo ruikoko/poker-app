@@ -131,10 +131,14 @@ def _pending_image_entries(limit: int) -> list[dict]:
     """
     Universo de entries `image` Discord ainda por anexar:
     - source='discord' AND entry_type='image'
-    - status != 'attached'
-    - sem row em hand_attachments com aquele entry_id
+    - sem row em hand_attachments com aquele entry_id (NOT IN)
 
     Ordem: discord_posted_at ASC (processa mais antigas primeiro).
+
+    NOTA: não filtramos por entries.status. O CHECK constraint
+    entries_status_check não inclui 'attached' (descoberto a 2026-04-26
+    durante backfill Fase VI), pelo que entries.status nunca toma esse
+    valor. O NOT IN em hand_attachments já filtra entries processadas.
     """
     return query(
         """
@@ -147,7 +151,6 @@ def _pending_image_entries(limit: int) -> list[dict]:
         FROM entries
         WHERE source = 'discord'
           AND entry_type = 'image'
-          AND COALESCE(status, '') <> 'attached'
           AND id NOT IN (
               SELECT entry_id FROM hand_attachments WHERE entry_id IS NOT NULL
           )
@@ -353,10 +356,12 @@ def _apply_match(candidate: dict) -> dict:
                 conn.commit()
                 return {"entry_id": entry_id, "status": "skip", "reason": "row já existia (race)"}
 
-            cur.execute(
-                "UPDATE entries SET status = 'attached' WHERE id = %s",
-                (entry_id,),
-            )
+            # NOTA: não escrevemos entries.status = 'attached'. O CHECK constraint
+            # entries_status_check (new/processed/partial/failed/archived/resolved)
+            # não inclui 'attached' — descoberto durante backfill Fase VI a 2026-04-26.
+            # O estado "anexada" é representado apenas pela existência de row
+            # em hand_attachments. O filtro de _pending_image_entries usa NOT IN
+            # nessa tabela, suficiente para excluir entries já processadas.
         conn.commit()
         return {
             "entry_id": entry_id,
