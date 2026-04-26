@@ -1,5 +1,7 @@
 # MAPA DE ACOPLAMENTO
 
+> **Atenção:** este documento tem aditamentos posteriores na §8.5 ("Aditamentos pós-26-Abr-2026"). Antes de tratar conteúdo das §§2-8 como definitivo, verifica se há evolução documentada lá.
+
 Documento permanente que mapeia, para cada conceito-chave da app, **quem o produz**, **quem o consome** e **o que acontece quando muda**. Pensado para duas audiências:
 
 1. **Rui (product owner, noob em código):** decidir mudanças sabendo o impacto sem ter de simular consequências na cabeça.
@@ -1327,6 +1329,123 @@ Outros: `GET /api/mtt/hands` (lista mãos), `GET /api/mtt/hands/{id}` (detalhe),
 **Quando alguém pergunta...**
 
 - *"Posso fazer reset total para reimportar?"* → Sim mas: `discord_sync_state` continua, então re-sync apanha desde o último `message_id` (não tudo). Se quiseres re-puxar tudo, TRUNCATE também `discord_sync_state` manualmente.
+
+---
+
+## 8.5 Aditamentos pós-26-Abr-2026
+
+Esta secção é o **diff incremental** face ao snapshot original do MAPA. Substitui ou complementa entradas das §§2-8 onde indicado. Quando esta info estabilizar, integrar no corpo principal do MAPA em vez de viver como aditamento.
+
+### 8.5.1 Regra de ouro evolucionada — placeholders Discord podem ir para Estudo
+
+**Antes (§2.1, §6.1):** placeholders Discord (`match_method LIKE 'discord_placeholder_%'`) eram **sempre** excluídos da página Estudo via `STUDY_VIEW_GG_MATCH_FILTER`.
+
+**Agora:** placeholders Discord não-`['nota']`-only podem entrar na vista **Por Tags** do Estudo, num enclave próprio chamado **"Discord — Só SS (sem HH)"**. Critério de elegibilidade extra:
+- `match_method LIKE 'discord_placeholder_%'`
+- AND `origin = 'discord'`
+- AND `discord_tags` populado com pelo menos 1 elemento
+- AND NÃO seja exclusivamente `['nota']` (essas continuam destinadas a Vilões via regra C quando HH chegar).
+
+Outras vistas (Por Torneio, Cards, Tabela) continuam **sem** placeholders. A regra documentada em CLAUDE.md ("regra de ouro do Rui") está ampliada — não é "saem do Dashboard só com HH real" universal, mas sim "saem do Dashboard só com HH real **ou** entram no enclave dedicado da vista Por Tags".
+
+### 8.5.2 Novo `STUDY_VIEW_GG_MATCH_FILTER_WITH_DISCORD_PLACEHOLDERS`
+
+**Localização:** `backend/app/routers/hands.py:313-336`.
+
+Constante SQL nova com 3 ramos disjuntos: (1) site != GGPoker; (2) GG com match real; (3) **GG placeholder Discord não-nota-only** (ramo novo). Variante do `STUDY_VIEW_GG_MATCH_FILTER` original (§2.1) que continua a ser usado quando `include_discord_placeholders=false`.
+
+Aplicado em `/api/hands` (`hands.py:466-471`) e `/api/hands/tag-groups` (`hands.py:543-548`) condicionalmente conforme parâmetro novo.
+
+### 8.5.3 Novo parâmetro `include_discord_placeholders`
+
+**Localização:** parâmetro Query `bool = False` em:
+- `/api/hands` — `hands.py:449`.
+- `/api/hands/tag-groups` — `hands.py:524`.
+
+Default `False` preserva 100% comportamento anterior. Quando `True` **e** `study_view=true`, aplica o filtro novo (§8.5.2) em vez do antigo.
+
+Activado pelo frontend só na vista "Por Tags" do Estudo (`Hands.jsx:1617`) — outras vistas e outras páginas continuam a omitir o flag.
+
+### 8.5.4 Novo endpoint `GET /api/hands/ss-without-match`
+
+**Localização:** `backend/app/routers/hands.py:774-855`.
+
+Lista unificada de **SSs sem match real** — universo `(source='screenshot' AND entry_type='screenshot') OR (source='discord' AND entry_type IN ('replayer_link','image'))`, filtrado por entries sem hand OR hand com `match_method` NULL/placeholder.
+
+Cada item devolvido tem `type ∈ {'manual','replayer','image'}` (discriminador para badge UI). Mais campos: `entry_id`, `hand_db_id`, `tm`, `vision_done`, `hero`, `file_meta`, `screenshot_url`, `played_at`, `discord_posted_at`, `created_at`, `channel_name` (resolvido via subquery a `discord_sync_state`), `raw_json`.
+
+Cobertura hoje: **157** items (vs **119** do `/api/mtt/orphan-screenshots` antigo, que cobria só placeholders GGDiscord). Endpoint antigo mantido **inalterado** (sem regressão noutros consumers, removível em fase de limpeza separada).
+
+### 8.5.5 Novo objecto `ss_dashboard` em `/api/hands/stats`
+
+**Localização:** `backend/app/routers/hands.py:687-756` (dentro de `hand_stats`).
+
+Objecto JSON novo no response com 4 contadores mutuamente exclusivos:
+
+```
+ss_dashboard: {
+    total:           <int>,
+    with_match:      <int>,
+    no_match_total:  <int>,                        # conveniência (soma 2 abaixo)
+    no_match_manual: <int>,
+    no_match_discord: { total, replayer, image }
+}
+```
+
+Sanidade: `total = with_match + no_match_manual + no_match_replayer + no_match_image` (5 buckets disjuntos). Verificado em prod a 2026-04-26: 157 = 0 + 0 + 149 + 8.
+
+Substitui semanticamente os campos antigos `total_screenshots` / `orphan_screenshots` / `ss_match_pending` (§6.2 Dashboard). Antigos **mantidos** no JSON para retro-compat até remoção planeada.
+
+### 8.5.6 Novo componente frontend `PlaceholderHandRow`
+
+**Localização:** `frontend/src/pages/Hands.jsx:1444-1573`.
+
+Renderiza uma mão placeholder Discord no enclave "Discord — Só SS (sem HH)". Design: SS inline 200px à esquerda (clicável → nova aba via `<a target="_blank">` com `cursor: zoom-in`); coluna metadata com hora + chips de canais (azul claro #38bdf8) + hand_id curto + linha "Hero: <nick>" (roxo #818cf8) com stack + lista de nicks Vision do `players_list` (hero destacado roxo, restantes cinzentos); botão único "Apagar" à direita.
+
+**Diferença vs `HandRow` matched:** **NÃO** mostra cartas/board/resultado/posição/badges showdown. Só mostra o que é conhecido sem HH (imagem + Vision data + tempo).
+
+### 8.5.7 Bug-fix: agregador `tag-groups` colapsava placeholders
+
+**Localização:** `backend/app/routers/hands.py:560-578`.
+
+**Problema:** o CASE SQL do `tag_source='auto'` priorizava `hm3_tags` sobre `discord_tags`. Para placeholders Discord, `hm3_tags=['GGDiscord']` (marker interno) ofuscava `discord_tags=['pos-pko']` (canal real). Resultado: todos os 96 placeholders elegíveis colapsavam num grupo único `tags=['GGDiscord'], source='hm3'`.
+
+**Fix:** cláusula nova nos 2 CASEs (tags + source). Quando `match_method LIKE 'discord_placeholder_%' AND origin='discord' AND discord_tags populado`, usar `discord_tags` como tema e `source='discord'`. Verificado em prod: 19 grupos por canal real após fix (`pos-pko`=34, `icm-pko`=11, `icm`=10, etc.).
+
+4 condições defensivas mutuamente reforçadas evitam falso positivo.
+
+### 8.5.8 Bug-fix: gate IIFE da vista Por Tags
+
+**Localização:** `frontend/src/pages/Hands.jsx:1857`.
+
+**Problema:** o gate de renderização do IIFE da vista Por Tags era `tagGroupsData.groups.length > 0` (assumption antiga: matched sempre existia). Com matched=0 e placeholders=N>0, o IIFE inteiro era saltado, e a secção "Discord — Só SS (sem HH)" (que **vive dentro do IIFE**) ficava invisível mesmo com `placeholderGroups` populado.
+
+**Fix:** gate aceita também `placeholderGroups.length > 0`:
+```js
+{!loading && viewMode === 'tags' && (tagGroupsData.groups.length > 0 || placeholderGroups.length > 0) && (() => { ... })()}
+```
+
+Confirmado via logs temporários (commit `3ccc80f`, removidos em `4a4a024`).
+
+### 8.5.9 Diagnóstico de discrepância 119↔157 entries Discord
+
+Investigação a 2026-04-26 contra prod confirmou que a discrepância (119 hands placeholder vs 157 entries Discord `replayer_link`+`image`) decompõe-se em **3 buckets** com causas distintas:
+
+| Bucket | N | Causa | Estado |
+|---|---|---|---|
+| 1 | 8 | Imagens directas Discord (`entry_type='image'`) nunca processadas pelo Vision; `process_replayer_links` filtrava só `replayer_link` | Bucket 1 redesign — ver §8.5.10 |
+| 2 | 3 | Vision processou mas TM não detectado pela imagem; `_create_placeholder_if_needed` faz early return se `tm_final IS NULL` | Aceitar como falha ocasional do Vision |
+| 3 | 27 | Cross-post: mesmo TM em múltiplos canais Discord → 1 hand por TM (UNIQUE em `hand_id`); `_link_second_discord_entry_to_existing_hand` agrega canais em `discord_tags` em vez de criar hand nova | **By design** — entries 2-N órfãs do JOIN mas agregadas via tags |
+
+### 8.5.10 Tabela `hand_attachments` planeada (não criada)
+
+**Estado:** spec aprovada, implementação adiada para sessão dedicada.
+
+Bucket 1 do diagnóstico (8 imagens directas Discord) tratado como **redesign**, não fix de superfície. Imagens directas Discord vão deixar de ser tratadas como mãos (regra de produto em CLAUDE.md, secção "Imagens de contexto Discord"). Vão ser anexos a mãos existentes via tabela nova `hand_attachments`.
+
+Schema, pipeline, edge cases, plano de implementação em 7 fases ordenadas: ver `docs/SPEC_BUCKET_1_anexos_imagem.md`. Decisões Q1-Q5 do Rui também documentadas lá.
+
+Implicação para o MAPA: quando `hand_attachments` for criada, esta secção §8.5.10 deve ser substituída por uma entrada conceito completa (formato §2.x ou §8.1) integrada no corpo principal do MAPA.
 
 ---
 
