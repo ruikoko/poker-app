@@ -114,6 +114,26 @@ Quando uma mensagem Discord referencia uma mão antes da HH ter sido importada, 
 
 `DISCORD_AUTO_SYNC=false` por defeito no Railway. O bot liga-se mas **não** extrai mensagens sozinho. Só corre quando o utilizador carrega em "Sincronizar Agora" em `/discord` (→ `POST /api/discord/sync` ou `/sync-and-process`). Isto reduz risco face ao ToS das salas de poker, que olham mal para scraping contínuo de canais de estudo. **Não mudar para auto-sync sem pedir autorização explícita.**
 
+## Imagens de contexto Discord — comportamento de produto
+
+Imagens directas Discord (anexos `.png`/`.jpg`/`.webp` ou links Gyazo) são **contexto de mãos, não mãos por si**. O Rui usa-as para anexar prints de HM3, gráficos, diagramas, qualquer screenshot que ajude a entender uma mão já partilhada — nunca como hand source primária.
+
+Padrão real:
+
+1. O Rui partilha uma mão num canal temático (`pos-pko`, `icm-pko`, `icm`, `nota`, etc.) via replayer GG ou HH text.
+2. Para anexar contexto, posta uma **imagem no mesmo canal**, com no máximo **90 segundos** de distância da mão.
+3. **Caso especial:** a mão pode ter chegado via HM3 (.bat, fluxo separado), não via Discord. Mesmo assim o Rui pode partilhar contexto via Discord — o sistema tem que conseguir cruzar imagem Discord ↔ mão HM3 quando os timestamps caem dentro da janela.
+
+Regra operacional do match imagem ↔ mão:
+
+- **Janela temporal: ±90 segundos.** Não 10 minutos. Não 5 minutos. **90s.** Janelas mais largas trazem ruído inaceitável (cross-talk entre mãos consecutivas).
+- **Match primário:** mesmo canal Discord + janela temporal.
+- **Match fallback** (mão veio via HM3 sem entry Discord da mão): janela temporal sozinha, em qualquer canal Discord do mesmo torneio.
+
+**Comportamento esperado da app** quando o Rui estuda uma mão: ver a imagem de contexto **inline** ao lado da mão (não num separador, não num click extra). A imagem **acompanha visualmente** a mão durante o estudo. Sem isto, o anexo perde o propósito.
+
+**Implicação para o pipeline:** imagens directas Discord **NÃO devem** ser tratadas como mãos (nem virar entries que disparam Vision para extrair TM, nem virar placeholders em `hands`). Devem ser anexos a mãos existentes em BD, ligadas via tabela tipo `hand_attachments` (a desenhar). Qualquer fluxo que crie hands a partir de `entry_type='image'` está a violar esta regra.
+
 ## Auth
 
 Cookie-based (`HttpOnly`, 7 dias, assinado com `SESSION_SECRET` via `itsdangerous`). `require_auth` é o dependency FastAPI para rotas protegidas. bcrypt para hashing de passwords. Não há CSRF para além de `SameSite` + CORS `ALLOWED_ORIGIN` — manter `ALLOWED_ORIGIN` apertado em produção.
