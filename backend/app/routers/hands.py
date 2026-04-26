@@ -684,6 +684,68 @@ def hand_stats(current_user=Depends(require_auth)):
     except Exception:
         result["ss_match_pending"] = 0
 
+    # ── ss_dashboard: 4 painéis novos do Dashboard (regra de ouro do Rui) ─────
+    # Universo SS = uploads manuais + replayer_links Discord + imagens Discord.
+    # HH text Discord (entry_type='hand_history') é excluído explicitamente.
+    # "Com match" = entry tem hand E match_method real (não placeholder).
+    # "Sem match" = entry sem hand OU hand com match_method NULL/placeholder.
+    # Os 5 contadores são mutuamente exclusivos:
+    #   total = with_match + no_match_manual + no_match_replayer + no_match_image
+    try:
+        ss_dash_rows = query("""
+            WITH ss_entries AS (
+                SELECT e.id, e.source, e.entry_type,
+                       h.id AS hand_db_id,
+                       h.player_names ->> 'match_method' AS mm
+                FROM entries e
+                LEFT JOIN hands h ON h.entry_id = e.id
+                WHERE
+                    (e.source = 'screenshot' AND e.entry_type = 'screenshot')
+                    OR (e.source = 'discord' AND e.entry_type IN ('replayer_link', 'image'))
+            )
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (
+                    WHERE hand_db_id IS NOT NULL
+                      AND mm IS NOT NULL
+                      AND mm NOT LIKE 'discord_placeholder_%%'
+                ) AS with_match,
+                COUNT(*) FILTER (
+                    WHERE source = 'screenshot'
+                      AND (hand_db_id IS NULL OR mm IS NULL OR mm LIKE 'discord_placeholder_%%')
+                ) AS no_match_manual,
+                COUNT(*) FILTER (
+                    WHERE source = 'discord' AND entry_type = 'replayer_link'
+                      AND (hand_db_id IS NULL OR mm IS NULL OR mm LIKE 'discord_placeholder_%%')
+                ) AS no_match_replayer,
+                COUNT(*) FILTER (
+                    WHERE source = 'discord' AND entry_type = 'image'
+                      AND (hand_db_id IS NULL OR mm IS NULL OR mm LIKE 'discord_placeholder_%%')
+                ) AS no_match_image
+            FROM ss_entries
+        """)
+        d = dict(ss_dash_rows[0]) if ss_dash_rows else {}
+        no_match_manual = d.get("no_match_manual", 0) or 0
+        no_match_replayer = d.get("no_match_replayer", 0) or 0
+        no_match_image = d.get("no_match_image", 0) or 0
+        result["ss_dashboard"] = {
+            "total":           d.get("total", 0) or 0,
+            "with_match":      d.get("with_match", 0) or 0,
+            "no_match_total":  no_match_manual + no_match_replayer + no_match_image,
+            "no_match_manual": no_match_manual,
+            "no_match_discord": {
+                "total":    no_match_replayer + no_match_image,
+                "replayer": no_match_replayer,
+                "image":    no_match_image,
+            },
+        }
+    except Exception:
+        result["ss_dashboard"] = {
+            "total": 0, "with_match": 0, "no_match_total": 0,
+            "no_match_manual": 0,
+            "no_match_discord": {"total": 0, "replayer": 0, "image": 0},
+        }
+
     return result
 
 
