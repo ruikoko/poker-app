@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { hands, equity } from '../api/client'
+import { hands, equity, screenshots } from '../api/client'
 import Replayer from '../components/Replayer'
 import { isHero } from '../heroNames'
 import TagEditor from '../components/TagEditor'
@@ -1191,8 +1191,10 @@ function TierHeader({ label, subtitle, count }) {
   )
 }
 
-function TierCollapsible({ label, subtitle, count, defaultOpen = false, children }) {
+function TierCollapsible({ label, subtitle, count, defaultOpen = false, children, colorOverride }) {
   const [open, setOpen] = useState(defaultOpen)
+  const labelColor = colorOverride || '#cbd5e1'
+  const borderColor = colorOverride ? `${colorOverride}33` : 'rgba(255,255,255,0.06)'
   return (
     <div style={{ marginTop: 12 }}>
       <button
@@ -1201,13 +1203,13 @@ function TierCollapsible({ label, subtitle, count, defaultOpen = false, children
           width: '100%', display: 'flex', alignItems: 'baseline', gap: 10,
           padding: '10px 4px 8px',
           background: 'transparent', border: 'none',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: `1px solid ${borderColor}`,
           cursor: 'pointer', textAlign: 'left',
           marginBottom: open ? 6 : 0,
         }}
       >
-        <span style={{ fontSize: 10, color: 'var(--muted)', width: 10 }}>{open ? '▼' : '▶'}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#cbd5e1', letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ fontSize: 10, color: colorOverride || 'var(--muted)', width: 10 }}>{open ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: labelColor, letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</span>
         <span style={{ fontSize: 10, color: 'var(--muted)' }}>{subtitle}</span>
         <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 'auto' }}>{count} grupos</span>
       </button>
@@ -1217,7 +1219,7 @@ function TierCollapsible({ label, subtitle, count, defaultOpen = false, children
 }
 
 
-function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters, useHm3Tags, studyView, onOpenDetail, onDeleteHand }) {
+function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters, useHm3Tags, studyView, isPlaceholder, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
   const [loadingHands, setLoadingHands] = useState(false)
@@ -1229,6 +1231,9 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
         const params = { ...filters, page_size: 500, page: 1 }
         if (!params.date_from) delete params.date_from
         if (studyView) params.study_view = true
+        // Sub-fase 4b: para a secção "Discord — Só SS (sem HH)", o backend só
+        // devolve placeholders se este flag for passado também na expansão.
+        if (isPlaceholder) params.include_discord_placeholders = true
         if (tags.length === 0) {
           // Grupo "(sem tag)" em modo auto (source='none'): nem hm3 nem discord.
           // Legado use_hm3_tags: só hm3 ausente. Default: coluna tags auto.
@@ -1258,7 +1263,8 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
     setOpen(o => !o)
   }
 
-  // Cor: Discord sempre azul (#5865F2). HM3 mantém mapa por tema. "(sem tag)" cinzento.
+  // Cor: Discord matched #5865F2; placeholder Discord #38bdf8 (azul claro).
+  // HM3 mantém mapa por tema. "(sem tag)" cinzento.
   const tag = tags.length > 0 ? tags[0] : 'sem-tag'
   const HM3_COLORS = {
     icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e',
@@ -1266,7 +1272,8 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
     cbet: '#a78bfa', ip: '#34d399', mw: '#fb923c',
     speed: '#ec4899', racer: '#ec4899',
   }
-  const tagColor = source === 'discord' ? '#5865F2' : (HM3_COLORS[tag] || '#64748b')
+  const tagColor = isPlaceholder ? '#38bdf8'
+    : (source === 'discord' ? '#5865F2' : (HM3_COLORS[tag] || '#64748b'))
 
   return (
     <div style={{
@@ -1323,17 +1330,24 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
           </span>
         </div>
 
-        {/* Stats rápidas */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 11 }}>
-          <span style={{ color: '#22c55e' }}>{wins}W</span>
-          <span style={{ color: '#ef4444' }}>{losses}L</span>
-          <span style={{
-            color: totalBB >= 0 ? '#22c55e' : '#ef4444',
-            fontWeight: 600, fontFamily: 'monospace',
-          }}>
-            {totalBB >= 0 ? '+' : ''}{totalBB.toFixed(1)} BB
+        {/* Stats rápidas — escondidas para placeholders (sem HH = sem resultado) */}
+        {!isPlaceholder && (
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 11 }}>
+            <span style={{ color: '#22c55e' }}>{wins}W</span>
+            <span style={{ color: '#ef4444' }}>{losses}L</span>
+            <span style={{
+              color: totalBB >= 0 ? '#22c55e' : '#ef4444',
+              fontWeight: 600, fontFamily: 'monospace',
+            }}>
+              {totalBB >= 0 ? '+' : ''}{totalBB.toFixed(1)} BB
+            </span>
+          </div>
+        )}
+        {isPlaceholder && (
+          <span style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>
+            sem HH ainda
           </span>
-        </div>
+        )}
       </div>
 
       {/* Conteúdo expandido */}
@@ -1347,6 +1361,16 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
             <div style={{ padding: '16px', textAlign: 'center', color: '#4b5563', fontSize: 12 }}>
               Sem mãos neste grupo
             </div>
+          ) : isPlaceholder ? (
+            // Placeholders Discord (sem HH): mostra SS inline + nicks Vision +
+            // hora + botão Apagar. Não há cartas/board/resultado/posição.
+            tagHands.map(h => (
+              <PlaceholderHandRow
+                key={h.id}
+                hand={h}
+                onDelete={() => onDeleteHand(h.id)}
+              />
+            ))
           ) : (() => {
             // Agrupar mãos por torneio (stakes)
             const byTournament = {}
@@ -1417,6 +1441,138 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
   )
 }
 
+// ── Linha de mão placeholder Discord (sub-fase 4b) ──────────────────────────
+// Mãos sem HH não têm cartas/board/resultado. Mostramos o que existe:
+// imagem do SS inline (Discord CDN ou imageUrl(entry_id)), nicks Vision
+// extraídos pelo Vision (players_list), stack do hero, hora.
+// Botão único Apagar — Rematch e Ignorar não aplicam (HH só chega via HM3/import).
+function PlaceholderHandRow({ hand, onDelete }) {
+  const pn = hand.player_names || {}
+  const playersList = pn.players_list || []
+  const heroName = pn.hero || null
+  const channels = hand.discord_tags || []
+  const playedAt = hand.played_at
+    ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : '—'
+  // Hero stack: tenta encontrar player com nome do hero em players_list e usar stack
+  const heroPlayer = heroName
+    ? playersList.find(p => (p.name || '').toLowerCase() === heroName.toLowerCase())
+    : null
+  const heroStack = heroPlayer?.stack ?? null
+  // SS source: prioriza screenshot_url (CDN GG), fallback para imageUrl(entry_id)
+  const imgSrc = hand.screenshot_url
+    || (hand.entry_id ? screenshots.imageUrl(hand.entry_id) : null)
+
+  return (
+    <div style={{
+      display: 'flex', gap: 14, padding: '12px 16px',
+      borderTop: '1px solid rgba(255,255,255,0.04)',
+      alignItems: 'flex-start',
+    }}>
+      {/* SS inline */}
+      <div style={{ flexShrink: 0, width: 200 }}>
+        {imgSrc ? (
+          <img
+            src={imgSrc}
+            alt="screenshot"
+            style={{
+              width: 200, height: 'auto', borderRadius: 4,
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'block',
+            }}
+          />
+        ) : (
+          <div style={{
+            width: 200, height: 120, borderRadius: 4,
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, color: '#4b5563',
+          }}>Sem imagem</div>
+        )}
+      </div>
+
+      {/* Metadata + nicks */}
+      <div style={{ flex: 1, fontSize: 12, color: '#cbd5e1', minWidth: 0 }}>
+        {/* Header: hora + canais + hand_id curto */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>{playedAt}</span>
+          {channels.length > 0 && (
+            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              {channels.map(ch => (
+                <span key={ch} style={{
+                  padding: '1px 7px', borderRadius: 3,
+                  fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
+                  color: '#38bdf8', background: 'rgba(56,189,248,0.14)',
+                  border: '1px solid rgba(56,189,248,0.3)',
+                }}>#{ch}</span>
+              ))}
+            </span>
+          )}
+          {hand.hand_id && (
+            <span style={{ fontFamily: 'monospace', color: '#4b5563', fontSize: 10 }}>{hand.hand_id}</span>
+          )}
+        </div>
+
+        {/* Hero + stack */}
+        {heroName && (
+          <div style={{ marginBottom: 6, fontSize: 12 }}>
+            <span style={{ color: '#64748b', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 6 }}>Hero</span>
+            <span style={{ color: '#818cf8', fontWeight: 600 }}>{heroName}</span>
+            {heroStack != null && (
+              <span style={{ color: '#94a3b8', marginLeft: 8, fontFamily: 'monospace', fontSize: 11 }}>
+                {Number(heroStack).toLocaleString('pt-PT')}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Lista de nicks Vision */}
+        {playersList.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11 }}>
+            <span style={{ color: '#64748b', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 4, alignSelf: 'center' }}>
+              Mesa
+            </span>
+            {playersList.map((p, i) => {
+              const isPlayerHero = heroName && (p.name || '').toLowerCase() === heroName.toLowerCase()
+              return (
+                <span key={i} style={{
+                  padding: '2px 8px', borderRadius: 3,
+                  background: isPlayerHero ? 'rgba(129,140,248,0.15)' : 'rgba(255,255,255,0.03)',
+                  color: isPlayerHero ? '#818cf8' : '#cbd5e1',
+                  fontWeight: isPlayerHero ? 600 : 400,
+                  fontSize: 11,
+                }}>
+                  {p.name}
+                  {p.stack != null && (
+                    <span style={{ color: '#64748b', marginLeft: 4, fontFamily: 'monospace', fontSize: 10 }}>
+                      {Number(p.stack).toLocaleString('pt-PT')}
+                    </span>
+                  )}
+                </span>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Botão Apagar */}
+      <div style={{ flexShrink: 0 }}>
+        <button
+          onClick={onDelete}
+          title="Apagar permanentemente"
+          style={{
+            fontSize: 10, padding: '4px 10px', borderRadius: 4,
+            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+            color: '#f87171', cursor: 'pointer', fontWeight: 600,
+          }}
+        >Apagar</button>
+      </div>
+    </div>
+  )
+}
+
+
 // ── Página Principal ─────────────────────────────────────────────────────────
 
 function applyFilterTransform(params) {
@@ -1432,6 +1588,11 @@ function applyFilterTransform(params) {
 export default function HandsPage() {
   const [data, setData]           = useState({ data: [], total: 0, pages: 1 })
   const [tagGroupsData, setTagGroupsData] = useState({ groups: [], total: 0 })
+  // Sub-fase 4b: groups que aparecem só quando include_discord_placeholders=true.
+  // Calculado por subtracção (count em response2 menos count em response1, por
+  // chave source+tags). Os matched continuam em tagGroupsData; os placeholders
+  // separados aqui para serem renderizados em secção própria com cor distinta.
+  const [placeholderGroups, setPlaceholderGroups] = useState([])
   const [page, setPage]           = useState(1)
   const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false })
   const [error, setError]         = useState('')
@@ -1439,17 +1600,51 @@ export default function HandsPage() {
   const [selected, setSelected]   = useState(null)
   const [viewMode, setViewMode]   = useState('tournament') // 'tags' | 'tournament' | 'grid' | 'table'
 
-  // Para a vista por tags: usa o endpoint tag-groups (sem paginação, só metadados)
+  // Para a vista por tags: usa o endpoint tag-groups (sem paginação, só metadados).
+  // Faz 2 chamadas em paralelo:
+  //   - response1: matched apenas (study_view=true)
+  //   - response2: matched + placeholders Discord não-nota-only
+  // Subtrai count(response2) - count(response1) por chave source+tags para
+  // isolar os placeholders. Hoje matched=0 → placeholders == response2.
   const loadTagGroups = useCallback(() => {
     if (viewMode !== 'tags') return
     setLoading(true)
     setError('')
     // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo).
-    // use_hm3_tags=true: agrupa por hm3_tags (tags reais do HM3) e esconde mãos sem hm3_tags
-    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, tag_source: 'auto', study_view: true })
-    hands.tagGroups(params)
-      .then(setTagGroupsData)
-      .catch(e => setError(e.message))
+    // tag_source='auto' agrupa por hm3_tags > discord_tags > '(sem tag)'.
+    const baseParams = applyFilterTransform({ ...filters, exclude_mtt_only: true, tag_source: 'auto', study_view: true })
+    const matchedReq = hands.tagGroups(baseParams)
+    const allReq = hands.tagGroups({ ...baseParams, include_discord_placeholders: true })
+    Promise.all([matchedReq, allReq])
+      .then(([matched, all]) => {
+        setTagGroupsData(matched)
+        // Diff por chave source+sorted(tags). Subtracção por count: para cada
+        // group em `all`, count_placeholder = all.count - matched.count (se key
+        // existir em matched). W/L/BB zerados — placeholders não têm resultado.
+        const keyOf = (g) => `${g.source || 'none'}:${(g.tags || []).slice().sort().join('+')}`
+        const matchedByKey = new Map()
+        for (const g of (matched.groups || [])) matchedByKey.set(keyOf(g), g)
+        const placeholders = []
+        for (const g of (all.groups || [])) {
+          // Só interessa source='discord' aqui — o filtro do backend não muda
+          // counts de hm3/none, mas defensivo por ruído de re-agregação.
+          if (g.source !== 'discord') continue
+          const matchedCount = matchedByKey.get(keyOf(g))?.count || 0
+          const placeholderCount = (g.count || 0) - matchedCount
+          if (placeholderCount > 0) {
+            placeholders.push({
+              ...g,
+              count: placeholderCount,
+              wins: 0, losses: 0, total_bb: 0,
+            })
+          }
+        }
+        setPlaceholderGroups(placeholders)
+      })
+      .catch(e => {
+        setError(e.message)
+        setPlaceholderGroups([])
+      })
       .finally(() => setLoading(false))
   }, [filters, viewMode])
 
@@ -1746,6 +1941,54 @@ export default function HandsPage() {
                 {discordGroups.map(renderGroup)}
               </TierCollapsible>
             )}
+            {/* Sub-fase 4b: placeholders Discord (sem HH ainda).
+                Re-agrega por pickTheme (igual aos matched), depois renderiza
+                cada canal como TagGroup com isPlaceholder=true (cor azul claro,
+                sem stats W/L/BB, expand pede include_discord_placeholders=true). */}
+            {placeholderGroups.length > 0 && (() => {
+              const phAgg = {}
+              for (const g of placeholderGroups) {
+                const theme = pickTheme(g.tags)
+                const key = `discord:${theme || ''}`
+                if (!phAgg[key]) {
+                  phAgg[key] = { tags: theme ? [theme] : [], source: 'discord', count: 0, wins: 0, losses: 0, total_bb: 0 }
+                }
+                phAgg[key].count += g.count
+              }
+              const phMerged = Object.values(phAgg).sort((a, b) => b.count - a.count)
+              const totalPh = phMerged.reduce((s, g) => s + g.count, 0)
+              return (
+                <TierCollapsible
+                  label="Discord — Só SS (sem HH)"
+                  subtitle={`${totalPh} mã${totalPh === 1 ? 'o' : 'os'} · ${phMerged.length} canal${phMerged.length === 1 ? '' : 'is'}`}
+                  count={phMerged.length}
+                  defaultOpen={tierA.length === 0 && tierB.length === 0 && discordGroups.length === 0}
+                  colorOverride="#38bdf8"
+                >
+                  {phMerged.map((group, i) => {
+                    const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.slice().sort().join('+')
+                    return (
+                      <TagGroup
+                        key={'ph:' + tagKey + i}
+                        tagKey={tagKey}
+                        tags={group.tags}
+                        source={group.source}
+                        count={group.count}
+                        wins={group.wins}
+                        losses={group.losses}
+                        totalBB={group.total_bb}
+                        filters={filters}
+                        useHm3Tags={true}
+                        studyView={true}
+                        isPlaceholder={true}
+                        onOpenDetail={openDetail}
+                        onDeleteHand={deleteHand}
+                      />
+                    )
+                  })}
+                </TierCollapsible>
+              )
+            })()}
             {noTagGroup && noTagGroup.count > 0 && (
               <TierCollapsible
                 label="(Sem tag)"
