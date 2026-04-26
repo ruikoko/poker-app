@@ -552,14 +552,31 @@ def tag_groups(
     if tag_source == 'auto':
         # CASE per-row: hm3 > discord > none. COALESCE não serve — arrays
         # vazios '{}' são não-NULL em PG, ignorar length é preciso explícito.
+        #
+        # Excepção (sub-fase 4b): placeholders Discord têm hm3_tags=['GGDiscord']
+        # como marker interno, mas o tema real vive em discord_tags (nome do canal).
+        # Sem esta cláusula, todos os 96 placeholders colapsavam em 1 grupo
+        # 'hm3:GGDiscord' em vez de ~19 grupos por canal real. Filtro: 4 condições
+        # mutuamente reforçadas para evitar falso positivo (match_method placeholder
+        # + origin discord + discord_tags com pelo menos 1 elemento).
         sql = f"""
             SELECT h.id, h.result, h.study_state,
                    CASE
+                       WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%'
+                            AND h.origin = 'discord'
+                            AND h.discord_tags IS NOT NULL
+                            AND array_length(h.discord_tags, 1) > 0
+                           THEN h.discord_tags
                        WHEN h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0 THEN h.hm3_tags
                        WHEN h.discord_tags IS NOT NULL AND array_length(h.discord_tags, 1) > 0 THEN h.discord_tags
                        ELSE ARRAY[]::text[]
                    END AS tags,
                    CASE
+                       WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%'
+                            AND h.origin = 'discord'
+                            AND h.discord_tags IS NOT NULL
+                            AND array_length(h.discord_tags, 1) > 0
+                           THEN 'discord'
                        WHEN h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0 THEN 'hm3'
                        WHEN h.discord_tags IS NOT NULL AND array_length(h.discord_tags, 1) > 0 THEN 'discord'
                        ELSE 'none'
