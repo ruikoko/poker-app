@@ -194,6 +194,58 @@ def ensure_tournament_name_and_number_columns():
         conn.close()
 
 
+def ensure_hand_attachments_schema():
+    """
+    Cria tabela hand_attachments (Bucket 1 — imagens directas Discord como
+    anexos a maos, nao maos por si). Ver docs/SPEC_BUCKET_1_anexos_imagem.md
+    e CLAUDE.md seccao "Imagens de contexto Discord".
+
+    - hand_db_id ON DELETE CASCADE: apagar a mao apaga os anexos.
+    - entry_id ON DELETE SET NULL: apagar entry preserva o anexo.
+    - UNIQUE parcial em (hand_db_id, entry_id) WHERE entry_id IS NOT NULL
+      impede duplicacao se o worker reprocessar a mesma entry.
+    - delta_seconds e magnitude (sem sinal) — sinal pode reconstruir-se de
+      posted_at - hand.played_at.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS hand_attachments (
+                    id            BIGSERIAL PRIMARY KEY,
+                    hand_db_id    BIGINT NOT NULL REFERENCES hands(id) ON DELETE CASCADE,
+                    entry_id      BIGINT REFERENCES entries(id) ON DELETE SET NULL,
+                    image_url     TEXT,
+                    cached_url    TEXT,
+                    img_b64       TEXT,
+                    mime_type     TEXT,
+                    posted_at     TIMESTAMPTZ NOT NULL,
+                    channel_name  TEXT,
+                    match_method  TEXT NOT NULL,
+                    delta_seconds INTEGER,
+                    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hand_attachments_hand
+                ON hand_attachments(hand_db_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hand_attachments_entry
+                ON hand_attachments(entry_id)
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_hand_attachments_hand_entry
+                ON hand_attachments(hand_db_id, entry_id) WHERE entry_id IS NOT NULL
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_hand_attachments_schema: {e}")
+    finally:
+        conn.close()
+
+
 # ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
 # Obtida via scan directo à BD HM3 (handmarkcategories).
 # Cada entrada: (category_id, description).

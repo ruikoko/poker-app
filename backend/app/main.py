@@ -11,7 +11,7 @@ from app.routers import health, auth, import_, tournaments, hands, villains
 from app.routers.hands import (
     ensure_hm3_tags_column, ensure_has_showdown_column, ensure_discord_tags_column,
     ensure_origin_column, ensure_buy_in_column, ensure_tournament_format_column,
-    ensure_tournament_name_and_number_columns,
+    ensure_tournament_name_and_number_columns, ensure_hand_attachments_schema,
 )
 from app.routers.entries import router as entries_router
 from app.routers.discord import router as discord_router
@@ -197,6 +197,7 @@ async def lifespan(app: FastAPI):
     ensure_buy_in_column()
     ensure_tournament_format_column()
     ensure_tournament_name_and_number_columns()
+    ensure_hand_attachments_schema()
 
     # Arrancar bot Discord em background
     from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
