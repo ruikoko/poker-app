@@ -291,16 +291,16 @@ async def resolve_replayers(current_user=Depends(require_auth)):
 @router.get("/process-replayer-links/preview")
 def process_replayer_links_preview(current_user=Depends(require_auth)):
     """
-    DRY-RUN. Lista os entries Discord (replayer_link + image) GG que seriam
-    processados. Não modifica nada.
+    DRY-RUN. Lista os entries replayer_link GG que seriam processados.
+    Não modifica nada.
     """
     rows = query("""
-        SELECT id, raw_text, entry_type, status, discord_channel, discord_author,
+        SELECT id, raw_text, status, discord_channel, discord_author,
                discord_posted_at, raw_json,
                (raw_json->>'img_b64' IS NOT NULL) AS has_image,
                (raw_json->>'vision_done')::boolean AS vision_done
         FROM entries
-        WHERE entry_type IN ('replayer_link', 'image')
+        WHERE entry_type = 'replayer_link'
           AND site = 'GGPoker'
           AND source = 'discord'
         ORDER BY id DESC
@@ -314,7 +314,6 @@ def process_replayer_links_preview(current_user=Depends(require_auth)):
         {
             "id": r["id"],
             "url": r["raw_text"],
-            "entry_type": r["entry_type"],
             "status": r["status"],
             "channel": r["discord_channel"],
             "posted_at": r["discord_posted_at"].isoformat() if r["discord_posted_at"] else None,
@@ -322,21 +321,10 @@ def process_replayer_links_preview(current_user=Depends(require_auth)):
         for r in pending[:5]
     ]
 
-    # Breakdown por entry_type para diagnóstico
-    by_type = {}
-    for r in rows:
-        by_type[r["entry_type"]] = by_type.get(r["entry_type"], 0) + 1
-
-    pending_by_type = {}
-    for r in pending:
-        pending_by_type[r["entry_type"]] = pending_by_type.get(r["entry_type"], 0) + 1
-
     return {
         "ok": True,
         "total": len(rows),
-        "by_type": by_type,
         "pending_extract": len(pending),
-        "pending_by_type": pending_by_type,
         "has_image_no_vision": len(has_image_no_vision),
         "done": len(done),
         "sample_pending": sample,
@@ -388,94 +376,6 @@ def debug_fetch(url: str, current_user=Depends(require_auth)):
     return {"ok": True, "url": url, "attempts": results}
 
 
-def _fetch_entry_image_bytes(entry_type: str, raw_text: str | None) -> dict | None:
-    """
-    Obtém bytes da imagem de uma entry Discord, conforme o entry_type.
-
-    - 'replayer_link': URL HTML (gg.gl / pokercraft.com/embedded). Faz fetch
-      HTML + extrai og:image PNG via _extract_gg_replayer_image.
-    - 'image': URL directo (gyazo, cdn.discordapp.com, etc.). Download directo.
-
-    Retorna {img_url, img_b64, mime_type} ou None em qualquer falha.
-    Pipeline downstream (guardar img_b64 + Vision) é idêntico para ambos.
-    """
-    import base64
-    url = (raw_text or "").strip()
-    if not url.startswith("http"):
-        return None
-
-    if entry_type == "replayer_link":
-        from app.discord_bot import _extract_gg_replayer_image
-        data = _extract_gg_replayer_image(url)
-        if not data:
-            return None
-        # _extract_gg_replayer_image devolve {img_url, img_b64, screenshot_url}
-        # com mime_type implícito 'image/png' (CDN GG só serve PNG).
-        return {
-            "img_url": data.get("img_url"),
-            "img_b64": data.get("img_b64"),
-            "mime_type": "image/png",
-        }
-
-    if entry_type == "image":
-        # Download directo. Cobre gyazo + cdn.discordapp.com + qualquer CDN
-        # que sirva a imagem no próprio URL. UA de browser para evitar 403.
-        try:
-            import httpx
-        except ImportError:
-            logger.error("httpx não instalado — image entry fetch falhou")
-            return None
-        try:
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Accept": "image/*,*/*;q=0.8",
-            }
-            with httpx.Client(follow_redirects=True, timeout=15, headers=headers) as client:
-                # Gyazo: link público é HTML. URL directo é i.gyazo.com/<id>.png.
-                # Se vier link gyazo.com/<id> sem extensão, transformar para i.gyazo.
-                fetch_url = url
-                if "gyazo.com/" in fetch_url and "i.gyazo.com" not in fetch_url and not any(
-                    fetch_url.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")
-                ):
-                    # Tentar i.gyazo + .png (formato canónico). Se falhar, fica o URL original.
-                    gid = fetch_url.rstrip("/").split("/")[-1]
-                    candidate = f"https://i.gyazo.com/{gid}.png"
-                    try:
-                        head = client.head(candidate)
-                        if head.status_code == 200:
-                            fetch_url = candidate
-                    except Exception:
-                        pass
-                resp = client.get(fetch_url)
-                if resp.status_code != 200:
-                    logger.warning(
-                        f"image entry fetch failed: {resp.status_code} for {fetch_url}"
-                    )
-                    return None
-                ct = resp.headers.get("content-type", "image/png").split(";")[0].strip() or "image/png"
-                if not ct.startswith("image/"):
-                    logger.warning(f"image entry fetch: unexpected content-type {ct} for {fetch_url}")
-                    return None
-                img_bytes = resp.content
-                img_b64 = base64.b64encode(img_bytes).decode("ascii")
-                return {
-                    "img_url": fetch_url,
-                    "img_b64": img_b64,
-                    "mime_type": ct,
-                }
-        except Exception as e:
-            logger.error(f"image entry fetch error for {url}: {e}")
-            return None
-
-    # entry_type desconhecido — não devia acontecer dada a query SQL.
-    logger.warning(f"_fetch_entry_image_bytes: entry_type não suportado: {entry_type}")
-    return None
-
-
 @router.post("/process-replayer-links")
 async def process_replayer_links(
     confirm: bool = False,
@@ -483,17 +383,16 @@ async def process_replayer_links(
     current_user=Depends(require_auth),
 ):
     """
-    Reprocessa entries Discord pendentes — `entry_type IN ('replayer_link','image')` —
-    em batch. Para cada uma:
-      1. Obtém bytes da imagem (helper _fetch_entry_image_bytes consoante o tipo)
+    Reprocessa entries replayer_link GG Discord em status=new.
+
+    Para cada um:
+      1. Extrai og:image do URL (sincronamente — rápido, só fetch HTML + PNG)
       2. Guarda img_b64 no entry
       3. Dispara _run_vision_for_entry em background — Vision + match automático
 
     Requer ?confirm=true. Parâmetro ?limit=N limita quantos processa (default 50).
     Devolve relatório por entry (sucesso extract / falha + razão).
     Vision corre em background, pode demorar ~5s por entry.
-
-    Nome 'replayer_links' mantido por retro-compat com sync-and-process e UI.
     """
     if not confirm:
         raise HTTPException(
@@ -505,12 +404,13 @@ async def process_replayer_links(
     import asyncio
     import json
     from app.db import get_conn
+    from app.discord_bot import _extract_gg_replayer_image
     from app.routers.screenshot import _run_vision_for_entry
 
     rows = query("""
-        SELECT id, raw_text, entry_type, discord_posted_at, raw_json
+        SELECT id, raw_text, discord_posted_at, raw_json
         FROM entries
-        WHERE entry_type IN ('replayer_link', 'image')
+        WHERE entry_type = 'replayer_link'
           AND site = 'GGPoker'
           AND source = 'discord'
           AND (raw_json->>'img_b64') IS NULL
@@ -526,8 +426,7 @@ async def process_replayer_links(
         for r in rows:
             entry_id = r["id"]
             url = (r["raw_text"] or "").strip()
-            entry_type = r["entry_type"]
-            entry_item = {"id": entry_id, "url": url, "entry_type": entry_type}
+            entry_item = {"id": entry_id, "url": url}
 
             if not url.startswith("http"):
                 entry_item["status"] = "skip"
@@ -535,9 +434,9 @@ async def process_replayer_links(
                 report.append(entry_item)
                 continue
 
-            # Obter bytes (replayer_link via og:image; image via download directo)
+            # Extrair og:image
             try:
-                img_data = _fetch_entry_image_bytes(entry_type, url)
+                img_data = _extract_gg_replayer_image(url)
             except Exception as e:
                 entry_item["status"] = "error_extract"
                 entry_item["reason"] = f"excepção: {e}"
@@ -546,39 +445,32 @@ async def process_replayer_links(
 
             if not img_data:
                 entry_item["status"] = "error_extract"
-                entry_item["reason"] = (
-                    "og:image não encontrado ou download falhou"
-                    if entry_type == "replayer_link"
-                    else "download da imagem falhou"
-                )
+                entry_item["reason"] = "og:image não encontrado ou download falhou"
                 report.append(entry_item)
                 continue
 
             img_b64 = img_data.get("img_b64")
             img_url = img_data.get("img_url")
-            mime_type = img_data.get("mime_type") or "image/png"
             if not img_b64:
                 entry_item["status"] = "error_extract"
                 entry_item["reason"] = "img_b64 vazio"
                 report.append(entry_item)
                 continue
 
-            # Guardar imagem no entry. Para replayer_link mantemos o flag legado
-            # gg_replayer_resolved=true (alguns paths antigos ainda lêem). Para
-            # image entries não escrevemos esse flag (não é replayer).
-            extra = {
-                "img_url": img_url,
-                "img_b64": img_b64,
-                "mime_type": mime_type,
-            }
-            if entry_type == "replayer_link":
-                extra["gg_replayer_resolved"] = True
-
+            # Guardar imagem no entry
             try:
                 with conn.cursor() as cur:
                     cur.execute(
                         "UPDATE entries SET raw_json = COALESCE(raw_json, '{}'::jsonb) || %s WHERE id = %s",
-                        (json.dumps(extra), entry_id),
+                        (
+                            json.dumps({
+                                "img_url": img_url,
+                                "img_b64": img_b64,
+                                "mime_type": "image/png",
+                                "gg_replayer_resolved": True,
+                            }),
+                            entry_id,
+                        ),
                     )
                 conn.commit()
             except Exception as e:
@@ -601,7 +493,7 @@ async def process_replayer_links(
                     _run_vision_for_entry(
                         entry_id=entry_id,
                         content=content,
-                        mime_type=mime_type,
+                        mime_type="image/png",
                         tm_number=None,   # Vision lê o TM da imagem
                         file_meta=file_meta,
                         img_b64=img_b64,
