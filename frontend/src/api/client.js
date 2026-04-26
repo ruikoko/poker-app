@@ -71,6 +71,7 @@ export const hands = {
   screenshot: (id)      => req('GET',    `/hands/${id}/screenshot`),
   stats:  ()            => req('GET',    '/hands/stats'),
   ssMatchPending: ()    => req('GET',    '/hands/ss-match-pending'),
+  ssWithoutMatch: ()    => req('GET',    '/hands/ss-without-match'),
   tagGroups: (params = {}) => {
     const qs = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
