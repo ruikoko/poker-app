@@ -585,16 +585,29 @@ def hand_stats(current_user=Depends(require_auth)):
       - new_this_week — mãos criadas nos últimos 7 dias
       - recent — 5 últimas mãos importadas (por created_at)
     """
-    rows = query("""
+    # Counts dos estados de estudo (new/review/studying/resolved) excluem
+    # placeholders GG sem HH real: pela regra de ouro, mãos GG só contam como
+    # "por estudar" quando têm match SS↔HH válido. Sites != GG passam sempre
+    # (já têm nicks reais no raw). 'total' e 'mtt_archive' continuam puros —
+    # 'total' é "estado da BD" por decisão explícita.
+    study_state_filter = (
+        "site != 'GGPoker' "
+        "OR ("
+        "    player_names ->> 'match_method' IS NOT NULL "
+        "    AND player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%'"
+        ")"
+    )
+    rows = query(f"""
         SELECT
             COUNT(*) FILTER (WHERE study_state != 'mtt_archive') AS total,
-            COUNT(*) FILTER (WHERE study_state = 'new') AS new,
-            COUNT(*) FILTER (WHERE study_state = 'review') AS review,
-            COUNT(*) FILTER (WHERE study_state = 'studying') AS studying,
-            COUNT(*) FILTER (WHERE study_state = 'resolved') AS resolved,
+            COUNT(*) FILTER (WHERE study_state = 'new'      AND ({study_state_filter})) AS new,
+            COUNT(*) FILTER (WHERE study_state = 'review'   AND ({study_state_filter})) AS review,
+            COUNT(*) FILTER (WHERE study_state = 'studying' AND ({study_state_filter})) AS studying,
+            COUNT(*) FILTER (WHERE study_state = 'resolved' AND ({study_state_filter})) AS resolved,
             COUNT(*) FILTER (WHERE study_state = 'mtt_archive') AS mtt_archive,
             COUNT(*) FILTER (
                 WHERE study_state != 'mtt_archive'
+                  AND ({study_state_filter})
                   AND created_at >= NOW() - INTERVAL '7 days'
             ) AS new_this_week,
             COUNT(DISTINCT site) FILTER (WHERE study_state != 'mtt_archive') AS sites,

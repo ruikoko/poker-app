@@ -1205,16 +1205,20 @@ def list_mtt_hands(
 
     if ss_filter is not None:
         if ss_filter == 'with':
-            # "Com SS": match SS↔HH válido (match_method preenchido) OU screenshot directo
+            # "Com SS" = mão pronta para estudo: HH real cruzada com SS via Vision.
+            # match_method real (não placeholder). screenshot_url sozinho não basta —
+            # placeholders Discord têm CDN URL mas continuam sem HH e caem em "Sem SS".
             conditions.append(
-                "(h.screenshot_url IS NOT NULL "
-                "OR h.player_names ->> 'match_method' IS NOT NULL)"
+                "(h.player_names ->> 'match_method' IS NOT NULL "
+                "AND h.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%')"
             )
         elif ss_filter == 'without':
-            # Sem SS E sem match válido (player_names sem match_method também conta)
+            # "Sem SS" = ainda à espera (HH em falta OU match em falta).
+            # Inclui placeholders Discord mesmo com screenshot_url preenchido.
             conditions.append(
-                "h.screenshot_url IS NULL "
-                "AND (h.player_names IS NULL OR h.player_names->>'match_method' IS NULL)"
+                "(h.player_names IS NULL "
+                "OR h.player_names ->> 'match_method' IS NULL "
+                "OR h.player_names ->> 'match_method' LIKE 'discord_placeholder_%%')"
             )
         # 'both' → sem filtro
     elif has_screenshot is not None:
@@ -1343,13 +1347,18 @@ def list_mtt_dates(
     params: list = []
 
     if ss_filter == 'with':
+        # "Com SS" = HH real + match Vision. Placeholders saem (têm screenshot_url
+        # mas raw IS NULL). Coerente com /mtt/hands.
         conditions.append(
-            "(screenshot_url IS NOT NULL OR player_names ->> 'match_method' IS NOT NULL)"
+            "(player_names ->> 'match_method' IS NOT NULL "
+            "AND player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%')"
         )
     elif ss_filter == 'without':
+        # "Sem SS" = ainda à espera de match real (inclui placeholders Discord).
         conditions.append(
-            "screenshot_url IS NULL "
-            "AND (player_names IS NULL OR player_names->>'match_method' IS NULL)"
+            "(player_names IS NULL "
+            "OR player_names ->> 'match_method' IS NULL "
+            "OR player_names ->> 'match_method' LIKE 'discord_placeholder_%%')"
         )
     # 'both' → sem filtro SS
 

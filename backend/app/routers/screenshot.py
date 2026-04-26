@@ -1319,6 +1319,29 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     anon_map = _build_anon_to_real_map(matched_hand, raw_json)
     enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json)
 
+    # match_method só sobe a 'anchors_stack_elimination_v2' quando há HH real
+    # (raw populado). Sem HH, a hand continua a ser placeholder mesmo após
+    # 2ª entry Discord cruzar nicks via Vision — anteriormente este path
+    # promovia incondicionalmente, criando 25 mãos com etiqueta de match
+    # completo mas sem raw, que escapavam ao filtro de Estudo.
+    has_real_hh = bool((matched_hand.get("raw") or "").strip())
+    pn_old = matched_hand.get("player_names") or {}
+    if isinstance(pn_old, str):
+        try:
+            pn_old = json.loads(pn_old)
+        except (ValueError, TypeError):
+            pn_old = {}
+    if has_real_hh:
+        match_method_value = "anchors_stack_elimination_v2"
+    else:
+        # Preservar match_method existente do placeholder (ex:
+        # 'discord_placeholder_no_hh' / '_backfill'); fallback ao default
+        # se de algum modo estiver vazio.
+        match_method_value = (
+            (pn_old.get("match_method") if isinstance(pn_old, dict) else None)
+            or "discord_placeholder_no_hh"
+        )
+
     player_names_json = {
         "players_list": raw_json.get("players_list", []),
         "hero": hero_name,
@@ -1326,7 +1349,7 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
         "vision_bb": raw_json.get("vision_bb"),
         "anon_map": anon_map,
         "file_meta": file_meta,
-        "match_method": "anchors_stack_elimination_v2",
+        "match_method": match_method_value,
     }
 
     # Fill basic fields from Vision data if hand is empty

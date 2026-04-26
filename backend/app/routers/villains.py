@@ -73,11 +73,13 @@ VILLAIN_ELIGIBILITY_CONDITION = """
         )
         OR (
             h.player_names ->> 'match_method' IS NOT NULL
+            AND h.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%'
             AND h.has_showdown = TRUE
         )
         OR (
             'nota' = ANY(COALESCE(h.discord_tags, ARRAY[]::text[]))
             AND h.player_names ->> 'match_method' IS NOT NULL
+            AND h.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%'
         )
     )
 """
