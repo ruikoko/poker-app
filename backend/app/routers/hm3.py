@@ -1202,6 +1202,25 @@ async def import_hm3(
     except Exception as e:
         logger.error(f"HM3 auto-rematch error: {e}")
 
+    # ── Trigger anexos imagem ↔ mão (Bucket 1 Fase IV) ──
+    # Corre em background. Cobre o caso em que mãos HM3 acabadas de inserir
+    # têm imagens Discord órfãs ±90s (match fallback hm3_temporal_fallback).
+    import asyncio
+    from app.routers.attachments import run_match_worker
+
+    async def _attachments_async():
+        try:
+            result = run_match_worker(limit=100)
+            logger.info(
+                f"[import_hm3] attachments worker: "
+                f"{result['applied']} applied, {result['skipped']} skipped, "
+                f"{result['errors']} errors"
+            )
+        except Exception as exc:
+            logger.error(f"[import_hm3] attachments worker falhou: {exc}")
+
+    asyncio.create_task(_attachments_async())
+
     return {
         "status": "ok",
         "total_rows": len(hands_map),

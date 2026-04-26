@@ -144,6 +144,24 @@ async def sync_and_process(current_user=Depends(require_auth)):
     except HTTPException:
         pass
 
+    # 6. Trigger anexos imagem ↔ mão (Bucket 1 Fase IV) — corre em background.
+    #    Cobre o caso em que entries 'image' chegaram durante o sync e mãos
+    #    irmãs (replayer_link no mesmo canal ±90s) já estão criadas.
+    from app.routers.attachments import run_match_worker
+
+    async def _attachments_async():
+        try:
+            result = run_match_worker(limit=100)
+            logger.info(
+                f"[sync-and-process] attachments worker: "
+                f"{result['applied']} applied, {result['skipped']} skipped, "
+                f"{result['errors']} errors"
+            )
+        except Exception as exc:
+            logger.error(f"[sync-and-process] attachments worker falhou: {exc}")
+
+    asyncio.create_task(_attachments_async())
+
     return {
         "ok": True,
         "servers_synced": synced_servers,
