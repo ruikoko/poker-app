@@ -540,7 +540,8 @@ def list_hands(
                h.all_players_actions, h.screenshot_url, h.player_names,
                h.tournament_format, h.tournament_name, h.tournament_number, h.buy_in,
                e.discord_channel, e.discord_posted_at,
-               d.channel_name AS discord_channel_name
+               d.channel_name AS discord_channel_name,
+               (SELECT COUNT(*) FROM hand_attachments WHERE hand_db_id = h.id)::int AS attachment_count
         FROM hands h
         LEFT JOIN entries e ON h.entry_id = e.id
         LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
@@ -974,6 +975,16 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
         raise HTTPException(status_code=404, detail="Mão não encontrada")
 
     hand = dict(rows[0])
+
+    # Anexos imagem ↔ mão (Bucket 1). Lista em ordem cronológica de posted_at.
+    attachments = query("""
+        SELECT id, image_url, cached_url, img_b64, mime_type,
+               posted_at, channel_name, match_method, delta_seconds
+        FROM hand_attachments
+        WHERE hand_db_id = %s
+        ORDER BY posted_at ASC, id ASC
+    """, (hand_pk,))
+    hand["attachments"] = [dict(a) for a in attachments]
 
     # Marcar como vista se ainda não foi
     if not hand.get("viewed_at"):

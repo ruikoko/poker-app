@@ -158,6 +158,52 @@ export default function HandDetailPage() {
         )}
       </div>
 
+      {/* ── CONTEXTO (Bucket 1 — anexos imagem ↔ mão) ── */}
+      {hand.attachments && hand.attachments.length > 0 && (
+        <div style={{ background: '#0f1117', borderRadius: 8, padding: '16px 20px', marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 12 }}>
+            CONTEXTO ({hand.attachments.length} {hand.attachments.length === 1 ? 'imagem' : 'imagens'})
+          </div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {hand.attachments.map(att => {
+              const src = att.img_b64
+                ? `data:${att.mime_type || 'image/png'};base64,${att.img_b64}`
+                : att.image_url
+              const dt = att.posted_at ? new Date(att.posted_at) : null
+              const timeStr = dt
+                ? `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+                : ''
+              const channelLabel = att.channel_name || ''
+              const deltaLabel = att.delta_seconds != null ? `Δ ${att.delta_seconds}s` : ''
+              const metaLine = [timeStr, channelLabel, deltaLabel].filter(Boolean).join(' · ')
+              return (
+                <div key={att.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <a
+                    href={att.image_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Abrir imagem em nova aba"
+                    style={{ cursor: 'zoom-in', display: 'inline-block' }}
+                  >
+                    <img
+                      src={src}
+                      alt={metaLine || 'anexo'}
+                      style={{
+                        width: 200, height: 'auto', display: 'block',
+                        borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)',
+                      }}
+                    />
+                  </a>
+                  <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', maxWidth: 200 }}>
+                    {metaLine}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── MESA + ACÇÕES (continuous block) ── */}
       <div style={{ background: '#0f1117', borderRadius: 8, overflow: 'hidden' }}>
         {/* Mesa */}

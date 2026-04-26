@@ -246,6 +246,19 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       <div style={{
         display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end',
       }}>
+        {/* Anexos imagem (Bucket 1) — discreto, só aparece se >0 */}
+        {hand.attachment_count > 0 && (
+          <span
+            onClick={e => e.stopPropagation()}
+            title={`${hand.attachment_count} ${hand.attachment_count === 1 ? 'imagem anexada' : 'imagens anexadas'}`}
+            style={{
+              fontSize: 10, color: '#64748b', fontFamily: 'monospace',
+              padding: '2px 5px', borderRadius: 3, fontWeight: 600,
+              background: 'rgba(100,116,139,0.08)',
+              whiteSpace: 'nowrap',
+            }}
+          >📎 {hand.attachment_count}</span>
+        )}
         {hand.all_players_actions && (
           <a
             href={`/replayer/${hand.id}`}
