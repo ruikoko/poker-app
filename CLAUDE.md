@@ -15,6 +15,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Se o Claude for invocado durante uma sessão activa**, avisar imediatamente o utilizador e pedir confirmação explícita antes de prosseguir. Nunca arrancar processos de longa duração (dev server, bot Discord, watchers) sem essa confirmação.
 
+## Mapa de acoplamento da app
+
+Antes de tocar em qualquer conceito da app (`match_method`, `origin`,
+`hm3_tags`, `discord_tags`, `tags`, `study_state`, `entry_type`,
+`source`, `raw_json`, etc.), lê **`docs/MAPA_ACOPLAMENTO.md`**.
+
+Esse documento mapeia, para cada conceito-chave (33 entradas):
+- Onde é produzido (ficheiro:linha + função)
+- Onde é consumido (filtros, queries, painéis)
+- Valores possíveis e significado de cada
+- Comportamento quando muda (ripple effects)
+- Armadilhas conhecidas (bugs já apanhados)
+- FAQ adaptada ao conceito
+
+Mexer sem ler causa regressões — vimos isto a acontecer em sessões
+passadas.
+
+**Manutenção obrigatória:** mudaste algo que produz/consome um
+conceito mapeado? Actualiza o MAPA na mesma sessão. Senão fica
+desactualizado e mente ao próximo Claude (pior do que não existir).
+
 ## Stack
 
 - **Backend**: FastAPI + `psycopg2` contra PostgreSQL. Entry point `backend/app/main.py`; routers em `backend/app/routers/`; lógica em `backend/app/services/` e `backend/app/hand_service.py` (top-level); parsers por sala em `backend/app/parsers/`.
