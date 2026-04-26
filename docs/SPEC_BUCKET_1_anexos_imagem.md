@@ -60,7 +60,8 @@ Notas:
 - `ON DELETE CASCADE` em `hand_db_id`: apagar a mão apaga os anexos.
 - `ON DELETE SET NULL` em `entry_id`: apagar o entry preserva o anexo (URL ainda válido).
 - UNIQUE parcial impede mesma `(hand, entry)` duplicada se o worker reprocessar.
-- `delta_seconds` sem sinal — só magnitude para qualidade. Sinal pode reconstruir-se de `posted_at - hand.played_at` se necessário.
+- `delta_seconds` = `|posted_at - hand.played_at|` em segundos, **uniforme em ambos os paths** (primário e fallback). É a magnitude da distância temporal entre a imagem postada e a mão jogada — métrica de qualidade do match. Sinal pode reconstruir-se de `posted_at - hand.played_at` se necessário.
+  - **Distinção importante:** a *janela* de match primário é definida pelo sibling delta (entry image vs entry replayer_link no mesmo canal, ±90s — ver §4); o *valor* `delta_seconds` guardado é image-to-played_at. Os dois números podem diferir (ver §6 — entry 13 tem sibling delta 7s mas image-to-played_at 18s).
 
 ## 4. Pipeline em 3 fases
 
@@ -90,20 +91,22 @@ Após `sync-and-process` (Discord), após `import_hm3` (CSV), e (Q5) após qualq
 
 ## 6. Estado real das 8 entries existentes
 
-Verificado em prod a 2026-04-26 com query `±90s`:
+Verificado em prod a 2026-04-26 com query `±90s`. Janela é sibling delta (entry image vs entry replayer_link irmã); valor `delta_seconds` armazenado é image-to-played_at (uniforme com fallback path):
 
-| entry_id | canal | posted_at (UTC) | URL gyazo | match candidato | resultado |
-|---|---|---|---|---|---|
-| 6 | icm-pko | 2026-03-23 19:48:39 | `00bd8eea48b6e9...` | nenhum | órfã |
-| 7 | icm-pko | 2026-03-24 03:31:42 | `c0871ebc6529...` | nenhum | órfã (cross-post 1/3) |
-| 46 | pos-pko | 2026-03-24 03:31:45 | `c0871ebc6529...` | nenhum | órfã (cross-post 2/3) |
-| 133 | nota | 2026-03-24 03:31:48 | `c0871ebc6529...` | nenhum | órfã (cross-post 3/3) |
-| 13 | icm-pko | 2026-03-25 20:29:21 | `4a776e1922de...` | hand 117 (Δ=-7s) ✓ / hand 85 (Δ=-64s) | **match** com hand 117 (mais próxima) |
-| 17 | icm-pko | 2026-03-25 21:27:35 | `fd1a6adb7c99...` | hand 115 (Δ=-10s) | **match** com hand 115 |
-| 87 | pos-pko | 2026-04-23 16:57:55 | `f77335e1ccb1...` | hand 67 (Δ=-65s) | **match** com hand 67 |
-| 35 | icm | 2026-04-23 19:33:23 | `f6e9f5afbc30...` | nenhum | órfã |
+| entry_id | canal | posted_at (UTC) | URL gyazo | match candidato | sibling Δ | image→played_at Δ (`delta_seconds`) | resultado |
+|---|---|---|---|---|---|---|---|
+| 6 | icm-pko | 2026-03-23 19:48:39 | `00bd8eea48b6e9...` | nenhum | — | — | órfã |
+| 7 | icm-pko | 2026-03-24 03:31:42 | `c0871ebc6529...` | nenhum | — | — | órfã (cross-post 1/3) |
+| 46 | pos-pko | 2026-03-24 03:31:45 | `c0871ebc6529...` | nenhum | — | — | órfã (cross-post 2/3) |
+| 133 | nota | 2026-03-24 03:31:48 | `c0871ebc6529...` | nenhum | — | — | órfã (cross-post 3/3) |
+| 13 | icm-pko | 2026-03-25 20:29:21 | `4a776e1922de...` | hand 117 (sibling 7s) ✓ / hand 85 (sibling 64s) | 7s | **18s** | **match** com hand 117 (sibling mais próximo) |
+| 17 | icm-pko | 2026-03-25 21:27:35 | `fd1a6adb7c99...` | hand 115 (sibling 10s) | 10s | **23s** | **match** com hand 115 |
+| 87 | pos-pko | 2026-04-23 16:57:55 | `f77335e1ccb1...` | hand 67 (sibling 65s) | 65s | **78s** | **match** com hand 67 |
+| 35 | icm | 2026-04-23 19:33:23 | `f6e9f5afbc30...` | nenhum | — | — | órfã |
 
 **Resumo:** 3 das 8 (38%) entram com a regra ±90s. 5 das 8 (62%) ficam órfãs hoje — destas, 3 são a mesma URL cross-postada (1 imagem real + 2 cross-posts). Apenas **1 imagem genuinamente órfã** (entry 6) + **1 imagem com cross-posts órfã** (cluster 24-Mar) + **1 imagem órfã** (entry 35).
+
+**Nota sobre os dois deltas:** o "sibling Δ" valida que a entry image é vizinha temporal de uma entry replayer_link no mesmo canal (regra de match primário, janela ±90s). O `delta_seconds` armazenado em `hand_attachments` é o image-to-played_at — métrica uniforme com o fallback path. Confirmado via `_compute_match_candidates(100)` em prod a 2026-04-27.
 
 ## 7. Plano de implementação ordenado
 

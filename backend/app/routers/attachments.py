@@ -161,8 +161,14 @@ def _pending_image_entries(limit: int) -> list[dict]:
 
 def _find_primary_match(img_entry: dict) -> dict | None:
     """
-    Match primário: outra entry Discord no mesmo canal ±90s que tenha hand
-    associada (via hands.entry_id). Tiebreaker: delta_seconds ASC, hand id ASC.
+    Match primário: outra entry Discord no mesmo canal cuja hand associada
+    fica dentro de ±90s (entre img.discord_posted_at e e2.discord_posted_at,
+    sibling delta — define a janela de match conforme SPEC §4).
+
+    O delta_seconds REPORTADO é image-to-played_at (|h.played_at -
+    img.discord_posted_at|), conforme SPEC §3 — uniforme com fallback path.
+
+    Tiebreaker: delta_s ASC (image-to-played_at), played_at ASC, hand id ASC.
 
     Filtro: hands.played_at >= '2026-01-01'.
     """
@@ -174,7 +180,7 @@ def _find_primary_match(img_entry: dict) -> dict | None:
             h.played_at,
             e2.id AS sibling_entry_id,
             e2.discord_posted_at AS sibling_posted_at,
-            ABS(EXTRACT(EPOCH FROM (e2.discord_posted_at - %s::timestamptz)))::int AS delta_s
+            ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamptz)))::int AS delta_s
         FROM entries e2
         JOIN hands h ON h.entry_id = e2.id
         WHERE e2.id <> %s
