@@ -366,7 +366,7 @@ def _apply_match(candidate: dict) -> dict:
         return {
             "entry_id": entry_id,
             "status": "ok",
-            "attachment_id": inserted[0],
+            "attachment_id": inserted["id"],
             "hand_db_id": match["hand_db_id"],
             "hand_id_text": match["hand_id_text"],
             "match_method": match["match_method"],
