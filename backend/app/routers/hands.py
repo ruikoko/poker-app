@@ -310,6 +310,32 @@ STUDY_VIEW_GG_MATCH_FILTER = (
     "    AND (h.player_names->>'match_method') NOT LIKE 'discord_placeholder_%%'))"
 )
 
+# Variante para a vista "Por Tags" do Estudo (sub-fase 4a):
+# Aceita placeholders Discord excepto para discord_tags = ['nota'] exclusivamente
+# (essas continuam destinadas a Vilões, não a Estudo).
+# Critério adicional: origem = 'discord' (exclui placeholders SS upload manual,
+# que ficam no Dashboard/SSMatch). discord_tags tem que estar populada com
+# pelo menos 1 canal que não seja 'nota' isolado.
+STUDY_VIEW_GG_MATCH_FILTER_WITH_DISCORD_PLACEHOLDERS = (
+    "("
+    "  h.site != 'GGPoker' "
+    "  OR ("
+    "    (h.player_names->>'match_method') IS NOT NULL "
+    "    AND (h.player_names->>'match_method') NOT LIKE 'discord_placeholder_%%'"
+    "  )"
+    "  OR ("
+    "    (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' "
+    "    AND h.origin = 'discord' "
+    "    AND h.discord_tags IS NOT NULL "
+    "    AND array_length(h.discord_tags, 1) > 0 "
+    "    AND NOT ("
+    "      array_length(h.discord_tags, 1) = 1 "
+    "      AND h.discord_tags[1] = 'nota'"
+    "    )"
+    "  )"
+    ")"
+)
+
 
 def _build_conditions(
     site, tag, study_state, position, search, date_from,
@@ -423,6 +449,7 @@ def list_hands(
     villain:          Optional[str] = Query(None, description="Filtrar por vilão (nick exacto em all_players_actions)"),
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
     study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
+    include_discord_placeholders: bool = Query(False, description="Se true (e study_view=true), aceita placeholders Discord excepto discord_tags=['nota'] exclusivamente. Para a secção 'Discord — Só SS (sem HH)' da vista Por Tags."),
     page:             int = Query(1, ge=1),
     page_size:        int = Query(50, ge=1, le=2000),
     current_user=Depends(require_auth)
@@ -436,7 +463,11 @@ def list_hands(
     if not include_archive and study_state != 'mtt_archive':
         conditions.append("h.study_state != 'mtt_archive'")
     if study_view:
-        conditions.append(STUDY_VIEW_GG_MATCH_FILTER)
+        conditions.append(
+            STUDY_VIEW_GG_MATCH_FILTER_WITH_DISCORD_PLACEHOLDERS
+            if include_discord_placeholders
+            else STUDY_VIEW_GG_MATCH_FILTER
+        )
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total = query(
@@ -490,6 +521,7 @@ def tag_groups(
     tag_source:       Optional[str] = Query(None, description="'auto' agrupa por hm3_tags (prioridade) senão discord_tags senão '(sem tag)'. Sobrescreve use_hm3_tags."),
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
     study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
+    include_discord_placeholders: bool = Query(False, description="Se true (e study_view=true), aceita placeholders Discord excepto discord_tags=['nota'] exclusivamente. Para a secção 'Discord — Só SS (sem HH)' da vista Por Tags."),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
@@ -509,7 +541,11 @@ def tag_groups(
     if not include_archive and study_state != 'mtt_archive':
         conditions.append("h.study_state != 'mtt_archive'")
     if study_view:
-        conditions.append(STUDY_VIEW_GG_MATCH_FILTER)
+        conditions.append(
+            STUDY_VIEW_GG_MATCH_FILTER_WITH_DISCORD_PLACEHOLDERS
+            if include_discord_placeholders
+            else STUDY_VIEW_GG_MATCH_FILTER
+        )
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
