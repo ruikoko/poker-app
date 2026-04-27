@@ -1,7 +1,7 @@
 # Validação end-to-end — poker-app
 
-**Última actualização:** 27 Abril 2026
-**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem) **+ verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1 (sessão 27-Abr)**
+**Última actualização:** 28 Abril 2026
+**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1) **+ sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes)**
 
 ---
 
@@ -18,11 +18,11 @@
 
 | Fonte | Entra com origem correcta? | Match auto? | Cria villains quando aplicável? |
 |---|---|---|---|
-| HM3 `.bat` (WN/PS/WPN/GG) | ✅ `origin='hm3'` | ✅ HH→SS auto-rematch (`072f57a`) | ✅ non-GG via VPIP/showdown; GG: skip puro (SS pipeline trata, fix `6aefc95`). **Validado 27-Abr Fase 5: 130 hands, 0 GG, 88 villain rows** |
+| HM3 `.bat` (WN/PS/WPN/GG) | ✅ `origin='hm3'` | ✅ HH→SS auto-rematch (`072f57a`) | ✅ non-GG via VPIP/showdown; GG: skip puro (SS pipeline trata, fix `6aefc95`). **Validado 27-Abr Fase 5: 130 hands, 0 GG, 88 villain rows**. **28-Abr: refundido com regra A∨B∨C∨D + categoria via helper centralizado (`8ca3d88`)** |
 | Discord (replayer / HH texto / image) | ✅ `origin='discord'` + `discord_tags`. Imagens directas (Bucket 1) NÃO criam mão. | ✅ SS→HH auto após Vision; 2ª entry duplicada agrega via `_link_second_discord_entry_to_existing_hand` (`f8a8238`) | ✅ regra A∨B∨C. **Validado 27-Abr Fase 2: 61 entries, 48 hands, 12 cross-posts agregados** |
 | Upload manual SS | ✅ entry `source='screenshot', entry_type='screenshot'`; Vision processa, match_method correcto. **Validado 27-Abr Fase 6: 2 SSs Rui + 10 Karluz, 12 entries resolved** | ✅ match por TM | ⚠️ `screenshot_url=NULL` (stub `_upload_screenshot_to_storage` grava em /tmp ephemeral; `img_b64` servido via `/api/screenshots/image/{entry_id}` funciona como fallback) |
-| Import ZIP/TXT HH | ✅ `origin='hh_import'` (fix `2844b94` + backfill 1146 mãos). **Validado 27-Abr Fase 4: 13737 mãos importadas, 48 placeholders Discord substituídos** | ✅ auto-rematch SS→HH expandido para Discord `replayer_link`/`image` (`c452e12`) | ✅ |
-| **Bucket 1 anexos imagem ↔ mão** | ✅ entries image NÃO criam hand; ligadas via `hand_attachments`. **Validado 27-Abr Fase 3: 4/4 imagens anexadas via `discord_channel_temporal`** | ✅ trigger Fase IV em `discord.py` + `hm3.py` (mas **não** em `import_.py` — Tech Debt #3) | n/a |
+| Import ZIP/TXT HH | ✅ `origin='hh_import'` (fix `2844b94` + backfill 1146 mãos). **Validado 27-Abr Fase 4: 13737 mãos importadas, 48 placeholders Discord substituídos**. **28-Abr: entry meta-record marcada `resolved` após import bem-sucedido (`b233b9b`)** | ✅ auto-rematch SS→HH expandido para Discord `replayer_link`/`image` (`c452e12`) | ✅ |
+| **Bucket 1 anexos imagem ↔ mão** | ✅ entries image NÃO criam hand; ligadas via `hand_attachments`. **Validado 27-Abr Fase 3: 4/4 imagens anexadas via `discord_channel_temporal`** | ✅ trigger Fase IV em `discord.py` + `hm3.py` + **`import_.py` (`b789c60`, Tech Debt #3 fechado 28-Abr)**; `discord.py` agora dispara T1+T2 (`eb00939`, Tech Debt #6 fechado 28-Abr) | n/a |
 
 ---
 
@@ -34,9 +34,9 @@
 | HH via import ZIP, SS Discord pendente | ✅ `import_.py:340-363` (replayer_link + image) | 23/04 (19 mãos) + 24/04 wipe (81/81) + **27/04 Fase 4 (48/48 placeholders Discord substituídos)** |
 | HH via HM3 `.bat`, SS Discord pendente | ✅ `import_hm3` ganha bloco auto-rematch (`072f57a`) | 23-24/04 + 27/04 Fase 5 |
 | HM3 import dispara worker anexos (Bucket 1) | ✅ `asyncio.create_task` em `import_hm3` (`06bbb9a`) | 26/04 + 27/04 Fase 5 (log `[import_hm3] attachments worker: 0 applied`) |
-| `sync-and-process` Discord dispara worker anexos | ✅ `asyncio.create_task` em `sync_and_process` (`06bbb9a`) | 26/04 + 27/04 Fase 2 (4 applied) |
+| `sync-and-process` Discord dispara worker anexos | ✅ T1 imediato + T2 delay 90s (`eb00939`, Tech Debt #6 fechado 28-Abr); idempotência via `_pending_image_entries` | 26/04 + 27/04 Fase 2 (4 applied) + 28/04 deploy live |
 | **Karluz friend_alias hero** | ✅ `FRIEND_HEROES` reconhece como hero | **27/04 teste extra: 10 hands hero=Karluz, 0 cross-contamination** |
-| `import_.py` dispara worker anexos retroactivo | ❌ **Tech Debt #3** — falta `asyncio.create_task` | Detectado 27/04 Fase 4 (4 attachments perdidos via CASCADE) |
+| `import_.py` dispara worker anexos retroactivo | ✅ **Tech Debt #3 fechado 28-Abr** (`b789c60`) — `asyncio.create_task` adicionado entre auto-rematch e response | 28/04 deploy live; CASCADE recovery real adiado para próximo import ZIP orgânico com placeholders pendentes |
 | Forçar match bidireccional global | ✅ `/api/mtt/rematch` | 23/04 |
 | Forçar match individual por SS | ✅ `/api/screenshot/orphans/{id}/rematch` | ❓ não testado explicitamente |
 | Forçar match individual por HH | ❓ endpoint pode não existir | A verificar |
@@ -49,15 +49,17 @@
 | Comportamento | Estado |
 |---|---|
 | Placeholder Discord → HH real preserva metadados | ✅ fix `823a9f4` + NULLIF defensivo `7de889f` (descoberto pós-wipe que `ARRAY[]::text[] DEFAULT` não é NULL para COALESCE). **Re-validado 27-Abr Fase 4 (48/48 com discord_tags + screenshot_url + cross-posts preservados)** |
-| `hand_villains` idempotente (ON CONFLICT) | ✅ fix `0b01d11` |
+| `hand_villains` idempotente (ON CONFLICT) | ✅ fix `0b01d11` + UNIQUE composto `(hand_db_id, player_name, category)` (`8ca3d88`, 28-Abr) |
 | `hand_villains` criado em rematch SS↔HH | ✅ fix `0b01d11` + backfill `af563a8` (44 mãos pós-wipe) + `ef1cb64` (32 mãos sessão 24/04) |
-| `hand_villains` criado em HM3 `.bat` GG | ✅ skip puro em `_create_hand_villains_hm3` para GGPoker (SS pipeline trata) — fix `6aefc95` |
-| `hand_villains` criado em HM3 `.bat` non-GG | ✅ via VPIP/showdown directo (`6aefc95`). **Validado 27-Abr Fase 5: 88 rows / 79 hands** |
+| `hand_villains` criado em HM3 `.bat` GG | ✅ skip puro em `_create_hand_villains_hm3` para GGPoker (SS pipeline trata) — fix `6aefc95` (preservado em `8ca3d88`) |
+| `hand_villains` criado em HM3 `.bat` non-GG | ✅ via VPIP/showdown directo (`6aefc95`). **Validado 27-Abr Fase 5: 88 rows / 79 hands**. **28-Abr: refundido com helper centralizado A∨B∨C∨D (`8ca3d88`)** |
 | `hand_villains` criado em upload manual SS | ✅ via path partilhado com `_enrich_hand_from_orphan_entry`. **Validado 27-Abr Fase 6: +2 villains** |
-| Regra A∨B∨C strictamente aplicada em villain creation | ⚠️ **Tech Debt #4** — `mtt.py:_create_villains_for_hand` usa VPIP legacy; 18 hands "OUTRO" + 1 hand `has_showdown=false` na Fase 6 com villain criado |
+| Regra A∨B∨C∨D strictamente aplicada em villain creation | ✅ **Tech Debt #4 fechado 28-Abr** (`8ca3d88` + backfill + `c409677` + `bf75150` + `45051ec`) — helper `_classify_villain_categories` em `services/hand_service.py`; coluna `category TEXT` em `hand_villains` com CHECK `('sd','nota','friend')`; backfill 175 → 117 rows (49 sd + 54 nota + 0 friend nicks únicos = 91 únicos com 12 overlap) |
 | ON CONFLICT preserva `all_players_actions` enriquecido (HM3 GG) | ✅ `CASE WHEN site='GGPoker' THEN COALESCE(...)` em `6aefc95` |
 | Anexos imagem preservados em substituição placeholder→matched (sync_and_process / import_hm3) | ✅ trigger retroactivo Fase IV reanexa em milissegundos. **Validado 27-Abr Fase 4 + Recovery (4 attachments → 0 → 4 via re-sync)** |
-| Anexos imagem preservados em substituição via `import_.py` (ZIP HH) | ❌ **Tech Debt #3** — sem trigger; recovery passa por novo sync Discord |
+| Anexos imagem preservados em substituição via `import_.py` (ZIP HH) | ✅ **Tech Debt #3 fechado 28-Abr** (`b789c60`) — trigger Fase IV adicionado |
+| `entries` ZIP HH meta-record marcada `resolved` após import | ✅ **Tech Debt #7 fechado 28-Abr** (`b233b9b` + backfill SQL ad-hoc) — entries 90/91/104 actualizadas; novos imports marcam automaticamente |
+| `hand_attachments.img_b64` para imagens Gyazo JPEG | ✅ **Tech Debt #2 fechado 28-Abr** (`9baec67` + backfill `att_id=8`) — helper Gyazo agora tenta `.png/.jpg/.gif`, retorna None em vez de fallback HTML silencioso |
 
 ---
 
@@ -77,7 +79,9 @@
 | Anexos imagem visíveis na lista (matched hands) | Ícone `📎 N` em `HandRow.jsx` | ✅ 26/04 parte 2 (`a543629`) |
 | Anexos imagem visíveis na lista (placeholders Discord) | Ícone `📎 N` + thumbnails 120px em `PlaceholderHandRow` | ✅ **27/04 commit `a2ac5e5` (Tech Debt #1 fechado)** |
 | Anexos imagem visíveis no detalhe | Secção CONTEXTO em `HandDetailPage.jsx` com thumbnail 200px | ✅ 26/04 parte 2 (`a543629`) |
-| HAND HISTORY no detalhe usa nicks reais (não hashes) | ❌ **Tech Debt #5** — mostra `89ef4cba: ...` em vez de aplicar `player_names.anon_map` |
+| HAND HISTORY no detalhe usa nicks reais (não hashes) | ✅ **Tech Debt #5 fechado 28-Abr** (`400eb10` + `98330ec`) — backend pré-resolve hashes em campo `hand.raw_resolved`; 5 componentes consomem (`HandDetailPage`, modal Estudo `Hands.jsx`, `ReplayerPage`, `Replayer`, `HM3.jsx`); `hand.raw` original preservado para "Copiar HH" |
+| Página Estudo aterra em vista por defeito | ✅ **NOVO 28-Abr** (`90a6205`) — default mudado de `'tournament'` para `'tags'`; sem persistência (consistente com restante app) |
+| Página Vilões com tabs por categoria | ✅ **NOVO 28-Abr Tech Debt #4 Parte D** (`45051ec`) — 4 tabs (Todos / Mãos com SD default / Notas / Amigos) consumindo `/api/villains/categorized`; cores por sala; modal `VillainProfile` reusado via adapter |
 
 ---
 
@@ -86,6 +90,7 @@
 | Feature | Estado |
 |---|---|
 | `/api/villains/search/hands` regra A∨B∨C | ✅ |
+| `/api/villains/categorized` com filtros category+site+search+page | ✅ **NOVO 28-Abr Tech Debt #4 Parte C** (`c409677`) — devolve nick + sd_count + nota_count + friend_count + total_count + last_seen + sites + dates por nick único; legacy `/api/villains` intacto para housekeeping futuro |
 | Villain `villain_result` (sinal correcto) | ✅ 23/04 Fase 2 |
 | Tournament name/number extracção | ✅ 23/04 |
 | Tournament format canonicalisation | ✅ 23/04 |
@@ -98,11 +103,15 @@
 | Filtro `study_view` exclui GG anonimizada | ✅ 24/04 (`07059f8`) |
 | Tag agrupamento Discord vs HM3 distinto (3 secções) | ✅ 24/04 (`ed663d0`) |
 | Tabela `hand_attachments` + endpoint `/api/attachments` (Bucket 1) | ✅ 26/04 parte 2 (fases I-VI; commits `ab1953e`→`d9d6f44`) |
-| Triggers retroactivos `asyncio.create_task` em sync_and_process / import_hm3 | ✅ 26/04 parte 2 (`06bbb9a`); **lacuna identificada em `import_.py` — Tech Debt #3** |
-| UI ícone `📎 N` + secção CONTEXTO + thumbnails 200px (HandRow + HandDetailPage) | ✅ 26/04 parte 2 (`a543629`) |
+| Triggers retroactivos `asyncio.create_task` em sync_and_process / import_hm3 / **import_.py** | ✅ 26/04 parte 2 (`06bbb9a`) **+ 28/04 cobertura `import_.py` (`b789c60`)** |
+| Trigger Bucket 1 com retry T1+T2 (race condition Vision lenta) | ✅ **NOVO 28-Abr Tech Debt #6** (`eb00939`) — `discord.py:sync_and_process` agora dispara T1 imediato + T2 delay 90s; helper `_spawn_background()` mantém referência forte a tasks |
+| Helper `_classify_villain_categories` (regras A∨B∨C∨D centralizadas) | ✅ **NOVO 28-Abr Tech Debt #4 Parte A** (`8ca3d88`) — função pura em `services/hand_service.py` partilhada por `mtt.py` e `hm3.py` |
+| Helper `_resolve_hashes_in_raw` (backend pré-resolve hashes GG) | ✅ **NOVO 28-Abr Tech Debt #5** (`400eb10`) — função pura em `services/hand_service.py` consumida por `GET /api/hands/{id}` |
+| Helper Gyazo com fallback `.png/.jpg/.gif` | ✅ **NOVO 28-Abr Tech Debt #2** (`9baec67`) — `attachments.py:_fetch_entry_image_bytes` itera extensões; sem silent fallback para HTML |
+| UI ícone `HandRow` + secção CONTEXTO em `HandDetailPage` (Fase V) | ✅ 26/04 parte 2 (`a543629`) |
 | **UI 📎 N + thumbnails 120px em PlaceholderHandRow** | ✅ **27/04 commit `a2ac5e5` (Tech Debt #1 fechado)** |
 | Anexos imagem ↔ mão (Bucket 1) end-to-end | ✅ **27/04 Fase 3 + Recovery: 4/4 anexadas, validado em BD + UI** |
-| **Friend_aliases robustos (Karluz não villain quando Rui hero, Rui não villain quando Karluz hero)** | ✅ **27/04 teste extra: 0 cross-contamination** |
+| **Friend_aliases robustos (Karluz não villain quando Rui hero, Rui não villain quando Karluz hero)** | ✅ **27/04 teste extra: 0 cross-contamination**. **28-Abr: FRIEND_HEROES (Karluz/flightrisk) agora INCLUÍDOS como villain com `category='friend'` quando aparecem em mãos do Rui** (`8ca3d88`) |
 
 ---
 
@@ -111,31 +120,28 @@
 1. **Backfill estendido às 110 mãos absorvidas** — placeholders Discord que matcharam HHs reais perderam `discord_tags` antes do fix `7de889f`. Filtro precisa de incluir `entry_id IN (SELECT id FROM entries WHERE source='discord')` em vez de só `origin='discord'`. (anterior à sessão 27-Abr; pós-wipe da sessão 27-Abr o estado está limpo)
 2. **Pesquisa MTT 10 dígitos numéricos → abrir modal mão directamente** (Opção A pré-aprovada 24/04, não implementada).
 3. **Página Discord: agrupar por canal real** (`#nota`, `#pos-pko`, etc.) em vez de `#GGDiscord` + `#sem-tag` (detectado 24/04 PARTE 10, não atacado).
-4. Tech Debt #2 — investigar `img_b64=NULL` Gyazo (entries 17 e 31 confirmaram padrão).
-5. Tech Debt #3 — adicionar trigger Fase IV em `import_.py`.
-6. Tech Debt #4 — refundir villain creation com regra A∨B∨C strict.
-7. Tech Debt #5 — aplicar `anon_map` em HandDetailPage HAND HISTORY.
-8. Tech Debt #6 — endurecer race condition `asyncio.sleep(10)` em `discord.py:140`.
-9. Tech Debt #7 — investigar 3 entries `hh_text/new` com `raw_text=None`.
-10. **Forçar match individual por HH** — confirmar se endpoint existe.
-11. **Sessão B UI** (`position_parse_failed` com edição manual).
-12. **Migração painel "SSs à espera" do Dashboard para Discord**.
+4. **Tech Debt #8 — Uniformização HH em todos os componentes (alta urgência)** — 3 parsers distintos (`handParser.js:parseHH`, `Hands.jsx:parseRawHH`, `HM3.jsx:parseRawHH`) com lógicas divergentes. Fix #5 follow-up cobriu sintoma (todos consomem `raw_resolved` agora) mas a unificação dos parsers é o fix arquitectural correcto. Detalhes em §7.3.
+5. **Verificação ponta-a-ponta dos 5 pipelines pós Tech Debts 28-Abr** — validar via fluxo orgânico (não SQL directa) que os 6 fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada.
+6. **Forçar match individual por HH** — confirmar se endpoint existe.
+7. **Sessão B UI** (`position_parse_failed` com edição manual).
+8. **Migração painel "SSs à espera" do Dashboard para Discord**.
+9. **Housekeeping endpoint legacy `/api/villains`** — pós-Parte D estável, considerar remoção (consume `villain_notes` sem categorias; substituído pelo `/categorized`).
 
 ---
 
 ## 7. Bugs conhecidos não corrigidos
 
-### 7.1 Tech Debts da sessão 27-Abr
+### 7.1 Tech Debts da sessão 27-Abr (TODOS FECHADOS na sessão 28-Abr)
 
-| # | Bug | Severidade | Esforço |
+| # | Bug | Severidade | Status |
 |---|---|---|---|
-| 1 | (FECHADO 27-Abr commit `a2ac5e5`) PlaceholderHandRow não mostrava 📎 N nem thumbnails | UX | ✅ feito |
-| 2 | `img_b64=NULL` silencioso quando Gyazo serve HTML em vez de imagem (padrão repete-se entries 17 e 31). Frontend tem fallback para `image_url` mas thumbnail visualmente partido | Cosmético | ~1h investigação |
-| 3 | `import_.py` (`POST /api/import` para ZIP HH) não tem trigger Fase IV. Quando placeholder Discord é substituído por HH real, `ON DELETE CASCADE` apaga `hand_attachments` sem reanexação automática. Recovery passa por novo sync Discord. Padrão a copiar: `discord.py:163` ou `hm3.py:1222` | UX (auto-recoverável) | ~10min código + 5min deploy |
-| 4 | `_create_villains_for_hand` em `mtt.py` (path enrichment SS↔HH) usa regra VPIP preflop legacy, não regra canónica A∨B∨C documentada em MAPA §4. 18 hands "OUTRO" + 1 hand `has_showdown=false` na Fase 6 | Funcional / incoerência | ~1h investigação |
-| 5 | HandDetailPage mostra hashes GG (`89ef4cba: ...`) na secção HAND HISTORY em vez de aplicar `player_names.anon_map` para mostrar nicks reais | Funcional grave (UX bloqueante para estudo de mãos) | ~1-2h |
-| 6 | Race condition trigger Bucket 1: `asyncio.sleep(10)` em `discord.py:140` insuficiente para batch Vision >20 entries. Workaround: re-clicar "Sincronizar Agora" | UX | ~30min |
-| 7 | 3 entries `hh_text/hand_history/new` com `raw_text=None` criadas durante a sessão (entries 90, 91, 104). Origem por identificar — provável upload UI com payload vazio ou bug em path específico | Funcional (não-bloqueante) | ~30min investigação |
+| 1 | PlaceholderHandRow não mostrava 📎 N nem thumbnails | UX | ✅ FECHADO 27-Abr commit `a2ac5e5` |
+| 2 | `img_b64=NULL` silencioso quando Gyazo serve HTML em vez de imagem (padrão repete-se entries 17 e 31) | Cosmético | ✅ FECHADO 28-Abr commit `9baec67` + backfill `att_id=8` |
+| 3 | `import_.py` (`POST /api/import` para ZIP HH) não tem trigger Fase IV | UX (auto-recoverável) | ✅ FECHADO 28-Abr commit `b789c60` |
+| 4 | `_create_villains_for_hand` em `mtt.py` usa regra VPIP preflop legacy, não regra canónica A∨B∨C | Funcional / incoerência | ✅ FECHADO 28-Abr em 4 partes (`8ca3d88` + backfill SQL ad-hoc + `c409677` + `bf75150` + `45051ec`) |
+| 5 | HandDetailPage mostra hashes GG (`89ef4cba: ...`) na secção HAND HISTORY em vez de nicks reais | Funcional grave | ✅ FECHADO 28-Abr commits `400eb10` (backend pré-resolve) + `98330ec` (follow-up 5 componentes cobertos) |
+| 6 | Race condition trigger Bucket 1: `asyncio.sleep(10)` insuficiente para batch Vision >20 entries | UX | ✅ FECHADO 28-Abr commit `eb00939` (T1+T2 trigger) |
+| 7 | 3 entries `hh_text/hand_history/new` com `raw_text=None` (entries 90, 91, 104) | Funcional (não-bloqueante) | ✅ FECHADO 28-Abr commit `b233b9b` + backfill SQL ad-hoc |
 
 ### 7.2 Bugs persistentes (UX/cosméticos pré-sessão 27-Abr)
 
@@ -147,6 +153,12 @@
 | D | `channel_name` em `hand_attachments` é ID numérico, não nome resolvido — frontend mostra ID na metadata do thumbnail | Cosmético | ~30min |
 
 **Os 4 bugs antigos da validação 22-23 Abr foram TODOS resolvidos** (Bug #1 GG villains via skip `6aefc95`; Bug #2 origin via `2844b94`; Bug #3 auto-rematch HM3 via `072f57a`; Bug #4 coluna TAGS via `e77b5cf`).
+
+### 7.3 NOVO Tech Debt — sessão 28-Abr
+
+| # | Bug | Severidade | Esforço |
+|---|---|---|---|
+| 8 | **Uniformização HH em todos os componentes** — 3 parsers distintos com lógicas divergentes (descoberto durante investigação Tech Debt #5). Sub-problemas: (a) hashes GG resolvidos só onde `raw_resolved` é usado — fix #5 cobriu sintoma, unificação é fix arquitectural; (b) stacks/acções inconsistentes (fichas vs BB) entre vistas; (c) posições GG não enriquecidas em alguns paths; (d) cards de showdown apresentados diferentemente; (e) spec canónica única ainda por escrever. Parsers afectados: `frontend/src/lib/handParser.js:parseHH` (canónico), `frontend/src/pages/Hands.jsx:parseRawHH` (procura `playerNames.seat_to_name` que não existe), `frontend/src/pages/HM3.jsx:parseRawHH` (sem `playerNames` argumento) | Funcional grave / arquitectural | **alta urgência**, ~4-6h sessão dedicada |
 
 ---
 
@@ -162,7 +174,9 @@
 | Filtros derivados Estudo (HU/3-way/MW) | Pendente histórico | ~2h |
 | Notas vilões — botão na vista mão Discord | Pendente histórico | ~1h |
 | Suporte Winamax replayer HTML | 49/246 SSs falham | ~3-4h |
-| **Centralizar trigger Fase IV em `hand_service.py`** (em vez de duplicar em discord/hm3/import) | Tech Debt #3 sugere | ~2h |
+| **Centralizar trigger Fase IV em `hand_service.py`** (em vez de duplicar em discord/hm3/import) | Padrão duplicado em 3 ficheiros pós-`b789c60`; refactor opcional | ~2h |
+| **Housekeeping endpoint legacy `/api/villains`** | Substituído pelo `/categorized`; pode ser removido após Parte D estável | ~30min |
+| **Persistência viewMode página Estudo (localStorage)** | Sem persistência hoje (default `'tags'`); follow-up trivial se necessário | ~5min |
 
 ---
 
@@ -170,11 +184,13 @@
 
 | Pipeline | Estado global |
 |---|---|
-| Discord (replayer + HH texto) | ✅ completo e validado (24/04 + 26/04 + **27/04 Fase 2: 61 entries, 12 cross-posts**) |
-| HM3 `.bat` | ✅ 3 bugs corrigidos (villains GG skip, auto-rematch HH→SS, ON CONFLICT preserve). **Re-validado 27/04 Fase 5 (130 hands, 88 villains, 0 GG)** |
-| Import ZIP/TXT HH | ✅ funcional + origin reparado + auto-rematch Discord expandido. **Re-validado 27/04 Fase 4 (13737 hands, 48/48 placeholders Discord substituídos)**. ⚠️ Tech Debt #3: falta trigger Bucket 1 Fase IV |
-| Upload manual SS | ✅ **Promovido de ⚠️ para ✅ em 27/04 Fase 6 (2 SSs Rui + 10 Karluz, anchors_stack_elimination_v2 funcional)**. Bug C `screenshot_url=NULL` mitigado por endpoint `/api/screenshots/image/{entry_id}` |
-| Anexos imagem ↔ mão (Bucket 1) | ✅ **Promovido de ⚠️ para ✅ em 27/04 Fase 3 + Recovery (4/4 anexadas, trigger retroactivo funcional, validação BD + UI)** |
+| Discord (replayer + HH texto) | ✅ completo e validado (24/04 + 26/04 + 27/04 Fase 2: 61 entries, 12 cross-posts). **28/04 ganhou T1+T2 trigger anexos (Tech Debt #6)** |
+| HM3 `.bat` | ✅ 3 bugs corrigidos (villains GG skip, auto-rematch HH→SS, ON CONFLICT preserve). **Re-validado 27/04 Fase 5 (130 hands, 88 villains, 0 GG)**. **28/04 villain creation refundido com regras A∨B∨C∨D + categoria** |
+| Import ZIP/TXT HH | ✅ funcional + origin reparado + auto-rematch Discord expandido. **Re-validado 27/04 Fase 4 (13737 hands, 48/48 placeholders Discord substituídos)**. **28/04 ganhou trigger Bucket 1 (Tech Debt #3) + entry meta-record marcada `resolved` (Tech Debt #7)** |
+| Upload manual SS | ✅ Promovido de ⚠️ para ✅ em 27/04 Fase 6 (2 SSs Rui + 10 Karluz, anchors_stack_elimination_v2 funcional). Bug C `screenshot_url=NULL` mitigado por endpoint `/api/screenshots/image/{entry_id}` |
+| Anexos imagem ↔ mão (Bucket 1) | ✅ Promovido de ⚠️ para ✅ em 27/04 Fase 3 + Recovery (4/4 anexadas, trigger retroactivo funcional, validação BD + UI). **28/04 Tech Debt #2 fechado (Gyazo JPEG fix + backfill `att_id=8`)** |
+
+⚠️ **Verificação ponta-a-ponta pós Tech Debts 28-Abr pendente** — validar via fluxo orgânico que os 6 fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada futura.
 
 ---
 
@@ -269,4 +285,21 @@
 | Commit | Descrição |
 |---|---|
 | `a2ac5e5` | feat(attachments): PlaceholderHandRow mostra 📎 N + thumbnails inline (Bucket 1 Tech Debt #1) |
-| _[a gerar]_ | docs(verification): sessão 27-Abr fecho — 5 pipelines validados ponta-a-ponta |
+| `b55a822` | docs(verification): sessão 27-Abr fecho — 5 pipelines validados ponta-a-ponta |
+
+### Sessão 28 Abril (Tech Debts + Tags + Vilões)
+
+| Commit | Descrição |
+|---|---|
+| `b789c60` | feat(attachments): import_.py dispara trigger Bucket 1 Fase IV (Tech Debt #3) |
+| `eb00939` | fix(attachments): trigger Bucket 1 dispara 2x para cobrir Vision lenta (Tech Debt #6) |
+| `b233b9b` | fix(import): marcar entry meta-record ZIP como resolved após import (Tech Debt #7) |
+| `9baec67` | fix(attachments): tentar .png/.jpg/.gif para imagens Gyazo (Tech Debt #2) |
+| `400eb10` | fix(hands): backend pré-resolve hashes GG anonimizados no raw HH (Tech Debt #5) |
+| `98330ec` | fix(hands): aplicar raw_resolved em todos os consumidores de HH (Tech Debt #5 follow-up) |
+| `90a6205` | feat(estudo): página Estudo aterra em vista 'Por Tags' por defeito |
+| `8ca3d88` | feat(villains): refundir _create_villains_for_hand com regras canónicas A∨B∨C∨D + categoria (Tech Debt #4 parte A) |
+| `c409677` | feat(villains): endpoint /api/villains/categorized aceita filter ?category= (Tech Debt #4 parte C) |
+| `bf75150` | chore(villains): remover migration legacy do índice UNIQUE antigo |
+| `45051ec` | feat(villains): página Vilões com 4 sub-secções + filtro sala (Tech Debt #4 parte D) |
+| _[a gerar]_ | docs(verification): sessão 28-Abr fecho — 6 Tech Debts fechados + re-arquitectura Vilões |
