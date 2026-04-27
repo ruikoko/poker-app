@@ -1650,7 +1650,7 @@ export default function HandsPage() {
   const [error, setError]         = useState('')
   const [loading, setLoading]     = useState(false)
   const [selected, setSelected]   = useState(null)
-  const [viewMode, setViewMode]   = useState('tournament') // 'tags' | 'tournament' | 'grid' | 'table'
+  const [viewMode, setViewMode]   = useState('tags') // 'tags' | 'tournament' | 'grid' | 'table'
 
   // Para a vista por tags: usa o endpoint tag-groups (sem paginação, só metadados).
   // Faz 2 chamadas em paralelo:
