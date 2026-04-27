@@ -150,6 +150,95 @@ def list_villains(
     }
 
 
+@router.get("/categorized")
+def list_villains_categorized(
+    category:  Optional[str] = Query("all", pattern="^(all|sd|nota|friend)$"),
+    search:    Optional[str] = Query(None, description="ILIKE no player_name"),
+    page:      int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    current_user=Depends(require_auth),
+):
+    """
+    Tech Debt #4 — re-arquitectura página Vilões.
+
+    Devolve agregação por nick a partir de `hand_villains.category`:
+    sd_count / nota_count / friend_count / total_count + last_seen +
+    sites + dates. Filtra por category (sd|nota|friend|all).
+
+    Coexiste com o endpoint legacy GET /api/villains (que lê de
+    villain_notes). Frontend Parte D consome este; legacy fica para
+    housekeeping após Parte D estável.
+    """
+    offset = (page - 1) * page_size
+    params = {
+        "category": category,
+        "search": search,
+        "search_like": f"%{search}%" if search else None,
+        "limit": page_size,
+        "offset": offset,
+    }
+
+    rows = query(
+        """
+        SELECT
+            nick,
+            sd_count, nota_count, friend_count, total_count,
+            last_seen, sites, dates,
+            COUNT(*) OVER() AS total_villains
+        FROM (
+            SELECT
+                hv.player_name AS nick,
+                COUNT(*) FILTER (WHERE hv.category = 'sd')     AS sd_count,
+                COUNT(*) FILTER (WHERE hv.category = 'nota')   AS nota_count,
+                COUNT(*) FILTER (WHERE hv.category = 'friend') AS friend_count,
+                COUNT(*)                                       AS total_count,
+                MAX(h.played_at)                               AS last_seen,
+                ARRAY_AGG(DISTINCT h.site)                     AS sites,
+                ARRAY_AGG(DISTINCT h.played_at::date
+                          ORDER BY h.played_at::date DESC)     AS dates
+            FROM hand_villains hv
+            JOIN hands h ON h.id = hv.hand_db_id
+            WHERE hv.hand_db_id IS NOT NULL
+              AND h.played_at >= '2026-01-01'
+              AND (%(search)s IS NULL OR hv.player_name ILIKE %(search_like)s)
+            GROUP BY hv.player_name
+            HAVING (
+                CASE %(category)s
+                    WHEN 'sd'     THEN COUNT(*) FILTER (WHERE hv.category = 'sd')     > 0
+                    WHEN 'nota'   THEN COUNT(*) FILTER (WHERE hv.category = 'nota')   > 0
+                    WHEN 'friend' THEN COUNT(*) FILTER (WHERE hv.category = 'friend') > 0
+                    ELSE TRUE
+                END
+            )
+        ) AS v
+        ORDER BY total_count DESC, last_seen DESC NULLS LAST
+        LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        params,
+    )
+
+    total = rows[0]["total_villains"] if rows else 0
+    data = []
+    for r in rows:
+        d = dict(r)
+        d.pop("total_villains", None)
+        # ISO-format dates para JSON friendly
+        if d.get("last_seen"):
+            d["last_seen"] = d["last_seen"].isoformat()
+        if d.get("dates"):
+            d["dates"] = [dt.isoformat() if hasattr(dt, "isoformat") else dt for dt in d["dates"]]
+        data.append(d)
+
+    return {
+        "category": category,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": (total + page_size - 1) // page_size if total else 0,
+        "data": data,
+    }
+
+
 @router.get("/{villain_id}")
 def get_villain(villain_id: int, current_user=Depends(require_auth)):
     rows = query("SELECT * FROM villain_notes WHERE id = %s", (villain_id,))
