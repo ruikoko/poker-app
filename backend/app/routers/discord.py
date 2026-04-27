@@ -1,6 +1,7 @@
 """
 API endpoints para monitorização e controlo do bot Discord.
 """
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import require_auth
@@ -8,6 +9,25 @@ from app.db import query
 
 logger = logging.getLogger("discord_router")
 router = APIRouter(prefix="/api/discord", tags=["discord"])
+
+# Tech Debt #6: 2º trigger Bucket 1 cobre batches Vision lentos (>20 entries).
+# Vision tem Semaphore(2) — 30 entries × ~7s / 2 ≈ 105s. 90s é a faixa
+# pragmática (T1 apanha batches pequenos; T2 apanha o resto).
+ATTACHMENTS_DELAYED_RETRY_SECONDS = 90
+
+# Set forte de referências às tasks em background — sem isto o asyncio
+# event loop só guarda weak references e a task pode ser GC'd antes de
+# correr (resulta em "Task was destroyed but it is pending"). Crítico
+# para T2 que fica suspensa 90s.
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn_background(coro) -> "asyncio.Task":
+    """Cria uma task fire-and-forget e mantém referência forte até completar."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
 
 
 @router.get("/status")
@@ -145,22 +165,29 @@ async def sync_and_process(current_user=Depends(require_auth)):
         pass
 
     # 6. Trigger anexos imagem ↔ mão (Bucket 1 Fase IV) — corre em background.
-    #    Cobre o caso em que entries 'image' chegaram durante o sync e mãos
-    #    irmãs (replayer_link no mesmo canal ±90s) já estão criadas.
+    #    T1 (imediato): cobre batches Vision pequenos (<20 entries).
+    #    T2 (delay ATTACHMENTS_DELAYED_RETRY_SECONDS): cobre batches grandes
+    #    onde Vision (Semaphore(2)) ainda está a processar quando T1 corre.
+    #    Idempotência via _pending_image_entries (NOT EXISTS hand_attachments).
     from app.routers.attachments import run_match_worker
 
-    async def _attachments_async():
+    async def _attachments_async(label: str, delay: int = 0):
+        if delay > 0:
+            await asyncio.sleep(delay)
         try:
             result = run_match_worker(limit=100)
             logger.info(
-                f"[sync-and-process] attachments worker: "
+                f"[sync-and-process {label}] attachments worker: "
                 f"{result['applied']} applied, {result['skipped']} skipped, "
                 f"{result['errors']} errors"
             )
         except Exception as exc:
-            logger.error(f"[sync-and-process] attachments worker falhou: {exc}")
+            logger.error(f"[sync-and-process {label}] attachments worker falhou: {exc}")
 
-    asyncio.create_task(_attachments_async())
+    _spawn_background(_attachments_async("T1:imediato"))
+    _spawn_background(
+        _attachments_async("T2:delay-90s", delay=ATTACHMENTS_DELAYED_RETRY_SECONDS)
+    )
 
     return {
         "ok": True,
