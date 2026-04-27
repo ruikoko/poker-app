@@ -971,7 +971,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
         {/* Acções — prioridade: HH parseada (raw) > all_players_actions > fallback notas */}
         {hand.raw
-          ? <ParsedHandHistory raw={hand.raw} playerNames={hand.player_names} allPlayersActions={hand.all_players_actions} />
+          ? <ParsedHandHistory raw={hand.raw_resolved || hand.raw} playerNames={hand.player_names} allPlayersActions={hand.all_players_actions} />
           : hand.all_players_actions
             ? <AllPlayersActions actions={hand.all_players_actions} />
             : <HeroActionsFromNotes notes={hand.notes} />

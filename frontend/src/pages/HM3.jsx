@@ -191,7 +191,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const streets = parseRawHH(hand.raw)
+  const streets = parseRawHH(hand.raw_resolved || hand.raw)
   const level = extractLevel(hand.raw)
 
   async function save() {

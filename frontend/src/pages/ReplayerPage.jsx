@@ -99,7 +99,7 @@ export default function ReplayerPage() {
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
 
-  const { steps, heroIdx } = hand ? parseHH(hand.raw, hand.all_players_actions) : { steps: [], heroIdx: -1 }
+  const { steps, heroIdx } = hand ? parseHH(hand.raw_resolved || hand.raw, hand.all_players_actions) : { steps: [], heroIdx: -1 }
   const meta = hand?.all_players_actions?._meta || {}
   const bbSize = meta.bb || 1
   const step = steps[si] || steps[0]

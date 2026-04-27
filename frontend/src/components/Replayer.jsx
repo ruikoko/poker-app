@@ -74,7 +74,7 @@ function ChipStack({ amount, bb, label }) {
 }
 
 export default function Replayer({ hand }) {
-  const { steps, heroIdx } = parseHH(hand?.raw, hand?.all_players_actions)
+  const { steps, heroIdx } = parseHH(hand?.raw_resolved || hand?.raw, hand?.all_players_actions)
   const meta = hand?.all_players_actions?._meta || {}
   const [si, setSi] = useState(0)
   const [playing, setPlaying] = useState(false)
