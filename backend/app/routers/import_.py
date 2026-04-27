@@ -412,6 +412,27 @@ async def import_file(
         except Exception as e:
             logger.error(f"Auto-rematch query error: {e}")
 
+        # ── Trigger anexos imagem ↔ mão (Bucket 1 Fase IV) ──
+        # Corre em background. Cobre o caso em que substituição
+        # placeholder Discord → HH real apaga hand_attachments via
+        # ON DELETE CASCADE; reanexa via match primário (entries image
+        # com siblings replayer_link no mesmo canal ±90s).
+        import asyncio
+        from app.routers.attachments import run_match_worker
+
+        async def _attachments_async():
+            try:
+                result = run_match_worker(limit=100)
+                logger.info(
+                    f"[import_] attachments worker: "
+                    f"{result['applied']} applied, {result['skipped']} skipped, "
+                    f"{result['errors']} errors"
+                )
+            except Exception as exc:
+                logger.error(f"[import_] attachments worker falhou: {exc}")
+
+        asyncio.create_task(_attachments_async())
+
         return {
             "import_type": "hands",
             "entry_id": entry_id,
