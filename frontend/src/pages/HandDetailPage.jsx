@@ -3,13 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi, screenshots } from '../api/client'
 import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
-import { parseStreetsForDisplay } from '../lib/handParser'
+import HandHistoryViewer from '../components/HandHistoryViewer'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const SEAT_ORDER = ['SB','BB','UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN']
-const STREET_COLORS = { 'PRE-FLOP': '#6366f1', 'FLOP': '#22c55e', 'TURN': '#f59e0b', 'RIVER': '#ef4444', 'SHOWDOWN': '#8b5cf6' }
 const POS_COLORS = { BTN: '#6366f1', CO: '#8b5cf6', HJ: '#a78bfa', SB: '#f59e0b', BB: '#ef4444', UTG: '#22c55e', 'UTG1': '#16a34a', 'UTG+1': '#16a34a', 'UTG2': '#15803d', 'UTG+2': '#15803d', MP: '#06b6d4', 'MP1': '#0891b2', 'MP+1': '#0891b2' }
 
 function RCard({ card, size = 'md' }) {
@@ -59,47 +58,12 @@ export default function HandDetailPage() {
       return ai - bi
     })
 
-  // Build name map: anon hash → real name from seats in raw HH vs all_players_actions
-  const nameMap = {}
-  const apa = hand.all_players_actions || {}
-  const seatLines = (hand.raw || '').match(/Seat \d+: .+? \([\d,]+(?:\s+in chips)?\)/g) || []
-  for (const line of seatLines) {
-    const sm = line.match(/Seat (\d+): (.+?) \(/)
-    if (sm) {
-      const anonName = sm[2].trim()
-      // Find the real name in all_players_actions that has this seat number
-      for (const [realName, info] of Object.entries(apa)) {
-        if (realName === '_meta') continue
-        if (info && info.seat === parseInt(sm[1])) {
-          if (realName !== anonName) nameMap[anonName] = realName
-          break
-        }
-      }
-    }
-  }
-  // Also map from player_names.anon_map if available
-  const pnAnon = (hand.player_names || {}).anon_map || {}
-  for (const [k, v] of Object.entries(pnAnon)) {
-    if (k !== v) nameMap[k] = v
-  }
-
-  // Tech Debt #5: backend pré-resolve hashes GG → nicks reais em raw_resolved.
-  // Fallback raw mantém comportamento legacy se raw_resolved não vier do backend.
-  const streets = parseStreetsForDisplay(hand.raw_resolved || hand.raw, hand.all_players_actions)
+  // Tech Debt #8: Mesa+Acções renderizado por HandHistoryViewer (componente canónico).
+  // Este componente lida internamente com:
+  //   - resolução de hashes GG (via raw_resolved fallback raw + apa.seat)
+  //   - cálculo de pot/stacks/posições (via parseHH canónico)
+  //   - bloco SHOWDOWN dedicado com cards lg
   const blindsLabel = meta.sb && meta.bb ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : ''
-
-  let initialPot = 0
-  const antes = (hand.raw || '').match(/posts the ante ([\d,]+)/g) || []
-  for (const a of antes) { const n = a.match(/[\d,]+/); if (n) initialPot += parseFloat(n[0].replace(/,/g, '')) }
-  const sbM = (hand.raw || '').match(/posts small blind ([\d,]+)/); if (sbM) initialPot += parseFloat(sbM[1].replace(/,/g, ''))
-  const bbM2 = (hand.raw || '').match(/posts big blind ([\d,]+)/); if (bbM2) initialPot += parseFloat(bbM2[1].replace(/,/g, ''))
-
-  const pNames = hand.player_names || {}
-  const playerBounties = {}
-  for (const p of (pNames.players_list || [])) {
-    if (p.name && p.bounty != null) playerBounties[p.name] = p.bounty
-    if (p.name && p.bounty_pct != null) playerBounties[p.name] = p.bounty_pct
-  }
 
   const tourneyName = hand.stakes || ''
   const playedDate = hand.played_at ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
@@ -206,136 +170,8 @@ export default function HandDetailPage() {
         </div>
       )}
 
-      {/* ── MESA + ACÇÕES (continuous block) ── */}
-      <div style={{ background: '#0f1117', borderRadius: 8, overflow: 'hidden' }}>
-        {/* Mesa */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1d2a' }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#94a3b8', marginBottom: 12 }}>MESA ({players.length} JOGADORES)</div>
-          {players.map((p, i) => {
-            const isHero = p.is_hero || HERO_NAMES_ALL.has(p.name.toLowerCase())
-            const realName = p.real_name || p.name
-            const bounty = playerBounties[realName] || p.bounty || p.bounty_pct
-            return (
-              <div key={i} style={{
-                display: 'flex', alignItems: 'center', gap: 14, padding: '9px 14px',
-                borderBottom: i < players.length - 1 ? '1px solid #14171f' : 'none',
-                background: isHero ? 'rgba(99,102,241,0.05)' : 'transparent', borderRadius: 4,
-              }}>
-                <PosBadge pos={p.position} />
-                <span style={{ fontSize: 16, fontWeight: isHero ? 700 : 500, color: isHero ? '#a5b4fc' : '#f1f5f9', minWidth: 160 }}>
-                  {realName}{isHero && <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', marginLeft: 6 }}>HERO</span>}
-                </span>
-                <span style={{ fontSize: 15, color: '#64748b', fontFamily: 'monospace', minWidth: 75, textAlign: 'right' }}>{p.stack ? Math.round(p.stack).toLocaleString() : '—'}</span>
-                <span style={{ fontSize: 15, color: '#fbbf24', fontFamily: 'monospace', fontWeight: 700, minWidth: 65, textAlign: 'right' }}>{p.stack_bb ? p.stack_bb.toFixed(1) : '—'} BB</span>
-                {bounty != null && <span style={{ fontSize: 14, color: '#7dd3fc', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.15)' }}>{typeof bounty === 'number' && bounty < 10 ? `${bounty}%` : `${bounty}€`}</span>}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Acções por street — with dynamic stacks and BB */}
-        <div style={{ padding: '16px 20px' }}>
-          {(() => {
-            // Build dynamic stack tracking
-            const stacks = {}
-            players.forEach(p => { stacks[p.name] = { stack: p.stack || 0, invested: 0 } })
-
-            // Helper: resolve name from raw HH to real name
-            const resolve = (n) => nameMap[n] || n
-
-            // Deduct antes and blinds
-            const anteLines = (hand.raw || '').match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?ante\s+([\d,]+)/gi) || []
-            for (const line of anteLines) {
-              const m = line.match(/^(.+?)(?::)?\s+posts\s+(?:the\s+)?ante\s+([\d,]+)/i)
-              if (m) { const rn = resolve(m[1].trim()); if (stacks[rn]) stacks[rn].stack -= parseFloat(m[2].replace(/,/g, '')) }
-            }
-            const sbLine = (hand.raw || '').match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?small blind\s+([\d,]+)/i)
-            if (sbLine) { const rn = resolve(sbLine[1].trim()); if (stacks[rn]) { stacks[rn].stack -= parseFloat(sbLine[2].replace(/,/g, '')); stacks[rn].invested = parseFloat(sbLine[2].replace(/,/g, '')) } }
-            const bbLine = (hand.raw || '').match(/(.+?)(?::)?\s+posts\s+(?:the\s+)?big blind\s+([\d,]+)/i)
-            if (bbLine) { const rn = resolve(bbLine[1].trim()); if (stacks[rn]) { stacks[rn].stack -= parseFloat(bbLine[2].replace(/,/g, '')); stacks[rn].invested = parseFloat(bbLine[2].replace(/,/g, '')) } }
-
-            return streets.map((st, si) => {
-              let streetPot = initialPot
-              for (let s = 0; s < si; s++) {
-                for (const a of streets[s].actions) {
-                  if (a.amount && (a.action === 'calls' || a.action === 'bets' || a.action === 'raises')) streetPot += a.amount
-                }
-              }
-              const streetPotBB = (streetPot / bb).toFixed(1)
-
-              // Reset invested per street (except preflop which carries blinds)
-              if (si > 0) {
-                Object.keys(stacks).forEach(n => { stacks[n].invested = 0 })
-              }
-
-              return (
-                <div key={st.name} style={{ marginBottom: si < streets.length - 1 ? 18 : 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <span style={{ padding: '4px 14px', borderRadius: 5, fontSize: 14, fontWeight: 800, color: STREET_COLORS[st.name] || '#f1f5f9', background: `${STREET_COLORS[st.name] || '#64748b'}15`, border: `1px solid ${STREET_COLORS[st.name] || '#64748b'}30` }}>{st.name}</span>
-                    {st.board?.length > 0 && <div style={{ display: 'flex', gap: 4 }}>{st.board.map((c, i) => <RCard key={i} card={c} />)}</div>}
-                    <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', marginLeft: 'auto', color: '#94a3b8', background: 'rgba(255,255,255,0.03)', padding: '3px 12px', borderRadius: 4 }}>Pot: {Math.round(streetPot).toLocaleString()} ({streetPotBB}bb)</span>
-                  </div>
-                  <div style={{ paddingLeft: 16, borderLeft: `3px solid ${STREET_COLORS[st.name] || '#2a2d3a'}30` }}>
-                    {st.actions.map((a, ai) => {
-                      const isHero = HERO_NAMES_ALL.has(a.actor.toLowerCase())
-                      const player = players.find(p => p.name === a.actor)
-                      const pos = player?.position
-
-                      // Update stack for this action
-                      const s = stacks[a.actor]
-                      let raiseTo = 0
-                      if (s && a.action === 'calls') { s.stack -= a.amount; s.invested += a.amount }
-                      else if (s && a.action === 'bets') { s.stack -= a.amount; s.invested += a.amount }
-                      else if (s && a.action === 'raises') {
-                        const toM = a.label.match(/to ([\d,]+)/)
-                        raiseTo = toM ? parseFloat(toM[1].replace(/,/g, '')) : a.amount
-                        const additional = raiseTo - s.invested
-                        s.stack -= additional; s.invested = raiseTo
-                      }
-
-                      const currentStackBB = s ? (s.stack / bb).toFixed(1) : '—'
-
-                      // BB for the action — use raiseTo for raises, amount for calls/bets
-                      let bbLabel = ''
-                      if (a.action === 'calls' && a.amount) bbLabel = `(${(a.amount / bb).toFixed(1)}bb)`
-                      else if (a.action === 'bets' && a.amount) bbLabel = `(${(a.amount / bb).toFixed(1)}bb)`
-                      else if (a.action === 'raises') {
-                        const rt = raiseTo || a.amount
-                        bbLabel = `(${(rt / bb).toFixed(1)}bb)`
-                      }
-                      else if (a.action === 'collected' && a.amount) bbLabel = `(${(a.amount / bb).toFixed(1)}bb)`
-
-                      // Colors: fold=white, raise/bet=red, call=green, check=grey
-                      let actionColor = '#94a3b8', actionBg = 'rgba(148,163,184,0.06)'
-                      if (a.action === 'folds') { actionColor = '#e2e8f0'; actionBg = 'rgba(226,232,240,0.06)' }
-                      else if (a.action === 'checks') { actionColor = '#64748b'; actionBg = 'rgba(100,116,139,0.06)' }
-                      else if (a.action === 'calls') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.08)' }
-                      else if (a.action === 'bets' || a.action === 'raises') { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.08)' }
-                      else if (a.action === 'collected') { actionColor = '#22c55e'; actionBg = 'rgba(34,197,94,0.1)' }
-                      else if (a.action === 'shows') { actionColor = '#8b5cf6'; actionBg = 'rgba(139,92,246,0.06)' }
-                      if (a.allIn) { actionColor = '#ef4444'; actionBg = 'rgba(239,68,68,0.12)' }
-
-                      const displayLabel = bbLabel ? `${a.label || a.action} ${bbLabel}` : (a.label || a.action)
-
-                      return (
-                        <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: ai < st.actions.length - 1 ? '1px solid rgba(255,255,255,0.02)' : 'none' }}>
-                          {pos && <PosBadge pos={pos} />}
-                          <span style={{ fontSize: 14, fontWeight: 600, color: '#0a0c14', background: isHero ? '#a5b4fc' : '#e2e8f0', padding: '2px 8px', borderRadius: 4, minWidth: 120, display: 'inline-block' }}>
-                            {a.actor}{isHero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
-                          </span>
-                          <span style={{ fontSize: 14, color: '#fbbf24', fontFamily: 'monospace', minWidth: 55, textAlign: 'right', fontWeight: 700 }}>{currentStackBB}bb</span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: actionColor, padding: '4px 14px', borderRadius: 5, background: actionBg, border: `1px solid ${actionColor}25` }}>{displayLabel}</span>
-                          {a.cards && <div style={{ display: 'flex', gap: 3 }}>{a.cards.map((c, i) => <RCard key={i} card={c} />)}</div>}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })
-          })()}
-        </div>
-      </div>
+      {/* ── MESA + ACÇÕES + SHOWDOWN (Tech Debt #8 — renderer canónico) ── */}
+      <HandHistoryViewer hand={hand} />
     </div>
   )
 }
