@@ -344,6 +344,17 @@ async def import_file(
             finally:
                 conn.close()
 
+        # ── Marcar entry meta-record como concluída (Tech Debt #7) ──
+        # ZIP/TXT HH não cabe em raw_text quando é binário; entry serve só
+        # como FK de rastreabilidade. Sem este UPDATE, fica 'status=new'
+        # indefinidamente — semanticamente errado, cria ruído em audits.
+        final_status = 'resolved' if (total_inserted + total_skipped) > 0 else 'failed'
+        try:
+            from app.db import execute as _exec
+            _exec("UPDATE entries SET status = %s WHERE id = %s", (final_status, entry_id))
+        except Exception as e:
+            logger.warning(f"[import] Falhou UPDATE status entry {entry_id}: {e}")
+
         # ── Auto-rematch de screenshots órfãos ──
         rematched = []
         migrated_to_study = 0
