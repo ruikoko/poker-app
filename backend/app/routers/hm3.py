@@ -750,11 +750,26 @@ def _create_hand_villains_hm3(
     Retorna numero de rows realmente inseridas (cur.rowcount acumulado).
     """
     # GG anonimizada: raw so tem hashes, nao nicks. Inserir hashes em
-    # hand_villains viola o invariante A∨B∨C. O SS pipeline (Discord/upload)
+    # hand_villains viola o invariante A∨B∨C∨D. O SS pipeline (Discord/upload)
     # e o ja-idempotente _create_villains_for_hand cobrem GG com match;
     # sem match, invariante diz "sem villain". Saltar em ambos os casos.
     if parsed.get("site") == "GGPoker":
         return 0
+
+    from app.hero_names import HERO_NAMES
+    from app.services.hand_service import _classify_villain_categories, _is_anon_hash
+
+    # ── Carregar hand_meta para regras A∨B∨C∨D (Tech Debt #4) ──
+    hand_meta = {}
+    from app.db import query as _q
+    rows = _q(
+        """SELECT hm3_tags, discord_tags, has_showdown,
+                  player_names->>'match_method' AS match_method
+           FROM hands WHERE id = %s""",
+        (hand_db_id,)
+    )
+    if rows:
+        hand_meta = dict(rows[0])
 
     all_players = parsed.get("all_players") or {}
     inserted = 0
@@ -762,53 +777,80 @@ def _create_hand_villains_hm3(
     def _clean_pos(p):
         return p if p and p != "?" else None
 
-    villains = []  # lista de (player_name, position, stack, vpip_action)
+    # Construir candidates: non-hero com showdown cards OR VPIP preflop
+    candidates: list[dict] = []  # {name, position, stack, has_cards, has_vpip, vpip_action}
 
-    if has_showdown:
-        for name, pdata in all_players.items():
-            if name == "_meta" or not isinstance(pdata, dict):
-                continue
-            if pdata.get("is_hero"):
-                continue
-            # Belt-and-suspenders: is_hero pode vir a False em entries criadas
-            # pelo merge de cards (hm3.py L770-774, L826-830) quando o nome so
-            # aparece via enrichment. Reforcar com match por nome.
-            if hero_name and name == hero_name:
-                continue
-            cards = pdata.get("cards")
-            if not cards:
-                continue
-            villains.append((
-                name,
-                _clean_pos(pdata.get("position")),
-                pdata.get("stack"),
-                ", ".join(cards),
-            ))
-    else:
-        vpip_by_name = _detect_vpip_hm3(raw_text, hero_name)
-        for name, action in vpip_by_name.items():
-            if hero_name and name == hero_name:
-                continue
-            pdata = all_players.get(name) if isinstance(all_players.get(name), dict) else {}
-            if pdata.get("is_hero"):
-                continue
-            villains.append((
-                name,
-                _clean_pos(pdata.get("position")),
-                pdata.get("stack"),
-                action,
-            ))
+    # SD candidates (com cards)
+    sd_names = set()
+    for name, pdata in all_players.items():
+        if name == "_meta" or not isinstance(pdata, dict):
+            continue
+        if pdata.get("is_hero"):
+            continue
+        if hero_name and name == hero_name:
+            continue
+        cards = pdata.get("cards")
+        if cards:
+            sd_names.add(name)
+            candidates.append({
+                "name": name,
+                "position": _clean_pos(pdata.get("position")),
+                "stack": pdata.get("stack"),
+                "has_cards": True,
+                "has_vpip": False,  # preencher abaixo se aplicável
+                "vpip_action": ", ".join(cards),
+            })
 
-    for player_name, position, stack, vpip_action in villains:
-        cur.execute(
-            """INSERT INTO hand_villains
-                   (hand_db_id, player_name, position, stack, vpip_action, mtt_hand_id)
-               VALUES (%s, %s, %s, %s, %s, NULL)
-               ON CONFLICT (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL DO NOTHING""",
-            (hand_db_id, player_name, position, stack, vpip_action),
+    # VPIP candidates (preflop) — adicionar novos OR marcar has_vpip nos existentes
+    vpip_by_name = _detect_vpip_hm3(raw_text, hero_name)
+    for name, action in vpip_by_name.items():
+        if hero_name and name == hero_name:
+            continue
+        pdata = all_players.get(name) if isinstance(all_players.get(name), dict) else {}
+        if pdata and pdata.get("is_hero"):
+            continue
+        if name in sd_names:
+            for c in candidates:
+                if c["name"] == name:
+                    c["has_vpip"] = True
+                    break
+            continue
+        candidates.append({
+            "name": name,
+            "position": _clean_pos(pdata.get("position")),
+            "stack": pdata.get("stack"),
+            "has_cards": False,
+            "has_vpip": True,
+            "vpip_action": action,
+        })
+
+    for c in candidates:
+        player_name = c["name"]
+        # Filtros: HERO_NAMES puros excluídos; FRIEND_HEROES incluídos via regra D.
+        # Hashes anónimos GG saltados (mas GG já foi early-return acima).
+        if player_name.lower() in HERO_NAMES:
+            continue
+        if _is_anon_hash(player_name):
+            continue
+
+        cats = _classify_villain_categories(
+            hand_meta, player_name, c["has_cards"], c["has_vpip"]
         )
-        if cur.rowcount > 0:
-            inserted += 1
+        if not cats:
+            continue
+
+        for cat in cats:
+            cur.execute(
+                """INSERT INTO hand_villains
+                       (hand_db_id, player_name, position, stack, vpip_action,
+                        mtt_hand_id, category)
+                   VALUES (%s, %s, %s, %s, %s, NULL, %s)
+                   ON CONFLICT (hand_db_id, player_name, category)
+                   WHERE hand_db_id IS NOT NULL DO NOTHING""",
+                (hand_db_id, player_name, c["position"], c["stack"], c["vpip_action"], cat),
+            )
+            if cur.rowcount > 0:
+                inserted += 1
 
     return inserted
 

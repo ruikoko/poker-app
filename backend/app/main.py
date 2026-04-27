@@ -138,6 +138,30 @@ def ensure_entries_schema():
         # pelo pipeline HM3 (hm3.py:_create_hand_villains_hm3). Parcial porque rows
         # legacy so com mtt_hand_id tem hand_db_id NULL e nao devem ficar no indice.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_hand_villains_hand_db_player ON hand_villains(hand_db_id, player_name) WHERE hand_db_id IS NOT NULL",
+        # Tech Debt #4: categoria + UNIQUE composto (hand_db_id, player_name, category).
+        # 'sd' = showdown match SS↔HH valido + has_showdown + cards (regra B).
+        # 'nota' = hm3_tags ~ 'nota%' (regra A) ou discord_tags ⊇ 'nota' + match real (regra C).
+        # 'friend' = villain_nick em FRIEND_HEROES (regra D — Karluz/flightrisk).
+        # Mesma mao+villain pode ter multiplas categorias (rows separados) — UNIQUE antigo
+        # (hand_db_id, player_name) seria violado; substituido pelo composto + DROP.
+        """
+        ALTER TABLE hand_villains
+        ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'sd'
+        """,
+        """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hand_villains_category_check') THEN
+                ALTER TABLE hand_villains ADD CONSTRAINT hand_villains_category_check
+                    CHECK (category IN ('sd', 'nota', 'friend'));
+            END IF;
+        END $$
+        """,
+        "DROP INDEX IF EXISTS uq_hand_villains_hand_db_player",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_hand_villains_hand_db_player_cat
+            ON hand_villains(hand_db_id, player_name, category)
+            WHERE hand_db_id IS NOT NULL
+        """,
     ]
 
     conn = get_conn()

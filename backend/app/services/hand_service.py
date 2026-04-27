@@ -8,6 +8,86 @@ from app.db import get_conn, query, execute_returning
 from app.parsers.gg_hands import parse_hands
 
 
+# ─── Tech Debt #4: classificar villain em A∨B∨C∨D ────────────────────────────
+
+# Hash GG anonimizado: 6-8 hex chars (ex: "697d60de", "53e253c7", "ed861052").
+# Nicks reais nunca correspondem a este padrão estrito.
+_ANON_HASH_RE = re.compile(r'^[0-9a-f]{6,8}$')
+
+
+def _is_anon_hash(nick: str | None) -> bool:
+    """True se `nick` parece ser hash GG anonimizado (sem match SS)."""
+    if not nick:
+        return True
+    return bool(_ANON_HASH_RE.match(nick.strip().lower()))
+
+
+def _classify_villain_categories(
+    hand_meta: dict,
+    villain_nick: str,
+    has_cards: bool,
+    has_vpip: bool,
+) -> list[str]:
+    """
+    Aplica regras canónicas A∨B∨C∨D, devolve as categorias aplicáveis a
+    um par (hand, villain) para Tech Debt #4 (re-arquitectura página Vilões).
+
+    Regras:
+        A — hm3_tags contém tag ~ 'nota%'                        → 'nota'
+        B — match HH↔SS válido + has_showdown=True + has_cards    → 'sd'
+        C — 'nota' em discord_tags + match real válido            → 'nota'
+        D — villain_nick em FRIEND_HEROES (Karluz/flightrisk)     → 'friend'
+
+    Filosofia "nota" inclusiva: villain criado para non-hero com VPIP
+    preflop OU showdown cards (não exige ambos).
+
+    Pré-condições (caller responsável):
+      - villain_nick NÃO em HERO_NAMES (Rui aliases puros).
+      - villain_nick NÃO é hash anónimo (_is_anon_hash False).
+      - has_cards e/ou has_vpip True (caso contrário devolve []).
+
+    Args:
+      hand_meta: dict com keys hm3_tags, discord_tags, has_showdown,
+                 match_method (todos opcionais — função tolera ausência).
+      villain_nick: nick do villain (case preservado para INSERT).
+      has_cards: villain mostrou cards no showdown.
+      has_vpip: villain entrou em VPIP preflop (call/raise/bet).
+
+    Returns:
+      Lista ordenada de categorias (set→sorted) — INSERT determinístico.
+      [] se nem VPIP nem cards (não é villain a registar).
+    """
+    if not (has_cards or has_vpip):
+        return []
+
+    from app.hero_names import FRIEND_HEROES
+
+    cats: set[str] = set()
+    mm = (hand_meta.get('match_method') or '')
+    has_real_match = bool(mm) and not mm.startswith('discord_placeholder_')
+    nick_lower = villain_nick.lower().strip()
+
+    # D — friend (Karluz/flightrisk como villain quando aparecem em mãos do Rui)
+    if nick_lower in FRIEND_HEROES:
+        cats.add('friend')
+
+    # B — SD: match HH↔SS válido + showdown + cards
+    if has_real_match and hand_meta.get('has_showdown') and has_cards:
+        cats.add('sd')
+
+    # A — HM3 tag começa por 'nota'
+    hm3_tags = hand_meta.get('hm3_tags') or []
+    if any((t or '').startswith('nota') for t in hm3_tags):
+        cats.add('nota')
+
+    # C — Discord canal #nota + match real
+    discord_tags = hand_meta.get('discord_tags') or []
+    if 'nota' in discord_tags and has_real_match:
+        cats.add('nota')
+
+    return sorted(cats)
+
+
 # ─── Tech Debt #5: pré-resolver hashes GG anonimizados no raw HH ─────────────
 
 _SEAT_RE = re.compile(r'Seat (\d+): (.+?) \(')

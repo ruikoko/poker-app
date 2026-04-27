@@ -630,52 +630,91 @@ def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
 
 
 def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt_hand_id: int = None, hand_db_id: int = None, showdown_only: bool = False, site: str = "GGPoker"):
+    """
+    Cria registos hand_villains aplicando regras canónicas A∨B∨C∨D
+    (Tech Debt #4 — re-arquitectura página Vilões).
+
+    Para mãos com hand_db_id (path estudo): SELECT à hands para
+    hm3_tags, discord_tags, has_showdown, match_method. Itera non-hero
+    candidates (VPIP preflop OU showdown cards), classifica via
+    _classify_villain_categories, INSERE 1 row por categoria aplicável.
+
+    Para mãos só com mtt_hand_id (path bulk MTT archive): comportamento
+    legacy preservado — category='sd' default. Aplicam-se ainda os
+    filtros hero exclusion (HERO_NAMES puros) + skip de hashes anónimos.
+
+    `showdown_only` mantido por compatibilidade com call-sites legacy
+    (backfill_showdown.py); na prática a regra A∨B∨C∨D já lida com
+    ambos os modos via has_cards/has_vpip.
+
+    Idempotência via UNIQUE (hand_db_id, player_name, category).
+    """
     assert (mtt_hand_id is None) ^ (hand_db_id is None), "must pass exactly one of mtt_hand_id or hand_db_id"
-    """
-    Cria registos hand_villains.
-    Se showdown_only=True, villains = jogadores não-herói que mostraram cartas no showdown.
-    Caso contrário, villains = jogadores com VPIP (comportamento legacy).
-    Nomes vêm do screenshot via match por stack (algoritmo v2).
-    Posições vêm da HH.
-    """
-    if showdown_only:
-        # Showdown mode: villains are non-hero players who showed cards
-        all_players = hh_hand.get("all_players_actions", {})
-        if not isinstance(all_players, dict):
-            return 0
-        showdown_seats = {}
-        for p, pdata in all_players.items():
-            if p == "_meta":
-                continue
-            if isinstance(pdata, dict) and not pdata.get("is_hero") and pdata.get("cards"):
-                showdown_seats[pdata["seat"]] = ", ".join(pdata["cards"])
-        if not showdown_seats:
-            return 0
-        vpip_seats = showdown_seats
-    else:
-        vpip_seats = hh_hand.get("vpip_seats", {})
-        if not vpip_seats:
-            return 0
 
+    from app.hero_names import HERO_NAMES
+    from app.services.hand_service import _classify_villain_categories, _is_anon_hash
+
+    # ── Carregar hand_meta para regras A∨B∨C∨D (só quando hand_db_id) ──
+    hand_meta = {}
+    if hand_db_id:
+        from app.db import query as _q
+        rows = _q(
+            """SELECT hm3_tags, discord_tags, has_showdown,
+                      player_names->>'match_method' AS match_method
+               FROM hands WHERE id = %s""",
+            (hand_db_id,)
+        )
+        if rows:
+            hand_meta = dict(rows[0])
+
+    # ── Construir lista de candidates (non-hero com cards OR VPIP) ──
     seats = hh_hand.get("seats", {})
-
-    # Construir mapa seat → nome real usando match por stack
     seat_to_name = _build_seat_to_name_map(hh_hand, screenshot_data)
-
-    # Lookup para bounty/country a partir da vision_list
     vision_by_name = {}
     for vp in screenshot_data.get("players_list", []):
         vision_by_name[vp["name"].lower()] = vp
 
+    # vpip_seats da HH (preflop legacy detection)
+    legacy_vpip_seats = hh_hand.get("vpip_seats", {}) or {}
+
+    # showdown_seats da apa (cards no showdown)
+    showdown_seats = {}
+    apa = hh_hand.get("all_players_actions", {})
+    if isinstance(apa, dict):
+        for p, pdata in apa.items():
+            if p == "_meta" or not isinstance(pdata, dict):
+                continue
+            if pdata.get("is_hero"):
+                continue
+            seat_n = pdata.get("seat")
+            if seat_n is not None and pdata.get("cards"):
+                showdown_seats[int(seat_n)] = ", ".join(pdata["cards"])
+
+    # União dos seats com VPIP ou showdown cards
+    all_candidate_seats = set(int(s) for s in legacy_vpip_seats.keys()) | set(showdown_seats.keys())
+    if not all_candidate_seats:
+        return 0
+
     created = 0
     with conn.cursor() as cur:
-        for seat_num, vpip_action in vpip_seats.items():
-            seat_num = int(seat_num)
+        for seat_num in sorted(all_candidate_seats):
             seat_info = seats.get(seat_num, {})
             position = seat_info.get("position", "?")
-
-            # Nome real vem do match por stack
             player_name = seat_to_name.get(seat_num, seat_info.get("name", "Unknown"))
+
+            # Filtros: HERO_NAMES puros (Rui) sempre excluídos. FRIEND_HEROES
+            # incluídos como villain (regra D). Hashes anónimos GG sem match: skip.
+            if not player_name or player_name == "Unknown" or player_name == "Hero":
+                continue
+            if player_name.lower() in HERO_NAMES:
+                continue
+            if _is_anon_hash(player_name):
+                continue
+
+            has_cards = seat_num in showdown_seats
+            has_vpip = seat_num in legacy_vpip_seats
+            # vpip_action: cards se SD, ou action label preflop
+            vpip_action = showdown_seats.get(seat_num) or legacy_vpip_seats.get(seat_num)
 
             # Bounty/country do Vision
             vision_info = vision_by_name.get(player_name.lower(), {})
@@ -683,25 +722,38 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
             bounty_pct = vision_info.get("bounty_pct")
             country = vision_info.get("country")
 
-            cur.execute(
-                """INSERT INTO hand_villains
-                   (mtt_hand_id, hand_db_id, player_name, position, stack, bounty_pct, country, vpip_action)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL DO NOTHING""",
-                (mtt_hand_id, hand_db_id, player_name, position, stack, bounty_pct, country, vpip_action)
-            )
-            created += 1
+            # ── Aplicar regras A∨B∨C∨D ──
+            if hand_db_id:
+                cats = _classify_villain_categories(hand_meta, player_name, has_cards, has_vpip)
+                if not cats:
+                    continue  # nenhuma regra disparou — não é villain a registar
+            else:
+                # Path bulk MTT archive (mtt_hand_id only): category='sd' default,
+                # comportamento legacy preservado.
+                cats = ['sd']
 
-            # Auto-populate villain_notes
-            if player_name and player_name != "Unknown" and player_name != "Hero":
+            for cat in cats:
                 cur.execute(
-                    """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                       VALUES (%s, %s, 1, NOW())
-                       ON CONFLICT (site, nick) DO UPDATE SET
-                           hands_seen = villain_notes.hands_seen + 1,
-                           updated_at = NOW()""",
-                    (site, player_name)
+                    """INSERT INTO hand_villains
+                           (mtt_hand_id, hand_db_id, player_name, position, stack,
+                            bounty_pct, country, vpip_action, category)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (hand_db_id, player_name, category)
+                       WHERE hand_db_id IS NOT NULL DO NOTHING""",
+                    (mtt_hand_id, hand_db_id, player_name, position, stack,
+                     bounty_pct, country, vpip_action, cat)
                 )
+                created += 1
+
+            # Auto-populate villain_notes (agnóstico de categoria, 1x por mão)
+            cur.execute(
+                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
+                   VALUES (%s, %s, 1, NOW())
+                   ON CONFLICT (site, nick) DO UPDATE SET
+                       hands_seen = villain_notes.hands_seen + 1,
+                       updated_at = NOW()""",
+                (site, player_name)
+            )
 
     return created
 
