@@ -85,18 +85,33 @@ def _fetch_entry_image_bytes(entry_type: str, raw_text: str | None) -> dict | No
             }
             with httpx.Client(follow_redirects=True, timeout=15, headers=headers) as client:
                 fetch_url = url
-                # Gyazo: gyazo.com/<id> (HTML) → i.gyazo.com/<id>.png (binário).
+                # Gyazo: gyazo.com/<id> (HTML) → i.gyazo.com/<id>.<ext> (binário).
+                # Imagens podem ser PNG, JPG ou GIF. Tenta .png primeiro (mais
+                # comum em screenshots de poker), .jpg e .gif depois. Se nenhum
+                # HEAD acertar, return None — não cai para o URL HTML (Tech Debt
+                # #2: silent fallback era a causa de img_b64=NULL para JPEGs).
                 if "gyazo.com/" in fetch_url and "i.gyazo.com" not in fetch_url and not any(
                     fetch_url.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")
                 ):
                     gid = fetch_url.rstrip("/").split("/")[-1]
-                    candidate = f"https://i.gyazo.com/{gid}.png"
-                    try:
-                        head = client.head(candidate)
-                        if head.status_code == 200:
-                            fetch_url = candidate
-                    except Exception:
-                        pass
+                    resolved = None
+                    for ext in (".png", ".jpg", ".gif"):
+                        candidate = f"https://i.gyazo.com/{gid}{ext}"
+                        try:
+                            head = client.head(candidate)
+                            if head.status_code == 200:
+                                resolved = candidate
+                                break
+                        except Exception:
+                            continue
+                    if resolved:
+                        fetch_url = resolved
+                    else:
+                        logger.warning(
+                            f"gyazo: HEAD a .png/.jpg/.gif todas falharam "
+                            f"para gid={gid} (URL original: {url})"
+                        )
+                        return None
                 resp = client.get(fetch_url)
                 if resp.status_code != 200:
                     logger.warning(
