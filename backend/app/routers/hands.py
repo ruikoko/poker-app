@@ -541,7 +541,19 @@ def list_hands(
                h.tournament_format, h.tournament_name, h.tournament_number, h.buy_in,
                e.discord_channel, e.discord_posted_at,
                d.channel_name AS discord_channel_name,
-               (SELECT COUNT(*) FROM hand_attachments WHERE hand_db_id = h.id)::int AS attachment_count
+               (SELECT COUNT(*) FROM hand_attachments WHERE hand_db_id = h.id)::int AS attachment_count,
+               (SELECT COALESCE(json_agg(
+                  json_build_object(
+                    'id', ha.id,
+                    'image_url', ha.image_url,
+                    'img_b64', ha.img_b64,
+                    'mime_type', ha.mime_type,
+                    'posted_at', ha.posted_at,
+                    'channel_name', ha.channel_name
+                  ) ORDER BY ha.posted_at ASC, ha.id ASC
+                ), '[]'::json)
+                FROM hand_attachments ha WHERE ha.hand_db_id = h.id
+               ) AS attachments
         FROM hands h
         LEFT JOIN entries e ON h.entry_id = e.id
         LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id

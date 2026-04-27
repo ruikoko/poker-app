@@ -1462,6 +1462,11 @@ function PlaceholderHandRow({ hand, onDelete }) {
   // SS source: prioriza screenshot_url (CDN GG), fallback para imageUrl(entry_id)
   const imgSrc = hand.screenshot_url
     || (hand.entry_id ? screenshots.imageUrl(hand.entry_id) : null)
+  // Bucket 1 Tech Debt #1: anexos imagem inline. Até 3 thumbs + "+N" overflow.
+  const attachments = hand.attachments || []
+  const attachmentCount = hand.attachment_count || 0
+  const attSrc = (att) =>
+    att.img_b64 ? `data:${att.mime_type || 'image/png'};base64,${att.img_b64}` : att.image_url
 
   return (
     <div style={{
@@ -1495,6 +1500,49 @@ function PlaceholderHandRow({ hand, onDelete }) {
           }}>Sem imagem</div>
         )}
       </div>
+
+      {/* Anexos imagem (Bucket 1 Tech Debt #1) */}
+      {attachmentCount > 0 && (
+        <div style={{ flexShrink: 0, width: 120, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>
+            📎 {attachmentCount}
+          </div>
+          {(() => {
+            const overflow = attachments.length > 3 ? attachments.length - 2 : 0
+            const visible = overflow > 0 ? attachments.slice(0, 2) : attachments.slice(0, 3)
+            return (
+              <>
+                {visible.map((att) => (
+                  <a key={att.id} href={att.image_url} target="_blank" rel="noopener noreferrer" style={{ lineHeight: 0 }}>
+                    <img
+                      src={attSrc(att)}
+                      alt="anexo"
+                      title="Abrir em nova aba"
+                      style={{
+                        width: 120, height: 'auto', borderRadius: 4,
+                        border: '1px solid rgba(0,0,0,0.1)',
+                        display: 'block',
+                        cursor: 'zoom-in',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+                    />
+                  </a>
+                ))}
+                {overflow > 0 && (
+                  <div style={{
+                    width: 120, height: 90, borderRadius: 4,
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, color: '#cbd5e1', fontWeight: 600,
+                  }}>+{overflow}</div>
+                )}
+              </>
+            )
+          })()}
+        </div>
+      )}
 
       {/* Metadata + nicks */}
       <div style={{ flex: 1, fontSize: 12, color: '#cbd5e1', minWidth: 0 }}>
