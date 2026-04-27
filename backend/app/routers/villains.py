@@ -153,6 +153,7 @@ def list_villains(
 @router.get("/categorized")
 def list_villains_categorized(
     category:  Optional[str] = Query("all", pattern="^(all|sd|nota|friend)$"),
+    site:      Optional[str] = Query(None, description="Filtrar por sala (GGPoker, Winamax, PokerStars, WPN)"),
     search:    Optional[str] = Query(None, description="ILIKE no player_name"),
     page:      int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -172,6 +173,7 @@ def list_villains_categorized(
     offset = (page - 1) * page_size
     params = {
         "category": category,
+        "site": site,
         "search": search,
         "search_like": f"%{search}%" if search else None,
         "limit": page_size,
@@ -200,6 +202,7 @@ def list_villains_categorized(
             JOIN hands h ON h.id = hv.hand_db_id
             WHERE hv.hand_db_id IS NOT NULL
               AND h.played_at >= '2026-01-01'
+              AND (%(site)s IS NULL OR h.site = %(site)s)
               AND (%(search)s IS NULL OR hv.player_name ILIKE %(search_like)s)
             GROUP BY hv.player_name
             HAVING (

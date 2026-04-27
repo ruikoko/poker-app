@@ -428,12 +428,79 @@ function VillainProfile({ villain, onClose, onSave }) {
 
 // ── Página Principal ─────────────────────────────────────────────────────────
 
+// ── Helpers Tech Debt #4 Parte D ─────────────────────────────────────────────
+
+const SITE_COLORS = {
+  GGPoker:    '#dc2626',
+  Winamax:    '#f59e0b',
+  PokerStars: '#22c55e',
+  WPN:        '#3b82f6',
+}
+
+function SiteBadge({ site }) {
+  const c = SITE_COLORS[site] || '#64748b'
+  return (
+    <span style={{
+      display: 'inline-block', padding: '1px 7px', borderRadius: 3,
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+      color: c, background: `${c}18`, border: `1px solid ${c}40`,
+    }}>{site}</span>
+  )
+}
+
+function relativeDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now - d
+  const diffH = Math.floor(diffMs / 3600000)
+  if (diffH < 1) return 'há minutos'
+  if (diffH < 24) return `há ${diffH}h`
+  const diffD = Math.floor(diffH / 24)
+  if (diffD < 7) return `há ${diffD}d`
+  return d.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' })
+}
+
+function datesLabel(arr) {
+  if (!arr || arr.length === 0) return '—'
+  if (arr.length === 1) return new Date(arr[0]).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' })
+  if (arr.length === 2) {
+    const fmt = (s) => new Date(s).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' })
+    // arr vem ORDER BY date DESC; fim → início
+    return `${fmt(arr[arr.length - 1])} → ${fmt(arr[0])}`
+  }
+  return `${arr.length} dias`
+}
+
+function CategoryBadge({ label, count, color }) {
+  if (count == null) return null
+  const dim = count === 0
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+      fontSize: 11, fontWeight: 700, fontFamily: 'monospace',
+      color: dim ? '#4b5563' : color,
+      background: dim ? 'transparent' : `${color}15`,
+      border: `1px solid ${dim ? '#2a2d3a' : color + '30'}`,
+      marginRight: 4,
+    }}>{label}: {count}</span>
+  )
+}
+
+const TAB_DEFS = [
+  { key: 'all',    label: 'Todos' },
+  { key: 'sd',     label: 'Mãos com SD' },
+  { key: 'nota',   label: 'Notas' },
+  { key: 'friend', label: 'Amigos' },
+]
+
+
 export default function VillainsPage() {
   const [data, setData]       = useState({ data: [], total: 0, pages: 1 })
   const [page, setPage]       = useState(1)
   const [search, setSearch]   = useState('')
   const [siteFilter, setSiteFilter] = useState('')
-  const [sortBy, setSortBy]   = useState('hands_desc')
+  const [category, setCategory]     = useState('sd')  // default: Mãos com SD
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -450,7 +517,6 @@ export default function VillainsPage() {
   useEffect(() => {
     const nickParam = searchParams.get('nick')
     if (!nickParam) return
-    // Procura exacta do vilão pelo nick e abre o modal
     villains.list({ search: nickParam, page_size: 10 })
       .then(res => {
         const items = res?.data || []
@@ -459,7 +525,6 @@ export default function VillainsPage() {
       })
       .catch(() => {})
       .finally(() => {
-        // limpa o query param para não reabrir em navegações subsequentes
         searchParams.delete('nick')
         setSearchParams(searchParams, { replace: true })
       })
@@ -468,18 +533,39 @@ export default function VillainsPage() {
 
   function load(p = page, s = search) {
     setLoading(true)
-    villains.list({ page: p, page_size: 50, search: s || undefined, site: siteFilter || undefined, sort: sortBy || undefined })
+    villains.listCategorized({
+      category,
+      site: siteFilter || undefined,
+      search: s || undefined,
+      page: p,
+      page_size: 50,
+    })
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [page, siteFilter, sortBy])
+  useEffect(() => { load() }, [page, siteFilter, category])
 
   function handleSearch(e) {
     e.preventDefault()
     setPage(1)
     load(1, search)
+  }
+
+  // Adapter: lista nova devolve só nick. Modal VillainProfile precisa de id
+  // (de villain_notes) para update da nota. Faz fetch ao endpoint legacy
+  // e abre o modal com a row obtida. _create_villains_for_hand garante UPSERT
+  // em villain_notes para todos os nicks criados pós-Parte A.
+  async function openModal(nick) {
+    try {
+      const res = await villains.list({ search: nick, page_size: 5 })
+      const match = (res.data || []).find(v => v.nick === nick)
+      if (match) setSelected(match)
+      else setError(`Sem entry em villain_notes para "${nick}". Tenta "Recalcular".`)
+    } catch (e) {
+      setError(e.message)
+    }
   }
 
   async function handleCreate(e) {
@@ -518,7 +604,13 @@ export default function VillainsPage() {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div>
             <div className="page-title">Vilões</div>
-            <div className="page-subtitle">{data.total} notas</div>
+            <div className="page-subtitle">
+              {data.total} {data.total === 1 ? 'vilão' : 'vilões'}
+              {category !== 'all' && (
+                <> · categoria <strong style={{ color: '#a5b4fc' }}>{TAB_DEFS.find(t => t.key === category)?.label}</strong></>
+              )}
+              {siteFilter && <> · <SiteBadge site={siteFilter} /></>}
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button
@@ -602,6 +694,23 @@ export default function VillainsPage() {
 
       {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
 
+      {/* TabBar — 4 tabs: Todos / Mãos com SD / Notas / Amigos */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 12, background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8, padding: 3, width: 'fit-content' }}>
+        {TAB_DEFS.map(t => (
+          <button
+            key={t.key}
+            onClick={() => { setCategory(t.key); setPage(1) }}
+            style={{
+              padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+              border: 'none', cursor: 'pointer',
+              background: category === t.key ? '#6366f1' : 'transparent',
+              color: category === t.key ? '#fff' : '#94a3b8',
+              transition: 'all 0.15s',
+            }}
+          >{t.label}</button>
+        ))}
+      </div>
+
       <div style={{ marginBottom: 12 }}>
         <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input
@@ -619,73 +728,62 @@ export default function VillainsPage() {
             <option value="PokerStars">PokerStars</option>
             <option value="WPN">WPN</option>
           </select>
-          <select value={sortBy} onChange={e => { setSortBy(e.target.value); setPage(1) }} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 11px', fontSize: 12 }}>
-            <option value="hands_desc">Mais mãos</option>
-            <option value="hands_asc">Menos mãos</option>
-            <option value="updated_desc">Actualizado recente</option>
-            <option value="updated_asc">Actualizado antigo</option>
-            <option value="nick_asc">Nick A-Z</option>
-          </select>
         </form>
       </div>
 
-      <div className="card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Nick</th>
-                <th>Sala</th>
-                <th>Nota</th>
-                <th>Tags</th>
-                <th>Mãos</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>A carregar…</td></tr>
-              )}
-              {!loading && rows.length === 0 && (
-                <tr><td colSpan={6}><div className="empty-state">Sem vilões. Cria o primeiro acima.</div></td></tr>
-              )}
-              {!loading && rows.map(v => (
-                <tr
-                  key={v.id}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setSelected(v)}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
-                  onMouseLeave={e => e.currentTarget.style.background = ''}
-                >
-                  <td>
-                    <strong style={{ color: '#e2e8f0' }}>{v.nick}</strong>
-                  </td>
-                  <td className="muted">{v.site || '—'}</td>
-                  <td style={{ minWidth: 200, maxWidth: 300 }}>
-                    <span className="muted" style={{ fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {v.note || <em style={{ color: '#4b5563' }}>Sem nota</em>}
-                    </span>
-                  </td>
-                  <td>
-                    {(v.tags || []).map(t => (
-                      <span key={t} className="badge badge-normal" style={{ marginRight: 3 }}>{t}</span>
-                    ))}
-                  </td>
-                  <td className="muted">{v.hands_seen ?? 0}</td>
-                  <td onClick={e => e.stopPropagation()}>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => deleteVillain(v.id)}
-                    >✕</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="card" style={{ padding: 0 }}>
+        {loading && (
+          <div style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>A carregar…</div>
+        )}
+        {!loading && rows.length === 0 && (
+          <div className="empty-state" style={{ padding: 32 }}>
+            {category === 'friend'
+              ? 'Sem amigos a aparecer. Quando jogares com Karluz/flightrisk vão entrar aqui automaticamente.'
+              : 'Sem vilões nesta categoria.'}
+          </div>
+        )}
+        {!loading && rows.map(v => (
+          <div
+            key={v.nick}
+            onClick={() => openModal(v.nick)}
+            style={{
+              padding: '12px 16px', borderBottom: '1px solid #1a1d27',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16,
+              flexWrap: 'wrap',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.05)'}
+            onMouseLeave={e => e.currentTarget.style.background = ''}
+          >
+            <div style={{ minWidth: 180, flexShrink: 0 }}>
+              <strong style={{ color: '#e2e8f0', fontSize: 14 }}>{v.nick}</strong>
+            </div>
+
+            <div style={{ display: 'flex', gap: 0, flexWrap: 'nowrap', minWidth: 280 }}>
+              <CategoryBadge label="SD"      count={v.sd_count}     color="#a78bfa" />
+              <CategoryBadge label="Notas"   count={v.nota_count}   color="#f59e0b" />
+              <CategoryBadge label="Friends" count={v.friend_count} color="#06b6d4" />
+            </div>
+
+            <div style={{ minWidth: 70, fontSize: 13, fontFamily: 'monospace', color: '#fbbf24', fontWeight: 700 }}>
+              {v.total_count} mãos
+            </div>
+
+            <div style={{ minWidth: 90, fontSize: 12, color: '#94a3b8' }}>
+              {relativeDate(v.last_seen)}
+            </div>
+
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {(v.sites || []).map(s => <SiteBadge key={s} site={s} />)}
+            </div>
+
+            <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', marginLeft: 'auto' }}>
+              {datesLabel(v.dates)}
+            </div>
+          </div>
+        ))}
 
         {data.pages > 1 && (
-          <div className="pagination">
+          <div className="pagination" style={{ padding: 12 }}>
             <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Anterior</button>
             <span className="muted">Pág. {page} / {data.pages}</span>
             <button className="btn btn-ghost btn-sm" disabled={page >= data.pages} onClick={() => setPage(p => p + 1)}>Próxima →</button>

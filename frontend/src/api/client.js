@@ -87,6 +87,12 @@ export const villains = {
     ).toString()
     return req('GET', `/villains${qs ? '?' + qs : ''}`)
   },
+  listCategorized: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/villains/categorized${qs ? '?' + qs : ''}`)
+  },
   get:    (id)          => req('GET',    `/villains/${id}`),
   create: (body)        => req('POST',   '/villains', body),
   update: (id, body)    => req('PATCH',  `/villains/${id}`, body),
