@@ -144,7 +144,9 @@ export default function HandHistoryViewer({ hand }) {
         </div>
         {players.map((p, i) => {
           const isHero = p.is_hero || HERO_NAMES_ALL.has(String(p.name).toLowerCase())
-          const stackLabel = formatTableStack(p.stack, bb)
+          // Hotfix: usar startStack (intacto desde init em parseHH) em vez de stack
+          // (mutado durante parsing — fica a 0 para jogadores all-in).
+          const stackLabel = formatTableStack(p.startStack, bb)
           return (
             <div key={i} style={{
               display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px',

@@ -576,59 +576,6 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           )}
         </div>
 
-        {/* Players table — stacks & positions */}
-        {hand.all_players_actions && (() => {
-          const SEAT_ORDER = ['BTN', 'SB', 'BB', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO']
-          const players = Object.entries(hand.all_players_actions)
-            .filter(([k]) => k !== '_meta')
-            .map(([name, info]) => ({ name, ...info }))
-            .sort((a, b) => {
-              const ia = SEAT_ORDER.indexOf(a.position)
-              const ib = SEAT_ORDER.indexOf(b.position)
-              return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
-            })
-          if (players.length === 0) return null
-          return (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
-                Mesa ({players.length} jogadores)
-              </div>
-              <div style={{ background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130', overflow: 'hidden' }}>
-                {players.map((p, i) => (
-                  <div key={i} style={{
-                    display: 'flex', alignItems: 'center',
-                    padding: '6px 12px',
-                    background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)',
-                    borderBottom: i < players.length - 1 ? '1px solid #1a1d27' : 'none',
-                  }}>
-                    <div style={{ width: 54, flexShrink: 0 }}><PosBadge pos={p.position} /></div>
-                    <div style={{ width: 150, flexShrink: 0 }}>
-                      <span style={{ fontSize: 12, fontWeight: p.is_hero ? 700 : 600, color: '#0a0c14', background: p.is_hero ? '#a5b4fc' : '#fbbf24', padding: '2px 8px', borderRadius: 4, display: 'inline-block' }}>
-                        {p.name}{p.is_hero && <span style={{ fontSize: 9, fontWeight: 700, color: '#4338ca', marginLeft: 4 }}>HERO</span>}
-                      </span>
-                    </div>
-                    <div style={{ width: 75, flexShrink: 0, textAlign: 'right', fontSize: 12, color: '#f97316', fontFamily: 'monospace', fontWeight: 700 }}>
-                      {p.stack ? Number(p.stack).toLocaleString() : '—'}
-                    </div>
-                    <div style={{ width: 70, flexShrink: 0, textAlign: 'right' }}>
-                      <span style={{ fontSize: 11, color: '#fff', fontFamily: 'monospace', fontWeight: 700, background: '#f97316', padding: '2px 6px', borderRadius: 3 }}>
-                        {p.stack_bb ? `${p.stack_bb} BB` : '—'}
-                      </span>
-                    </div>
-                    <div style={{ width: 70, flexShrink: 0, textAlign: 'right', paddingLeft: 12 }}>
-                      {p.bounty != null && (
-                        <span style={{ fontSize: 11, color: '#f1f5f9', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(30,58,95,0.4)', border: '1px solid rgba(30,58,95,0.5)' }}>
-                          {p.bounty}€
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })()}
-
         {/* Acções — prioridade: HH parseada (raw) > all_players_actions > fallback notas */}
         {/* Tech Debt #8: HandHistoryViewer canónico (substitui ParsedHandHistory + parseRawHH local). */}
         {hand.raw
