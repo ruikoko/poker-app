@@ -300,6 +300,10 @@ export function parseHH(raw, apa) {
       const isH = pi >= 0 && pState[pi].isHero
 
       let actionLabel = ''
+      // Campos canónicos (Tech Debt #8) — preenchidos por cada branch
+      let canonicalAmount = 0      // chips: 'to' para raises, amount para calls/bets
+      let canonicalRaiseTo = null  // só para raises
+      let canonicalAddCost = null  // só para raises (delta = raiseTo - prevInvested)
       if (action === 'folds') {
         if (pi >= 0) { pState[pi].folded = true; pState[pi].currentBet = 0; pState[pi].actionLabel = '' }
         actionLabel = 'Fold'
@@ -308,6 +312,7 @@ export function parseHH(raw, apa) {
         actionLabel = 'Check'
       } else if (action === 'calls') {
         const callAmount = amount
+        canonicalAmount = callAmount
         pot += callAmount
         if (pi >= 0) {
           pState[pi].stack -= callAmount
@@ -318,6 +323,7 @@ export function parseHH(raw, apa) {
         }
         actionLabel = `calls ${Math.round(callAmount).toLocaleString()}${allIn ? ' (all-in)' : ''}`
       } else if (action === 'bets') {
+        canonicalAmount = amount
         pot += amount
         if (pi >= 0) {
           pState[pi].stack -= amount
@@ -331,6 +337,9 @@ export function parseHH(raw, apa) {
         const raiseTo = toM ? parseFloat(toM[1].replace(/,/g, '')) : amount
         const prevInvested = pi >= 0 ? pState[pi].totalInvested : 0
         const additionalCost = raiseTo - prevInvested
+        canonicalAmount = raiseTo
+        canonicalRaiseTo = raiseTo
+        canonicalAddCost = additionalCost
         pot += additionalCost
         if (pi >= 0) {
           pState[pi].stack -= additionalCost
@@ -412,6 +421,12 @@ export function parseHH(raw, apa) {
         ps: snap(),
         analysis,
         villainAnalysis,
+        // Tech Debt #8 — campos canónicos para formatActionLabel
+        actionType: action,                                                          // 'folds'|'checks'|'calls'|'bets'|'raises'
+        actionAmount: Math.round(canonicalAmount),                                   // chips
+        raiseTo: canonicalRaiseTo != null ? Math.round(canonicalRaiseTo) : null,     // só para raises
+        additionalCost: canonicalAddCost != null ? Math.round(canonicalAddCost) : null, // só para raises (delta)
+        allIn,
       })
     }
   }
@@ -517,6 +532,10 @@ export function parseStreetsForDisplay(raw, apa) {
         label: step.action,
         amount,
         allIn,
+        // Tech Debt #8 — propagar campos canónicos do step
+        actionType: step.actionType || action,
+        raiseTo: step.raiseTo ?? null,
+        additionalCost: step.additionalCost ?? null,
       })
     }
     // Showdown: cards dos jogadores são snapshot — colocar como acções "shows"
@@ -542,4 +561,65 @@ export function parseStreetsForDisplay(raw, apa) {
   return streetOrder
     .map(k => byStreet[k])
     .filter(s => s.name === 'PRE-FLOP' || s.board.length > 0 || s.actions.length > 0)
+}
+
+// ─── Helpers de formatação canónica (Tech Debt #8) ───────────────────────────
+
+/**
+ * Formata um valor BB conforme a regra global da app:
+ *   - inteiro        → "Nbb"     (ex: 2     → "2bb")
+ *   - decimal        → "N.Xbb"   (1 casa,    ex: 2.5   → "2.5bb")
+ *   - null/NaN/undef → ""
+ *
+ * Regra global: aplica-se em TODA a app (HH, pots, dashboards, listas, etc.).
+ */
+export function formatBB(bb) {
+  if (bb == null || !isFinite(bb)) return ''
+  const rounded = Math.round(bb * 10) / 10
+  if (Number.isInteger(rounded)) return `${rounded}bb`
+  return `${rounded.toFixed(1)}bb`
+}
+
+/**
+ * Produz o label canónico de uma acção conforme spec Rui (29-Abr):
+ *   - folds        → "Fold"
+ *   - checks       → "Check"
+ *   - calls X      → "calls 1,200 (2bb)"
+ *   - bets X       → "bets 1,200 (2bb)"
+ *   - raises X→Y   → "raises 600 to 1,200 (2bb)"   (delta+total fichas, total BB)
+ *   - collected X  → "collected 5,400 (9bb)"
+ *   - sufixo " (all-in)" se source.allIn === true
+ *
+ * Aceita ambos os shapes:
+ *   - step de parseHH                ({ actionType, actionAmount, raiseTo, additionalCost, allIn })
+ *   - action de parseStreetsForDisplay ({ action,    amount,        raiseTo, additionalCost, allIn })
+ *
+ * Fallback: source.label || source.action || ''
+ */
+export function formatActionLabel(source, bb) {
+  if (!source) return ''
+  const type = (source.actionType || source.action || '').toLowerCase()
+  const amount = source.actionAmount ?? source.amount ?? 0
+  const raiseTo = source.raiseTo ?? null
+  const addCost = source.additionalCost ?? null
+  const allInSuffix = source.allIn ? ' (all-in)' : ''
+  const fmt = (n) => Math.round(n).toLocaleString('en-US')
+
+  if (type === 'folds' || type === 'fold') return 'Fold'
+  if (type === 'checks' || type === 'check') return 'Check'
+  if (type === 'calls' || type === 'call') {
+    return `calls ${fmt(amount)} (${formatBB(amount / bb)})${allInSuffix}`
+  }
+  if (type === 'bets' || type === 'bet') {
+    return `bets ${fmt(amount)} (${formatBB(amount / bb)})${allInSuffix}`
+  }
+  if (type === 'raises' || type === 'raise') {
+    const total = raiseTo ?? amount
+    const delta = addCost ?? total
+    return `raises ${fmt(delta)} to ${fmt(total)} (${formatBB(total / bb)})${allInSuffix}`
+  }
+  if (type === 'collected' || type === 'collects' || type === 'wins') {
+    return `collected ${fmt(amount)} (${formatBB(amount / bb)})${allInSuffix}`
+  }
+  return source.label || source.action || ''
 }
