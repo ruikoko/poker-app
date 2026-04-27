@@ -988,6 +988,17 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
 
     hand = dict(rows[0])
 
+    # Tech Debt #5: pré-resolve hashes GG anonimizados no raw HH para os
+    # nicks reais. Frontend usa hand.raw_resolved se disponível, fallback
+    # para hand.raw (mantido intacto para botão "Copiar HH").
+    if hand.get("raw") and hand.get("all_players_actions"):
+        from app.services.hand_service import _resolve_hashes_in_raw
+        hand["raw_resolved"] = _resolve_hashes_in_raw(
+            hand["raw"], hand["all_players_actions"]
+        )
+    else:
+        hand["raw_resolved"] = None
+
     # Anexos imagem ↔ mão (Bucket 1). Lista em ordem cronológica de posted_at.
     attachments = query("""
         SELECT id, image_url, cached_url, img_b64, mime_type,

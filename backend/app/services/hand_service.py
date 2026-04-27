@@ -3,8 +3,86 @@ Serviço de processamento de mãos.
 Liga entries a hands: extrai mãos de uma entry e insere-as na tabela hands.
 """
 import json
+import re
 from app.db import get_conn, query, execute_returning
 from app.parsers.gg_hands import parse_hands
+
+
+# ─── Tech Debt #5: pré-resolver hashes GG anonimizados no raw HH ─────────────
+
+_SEAT_RE = re.compile(r'Seat (\d+): (.+?) \(')
+
+
+def _resolve_hashes_in_raw(raw: str | None, apa: dict | None) -> str | None:
+    """
+    Pré-resolve hashes GG anonimizados (`3d454afe`, etc.) no raw HH para os
+    nicks reais que estão em `all_players_actions`.
+
+    O cliente (HandDetailPage.jsx) já tenta fazer este mapping, mas há um
+    bug visual em que apenas `Hero` é resolvido — os outros 6/7 hashes
+    aparecem literalmente na secção HAND HISTORY apesar do algoritmo
+    parecer correcto. Mover a resolução para o backend elimina dependência
+    de cache/build state do frontend e dá garantia determinística.
+
+    Args:
+        raw: string HH original (ex: "Seat 2: ed861052 (18,804 in chips)\n...")
+        apa: all_players_actions JSONB — keys são nicks reais com info.seat
+
+    Returns:
+        raw com hashes substituídos por nicks. Se `name_map` ficar vazio
+        (apa sem seats), devolve raw original sem alterações. Hashes que
+        não estejam no map são mantidos (não há substituição aleatória).
+
+    Bordas tratadas (cobre todos os locais onde GG escreve o nome do
+    jogador no HH):
+      - "Seat N: <hash> ("
+      - "<hash>: " (action lines)
+      - "Dealt to <hash>"
+      - "<hash> shows"
+      - "<hash> collected"
+      - "<hash> mucks"
+      - "Uncalled bet (...) returned to <hash>"
+    """
+    if not raw or not apa:
+        return raw
+
+    # 1) Construir name_map cruzando "Seat N: <hash>" com apa[name].seat
+    seat_to_real = {}
+    for name, info in apa.items():
+        if name == "_meta" or not isinstance(info, dict):
+            continue
+        seat = info.get("seat")
+        if isinstance(seat, int):
+            seat_to_real[seat] = name
+
+    name_map: dict[str, str] = {}
+    for m in _SEAT_RE.finditer(raw):
+        seat_num = int(m.group(1))
+        anon_name = m.group(2).strip()
+        real_name = seat_to_real.get(seat_num)
+        if real_name and real_name != anon_name:
+            name_map[anon_name] = real_name
+
+    if not name_map:
+        return raw
+
+    # 2) Substituição segura por hash. Ordem desc por comprimento evita
+    #    substring conflicts (ex: hash que é prefixo de outro).
+    resolved = raw
+    for anon in sorted(name_map.keys(), key=len, reverse=True):
+        real = name_map[anon]
+        # Word boundary defensivo: hash seguido por ":", " ", "(" ou
+        # antecedido por "to ", "Seat N: ", início de linha, etc.
+        # Usamos lookbehind para "Dealt to ", "returned to "; padrão
+        # geral cobre o resto.
+        # Escape do anon (pode ter caracteres ., ! como nicks Vision).
+        anon_esc = re.escape(anon)
+        # (?<![\w.]) e (?![\w.]) — boundaries que tratam '.' como parte
+        # do nick (nicks Vision podem terminar em ".." truncados).
+        pattern = rf'(?<![\w.]){anon_esc}(?![\w.])'
+        resolved = re.sub(pattern, real, resolved)
+
+    return resolved
 
 
 def _get_or_create_tournament_pk(conn, tournament_id_str: str, site: str) -> int | None:

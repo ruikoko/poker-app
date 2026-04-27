@@ -83,7 +83,9 @@ export default function HandDetailPage() {
     if (k !== v) nameMap[k] = v
   }
 
-  const streets = parseStreetsForDisplay(hand.raw, hand.all_players_actions)
+  // Tech Debt #5: backend pré-resolve hashes GG → nicks reais em raw_resolved.
+  // Fallback raw mantém comportamento legacy se raw_resolved não vier do backend.
+  const streets = parseStreetsForDisplay(hand.raw_resolved || hand.raw, hand.all_players_actions)
   const blindsLabel = meta.sb && meta.bb ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : ''
 
   let initialPot = 0
