@@ -674,7 +674,24 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
 
     # ── Construir lista de candidates (non-hero com cards OR VPIP) ──
     seats = hh_hand.get("seats", {})
-    seat_to_name = _build_seat_to_name_map(hh_hand, screenshot_data)
+    # Tech Debt #17: usar mapping seat→nick já feito por anchors_stack_elimination_v2
+    # em _enrich_hand_from_orphan_entry e gravado em apa.
+    # _build_seat_to_name_map é algoritmo paralelo divergente (mtt.py:487-629) que
+    # falha em ~70% das mãos GG (audit 16 hands pós-fix Tech Debt #16: 5 match
+    # perfeito, 12 falsos positivos, 12 falsos negativos — simetria 12/12 confirma
+    # seat→nick swap, não filtro errado).
+    # Fallback ao algoritmo legacy só se apa não tem seats (paths bulk MTT archive).
+    apa_for_mapping = hh_hand.get("all_players_actions", {})
+    seat_to_name = {}
+    if isinstance(apa_for_mapping, dict):
+        for _name, _pdata in apa_for_mapping.items():
+            if _name == "_meta" or not isinstance(_pdata, dict):
+                continue
+            _seat = _pdata.get("seat")
+            if _seat is not None:
+                seat_to_name[int(_seat)] = _name
+    if not seat_to_name:
+        seat_to_name = _build_seat_to_name_map(hh_hand, screenshot_data)
     vision_by_name = {}
     for vp in screenshot_data.get("players_list", []):
         vision_by_name[vp["name"].lower()] = vp
