@@ -1,4 +1,5 @@
 import TagEditor from './TagEditor'
+import { SITE_COLORS_HANDROW, SITE_COLOR_DEFAULT } from '../lib/siteColors'
 
 // ── Constantes (cópia de Hands.jsx para auto-conteúdo) ──────────────────────
 
@@ -103,11 +104,7 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
     : hand.site === 'WPN'        ? 'WPN'
     : hand.site === 'GGPoker'    ? 'GG'
     : '?'
-  const siteColor =
-    hand.site === 'Winamax'    ? '#f59e0b'
-    : hand.site === 'PokerStars' ? '#ef4444'
-    : hand.site === 'WPN'        ? '#22c55e'
-    : '#6366f1'
+  const siteColor = SITE_COLORS_HANDROW[hand.site] || SITE_COLOR_DEFAULT
 
   // Buy-in: soma componentes do stakes (ex: €45+€45+€10 → €100)
   const stakesStr = hand.stakes || ''

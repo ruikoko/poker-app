@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
+import { SITE_COLORS_VILLAINS as SITE_COLORS } from '../lib/siteColors'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -429,13 +430,6 @@ function VillainProfile({ villain, onClose, onSave }) {
 // ── Página Principal ─────────────────────────────────────────────────────────
 
 // ── Helpers Tech Debt #4 Parte D ─────────────────────────────────────────────
-
-const SITE_COLORS = {
-  GGPoker:    '#dc2626',
-  Winamax:    '#f59e0b',
-  PokerStars: '#22c55e',
-  WPN:        '#3b82f6',
-}
 
 function SiteBadge({ site }) {
   const c = SITE_COLORS[site] || '#64748b'

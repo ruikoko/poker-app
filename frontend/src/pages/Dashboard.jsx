@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { hands, study, screenshots, villains } from '../api/client'
+import { SITE_COLORS_DASHBOARD as SITE_COLORS } from '../lib/siteColors'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -19,11 +20,6 @@ const POS_COLORS = {
   SB: '#f59e0b', BB: '#ef4444',
   UTG: '#22c55e', UTG1: '#16a34a', UTG2: '#15803d',
   MP: '#06b6d4', MP1: '#0891b2',
-}
-
-const SITE_COLORS = {
-  PokerStars: '#ef4444', Winamax: '#22c55e', GGPoker: '#f59e0b',
-  WPN: '#06b6d4', '888poker': '#8b5cf6',
 }
 
 const SITE_SHORT = {
