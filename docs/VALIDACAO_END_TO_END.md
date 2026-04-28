@@ -1,7 +1,7 @@
 # Validação end-to-end — poker-app
 
 **Última actualização:** 29 Abril 2026
-**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1), sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes), sessão 29-Abr Tech Debt #8 (Uniformização HH em todos os componentes — fechado), Pipeline 1 verificação ponta-a-ponta (HM3) + Tech Debt #9 fechado (race condition cross-connection hm3+mtt) + 4 Tech Debts pendentes (#10/#11/#12/#13) + 1 nota explicativa (TZ display) **+ sessão 29-Abr pt3 (4 itens backlog fechados: #5 race latente mtt.py + #7 dead code HM3.jsx + #13a centralizar SITE_COLORS + #13b paleta unificada + filtros multi-select)**
+**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1), sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes), sessão 29-Abr Tech Debt #8 (Uniformização HH em todos os componentes — fechado), Pipeline 1 verificação ponta-a-ponta (HM3) + Tech Debt #9 fechado (race condition cross-connection hm3+mtt) + 4 Tech Debts pendentes (#10/#11/#12/#13) + 1 nota explicativa (TZ display) + sessão 29-Abr pt3 (4 itens backlog fechados: #5 race latente mtt.py + #7 dead code HM3.jsx + #13a centralizar SITE_COLORS + #13b paleta unificada + filtros multi-select) **+ sessão 29-Abr pt4 (Tech Debt #14 extra — header torneios enriquecido + TM copiável)**
 
 ---
 
@@ -189,6 +189,7 @@
 | 5 | **Bug latente `mtt.py:786` (`_create_ggpoker_villain_notes_for_hand`)** — mesmo padrão `_q()` cross-connection do Tech Debt #9. Função recebe `conn` como parâmetro mas usa `from app.db import query as _q` para ler `all_players_actions, raw FROM hands WHERE id=%s`. Não se manifesta em prod hoje porque os 3 call-sites (screenshot.py:1445 + mtt.py:1860/1993) passam por `_enrich_hand_from_orphan_entry` que faz commit intermédio. Risco: call-sites futuros podem não comitar antes. | Latente | ✅ **FECHADO 29-Abr pt3** commit `b85c974` — substituir `_q()` por `with conn.cursor() as _cur` na transacção activa. Mecanicamente idêntico ao Tech Debt #9. Comentário rastreável a `630dc73`. Detalhes em `docs/JOURNAL_2026-04-29-pt3.md` |
 | 7 | **Dead code HM3.jsx** — `ACTION_COLORS` (linhas 27-34), `actionStyle()` (103-112), `ActionBadge()` (114-117). Confirmado dead via grep no projecto inteiro: zero callers fora destas linhas. Pré-existente à sessão 29-Abr Tech Debt #8; não removido nesse commit para limitar scope. | Cosmético | ✅ **FECHADO 29-Abr pt3** commit `b85c974` — apagados os 3 blocos (~24 linhas removidas). Sem outras alterações. Hands.jsx tem cópias suas que ainda usa internamente (analisar separadamente em #8). |
 | 13 | **Paleta sites + filtros multi-select + landing tab Vilões** — 3 paletas distintas em `Villains.jsx`, `Dashboard.jsx`, `HandRow.jsx` (cada sala com cor diferente em cada ecrã). Spec aprovada: paleta unificada nova (Winamax vermelho / WPN verde / GG azul / PS amarelo) + landing default tab "Todos" + filtros multi-select com pills coloridas + persistência localStorage + 0 salas → página vazia. | UX | ✅ **FECHADO 29-Abr pt3** em 2 commits. **#13a** (`1698390`): centralizar 3 paletas em `lib/siteColors.js` preservando-as distintas + aliases `SITE_COLORS_VILLAINS/_DASHBOARD/_HANDROW`. Zero risco visual. **#13b** (`48a98d3`): unificar para 1 só `SITE_COLORS` (paleta nova) — aliases passam a apontar para a mesma const → mudança colateral em Dashboard/HandRow (efeito desejado). Backend `villains.py:/categorized` aceita CSV multi-site (`?site=Winamax,WPN`). Validação visual Rui em prod 9/9 OK. Detalhes em `docs/JOURNAL_2026-04-29-pt3.md` |
+| 14 | **Header torneios vista "Por Tags" enriquecido** — `tournament_number` (todas as salas) + stack inicial Hero (só GG) com sigla `SI`. Plus follow-up: TM copiável ao click com flash verde 600ms + tooltip "Copiar"→"Copiado!". | UX | ✅ **FECHADO 29-Abr pt4** (extra após pt3) commits `ba60d05` (header) + `40119fd` (clipboard). Frontend only, zero backend. `tournament_number` já vinha em `hands.list`; SI lê `all_players_actions[hero].stack` da primeira mão Hero do torneio (ordenada ASC por `played_at`). Render gracefully condicional: TM=null escondido; site!=GG → siHero=null → escondido. Validação Rui em prod ("ja da pa colar"). Detalhes em `docs/JOURNAL_2026-04-29-pt4.md` |
 
 ### Notas explicativas (não-bugs)
 
@@ -370,4 +371,12 @@
 | `b85c974` | fix(villains): corrigir race condition latente em _create_ggpoker_villain_notes_for_hand + remover dead code HM3.jsx (Tech Debts #5 + #7) |
 | `1698390` | refactor(theme): centralizar SITE_COLORS em lib/siteColors.js (Tech Debt #13a) |
 | `48a98d3` | feat(villains): paleta unificada + filtros multi-select por sala (Tech Debt #13b) |
-| _[a gerar]_ | docs(verification): sessão 29-Abr pt3 fecho — 4 itens backlog fechados (#5/#7/#13a/#13b) |
+| `67089c3` | docs(verification): sessão 29-Abr pt3 fecho — 4 itens backlog fechados (#5/#7/#13a/#13b) |
+
+### Sessão 29 Abril parte 4 (Tech Debt #14 extra)
+
+| Commit | Descrição |
+|---|---|
+| `ba60d05` | feat(estudo): header torneios mostra tournament_number + stack inicial Hero (Tech Debt #14) |
+| `40119fd` | feat(estudo): tournament_number copiável ao click (Tech Debt #14 follow-up) |
+| _[a gerar]_ | docs(verification): sessão 29-Abr pt4 fecho — Tech Debt #14 (header torneios + TM copiável) |
