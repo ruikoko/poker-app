@@ -743,7 +743,7 @@ const ICM_TAGS = new Set([
   'SB vs Steal PKO', 'SB vs Steal', 'SB vs Steal LS',
 ])
 
-function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false }) {
+function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null }) {
   const [open, setOpen] = useState(false)
   const bbColor = totalBB > 0 ? '#22c55e' : totalBB < 0 ? '#ef4444' : '#64748b'
   return (
@@ -755,7 +755,6 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ display: 'inline-block', fontSize: 11, color: '#818cf8', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>{name}</span>
-          <span style={{ fontSize: 11, color: '#64748b' }}>{hands.length} mãos</span>
           {showHrcButton && (
             <a
               href="https://hrc.ninja/create-structure/"
@@ -770,6 +769,9 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
               }}
             >HRC</a>
           )}
+          {tournamentNumber && <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}>{tournamentNumber}</span>}
+          {siHero && <span style={{ fontSize: 11, color: '#fbbf24', fontFamily: 'monospace', fontWeight: 700 }}>SI {siHero.toLocaleString('en-US')}</span>}
+          <span style={{ fontSize: 11, color: '#64748b' }}>{hands.length} mãos</span>
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 11, fontFamily: 'monospace' }}>
           <span style={{ color: '#22c55e' }}>{wins}W</span>
@@ -1028,6 +1030,20 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
               // Tema do grupo = tags[0]. Mostrar botão HRC se estiver na lista ICM.
               const groupTheme = tags[0]
               const showHrc = groupTheme && ICM_TAGS.has(groupTheme)
+
+              // Tech Debt #14: tournament_number (todas as salas) + SI Hero (só GG).
+              const tournamentNumber = tHands.find(h => h.tournament_number)?.tournament_number || null
+              let siHero = null
+              if (tHands[0]?.site === 'GGPoker') {
+                const sortedAsc = [...tHands].sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
+                const firstHand = sortedAsc[0]
+                const apa = firstHand?.all_players_actions || {}
+                for (const [pname, info] of Object.entries(apa)) {
+                  if (pname === '_meta') continue
+                  if (info?.is_hero) { siHero = info.stack || null; break }
+                }
+              }
+
               return (
                 <TournamentGroup
                   key={`${ent.day}__${ent.name}`}
@@ -1039,6 +1055,8 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
                   onOpenDetail={onOpenDetail}
                   onDeleteHand={onDeleteHand}
                   showHrcButton={showHrc}
+                  tournamentNumber={tournamentNumber}
+                  siHero={siHero}
                 />
               )
             })
