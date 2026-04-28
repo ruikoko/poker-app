@@ -745,7 +745,20 @@ const ICM_TAGS = new Set([
 
 function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null }) {
   const [open, setOpen] = useState(false)
+  const [tmCopied, setTmCopied] = useState(false)
   const bbColor = totalBB > 0 ? '#22c55e' : totalBB < 0 ? '#ef4444' : '#64748b'
+
+  function copyTm(e) {
+    e.stopPropagation()
+    if (!tournamentNumber) return
+    try {
+      navigator.clipboard?.writeText(String(tournamentNumber))
+      setTmCopied(true)
+      setTimeout(() => setTmCopied(false), 600)
+    } catch {
+      // clipboard API indisponível (browsers antigos / contexto inseguro) — noop
+    }
+  }
   return (
     <div style={{ marginBottom: 8, border: `1px solid ${open ? 'rgba(99,102,241,0.3)' : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden' }}>
       <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: open ? 'rgba(99,102,241,0.06)' : '#1a1d27', cursor: 'pointer', userSelect: 'none' }}
@@ -769,7 +782,20 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
               }}
             >HRC</a>
           )}
-          {tournamentNumber && <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}>{tournamentNumber}</span>}
+          {tournamentNumber && (
+            <span
+              onClick={copyTm}
+              title={tmCopied ? 'Copiado!' : 'Copiar'}
+              style={{
+                fontSize: 11,
+                color: tmCopied ? '#22c55e' : '#64748b',
+                fontFamily: 'monospace',
+                cursor: 'pointer',
+                transition: 'color 0.15s',
+                userSelect: 'none',
+              }}
+            >{tournamentNumber}</span>
+          )}
           {siHero && <span style={{ fontSize: 11, color: '#fbbf24', fontFamily: 'monospace', fontWeight: 700 }}>SI {siHero.toLocaleString('en-US')}</span>}
           <span style={{ fontSize: 11, color: '#64748b' }}>{hands.length} mãos</span>
         </div>
