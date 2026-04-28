@@ -1,7 +1,7 @@
 # Validação end-to-end — poker-app
 
-**Última actualização:** 28 Abril 2026
-**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1) **+ sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes)**
+**Última actualização:** 29 Abril 2026
+**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1), sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes) **+ sessão 29-Abr (Tech Debt #8 — Uniformização HH em todos os componentes — fechado)**
 
 ---
 
@@ -60,6 +60,8 @@
 | Anexos imagem preservados em substituição via `import_.py` (ZIP HH) | ✅ **Tech Debt #3 fechado 28-Abr** (`b789c60`) — trigger Fase IV adicionado |
 | `entries` ZIP HH meta-record marcada `resolved` após import | ✅ **Tech Debt #7 fechado 28-Abr** (`b233b9b` + backfill SQL ad-hoc) — entries 90/91/104 actualizadas; novos imports marcam automaticamente |
 | `hand_attachments.img_b64` para imagens Gyazo JPEG | ✅ **Tech Debt #2 fechado 28-Abr** (`9baec67` + backfill `att_id=8`) — helper Gyazo agora tenta `.png/.jpg/.gif`, retorna None em vez de fallback HTML silencioso |
+| Helper `formatBB(bb)` global para arredondamento BB | ✅ **NOVO 29-Abr Tech Debt #8** (`38ae653`) — `lib/handParser.js` exporta helper canónico: inteiro `"Nbb"` / decimal `"N.Xbb"` (1 casa). Aplica-se em toda a app (HH, pots, dashboards, listas) |
+| Helper `formatActionLabel(source, bb)` canónico (Fold/Check/calls/bets/raises/collected) | ✅ **NOVO 29-Abr Tech Debt #8** (`38ae653`) — produz strings canónicas conforme spec: `"Fold"`/`"Check"`/`"calls X (Ybb)"`/`"raises X to Y (Zbb)"`/`"collected X (Ybb)"` + sufixo `" (all-in)"`. 5 campos novos por step de acção populados em parseHH (aditivos, não breaking) |
 
 ---
 
@@ -82,6 +84,10 @@
 | HAND HISTORY no detalhe usa nicks reais (não hashes) | ✅ **Tech Debt #5 fechado 28-Abr** (`400eb10` + `98330ec`) — backend pré-resolve hashes em campo `hand.raw_resolved`; 5 componentes consomem (`HandDetailPage`, modal Estudo `Hands.jsx`, `ReplayerPage`, `Replayer`, `HM3.jsx`); `hand.raw` original preservado para "Copiar HH" |
 | Página Estudo aterra em vista por defeito | ✅ **NOVO 28-Abr** (`90a6205`) — default mudado de `'tournament'` para `'tags'`; sem persistência (consistente com restante app) |
 | Página Vilões com tabs por categoria | ✅ **NOVO 28-Abr Tech Debt #4 Parte D** (`45051ec`) — 4 tabs (Todos / Mãos com SD default / Notas / Amigos) consumindo `/api/villains/categorized`; cores por sala; modal `VillainProfile` reusado via adapter |
+| HandDetailPage (`/hand/:id`) renderiza HH em formato canónico | ✅ **NOVO 29-Abr Tech Debt #8 fechado** (`c3b3dbf`) — bloco MESA+ACÇÕES inline (~130 linhas) substituído por `<HandHistoryViewer hand={hand}/>`. Stacks `"X,XXX (Y BB)"` + posições antes do nick + acções canónicas + bloco SHOWDOWN dedicado |
+| Modal Estudo (Hands.jsx) renderiza HH em formato canónico | ✅ **NOVO 29-Abr Tech Debt #8 fechado** (`c411a37`) — `<ParsedHandHistory>` + `parseRawHH` local (~340 linhas) substituídos por `<HandHistoryViewer hand={hand}/>`. Bug histórico do `seat_to_name` inexistente eliminado |
+| Modal HM3 renderiza HH em formato canónico | ✅ **NOVO 29-Abr Tech Debt #8 fechado** (`1136e2b`) — `parseRawHH` local + bloco render inline (~270 linhas) substituídos por `<HandHistoryViewer hand={hand}/>` |
+| Bloco MESA legacy duplicado removido (Hands.jsx + HM3.jsx) | ✅ **NOVO 29-Abr Tech Debt #8** — bloco IIFE "Players table" (~52 linhas em cada ficheiro) que duplicava MESA acima do `<HandHistoryViewer>`. Apagado em `Hands.jsx:579-630` (hotfix `b869c12`) e `HM3.jsx:299-349` (commit `1136e2b`) |
 
 ---
 
@@ -112,20 +118,27 @@
 | **UI 📎 N + thumbnails 120px em PlaceholderHandRow** | ✅ **27/04 commit `a2ac5e5` (Tech Debt #1 fechado)** |
 | Anexos imagem ↔ mão (Bucket 1) end-to-end | ✅ **27/04 Fase 3 + Recovery: 4/4 anexadas, validado em BD + UI** |
 | **Friend_aliases robustos (Karluz não villain quando Rui hero, Rui não villain quando Karluz hero)** | ✅ **27/04 teste extra: 0 cross-contamination**. **28-Abr: FRIEND_HEROES (Karluz/flightrisk) agora INCLUÍDOS como villain com `category='friend'` quando aparecem em mãos do Rui** (`8ca3d88`) |
+| Componente `PokerCard` partilhado (variantes sm/md/lg + faceDown) | ✅ **NOVO 29-Abr Tech Debt #8** (`870024e`) — `frontend/src/components/PokerCard.jsx`. Paleta polida red/blue/green/slate da HandDetailPage:15. Faceup placeholder `?`, faceDown gradient azul/púrpura. Consumido por `HandHistoryViewer`; consolidação dos 8 callers locais (HandRow/Dashboard/Discord/Hands/HM3/Tournaments/ReplayerPage/Replayer) fica como housekeeping futuro |
+| Componente `HandHistoryViewer` (renderer único Mesa+Acções+Showdown) | ✅ **NOVO 29-Abr Tech Debt #8** (`a0903d8`) — `frontend/src/components/HandHistoryViewer.jsx`. Consome `parseHH` canónico + `formatBB` + `formatActionLabel` + `PokerCard` partilhado. Implementa toda a spec aprovada Rui (5 decisões + arredondamento BB) |
+| Helper `formatBB(bb)` global | ✅ **NOVO 29-Abr Tech Debt #8** (`38ae653`) — exportado de `handParser.js`. Inteiro `"Nbb"` / decimal `"N.Xbb"` / null `""`. Aplicação em toda a app (HH, pots, dashboards, listas) |
+| Helper `formatActionLabel(source, bb)` canónico | ✅ **NOVO 29-Abr Tech Debt #8** (`38ae653`) — exportado de `handParser.js`. Produz `"Fold"`/`"Check"`/`"calls X (Ybb)"`/`"raises X to Y (Zbb)"`/`"collected X (Ybb)"` + sufixo `" (all-in)"`. Aceita shape de step (parseHH) ou de action (parseStreetsForDisplay) |
+| Hotfix MESA usa `startStack` em vez de `stack` (parseHH devolve pState mutado) | ✅ **NOVO 29-Abr Tech Debt #8 hotfix** (`b869c12`) — bug detectado por Rui em validação visual: jogador all-in aparecia com `"0 (0 BB)"` no MESA porque `parseHH` devolve `pState` (estado mutado) como `players`. Fix 1-line: `HandHistoryViewer.jsx:147` usa `p.startStack` (intacto desde init em parseHH:141) |
 
 ---
 
 ## 6. Pendentes por validar (prioridade decrescente)
 
-1. **Backfill estendido às 110 mãos absorvidas** — placeholders Discord que matcharam HHs reais perderam `discord_tags` antes do fix `7de889f`. Filtro precisa de incluir `entry_id IN (SELECT id FROM entries WHERE source='discord')` em vez de só `origin='discord'`. (anterior à sessão 27-Abr; pós-wipe da sessão 27-Abr o estado está limpo)
-2. **Pesquisa MTT 10 dígitos numéricos → abrir modal mão directamente** (Opção A pré-aprovada 24/04, não implementada).
-3. **Página Discord: agrupar por canal real** (`#nota`, `#pos-pko`, etc.) em vez de `#GGDiscord` + `#sem-tag` (detectado 24/04 PARTE 10, não atacado).
-4. **Tech Debt #8 — Uniformização HH em todos os componentes (alta urgência)** — 3 parsers distintos (`handParser.js:parseHH`, `Hands.jsx:parseRawHH`, `HM3.jsx:parseRawHH`) com lógicas divergentes. Fix #5 follow-up cobriu sintoma (todos consomem `raw_resolved` agora) mas a unificação dos parsers é o fix arquitectural correcto. Detalhes em §7.3.
-5. **Verificação ponta-a-ponta dos 5 pipelines pós Tech Debts 28-Abr** — validar via fluxo orgânico (não SQL directa) que os 6 fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada.
+1. **Verificação ponta-a-ponta dos 5 pipelines pós Tech Debts 28-29 Abr** — validar via fluxo orgânico (não SQL directa) que os fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada.
+2. **Anomalia hand 253 — Upstakes_io villain `sd` sem cards revelados** (NOVO 29-Abr) — Bug aparente no backfill Tech Debt #4 Parte B: regra B (`match_method valid AND has_showdown=TRUE`) aplicada ao nível da MÃO, não filtra por player ter cards revelados. Resultado: jogador que fez fold preflop foi criado como villain `cat='sd'`. Investigação completa reportada (não corrigida) — pendente decisão Rui sobre interpretação da regra (filtrar por `player.cards != None`).
+3. **Backfill estendido às 110 mãos absorvidas** — placeholders Discord que matcharam HHs reais perderam `discord_tags` antes do fix `7de889f`. Filtro precisa de incluir `entry_id IN (SELECT id FROM entries WHERE source='discord')` em vez de só `origin='discord'`. (anterior à sessão 27-Abr; pós-wipe da sessão 27-Abr o estado está limpo)
+4. **Pesquisa MTT 10 dígitos numéricos → abrir modal mão directamente** (Opção A pré-aprovada 24/04, não implementada).
+5. **Página Discord: agrupar por canal real** (`#nota`, `#pos-pko`, etc.) em vez de `#GGDiscord` + `#sem-tag` (detectado 24/04 PARTE 10, não atacado).
 6. **Forçar match individual por HH** — confirmar se endpoint existe.
 7. **Sessão B UI** (`position_parse_failed` com edição manual).
 8. **Migração painel "SSs à espera" do Dashboard para Discord**.
 9. **Housekeeping endpoint legacy `/api/villains`** — pós-Parte D estável, considerar remoção (consume `villain_notes` sem categorias; substituído pelo `/categorized`).
+10. **Consolidação 8 PokerCard locais** (NOVO 29-Abr) — refactor opcional. `PokerCard.jsx` partilhado existe (commit `870024e`), 8 callers locais (HandRow/Dashboard/Discord/Hands/HM3/Tournaments/ReplayerPage/Replayer com RCard) ficam intactos. Decisão Q3 da sessão 29-Abr adiou para housekeeping futuro (risco moderado em layouts estáveis).
+11. **Dead code em HM3.jsx** (NOVO 29-Abr) — `ACTION_COLORS` (linha 26-37), `actionStyle` (105-114), `ActionBadge` (116-118). Já eram dead code antes da sessão 29-Abr; não removidos para não misturar housekeeping desconexo no Commit 6 de Tech Debt #8.
 
 ---
 
@@ -154,11 +167,11 @@
 
 **Os 4 bugs antigos da validação 22-23 Abr foram TODOS resolvidos** (Bug #1 GG villains via skip `6aefc95`; Bug #2 origin via `2844b94`; Bug #3 auto-rematch HM3 via `072f57a`; Bug #4 coluna TAGS via `e77b5cf`).
 
-### 7.3 NOVO Tech Debt — sessão 28-Abr
+### 7.3 Tech Debt — sessão 28-Abr (FECHADO na sessão 29-Abr)
 
-| # | Bug | Severidade | Esforço |
+| # | Bug | Severidade | Status |
 |---|---|---|---|
-| 8 | **Uniformização HH em todos os componentes** — 3 parsers distintos com lógicas divergentes (descoberto durante investigação Tech Debt #5). Sub-problemas: (a) hashes GG resolvidos só onde `raw_resolved` é usado — fix #5 cobriu sintoma, unificação é fix arquitectural; (b) stacks/acções inconsistentes (fichas vs BB) entre vistas; (c) posições GG não enriquecidas em alguns paths; (d) cards de showdown apresentados diferentemente; (e) spec canónica única ainda por escrever. Parsers afectados: `frontend/src/lib/handParser.js:parseHH` (canónico), `frontend/src/pages/Hands.jsx:parseRawHH` (procura `playerNames.seat_to_name` que não existe), `frontend/src/pages/HM3.jsx:parseRawHH` (sem `playerNames` argumento) | Funcional grave / arquitectural | **alta urgência**, ~4-6h sessão dedicada |
+| 8 | **Uniformização HH em todos os componentes** — 3 parsers distintos com lógicas divergentes (descoberto durante investigação Tech Debt #5). Sub-problemas: (a) hashes GG resolvidos só onde `raw_resolved` é usado; (b) stacks/acções inconsistentes (fichas vs BB) entre vistas; (c) posições GG não enriquecidas em alguns paths; (d) cards de showdown apresentados diferentemente; (e) spec canónica única ainda por escrever. Parsers afectados: `frontend/src/lib/handParser.js:parseHH` (canónico), `frontend/src/pages/Hands.jsx:parseRawHH`, `frontend/src/pages/HM3.jsx:parseRawHH` | Funcional grave / arquitectural | ✅ **FECHADO 29-Abr** em 6 commits + 1 hotfix (`870024e` PokerCard + `38ae653` helpers + `a0903d8` HandHistoryViewer + `c3b3dbf` HandDetailPage + `c411a37` modal Estudo + `b869c12` hotfix startStack + `1136e2b` modal HM3). 1 parser canónico + 1 renderer único + 1 Card partilhado. Net -480 linhas no frontend. Replayer/ReplayerPage permanecem intactos por design. Detalhes completos em `docs/JOURNAL_2026-04-29.md` |
 
 ---
 
@@ -177,6 +190,8 @@
 | **Centralizar trigger Fase IV em `hand_service.py`** (em vez de duplicar em discord/hm3/import) | Padrão duplicado em 3 ficheiros pós-`b789c60`; refactor opcional | ~2h |
 | **Housekeeping endpoint legacy `/api/villains`** | Substituído pelo `/categorized`; pode ser removido após Parte D estável | ~30min |
 | **Persistência viewMode página Estudo (localStorage)** | Sem persistência hoje (default `'tags'`); follow-up trivial se necessário | ~5min |
+| **Consolidação 8 PokerCard locais no partilhado** | `PokerCard.jsx` partilhado existe (29-Abr); 8 callers locais ficam intactos. Risco moderado em layouts estáveis | ~2h |
+| **Limpeza dead code HM3.jsx** (`ACTION_COLORS`/`actionStyle`/`ActionBadge`) | Pré-existente à sessão 29-Abr | ~5min |
 
 ---
 
@@ -190,7 +205,7 @@
 | Upload manual SS | ✅ Promovido de ⚠️ para ✅ em 27/04 Fase 6 (2 SSs Rui + 10 Karluz, anchors_stack_elimination_v2 funcional). Bug C `screenshot_url=NULL` mitigado por endpoint `/api/screenshots/image/{entry_id}` |
 | Anexos imagem ↔ mão (Bucket 1) | ✅ Promovido de ⚠️ para ✅ em 27/04 Fase 3 + Recovery (4/4 anexadas, trigger retroactivo funcional, validação BD + UI). **28/04 Tech Debt #2 fechado (Gyazo JPEG fix + backfill `att_id=8`)** |
 
-⚠️ **Verificação ponta-a-ponta pós Tech Debts 28-Abr pendente** — validar via fluxo orgânico que os 6 fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada futura.
+⚠️ **Verificação ponta-a-ponta pós Tech Debts 28-29 Abr pendente** — validar via fluxo orgânico que todos os fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada futura.
 
 ---
 
@@ -302,4 +317,17 @@
 | `c409677` | feat(villains): endpoint /api/villains/categorized aceita filter ?category= (Tech Debt #4 parte C) |
 | `bf75150` | chore(villains): remover migration legacy do índice UNIQUE antigo |
 | `45051ec` | feat(villains): página Vilões com 4 sub-secções + filtro sala (Tech Debt #4 parte D) |
-| _[a gerar]_ | docs(verification): sessão 28-Abr fecho — 6 Tech Debts fechados + re-arquitectura Vilões |
+| `127b47a` | docs(verification): sessão 28-Abr fecho — 6 Tech Debts fechados + re-arquitectura Vilões |
+
+### Sessão 29 Abril (Tech Debt #8 — Uniformização HH)
+
+| Commit | Descrição |
+|---|---|
+| `870024e` | feat(hh): novo componente PokerCard partilhado (Tech Debt #8 commit 1/6) |
+| `38ae653` | feat(hh): helpers formatBB + formatActionLabel canónicos em handParser.js (Tech Debt #8 commit 2/6) |
+| `a0903d8` | feat(hh): novo componente HandHistoryViewer (Tech Debt #8 commit 3/6) |
+| `c3b3dbf` | refactor(hh): HandDetailPage usa HandHistoryViewer (Tech Debt #8 commit 4/6) |
+| `c411a37` | refactor(hh): modal Estudo usa HandHistoryViewer + remove parser local (Tech Debt #8 commit 5/6) |
+| `b869c12` | fix(hh): MESA mostra startStack em vez de stack final + remove bloco legacy duplicado (Tech Debt #8 hotfix) |
+| `1136e2b` | refactor(hh): modal HM3 usa HandHistoryViewer + remove parser local + bloco legacy (Tech Debt #8 commit 6/6 + final) |
+| _[a gerar]_ | docs(verification): sessão 29-Abr fecho — Tech Debt #8 (Uniformização HH) fechado em pleno |
