@@ -655,17 +655,22 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
     from app.services.hand_service import _classify_villain_categories, _is_anon_hash
 
     # ── Carregar hand_meta para regras A∨B∨C∨D (só quando hand_db_id) ──
+    # Tech Debt #9: usar cursor da `conn` actual (mesma transação) em vez de
+    # abrir conexão nova — read committed isolation não veria hands inseridas
+    # not-yet-committed. Bug latente até esta sessão (call-sites Discord/SS
+    # comitam antes, hm3.py com batch atómico expôs o problema).
     hand_meta = {}
     if hand_db_id:
-        from app.db import query as _q
-        rows = _q(
-            """SELECT hm3_tags, discord_tags, has_showdown,
-                      player_names->>'match_method' AS match_method
-               FROM hands WHERE id = %s""",
-            (hand_db_id,)
-        )
-        if rows:
-            hand_meta = dict(rows[0])
+        with conn.cursor() as _cur:
+            _cur.execute(
+                """SELECT hm3_tags, discord_tags, has_showdown,
+                          player_names->>'match_method' AS match_method
+                   FROM hands WHERE id = %s""",
+                (hand_db_id,)
+            )
+            row = _cur.fetchone()
+            if row:
+                hand_meta = dict(row)
 
     # ── Construir lista de candidates (non-hero com cards OR VPIP) ──
     seats = hh_hand.get("seats", {})

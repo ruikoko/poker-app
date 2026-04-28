@@ -760,16 +760,19 @@ def _create_hand_villains_hm3(
     from app.services.hand_service import _classify_villain_categories, _is_anon_hash
 
     # ── Carregar hand_meta para regras A∨B∨C∨D (Tech Debt #4) ──
+    # Tech Debt #9: usar `cur` da transação actual (mesma do INSERT em hands)
+    # em vez de abrir conexão nova — read committed isolation não veria a
+    # hand recém-inserida ainda not-committed.
     hand_meta = {}
-    from app.db import query as _q
-    rows = _q(
+    cur.execute(
         """SELECT hm3_tags, discord_tags, has_showdown,
                   player_names->>'match_method' AS match_method
            FROM hands WHERE id = %s""",
         (hand_db_id,)
     )
-    if rows:
-        hand_meta = dict(rows[0])
+    row = cur.fetchone()
+    if row:
+        hand_meta = dict(row)
 
     all_players = parsed.get("all_players") or {}
     inserted = 0
