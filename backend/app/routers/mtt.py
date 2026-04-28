@@ -788,12 +788,21 @@ def _create_ggpoker_villain_notes_for_hand(
 
     Retorna numero de UPSERTs efectuados em villain_notes.
     """
-    from app.db import query as _q
-    updated_hand = _q(
-        "SELECT all_players_actions, raw FROM hands WHERE id = %s",
-        (hand_db_id,)
-    )
-    hand_row = updated_hand[0] if updated_hand else {}
+    # Tech Debt #9 follow-up: usar cursor da `conn` actual (mesma transação) em
+    # vez de abrir conexão nova via _q() — read committed isolation não veria
+    # hands inseridas not-yet-committed se algum call-site futuro não comitar
+    # antes. Não se manifesta em prod hoje (call-sites SS/rematch comitam via
+    # _enrich_hand_from_orphan_entry antes), mas é fix preventivo idêntico ao
+    # já aplicado em _create_villains_for_hand (commit 630dc73).
+    hand_row = {}
+    with conn.cursor() as _cur:
+        _cur.execute(
+            "SELECT all_players_actions, raw FROM hands WHERE id = %s",
+            (hand_db_id,)
+        )
+        row = _cur.fetchone()
+        if row:
+            hand_row = dict(row)
     apa = hand_row.get("all_players_actions") or {}
     hand_raw = hand_row.get("raw") or ""
 

@@ -24,15 +24,6 @@ const STATE_META = {
   resolved: { label: 'Resolvida', color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
 }
 
-const ACTION_COLORS = {
-  fold: { color: '#64748b', bg: 'rgba(100,116,139,0.10)' },
-  check: { color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
-  call: { color: '#22c55e', bg: 'rgba(34,197,94,0.10)' },
-  bet: { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)' },
-  raise: { color: '#f97316', bg: 'rgba(249,115,22,0.10)' },
-  allin: { color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function PokerCard({ card, size = 'sm' }) {
@@ -98,22 +89,6 @@ function extractLevel(raw) {
     return `Lv ${v}`
   }
   return null
-}
-
-function actionStyle(text) {
-  const t = (text || '').toLowerCase()
-  if (t.includes('all-in') || t.includes('allin') || t.includes('all in')) return ACTION_COLORS.allin
-  if (t.startsWith('raise') || t.startsWith('re-raise')) return ACTION_COLORS.raise
-  if (t.startsWith('bet')) return ACTION_COLORS.bet
-  if (t.startsWith('call')) return ACTION_COLORS.call
-  if (t.startsWith('check')) return ACTION_COLORS.check
-  if (t.startsWith('fold')) return ACTION_COLORS.fold
-  return { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' }
-}
-
-function ActionBadge({ text }) {
-  const s = actionStyle(text)
-  return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, fontFamily: 'monospace', color: s.color, background: s.bg, border: `1px solid ${s.color}25`, whiteSpace: 'nowrap' }}>{text}</span>
 }
 
 // ── Detail Modal ─────────────────────────────────────────────────────────────
