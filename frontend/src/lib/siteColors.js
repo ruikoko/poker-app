@@ -1,34 +1,28 @@
-// Tech Debt #13a — fonte única para cores das salas (paletas preservadas por caller)
+// Tech Debt #13b — paleta unificada para cores das salas
 //
-// NOTA: este ficheiro contém 3 paletas distintas porque a app actualmente tem cores
-// inconsistentes para a mesma sala em ecrãs diferentes. #13a centraliza num único
-// sítio para auditabilidade. #13b unificará para 1 paleta após decisão visual Rui.
+// Após #13a (centralização) e decisão estética Rui em #13b, a app passa a usar
+// 1 paleta única para todas as salas. Substitui as 3 paletas distintas que
+// existiam em Villains.jsx / Dashboard.jsx / HandRow.jsx.
 //
-// QUEM USA O QUÊ:
-// - SITE_COLORS_VILLAINS  → Villains.jsx (página /villains)
-// - SITE_COLORS_DASHBOARD → Dashboard.jsx (Recent villains panel + Últimas mãos)
-// - SITE_COLORS_HANDROW   → HandRow.jsx (coluna "Sala" em todas as listas de mãos)
+// Aliases SITE_COLORS_VILLAINS / SITE_COLORS_DASHBOARD / SITE_COLORS_HANDROW
+// mantidos durante a transição para retrocompatibilidade — todos apontam para
+// a mesma const SITE_COLORS. Limpeza de aliases fica como housekeeping futuro
+// após validação visual em prod.
 
-export const SITE_COLORS_VILLAINS = {
-  GGPoker: '#dc2626',     // vermelho
-  Winamax: '#f59e0b',     // laranja
-  PokerStars: '#22c55e',  // verde
-  WPN: '#3b82f6',         // azul
+export const SITE_COLORS = {
+  Winamax:    '#dc2626',  // vermelho
+  WPN:        '#22c55e',  // verde
+  GGPoker:    '#3b82f6',  // azul
+  PokerStars: '#facc15',  // amarelo
 }
 
-export const SITE_COLORS_DASHBOARD = {
-  PokerStars: '#ef4444',  // vermelho
-  Winamax: '#22c55e',     // verde
-  GGPoker: '#f59e0b',     // laranja
-  WPN: '#06b6d4',         // ciano
-  '888poker': '#8b5cf6',  // púrpura (sala extra que só Dashboard tem)
-}
+export const SITE_COLOR_DEFAULT = '#6366f1'  // índigo (fallback p/ salas não-mapeadas, ex: 888poker)
 
-export const SITE_COLORS_HANDROW = {
-  Winamax: '#f59e0b',     // laranja
-  PokerStars: '#ef4444',  // vermelho
-  WPN: '#22c55e',         // verde
-  // GGPoker cai no default
-}
+// ── Aliases legacy (retrocompat #13a) ────────────────────────────────────────
+// Apontam todos para a paleta unificada. Callers podem importar qualquer alias
+// durante a transição; pós-validação visual Rui, podemos consolidar todos os
+// imports para SITE_COLORS directamente.
 
-export const SITE_COLOR_DEFAULT = '#6366f1'  // índigo
+export const SITE_COLORS_VILLAINS = SITE_COLORS
+export const SITE_COLORS_DASHBOARD = SITE_COLORS
+export const SITE_COLORS_HANDROW = SITE_COLORS

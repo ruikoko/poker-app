@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
-import { SITE_COLORS_VILLAINS as SITE_COLORS } from '../lib/siteColors'
+import { SITE_COLORS, SITE_COLOR_DEFAULT } from '../lib/siteColors'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -489,12 +489,30 @@ const TAB_DEFS = [
 ]
 
 
+// Tech Debt #13b — filtros sala persistidos em localStorage.
+// Default: 4 salas activas. 0 salas → página vazia (respeita escolha user).
+const SITES_ALL = ['Winamax', 'WPN', 'GGPoker', 'PokerStars']
+const LS_KEY_SITE_FILTERS = 'villains_site_filters'
+
+function loadInitialSiteFilters() {
+  try {
+    const raw = localStorage.getItem(LS_KEY_SITE_FILTERS)
+    if (!raw) return new Set(SITES_ALL)
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return new Set(SITES_ALL)
+    // Filtrar apenas salas conhecidas (ignora valores corrompidos)
+    return new Set(arr.filter(s => SITES_ALL.includes(s)))
+  } catch {
+    return new Set(SITES_ALL)
+  }
+}
+
 export default function VillainsPage() {
   const [data, setData]       = useState({ data: [], total: 0, pages: 1 })
   const [page, setPage]       = useState(1)
   const [search, setSearch]   = useState('')
-  const [siteFilter, setSiteFilter] = useState('')
-  const [category, setCategory]     = useState('sd')  // default: Mãos com SD
+  const [siteFilters, setSiteFilters] = useState(loadInitialSiteFilters)
+  const [category, setCategory]     = useState('all')  // Tech Debt #13b: default Todos
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -525,11 +543,30 @@ export default function VillainsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Tech Debt #13b — persistir filtros sala em localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY_SITE_FILTERS, JSON.stringify(Array.from(siteFilters)))
+    } catch {
+      // ignore quota/private mode errors
+    }
+  }, [siteFilters])
+
   function load(p = page, s = search) {
+    // Tech Debt #13b: 0 salas seleccionadas → não chamar API, mostrar vazio.
+    if (siteFilters.size === 0) {
+      setData({ data: [], total: 0, pages: 0 })
+      setLoading(false)
+      return
+    }
+    // 4/4 salas → sem filtro (equivalente a all). <4/4 → CSV.
+    const siteParam = siteFilters.size === SITES_ALL.length
+      ? undefined
+      : Array.from(siteFilters).join(',')
     setLoading(true)
     villains.listCategorized({
       category,
-      site: siteFilter || undefined,
+      site: siteParam,
       search: s || undefined,
       page: p,
       page_size: 50,
@@ -539,7 +576,17 @@ export default function VillainsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [page, siteFilter, category])
+  function toggleSiteFilter(site) {
+    setSiteFilters(prev => {
+      const next = new Set(prev)
+      if (next.has(site)) next.delete(site)
+      else next.add(site)
+      return next
+    })
+    setPage(1)
+  }
+
+  useEffect(() => { load() }, [page, siteFilters, category])
 
   function handleSearch(e) {
     e.preventDefault()
@@ -603,7 +650,9 @@ export default function VillainsPage() {
               {category !== 'all' && (
                 <> · categoria <strong style={{ color: '#a5b4fc' }}>{TAB_DEFS.find(t => t.key === category)?.label}</strong></>
               )}
-              {siteFilter && <> · <SiteBadge site={siteFilter} /></>}
+              {siteFilters.size > 0 && siteFilters.size < SITES_ALL.length && (
+                <> · {Array.from(siteFilters).map(s => <SiteBadge key={s} site={s} />)}</>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -715,13 +764,30 @@ export default function VillainsPage() {
           />
           <button type="submit" className="btn btn-ghost btn-sm">Buscar</button>
           {search && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); load(1, '') }}>✕</button>}
-          <select value={siteFilter} onChange={e => { setSiteFilter(e.target.value); setPage(1) }} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '6px 11px', fontSize: 12 }}>
-            <option value="">Todas as salas</option>
-            <option value="GGPoker">GGPoker</option>
-            <option value="Winamax">Winamax</option>
-            <option value="PokerStars">PokerStars</option>
-            <option value="WPN">WPN</option>
-          </select>
+          {/* Tech Debt #13b — filtros sala multi-select com pills coloridas */}
+          <div style={{ display: 'flex', gap: 6, marginLeft: 4 }}>
+            {SITES_ALL.map(s => {
+              const active = siteFilters.has(s)
+              const c = SITE_COLORS[s] || SITE_COLOR_DEFAULT
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleSiteFilter(s)}
+                  style={{
+                    padding: '5px 12px', borderRadius: 999,
+                    fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                    border: `1px solid ${c}`,
+                    background: active ? c : 'transparent',
+                    color: active ? '#fff' : c,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    opacity: active ? 1 : 0.65,
+                  }}
+                >{s}</button>
+              )
+            })}
+          </div>
         </form>
       </div>
 
@@ -731,7 +797,9 @@ export default function VillainsPage() {
         )}
         {!loading && rows.length === 0 && (
           <div className="empty-state" style={{ padding: 32 }}>
-            {category === 'friend'
+            {siteFilters.size === 0
+              ? 'Nenhuma sala seleccionada — todos os vilões filtrados. Activa pelo menos uma sala acima.'
+              : category === 'friend'
               ? 'Sem amigos a aparecer. Quando jogares com Karluz/flightrisk vão entrar aqui automaticamente.'
               : 'Sem vilões nesta categoria.'}
           </div>

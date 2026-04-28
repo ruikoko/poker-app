@@ -153,7 +153,7 @@ def list_villains(
 @router.get("/categorized")
 def list_villains_categorized(
     category:  Optional[str] = Query("all", pattern="^(all|sd|nota|friend)$"),
-    site:      Optional[str] = Query(None, description="Filtrar por sala (GGPoker, Winamax, PokerStars, WPN)"),
+    site:      Optional[str] = Query(None, description="Filtrar por sala. Aceita CSV multi-value (ex: 'Winamax,WPN')."),
     search:    Optional[str] = Query(None, description="ILIKE no player_name"),
     page:      int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -166,14 +166,23 @@ def list_villains_categorized(
     sd_count / nota_count / friend_count / total_count + last_seen +
     sites + dates. Filtra por category (sd|nota|friend|all).
 
+    Tech Debt #13b: parâmetro `site` aceita CSV (ex: "Winamax,WPN") para
+    filtros multi-select. None = sem filtro de sala (todas).
+
     Coexiste com o endpoint legacy GET /api/villains (que lê de
     villain_notes). Frontend Parte D consome este; legacy fica para
     housekeeping após Parte D estável.
     """
     offset = (page - 1) * page_size
+
+    # Tech Debt #13b — parse CSV multi-site. Lista vazia tratada como None.
+    site_list = None
+    if site:
+        site_list = [s.strip() for s in site.split(',') if s.strip()] or None
+
     params = {
         "category": category,
-        "site": site,
+        "site_list": site_list,
         "search": search,
         "search_like": f"%{search}%" if search else None,
         "limit": page_size,
@@ -202,7 +211,7 @@ def list_villains_categorized(
             JOIN hands h ON h.id = hv.hand_db_id
             WHERE hv.hand_db_id IS NOT NULL
               AND h.played_at >= '2026-01-01'
-              AND (%(site)s IS NULL OR h.site = %(site)s)
+              AND (%(site_list)s IS NULL OR h.site = ANY(%(site_list)s))
               AND (%(search)s IS NULL OR hv.player_name ILIKE %(search_like)s)
             GROUP BY hv.player_name
             HAVING (
