@@ -853,6 +853,13 @@ def _create_ggpoker_villain_notes_for_hand(
     if screenshot_data and hand_raw:
         parsed = _parse_mtt_hand(hand_raw)
         if parsed:
+            # Tech Debt #16: _parse_mtt_hand não inclui all_players_actions
+            # (só seats/positions/blinds/board/vpip_seats). Sem isto,
+            # _create_villains_for_hand vê showdown_seats={} e regra B
+            # (has_cards=True ∧ has_showdown=True) nunca dispara → 0 villains cat='sd'.
+            # apa já lido da BD em mtt.py:798-805 — injectar antes da chamada.
+            if isinstance(apa, dict):
+                parsed["all_players_actions"] = apa
             _create_villains_for_hand(
                 conn, parsed, screenshot_data,
                 hand_db_id=hand_db_id, showdown_only=False,
