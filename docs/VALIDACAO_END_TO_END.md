@@ -1,7 +1,7 @@
 # Validação end-to-end — poker-app
 
 **Última actualização:** 29 Abril 2026
-**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1), sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes) **+ sessão 29-Abr (Tech Debt #8 — Uniformização HH em todos os componentes — fechado)**
+**Âmbito:** mapa completo do estado de validação pós-sessões 23-24 Abr (4 bugs + wipe), 24 Abr (Discord workflow + GG anon Estudo + refactor Tags), 26 Abr (consolidação SSs + Bucket 1 anexos imagem), 27 Abr (verificação ponta-a-ponta dos 5 pipelines pós-Bucket 1), sessão Tech Debts 28-Abr (6 Tech Debts fechados + Tags default + re-arquitectura Vilões em 4 partes), sessão 29-Abr Tech Debt #8 (Uniformização HH em todos os componentes — fechado) **+ Pipeline 1 verificação ponta-a-ponta (HM3) + Tech Debt #9 fechado (race condition cross-connection hm3+mtt) + 4 Tech Debts pendentes (#10/#11/#12/#13) + 1 nota explicativa (TZ display)**
 
 ---
 
@@ -128,17 +128,22 @@
 
 ## 6. Pendentes por validar (prioridade decrescente)
 
-1. **Verificação ponta-a-ponta dos 5 pipelines pós Tech Debts 28-29 Abr** — validar via fluxo orgânico (não SQL directa) que os fixes funcionam end-to-end. Decisão Rui: pausar sem fazer, fica para sessão dedicada.
-2. **Anomalia hand 253 — Upstakes_io villain `sd` sem cards revelados** (NOVO 29-Abr) — Bug aparente no backfill Tech Debt #4 Parte B: regra B (`match_method valid AND has_showdown=TRUE`) aplicada ao nível da MÃO, não filtra por player ter cards revelados. Resultado: jogador que fez fold preflop foi criado como villain `cat='sd'`. Investigação completa reportada (não corrigida) — pendente decisão Rui sobre interpretação da regra (filtrar por `player.cards != None`).
-3. **Backfill estendido às 110 mãos absorvidas** — placeholders Discord que matcharam HHs reais perderam `discord_tags` antes do fix `7de889f`. Filtro precisa de incluir `entry_id IN (SELECT id FROM entries WHERE source='discord')` em vez de só `origin='discord'`. (anterior à sessão 27-Abr; pós-wipe da sessão 27-Abr o estado está limpo)
-4. **Pesquisa MTT 10 dígitos numéricos → abrir modal mão directamente** (Opção A pré-aprovada 24/04, não implementada).
-5. **Página Discord: agrupar por canal real** (`#nota`, `#pos-pko`, etc.) em vez de `#GGDiscord` + `#sem-tag` (detectado 24/04 PARTE 10, não atacado).
-6. **Forçar match individual por HH** — confirmar se endpoint existe.
-7. **Sessão B UI** (`position_parse_failed` com edição manual).
-8. **Migração painel "SSs à espera" do Dashboard para Discord**.
-9. **Housekeeping endpoint legacy `/api/villains`** — pós-Parte D estável, considerar remoção (consume `villain_notes` sem categorias; substituído pelo `/categorized`).
-10. **Consolidação 8 PokerCard locais** (NOVO 29-Abr) — refactor opcional. `PokerCard.jsx` partilhado existe (commit `870024e`), 8 callers locais (HandRow/Dashboard/Discord/Hands/HM3/Tournaments/ReplayerPage/Replayer com RCard) ficam intactos. Decisão Q3 da sessão 29-Abr adiou para housekeeping futuro (risco moderado em layouts estáveis).
-11. **Dead code em HM3.jsx** (NOVO 29-Abr) — `ACTION_COLORS` (linha 26-37), `actionStyle` (105-114), `ActionBadge` (116-118). Já eram dead code antes da sessão 29-Abr; não removidos para não misturar housekeeping desconexo no Commit 6 de Tech Debt #8.
+1. **Verificação ponta-a-ponta dos 5 pipelines pós Tech Debts 28-29 Abr** — Pipeline 1 HM3 ✅ validado 29-Abr (Tech Debt #9 fechado). Pipelines 2-5 (Import ZIP / Discord sync / Upload manual SS / Bucket 1 retroactivo) por validar.
+2. **Tech Debt #10 — bug parser truncamento nicks Winamax** (NOVO 29-Abr) — Detectado em verificação ponta-a-ponta Pipeline 1: hand 102 (Winamax 26-Abr 19:38:24) tem 3 villains incluindo `'la'` E `'la louffe'` separados (suspeita `'la'` é truncamento). Hand 126 (Winamax 26-Abr 18:37:34) tem 2 villains `'La'` E `'La m3nace'` (mesmo padrão). Causa provável: parser Winamax (frontend ou backend) trunca nicks com determinados padrões e cria villains separados. Severidade: Funcional (cria villains duplicados/falsos). Esforço estimado: ~1-2h (investigar parser + fix + backfill cleanup).
+3. **Tech Debt #11 — botão × eliminar villain de mão** (NOVO 29-Abr) — Pedido Rui durante verificação ponta-a-ponta. Use case: "na primeira mão temos 2 vilões associados, mas só quero tirar nota de um, a jogada só merece reparo num jogador, no outro foi standard". Spec aprovada: botão SÓ na página `/hand/X` (HandDetailPage), na secção MESA, apenas players que SÃO villains nesta mão. Apaga 1 row em `hand_villains` para `(hand_id, player_name)` directo sem confirmação. Pendente decisão técnica: comportamento em re-import (volta a criar villain? blacklist persistida?). Backend: endpoint `DELETE /api/hands/{hand_id}/villains/{player_name}`. Frontend: HandHistoryViewer.jsx — adicionar prop `deletable` + handler `onDeleteVillain`. Esforço: ~2h.
+4. **Tech Debt #12 — re-arquitectura modal Vilões** (NOVO 29-Abr) — Pedido Rui sessão dedicada. Spec completa aprovada: layout (eliminar painéis Notas+Tags, alargar Mãos Comuns), lista colapsada (cards Hero NUNCA, cards villain entre data e pos só se reveladas, BB delta = lucro/perda do VILLAIN, posição villain vs Hero), mão expandida split 1/3 + 2/3 (MESA cronológica esquerda com ★ villain + HERO Hero; ACÇÕES 4 colunas Pre-flop/Flop/Turn/River com notação compacta F/x/C/b/R/3b/4b/AI em bbs, sem nicks, board cards no header). Severidade: UX major (re-arquitectura). Esforço: ~4-6h. Pendentes na implementação: heads-up edge cases, all-in pré-flop, paleta cor exacta destaque villain.
+5. **Tech Debt #13 — landing page Vilões + filtros sala** (NOVO 29-Abr) — Pedido Rui. Spec aprovada: landing aterra em tab "Todos" (não "Mãos com SD"). Filtros multi-select por sala integrados com search bar (Winamax vermelha, WPN verde, GG azul, PokerStars amarela). Default 4 salas activas. 0 salas → página vazia (respeita escolha). Severidade: UX (feature melhoria). Esforço: ~1-2h.
+6. **Anomalia hand 253 — Upstakes_io villain `sd` sem cards revelados** (29-Abr) — Bug aparente no backfill Tech Debt #4 Parte B: regra B (`match_method valid AND has_showdown=TRUE`) aplicada ao nível da MÃO, não filtra por player ter cards revelados. Resultado: jogador que fez fold preflop foi criado como villain `cat='sd'`. Investigação completa reportada (não corrigida) — pendente decisão Rui sobre interpretação da regra (filtrar por `player.cards != None`).
+7. **Backfill estendido às 110 mãos absorvidas** — placeholders Discord que matcharam HHs reais perderam `discord_tags` antes do fix `7de889f`. Filtro precisa de incluir `entry_id IN (SELECT id FROM entries WHERE source='discord')` em vez de só `origin='discord'`. (anterior à sessão 27-Abr; pós-wipe da sessão 27-Abr o estado está limpo)
+8. **Pesquisa MTT 10 dígitos numéricos → abrir modal mão directamente** (Opção A pré-aprovada 24/04, não implementada).
+9. **Página Discord: agrupar por canal real** (`#nota`, `#pos-pko`, etc.) em vez de `#GGDiscord` + `#sem-tag` (detectado 24/04 PARTE 10, não atacado).
+10. **Forçar match individual por HH** — confirmar se endpoint existe.
+11. **Sessão B UI** (`position_parse_failed` com edição manual).
+12. **Migração painel "SSs à espera" do Dashboard para Discord**.
+13. **Housekeeping endpoint legacy `/api/villains`** — pós-Parte D estável, considerar remoção (consume `villain_notes` sem categorias; substituído pelo `/categorized`).
+14. **Consolidação 8 PokerCard locais** (29-Abr) — refactor opcional. `PokerCard.jsx` partilhado existe (commit `870024e`), 8 callers locais (HandRow/Dashboard/Discord/Hands/HM3/Tournaments/ReplayerPage/Replayer com RCard) ficam intactos. Decisão Q3 da sessão 29-Abr adiou para housekeeping futuro (risco moderado em layouts estáveis).
+15. **Dead code em HM3.jsx** (29-Abr) — `ACTION_COLORS` (linha 26-37), `actionStyle` (105-114), `ActionBadge` (116-118). Já eram dead code antes da sessão 29-Abr; não removidos para não misturar housekeeping desconexo no Commit 6 de Tech Debt #8.
+16. **Bug latente `mtt.py:786`** (NOVO 29-Abr) — outra função (`_create_villain_notes_with_action` ou afim) tem mesmo padrão `_q()` cross-connection que foi corrigido no Tech Debt #9. Não detectado em prod (call-sites comitam antes), mas potencial bug futuro. Não fixed nesta sessão para limitar scope. Esforço: ~5min.
 
 ---
 
@@ -172,6 +177,18 @@
 | # | Bug | Severidade | Status |
 |---|---|---|---|
 | 8 | **Uniformização HH em todos os componentes** — 3 parsers distintos com lógicas divergentes (descoberto durante investigação Tech Debt #5). Sub-problemas: (a) hashes GG resolvidos só onde `raw_resolved` é usado; (b) stacks/acções inconsistentes (fichas vs BB) entre vistas; (c) posições GG não enriquecidas em alguns paths; (d) cards de showdown apresentados diferentemente; (e) spec canónica única ainda por escrever. Parsers afectados: `frontend/src/lib/handParser.js:parseHH` (canónico), `frontend/src/pages/Hands.jsx:parseRawHH`, `frontend/src/pages/HM3.jsx:parseRawHH` | Funcional grave / arquitectural | ✅ **FECHADO 29-Abr** em 6 commits + 1 hotfix (`870024e` PokerCard + `38ae653` helpers + `a0903d8` HandHistoryViewer + `c3b3dbf` HandDetailPage + `c411a37` modal Estudo + `b869c12` hotfix startStack + `1136e2b` modal HM3). 1 parser canónico + 1 renderer único + 1 Card partilhado. Net -480 linhas no frontend. Replayer/ReplayerPage permanecem intactos por design. Detalhes completos em `docs/JOURNAL_2026-04-29.md` |
+
+### 7.4 Tech Debts da sessão 29-Abr (continuação — Pipeline 1 verificação)
+
+| # | Bug | Severidade | Status |
+|---|---|---|---|
+| 9 | **Race condition cross-connection em villain creation** — `hm3.py:_create_hand_villains_hm3` e `mtt.py:_create_villains_for_hand` usavam `_q()` (`app.db.query`) que abre conexão SEPARADA via `with get_conn() as conn`. PostgreSQL com isolation `read committed` não vê dados não-committed da conexão original. Durante batch import HM3 `.bat` (transação atómica que insere hand + chama villain creation antes do commit), a query `SELECT hm3_tags... FROM hands WHERE id=%s` retornava `[]` porque a hand recém-inserida ainda não estava visível na conexão separada. Consequência: `hand_meta = {}` → helper `_classify_villain_categories` devolvia `cats=[]` → INSERT skipped silenciosamente. Detectado em verificação ponta-a-ponta sessão 29-Abr: 159 hands HM3 importadas via `.bat`, 68 com `hm3_tags='nota%'`, mas `hand_villains=0`. | Funcional grave | ✅ **FECHADO 29-Abr** commit `630dc73` — substituir `_q()` por `cur.execute()` directo (hm3) e `with conn.cursor() as _cur` (mtt, preventivo). 4 linhas em `hm3.py:763-772` + 4 linhas em `mtt.py:660-668`. Validação: re-wipe + re-import → `hand_villains: 0 → 92` (66/68 mãos com nota-tag têm villain, 97% cobertura, 69 nicks únicos). Bug latente em `mtt.py:786` (outra função) **não corrigido** — registado como pendente §6 item 16. Detalhes em `docs/JOURNAL_2026-04-29-pt2.md` |
+
+### Notas explicativas (não-bugs)
+
+| Nota | Descrição |
+|---|---|
+| TZ display BD vs UI | `hands.played_at` é `timestamptz` armazenado em UTC (raw HH dos torneios usa UTC literalmente). Frontend `HandRow.jsx:131-139` converte para hora local do browser via `new Date(...).getHours()` — comentário no código confirma intenção: "para bater com as horas a que o utilizador jogou". Diferença típica visível ao utilizador português = +1h em DST Verão (UTC+1 Lisbon WEST) ou +0h em DST Inverno (UTC). Coerência: BD canónica em UTC (filtros `played_at >= '2026-01-01'`, comparações cross-TZ); UI Lisbon (relógio na mesa de jogo). Não é bug. |
 
 ---
 
@@ -330,4 +347,11 @@
 | `c411a37` | refactor(hh): modal Estudo usa HandHistoryViewer + remove parser local (Tech Debt #8 commit 5/6) |
 | `b869c12` | fix(hh): MESA mostra startStack em vez de stack final + remove bloco legacy duplicado (Tech Debt #8 hotfix) |
 | `1136e2b` | refactor(hh): modal HM3 usa HandHistoryViewer + remove parser local + bloco legacy (Tech Debt #8 commit 6/6 + final) |
-| _[a gerar]_ | docs(verification): sessão 29-Abr fecho — Tech Debt #8 (Uniformização HH) fechado em pleno |
+| `d12d7a5` | docs(verification): sessão 29-Abr fecho — Tech Debt #8 (Uniformização HH) fechado em pleno |
+
+### Sessão 29 Abril continuação (Pipeline 1 verificação + Tech Debt #9)
+
+| Commit | Descrição |
+|---|---|
+| `630dc73` | fix(villains): hm3+mtt usam transação actual em vez de conexão nova para ler hand_meta (Tech Debt #9) |
+| _[a gerar]_ | docs(verification): sessão 29-Abr continuação — Pipeline 1 fechado + Tech Debt #9 + 4 pendentes registados |
