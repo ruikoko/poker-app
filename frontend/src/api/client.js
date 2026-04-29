@@ -129,6 +129,9 @@ export const images = {
   channels: () => req('GET', '/images/channels'),
   attach:   (handDbId, entryId) => req('POST', `/hands/${handDbId}/images`, { entry_id: entryId }),
   detach:   (handDbId, haId)    => req('DELETE', `/hands/${handDbId}/images/${haId}`),
+  // URL absoluto para <img src> — endpoint público (Tech Debt #B9 thumbnails fix).
+  // Em dev usa path relativo (Vite proxy); em prod usa VITE_API_URL.
+  rawUrl:   (entryId) => `${BASE}/images/${entryId}/raw`,
 }
 
 // ── Discord ──────────────────────────────────────────────────────────────────

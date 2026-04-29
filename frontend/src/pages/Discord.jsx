@@ -182,8 +182,8 @@ function ImageRow({ item }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 200px 130px 90px', gap: 12, alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #2a2d3a', background: '#0f1117', fontSize: 12 }}>
       <div style={{ width: 56, height: 40, borderRadius: 4, overflow: 'hidden', background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {item.image_url ? (
-          <img src={item.image_url} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        {item.entry_id ? (
+          <img src={imagesApi.rawUrl(item.entry_id)} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                onError={e => { e.target.style.display = 'none' }} />
         ) : <span style={{ fontSize: 18, color: '#4b5563' }}>&#x1F5BC;</span>}
       </div>

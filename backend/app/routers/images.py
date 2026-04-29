@@ -29,6 +29,7 @@ import base64
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from app.auth import require_auth
 from app.db import query, get_conn
@@ -149,6 +150,62 @@ def gallery(
         "filters": {"channel": channel, "date": date},
         "items": items,
     }
+
+
+# ── GET /api/images/{entry_id}/raw ─────────────────────────────────────────
+
+@router.get("/{entry_id}/raw")
+def serve_image_raw(entry_id: int):
+    """
+    Serve bytes da imagem de uma entry image (Tech Debt #B9 thumbnails fix).
+
+    Endpoint público sem auth — justificação: entries entry_type='image'
+    contêm URLs Gyazo já públicos partilhadas em Discord; servir os mesmos
+    bytes via proxy não acrescenta exposição. Se no futuro houver uploads
+    privados, mudar para auth-required.
+
+    Lógica:
+    1. Valida entry_type='image' (404 se não)
+    2. Cache hit: serve raw_json.img_b64 directamente
+    3. Cache miss: _fetch_entry_image_bytes (resolve gyazo.com/{id} →
+       i.gyazo.com/{id}.png/.jpg/.gif via HEAD probe em attachments.py)
+    4. Response com bytes + mime_type + Cache-Control 1h (browser cache
+       evita re-fetch a cada render do thumbnail).
+    """
+    rows = query(
+        "SELECT raw_text, entry_type, raw_json FROM entries WHERE id = %s",
+        (entry_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="entry not found")
+    e = rows[0]
+    if e["entry_type"] != "image":
+        raise HTTPException(status_code=400, detail="entry_type != 'image'")
+
+    raw_json = e.get("raw_json") or {}
+    if isinstance(raw_json, dict) and raw_json.get("img_b64"):
+        try:
+            img_bytes = base64.b64decode(raw_json["img_b64"])
+            mime = raw_json.get("mime_type", "image/png")
+            return Response(
+                content=img_bytes,
+                media_type=mime,
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+        except Exception as exc:
+            logger.warning(f"img_b64 decode falhou para entry {entry_id}: {exc}")
+            # Fall through para fetch live
+
+    from app.routers.attachments import _fetch_entry_image_bytes
+    data = _fetch_entry_image_bytes("image", e["raw_text"])
+    if not data or not data.get("img_b64"):
+        raise HTTPException(status_code=502, detail="failed to fetch image")
+    img_bytes = base64.b64decode(data["img_b64"])
+    return Response(
+        content=img_bytes,
+        media_type=data.get("mime_type", "image/png"),
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 # ── GET /api/images/channels ────────────────────────────────────────────────

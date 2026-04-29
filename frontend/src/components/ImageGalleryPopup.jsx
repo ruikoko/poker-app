@@ -156,7 +156,7 @@ export default function ImageGalleryPopup({ onClose, onPick, alreadyAttached = [
               </div>
               <a href={selected.image_url} target="_blank" rel="noopener noreferrer">
                 <img
-                  src={selected.image_url}
+                  src={imagesApi.rawUrl(selected.entry_id)}
                   alt="preview"
                   style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', display: 'block', margin: '0 auto' }}
                 />
@@ -184,7 +184,7 @@ export default function ImageGalleryPopup({ onClose, onPick, alreadyAttached = [
                     }}
                   >
                     <img
-                      src={it.image_url}
+                      src={imagesApi.rawUrl(it.entry_id)}
                       alt=""
                       style={{ width: '100%', height: 100, objectFit: 'cover', display: 'block' }}
                       onError={e => { e.target.style.display = 'none' }}
