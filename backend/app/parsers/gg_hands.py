@@ -156,6 +156,20 @@ def _build_anon_map(block: str, seats: dict) -> dict[str, str]:
     real_names = {info["name"] for info in seats.values()}
     anon_map = {}  # anon_id → real_name
 
+    # Tech Debt #20: HH GG totalmente anonimizada (todos non-hero são hashes 6-12 hex).
+    # Sem nicks reais para mapear, Padrão 2 (eliminação seat order) faz mapping
+    # caótico hash→hash que escreve actions/cards no seat ERRADO. Detectado em
+    # audit 16 hands cat='sd' Pipeline 2 pós-fix Tech Debts #16/#17: 9/16 swap
+    # confirmado, 0 sem swap. Comentário em mtt.py:117-120 confirma bug conhecido
+    # mas só workaround local em _detect_vpip_players foi aplicado.
+    # Sem mapping, _parse_actions usa hashes directamente como keys (correcto);
+    # screenshot.py:_build_anon_to_real_map faz nick→hash via anchors/stack/elim
+    # a posteriori.
+    hex_pattern = re.compile(r'^[0-9a-f]{6,12}$', re.IGNORECASE)
+    non_hero_names = real_names - {"Hero"}
+    if non_hero_names and all(hex_pattern.match(n) for n in non_hero_names):
+        return {}
+
     # Padrão 1: linha explícita de mapeamento (algumas versões do GGPoker)
     # "  89ef4cba (NomeReal)"  ou  "NomeReal: [89ef4cba]"
     for name in real_names:
