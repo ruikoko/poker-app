@@ -635,8 +635,12 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
                 if not vp_stack:
                     continue
                 diff = abs(stack_esperado - vp_stack)
-                pct = (diff / stack_esperado * 100) if stack_esperado > 0 else 999
-                if pct < 2.0 and diff < best_diff:
+                # Tech Debt #B1: tolerância dinâmica. 2% relativo OU 20 chips
+                # absoluto, o que for maior. Cobre micro-stacks (<1000 chips)
+                # onde 2% é demasiado restritivo para erro OCR Vision típico
+                # (±5-10 chips); mid/deep stacks mantêm comportamento idêntico.
+                tolerance = max(20, stack_esperado * 0.02)
+                if diff <= tolerance and diff < best_diff:
                     best_diff = diff
                     best_i = i
 
