@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { hands as handsApi, screenshots, images as imagesApi } from '../api/client'
+import { hands as handsApi, screenshots } from '../api/client'
 import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import HandHistoryViewer from '../components/HandHistoryViewer'
-import ImageGalleryPopup from '../components/ImageGalleryPopup'
+import AttachedImagesSection from '../components/AttachedImagesSection'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
@@ -34,33 +34,12 @@ export default function HandDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [galleryOpen, setGalleryOpen] = useState(false)
 
   const refreshHand = () => {
     handsApi.get(id).then(h => setHand(h)).catch(e => setError(e.message))
   }
 
   useEffect(() => { setLoading(true); handsApi.get(id).then(h => { setHand(h); setLoading(false) }).catch(e => { setError(e.message); setLoading(false) }) }, [id])
-
-  const handleAttachImage = async (entryId) => {
-    try {
-      await imagesApi.attach(id, entryId)
-      setGalleryOpen(false)
-      refreshHand()
-    } catch (e) {
-      setError(`Anexar falhou: ${e.message}`)
-    }
-  }
-
-  const handleDetachImage = async (haId) => {
-    if (!confirm('Remover esta imagem da mão?')) return
-    try {
-      await imagesApi.detach(id, haId)
-      refreshHand()
-    } catch (e) {
-      setError(`Remover falhou: ${e.message}`)
-    }
-  }
 
   if (loading) return <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: 16 }}>A carregar...</div>
   if (error) return <div style={{ padding: 60, textAlign: 'center', color: '#ef4444', fontSize: 16 }}>{error}</div>
@@ -151,75 +130,7 @@ export default function HandDetailPage() {
       </div>
 
       {/* ── IMAGENS ANEXADAS (Tech Debt #B9 — galeria manual) ── */}
-      <div style={{ background: '#0f1117', borderRadius: 8, padding: '16px 20px', marginBottom: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700 }}>
-            IMAGENS ANEXADAS ({hand.attachments?.length || 0})
-          </div>
-          <button
-            onClick={() => setGalleryOpen(true)}
-            style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer' }}
-          >
-            + Adicionar imagem
-          </button>
-        </div>
-        {hand.attachments?.length > 0 ? (
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            {hand.attachments.map(att => {
-              const src = att.img_b64
-                ? `data:${att.mime_type || 'image/png'};base64,${att.img_b64}`
-                : att.image_url
-              const dt = att.posted_at ? new Date(att.posted_at) : null
-              const timeStr = dt
-                ? `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
-                : ''
-              const channelLabel = att.channel_name || ''
-              const methodLabel = att.match_method === 'manual' ? 'manual' : (att.match_method || '')
-              const metaLine = [timeStr, channelLabel, methodLabel].filter(Boolean).join(' · ')
-              return (
-                <div key={att.id} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <button
-                    onClick={() => handleDetachImage(att.id)}
-                    title="Remover anexação"
-                    style={{ position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,0.7)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.5)', cursor: 'pointer', fontSize: 13, fontWeight: 700, zIndex: 2, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >×</button>
-                  <a
-                    href={att.image_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Abrir imagem em nova aba"
-                    style={{ cursor: 'zoom-in', display: 'inline-block' }}
-                  >
-                    <img
-                      src={src}
-                      alt={metaLine || 'anexo'}
-                      style={{
-                        width: 200, height: 'auto', display: 'block',
-                        borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)',
-                      }}
-                    />
-                  </a>
-                  <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', maxWidth: 200 }}>
-                    {metaLine}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic' }}>
-            Sem imagens anexadas. Click "+ Adicionar imagem" para escolher da galeria.
-          </div>
-        )}
-      </div>
-
-      {galleryOpen && (
-        <ImageGalleryPopup
-          onClose={() => setGalleryOpen(false)}
-          onPick={handleAttachImage}
-          alreadyAttached={(hand.attachments || []).map(a => a.entry_id).filter(Boolean)}
-        />
-      )}
+      <AttachedImagesSection hand={hand} onChange={refreshHand} />
 
       {/* ── MESA + ACÇÕES + SHOWDOWN (Tech Debt #8 — renderer canónico) ── */}
       <HandHistoryViewer hand={hand} />

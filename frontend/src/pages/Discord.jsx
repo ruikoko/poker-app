@@ -179,14 +179,21 @@ function ImagesGroup({ items, defaultOpen = false }) {
 function ImageRow({ item }) {
   const fmt = (d) => d ? new Date(d).toLocaleString('pt-PT') : '—'
   const attachedCount = item.attached_to?.length || 0
+  const rawUrl = item.entry_id ? imagesApi.rawUrl(item.entry_id) : null
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 200px 130px 90px', gap: 12, alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #2a2d3a', background: '#0f1117', fontSize: 12 }}>
-      <div style={{ width: 56, height: 40, borderRadius: 4, overflow: 'hidden', background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {item.entry_id ? (
-          <img src={imagesApi.rawUrl(item.entry_id)} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+    <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 200px 130px', gap: 12, alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #2a2d3a', background: '#0f1117', fontSize: 12 }}>
+      {rawUrl ? (
+        <a href={rawUrl} target="_blank" rel="noopener noreferrer"
+           title="Abrir imagem em nova aba"
+           style={{ width: 56, height: 40, borderRadius: 4, overflow: 'hidden', background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-in' }}>
+          <img src={rawUrl} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                onError={e => { e.target.style.display = 'none' }} />
-        ) : <span style={{ fontSize: 18, color: '#4b5563' }}>&#x1F5BC;</span>}
-      </div>
+        </a>
+      ) : (
+        <div style={{ width: 56, height: 40, borderRadius: 4, overflow: 'hidden', background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontSize: 18, color: '#4b5563' }}>&#x1F5BC;</span>
+        </div>
+      )}
       <div style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {attachedCount > 0
           ? <span style={{ color: '#22c55e' }}>Anexada a {attachedCount} {attachedCount === 1 ? 'mão' : 'mãos'}</span>
@@ -195,12 +202,6 @@ function ImageRow({ item }) {
       <div style={{ color: '#64748b', fontFamily: 'monospace', fontSize: 11 }}>{fmt(item.posted_at)}</div>
       <div>
         {item.channel_name && <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, color: DISCORD_COLOR, background: `${DISCORD_COLOR}18`, border: `1px solid ${DISCORD_COLOR}30` }}>#{item.channel_name}</span>}
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <a href={item.image_url} target="_blank" rel="noopener noreferrer"
-           style={{ padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', textDecoration: 'none', display: 'inline-block' }}>
-          Abrir
-        </a>
       </div>
     </div>
   )

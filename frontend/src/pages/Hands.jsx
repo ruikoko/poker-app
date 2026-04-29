@@ -5,6 +5,7 @@ import { isHero } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import HandRow from '../components/HandRow'
 import HandHistoryViewer from '../components/HandHistoryViewer'
+import AttachedImagesSection from '../components/AttachedImagesSection'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -429,6 +430,17 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
   const [ssLoading, setSsLoading] = useState(false)
   const [ssFullscreen, setSsFullscreen] = useState(false)
   const [copied, setCopied] = useState(false)
+  // Tech Debt #B9: override local de attachments após attach/detach. Hand
+  // prop é controlled pelo parent (selected); refetch local mantém UX viva.
+  const [attachmentsOverride, setAttachmentsOverride] = useState(null)
+  const effectiveAttachments = attachmentsOverride ?? (hand.attachments || [])
+  const handForAttachments = { ...hand, attachments: effectiveAttachments }
+  useEffect(() => { setAttachmentsOverride(null) }, [hand.id])
+  const refreshAttachments = () => {
+    hands.get(hand.id)
+      .then(h => setAttachmentsOverride(h.attachments || []))
+      .catch(() => {})
+  }
 
   // Carregar screenshot se a mão tem entry_id (screenshot associado)
   useEffect(() => {
@@ -629,6 +641,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             <Replayer hand={hand} />
           </>
         )}
+
+        {/* Imagens anexadas (Tech Debt #B9 — galeria manual, ajuste UX pt7) */}
+        <AttachedImagesSection hand={handForAttachments} onChange={refreshAttachments} dense />
 
         {/* Source info */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
