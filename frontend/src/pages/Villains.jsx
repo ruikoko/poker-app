@@ -235,6 +235,40 @@ function ExpandedHandTable({ hand, villainNick }) {
   )
 }
 
+// Tech Debt #12 pt7: cor fundo per-acção na tabela expandida.
+// Múltiplas acções separadas por "/" → cor da ÚLTIMA acção (decisão Rui).
+// All-in suffix " AI" override com vermelho escuro (action all-in domina visualmente).
+function actionBgColor(action) {
+  if (!action) return 'transparent'
+  const parts = action.split('/')
+  const last = (parts[parts.length - 1] || '').trim()
+  if (!last) return 'transparent'
+  // All-in domina (suffix " AI" ou prefixo "AI")
+  if (/\bAI\b/i.test(last)) return 'rgba(220,38,38,0.35)'
+  const upper = last.toUpperCase()
+  if (upper === 'F' || upper.startsWith('F ')) return 'rgba(34,197,94,0.18)'      // verde fold
+  if (upper === 'X' || upper.startsWith('X ')) return 'rgba(148,163,184,0.18)'    // cinza check
+  if (upper.startsWith('C ') || upper === 'C')  return 'rgba(59,130,246,0.22)'    // azul call
+  if (upper.startsWith('R ') || upper === 'R')  return 'rgba(239,68,68,0.22)'     // vermelho raise
+  if (upper.startsWith('B ') || upper === 'B')  return 'rgba(239,68,68,0.22)'     // vermelho bet
+  // 3b/4b/5b/6b/7b... (raises subsequentes)
+  if (/^\d+B(\s|$)/.test(upper)) return 'rgba(239,68,68,0.22)'
+  return 'transparent'
+}
+
+function ActionCell({ action }) {
+  const bg = actionBgColor(action)
+  return (
+    <div style={{
+      color: '#94a3b8', fontFamily: 'monospace', fontSize: 10,
+      background: bg,
+      padding: bg === 'transparent' ? 0 : '2px 6px',
+      borderRadius: 3,
+      minHeight: 14,
+    }}>{action || ''}</div>
+  )
+}
+
 function RowRender({ isHero, isVillain, pos, name, nameColor, cards, showCards, stackStr, cs }) {
   // Wrapper React.Fragment para emitir 6 cells directamente filhos do grid.
   return (
@@ -262,10 +296,10 @@ function RowRender({ isHero, isVillain, pos, name, nameColor, cards, showCards, 
       </div>
       {/* Tech Debt #12 ajuste pt7: stack laranja + maior para destaque */}
       <div style={{ color: '#f97316', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>{stackStr}</div>
-      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.preflop || ''}</div>
-      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.flop || ''}</div>
-      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.turn || ''}</div>
-      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.river || ''}</div>
+      <ActionCell action={cs.preflop} />
+      <ActionCell action={cs.flop} />
+      <ActionCell action={cs.turn} />
+      <ActionCell action={cs.river} />
     </>
   )
 }
