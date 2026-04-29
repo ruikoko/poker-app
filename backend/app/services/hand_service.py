@@ -29,14 +29,21 @@ def _classify_villain_categories(
     has_vpip: bool,
 ) -> list[str]:
     """
-    Aplica regras canónicas A∨B∨C∨D, devolve as categorias aplicáveis a
+    Aplica regras canónicas A∨C∨D, devolve as categorias aplicáveis a
     um par (hand, villain) para Tech Debt #4 (re-arquitectura página Vilões).
 
     Regras:
         A — hm3_tags contém tag ~ 'nota%'                        → 'nota'
-        B — match HH↔SS válido + has_showdown=True + has_cards    → 'sd'
         C — 'nota' em discord_tags + match real válido            → 'nota'
         D — villain_nick em FRIEND_HEROES (Karluz/flightrisk)     → 'friend'
+
+    Tech Debt #B8 (29-Abr pt7): regra B (showdown automático →
+    'sd') removida. Era falso positivo: 22/22 cat='sd' em FASE 1
+    eram criados sem tag 'nota' (sample: NemoTT mostrou cards em
+    icm-pko mas Rui não tinha marcado a mão para estudo). Regra de
+    negócio real é "tag 'nota' explícita → entra em Vilões";
+    showdown sem tag não interessa. Cards continuam visíveis no
+    apa para qualquer caller.
 
     Filosofia "nota" inclusiva: villain criado para non-hero com VPIP
     preflop OU showdown cards (não exige ambos).
@@ -70,10 +77,6 @@ def _classify_villain_categories(
     # D — friend (Karluz/flightrisk como villain quando aparecem em mãos do Rui)
     if nick_lower in FRIEND_HEROES:
         cats.add('friend')
-
-    # B — SD: match HH↔SS válido + showdown + cards
-    if has_real_match and hand_meta.get('has_showdown') and has_cards:
-        cats.add('sd')
 
     # A — HM3 tag começa por 'nota'
     hm3_tags = hand_meta.get('hm3_tags') or []
