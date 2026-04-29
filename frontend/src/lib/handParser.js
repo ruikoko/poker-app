@@ -596,6 +596,83 @@ export function formatBB(bb) {
  *
  * Fallback: source.label || source.action || ''
  */
+/**
+ * Notação compacta para o modal villain (Tech Debt #12 + #UX1, pt7 final).
+ *
+ * `apa[player].actions[street]` é uma lista de strings tipo:
+ *   "Raise 6.0 BB", "Call 4.0 BB", "Fold", "Check", "Bet 9.4 BB", "All-in 32.3 BB"
+ *
+ * Esta função recebe esse array de strings + o número global de raises já
+ * vistos NA STREET (todos os jogadores combinados, não só este player) e
+ * devolve a notação compacta com separador "/" entre múltiplas acções.
+ *
+ * Regras (spec Rui pt7):
+ *   - Fold        → "F"
+ *   - Check       → "X"
+ *   - Call X      → "C Xbb"
+ *   - Bet X       → "b Xbb"
+ *   - All-in X    → "AI Xbb"
+ *   - Raises:
+ *       1ª da street → "R Xbb"
+ *       2ª da street → "3b Xbb"
+ *       3ª da street → "4b Xbb"
+ *       Nª (N>=4)    → `${N+1}b Xbb` (5b, 6b, 7b... ad infinitum)
+ *   - Múltiplas acções no mesmo street → joined por "/" (sem espaços)
+ *     Ex: "X/3b 12bb", "b/F", "C/X"
+ *
+ * Args:
+ *   - actions: array de strings (apa[player].actions[street])
+ *   - raiseCountStart: int (raises antes desta sequência na street)
+ * Returns:
+ *   { compact: string, raiseCountEnd: int (raises após esta sequência) }
+ */
+export function compactStreetActions(actions, raiseCountStart = 0) {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return { compact: '', raiseCountEnd: raiseCountStart }
+  }
+  let raiseCount = raiseCountStart
+  const parts = []
+  for (const raw of actions) {
+    const s = (raw || '').trim()
+    const lower = s.toLowerCase()
+    if (!s) continue
+    if (lower === 'fold' || lower.startsWith('fold')) {
+      parts.push('F')
+      continue
+    }
+    if (lower === 'check' || lower.startsWith('check')) {
+      parts.push('X')
+      continue
+    }
+    const bbMatch = s.match(/([\d.]+)\s*BB/i)
+    const bbValStr = bbMatch ? bbMatch[1] : null
+    const bbLabel = bbValStr ? `${parseFloat(bbValStr)}bb` : ''
+    if (lower.startsWith('call')) {
+      parts.push(bbLabel ? `C ${bbLabel}` : 'C')
+      continue
+    }
+    if (lower.startsWith('bet')) {
+      parts.push(bbLabel ? `b ${bbLabel}` : 'b')
+      continue
+    }
+    if (lower.startsWith('all-in') || lower.includes('all in')) {
+      parts.push(bbLabel ? `AI ${bbLabel}` : 'AI')
+      continue
+    }
+    if (lower.startsWith('raise')) {
+      raiseCount += 1
+      let prefix
+      if (raiseCount === 1) prefix = 'R'
+      else prefix = `${raiseCount + 1}b`
+      parts.push(bbLabel ? `${prefix} ${bbLabel}` : prefix)
+      continue
+    }
+    parts.push(s)
+  }
+  return { compact: parts.join('/'), raiseCountEnd: raiseCount }
+}
+
+
 export function formatActionLabel(source, bb) {
   if (!source) return ''
   const type = (source.actionType || source.action || '').toLowerCase()
