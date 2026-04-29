@@ -6,26 +6,46 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (29-Abr pt7)
+## Estado actual (29-Abr fim pt7)
 
-- **Total Tech Debts numerados detectados:** 22 (#1–#22, sem #19)
-- **Fechados:** 17 (#1, #2, #3, #4, #5, #6, #7, #8, #9, #13a, #13b, #14, #16, #17, #20, #21 + bug latente mtt.py:786 do pt3)
-- **Pendentes numerados:** 5 (#10, #11, #12, #13c, #15, #18, #22)
-- **Bugs latentes não-numerados detectados nesta auditoria pt7:** 6 (registados §3 abaixo)
+- **Total Tech Debts numerados detectados:** 23 (#1–#22, sem #19; +#UX1)
+- **Fechados pt7:** 9 (#10, #21, #B1, #B2, #B4, #B8, #B9, #12, #UX1) + 17 anteriores = **26 totais fechados**
+- **Pendentes numerados:** #11, #13c, #15, #18, #B7, #B10, #B11, #B-edge
+- **Bugs latentes não-numerados detectados em pt7:** 4 (registados §3 abaixo)
 
----
+### Sumário pt7 (9 Tech Debts fechados)
 
-## §1. Tech Debts numerados pendentes (ordem prioridade)
+| # | Hash(es) | Descrição |
+|---|---|---|
+| **#21** ✅ | `d61a241` | Idempotência `_enrich_hand_from_orphan_entry` |
+| **#10** ✅ | `e74df0c` | Parser HM3 nicks com espaço (regex universal seat_nicks) |
+| **#B1** ✅ | `c90b1b9` | Stack matching tolerância dinâmica `max(20, 2%)` |
+| **#B2** ✅ | `0c0a1d3` | Anchor SB/BB via `difflib.SequenceMatcher` ratio≥0.85 |
+| **#B4** ✅ | `82afcd7` | Phase 3 elimination brute-force optimal assignment |
+| **#B8** ✅ | `ce56d59` | Regra B (auto-create cat='sd' showdown) removida + cleanup BD |
+| **#B9** ✅ | `f98f8c8`→`cc2161c` (6 commits) | Bucket 1 automático → galeria manual de imagens |
+| **#12** ✅ | `8871d1b`→`3c7dc13` (7 commits) | Refactor modal villain (layout, alinhamento, cores per-acção) |
+| **#UX1** ✅ | (incluído `#12`) | Cards villain mostradas (não Hero) — fix bug pt6 |
 
-| ID | Título | File:Line | Severidade | Esforço | Magnitude | Dependências |
-|---|---|---|---|---|---|---|
-| **#22** | `_build_anon_to_real_map` produz mapping baralhado quando apa já enriched (keys=nicks em vez de hashes) → Fase 2 fold-stack-match falha em todos os fold players porque `hh_data["players"][nick]` retorna `{}` → caem para Fase 3 greedy com `stack_initial=0` → atribuição arbitrária | `screenshot.py:608-650` | 🔥 GRAVE (data wrong) | ~3-4h (Opção A: re-parse raw + reset apa keys + 1 enrich limpo. Opção B: stack matching óptimo Hungarian) | 38 hands afectadas (resíduo congelado de #21 cleanup pt6); hand 923 com 5/8 seats baralhados | bloqueia validação UI Vilões SD |
-| **#15** | Dashboard "Últimas mãos importadas" mostra mãos de Março numa BD com cutoff -3d HM3 — query ordena `played_at` em vez de `created_at` | `hands.py:611` (a confirmar) | 🟡 Funcional | ~10 min | UX hub | nenhuma |
-| **#18** | Não-determinismo cross-post — `_enrich_hand_from_orphan_entry` produzia mappings diferentes consoante ordem entries | `screenshot.py:1297` | 🟡 Funcional | validar pós-#21 | a verificar | resolvido provavelmente por #21 (skip = sem divergência); validar 2-3 hands |
-| **#10** | Parser HM3 trunca nicks com espaço ("la louffe", "La m3nace") em villain creation. Regex `^(.+?)(?::)?\s+(.+)$` é non-greedy + check `"all-in" in action_text` (in vez de startswith) | `hm3.py:688` regex + `:717` check | 🟡 Funcional | ~1h fix + 10min backfill SQL cleanup | hands 102, 126 confirmadas pelo Rui (sample n=2, magnitude real desconhecida) | Decisão Rui Opção A defensiva (validar actor contra seats) vs B cirúrgica (regex com keyword poker tipo "all-in") |
-| **#11** | Botão × eliminar villain manualmente do modal HandDetailPage MESA | `HandHistoryViewer.jsx` + endpoint `DELETE /api/hands/{id}/villains/{name}` | 🟡 UX | ~2-3h (Opção A simples vs B com blacklist persistida) | feature pedida (use case: 2 villains numa mão, só 1 merece nota) | Decisão Rui: re-import volta a criar villain? blacklist persistida? |
-| **#12** | Re-arquitectura modal Vilões — eliminar painéis Notas+Tags, alargar Mãos Comuns; layout cards revealed only; split 1/3+2/3 mão expandida; ★ villain destaque; notação compacta F/x/C/b/R/3b/4b/AI | `Villains.jsx` modal | 🟡 UX major | ~6-8h (sessão dedicada) | re-arquitectura | bloqueia housekeeping `/api/villains` legacy |
-| **#13c** | Housekeeping aliases legacy `SITE_COLORS_VILLAINS/_DASHBOARD/_HANDROW` em `siteColors.js` apontam todos para `SITE_COLORS` único pós-#13b — migrar 2 callers (`Dashboard.jsx`, `HandRow.jsx`) para import directo e remover aliases | `siteColors.js` | 🟢 Housekeeping | ~10-15 min | trivial | nenhuma |
+### Tech Debts pendentes para sessão pt8 (ordem prioridade)
+
+| ID | Título | Severidade | Esforço |
+|---|---|---|---|
+| **#15** | Dashboard "Últimas mãos" ordena `played_at` em vez `created_at` | 🟡 Funcional | ~10 min |
+| **#B7** | Discord bot ignora `last_sync_at` quando `last_message_id` NULL | 🟡 Funcional | ~30 min |
+| **#18** | Validar não-determinismo cross-post pós-`#21` (provável já resolvido) | 🟡 Funcional | ~30 min |
+| **#11** | Botão eliminar villain manualmente do modal HandDetailPage | 🟡 UX | ~2-3h |
+| **#B11** | Auto-tag mãos via LLM (ideia exploratória pt7) | 🟢 Feature | ~3-4h |
+| **#B10** | Vision não extrai `tournament_name` da imagem na galeria | 🟢 UX | ~2-3h |
+| **#B-edge** | Hero detection seat não-central (1/23 = 4.3% taxa) | 🟢 Edge case | ~30 min |
+| **#13c** | Housekeeping aliases SITE_COLORS legacy | 🟢 Housekeeping | ~10-15 min |
+
+#### Tech Debts pré-existentes mantidos (não atacados pt7)
+
+| ID | Título | Severidade | Notas |
+|---|---|---|---|
+| **#22** | (consolidado em fixes #B1+#B2+#B4 — ver §3 abaixo) | — | Considera-se dissolvido nos fixes preventivos pt7 (validado 117/117 + 32/32 OK FASE 2) |
+| **#13c** | Housekeeping aliases legacy SITE_COLORS | 🟢 | (idem cima) |
 
 ---
 
