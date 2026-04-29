@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
 import { SITE_COLORS, SITE_COLOR_DEFAULT } from '../lib/siteColors'
+import { compactStreetActions } from '../lib/handParser'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -136,6 +137,120 @@ function CompactHandRow({ hand, villainNick, expanded, onToggle }) {
         {tourneyName}
       </span>
     </div>
+  )
+}
+
+function ExpandedHandTable({ hand, villainNick }) {
+  // Tabela 6 cols: Pos+Nome+Cards | Stack | pf | F | T | R
+  // Alinha com cols 3-8 da CompactHandRow (Pos→Pos, Stack→Stack/Cards,
+  // pf/F/T/R correspondentes). Margem-left de 14+56+gap=76px alinha com
+  // col "Pos" da linha colapsada (skip cols ▶ + Data).
+  const apa = hand.all_players_actions || {}
+  const players = Object.entries(apa)
+    .filter(([k]) => k !== '_meta')
+    .map(([name, info]) => ({ name, ...info }))
+    .sort((a, b) => {
+      const ia = SEAT_ORDER.indexOf(a.position)
+      const ib = SEAT_ORDER.indexOf(b.position)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
+
+  // Para cada street, computar raiseCount cumulativo (todos os players).
+  // Iteramos players por SEAT_ORDER mas a contagem importa só para o output
+  // visual de cada player — raiseCount real é cross-player.
+  // Estratégia: pré-computar para cada street o output compacto de cada
+  // player por ordem de SEAT_ORDER (ordem aproximada de actuação).
+  const STREETS = ['preflop', 'flop', 'turn', 'river']
+  const compactByPlayerStreet = {}
+  for (const st of STREETS) {
+    let raiseCount = 0
+    for (const p of players) {
+      const acts = p.actions?.[st]
+      if (!acts || acts.length === 0) {
+        if (!compactByPlayerStreet[p.name]) compactByPlayerStreet[p.name] = {}
+        compactByPlayerStreet[p.name][st] = ''
+        continue
+      }
+      const { compact, raiseCountEnd } = compactStreetActions(acts, raiseCount)
+      raiseCount = raiseCountEnd
+      if (!compactByPlayerStreet[p.name]) compactByPlayerStreet[p.name] = {}
+      compactByPlayerStreet[p.name][st] = compact
+    }
+  }
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '130px 90px 80px 80px 80px 80px',
+      gap: 6,
+      marginLeft: 76,  // 14 (chevron) + 56 (data) + 6*2 gaps = 76px
+      padding: '8px 10px 12px',
+      background: 'rgba(255,255,255,0.01)',
+      fontSize: 11,
+    }}>
+      {/* Header row */}
+      <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Pos / Nome / Cards</div>
+      <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Stack</div>
+      <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>pf</div>
+      <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>F</div>
+      <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>T</div>
+      <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>R</div>
+
+      {/* Player rows */}
+      {players.map(p => {
+        const isHero = !!p.is_hero
+        const isVillain = p.name === villainNick
+        const cards = p.cards
+        // Hero sempre real cards; villain cards se mostrou no SD; outros: hidden ou real se mostraram
+        const hasRealCards = Array.isArray(cards) && cards.length === 2
+        const showCards = isHero ? hasRealCards : hasRealCards
+        const stackStr = p.stack_bb != null ? `${p.stack_bb.toFixed(1)} BB` : '—'
+        const cs = compactByPlayerStreet[p.name] || {}
+        const nameColor = isHero ? '#818cf8' : isVillain ? '#f59e0b' : '#94a3b8'
+
+        return (
+          <RowRender
+            key={p.name}
+            isHero={isHero}
+            isVillain={isVillain}
+            pos={p.position}
+            name={p.name}
+            nameColor={nameColor}
+            cards={cards}
+            showCards={showCards}
+            stackStr={stackStr}
+            cs={cs}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function RowRender({ isHero, isVillain, pos, name, nameColor, cards, showCards, stackStr, cs }) {
+  // Wrapper React.Fragment para emitir 6 cells directamente filhos do grid.
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
+        <PosBadge pos={pos} />
+        <span style={{ color: nameColor, fontWeight: isHero || isVillain ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+          {name}
+          {isHero && <span style={{ fontSize: 8, color: '#6366f1', marginLeft: 3 }}>HERO</span>}
+          {isVillain && <span style={{ fontSize: 8, color: '#f59e0b', marginLeft: 3 }}>★</span>}
+        </span>
+        <span style={{ display: 'flex', gap: 2 }}>
+          {showCards
+            ? cards.map((c, j) => <MiniCard key={j} card={c} />)
+            : [<MiniCard key="x1" hidden />, <MiniCard key="x2" hidden />]
+          }
+        </span>
+      </div>
+      <div style={{ color: '#4b5563', fontFamily: 'monospace', fontSize: 11 }}>{stackStr}</div>
+      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.preflop || ''}</div>
+      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.flop || ''}</div>
+      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.turn || ''}</div>
+      <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.river || ''}</div>
+    </>
   )
 }
 
