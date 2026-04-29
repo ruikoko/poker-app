@@ -1306,7 +1306,7 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     screenshot_url = raw_json.get("screenshot_url")
 
     hand_rows = query(
-        "SELECT id, hand_id, all_players_actions, position, raw, stakes, hero_cards, board FROM hands WHERE id = %s",
+        "SELECT id, hand_id, all_players_actions, position, raw, stakes, hero_cards, board, player_names FROM hands WHERE id = %s",
         (hand_db_id,)
     )
     if not hand_rows:
@@ -1314,6 +1314,41 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
 
     matched_hand = dict(hand_rows[0])
     all_players_raw = matched_hand.get("all_players_actions") or {}
+
+    # Tech Debt #21: idempotência. Se hand já foi enriched (match_method=
+    # anchors_stack_elimination_v2 + raw populado), pular re-execução.
+    # Sem este guard, _build_anon_to_real_map trabalha com apa pós-enrich
+    # (keys=nicks em vez de hashes) e produz mapping divergente, criando
+    # villains stale em hand_villains a cada re-corrida do auto-rematch
+    # loop em import_.py:411.
+    pn_existing = matched_hand.get("player_names") or {}
+    if isinstance(pn_existing, str):
+        try:
+            pn_existing = json.loads(pn_existing)
+        except (ValueError, TypeError):
+            pn_existing = {}
+    existing_mm = (
+        pn_existing.get("match_method") if isinstance(pn_existing, dict) else None
+    )
+    raw_already_present = bool((matched_hand.get("raw") or "").strip())
+    if existing_mm == "anchors_stack_elimination_v2" and raw_already_present:
+        # Marcar entry como resolved (semântica preservada) e retornar.
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE entries SET status = 'resolved' WHERE id = %s",
+                    (entry_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "status": "already_enriched",
+            "hand_id": hand_db_id,
+            "players_mapped": 0,
+            "anon_map": {},
+        }
 
     # Novo algoritmo v2: âncoras + stack esperado + eliminação
     anon_map = _build_anon_to_real_map(matched_hand, raw_json)
