@@ -9,7 +9,21 @@ const SUIT_COLORS  = { h: '#ef4444', d: '#f97316', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_BG      = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
 const SUIT_SYMBOLS = { h: '♥', d: '♦', c: '♣', s: '♠' }
 
-function MiniCard({ card }) {
+function MiniCard({ card, hidden = false }) {
+  // Tech Debt #UX1 (pt7): prop `hidden` renderiza "—" cinza para villains
+  // que não mostraram cards no showdown (foldaram ou mucked). Substitui o
+  // hack antigo de mostrar cards do Hero como cards do villain.
+  if (hidden) {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 22, height: 30, background: '#0f1117',
+        border: '1px solid #2a2d3a', borderRadius: 3,
+        fontFamily: "'Fira Code', monospace", fontSize: 16,
+        fontWeight: 700, color: '#4b5563', lineHeight: 1,
+      }}>—</span>
+    )
+  }
   if (!card || card.length < 2) return <span style={{ color: '#4b5563' }}>?</span>
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
@@ -51,6 +65,78 @@ function ResultBadge({ result }) {
   if (val > 0) return <span style={{ color: '#22c55e', fontWeight: 600, fontFamily: 'monospace', fontSize: 11 }}>+{val.toFixed(1)}</span>
   if (val < 0) return <span style={{ color: '#ef4444', fontWeight: 600, fontFamily: 'monospace', fontSize: 11 }}>{val.toFixed(1)}</span>
   return <span style={{ color: '#64748b', fontFamily: 'monospace', fontSize: 11 }}>0</span>
+}
+
+// ── Tech Debt #12 + #UX1 (pt7): grid partilhado modal villain ──────────────
+//
+// Linha colapsada (10 cols): ▶ Data Pos+Nome Stack/Cards pf F T R Resultado Tournament
+// Tabela expandida (6 cols mapeados): cols 3-8 da colapsada (Pos→Pos, Stack→Stack,
+//   pf→pf, F→F, T→T, R→R). Cols 1-2 e 9-10 NÃO existem na expandida.
+//
+// gridTemplateColumns idêntico em ambas componentes garante alinhamento
+// vertical: click ▶ expande sem mover horizontalmente o nome.
+const GRID_COLS_FULL    = '14px 56px 130px 90px 80px 80px 80px 80px 60px 1fr'
+const GRID_COLS_EXPANDED = 'subgrid'  // CSS subgrid herda do parent
+// Fallback se subgrid não suportado: replica cols 3-8 (sem padding ▶/data nem cols R/T)
+const GRID_COLS_EXPANDED_FALLBACK = '130px 90px 80px 80px 80px 80px'
+// Wrapper expandido começa após cols ▶+Data (largura 14+56+gap=78px); usa
+// margem-left ou nested grid. Solução simples: nested grid com mesmas cols
+// 3-8 do template full, com margin-left para visual alinhamento.
+
+const SEAT_ORDER = ['UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN', 'SB', 'BB']
+
+function CompactHandRow({ hand, villainNick, expanded, onToggle }) {
+  const apa = hand.all_players_actions || {}
+  const villainInfo = apa[villainNick] || {}
+  const villainPos = villainInfo.position || '?'
+  const villainCards = villainInfo.cards
+  const showVillainCards = Array.isArray(villainCards) && villainCards.length === 2
+
+  const board = hand.board || []
+  const flop = board.slice(0, 3)
+  const turn = board.slice(3, 4)
+  const river = board.slice(4, 5)
+
+  const dateStr = hand.played_at ? hand.played_at.slice(5, 10) : '—'
+  const tourneyName = hand.tournament_name || hand.stakes || ''
+  const result = hand.villain_result ?? hand.result
+
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: GRID_COLS_FULL,
+        alignItems: 'center', gap: 6,
+        padding: '8px 10px',
+        cursor: 'pointer',
+        fontSize: 11,
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <span style={{ color: '#4b5563', fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
+      <span style={{ color: '#4b5563', fontFamily: 'monospace' }}>{dateStr}</span>
+      <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <PosBadge pos={villainPos} />
+        <span style={{ color: '#f59e0b', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{villainNick}</span>
+      </span>
+      <span style={{ display: 'flex', gap: 2 }}>
+        {showVillainCards
+          ? villainCards.map((c, j) => <MiniCard key={j} card={c} />)
+          : [<MiniCard key="x1" hidden />, <MiniCard key="x2" hidden />]
+        }
+      </span>
+      <span></span>{/* pf vazio na colapsada */}
+      <span style={{ display: 'flex', gap: 2 }}>{flop.map((c, j) => <MiniCard key={j} card={c} />)}</span>
+      <span style={{ display: 'flex', gap: 2 }}>{turn.map((c, j) => <MiniCard key={j} card={c} />)}</span>
+      <span style={{ display: 'flex', gap: 2 }}>{river.map((c, j) => <MiniCard key={j} card={c} />)}</span>
+      <span><ResultBadge result={result} /></span>
+      <span style={{ color: '#4b5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {tourneyName}
+      </span>
+    </div>
+  )
 }
 
 // ── Villain Profile Panel ────────────────────────────────────────────────────
