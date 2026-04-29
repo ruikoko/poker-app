@@ -1861,3 +1861,171 @@ def admin_refix_anonmap_execute(
     finally:
         conn.close()
 
+
+# ── Galeria manual de imagens (Tech Debt #B9) ───────────────────────────────
+
+class AttachImageBody(BaseModel):
+    entry_id: int
+
+
+@router.post("/{hand_db_id}/images")
+def attach_image(
+    hand_db_id: int,
+    body: AttachImageBody,
+    current_user=Depends(require_auth),
+):
+    """
+    Anexa manualmente uma imagem (entry_type='image') a uma mão.
+
+    Cria row em hand_attachments com match_method='manual'. Substitui o
+    Bucket 1 automático que falhava sistematicamente quando o utilizador
+    joga múltiplos torneios em paralelo (Tech Debt #B9).
+
+    Validações:
+      - hand_db_id existe em hands
+      - entry_id existe em entries E tem entry_type='image'
+      - não há row pré-existente (hand_db_id, entry_id)
+
+    Para Gyazo URLs, faz cache de bytes (img_b64) — link rot real, ver §4
+    da spec Bucket 1. Para Discord CDN, guarda só URL.
+    """
+    hand_rows = query(
+        "SELECT id, hand_id FROM hands WHERE id = %s",
+        (hand_db_id,),
+    )
+    if not hand_rows:
+        raise HTTPException(status_code=404, detail=f"hand {hand_db_id} not found")
+
+    entry_rows = query(
+        """
+        SELECT e.id, e.raw_text, e.entry_type, e.discord_channel,
+               e.discord_posted_at, d.channel_name
+        FROM entries e
+        LEFT JOIN discord_sync_state d ON d.channel_id = e.discord_channel
+        WHERE e.id = %s
+        """,
+        (body.entry_id,),
+    )
+    if not entry_rows:
+        raise HTTPException(status_code=404, detail=f"entry {body.entry_id} not found")
+    entry = entry_rows[0]
+    if entry["entry_type"] != "image":
+        raise HTTPException(
+            status_code=400,
+            detail=f"entry {body.entry_id} has entry_type={entry['entry_type']}, expected 'image'",
+        )
+
+    existing = query(
+        "SELECT id FROM hand_attachments WHERE hand_db_id = %s AND entry_id = %s",
+        (hand_db_id, body.entry_id),
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"image entry {body.entry_id} já anexada a hand {hand_db_id} (ha_id={existing[0]['id']})",
+        )
+
+    image_url = (entry.get("raw_text") or "").strip()
+    img_b64 = None
+    mime_type = None
+    if image_url and "gyazo.com" in image_url.lower():
+        try:
+            from app.routers.attachments import _fetch_entry_image_bytes
+            data = _fetch_entry_image_bytes("image", image_url)
+            if data:
+                img_b64 = data.get("img_b64")
+                mime_type = data.get("mime_type")
+        except Exception as exc:
+            logger.warning(f"gyazo fetch falhou para entry {body.entry_id}: {exc}")
+            # não bloqueia o anexo — guarda só URL
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO hand_attachments (
+                    hand_db_id, entry_id,
+                    image_url, cached_url, img_b64, mime_type,
+                    posted_at, channel_name,
+                    match_method, delta_seconds
+                ) VALUES (
+                    %s, %s,
+                    %s, NULL, %s, %s,
+                    %s, %s,
+                    'manual', NULL
+                )
+                RETURNING id
+                """,
+                (
+                    hand_db_id, body.entry_id,
+                    image_url, img_b64, mime_type,
+                    entry.get("discord_posted_at"), entry.get("channel_name"),
+                ),
+            )
+            inserted = cur.fetchone()
+            ha_id = inserted["id"] if isinstance(inserted, dict) else inserted[0]
+        conn.commit()
+        return {
+            "ok": True,
+            "ha_id": ha_id,
+            "hand_db_id": hand_db_id,
+            "hand_id": hand_rows[0]["hand_id"],
+            "entry_id": body.entry_id,
+            "match_method": "manual",
+            "img_b64_cached": img_b64 is not None,
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"attach_image falhou para hand {hand_db_id} entry {body.entry_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.delete("/{hand_db_id}/images/{ha_id}")
+def detach_image(
+    hand_db_id: int,
+    ha_id: int,
+    current_user=Depends(require_auth),
+):
+    """
+    Remove anexação de imagem (qualquer match_method) de uma mão.
+
+    Validações:
+      - hand_db_id existe
+      - ha_id existe E pertence a esse hand_db_id (proteção contra delete
+        cross-hand por engano).
+    """
+    hand_rows = query(
+        "SELECT id FROM hands WHERE id = %s",
+        (hand_db_id,),
+    )
+    if not hand_rows:
+        raise HTTPException(status_code=404, detail=f"hand {hand_db_id} not found")
+
+    ha_rows = query(
+        "SELECT id, hand_db_id FROM hand_attachments WHERE id = %s",
+        (ha_id,),
+    )
+    if not ha_rows:
+        raise HTTPException(status_code=404, detail=f"hand_attachment {ha_id} not found")
+    if ha_rows[0]["hand_db_id"] != hand_db_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"hand_attachment {ha_id} pertence a hand {ha_rows[0]['hand_db_id']}, não {hand_db_id}",
+        )
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM hand_attachments WHERE id = %s", (ha_id,))
+        conn.commit()
+        return {"ok": True, "ha_id": ha_id, "hand_db_id": hand_db_id, "deleted": True}
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"detach_image falhou para ha_id {ha_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+

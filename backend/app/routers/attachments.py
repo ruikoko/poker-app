@@ -398,17 +398,32 @@ def _apply_match(candidate: dict) -> dict:
 
 def run_match_worker(limit: int = 100) -> dict:
     """
-    Ponto de entrada usado pelos triggers retroactivos (Fase IV) e pelo
-    endpoint POST /match. Calcula candidates + aplica os com match.
+    Tech Debt #B9 (29-Abr pt7): Bucket 1 automático DESACTIVADO.
+
+    Match temporal ±90s + canal era falso positivo sistemático quando o
+    utilizador joga múltiplos torneios em paralelo (caso confirmado: Rui
+    com ~9 torneios concorrentes → 7-9 torneios distintos com hands
+    activas dentro de ±5min de cada imagem). Ver inventário Tech Debts.
+
+    Substituído por anexação manual via galeria UI:
+      - GET  /api/images/gallery
+      - POST /api/hands/{hand_id}/images
+      - DELETE /api/hands/{hand_id}/images/{ha_id}
+
+    Função permanece como no-op para preservar callers existentes
+    (hm3.py:1279, discord.py:172, import_.py:432, screenshot.py background
+    tasks) sem partir signature. Helpers `_compute_match_candidates`,
+    `_apply_match`, `_find_primary_match`, `_find_fallback_match`
+    mantidos para potencial debug/recovery futuro mas não chamados.
     """
-    candidates = _compute_match_candidates(limit)
-    results = [_apply_match(c) for c in candidates]
     return {
-        "total_seen": len(candidates),
-        "applied": sum(1 for r in results if r["status"] == "ok"),
-        "skipped": sum(1 for r in results if r["status"] == "skip"),
-        "errors": sum(1 for r in results if r["status"] == "error"),
-        "results": results,
+        "total_seen": 0,
+        "applied": 0,
+        "skipped": 0,
+        "errors": 0,
+        "results": [],
+        "deactivated": True,
+        "reason": "Tech Debt #B9 — substituido por galeria manual",
     }
 
 
