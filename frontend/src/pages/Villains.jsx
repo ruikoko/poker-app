@@ -257,17 +257,14 @@ function RowRender({ isHero, isVillain, pos, name, nameColor, cards, showCards, 
 // ── Villain Profile Panel ────────────────────────────────────────────────────
 
 function VillainProfile({ villain, onClose, onSave }) {
-  const [note, setNote]   = useState(villain.note || '')
-  const [tags, setTags]   = useState((villain.tags || []).join(', '))
-  const [saving, setSaving] = useState(false)
-
-  const [hands, setHands]     = useState([])
+  // Tech Debt #12 + #UX1 (pt7): refactor para 1 coluna 100% width.
+  // PARTE 1 spec: removido painel esquerdo (Notas + Tags + Guardar);
+  // "Mãos em Comum" expande para 100% width usando CompactHandRow + ExpandedHandTable.
+  const [hands, setHands] = useState([])
   const [handsTotal, setHandsTotal] = useState(0)
   const [handsLoading, setHandsLoading] = useState(false)
   const [handsPage, setHandsPage] = useState(1)
   const [expandedHand, setExpandedHand] = useState(null)
-  const [ssCache, setSsCache] = useState({}) // hand_id -> data_url
-  const [ssFullscreen, setSsFullscreen] = useState(null) // data_url for fullscreen
 
   useEffect(() => {
     loadHands(1)
@@ -285,21 +282,6 @@ function VillainProfile({ villain, onClose, onSave }) {
       .finally(() => setHandsLoading(false))
   }
 
-  async function save() {
-    setSaving(true)
-    try {
-      await villains.update(villain.id, {
-        note,
-        tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [],
-      })
-      onSave()
-    } catch (e) {
-      alert(e.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const handsPages = Math.ceil(handsTotal / 10)
 
   return (
@@ -310,14 +292,14 @@ function VillainProfile({ villain, onClose, onSave }) {
     }} onClick={onClose}>
       <div
         style={{
-          width: '95%', maxWidth: 860, maxHeight: '92vh', overflow: 'auto',
+          width: '95%', maxWidth: 1100, maxHeight: '92vh', overflow: 'auto',
           background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 12,
-          padding: 28,
+          padding: 24,
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{villain.nick}</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -340,289 +322,106 @@ function VillainProfile({ villain, onClose, onSave }) {
           >✕</button>
         </div>
 
-        {/* 2-column layout: notes + hands */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 20 }}>
-
-          {/* Left: Notas e Tags */}
-          <div>
-            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
-              Notas
-            </div>
-            <textarea
-              rows={6}
-              style={{
-                width: '100%', fontSize: 13, background: '#0f1117',
-                border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0',
-                padding: '8px 12px', fontFamily: 'inherit', resize: 'vertical',
-                marginBottom: 10,
-              }}
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder="Tendências, reads, exploits..."
-            />
-
-            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
-              Tags
-            </div>
-            <input
-              type="text"
-              style={{
-                width: '100%', fontSize: 13, background: '#0f1117',
-                border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0',
-                padding: '8px 12px', marginBottom: 14,
-              }}
-              value={tags}
-              onChange={e => setTags(e.target.value)}
-              placeholder="fish, aggro, nitty, reg..."
-            />
-
-            <button
-              style={{
-                padding: '8px 20px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-                background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer',
-                opacity: saving ? 0.6 : 1,
-              }}
-              disabled={saving}
-              onClick={save}
-            >{saving ? 'A guardar...' : 'Guardar'}</button>
+        {/* Mãos em Comum — 100% width */}
+        <div>
+          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
+            Mãos em Comum ({handsTotal})
           </div>
 
-          {/* Right: Histórico de mãos */}
-          <div>
-            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
-              Mãos em Comum ({handsTotal})
+          {handsLoading && (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#4b5563', fontSize: 13 }}>A carregar...</div>
+          )}
+
+          {!handsLoading && hands.length === 0 && (
+            <div style={{
+              textAlign: 'center', padding: '32px 16px', color: '#4b5563', fontSize: 13,
+              background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130',
+            }}>
+              Sem mãos em comum na BD.<br />
+              <span style={{ fontSize: 11, color: '#4b5563' }}>Importa HH ou faz match de screenshots.</span>
             </div>
+          )}
 
-            {handsLoading && (
-              <div style={{ textAlign: 'center', padding: '24px 0', color: '#4b5563', fontSize: 13 }}>A carregar...</div>
-            )}
-
-            {!handsLoading && hands.length === 0 && (
-              <div style={{
-                textAlign: 'center', padding: '32px 16px', color: '#4b5563', fontSize: 13,
-                background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130',
-              }}>
-                Sem mãos em comum na BD.<br />
-                <span style={{ fontSize: 11, color: '#4b5563' }}>Importa HH ou faz match de screenshots.</span>
-              </div>
-            )}
-
-            {!handsLoading && hands.length > 0 && (
-              <div style={{ background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130', overflow: 'hidden' }}>
-                {hands.map((h, i) => {
-                  const villainActions = h.all_players_actions?.[villain.nick]
-                  const villainPos = villainActions?.position || '?'
-                  const isExpanded = expandedHand === h.id
-
-                  function toggleExpand() {
-                    if (isExpanded) {
-                      setExpandedHand(null)
-                    } else {
-                      setExpandedHand(h.id)
-                      // Load screenshot if not cached
-                      if (!ssCache[h.id] && (h.entry_id || h.player_names?.screenshot_entry_id)) {
-                        handsApi.screenshot(h.id)
-                          .then(data => {
-                            if (data?.data_url) setSsCache(prev => ({...prev, [h.id]: data.data_url}))
-                          })
-                          .catch(() => {})
-                      }
-                    }
-                  }
-
-                  // Parse all_players_actions for display
-                  const allPlayers = h.all_players_actions || {}
-                  const SEAT_ORDER = ['SB', 'BB', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN']
-                  const sortedPlayers = Object.entries(allPlayers)
-                    .filter(([k]) => k !== '_meta')
-                    .map(([name, info]) => ({ name, ...info }))
-                    .sort((a, b) => {
-                      const ia = SEAT_ORDER.indexOf(a.position)
-                      const ib = SEAT_ORDER.indexOf(b.position)
-                      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
-                    })
-
-                  return (
-                    <div key={h.id} style={{ borderBottom: i < hands.length - 1 ? '1px solid #1a1d27' : 'none' }}>
-                      {/* Summary row */}
-                      <div
-                        onClick={toggleExpand}
-                        style={{
-                          padding: '10px 14px',
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          cursor: 'pointer',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                      >
-                        <span style={{ color: '#4b5563', fontSize: 10 }}>{isExpanded ? '▼' : '▶'}</span>
-                        <span style={{ fontSize: 11, color: '#4b5563', minWidth: 48 }}>
-                          {h.played_at ? h.played_at.slice(5, 10) : '—'}
-                        </span>
-                        {/* Villain position + cards first */}
-                        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                          <PosBadge pos={villainPos} />
-                          <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>{villain.nick}</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: 11, color: '#4b5563' }}>vs</span>
-                          <PosBadge pos={h.position} />
-                          {h.hero_cards?.map((c, j) => <MiniCard key={j} card={c} />)}
-                        </div>
-                        <div style={{ display: 'flex', gap: 2, flex: 1 }}>
-                          {h.board?.slice(0, 5).map((c, j) => <MiniCard key={j} card={c} />)}
-                        </div>
-                        {/* Perspectiva do villain quando disponivel (backend computa
-                            villain_result per-hand via _compute_villain_result);
-                            fallback para h.result (hero) em GG anonimizado ou quando
-                            bb_size esta em falta em all_players_actions._meta. */}
-                        <ResultBadge result={h.villain_result ?? h.result} />
-                        {h.stakes && (
-                          <span style={{ fontSize: 11, color: '#4b5563', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {h.stakes}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Expanded detail */}
-                      {isExpanded && (
-                        <div style={{ padding: '8px 14px 16px 30px', background: 'rgba(255,255,255,0.01)' }}>
-                          {/* Tournament info */}
-                          {h.stakes && (
-                            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
-                              {h.stakes} • {h.played_at ? new Date(h.played_at).toLocaleString('pt-PT') : ''}
-                            </div>
-                          )}
-
-                          {/* All players table */}
-                          {sortedPlayers.length > 0 && (
-                            <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>
-                                Mesa ({sortedPlayers.length} jogadores)
-                              </div>
-                              <div style={{ background: '#0f1117', borderRadius: 6, padding: '4px 8px', border: '1px solid #1e2130' }}>
-                                {sortedPlayers.map((p, pi) => (
-                                  <div key={pi} style={{
-                                    display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0',
-                                    borderBottom: pi < sortedPlayers.length - 1 ? '1px solid #1a1d27' : 'none',
-                                  }}>
-                                    <PosBadge pos={p.position} />
-                                    <span style={{
-                                      fontSize: 11, minWidth: 100,
-                                      color: p.is_hero ? '#818cf8' : p.name === villain.nick ? '#f59e0b' : '#94a3b8',
-                                      fontWeight: p.is_hero || p.name === villain.nick ? 600 : 400,
-                                    }}>
-                                      {p.real_name || p.name}
-                                      {p.is_hero && <span style={{ fontSize: 8, color: '#6366f1', marginLeft: 3 }}>HERO</span>}
-                                      {p.name === villain.nick && <span style={{ fontSize: 8, color: '#f59e0b', marginLeft: 3 }}>★</span>}
-                                    </span>
-                                    {p.stack_bb != null && (
-                                      <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace' }}>
-                                        {p.stack_bb.toFixed(1)} BB
-                                      </span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Screenshot */}
-                          {ssCache[h.id] && (
-                            <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>Screenshot</div>
-                              <img
-                                src={ssCache[h.id]}
-                                alt="Screenshot"
-                                style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'pointer' }}
-                                onClick={() => setSsFullscreen(ssCache[h.id])}
-                              />
-                            </div>
-                          )}
-                          {!ssCache[h.id] && (h.entry_id || h.player_names?.screenshot_entry_id) && (
-                            <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 8 }}>A carregar screenshot...</div>
-                          )}
-
-                          {/* 3 acessos à mão */}
-                          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                            {h.raw && h.all_players_actions && (
-                              <a href={`/replayer/${h.id}`} target="_blank" rel="noopener noreferrer" style={{
-                                fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '4px 10px',
-                                borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
-                                fontWeight: 600,
-                              }}>&#9654; Replayer</a>
-                            )}
-                            <a href={`/hand/${h.id}`} style={{
-                              fontSize: 11, color: '#22c55e', textDecoration: 'none', padding: '4px 10px',
-                              borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)',
+          {!handsLoading && hands.length > 0 && (
+            <div style={{ background: '#0f1117', borderRadius: 8, border: '1px solid #1e2130', overflow: 'hidden' }}>
+              {hands.map((h, i) => {
+                const isExpanded = expandedHand === h.id
+                const toggle = () => setExpandedHand(isExpanded ? null : h.id)
+                return (
+                  <div key={h.id} style={{ borderBottom: i < hands.length - 1 ? '1px solid #1a1d27' : 'none' }}>
+                    <CompactHandRow
+                      hand={h}
+                      villainNick={villain.nick}
+                      expanded={isExpanded}
+                      onToggle={toggle}
+                    />
+                    {isExpanded && (
+                      <div>
+                        <ExpandedHandTable hand={h} villainNick={villain.nick} />
+                        {/* 3 acessos à mão */}
+                        <div style={{ display: 'flex', gap: 6, padding: '4px 14px 12px 76px', flexWrap: 'wrap' }}>
+                          {h.raw && h.all_players_actions && (
+                            <a href={`/replayer/${h.id}`} target="_blank" rel="noopener noreferrer" style={{
+                              fontSize: 11, color: '#818cf8', textDecoration: 'none', padding: '4px 10px',
+                              borderRadius: 4, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
                               fontWeight: 600,
-                            }}>HH Formatada</a>
-                            {h.raw && (
-                              <button onClick={() => { navigator.clipboard.writeText(h.raw); alert('HH copiada!') }} style={{
-                                fontSize: 11, color: '#f59e0b', padding: '4px 10px',
-                                borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)',
-                                fontWeight: 600, cursor: 'pointer',
-                              }}>Copiar HH</button>
-                            )}
-                            {h.player_names?.gg_link && (
-                              <a href={h.player_names.gg_link} target="_blank" rel="noopener noreferrer" style={{
-                                fontSize: 11, color: '#fbbf24', textDecoration: 'none', padding: '4px 10px',
-                                borderRadius: 4, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)',
-                                fontWeight: 600,
-                              }}>GG Replayer</a>
-                            )}
-                          </div>
+                            }}>&#9654; Replayer</a>
+                          )}
+                          <a href={`/hand/${h.id}`} style={{
+                            fontSize: 11, color: '#22c55e', textDecoration: 'none', padding: '4px 10px',
+                            borderRadius: 4, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)',
+                            fontWeight: 600,
+                          }}>HH Formatada</a>
+                          {h.raw && (
+                            <button onClick={() => { navigator.clipboard.writeText(h.raw); alert('HH copiada!') }} style={{
+                              fontSize: 11, color: '#f59e0b', padding: '4px 10px',
+                              borderRadius: 4, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)',
+                              fontWeight: 600, cursor: 'pointer',
+                            }}>Copiar HH</button>
+                          )}
+                          {h.player_names?.gg_link && (
+                            <a href={h.player_names.gg_link} target="_blank" rel="noopener noreferrer" style={{
+                              fontSize: 11, color: '#fbbf24', textDecoration: 'none', padding: '4px 10px',
+                              borderRadius: 4, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)',
+                              fontWeight: 600,
+                            }}>GG Replayer</a>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
-            {/* Paginação */}
-            {handsPages > 1 && (
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 10 }}>
-                <button
-                  disabled={handsPage <= 1}
-                  onClick={() => loadHands(handsPage - 1)}
-                  style={{
-                    padding: '4px 12px', borderRadius: 6, fontSize: 11,
-                    background: 'transparent', color: handsPage <= 1 ? '#374151' : '#94a3b8',
-                    border: '1px solid #2a2d3a', cursor: handsPage <= 1 ? 'not-allowed' : 'pointer',
-                  }}
-                >←</button>
-                <span style={{ color: '#4b5563', fontSize: 11, alignSelf: 'center' }}>
-                  {handsPage} / {handsPages}
-                </span>
-                <button
-                  disabled={handsPage >= handsPages}
-                  onClick={() => loadHands(handsPage + 1)}
-                  style={{
-                    padding: '4px 12px', borderRadius: 6, fontSize: 11,
-                    background: 'transparent', color: handsPage >= handsPages ? '#374151' : '#94a3b8',
-                    border: '1px solid #2a2d3a', cursor: handsPage >= handsPages ? 'not-allowed' : 'pointer',
-                  }}
-                >→</button>
-              </div>
-            )}
-          </div>
+          {/* Paginação */}
+          {handsPages > 1 && (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 10 }}>
+              <button
+                disabled={handsPage <= 1}
+                onClick={() => loadHands(handsPage - 1)}
+                style={{
+                  padding: '4px 12px', borderRadius: 6, fontSize: 11,
+                  background: 'transparent', color: handsPage <= 1 ? '#374151' : '#94a3b8',
+                  border: '1px solid #2a2d3a', cursor: handsPage <= 1 ? 'not-allowed' : 'pointer',
+                }}
+              >←</button>
+              <span style={{ color: '#4b5563', fontSize: 11, alignSelf: 'center' }}>
+                {handsPage} / {handsPages}
+              </span>
+              <button
+                disabled={handsPage >= handsPages}
+                onClick={() => loadHands(handsPage + 1)}
+                style={{
+                  padding: '4px 12px', borderRadius: 6, fontSize: 11,
+                  background: 'transparent', color: handsPage >= handsPages ? '#374151' : '#94a3b8',
+                  border: '1px solid #2a2d3a', cursor: handsPage >= handsPages ? 'not-allowed' : 'pointer',
+                }}
+              >→</button>
+            </div>
+          )}
         </div>
-
-        {/* Screenshot fullscreen modal */}
-        {ssFullscreen && (
-          <div
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
-              cursor: 'pointer',
-            }}
-            onClick={() => setSsFullscreen(null)}
-          >
-            <img src={ssFullscreen} alt="Screenshot" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
-            <button onClick={() => setSsFullscreen(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}>✕</button>
-          </div>
-        )}
       </div>
     </div>
   )
