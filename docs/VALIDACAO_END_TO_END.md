@@ -380,3 +380,76 @@
 | `ba60d05` | feat(estudo): header torneios mostra tournament_number + stack inicial Hero (Tech Debt #14) |
 | `40119fd` | feat(estudo): tournament_number copiável ao click (Tech Debt #14 follow-up) |
 | _[a gerar]_ | docs(verification): sessão 29-Abr pt4 fecho — Tech Debt #14 (header torneios + TM copiável) |
+
+### Sessão 29 Abril parte 6 (Wipe TOTAL + 5 pipelines + #20 fechado, #21 detectado)
+
+| Commit | Descrição |
+|---|---|
+| `6765f44` | fix(villains): injectar all_players_actions em parsed antes de _create_villains_for_hand (Tech Debt #16) |
+| `f818da6` | fix(villains): usar apa para mapping seat→nick em _create_villains_for_hand (Tech Debt #17) |
+| `429833a` | fix(gg_parser): early return em _build_anon_map se HH GG totalmente anonimizada (Tech Debt #20) |
+| _[a gerar]_ | docs(journal+plan): sessão 29-Abr pt6 fecho + plano pt7 |
+
+---
+
+## 11. Sessão 29-Abr pt6 — estado consolidado
+
+### Estado 5 pipelines pós-wipe pt6
+
+| Pipeline | Estado | Detalhe |
+|---|---|---|
+| 1. HM3 `.bat` | ✅ Validado | 209 mãos / 132 vilões cat='nota' / 0 erros |
+| 2. Import ZIP HH | ✅ Validado | 16429 hh_import GG (3 ZIPs) / 130 cat='sd' / Tech Debt #20 confirmado fechado via deep audit |
+| 3. Discord sync | ✅ Validado | 209 placeholders / 277 entries / 0 dups `discord_message_id` (cutoff -3d FASE B.5) |
+| 4. Upload SS manual | ❌ Pendente | Não testado pt6 |
+| 5. Bucket 1 retroactivo | ⚠️ Parcial | 12 hand_attachments criados via trigger automático em Pipeline 2; standalone não testado |
+
+### Tech Debts fechados pt6
+
+| # | Descrição | Commit |
+|---|---|---|
+| #16 | Injectar `all_players_actions` em parsed antes de `_create_villains_for_hand` | `6765f44` |
+| #17 | Usar apa directamente para mapping seat→nick em `_create_villains_for_hand` | `f818da6` |
+| #20 | Early return em `_build_anon_map` se HH GG totalmente anonimizada | `429833a` |
+
+### Tech Debts pendentes pós-pt6 (ordem prioridade)
+
+#### 🔥 Alta prioridade
+
+| # | Descrição | Esforço |
+|---|---|---|
+| #21 | `_enrich_hand_from_orphan_entry` não-idempotente (38 hands / 63 villains stale) — fix Opção A skip se já enriched | ~20 min |
+| #15 | Dashboard "Últimas mãos importadas" datas anómalas (ordena por `played_at` em vez de `created_at`) | ~10 min |
+
+#### 🟡 Média prioridade
+
+| # | Descrição | Esforço |
+|---|---|---|
+| #18 | Não-determinismo cross-post (provável fica resolvido com fix #21) | validar pós-fix |
+| #6 | Endpoint legacy `/api/villains` (bloqueado por #12) | depende |
+| #8 | Consolidação 8 PokerCard locais | ~30 min |
+| #10 | Parser Winamax truncamento `la/La` | ~15-20 min |
+| #11 | Botão × eliminar villain do modal | ~30 min |
+| #12 | Re-arquitectura modal Vilões | 6-8h |
+| #13c | Housekeeping aliases SITE_COLORS (`_DASHBOARD/_HANDROW`) | ~10 min |
+
+### Counts finais BD pós-pt6
+
+| Tabela | Valor |
+|---|---|
+| hands | 16847 (16429 hh_import + 209 hm3 + 209 discord) |
+| entries | 280 (277 discord + 3 hh_text) |
+| hand_attachments | 12 |
+| hand_villains | **284** (169 nota + 115 sd) — pós cleanup 63 stale |
+| villain_notes | 304 |
+| discord_sync_state | 14 canais |
+
+### Validação Tech Debt #20 (deep audit)
+
+- **0 swaps em 90 hands** com showdown matched (vs pt5: 9/16 = 56% swaps)
+- Validação contra HH text ground truth real (`Seat X: hash showed [...]`)
+- Magnitude positiva: 5.6× mais hands testadas que pt5
+
+### Tech Debt #21 sintoma-chave
+
+- **Hand TM5884107821 (id=923)**: 3 villains acumulados no mesmo seat (BTN raise) entre Joao Coelho/QuincasBorba/Anbem. Real era PikkuHUMPPA. Cada ZIP import disparou re-enrich com mapping divergente.
