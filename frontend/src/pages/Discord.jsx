@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { discord, hands as handsApi } from '../api/client'
+import { discord, hands as handsApi, images as imagesApi } from '../api/client'
 import HandRow from '../components/HandRow'
 
 // ── Constantes ──────────────────────────────────────────────────────────────
@@ -139,6 +139,73 @@ function TagGroup({ tagKey, tagHands, onOpenDetail, onDeleteHand, defaultOpen = 
   )
 }
 
+// ── Images Group (Tech Debt #B9 — galeria manual) ───────────────────────────
+
+function ImagesGroup({ items, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const tagColor = DISCORD_COLOR
+
+  return (
+    <div style={{ marginBottom: 8, border: `1px solid ${open ? `${tagColor}40` : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+      <div onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: open ? `${tagColor}08` : '#1a1d27', cursor: 'pointer', transition: 'background 0.15s', userSelect: 'none' }}
+        onMouseEnter={e => { if (!open) e.currentTarget.style.background = '#1e2130' }}
+        onMouseLeave={e => { if (!open) e.currentTarget.style.background = '#1a1d27' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ display: 'inline-block', fontSize: 11, color: tagColor, transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
+          <span style={{
+            display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11,
+            fontWeight: 600, color: tagColor, background: `${tagColor}18`,
+            border: `1px solid ${tagColor}30`,
+          }}>#imagens</span>
+          <span style={{ fontSize: 12, color: '#64748b' }}>
+            {items.length} {items.length === 1 ? 'imagem' : 'imagens'}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: '#64748b' }}>
+          Galeria manual &middot; anexar via modal de mão
+        </div>
+      </div>
+      {open && (
+        <div>
+          {items.map((item) => (
+            <ImageRow key={item.entry_id} item={item} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ImageRow({ item }) {
+  const fmt = (d) => d ? new Date(d).toLocaleString('pt-PT') : '—'
+  const attachedCount = item.attached_to?.length || 0
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 200px 130px 90px', gap: 12, alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #2a2d3a', background: '#0f1117', fontSize: 12 }}>
+      <div style={{ width: 56, height: 40, borderRadius: 4, overflow: 'hidden', background: '#1e2130', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {item.image_url ? (
+          <img src={item.image_url} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+               onError={e => { e.target.style.display = 'none' }} />
+        ) : <span style={{ fontSize: 18, color: '#4b5563' }}>&#x1F5BC;</span>}
+      </div>
+      <div style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {attachedCount > 0
+          ? <span style={{ color: '#22c55e' }}>Anexada a {attachedCount} {attachedCount === 1 ? 'mão' : 'mãos'}</span>
+          : <span style={{ color: '#64748b' }}>(sem anexação)</span>}
+      </div>
+      <div style={{ color: '#64748b', fontFamily: 'monospace', fontSize: 11 }}>{fmt(item.posted_at)}</div>
+      <div>
+        {item.channel_name && <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, color: DISCORD_COLOR, background: `${DISCORD_COLOR}18`, border: `1px solid ${DISCORD_COLOR}30` }}>#{item.channel_name}</span>}
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <a href={item.image_url} target="_blank" rel="noopener noreferrer"
+           style={{ padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', textDecoration: 'none', display: 'inline-block' }}>
+          Abrir
+        </a>
+      </div>
+    </div>
+  )
+}
+
 // ── Hand Detail Modal ───────────────────────────────────────────────────────
 
 function HandDetailModal({ hand, onClose }) {
@@ -250,6 +317,7 @@ export default function DiscordPage() {
   const [loadingHands, setLoadingHands] = useState(false)
   const [selected, setSelected] = useState(null)
   const [tab, setTab] = useState('hands') // 'hands' | 'bot'
+  const [imagesList, setImagesList] = useState([])
 
   const loadStatus = useCallback(() => {
     discord.status().then(setStatus).catch(e => setError(e.message))
@@ -268,7 +336,13 @@ export default function DiscordPage() {
       .finally(() => setLoadingHands(false))
   }, [dateFrom])
 
-  useEffect(() => { loadStatus(); loadHands() }, [loadStatus, loadHands])
+  const loadImages = useCallback(() => {
+    imagesApi.gallery({ page_size: 200 })
+      .then(r => setImagesList(r.items || []))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { loadStatus(); loadHands(); loadImages() }, [loadStatus, loadHands, loadImages])
 
   const triggerSync = async () => {
     setSyncing(true); setMsg('')
@@ -440,6 +514,9 @@ export default function DiscordPage() {
                   onOpenDetail={openDetail}
                   onDeleteHand={deleteHand}
                 />
+              )}
+              {imagesList.length > 0 && (
+                <ImagesGroup items={imagesList} />
               )}
             </div>
           )}

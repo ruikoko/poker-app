@@ -118,6 +118,19 @@ export const entries = {
   reprocess: (id)          => req('POST',  `/entries/${id}/reprocess`),
 }
 
+// ── Images (galeria manual — Tech Debt #B9) ──────────────────────────────────
+export const images = {
+  gallery:  (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/images/gallery${qs ? '?' + qs : ''}`)
+  },
+  channels: () => req('GET', '/images/channels'),
+  attach:   (handDbId, entryId) => req('POST', `/hands/${handDbId}/images`, { entry_id: entryId }),
+  detach:   (handDbId, haId)    => req('DELETE', `/hands/${handDbId}/images/${haId}`),
+}
+
 // ── Discord ──────────────────────────────────────────────────────────────────
 export const discord = {
   status:    ()  => req('GET',  '/discord/status'),
