@@ -241,19 +241,27 @@ function RowRender({ isHero, isVillain, pos, name, nameColor, cards, showCards, 
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
         <PosBadge pos={pos} />
-        <span style={{ color: nameColor, fontWeight: isHero || isVillain ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+        {/* Tech Debt #12 ajuste pt7: width fixo no nick para que cards de
+            todos os jogadores fiquem alinhadas verticalmente. Truncate com
+            ellipsis se nick + badge HERO/★ exceder. */}
+        <span style={{
+          color: nameColor, fontWeight: isHero || isVillain ? 600 : 400,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          width: 110, flexShrink: 0,
+        }}>
           {name}
           {isHero && <span style={{ fontSize: 8, color: '#6366f1', marginLeft: 3 }}>HERO</span>}
           {isVillain && <span style={{ fontSize: 8, color: '#f59e0b', marginLeft: 3 }}>★</span>}
         </span>
-        <span style={{ display: 'flex', gap: 2 }}>
+        <span style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
           {showCards
             ? cards.map((c, j) => <MiniCard key={j} card={c} />)
             : [<MiniCard key="x1" hidden />, <MiniCard key="x2" hidden />]
           }
         </span>
       </div>
-      <div style={{ color: '#4b5563', fontFamily: 'monospace', fontSize: 11 }}>{stackStr}</div>
+      {/* Tech Debt #12 ajuste pt7: stack laranja + maior para destaque */}
+      <div style={{ color: '#f97316', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>{stackStr}</div>
       <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.preflop || ''}</div>
       <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.flop || ''}</div>
       <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{cs.turn || ''}</div>
