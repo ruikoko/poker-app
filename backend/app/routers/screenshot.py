@@ -24,6 +24,8 @@ import logging
 import asyncio
 import io
 from datetime import datetime
+from difflib import SequenceMatcher
+from itertools import permutations
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response
 from PIL import Image
 from app.auth import require_auth
@@ -576,27 +578,53 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
 
         # SB (do painel esquerdo — alta fiabilidade)
         if pos == "SB" and vision_sb:
+            # Tech Debt #B2: substituir startswith[:6] por SequenceMatcher
+            # ratio >=0.85. Match exacto prioritário; truncamento típico
+            # Vision (ratio ~0.91) coberto; nick lido mal (ratio <0.85) cai
+            # em fallback explícito vision_sb. Collect+sort impede
+            # ambiguidade quando >1 candidato qualifica.
+            sb_lower = vision_sb.lower()
+            candidates = []
             for i, vp in enumerate(vision_list):
                 if i in used_vision:
                     continue
-                if vp["name"].lower().startswith(vision_sb.lower()[:6]):
-                    anon_map[player_key] = vp["name"]
-                    used_vision.add(i)
+                v_lower = vp["name"].lower()
+                if v_lower == sb_lower:
+                    candidates = [(i, 1.0)]
                     break
-            if player_key not in anon_map:
+                ratio = SequenceMatcher(None, v_lower, sb_lower).ratio()
+                if ratio >= 0.85:
+                    candidates.append((i, ratio))
+            if candidates:
+                candidates.sort(key=lambda c: -c[1])
+                best_i = candidates[0][0]
+                anon_map[player_key] = vision_list[best_i]["name"]
+                used_vision.add(best_i)
+            else:
                 anon_map[player_key] = vision_sb
             continue
 
         # BB (do painel esquerdo — alta fiabilidade)
         if pos == "BB" and vision_bb:
+            # Tech Debt #B2: idem SB, ver comentário acima.
+            bb_lower = vision_bb.lower()
+            candidates = []
             for i, vp in enumerate(vision_list):
                 if i in used_vision:
                     continue
-                if vp["name"].lower().startswith(vision_bb.lower()[:6]):
-                    anon_map[player_key] = vp["name"]
-                    used_vision.add(i)
+                v_lower = vp["name"].lower()
+                if v_lower == bb_lower:
+                    candidates = [(i, 1.0)]
                     break
-            if player_key not in anon_map:
+                ratio = SequenceMatcher(None, v_lower, bb_lower).ratio()
+                if ratio >= 0.85:
+                    candidates.append((i, ratio))
+            if candidates:
+                candidates.sort(key=lambda c: -c[1])
+                best_i = candidates[0][0]
+                anon_map[player_key] = vision_list[best_i]["name"]
+                used_vision.add(best_i)
+            else:
                 anon_map[player_key] = vision_bb
             continue
 
