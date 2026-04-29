@@ -689,30 +689,49 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
         anon_map[unmapped_hh[0]] = vision_list[unmapped_vision[0]]["name"]
         logger.info(f"  Elimination match: {unmapped_hh[0]} -> {vision_list[unmapped_vision[0]]['name']}")
     elif len(unmapped_hh) > 0 and len(unmapped_vision) > 0:
-        still_unmapped_vision = set(unmapped_vision)
+        # Tech Debt #B4: substituir greedy ordem-dependente por brute-force
+        # enumeration que minimiza soma global de diffs. Para max ~8 jogadores
+        # por mesa: 8! = 40320 perms, ~30-80ms — desprezível vs 1 chamada por
+        # match. Garante atribuição global óptima.
+        hh_stacks = []
         for player_key in unmapped_hh:
             hh_player = hh_data["players"].get(player_key, {}) if hh_data else {}
-            stack_initial = hh_player.get("stack_chips", 0)
+            hh_stacks.append(hh_player.get("stack_chips", 0))
 
-            best_i = None
-            best_diff = float("inf")
-            for i in still_unmapped_vision:
-                vp = vision_list[i]
-                vp_stack = vp.get("stack_chips")
-                if vp_stack is None:
-                    vp_stack = vp.get("stack", 0)
-                diff = abs(stack_initial - vp_stack)
-                if diff < best_diff:
-                    best_diff = diff
-                    best_i = i
+        vision_stacks = []
+        for i in unmapped_vision:
+            vp = vision_list[i]
+            vp_stack = vp.get("stack_chips")
+            if vp_stack is None:
+                vp_stack = vp.get("stack", 0)
+            vision_stacks.append(vp_stack)
 
-            if best_i is not None:
-                anon_map[player_key] = vision_list[best_i]["name"]
-                still_unmapped_vision.discard(best_i)
-                vp_stack_log = vision_list[best_i].get("stack_chips") or vision_list[best_i].get("stack", 0)
-                logger.info(f"  Approx match: {player_key} -> {vision_list[best_i]['name']} "
-                           f"(hh_initial={stack_initial}, vision={vp_stack_log}, "
-                           f"diff={best_diff})")
+        n = len(unmapped_hh)
+        m = len(unmapped_vision)
+
+        best_perm = None
+        best_total = float("inf")
+        if n <= m:
+            for vis_perm in permutations(range(m), n):
+                total = sum(
+                    abs(hh_stacks[hh_idx] - vision_stacks[vis_perm[hh_idx]])
+                    for hh_idx in range(n)
+                )
+                if total < best_total:
+                    best_total = total
+                    best_perm = vis_perm
+
+        if best_perm is not None:
+            for hh_idx, vis_local_idx in enumerate(best_perm):
+                global_vis_idx = unmapped_vision[vis_local_idx]
+                player_key = unmapped_hh[hh_idx]
+                anon_map[player_key] = vision_list[global_vis_idx]["name"]
+                vp_stack_log = vision_stacks[vis_local_idx]
+                logger.info(f"  Optimal match: {player_key} -> "
+                           f"{vision_list[global_vis_idx]['name']} "
+                           f"(hh_initial={hh_stacks[hh_idx]}, "
+                           f"vision={vp_stack_log}, "
+                           f"diff={abs(hh_stacks[hh_idx] - vp_stack_log)})")
 
     logger.info(f"Match result: {len(anon_map)}/{len(all_players)} mapped. "
                f"Anchors: Hero+SB+BB. Folds: stack match. Rest: elimination.")
