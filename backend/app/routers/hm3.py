@@ -657,9 +657,24 @@ def _detect_vpip_hm3(raw_text, hero_name=None):
     Detects players who made VPIP preflop from raw HH text.
     Returns { player_name: "action_desc", ... } excluding hero.
     Works for Winamax, PokerStars, and WPN formats.
+
+    Tech Debt #10: nicks com espaço (ex: "Reg ou Zgg", "la louffe") eram
+    truncados pela regex frouxa antiga `^(.+?)(?::)?\\s+(.+)$`. Solução
+    universal: extrair seat_nicks dos lines `Seat N: nick (...)` e usar
+    prefix-match ordenado por length para identificar o actor.
     """
     vpip_players = {}
     if not raw_text:
+        return vpip_players
+
+    # Extrair seat nicks (universal Winamax/PS/WPN). Padrão "Seat N: nick ("
+    # cobre as 3 salas:
+    #   Winamax:    "Seat 1: thinvalium (50735, 187.50€ bounty)"
+    #   PokerStars: "Seat 1: RuTherFord885 (112022 in chips)"
+    #   WPN:        "Seat 1: loltaxpayers (684156.00)"
+    seat_pattern = re.compile(r'^Seat \d+:\s+(.+?)\s+\(', re.MULTILINE)
+    seat_nicks = sorted(set(seat_pattern.findall(raw_text)), key=len, reverse=True)
+    if not seat_nicks:
         return vpip_players
 
     # Find preflop section
@@ -685,12 +700,22 @@ def _detect_vpip_hm3(raw_text, hero_name=None):
         if not line or line.startswith("***") or line.startswith("Dealt"):
             continue
 
-        m = re.match(r"^(.+?)(?::)?\s+(.+)$", line)
-        if not m:
+        # Tech Debt #10: prefix-match contra seat_nicks ordenado DESC por
+        # length impede "Reg" matchar antes de "Reg ou Zgg". Skip lines que
+        # não começam com nick conhecido (Uncalled bet, board cards, etc).
+        actor = None
+        action_text = ""
+        for nick in seat_nicks:
+            if line.startswith(nick):
+                rest = line[len(nick):]
+                # Aceitar `:` ou ` ` após nick para validar action line
+                # (não substring acidental).
+                if rest.startswith(":") or rest.startswith(" "):
+                    actor = nick
+                    action_text = rest.lstrip(":").strip().lower()
+                    break
+        if actor is None:
             continue
-
-        actor = m.group(1).strip()
-        action_text = m.group(2).strip().lower()
 
         # Skip posts (antes/blinds)
         if "posts" in action_text:
