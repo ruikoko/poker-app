@@ -76,7 +76,10 @@ function ResultBadge({ result }) {
 //
 // gridTemplateColumns idêntico em ambas componentes garante alinhamento
 // vertical: click ▶ expande sem mover horizontalmente o nome.
-const GRID_COLS_FULL    = '14px 56px 130px 90px 80px 80px 80px 80px 60px 1fr'
+// Col 3 (Pos+Nome): 200px para acomodar nicks até ~14 chars + badge POS
+// (ex: "Madjidov D.", "Reg ou Zgg", "FlusHDrug"). Valor partilhado com
+// col 1 da ExpandedHandTable para preservar alinhamento vertical.
+const GRID_COLS_FULL    = '14px 56px 200px 90px 80px 80px 80px 80px 60px 1fr'
 const GRID_COLS_EXPANDED = 'subgrid'  // CSS subgrid herda do parent
 // Fallback se subgrid não suportado: replica cols 3-8 (sem padding ▶/data nem cols R/T)
 const GRID_COLS_EXPANDED_FALLBACK = '130px 90px 80px 80px 80px 80px'
@@ -146,6 +149,7 @@ function ExpandedHandTable({ hand, villainNick }) {
   // pf/F/T/R correspondentes). Margem-left de 14+56+gap=76px alinha com
   // col "Pos" da linha colapsada (skip cols ▶ + Data).
   const apa = hand.all_players_actions || {}
+  const bbSize = (apa._meta && apa._meta.bb) || null
   const players = Object.entries(apa)
     .filter(([k]) => k !== '_meta')
     .map(([name, info]) => ({ name, ...info }))
@@ -165,13 +169,16 @@ function ExpandedHandTable({ hand, villainNick }) {
   for (const st of STREETS) {
     let raiseCount = 0
     for (const p of players) {
-      const acts = p.actions?.[st]
-      if (!acts || acts.length === 0) {
+      const acts = p.actions && p.actions[st]
+      // Aceita string ou array vazio. HM3 envia string ("calls 2800"); GG
+      // cross-match envia array (['Call 12.9 BB']).
+      const isEmpty = !acts || (Array.isArray(acts) ? acts.length === 0 : !acts.toString().trim())
+      if (isEmpty) {
         if (!compactByPlayerStreet[p.name]) compactByPlayerStreet[p.name] = {}
         compactByPlayerStreet[p.name][st] = ''
         continue
       }
-      const { compact, raiseCountEnd } = compactStreetActions(acts, raiseCount)
+      const { compact, raiseCountEnd } = compactStreetActions(acts, raiseCount, bbSize)
       raiseCount = raiseCountEnd
       if (!compactByPlayerStreet[p.name]) compactByPlayerStreet[p.name] = {}
       compactByPlayerStreet[p.name][st] = compact
@@ -181,7 +188,8 @@ function ExpandedHandTable({ hand, villainNick }) {
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '130px 90px 80px 80px 80px 80px',
+      // Col 1 (200px) alinha com col 3 (200px) da CompactHandRow GRID_COLS_FULL.
+      gridTemplateColumns: '200px 90px 80px 80px 80px 80px',
       gap: 6,
       marginLeft: 76,  // 14 (chevron) + 56 (data) + 6*2 gaps = 76px
       padding: '8px 10px 12px',

@@ -626,16 +626,31 @@ export function formatBB(bb) {
  * Returns:
  *   { compact: string, raiseCountEnd: int (raises após esta sequência) }
  */
-export function compactStreetActions(actions, raiseCountStart = 0) {
-  if (!Array.isArray(actions) || actions.length === 0) {
+export function compactStreetActions(actions, raiseCountStart = 0, bbSize = null) {
+  // Normalizar shape: GG cross-match Discord envia Array<string> com BB suffix
+  // (['Raise 2.0 BB', 'Call 12.9 BB']); HM3 .bat envia string única
+  // vírgula-separada com valores em chips brutos ('calls 2800, folds').
+  // Aceita ambos.
+  let arr
+  if (Array.isArray(actions)) {
+    arr = actions
+  } else if (typeof actions === 'string') {
+    arr = actions.split(/,\s*/).filter(Boolean)
+  } else {
     return { compact: '', raiseCountEnd: raiseCountStart }
   }
+  if (arr.length === 0) {
+    return { compact: '', raiseCountEnd: raiseCountStart }
+  }
+
   let raiseCount = raiseCountStart
   const parts = []
-  for (const raw of actions) {
+
+  for (const raw of arr) {
     const s = (raw || '').trim()
     const lower = s.toLowerCase()
     if (!s) continue
+
     if (lower === 'fold' || lower.startsWith('fold')) {
       parts.push('F')
       continue
@@ -644,29 +659,55 @@ export function compactStreetActions(actions, raiseCountStart = 0) {
       parts.push('X')
       continue
     }
+
+    // Detecção do tamanho:
+    // - GG format: "Call 12.9 BB" → BB directo
+    // - HM3 format: "calls 2800" ou "raises 600 to 1200" → chips → /bbSize
+    let bbVal = null
     const bbMatch = s.match(/([\d.]+)\s*BB/i)
-    const bbValStr = bbMatch ? bbMatch[1] : null
-    const bbLabel = bbValStr ? `${parseFloat(bbValStr)}bb` : ''
+    if (bbMatch) {
+      bbVal = parseFloat(bbMatch[1])
+    } else if (bbSize) {
+      // HM3: extrair chips. Para raise pegar o "to" (total) se existir.
+      const toMatch = s.match(/to\s+([\d,]+)/i)
+      const chipsMatch = toMatch || s.match(/([\d,]+)/)
+      if (chipsMatch) {
+        const chips = parseFloat(chipsMatch[1].replace(/,/g, ''))
+        if (isFinite(chips) && chips > 0) bbVal = chips / bbSize
+      }
+    }
+    const bbLabel = bbVal != null
+      ? (Number.isInteger(Math.round(bbVal * 10) / 10)
+          ? `${Math.round(bbVal)}bb`
+          : `${(Math.round(bbVal * 10) / 10).toFixed(1)}bb`)
+      : ''
+
+    // All-in detection: pode aparecer como acção principal ('all-in 5000')
+    // ou como suffix ('calls 2800 and is all-in', 'Raise 14.9 BB (All-In)').
+    const isAllIn = lower.includes('all-in') || lower.includes('all in')
+
+    if (lower.startsWith('all-in') || lower.startsWith('all in')) {
+      parts.push(bbLabel ? `AI ${bbLabel}` : 'AI')
+      continue
+    }
+
+    const aiSuffix = isAllIn ? ' AI' : ''
+
     if (lower.startsWith('call')) {
-      parts.push(bbLabel ? `C ${bbLabel}` : 'C')
+      parts.push(bbLabel ? `C ${bbLabel}${aiSuffix}` : `C${aiSuffix}`)
       continue
     }
     if (lower.startsWith('bet')) {
-      parts.push(bbLabel ? `b ${bbLabel}` : 'b')
-      continue
-    }
-    if (lower.startsWith('all-in') || lower.includes('all in')) {
-      parts.push(bbLabel ? `AI ${bbLabel}` : 'AI')
+      parts.push(bbLabel ? `b ${bbLabel}${aiSuffix}` : `b${aiSuffix}`)
       continue
     }
     if (lower.startsWith('raise')) {
       raiseCount += 1
-      let prefix
-      if (raiseCount === 1) prefix = 'R'
-      else prefix = `${raiseCount + 1}b`
-      parts.push(bbLabel ? `${prefix} ${bbLabel}` : prefix)
+      const prefix = raiseCount === 1 ? 'R' : `${raiseCount + 1}b`
+      parts.push(bbLabel ? `${prefix} ${bbLabel}${aiSuffix}` : `${prefix}${aiSuffix}`)
       continue
     }
+
     parts.push(s)
   }
   return { compact: parts.join('/'), raiseCountEnd: raiseCount }
