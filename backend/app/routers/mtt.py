@@ -714,6 +714,29 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
 
     # União dos seats com VPIP ou showdown cards
     all_candidate_seats = set(int(s) for s in legacy_vpip_seats.keys()) | set(showdown_seats.keys())
+
+    # #B19 (REGRAS_NEGOCIO.md §3.3 + caso canónico 2): para mãos marcadas
+    # explicitamente para Vilões via tag HM3 'nota%', alargar candidates a
+    # qualquer non-hero que tenha visto o flop (acção em street != 'preflop'),
+    # mesmo sem VPIP preflop nem showdown. Cobre o BB que faz check preflop
+    # e age postflop sem chegar a SD — perdido pela regra padrão VPIP∪SD.
+    has_nota_tag = any(
+        (t or "").lower().startswith("nota")
+        for t in (hand_meta.get("hm3_tags") or [])
+    )
+    if has_nota_tag and isinstance(apa, dict):
+        for _name, _pdata in apa.items():
+            if _name == "_meta" or not isinstance(_pdata, dict):
+                continue
+            if _pdata.get("is_hero"):
+                continue
+            _seat = _pdata.get("seat")
+            if _seat is None:
+                continue
+            _streets = set((_pdata.get("actions") or {}).keys()) - {"preflop"}
+            if _streets:
+                all_candidate_seats.add(int(_seat))
+
     if not all_candidate_seats:
         return 0
 
