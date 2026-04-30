@@ -92,8 +92,8 @@ A app cruza as duas para produzir `hands.all_players_actions` enriquecido. Ter i
 
 Cada linha em `hands` tem `study_state`. As duas pistas não se devem contaminar:
 
-- **Arquivo MTT**: imports em bulk (`.zip` HH) entram com `study_state = 'mtt_archive'`. Aparecem só na secção **MTT** (drill-down por torneio) — **nunca** na Inbox nem na página Mãos.
-- **Estudo**: uma mão entra em `new` apenas quando chega um screenshot (ou marcação manual). Depois percorre `new → review → studying → resolved`. A Inbox mostra `new`; a página Mãos mostra o track de estudo.
+- **Arquivo de torneio**: imports em bulk (`.zip` HH) entram com `study_state = 'mtt_archive'`. Aparecem só na secção **Torneios** (drill-down por torneio) — **nunca** na página Mãos.
+- **Estudo**: uma mão entra em `new` apenas quando chega um screenshot (ou marcação manual). Depois percorre `new → review → studying → resolved`. A página Mãos mostra o track de estudo.
 
 Ao listar mãos, **filtrar sempre por `study_state` explicitamente**. "Todas as mãos" quase nunca é o que a UI quer.
 
@@ -139,7 +139,7 @@ Regra operacional do match imagem ↔ mão:
 
 - **Janela temporal: ±90 segundos.** Não 10 minutos. Não 5 minutos. **90s.** Janelas mais largas trazem ruído inaceitável (cross-talk entre mãos consecutivas).
 - **Match primário:** mesmo canal Discord + janela temporal.
-- **Match fallback** (mão veio via HM3 sem entry Discord da mão): janela temporal sozinha, em qualquer canal Discord do mesmo torneio.
+- **Match fallback** (mão veio via HM3 sem entry Discord da mão): janela ±90s sozinha, em qualquer canal Discord do mesmo torneio.
 
 **Comportamento esperado da app** quando o Rui estuda uma mão: ver a imagem de contexto **inline** ao lado da mão (não num separador, não num click extra). A imagem **acompanha visualmente** a mão durante o estudo. Sem isto, o anexo perde o propósito.
 
@@ -157,16 +157,6 @@ Cookie-based (`HttpOnly`, 7 dias, assinado com `SESSION_SECRET` via `itsdangerou
 - **`backend/app/routers/mtt.py`** — especialmente `_promote_to_study`, `_create_villains_for_hand`, `import_mtt`. Toca arquivo, track de estudo e criação de villains em simultâneo; um erro pode contaminar as duas pistas.
 - **`backend/app/services/hand_service.py:_insert_hand`** — detecta placeholders GGDiscord e apaga-os antes de inserir a HH real. Bug aqui **bloqueia imports inteiros**.
 
-## Trabalho em curso (20 Abril 2026)
-
-- Feature `has_showdown` adicionada à tabela `hands` (commit `d91a186`).
-- `_create_villains_for_hand` agora tem modo showdown: só cria villains para jogadores com `cards != None`.
-- Backfill SQL processou 5269 mãos e criou 266 villains.
-- **Por validar**:
-  - Deploy no Railway está activo com estas alterações?
-  - Mãos novas (inseridas após o merge) estão a popular `has_showdown` correctamente?
-  - Distribuição dos 266 villains faz sentido (sem duplicados, nicks razoáveis)?
-
 ## MODELO DE DADOS E FLUXO (v2, 21-Abr-2026)
 
 Consolidação após sessão de 21-Abr. Substitui o modelo antigo onde aplicável — nos pontos em conflito, **esta secção ganha**.
@@ -179,10 +169,8 @@ Cada input deixa uma marca diferente na mão:
 |---|---|---|
 | **HM3 (.bat)** | Script `.bat` lê BD do HoldemManager3 e faz POST | `hm3_tags` = tags reais do HM3 (lista em `HM3_REAL_TAGS`) |
 | **Discord** | Bot puxa mensagens de canais monitorizados | `discord_tags` = nome literal do canal (ex: `'nota'`, `'icm'`) |
-| **Upload manual SS** | Drag-and-drop de screenshot na UI | `origin = 'ss_upload'` *(coluna ainda por criar)* |
-| **Import ZIP/TXT HH** | Upload de ficheiro HH bruto (GG/PS/Winamax/WPN) | `origin = 'hh_import'` *(coluna ainda por criar)* |
-
-**Nota técnica:** coluna `hands.origin TEXT` ainda não existe — será adicionada numa fase seguinte (mesmo padrão `ensure_origin_column`). Até lá, origem para SS/HH deriva-se indirectamente via `entries.source` + `entries.entry_type`.
+| **Upload manual SS** | Drag-and-drop de screenshot na UI | `origin = 'ss_upload'` |
+| **Import ZIP/TXT HH** | Upload de ficheiro HH bruto (GG/PS/Winamax/WPN) | `origin = 'hh_import'` |
 
 ### 2. Sete secções do sidebar
 
@@ -197,7 +185,7 @@ Depois da consolidação a **Inbox foi eliminada** (redundante com Dashboard + b
    - **Não entra**: HH GGPoker sem match (anonimizada).
 3. **Vilões** — lista de nicks. Modal mostra apenas mãos em `hand_villains` desse nick (não mais VPIP global).
 4. **Torneios** — aba GGPoker (Com SS / Sem SS); aba HM3 com Tag.
-5. **Discord** — centro de operações SS↔HH: logs detalhados, associação de gyazos (±10 min → mão adjacente). **Sem** listas de SSs/mãos (vivem no Dashboard / Estudo / Vilões).
+5. **Discord** — centro de operações SS↔HH: logs detalhados, associação de gyazos (±90s → mão adjacente). **Sem** listas de SSs/mãos (vivem no Dashboard / Estudo / Vilões).
 6. **HM3** — centro de operações do script `.bat`: logs, listagem de mãos filtrável (tag / data / PKO-NPKO / pré-flop vs pós-flop), edição manual de tags com re-avaliação automática de destinos.
 7. **GTO** — inalterada.
 
@@ -212,6 +200,7 @@ Regras determinísticas; cada mão pode cair em múltiplos sítios:
 | `hm3_tags` mistas (ex: `['ICM','nota']`) | **Ambas** — cada secção filtra só as tags da sua semântica |
 | `discord_tags` contém `'nota'` + tem match | Vilões |
 | `discord_tags` outros canais + tem match | Estudo |
+| non-hero é nick em `FRIEND_HEROES` (Karluz, flightrisk) | Vilões (Regra D, sem tag necessária) |
 | SS sem HH (match falhou) | Dashboard (painel "À espera de HH") |
 | HH GGPoker sem SS | Torneios > GG > Sem SS |
 | HH PokerStars/Winamax/WPN sem SS | Estudo directo (já têm nicks reais) |
@@ -219,45 +208,22 @@ Regras determinísticas; cada mão pode cair em múltiplos sítios:
 
 ### 4. Regra de elegibilidade para `hand_villains`
 
-Uma mão gera entry em `hand_villains` sse **(A OR B OR C)**:
+Uma mão gera entry em `hand_villains` sse **(A ∨ C ∨ D)** — regras canónicas em `_classify_villain_categories` (`backend/app/services/hand_service.py`):
 
-- **(A)** `hm3_tags ~ 'nota%'` (tag HM3 começa por "nota")
-- **(B)** `player_names ->> 'match_method' IS NOT NULL` **AND** `has_showdown = TRUE` (match SS↔HH válido **e** houve showdown)
-- **(C)** `'nota' = ANY(discord_tags)` **AND** `player_names ->> 'match_method' IS NOT NULL` (partilhada no canal Discord #nota, ID `1410311700023869522`, e com match SS↔HH)
+- **(A)** `hm3_tags` contém tag a começar por `nota` → `category='nota'`.
+- **(C)** `'nota' = ANY(discord_tags)` **AND** `player_names ->> 'match_method' IS NOT NULL` (não `discord_placeholder_*`) → `category='nota'`.
+- **(D)** `villain_nick` em `FRIEND_HEROES` (`backend/app/hero_names.py` — actualmente Karluz, flightrisk) → `category='friend'`. Independente de tag; dispara sempre que o nick aparece como non-hero numa mão com nicks reais.
+
+**Pré-condição padrão** do classificador: villain tem `has_cards` (showdown) OU `has_vpip` (call/raise/bet preflop). **Excepção #B19** (pt9): tag HM3 `nota%` ignora a pré-condição — qualquer non-hero que viu o flop é elegível. Detalhe completo em `docs/REGRAS_NEGOCIO.md` §3.3.
 
 O modal do vilão mostra **só** mãos presentes em `hand_villains` — não mais o VPIP global antigo, que puxava toda a mão onde o vilão aparecia.
 
-**Princípio invariante:** NUNCA criar villain numa mão GG anonimizada (sem `match_method`). Aplica-se às 3 regras — B e C já o exigem explicitamente; A aplica-se a tags HM3 que em GG também implicam match na prática.
+**Princípio invariante:** NUNCA criar villain numa mão GG anonimizada (sem `match_method`). Aplica-se às 3 regras — C exige `match_method` explicitamente; A aplica-se a tags HM3 que em GG implicam match na prática; D não dispara em GG anon porque `FRIEND_HEROES` exige nick real, não hash.
 
 ### 5. Filtro permanente: só mãos de 2026
 
 Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` deve incluir `played_at >= '2026-01-01'`**. Em produção a UI já filtra; em scripts `query_*.py` / `backfill_*.py` é obrigatório. Histórico anterior existe na BD mas é ruído para qualquer análise actual.
 
-## ESTADO FIM SESSÃO 21-22 ABR 2026
+---
 
-### Concluído hoje
-- Coluna hands.origin criada + backfill 5271 mãos
-- Regra villain A∨B∨C aplicada em /villains/search/hands e /recalculate-hands (VPIP antigo removido)
-- Filtros showdown (Com/Sem) na página Estudo
-- Torneios: aba "GG sem SS", header enriquecido (TM · nome · $buy_in · blinds · horas · N mãos/SS/V), chip buy_in
-- Placeholders Discord excluídos de Torneios
-- Secção HM3 adicionada ao sidebar (/hm3)
-- Coluna hands.tournament_format criada + parser por sala (nome primeiro; fallback: Winamax bounty pattern, PS 3-componentes buyIn, GG bounty_pct) + backfill
-- Badge KO/NKO no HandRow unificado (Estudo, HM3, Torneios)
-- Componente HandRow partilhado em components/HandRow.jsx substituindo 3 HandRows locais
-- Endpoint HM3 .bat agora popula origin='hm3'
-- Fix button seat não presente em seats (Winamax raw bug) — 3 mãos que falhavam agora entram com position=NULL
-- Fallback site detection via hero aliases (HERO_NICKS_BY_SITE por sala) quando SITE_MAP HM3 falha
-
-### Bugs detectados, por resolver
-1. CRÍTICO: _detect_vpip_hm3 em hm3.py só olha VPIP preflop; mãos com tag nota* + showdown não criam entries em hand_villains. Ex: id=182259 (WN-...-157) nota++ sd=True villains=[]. Código escreve em villain_notes mas NUNCA em hand_villains — regra A∨B∨C fica sem rows. Fix: (a) iterar all_players e extrair não-hero com cards preenchidos (showdown-based); fallback VPIP preflop quando sd=False; (b) INSERT em hand_villains além de villain_notes. Modelo equivalente existe em mtt.py _create_villains_for_hand.
-2. Parser WPN incompleto (baixa prioridade — Rui joga pouco em WPN)
-
-### Simulação end-to-end
-- Passo 1 HM3 .bat: VALIDADO (3 mãos button-bug resolvidas, 0 erros)
-- Passo 2 Discord sync: PENDENTE
-- Passo 3 validação UI: PENDENTE
-
-### Contexto útil próxima sessão
-- hero_names.py tem HERO_NICKS_BY_SITE e FRIEND_NICKS_BY_SITE novos. FRIEND_NICKS_BY_SITE["GGPoker"] = ["karluz","flightrisk"] — extensível à medida que Rui pede mãos de amigos.
-- Commits session: c499c6f→d6d0505→5ea3db6→9bd40aa→8fdb0a7→42bca81→3305c60→0737d61→b864773→5c7c33b→dd2e960→dee479f→17f5cf1→e3ab933→7ab5ac1→828d736→3aedae5→76b67bc→3493b56
+Última sessão fechada: pt9 (30 Abril 2026, commit `ab8e033`).
