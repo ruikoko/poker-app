@@ -22,12 +22,15 @@ Automação na recolha/processamento/distribuição. Controlo manual sempre disp
 ## Secções da app
 
 ### Secções de ORIGEM (toda mão entra na respectiva)
-- **HM3** — mãos vindas do script .bat HM3.
-- **Discord** — mãos vindas do bot Discord.
+- **Dashboard** — hub geral; SS e imagens uploadadas manualmente.
+- **HM3** — mãos vindas do script .bat HM3 (Winamax/WPN/PokerStars).
+- **Discord** — mãos vindas do bot Discord (canais GG).
 - **Torneios** — drill-down por torneio (toda mão GG entra aqui).
-- **Dashboard** — SS e imagens uploadadas manualmente.
 
-### Secções DERIVADAS (com regras de elegibilidade estritas)
+### Secções DERIVADAS
+
+Sidebar tem 7 secções: as 4 de ORIGEM acima + **Estudo**, **Vilões**, **GTO**. Estudo e Vilões aplicam regras de elegibilidade estritas (abaixo). GTO é secção dedicada — regras e propósito documentados separadamente desta visão.
+
 
 #### Estudo
 
@@ -50,9 +53,11 @@ TODAS as condições têm de cumprir-se cumulativamente:
 
 #### Vilões
 
-Critério único:
-- Tag HM3 `nota` / `notas` / `nota+` / `nota++` / derivados, OU
-- Canal Discord `nota`.
+Critérios (basta cumprir um — regras A∨C∨D, definidas em `_classify_villain_categories`):
+
+- **Regra A** — Tag HM3 a começar por `nota` (`nota`, `notas`, `nota+`, `nota++`, derivados).
+- **Regra C** — Canal Discord `nota` em `discord_tags` com match SS↔HH real (não `discord_placeholder_*`).
+- **Regra D** — Non-hero é nick em `FRIEND_HEROES` (`backend/app/hero_names.py` — actualmente Karluz, flightrisk). Independente de tag; dispara sempre que o nick aparece como non-hero numa mão com nicks reais. Permite ver mãos de amigos sem o Rui ter de marcá-las.
 
 ## Regra de cross-post Discord
 
@@ -72,6 +77,7 @@ Se uma mão é cross-postada em N canais, `discord_tags` deve conter os N nomes.
 | 6 | Discord | canais `["nota", "pos-pko"]` | ✓ | ✓ | Discord, Estudo, Vilões |
 | 7 | GG anon (sem SS, sem match) | — | ✗ | ✗ | Torneios |
 | 8 | HH bulk + SS match, sem tags | — | ✗ | ✗ | Torneios |
+| 9 | qualquer (com nicks reais) | sem tags; non-hero é Karluz/flightrisk | ✗ | ✓ (Regra D) | secção origem + Vilões |
 
 ## Pipeline diário típico do Rui
 
