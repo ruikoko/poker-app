@@ -1,4 +1,4 @@
-# Inventário Tech Debts — 29-Abr 2026 pt7
+# Inventário Tech Debts — 30-Abr 2026 pt8 (em curso)
 
 Compilação read-only baseada em journals (23-24 Abr → 29-Abr pt6), VALIDACAO_END_TO_END §6/§7/§11, MAPA_ACOPLAMENTO, git log, e leitura directa do código.
 
@@ -6,11 +6,12 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (29-Abr fim pt7)
+## Estado actual (30-Abr pt8 em curso)
 
-- **Total Tech Debts numerados detectados:** 23 (#1–#22, sem #19; +#UX1)
-- **Fechados pt7:** 9 (#10, #21, #B1, #B2, #B4, #B8, #B9, #12, #UX1) + 17 anteriores = **26 totais fechados**
-- **Pendentes numerados:** #11, #13c, #15, #18, #B7, #B10, #B11, #B-edge
+- **Total Tech Debts numerados detectados:** 24 (#1–#22, sem #19; +#UX1; +#B12 pt8)
+- **Fechados pt8 até agora:** 1 (#18 validado empiricamente)
+- **Fechados pt7:** 9 (#10, #21, #B1, #B2, #B4, #B8, #B9, #12, #UX1) + 17 anteriores = **27 totais fechados** (incl. #18 pt8)
+- **Pendentes numerados:** #11, #13c, #15, #B7, #B10, #B11, #B12, #B-edge
 - **Bugs latentes não-numerados detectados em pt7:** 4 (registados §3 abaixo)
 
 ### Sumário pt7 (9 Tech Debts fechados)
@@ -27,13 +28,19 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 | **#12** ✅ | `8871d1b`→`3c7dc13` (7 commits) | Refactor modal villain (layout, alinhamento, cores per-acção) |
 | **#UX1** ✅ | (incluído `#12`) | Cards villain mostradas (não Hero) — fix bug pt6 |
 
+### Tech Debts fechados pt8 (até agora)
+
+| # | Data | Validação | Descrição |
+|---|---|---|---|
+| **#18** ✅ | 2026-04-30 | Empírica BD prod | Não-determinismo cross-post resolvido estruturalmente pelo guard #21. 1 hand cross-post real (1115) com APA coerente, 23 hands enriched protegidas pelo guard, 0 divergências detectadas. Sem fix de código necessário. |
+
 ### Tech Debts pendentes para sessão pt8 (ordem prioridade)
 
 | ID | Título | Severidade | Esforço |
 |---|---|---|---|
 | **#15** | Dashboard "Últimas mãos" ordena `played_at` em vez `created_at` | 🟡 Funcional | ~10 min |
 | **#B7** | Discord bot ignora `last_sync_at` quando `last_message_id` NULL | 🟡 Funcional | ~30 min |
-| **#18** | Validar não-determinismo cross-post pós-`#21` (provável já resolvido) | 🟡 Funcional | ~30 min |
+| **#B12** | Hands GG anonimizadas com cross-post Discord não recebem `discord_tags` populado | 🟡 Funcional menor | ~1h investigação |
 | **#11** | Botão eliminar villain manualmente do modal HandDetailPage | 🟡 UX | ~2-3h |
 | **#B11** | Auto-tag mãos via LLM (ideia exploratória pt7) | 🟢 Feature | ~3-4h |
 | **#B10** | Vision não extrai `tournament_name` da imagem na galeria | 🟢 UX | ~2-3h |
@@ -138,6 +145,16 @@ Identificados por leitura directa do código + cross-check com docs. **Não docu
 - **Fix proposto:** advisory lock `pg_advisory_xact_lock` em `_sync_guild_history`. Ou simples: `DISCORD_AUTO_SYNC=False` (default actual — manter).
 - **Esforço:** ~1h se decidirem.
 
+### #B12 — Hands GG anonimizadas com cross-post Discord não recebem `discord_tags` populado
+
+- **File provável:** `backend/app/routers/screenshot.py` (`_link_second_discord_entry_to_existing_hand:831`) ou path de ingestão de entries Discord órfãs (sem hand ligada).
+- **Origem:** Achado lateral durante validação empírica do #18 (pt8, 30-Abr).
+- **Vector:** Quando o Rui partilha a mesma mão em 2 canais Discord (cross-post), só **1/17 TMs** observados têm `discord_tags` populado na hand correspondente. As restantes 16 hands têm `discord_tags=[]` apesar de existirem 2 entries Discord em canais distintos. Padrão comum: estas 16 hands têm `match_method=null` (HH GG anonimizada sem match SS), enquanto a única que ficou correcta (hand 1115) tem `match_method=anchors_stack_elimination_v2`. Hipótese: `_link_second_discord_entry_to_existing_hand` só dispara quando a 1ª entry já tem hand ligada via enrich; em hands GG anon, a 1ª entry fica órfã e a 2ª também — `discord_tags` nunca recebe append.
+- **Severidade:** 🟡 Funcional menor. Não corrompe dados; só impede UI de mostrar tags Discord em hands GG anonimizadas. Não toca em `hand_villains` (regra de negócio impede villains em hands sem `match_method`).
+- **Magnitude pt8:** 16/17 TMs com cross-post Discord (94%) afectados.
+- **Fix proposto:** investigar trigger de append `discord_tags` independente de existir match SS↔HH. Possível solução: ao ingerir entry Discord, tentar localizar hand pelo `hand_id` (TM number) e fazer append directo de `discord_tags` mesmo que não haja enrich.
+- **Esforço:** ~1h investigação + ~30min fix se confirmado.
+
 ---
 
 ## §3a. UX bugs detectados em validação pt7 (Bloco B Fase 1)
@@ -196,8 +213,12 @@ Relevância variável; alguns são edge cases raros, outros podem afectar produ�
 #10 (parser WN truncamento) ── decisão Rui Opção A vs B
                                   └── pode revelar más assignments hands 102/126
 
-#18 (não-determinismo cross-post) ── quase certo resolvido por #21
-                                       └── valida com 2-3 hands sample
+#18 (FECHADO pt8 30-Abr) ── validado empíricamente: guard #21 elimina vector
+                              └── 1 hand cross-post real (1115) APA coerente
+                                  + 23 hands enriched protegidas + 0 divergências
+
+#B12 (cross-post Discord não popula discord_tags em hands GG anon) ── achado lateral pt8
+                              └── 16/17 TMs afectados; investigação ~1h
 
 #12 (modal Vilões re-arquit) ──┐
                                ├── bloqueia /api/villains housekeeping
