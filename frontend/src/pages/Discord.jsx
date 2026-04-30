@@ -319,6 +319,14 @@ export default function DiscordPage() {
   const [selected, setSelected] = useState(null)
   const [tab, setTab] = useState('hands') // 'hands' | 'bot'
   const [imagesList, setImagesList] = useState([])
+  // Sync com janelas — Tech Debt #B7 + feature pt8
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [selectedWindow, setSelectedWindow] = useState(null)
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [lastSync, setLastSync] = useState(null)
+  const [lastSyncDismissed, setLastSyncDismissed] = useState(false)
+  const [, setNowTick] = useState(0)
 
   const loadStatus = useCallback(() => {
     discord.status().then(setStatus).catch(e => setError(e.message))
@@ -345,22 +353,67 @@ export default function DiscordPage() {
 
   useEffect(() => { loadStatus(); loadHands(); loadImages() }, [loadStatus, loadHands, loadImages])
 
-  const triggerSync = async () => {
-    setSyncing(true); setMsg('')
+  // Tick a cada 30s só quando há mensagem "Última sync" visível, para
+  // recalcular o relativo "há X min". Sem mensagem visível, não consome.
+  useEffect(() => {
+    if (!lastSync || lastSyncDismissed) return
+    const id = setInterval(() => setNowTick(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [lastSync, lastSyncDismissed])
+
+  // Dispara sync com janela específica:
+  //   window pré-definida (24h/72h/7d/15d/30d) → body { window: <key> }
+  //   custom → body { window:'custom', from, to }
+  // Painel fecha ao arrancar (feedback "submetido"). Após sync: refresh
+  // imediato + 2º refresh aos 30s para apanhar Vision/match em background.
+  const triggerSyncWindow = async (windowKey) => {
+    if (windowKey === 'custom' && (!customFrom || (customTo && customFrom > customTo))) return
+    setSyncing(true); setError(''); setMsg('')
+    setPanelOpen(false)
+    setSelectedWindow(windowKey)
+    const body = windowKey === 'custom'
+      ? { window: 'custom', from: customFrom, to: customTo }
+      : { window: windowKey }
     try {
-      setMsg('A varrer o Discord e a processar mãos novas. Isto pode demorar 1-3 minutos...')
-      const r = await discord.syncAndProcess()
-      const newEntries = r.new_replayer_entries || 0
-      const queued = r.process_result?.vision_queued || 0
-      const placeholders = r.backfill_result?.created || 0
-      setMsg(`Sync concluído: ${newEntries} entries novos, ${queued} a correr Vision, ${placeholders} placeholders GGDiscord criados. Actualiza em 30s.`)
+      const r = await discord.syncAndProcess(body)
+      setLastSync(r.last_sync ? { ...r.last_sync, receivedAt: Date.now() } : null)
+      setLastSyncDismissed(false)
+      loadStatus(); loadHands()
       setTimeout(() => { loadStatus(); loadHands() }, 30000)
     } catch (e) {
       setError(`Erro: ${e.message}`)
     } finally {
       setSyncing(false)
+      setSelectedWindow(null)  // reset chip activo após sync
     }
   }
+
+  // Texto do banner durante sync — adapta-se à janela escolhida.
+  const bannerText = () => {
+    if (selectedWindow === '24h')  return 'A sincronizar últimas 24 horas...'
+    if (selectedWindow === '72h')  return 'A sincronizar últimos 3 dias...'
+    if (selectedWindow === '7d')   return 'A sincronizar última semana...'
+    if (selectedWindow === '15d')  return 'A sincronizar últimos 15 dias...'
+    if (selectedWindow === '30d')  return 'A sincronizar último mês...'
+    if (selectedWindow === 'custom') {
+      const fmt = (s) => s ? new Date(s).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' }) : '?'
+      return `A sincronizar intervalo ${fmt(customFrom)} → ${fmt(customTo)}...`
+    }
+    return 'A sincronizar...'
+  }
+
+  // "agora" / "há X min" / "há 1 hora" — relativo desde receivedAt.
+  const formatRelative = (receivedAt) => {
+    if (!receivedAt) return 'agora'
+    const diffSec = Math.round((Date.now() - receivedAt) / 1000)
+    if (diffSec < 60)    return 'agora'
+    if (diffSec < 3600)  return `há ${Math.floor(diffSec / 60)} min`
+    if (diffSec < 7200)  return 'há 1 hora'
+    return `há ${Math.floor(diffSec / 3600)} horas`
+  }
+
+  const customRangeError = customFrom && customTo && customFrom > customTo
+  const customDisabled = !customFrom || customRangeError
 
   async function openDetail(id) {
     try { const h = await handsApi.get(id); setSelected(h) }
@@ -423,6 +476,7 @@ export default function DiscordPage() {
 
   return (
     <>
+      <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
@@ -430,14 +484,100 @@ export default function DiscordPage() {
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 3 }}>
             {handsList.length} mãos importadas &middot; {Object.keys(tagGroups).length} {Object.keys(tagGroups).length === 1 ? 'canal' : 'canais'}
           </div>
+          {lastSync && !lastSyncDismissed && (
+            <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>
+                Última sync: {formatRelative(lastSync.receivedAt)}
+                {lastSync.window_label && ` · janela ${lastSync.window_label}`}
+                {' · '}{lastSync.n_links} links · {lastSync.m_canais} canais · {lastSync.k_match_hh} match HH
+              </span>
+              <button
+                onClick={() => setLastSyncDismissed(true)}
+                title="Ocultar"
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1 }}
+                onMouseEnter={e => e.currentTarget.style.color = '#e2e8f0'}
+                onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
+              >×</button>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }} onClick={() => { loadStatus(); loadHands() }}>Actualizar</button>
-          <button style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer', opacity: syncing || !status?.online ? 0.5 : 1 }} onClick={triggerSync} disabled={syncing || !status?.online}>
-            {syncing ? 'A sincronizar...' : 'Sincronizar Agora'}
+          <button
+            style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer', opacity: syncing || !status?.online ? 0.5 : 1 }}
+            onClick={() => setPanelOpen(o => !o)}
+            disabled={syncing || !status?.online}
+          >
+            Sincronizar {panelOpen ? '▴' : '▾'}
           </button>
         </div>
       </div>
+
+      {/* Painel sincronização (toggle inline) */}
+      {panelOpen && !syncing && (
+        <div style={{ marginLeft: 'auto', maxWidth: 720, background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, minWidth: 64 }}>Janela:</span>
+            {[
+              { key: '24h',  label: '24h' },
+              { key: '72h',  label: '72h' },
+              { key: '7d',   label: '1 semana' },
+              { key: '15d',  label: '15 dias' },
+              { key: '30d',  label: '1 mês' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => triggerSyncWindow(key)}
+                style={{ padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500, border: '1px solid #2a2d3a', background: 'transparent', color: '#64748b', cursor: 'pointer', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.color = '#818cf8' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2d3a'; e.currentTarget.style.color = '#64748b' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, minWidth: 64 }}>Custom:</span>
+            <label style={{ fontSize: 12, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+              De
+              <input
+                type="date"
+                value={customFrom}
+                onChange={e => setCustomFrom(e.target.value)}
+                style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '5px 10px', fontSize: 12, colorScheme: 'dark' }}
+              />
+            </label>
+            <label style={{ fontSize: 12, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+              Até
+              <input
+                type="date"
+                value={customTo}
+                onChange={e => setCustomTo(e.target.value)}
+                style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, color: '#e2e8f0', padding: '5px 10px', fontSize: 12, colorScheme: 'dark' }}
+              />
+            </label>
+            <button
+              onClick={() => triggerSyncWindow('custom')}
+              disabled={customDisabled}
+              title={customRangeError ? "Data 'Até' deve ser ≥ 'De'" : (!customFrom ? "Indica a data 'De'" : '')}
+              style={{ padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: customDisabled ? 'not-allowed' : 'pointer', opacity: customDisabled ? 0.4 : 1 }}
+            >
+              Sincronizar
+            </button>
+            {customRangeError && (
+              <span style={{ color: '#ef4444', fontSize: 11 }}>Data 'Até' deve ser ≥ 'De'</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Banner durante sync */}
+      {syncing && (
+        <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#818cf8', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
+          {bannerText()}
+        </div>
+      )}
 
       {error && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.08)', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)' }}>{error}</div>}
       {msg && <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#818cf8', fontSize: 13 }}>{msg}</div>}

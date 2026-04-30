@@ -145,7 +145,7 @@ export const discord = {
     return req('GET', `/discord/stats${qs ? '?' + qs : ''}`)
   },
   sync:           ()  => req('POST', '/discord/sync'),
-  syncAndProcess: ()  => req('POST', '/discord/sync-and-process'),
+  syncAndProcess: (body)  => req('POST', '/discord/sync-and-process', body),
 }
 
 // ── Import ────────────────────────────────────────────────────────────────────

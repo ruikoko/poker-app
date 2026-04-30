@@ -3,7 +3,13 @@ API endpoints para monitorização e controlo do bot Discord.
 """
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
 from app.auth import require_auth
 from app.db import query
 
@@ -14,6 +20,34 @@ router = APIRouter(prefix="/api/discord", tags=["discord"])
 # Vision tem Semaphore(2) — 30 entries × ~7s / 2 ≈ 105s. 90s é a faixa
 # pragmática (T1 apanha batches pequenos; T2 apanha o resto).
 ATTACHMENTS_DELAYED_RETRY_SECONDS = 90
+
+# Mapeamento window pré-definida → (timedelta, label PT-PT para UI/banner).
+# Regra de negócio: "1 semana"=7d, "1 mês"=30d (calendar-aware não é pedido,
+# 30d é approximation aceite). Janelas curtas (24h/72h) cobrem pós-sessão
+# diário; longas (7d/15d/30d) cobrem catch-up após pausa do utilizador.
+_WINDOW_DELTAS: dict[str, tuple[timedelta, str]] = {
+    "24h":  (timedelta(hours=24),  "24h"),
+    "72h":  (timedelta(hours=72),  "72h"),
+    "7d":   (timedelta(days=7),    "1 semana"),
+    "15d":  (timedelta(days=15),   "15 dias"),
+    "30d":  (timedelta(days=30),   "1 mês"),
+}
+_LISBON = ZoneInfo("Europe/Lisbon")
+
+
+class SyncWindowBody(BaseModel):
+    """Body opcional de POST /api/discord/sync-and-process.
+
+    Sem campos preenchidos → comportamento legacy (cursor automático via
+    discord_sync_state, fix #B7 trata de last_message_id NULL + last_sync_at).
+    Com `window` ou `from`/`to` → override do cursor para a janela pedida.
+    """
+    window: Optional[Literal["24h","72h","7d","15d","30d","custom"]] = None
+    from_: Optional[str] = Field(default=None, alias="from")  # ISO 8601
+    to: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
+
 
 # Set forte de referências às tasks em background — sem isto o asyncio
 # event loop só guarda weak references e a task pode ser GC'd antes de
@@ -104,7 +138,10 @@ async def trigger_sync(current_user=Depends(require_auth)):
 
 
 @router.post("/sync-and-process")
-async def sync_and_process(current_user=Depends(require_auth)):
+async def sync_and_process(
+    body: SyncWindowBody | None = None,
+    current_user=Depends(require_auth),
+):
     """
     Workflow completo de varrimento pós-sessão:
       1. Sync Discord (vai buscar mensagens novas e cria entries)
@@ -113,20 +150,97 @@ async def sync_and_process(current_user=Depends(require_auth)):
       4. Cria placeholders GGDiscord para SS sem HH
 
     Uso: clicar uma vez após fechar as salas de poker no fim da sessão.
+
+    Body opcional `SyncWindowBody`: força janela de cutoff específica.
+      - window pré-definida: from = now(Lisbon) - delta, to = now
+      - window="custom": usa from/to do body, to default = now
+      - window ausente: comportamento legacy (cursor automático)
+    Sempre clamp from >= APP_EPOCH_CUTOFF (1 Jan 2026 Lisbon).
     """
     import asyncio
     from app.discord_bot import get_bot, MONITORED_SERVERS
+    from app.discord_bot import APP_EPOCH_CUTOFF, _ensure_sync_table
+    from app.db import execute as _execute
 
     bot = get_bot()
     if not bot or not bot.is_ready():
         raise HTTPException(status_code=503, detail="Bot Discord não está online")
+
+    # Captura timestamp de início — usado para filtrar entries criadas nesta
+    # sync e calcular contadores N/M/K na resposta.
+    sync_started_at = datetime.now(timezone.utc)
+
+    # 0. Resolver janela (se body fornecido) → from_clamped, to_dt, label.
+    #    Sem body ou window=None: comportamento legacy, cursor inalterado.
+    window_label: str | None = None
+    from_clamped: datetime | None = None
+    to_dt: datetime | None = None
+    before_arg: datetime | None = None
+    if body and (body.window or body.from_ or body.to):
+        now_lisbon = datetime.now(_LISBON)
+        # Resolver from + to consoante window pré-definida vs custom.
+        if body.window and body.window != "custom":
+            delta, window_label = _WINDOW_DELTAS[body.window]
+            from_dt = now_lisbon - delta
+            to_dt = now_lisbon
+        else:
+            window_label = "custom"
+            try:
+                from_dt = (
+                    datetime.fromisoformat(body.from_).astimezone(_LISBON)
+                    if body.from_ else now_lisbon - timedelta(days=1)
+                )
+                to_dt = (
+                    datetime.fromisoformat(body.to).astimezone(_LISBON)
+                    if body.to else now_lisbon
+                )
+            except (TypeError, ValueError) as e:
+                raise HTTPException(
+                    status_code=400, detail=f"from/to ISO 8601 inválido: {e}"
+                )
+        # Clamp silencioso: nunca varrer antes da era da app (1 Jan 2026).
+        # Regra de negócio do Rui — mensagens anteriores são ruído histórico.
+        if from_dt < APP_EPOCH_CUTOFF:
+            from_dt = APP_EPOCH_CUTOFF
+        from_clamped = from_dt
+        # Se to está no passado relativamente a agora, passar before ao
+        # channel.history para limitar a janela superiormente.
+        if to_dt < now_lisbon:
+            before_arg = to_dt
+
+        # Override do cursor por canal monitorizado: força from_clamped como
+        # last_sync_at e zera last_message_id. _sync_guild_history cai no
+        # path (b) da precedência #B7 → datetime como ponto de partida.
+        # Reset do contador messages_synced=0 para que UI veja só esta sync.
+        _ensure_sync_table()
+        for guild in bot.guilds:
+            if str(guild.id) not in MONITORED_SERVERS:
+                continue
+            for channel in guild.text_channels:
+                if not bot._should_monitor(channel):
+                    continue
+                _execute(
+                    """
+                    INSERT INTO discord_sync_state
+                        (channel_id, server_id, channel_name,
+                         last_message_id, last_sync_at, messages_synced)
+                    VALUES (%s, %s, %s, NULL, %s, 0)
+                    ON CONFLICT (channel_id) DO UPDATE SET
+                        last_message_id = NULL,
+                        last_sync_at = EXCLUDED.last_sync_at,
+                        messages_synced = 0
+                    """,
+                    (str(channel.id), str(guild.id), channel.name, from_clamped),
+                )
 
     # 1. Sync — dispara em background
     synced_servers = 0
     sync_tasks = []
     for guild in bot.guilds:
         if str(guild.id) in MONITORED_SERVERS:
-            t = asyncio.create_task(bot._sync_guild_history(guild))
+            t = asyncio.create_task(
+                bot._sync_guild_history(guild, before=before_arg)
+            )
             sync_tasks.append(t)
             synced_servers += 1
 
@@ -189,12 +303,53 @@ async def sync_and_process(current_user=Depends(require_auth)):
         _attachments_async("T2:delay-90s", delay=ATTACHMENTS_DELAYED_RETRY_SECONDS)
     )
 
+    # Contadores N/M/K para UI:
+    #   N links     = entries Discord (replayer_link OR image) criados desde
+    #                 sync_started_at — conteúdo útil trazido por esta sync
+    #   M canais    = COUNT(DISTINCT discord_channel) sobre os N entries
+    #   K match HH  = dos N entries, quantos têm TM number que corresponde a
+    #                 hands.hand_id ('GG-<tm>') com raw HH não-vazio em BD
+    # Ignora hand_history text (raro pelo Discord). Idempotente: re-sync da
+    # mesma janela retorna N=0 (entries dedupadas via discord_message_id UNIQUE).
+    counters = query("""
+        WITH new_entries AS (
+            SELECT id, discord_channel, raw_json->>'tm' AS tm
+            FROM entries
+            WHERE source = 'discord'
+              AND entry_type IN ('replayer_link', 'image')
+              AND created_at >= %s
+        )
+        SELECT
+            COUNT(*) AS n_links,
+            COUNT(DISTINCT discord_channel) AS m_canais,
+            COUNT(*) FILTER (
+                WHERE tm IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM hands h
+                    WHERE h.hand_id = 'GG-' || REPLACE(new_entries.tm, 'TM', '')
+                      AND h.raw IS NOT NULL
+                      AND length(h.raw) > 0
+                  )
+            ) AS k_match_hh
+        FROM new_entries
+    """, (sync_started_at,))
+    c = dict(counters[0]) if counters else {"n_links": 0, "m_canais": 0, "k_match_hh": 0}
+
     return {
         "ok": True,
         "servers_synced": synced_servers,
         "new_replayer_entries": new_entries,
         "process_result": processed_response,
         "backfill_result": backfill_response,
+        "last_sync": {
+            "started_at": sync_started_at.isoformat(),
+            "window_label": window_label,
+            "from": from_clamped.isoformat() if from_clamped else None,
+            "to": to_dt.isoformat() if to_dt else None,
+            "n_links": int(c["n_links"]),
+            "m_canais": int(c["m_canais"]),
+            "k_match_hh": int(c["k_match_hh"]),
+        },
         "note": "Vision corre em background. Actualizar a página daqui a ~30s para ver resultados finais.",
     }
 

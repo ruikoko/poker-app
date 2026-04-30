@@ -625,8 +625,16 @@ class PokerBot(discord.Client):
             except Exception as e:
                 logger.error(f"Erro ao guardar item de #{channel_name}: {e}")
 
-    async def _sync_guild_history(self, guild: discord.Guild):
-        """Sync incremental do histórico de mensagens de um servidor."""
+    async def _sync_guild_history(
+        self, guild: discord.Guild, before: datetime | None = None
+    ):
+        """Sync incremental do histórico de mensagens de um servidor.
+
+        Param `before` (opcional): se fornecido, limita a varredura a
+        mensagens com timestamp < before. Usado por sync-window quando o
+        utilizador pede uma janela com `to` no passado (ex: 1 Jan → 15 Jan).
+        Sem `before`, varre até ao mais recente (comportamento default).
+        """
         logger.info(f"A iniciar sync histórico de {guild.name}...")
         total_items = 0
 
@@ -652,7 +660,9 @@ class PokerBot(discord.Client):
             latest_msg_id = last_msg_id
 
             try:
-                async for message in channel.history(limit=500, after=after, oldest_first=True):
+                async for message in channel.history(
+                    limit=500, after=after, before=before, oldest_first=True
+                ):
                     if message.author == self.user:
                         continue
 
