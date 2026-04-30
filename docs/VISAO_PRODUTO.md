@@ -34,22 +34,23 @@ Sidebar tem 7 secções: as 4 de ORIGEM acima + **Estudo**, **Vilões**, **GTO**
 
 #### Estudo
 
-TODAS as condições têm de cumprir-se cumulativamente:
+TODAS as condições têm de cumprir-se cumulativamente. Fonte de verdade: `backend/app/routers/hands.py:567-574` (filtros aplicados quando `study_view=true`).
 
 **Condições técnicas:**
-- Nicks reais, não hashes (mãos GG: requer `match_method` preenchido e diferente de `discord_placeholder_*`).
-- Nome de torneio (`tournament_name`) preenchido.
-- Buy-in (`buy_in`) preenchido.
-- Sala (`site`) preenchida.
+- Nicks reais, não hashes — `STUDY_VIEW_GG_MATCH_FILTER` (`hands.py:359-363`): mãos GG exigem `match_method` populado e diferente de `discord_placeholder_*`; outras salas passam livremente.
+- HH presente — `STUDY_VIEW_REQUIRES_HH` (`hands.py:395`): `h.raw IS NOT NULL AND h.raw != ''`.
+- Não estar em arquivo MTT — `h.study_state != 'mtt_archive'` (default em `hands.py:565-566`).
 
-**Condição de tag:**
+**Condição de tag** — `STUDY_VIEW_HAS_STUDY_TAG` (`hands.py:402-409`):
 - Pelo menos 1 tag de estudo:
-  - Tag HM3 que NÃO seja `nota` / `notas` / `nota+` / `nota++` / derivados.
+  - Tag HM3 que NÃO bate `nota%` (case-insensitive).
   - OU canal Discord que NÃO seja `nota`.
 
 **Excepção (aditiva):**
 - Mão com tag `nota` + tag de estudo → entra em Estudo E Vilões.
 - Mão SÓ com `nota` → vai apenas para Vilões.
+
+**Não exigido pelo código** (apesar de docs antigas afirmarem): `tournament_name`, `buy_in`, `site`. Parsers PS deixam `tournament_name=None` deliberadamente; parsers WPN deixam `buy_in=None` deliberadamente. Exigir bloquearia mãos legítimas — por isso o filtro do código não os impõe.
 
 #### Vilões
 
@@ -101,5 +102,5 @@ Se uma mão é cross-postada em N canais, `discord_tags` deve conter os N nomes.
 
 - Mãos GG anonimizadas (sem `match_method`) NÃO podem aparecer em Estudo.
 - Mãos só com tag `nota` NÃO podem aparecer em Estudo.
-- Mãos sem nome de torneio / buy-in / sala NÃO podem aparecer em Estudo.
+- Mãos sem HH NUNCA aparecem em Estudo (mesmo que tenham tags).
 - Cross-post Discord NÃO pode perder canais (regra acima).

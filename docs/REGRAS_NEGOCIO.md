@@ -89,22 +89,23 @@ Toda mão entra na sua secção de origem.
 
 #### 3.2.1. Regras de elegibilidade (TODAS obrigatórias)
 
-**Condições técnicas:**
-- Nicks reais (não hashes). Para GG: requer `match_method` populado e diferente de `discord_placeholder_*`.
-- Mão TEM HH. Mãos só com SS, sem HH, NUNCA aparecem em Estudo.
-- Nome de torneio (`tournament_name`) preenchido.
-- Sala (`site`) preenchida.
+Fonte de verdade: `backend/app/routers/hands.py:567-574` (3 filtros aplicados quando `study_view=true`, mais `study_state != 'mtt_archive'` por defeito em `hands.py:565-566`).
 
-**Condição de tag:**
+**Condições técnicas:**
+- Nicks reais (não hashes). Para GG: requer `match_method` populado e diferente de `discord_placeholder_*` — `STUDY_VIEW_GG_MATCH_FILTER` (`hands.py:359-363`).
+- Mão TEM HH (`raw` não vazio). Mãos só com SS, sem HH, NUNCA aparecem em Estudo — `STUDY_VIEW_REQUIRES_HH` (`hands.py:395`).
+- Não estar em arquivo MTT (`study_state != 'mtt_archive'`) — default em `hands.py:565-566`.
+
+**Condição de tag** — `STUDY_VIEW_HAS_STUDY_TAG` (`hands.py:402-409`):
 - Pelo menos 1 tag de estudo:
-  - Tag HM3 que NÃO seja `nota` / `notas` / `nota+` / `nota++` / derivados.
+  - Tag HM3 que NÃO bate `nota%` (case-insensitive).
   - OU canal Discord que NÃO seja `nota`.
 
 **Excepção (aditiva):**
 - Mão com tag `nota` + tag de estudo → entra em Estudo E Vilões.
 - Mão SÓ com `nota` → vai apenas para Vilões.
 
-**Nota sobre buy_in:** NÃO é obrigatório (parsers WPN e PS frequentemente falham em extrair; obrigar bloquearia mãos legítimas).
+**Não exigido pelo código** (apesar de docs antigas afirmarem): `tournament_name`, `buy_in`, `site`. Parsers PS deixam `tournament_name=None` deliberadamente (`hm3.py:335-336`); parsers WPN deixam `buy_in=None` deliberadamente (`hm3.py:211-212` em `_extract_buyin_hm3`). Exigir bloquearia mãos legítimas.
 
 #### 3.2.2. Apresentação em Estudo
 
@@ -205,7 +206,6 @@ Exemplo: `Tournament 12345 — $30,000 GTD`.
 
 - Mãos GG anonimizadas (sem `match_method`) NÃO podem aparecer em Estudo.
 - Mãos só com tag `nota` NÃO podem aparecer em Estudo.
-- Mãos sem nome de torneio + sala NÃO podem aparecer em Estudo.
 - Mãos sem HH NUNCA aparecem em Estudo (mesmo que tenham tags).
 - Cross-post Discord NÃO pode perder canais.
 - Mensagens Discord anteriores a 1 Jan 2026 Lisboa NÃO são varridas.
