@@ -106,21 +106,18 @@ Toda mão entra na sua secção de origem.
 
 **Nota sobre buy_in:** NÃO é obrigatório (parsers WPN e PS frequentemente falham em extrair; obrigar bloquearia mãos legítimas).
 
-#### 3.2.2. Apresentação em Estudo (DIVERGÊNCIA 5 — actualmente NÃO implementada)
+#### 3.2.2. Apresentação em Estudo
 
-**Regra:** tags HM3 e canais Discord são o MESMO conceito. Rui nomeou os canais Discord para coincidirem com tags HM3 (ex: canal "icm-pko" ≡ tag "ICM PKO").
+**Regra:** tags HM3 e canais Discord são o MESMO conceito. Rui nomeou os canais Discord para coincidirem com tags HM3 (ex: canal `icm-pko` ≡ tag `ICM PKO`).
 
-**Apresentação desejada:**
-- 1 chip por nome de tag/canal (não 1 chip por origem).
-- Dentro da chip: TODAS as mãos com essa tag, vindas de qualquer origem.
-- Cada mão mostra a sua origem como rótulo discreto (HM3 / Discord).
+**Apresentação actual (pt9):**
+- 1 chip por nome de tag/canal (unificação case-insensitive + hyphen→space; ver `normalizeTagKey` em `frontend/src/pages/Hands.jsx`).
+- Dentro da chip: todas as mãos com essa tag, vindas de qualquer origem (HM3 ou Discord).
+- Cada `HandRow` carrega um `OriginBadge` (`HM3`, `Discord`, ou `HM3+D` quando a tag normalizada existe nas duas origens da mesma mão).
+- Mãos sem HH excluídas do Estudo (regra 3.2.1: "Mão TEM HH").
+- Mãos só com tag `nota` excluídas do Estudo (vão apenas para Vilões — #B15).
 
-**Estado actual da app (a corrigir):**
-- Estudo separa em secções por origem: PRINCIPAIS/SECUNDÁRIAS/SPOTS (HM3) + CANAIS DISCORD + DISCORD — SÓ SS (SEM HH).
-- Resultado: a mesma chip "pos-pko" aparece em 3 sítios diferentes.
-- Secção "DISCORD — SÓ SS (SEM HH)" tem 119 mãos sem HH visíveis em Estudo, violando regra 3.2.1.
-
-**Tech debt aberto:** ver inventário (#B17 a abrir após criação deste doc).
+**Tech debt:** #B17 RESOLVIDO em pt9 (commit `7806d33`). #B15 (excluir só-nota) RESOLVIDO em pt9 (commit `1cca3a6`).
 
 ### 3.3. Secções DERIVADAS — Vilões
 
