@@ -994,6 +994,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                 with conn.cursor() as cur:
                     raw_json_str = json.dumps({
                             "tm": tm_final,
+                            "tournament": vision_data.get("tournament"),
                             "file_meta": file_meta,
                             "mime_type": compressed_mime,
                             "img_b64": compressed_b64,
