@@ -808,6 +808,7 @@ def backfill_ggdiscord(
     """)
 
     created = 0
+    linked = 0          # #B12: hands existentes que receberam append discord_tags
     skipped = []
     failed = []
 
@@ -833,7 +834,20 @@ def backfill_ggdiscord(
                 (hand_id,)
             )
             if existing_hand:
-                skipped.append({"id": entry_id, "reason": f"já existe mão {hand_id}"})
+                # #B12 (pt9): em vez de continue silencioso, faz append do canal
+                # desta entry a hands.discord_tags (regra cross-post Discord da
+                # VISAO_PRODUTO.md). Helper centralizado garante idempotência e
+                # marca entry resolved.
+                from app.services.hand_service import append_discord_channel_to_hand
+                from app.routers.screenshot import _maybe_create_rule_c_villain_for_hand
+                res = append_discord_channel_to_hand(existing_hand[0]["id"], entry_id)
+                if res["resolved"]:
+                    linked += 1
+                    # Regra C villain: se o append trouxe 'nota' e a hand já
+                    # tem raw HH real, dispara create villains.
+                    _maybe_create_rule_c_villain_for_hand(entry_id, existing_hand[0]["id"])
+                else:
+                    failed.append({"id": entry_id, "error": "append helper failed"})
                 continue
 
             apa = {
@@ -912,6 +926,7 @@ def backfill_ggdiscord(
             "ok": True,
             "total_scanned": len(rows),
             "created": created,
+            "linked": linked,
             "skipped_count": len(skipped),
             "skipped": skipped[:10],
             "failed_count": len(failed),

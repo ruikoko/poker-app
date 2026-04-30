@@ -424,3 +424,74 @@ def process_entry_to_hands(entry_id: int) -> dict:
         "skipped": skipped,
         "errors": parse_errors,
     }
+
+
+# ─── Append discord_tags helper (#B12, pt9) ──────────────────────────────────
+
+def append_discord_channel_to_hand(hand_db_id: int, entry_id: int) -> dict:
+    """
+    Faz append idempotente do canal Discord (resolvido a partir de entry_id)
+    a hands.discord_tags, e marca a entry como resolved.
+
+    Regra de negócio (docs/VISAO_PRODUTO.md, secção "Regra de cross-post
+    Discord"): toda mão que apareça num canal Discord deve ter o nome desse
+    canal em discord_tags. Cross-post em N canais → discord_tags com N nomes.
+    Idempotência via DISTINCT unnest (chamadas repetidas não duplicam canal).
+
+    Single source of truth para append discord_tags. Chamado por:
+      - routers/discord.py::backfill_ggdiscord (cross-post replayer_link
+        cuja hand já existe).
+      - routers/screenshot.py::_link_second_discord_entry_to_existing_hand
+        (cross-post via Vision SS pipeline).
+
+    NÃO dispara regra C villain — quem precisar chama
+    _maybe_create_rule_c_villain_for_hand em separado.
+
+    Devolve: {"channel_added": str|None, "discord_tags": list[str], "resolved": bool}.
+    Em caso de excepção: rollback, log, devolve resolved=False.
+    """
+    from app.discord_bot import _resolve_channel_name_for_entry
+
+    channel = _resolve_channel_name_for_entry(entry_id)
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if channel:
+                cur.execute(
+                    """UPDATE hands SET
+                         discord_tags = ARRAY(SELECT DISTINCT unnest(
+                           COALESCE(discord_tags, '{}'::text[]) || %s::text[]
+                         ))
+                       WHERE id = %s
+                       RETURNING discord_tags""",
+                    ([channel], hand_db_id),
+                )
+            else:
+                cur.execute(
+                    "SELECT discord_tags FROM hands WHERE id = %s",
+                    (hand_db_id,),
+                )
+            row = cur.fetchone()
+            cur.execute(
+                "UPDATE entries SET status = 'resolved' WHERE id = %s",
+                (entry_id,),
+            )
+        conn.commit()
+        result_tags = list(row["discord_tags"]) if row and row["discord_tags"] else []
+        logger.info(
+            f"append_discord_channel_to_hand: hand={hand_db_id} entry={entry_id} "
+            f"channel={channel} discord_tags={result_tags}"
+        )
+        return {
+            "channel_added": channel,
+            "discord_tags": result_tags,
+            "resolved": True,
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(
+            f"append_discord_channel_to_hand failed hand={hand_db_id} entry={entry_id}: {e}"
+        )
+        return {"channel_added": None, "discord_tags": [], "resolved": False}
+    finally:
+        conn.close()

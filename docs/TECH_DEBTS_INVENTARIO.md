@@ -197,6 +197,16 @@ Identificados por leitura directa do código + cross-check com docs. **Não docu
 - **Fix:** estender o filtro principal para excluir hands cujo conjunto de tags de estudo (hm3_tags excluindo padrões `nota%` + discord_tags excluindo `nota`) seja vazio. Casos canónicos 2 e 5 (`docs/VISAO_PRODUTO.md`) servem de teste.
 - **Esforço:** ~30-45 min + validação.
 
+### #B16 — `_apply_channel_tags` filtra por entry_id (vector latente HH cross-post)
+
+- **File:** `backend/app/discord_bot.py:244-257` (`_apply_channel_tags`).
+- **Origem:** Identificado durante diagnóstico #B12 (pt9, 30-Abr).
+- **Vector:** Quando uma HH text é cross-postada em 2 canais Discord, a 1ª entry processada cria as hands via `process_entry_to_hands` e `_apply_channel_tags` popula `discord_tags` com o canal A. A 2ª entry chega com a mesma HH; `process_entry_to_hands` faz `INSERT ... ON CONFLICT DO NOTHING` (não cria hands duplicadas); `_apply_channel_tags` filtra `WHERE entry_id = %s` (entry da 2ª) e não toca em nada — o canal B nunca é appendado.
+- **Severidade:** 🟡 Funcional latente. Magnitude actual: 0 hands afectadas em prod (Rui não usa cross-post HH text — usa replayer_link, coberto por #B12 fix).
+- **Fix proposto:** alterar `_apply_channel_tags` para também tocar hands cujo `hand_id` derive da mesma HH parseada da entry, mesmo quando `entry_id` ≠ entry actual. Em alternativa, chamar `append_discord_channel_to_hand` (helper #B12) para cada hand_id afectado.
+- **Esforço:** ~45 min + validação contra cenário simulado.
+- **Bloqueado por:** nada. Tem prioridade baixa enquanto magnitude=0.
+
 ---
 
 ## §3a. UX bugs detectados em validação pt7 (Bloco B Fase 1)
