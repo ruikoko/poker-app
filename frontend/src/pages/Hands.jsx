@@ -748,6 +748,31 @@ function extractLevel(raw) {
 
 // ── Componente: Tag Group (colapsável) ──────────────────────────────────────
 
+// #B17 (REGRAS_NEGOCIO.md §3.2.2): normaliza nome de tag para chave de
+// unificação HM3 ↔ Discord (case-insensitive + hyphen→space). Mirror do
+// backend normalize_tag_key.
+function normalizeTagKey(tag) {
+  if (!tag) return ''
+  return String(tag).replace(/-/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+// Badge de origem por mão dentro de tag unificada (#B17). Mostra HM3,
+// Discord ou HM3+D consoante a tag normalizada aparecer em
+// hand.hm3_tags, hand.discord_tags ou ambos.
+function OriginBadge({ inHm3, inDiscord }) {
+  if (!inHm3 && !inDiscord) return null
+  const both = inHm3 && inDiscord
+  const label = both ? 'HM3+D' : (inHm3 ? 'HM3' : 'Discord')
+  const color = both ? '#a78bfa' : (inHm3 ? '#fbbf24' : '#5865F2')
+  return (
+    <span style={{
+      fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3,
+      background: `${color}15`, border: `1px solid ${color}40`, color,
+      fontFamily: 'monospace', letterSpacing: 0.3, whiteSpace: 'nowrap',
+    }}>{label}</span>
+  )
+}
+
 // TagGroup recebe metadados do endpoint tag-groups e faz lazy-load das mãos ao expandir
 // ── Tags que justificam atalho HRC Ninja (decisões ICM/bubble/SS) ─────────
 const ICM_TAGS = new Set([
@@ -870,7 +895,7 @@ function TierCollapsible({ label, subtitle, count, defaultOpen = false, children
 }
 
 
-function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters, useHm3Tags, studyView, isPlaceholder, onOpenDetail, onDeleteHand }) {
+function TagGroup({ normKey, displayName, variants, sources, count, wins, losses, totalBB, filters, studyView, onOpenDetail, onDeleteHand }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
   const [loadingHands, setLoadingHands] = useState(false)
@@ -882,29 +907,17 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
         const params = { ...filters, page_size: 500, page: 1 }
         if (!params.date_from) delete params.date_from
         if (studyView) params.study_view = true
-        // Sub-fase 4b: para a secção "Discord — Só SS (sem HH)", o backend só
-        // devolve placeholders se este flag for passado também na expansão.
-        if (isPlaceholder) params.include_discord_placeholders = true
-        if (tags.length === 0) {
-          // Grupo "(sem tag)" em modo auto (source='none'): nem hm3 nem discord.
-          // Legado use_hm3_tags: só hm3 ausente. Default: coluna tags auto.
-          if (source === 'none') {
-            params.hm3_tag = '__none__'
-            params.discord_tag = '__none__'
-          } else if (useHm3Tags) {
-            params.hm3_tag = '__none__'
-          } else {
-            params.tag = '__none__'
-          }
-        } else if (source === 'discord') {
-          params.discord_tag = tags[0]
+        if (normKey) {
+          // #B17 (REGRAS_NEGOCIO.md §3.2.2): backend faz OR cross-source via
+          // unified_tag normalizado (case-insensitive + hyphen→space).
+          params.unified_tag = normKey
         } else {
-          // Filtrar pela tag HM3 principal do grupo (tema).
-          params.hm3_tag = tags[0]
+          // Grupo "(sem tag)": nem hm3 nem discord.
+          params.hm3_tag = '__none__'
+          params.discord_tag = '__none__'
         }
         const result = await hands.list(params)
-        const fetched = result.data || []
-        setTagHands(fetched)
+        setTagHands(result.data || [])
       } catch (e) {
         console.error('Erro ao carregar mãos do grupo:', e)
       } finally {
@@ -914,17 +927,19 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
     setOpen(o => !o)
   }
 
-  // Cor: Discord matched #5865F2; placeholder Discord #38bdf8 (azul claro).
-  // HM3 mantém mapa por tema. "(sem tag)" cinzento.
-  const tag = tags.length > 0 ? tags[0] : 'sem-tag'
+  // Cor da tag: lookup pelo prefixo do display_name no map HM3_COLORS.
+  // Cobre 'pos-pko'→pos, 'icm-pko'→icm, etc. Fallback cinzento.
   const HM3_COLORS = {
     icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e',
     bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b',
     cbet: '#a78bfa', ip: '#34d399', mw: '#fb923c',
     speed: '#ec4899', racer: '#ec4899',
   }
-  const tagColor = isPlaceholder ? '#38bdf8'
-    : (source === 'discord' ? '#5865F2' : (HM3_COLORS[tag] || '#64748b'))
+  const tagPrefix = (displayName || '').toLowerCase().split(/[-\s]/)[0]
+  const tagColor = HM3_COLORS[tagPrefix] || '#64748b'
+  const hasTag = !!displayName
+  const allVariants = variants || []
+  const srcList = sources || []
 
   return (
     <div style={{
@@ -956,24 +971,32 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
             transition: 'transform 0.2s',
           }}>&#9654;</span>
 
-          {/* Tag badges */}
-          <div style={{ display: 'flex', gap: 4 }}>
-            {tags.length === 0 ? (
-              <span style={{
-                display: 'inline-block', padding: '3px 12px', borderRadius: 999,
-                fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
-                color: '#64748b', background: 'rgba(100,116,139,0.15)',
-                border: '1px solid rgba(100,116,139,0.3)',
-              }}>#sem-tag</span>
-            ) : tags.map(t => (
-              <span key={t} style={{
-                display: 'inline-block', padding: '3px 10px', borderRadius: 999,
-                fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
-                color: tagColor, background: `${tagColor}20`,
-                border: `1px solid ${tagColor}40`,
-              }}>#{t}</span>
-            ))}
-          </div>
+          {/* Tag — display_name unificado (#B17) */}
+          <span
+            title={allVariants.length > 1 ? `Variantes: ${allVariants.join(', ')}` : undefined}
+            style={{
+              display: 'inline-block', padding: '3px 12px', borderRadius: 999,
+              fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+              color: hasTag ? tagColor : '#64748b',
+              background: hasTag ? `${tagColor}20` : 'rgba(100,116,139,0.15)',
+              border: `1px solid ${hasTag ? `${tagColor}40` : 'rgba(100,116,139,0.3)'}`,
+            }}>#{hasTag ? displayName : 'sem-tag'}</span>
+
+          {/* Indicação de variantes (PKO SS / pko-ss) */}
+          {allVariants.length > 1 && (
+            <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>
+              ({allVariants.length} variantes)
+            </span>
+          )}
+
+          {/* Origens da tag — cross-source (HM3+Discord) ou single */}
+          {srcList.length > 0 && srcList[0] !== 'none' && (
+            <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace', letterSpacing: 0.3 }}>
+              {srcList.includes('hm3') && srcList.includes('discord')
+                ? 'HM3+Discord'
+                : (srcList.includes('hm3') ? 'HM3' : 'Discord')}
+            </span>
+          )}
 
           {/* Contagem */}
           <span style={{ fontSize: 12, color: '#64748b' }}>
@@ -981,24 +1004,17 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
           </span>
         </div>
 
-        {/* Stats rápidas — escondidas para placeholders (sem HH = sem resultado) */}
-        {!isPlaceholder && (
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 11 }}>
-            <span style={{ color: '#22c55e' }}>{wins}W</span>
-            <span style={{ color: '#ef4444' }}>{losses}L</span>
-            <span style={{
-              color: totalBB >= 0 ? '#22c55e' : '#ef4444',
-              fontWeight: 600, fontFamily: 'monospace',
-            }}>
-              {totalBB >= 0 ? '+' : ''}{totalBB.toFixed(1)} BB
-            </span>
-          </div>
-        )}
-        {isPlaceholder && (
-          <span style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>
-            sem HH ainda
+        {/* Stats rápidas */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 11 }}>
+          <span style={{ color: '#22c55e' }}>{wins}W</span>
+          <span style={{ color: '#ef4444' }}>{losses}L</span>
+          <span style={{
+            color: totalBB >= 0 ? '#22c55e' : '#ef4444',
+            fontWeight: 600, fontFamily: 'monospace',
+          }}>
+            {totalBB >= 0 ? '+' : ''}{totalBB.toFixed(1)} BB
           </span>
-        )}
+        </div>
       </div>
 
       {/* Conteúdo expandido */}
@@ -1012,52 +1028,48 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
             <div style={{ padding: '16px', textAlign: 'center', color: '#4b5563', fontSize: 12 }}>
               Sem mãos neste grupo
             </div>
-          ) : isPlaceholder ? (
-            // Placeholders Discord (sem HH): mostra SS inline + nicks Vision +
-            // hora + botão Apagar. Não há cartas/board/resultado/posição.
-            tagHands.map(h => (
-              <PlaceholderHandRow
-                key={h.id}
-                hand={h}
-                onDelete={() => onDeleteHand(h.id)}
-              />
-            ))
           ) : (() => {
             // Agrupar mãos por torneio (stakes)
             const byTournament = {}
             for (const h of tagHands) {
               const tName = h.stakes || 'Sem torneio'
-              // Data do torneio (YYYY-MM-DD), extraída de played_at
               const dayIso = h.played_at
                 ? new Date(h.played_at).toISOString().slice(0, 10)
                 : 'sem-data'
               const key = `${dayIso}__${tName}`
               if (!byTournament[key]) {
-                byTournament[key] = {
-                  name: tName,
-                  day: dayIso,
-                  hands: [],
-                  maxTime: 0,
-                }
+                byTournament[key] = { name: tName, day: dayIso, hands: [], maxTime: 0 }
               }
               byTournament[key].hands.push(h)
               const t = h.played_at ? new Date(h.played_at).getTime() : 0
               if (t > byTournament[key].maxTime) byTournament[key].maxTime = t
             }
-            // Ordem: data descendente (mais recente primeiro)
             const entries = Object.values(byTournament).sort((a, b) => b.maxTime - a.maxTime)
 
-            if (entries.length === 1) {
-              // Só um torneio/dia — mostrar mãos directamente sem sub-grupo
-              return tagHands.map((h, idx) => (
-                <HandRow key={h.id} hand={h} idx={idx} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} />
-              ))
+            // #B17: cada HandRow ganha extraEnd com OriginBadge calculado a
+            // partir da tag normalizada vs hm3_tags/discord_tags da hand.
+            const renderHand = (h, idx) => {
+              const inHm3 = (h.hm3_tags || []).some(t => normalizeTagKey(t) === normKey)
+              const inDiscord = (h.discord_tags || []).some(t => normalizeTagKey(t) === normKey)
+              return (
+                <HandRow
+                  key={h.id}
+                  hand={h}
+                  idx={idx}
+                  onClick={() => onOpenDetail(h.id)}
+                  onDelete={() => onDeleteHand(h.id)}
+                  extraEnd={normKey ? <OriginBadge inHm3={inHm3} inDiscord={inDiscord} /> : null}
+                />
+              )
             }
 
-            // Formatar label: "GRAVITY · 17/04" (PT-PT)
+            if (entries.length === 1) {
+              return tagHands.map((h, idx) => renderHand(h, idx))
+            }
+
             const fmtDay = (iso) => {
               if (!iso || iso === 'sem-data') return ''
-              const [y, m, d] = iso.split('-')
+              const [_, m, d] = iso.split('-')
               return `${d}/${m}`
             }
 
@@ -1068,11 +1080,9 @@ function TagGroup({ tagKey, tags, source, count, wins, losses, totalBB, filters,
               const tBB    = tHands.reduce((s, h) => s + Number(h.result || 0), 0)
               const dayLabel = fmtDay(ent.day)
               const label = dayLabel ? `${ent.name} · ${dayLabel}` : ent.name
-              // Tema do grupo = tags[0]. Mostrar botão HRC se estiver na lista ICM.
-              const groupTheme = tags[0]
-              const showHrc = groupTheme && ICM_TAGS.has(groupTheme)
+              // Botão HRC quando display_name está na lista ICM
+              const showHrc = displayName && ICM_TAGS.has(displayName)
 
-              // Tech Debt #14: tournament_number (todas as salas) + SI Hero (só GG).
               const tournamentNumber = tHands.find(h => h.tournament_number)?.tournament_number || null
               let siHero = null
               if (tHands[0]?.site === 'GGPoker') {
@@ -1307,11 +1317,6 @@ function applyFilterTransform(params) {
 export default function HandsPage() {
   const [data, setData]           = useState({ data: [], total: 0, pages: 1 })
   const [tagGroupsData, setTagGroupsData] = useState({ groups: [], total: 0 })
-  // Sub-fase 4b: groups que aparecem só quando include_discord_placeholders=true.
-  // Calculado por subtracção (count em response2 menos count em response1, por
-  // chave source+tags). Os matched continuam em tagGroupsData; os placeholders
-  // separados aqui para serem renderizados em secção própria com cor distinta.
-  const [placeholderGroups, setPlaceholderGroups] = useState([])
   const [page, setPage]           = useState(1)
   const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false })
   const [error, setError]         = useState('')
@@ -1319,51 +1324,19 @@ export default function HandsPage() {
   const [selected, setSelected]   = useState(null)
   const [viewMode, setViewMode]   = useState('tags') // 'tags' | 'tournament' | 'grid' | 'table'
 
-  // Para a vista por tags: usa o endpoint tag-groups (sem paginação, só metadados).
-  // Faz 2 chamadas em paralelo:
-  //   - response1: matched apenas (study_view=true)
-  //   - response2: matched + placeholders Discord não-nota-only
-  // Subtrai count(response2) - count(response1) por chave source+tags para
-  // isolar os placeholders. Hoje matched=0 → placeholders == response2.
+  // Vista "Por Tags": endpoint tag-groups com tag_source='auto' devolve
+  // groups unificados (#B17, REGRAS_NEGOCIO.md §3.2.2). Backend agrega
+  // hm3_tags + discord_tags por nome normalizado e devolve display_name,
+  // norm_key, sources, variants, counts, stats. Sem 2ª chamada com
+  // include_discord_placeholders — regra dura: mãos sem HH não aparecem.
   const loadTagGroups = useCallback(() => {
     if (viewMode !== 'tags') return
     setLoading(true)
     setError('')
-    // Excluir mãos que só têm #mtt (bulk HH sem marcação de estudo).
-    // tag_source='auto' agrupa por hm3_tags > discord_tags > '(sem tag)'.
-    const baseParams = applyFilterTransform({ ...filters, exclude_mtt_only: true, tag_source: 'auto', study_view: true })
-    const matchedReq = hands.tagGroups(baseParams)
-    const allReq = hands.tagGroups({ ...baseParams, include_discord_placeholders: true })
-    Promise.all([matchedReq, allReq])
-      .then(([matched, all]) => {
-        setTagGroupsData(matched)
-        // Diff por chave source+sorted(tags). Subtracção por count: para cada
-        // group em `all`, count_placeholder = all.count - matched.count (se key
-        // existir em matched). W/L/BB zerados — placeholders não têm resultado.
-        const keyOf = (g) => `${g.source || 'none'}:${(g.tags || []).slice().sort().join('+')}`
-        const matchedByKey = new Map()
-        for (const g of (matched.groups || [])) matchedByKey.set(keyOf(g), g)
-        const placeholders = []
-        for (const g of (all.groups || [])) {
-          // Só interessa source='discord' aqui — o filtro do backend não muda
-          // counts de hm3/none, mas defensivo por ruído de re-agregação.
-          if (g.source !== 'discord') continue
-          const matchedCount = matchedByKey.get(keyOf(g))?.count || 0
-          const placeholderCount = (g.count || 0) - matchedCount
-          if (placeholderCount > 0) {
-            placeholders.push({
-              ...g,
-              count: placeholderCount,
-              wins: 0, losses: 0, total_bb: 0,
-            })
-          }
-        }
-        setPlaceholderGroups(placeholders)
-      })
-      .catch(e => {
-        setError(e.message)
-        setPlaceholderGroups([])
-      })
+    const params = applyFilterTransform({ ...filters, exclude_mtt_only: true, tag_source: 'auto', study_view: true })
+    hands.tagGroups(params)
+      .then(setTagGroupsData)
+      .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [filters, viewMode])
 
@@ -1571,67 +1544,34 @@ export default function HandsPage() {
         </div>
       )}
 
-      {/* Tags View (default) — grupos com contagens reais, lazy-load ao expandir.
-          Re-agrega por TEMA (primeira tag que não seja 'nota*'); se só houver notas, usa a tag de nota.
-          Depois parte em tiers: A (>100), B (10-100), C (<10).
-          Gate inclui placeholderGroups: vista renderiza se houver matched OU placeholders. */}
-      {!loading && viewMode === 'tags' && (tagGroupsData.groups.length > 0 || placeholderGroups.length > 0) && (() => {
-        // Regra: se uma mão tem tags [X, Y, nota++], o tema é a primeira (alfabética) que não seja "nota*".
-        // Fallback: se só tem tags de nota, usa a nota mesma.
-        const pickTheme = (tags) => {
-          if (!tags || tags.length === 0) return null
-          const sorted = tags.slice().sort((a, b) => a.localeCompare(b))
-          const themes = sorted.filter(t => !/nota/i.test(t))
-          return themes.length > 0 ? themes[0] : sorted[0]
-        }
+      {/* Tags View (default) — tags unificadas HM3+Discord (#B17, REGRAS_NEGOCIO.md §3.2.2).
+          Backend agrega por nome normalizado e devolve display_name + variants + sources.
+          Tiers por count. Sem secções por origem. Mãos sem HH excluídas no backend. */}
+      {!loading && viewMode === 'tags' && tagGroupsData.groups.length > 0 && (() => {
+        const allGroups   = tagGroupsData.groups.filter(g => g.norm_key !== '')
+        const noTagGroup  = tagGroupsData.groups.find(g => g.norm_key === '')
 
-        // Re-agregar: chave inclui source para hm3 e discord não se fundirem
-        // (improvável no dataset porque são disjuntos, mas defensivo).
-        const themeAgg = {}
-        for (const g of tagGroupsData.groups) {
-          const theme = pickTheme(g.tags)
-          const src = g.source || 'none'
-          const key = theme ? `${src}:${theme}` : '__no_tag__'
-          if (!themeAgg[key]) {
-            themeAgg[key] = { tags: theme ? [theme] : [], source: src, count: 0, wins: 0, losses: 0, total_bb: 0 }
-          }
-          const t = themeAgg[key]
-          t.count    += g.count
-          t.wins     += g.wins
-          t.losses   += g.losses
-          t.total_bb += g.total_bb
-        }
-        const merged = Object.values(themeAgg).sort((a, b) => b.count - a.count)
+        const tierA = allGroups.filter(g => g.count > 100)
+        const tierB = allGroups.filter(g => g.count > 10 && g.count <= 100)
+        const tierC = allGroups.filter(g => g.count <= 10)
 
-        // Secções: HM3 em tiers A/B/C, Discord em secção própria, (sem tag) no fim.
-        const hm3Groups     = merged.filter(g => g.source === 'hm3')
-        const discordGroups = merged.filter(g => g.source === 'discord')
-        const noTagGroup    = merged.find(g => g.source === 'none' && g.tags.length === 0)
-
-        const tierA = hm3Groups.filter(g => g.count > 100)
-        const tierB = hm3Groups.filter(g => g.count > 10 && g.count <= 100)
-        const tierC = hm3Groups.filter(g => g.count <= 10)
-
-        const renderGroup = (group, i) => {
-          const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.slice().sort().join('+')
-          return (
-            <TagGroup
-              key={(group.source || 'none') + ':' + tagKey + i}
-              tagKey={tagKey}
-              tags={group.tags}
-              source={group.source}
-              count={group.count}
-              wins={group.wins}
-              losses={group.losses}
-              totalBB={group.total_bb}
-              filters={filters}
-              useHm3Tags={true}
-              studyView={true}
-              onOpenDetail={openDetail}
-              onDeleteHand={deleteHand}
-            />
-          )
-        }
+        const renderGroup = (group, i) => (
+          <TagGroup
+            key={group.norm_key + i}
+            normKey={group.norm_key}
+            displayName={group.display_name}
+            variants={group.variants || []}
+            sources={group.sources || []}
+            count={group.count}
+            wins={group.wins}
+            losses={group.losses}
+            totalBB={group.total_bb}
+            filters={filters}
+            studyView={true}
+            onOpenDetail={openDetail}
+            onDeleteHand={deleteHand}
+          />
+        )
 
         return (
           <div style={{ marginBottom: 24 }}>
@@ -1651,64 +1591,6 @@ export default function HandsPage() {
                 {tierC.map(renderGroup)}
               </TierCollapsible>
             )}
-            {discordGroups.length > 0 && (
-              <TierCollapsible
-                label="Canais Discord"
-                subtitle={`${discordGroups.length} canal${discordGroups.length === 1 ? '' : 'is'}`}
-                count={discordGroups.length}
-                defaultOpen={tierA.length === 0 && tierB.length === 0}
-              >
-                {discordGroups.map(renderGroup)}
-              </TierCollapsible>
-            )}
-            {/* Sub-fase 4b: placeholders Discord (sem HH ainda).
-                Re-agrega por pickTheme (igual aos matched), depois renderiza
-                cada canal como TagGroup com isPlaceholder=true (cor azul claro,
-                sem stats W/L/BB, expand pede include_discord_placeholders=true). */}
-            {placeholderGroups.length > 0 && (() => {
-              const phAgg = {}
-              for (const g of placeholderGroups) {
-                const theme = pickTheme(g.tags)
-                const key = `discord:${theme || ''}`
-                if (!phAgg[key]) {
-                  phAgg[key] = { tags: theme ? [theme] : [], source: 'discord', count: 0, wins: 0, losses: 0, total_bb: 0 }
-                }
-                phAgg[key].count += g.count
-              }
-              const phMerged = Object.values(phAgg).sort((a, b) => b.count - a.count)
-              const totalPh = phMerged.reduce((s, g) => s + g.count, 0)
-              return (
-                <TierCollapsible
-                  label="Discord — Só SS (sem HH)"
-                  subtitle={`${totalPh} mã${totalPh === 1 ? 'o' : 'os'} · ${phMerged.length} canal${phMerged.length === 1 ? '' : 'is'}`}
-                  count={phMerged.length}
-                  defaultOpen={tierA.length === 0 && tierB.length === 0 && discordGroups.length === 0}
-                  colorOverride="#38bdf8"
-                >
-                  {phMerged.map((group, i) => {
-                    const tagKey = group.tags.length === 0 ? '__no_tag__' : group.tags.slice().sort().join('+')
-                    return (
-                      <TagGroup
-                        key={'ph:' + tagKey + i}
-                        tagKey={tagKey}
-                        tags={group.tags}
-                        source={group.source}
-                        count={group.count}
-                        wins={group.wins}
-                        losses={group.losses}
-                        totalBB={group.total_bb}
-                        filters={filters}
-                        useHm3Tags={true}
-                        studyView={true}
-                        isPlaceholder={true}
-                        onOpenDetail={openDetail}
-                        onDeleteHand={deleteHand}
-                      />
-                    )
-                  })}
-                </TierCollapsible>
-              )
-            })()}
             {noTagGroup && noTagGroup.count > 0 && (
               <TierCollapsible
                 label="(Sem tag)"

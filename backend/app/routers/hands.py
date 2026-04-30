@@ -388,6 +388,25 @@ STUDY_VIEW_GG_MATCH_FILTER_WITH_DISCORD_PLACEHOLDERS = (
     ")"
 )
 
+# Filtro adicional aplicado em conjunto com STUDY_VIEW_GG_MATCH_FILTER quando
+# study_view=true. Regra dura (REGRAS_NEGOCIO.md §6): mãos sem HH NUNCA
+# aparecem em Estudo, mesmo que tenham tags. Cobre placeholders Discord
+# (raw vazio) que entravam pela variante WITH_DISCORD_PLACEHOLDERS.
+STUDY_VIEW_REQUIRES_HH = "(h.raw IS NOT NULL AND h.raw != '')"
+
+
+def normalize_tag_key(tag: str | None) -> str:
+    """Normaliza nome de tag para chave de unificação HM3 ↔ Discord (#B17).
+
+    Regra observada (REGRAS_NEGOCIO.md §3.2.2): HM3 e Discord nomeiam o mesmo
+    conceito de forma case-insensitive e tolerante a hyphens
+    (ex: 'PKO SS' ≡ 'pko-ss', 'pos-pko' ≡ 'pos pko').
+    """
+    if not tag:
+        return ""
+    import re as _re
+    return _re.sub(r'\s+', ' ', tag.replace('-', ' ').lower()).strip()
+
 
 def _build_conditions(
     site, tag, study_state, position, search, date_from,
@@ -399,6 +418,7 @@ def _build_conditions(
     date_to: str = None,
     hm3_tag: str = None,
     discord_tag: str = None,
+    unified_tag: str = None,
     has_showdown: Optional[bool] = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
@@ -429,6 +449,19 @@ def _build_conditions(
         else:
             conditions.append("%s = ANY(h.discord_tags)")
             params.append(discord_tag)
+
+    if unified_tag:
+        # #B17: OR cross-source. Match em hm3_tags OR discord_tags onde
+        # alguma tag normalizada bate %s. Caller deve passar valor já
+        # normalizado via normalize_tag_key (case-insensitive + hyphen→space).
+        conditions.append(
+            "(EXISTS (SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}'::text[])) t "
+            "  WHERE lower(regexp_replace(replace(t, '-', ' '), '\\s+', ' ', 'g')) = %s) "
+            "OR EXISTS (SELECT 1 FROM unnest(COALESCE(h.discord_tags, '{}'::text[])) t "
+            "  WHERE lower(regexp_replace(replace(t, '-', ' '), '\\s+', ' ', 'g')) = %s))"
+        )
+        params.append(unified_tag)
+        params.append(unified_tag)
 
     if study_state:
         conditions.append("h.study_state = %s")
@@ -488,6 +521,7 @@ def list_hands(
     tag:              Optional[str] = Query(None, description="Filtrar por tag (na coluna tags)"),
     hm3_tag:          Optional[str] = Query(None, description="Filtrar por tag HM3 (na coluna hm3_tags)"),
     discord_tag:      Optional[str] = Query(None, description="Filtrar por tag Discord (coluna discord_tags). '__none__' para mãos sem discord_tags."),
+    unified_tag:      Optional[str] = Query(None, description="#B17: filtrar por tag normalizada (case-insensitive + hyphen→space) em hm3_tags OR discord_tags."),
     study_state:      Optional[str] = Query(None, description="Filtrar por estado de estudo"),
     position:         Optional[str] = Query(None, description="Filtrar por posição"),
     search:           Optional[str] = Query(None, description="Pesquisa livre em notas/raw"),
@@ -509,7 +543,9 @@ def list_hands(
     conditions, params = _build_conditions(
         site, tag, study_state, position, search, date_from, exclude_mtt_only,
         result_min, result_max, source=source, villain=villain, date_to=date_to,
-        hm3_tag=hm3_tag, discord_tag=discord_tag, has_showdown=has_showdown,
+        hm3_tag=hm3_tag, discord_tag=discord_tag,
+        unified_tag=normalize_tag_key(unified_tag) if unified_tag else None,
+        has_showdown=has_showdown,
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':
@@ -520,6 +556,7 @@ def list_hands(
             if include_discord_placeholders
             else STUDY_VIEW_GG_MATCH_FILTER
         )
+        conditions.append(STUDY_VIEW_REQUIRES_HH)   # #B17 regra dura mãos sem HH
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total = query(
@@ -611,57 +648,124 @@ def tag_groups(
             if include_discord_placeholders
             else STUDY_VIEW_GG_MATCH_FILTER
         )
+        conditions.append(STUDY_VIEW_REQUIRES_HH)   # #B17 regra dura mãos sem HH
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     if tag_source == 'auto':
-        # CASE per-row: hm3 > discord > none. COALESCE não serve — arrays
-        # vazios '{}' são não-NULL em PG, ignorar length é preciso explícito.
-        #
-        # Excepção (sub-fase 4b): placeholders Discord têm hm3_tags=['GGDiscord']
-        # como marker interno, mas o tema real vive em discord_tags (nome do canal).
-        # Sem esta cláusula, todos os 96 placeholders colapsavam em 1 grupo
-        # 'hm3:GGDiscord' em vez de ~19 grupos por canal real. Filtro: 4 condições
-        # mutuamente reforçadas para evitar falso positivo (match_method placeholder
-        # + origin discord + discord_tags com pelo menos 1 elemento).
+        # #B17 (REGRAS_NEGOCIO.md §3.2.2): unifica HM3 + Discord por nome
+        # normalizado. Devolve 1 entry por tag; display_name preferindo
+        # variante HM3 (estratégia i). Cada hand pode aparecer em até 2
+        # themes (hm3+discord), mas se ambos normalizam para a mesma chave,
+        # a hand é contada UMA SÓ vez nessa tag.
         sql = f"""
-            SELECT h.id, h.result, h.study_state,
-                   CASE
-                       WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%'
-                            AND h.origin = 'discord'
-                            AND h.discord_tags IS NOT NULL
-                            AND array_length(h.discord_tags, 1) > 0
-                           THEN h.discord_tags
-                       WHEN h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0 THEN h.hm3_tags
-                       WHEN h.discord_tags IS NOT NULL AND array_length(h.discord_tags, 1) > 0 THEN h.discord_tags
-                       ELSE ARRAY[]::text[]
-                   END AS tags,
-                   CASE
-                       WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%'
-                            AND h.origin = 'discord'
-                            AND h.discord_tags IS NOT NULL
-                            AND array_length(h.discord_tags, 1) > 0
-                           THEN 'discord'
-                       WHEN h.hm3_tags IS NOT NULL AND array_length(h.hm3_tags, 1) > 0 THEN 'hm3'
-                       WHEN h.discord_tags IS NOT NULL AND array_length(h.discord_tags, 1) > 0 THEN 'discord'
-                       ELSE 'none'
-                   END AS source
+            SELECT
+                h.id, h.result,
+                (SELECT COALESCE(
+                   (SELECT t FROM unnest(h.hm3_tags) t WHERE t IS NOT NULL AND t NOT ILIKE 'nota%%' ORDER BY t LIMIT 1),
+                   (SELECT t FROM unnest(h.hm3_tags) t WHERE t IS NOT NULL ORDER BY t LIMIT 1)
+                )) AS hm3_theme,
+                (SELECT COALESCE(
+                   (SELECT t FROM unnest(h.discord_tags) t WHERE t IS NOT NULL AND t != 'nota' ORDER BY t LIMIT 1),
+                   (SELECT t FROM unnest(h.discord_tags) t WHERE t IS NOT NULL ORDER BY t LIMIT 1)
+                )) AS discord_theme
             FROM hands h
             {where}
             ORDER BY h.played_at DESC NULLS LAST
         """
-    else:
-        tag_col = "hm3_tags" if use_hm3_tags else "tags"
-        src_label = 'hm3' if use_hm3_tags else 'tags'
-        sql = (
-            f"SELECT h.id, h.{tag_col} AS tags, h.result, h.study_state, "
-            f"'{src_label}' AS source "
-            f"FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST"
-        )
+        rows = query(sql, params)
+
+        # Pós-processamento: agrega por norm_key. 1 hand → 1 contagem por tag.
+        groups = {}   # norm_key -> {hm3_variants, discord_variants, sources, ids, wins, losses, total_bb}
+        for r in rows:
+            hand_id = r["id"]
+            result = float(r["result"] or 0.0)
+            hm3_t = r.get("hm3_theme")
+            disc_t = r.get("discord_theme")
+
+            entries = []
+            if hm3_t:
+                entries.append((hm3_t, 'hm3'))
+            if disc_t:
+                entries.append((disc_t, 'discord'))
+            if not entries:
+                entries = [(None, 'none')]
+
+            seen_keys = set()
+            for theme, src in entries:
+                nk = normalize_tag_key(theme) if theme else ''
+                if nk in seen_keys:
+                    continue
+                seen_keys.add(nk)
+                if nk not in groups:
+                    groups[nk] = {
+                        'hm3_variants': set(),
+                        'discord_variants': set(),
+                        'sources': set(),
+                        'ids': set(),
+                        'wins': 0, 'losses': 0, 'total_bb': 0.0,
+                    }
+                g = groups[nk]
+                if src == 'hm3':
+                    g['hm3_variants'].add(theme)
+                    g['sources'].add('hm3')
+                elif src == 'discord':
+                    g['discord_variants'].add(theme)
+                    g['sources'].add('discord')
+                else:
+                    g['sources'].add('none')
+                if hand_id not in g['ids']:
+                    g['ids'].add(hand_id)
+                    if result > 0:
+                        g['wins'] += 1
+                    elif result < 0:
+                        g['losses'] += 1
+                    g['total_bb'] += result
+
+        out = []
+        for nk, g in groups.items():
+            # Estratégia (i): preferir variante HM3; fallback Discord
+            if g['hm3_variants']:
+                display_name = sorted(g['hm3_variants'])[0]
+            elif g['discord_variants']:
+                display_name = sorted(g['discord_variants'])[0]
+            else:
+                display_name = ''
+            all_variants = sorted(list(g['hm3_variants'] | g['discord_variants']))
+            sources_list = sorted(list(g['sources']))
+            # Campo 'source' legado: hm3 > discord > none (compat frontend antigo)
+            legacy_source = (
+                'hm3' if 'hm3' in g['sources']
+                else ('discord' if 'discord' in g['sources'] else 'none')
+            )
+            out.append({
+                'norm_key': nk,
+                'display_name': display_name,
+                'tags': all_variants if all_variants else [],
+                'variants': all_variants,
+                'sources': sources_list,
+                'source': legacy_source,
+                'count': len(g['ids']),
+                'wins': g['wins'],
+                'losses': g['losses'],
+                'total_bb': g['total_bb'],
+            })
+
+        # Ordena: tags por count desc; "(sem tag)" sempre no fim
+        out.sort(key=lambda x: (x['norm_key'] == '', -x['count']))
+        return {"groups": out, "total": len(rows)}
+
+    # Modos legados (use_hm3_tags / default tags) — inalterados:
+    tag_col = "hm3_tags" if use_hm3_tags else "tags"
+    src_label = 'hm3' if use_hm3_tags else 'tags'
+    sql = (
+        f"SELECT h.id, h.{tag_col} AS tags, h.result, h.study_state, "
+        f"'{src_label}' AS source "
+        f"FROM hands h {where} ORDER BY h.played_at DESC NULLS LAST"
+    )
     rows = query(sql, params)
 
-    # Group by sorted tag combination
-    groups = {}  # tagKey -> {tags, count, wins, losses, total_bb}
+    groups = {}
     no_tag = {"tags": [], "source": "none", "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
 
     for r in rows:
@@ -677,7 +781,6 @@ def tag_groups(
             no_tag["losses"] += loss
             no_tag["total_bb"] += result
         else:
-            # source na chave evita colisão entre hm3/discord (ex: 'nota' em ambos).
             key = f"{src}:" + "+".join(sorted(tags))
             if key not in groups:
                 groups[key] = {"tags": sorted(tags), "source": src, "count": 0, "wins": 0, "losses": 0, "total_bb": 0.0}
@@ -686,7 +789,6 @@ def tag_groups(
             groups[key]["losses"] += loss
             groups[key]["total_bb"] += result
 
-    # Sort by count desc
     sorted_groups = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
     if no_tag["count"] > 0:
         sorted_groups.append(no_tag)
