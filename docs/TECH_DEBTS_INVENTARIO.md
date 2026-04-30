@@ -1,4 +1,4 @@
-# Inventário Tech Debts — 30-Abr 2026 pt8 (em curso)
+# Inventário Tech Debts — 30-Abr 2026 pt8 (fechada)
 
 Compilação read-only baseada em journals (23-24 Abr → 29-Abr pt6), VALIDACAO_END_TO_END §6/§7/§11, MAPA_ACOPLAMENTO, git log, e leitura directa do código.
 
@@ -6,13 +6,14 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (30-Abr pt8 em curso)
+## Estado actual (30-Abr fim pt8)
 
-- **Total Tech Debts numerados detectados:** 24 (#1–#22, sem #19; +#UX1; +#B12 pt8)
-- **Fechados pt8 até agora:** 1 (#18 validado empiricamente)
-- **Fechados pt7:** 9 (#10, #21, #B1, #B2, #B4, #B8, #B9, #12, #UX1) + 17 anteriores = **27 totais fechados** (incl. #18 pt8)
-- **Pendentes numerados:** #11, #13c, #15, #B7, #B10, #B11, #B12, #B-edge
+- **Total Tech Debts numerados detectados:** 25 (#1–#22, sem #19; +#UX1; +#B12 pt8; +#B13 pt8)
+- **Fechados pt8:** 3 (#18 validado empiricamente, #15 fix Dashboard, #B7 cursor Discord)
+- **Fechados pt7:** 9 (#10, #21, #B1, #B2, #B4, #B8, #B9, #12, #UX1) + 17 anteriores = **29 totais fechados** (incl. #18+#15+#B7 pt8)
+- **Pendentes numerados:** #11, #13c, #B10, #B11, #B12, #B13, #B-edge
 - **Bugs latentes não-numerados detectados em pt7:** 4 (registados §3 abaixo)
+- **Feature nova pt8:** sincronização Discord manual com janelas (24h/72h/1sem/15d/1mês/custom) — substitui botão "Sincronizar Agora"
 
 ### Sumário pt7 (9 Tech Debts fechados)
 
@@ -28,19 +29,26 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 | **#12** ✅ | `8871d1b`→`3c7dc13` (7 commits) | Refactor modal villain (layout, alinhamento, cores per-acção) |
 | **#UX1** ✅ | (incluído `#12`) | Cards villain mostradas (não Hero) — fix bug pt6 |
 
-### Tech Debts fechados pt8 (até agora)
+### Tech Debts fechados pt8 (3 total)
 
-| # | Data | Validação | Descrição |
-|---|---|---|---|
-| **#18** ✅ | 2026-04-30 | Empírica BD prod | Não-determinismo cross-post resolvido estruturalmente pelo guard #21. 1 hand cross-post real (1115) com APA coerente, 23 hands enriched protegidas pelo guard, 0 divergências detectadas. Sem fix de código necessário. |
+| # | Hash | Data | Validação | Descrição |
+|---|---|---|---|---|
+| **#18** ✅ | (docs only) | 2026-04-30 | Empírica BD prod | Não-determinismo cross-post resolvido estruturalmente pelo guard #21. 1 hand cross-post real (1115) com APA coerente, 23 hands enriched protegidas pelo guard, 0 divergências. Sem fix de código necessário. |
+| **#15** ✅ | `8919840` | 2026-04-30 | Visual frontend | Dashboard "Últimas mãos" passa a mostrar created_at (data import) + linha secundária "jogada DD Mmm" só quando played_at é dia diferente. Backend já ordenava por created_at desde 16-Abr; fix foi à apresentação. |
+| **#B7** ✅ | `9d57b2b` | 2026-04-30 | Code + audit | `_get_sync_cursor` devolve `(last_message_id, last_sync_at)`; precedência (a) snowflake > (b) datetime > (c) APP_EPOCH_CUTOFF (1 Jan 2026 Lisbon hardcoded). Fix afecta `/sync` e `/sync-and-process`. |
 
-### Tech Debts pendentes para sessão pt8 (ordem prioridade)
+### Feature nova pt8
+
+| Hash | Descrição |
+|---|---|
+| `7ad41d4` | UI Discord painel inline com chips de janela (24h/72h/1sem/15d/1mês) + custom (De/Até). Endpoint POST `/api/discord/sync-and-process` aceita body opcional `{window?, from?, to?}`. Override de `discord_sync_state` antes do sync (`last_message_id=NULL, last_sync_at=from_clamped, messages_synced=0`) — usa precedência (b) do #B7. Response ganha `last_sync` com {window_label, from, to, n_links, m_canais, k_match_hh}. Banner "⟳ A sincronizar..." durante sync; sub-linha "Última sync: agora · janela X · N · M · K" persistente após. |
+
+### Tech Debts pendentes para sessão pt9 (ordem prioridade)
 
 | ID | Título | Severidade | Esforço |
 |---|---|---|---|
-| **#15** | Dashboard "Últimas mãos" ordena `played_at` em vez `created_at` | 🟡 Funcional | ~10 min |
-| **#B7** | Discord bot ignora `last_sync_at` quando `last_message_id` NULL | 🟡 Funcional | ~30 min |
 | **#B12** | Hands GG anonimizadas com cross-post Discord não recebem `discord_tags` populado | 🟡 Funcional menor | ~1h investigação |
+| **#B13** | Contadores `last_sync` (N/M/K) medem entries criadas em vez de trabalho útil | 🟢 UX | ~1h |
 | **#11** | Botão eliminar villain manualmente do modal HandDetailPage | 🟡 UX | ~2-3h |
 | **#B11** | Auto-tag mãos via LLM (ideia exploratória pt7) | 🟢 Feature | ~3-4h |
 | **#B10** | Vision não extrai `tournament_name` da imagem na galeria | 🟢 UX | ~2-3h |
@@ -155,6 +163,20 @@ Identificados por leitura directa do código + cross-check com docs. **Não docu
 - **Fix proposto:** investigar trigger de append `discord_tags` independente de existir match SS↔HH. Possível solução: ao ingerir entry Discord, tentar localizar hand pelo `hand_id` (TM number) e fazer append directo de `discord_tags` mesmo que não haja enrich.
 - **Esforço:** ~1h investigação + ~30min fix se confirmado.
 
+### #B13 — Contadores `last_sync` (N links/M canais/K match HH) medem entries criadas em vez de trabalho útil
+
+- **File:** `backend/app/routers/discord.py` (CTE `new_entries` no fim de `sync_and_process`).
+- **Origem:** Achado pt8 durante teste da feature nova de sincronização com janelas (commit `7ad41d4`).
+- **Sintoma:** Utilizador faz sync de janela já totalmente importada e vê `n_links=0` mas a lista de mãos cresce de 23 para 150 (placeholders `GGDiscord` criados por `backfill_ggdiscord`, processamento Vision de entries antigas que faltavam imagem, matches feitos retroactivamente, etc.). Os contadores afirmam "esta janela trouxe X coisas novas", mas o pipeline `sync-and-process` faz muito mais do que ingerir mensagens novas — opera globalmente sobre entries pré-existentes.
+- **Causa:** A query CTE filtra `entries WHERE source='discord' AND entry_type IN ('replayer_link','image') AND created_at >= sync_started_at`. Não captura: (a) processamento Vision de entries pré-existentes a `sync_started_at`, (b) placeholders criados em `hands` por `backfill_ggdiscord`, (c) matches SS↔HH feitos por `run_match_worker` (Bucket 1 attachments), (d) anexação de imagens órfãs.
+- **Severidade:** 🟢 UX. Não corrompe dados. Mensagem na UI desalinhada com a realidade observada pelo utilizador.
+- **Possíveis abordagens (a investigar pt9):**
+  - **(a)** substituir contadores por "entries processadas + placeholders criados + matches feitos nesta sync" — instrumentar cada subtask para reportar contadores.
+  - **(b)** acrescentar contadores adicionais sem remover os actuais — mantém compat com UI actual.
+  - **(c)** deixar os contadores como estão e mudar texto da UI para "Mensagens novas: N · Canais: M · Match HH: K" — mais honesto sobre o que medem.
+- **Bloqueado por:** nada. Investigação isolada.
+- **Esforço:** ~1h.
+
 ---
 
 ## §3a. UX bugs detectados em validação pt7 (Bloco B Fase 1)
@@ -217,8 +239,18 @@ Relevância variável; alguns são edge cases raros, outros podem afectar produ�
                               └── 1 hand cross-post real (1115) APA coerente
                                   + 23 hands enriched protegidas + 0 divergências
 
+#15 (FECHADO pt8 30-Abr 8919840) ── Dashboard mostra created_at + linha "jogada"
+
+#B7 (FECHADO pt8 30-Abr 9d57b2b) ── precedência tripla cursor Discord +
+                                     APP_EPOCH_CUTOFF 1 Jan 2026 Lisbon
+
+feat sync windows (pt8 30-Abr 7ad41d4) ── usa #B7 path (b); UI inline + endpoint estendido
+
 #B12 (cross-post Discord não popula discord_tags em hands GG anon) ── achado lateral pt8
                               └── 16/17 TMs afectados; investigação ~1h
+
+#B13 (contadores last_sync medem entries em vez de trabalho útil) ── achado pt8 pós-feature
+                              └── n_links=0 quando pipeline ainda processou Vision/backfill/matches
 
 #12 (modal Vilões re-arquit) ──┐
                                ├── bloqueia /api/villains housekeeping
