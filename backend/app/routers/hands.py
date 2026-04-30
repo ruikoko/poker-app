@@ -394,6 +394,20 @@ STUDY_VIEW_GG_MATCH_FILTER_WITH_DISCORD_PLACEHOLDERS = (
 # (raw vazio) que entravam pela variante WITH_DISCORD_PLACEHOLDERS.
 STUDY_VIEW_REQUIRES_HH = "(h.raw IS NOT NULL AND h.raw != '')"
 
+# Filtro adicional #B15 (REGRAS_NEGOCIO.md §3.2.1 + §6 + casos canónicos 2 e 5):
+# Mão tem que ter PELO MENOS 1 tag de estudo. Tag de estudo = tag HM3 que NÃO
+# bate o padrão 'nota%' OU canal Discord != 'nota'. Mãos só com 'nota' (HM3 ou
+# Discord) são destinadas a Vilões, não a Estudo. Aplicado em conjunto com
+# STUDY_VIEW_GG_MATCH_FILTER + STUDY_VIEW_REQUIRES_HH quando study_view=true.
+STUDY_VIEW_HAS_STUDY_TAG = (
+    "("
+    "  EXISTS (SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}'::text[])) t "
+    "          WHERE t IS NOT NULL AND t NOT ILIKE 'nota%%')"
+    "  OR EXISTS (SELECT 1 FROM unnest(COALESCE(h.discord_tags, '{}'::text[])) t "
+    "             WHERE t IS NOT NULL AND t != 'nota')"
+    ")"
+)
+
 
 def normalize_tag_key(tag: str | None) -> str:
     """Normaliza nome de tag para chave de unificação HM3 ↔ Discord (#B17).
@@ -557,6 +571,7 @@ def list_hands(
             else STUDY_VIEW_GG_MATCH_FILTER
         )
         conditions.append(STUDY_VIEW_REQUIRES_HH)   # #B17 regra dura mãos sem HH
+        conditions.append(STUDY_VIEW_HAS_STUDY_TAG) # #B15 exclui só-nota
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total = query(
@@ -649,6 +664,7 @@ def tag_groups(
             else STUDY_VIEW_GG_MATCH_FILTER
         )
         conditions.append(STUDY_VIEW_REQUIRES_HH)   # #B17 regra dura mãos sem HH
+        conditions.append(STUDY_VIEW_HAS_STUDY_TAG) # #B15 exclui só-nota
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

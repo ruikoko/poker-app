@@ -220,6 +220,16 @@ Identificados por leitura directa do código + cross-check com docs. **Não docu
 - **Esforço:** ~3-4h (backend agregação + frontend redesign + validação).
 - **Bloqueado por:** nada. Pode atacar em pt10 ou continuação pt9.
 
+### #B18 — Lista de mãos em torneio (drill-down): falta badge de origem por mão
+
+- **File provável:** `frontend/src/components/HandRow.jsx` ou caller no drill-down de torneio (`frontend/src/pages/Tournaments.jsx`, `frontend/src/pages/Hands.jsx::TournamentGroup`).
+- **Origem:** Coerência com #B17 (pt9).
+- **Sintoma:** No drill-down de torneio, lista de mãos mostra: nome do torneio, buy-in, data, número do torneio, stack inicial (quando disponível), número de mãos. Falta badge de origem por mão (HM3 / Discord / SS-only) — incoerente com a vista Estudo pós-#B17 que adicionou `OriginBadge` via prop `extraEnd`.
+- **Severidade:** 🟢 UX.
+- **Fix proposto:** passar `extraEnd={<OriginBadge ...>}` no `HandRow` dentro do `TournamentGroup` quando aplicável; ou tornar `HandRow` capaz de calcular o badge a partir das próprias `hand.hm3_tags` / `hand.discord_tags` quando uma prop `showOrigin=true` for passada.
+- **Esforço:** ~30-45 min.
+- **Bloqueado por:** nada.
+
 ---
 
 ## §3a. UX bugs detectados em validação pt7 (Bloco B Fase 1)
