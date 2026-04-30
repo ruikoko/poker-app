@@ -124,9 +124,17 @@ Toda mão entra na sua secção de origem.
 
 ### 3.3. Secções DERIVADAS — Vilões
 
-Critério único:
-- Tag HM3 `nota` / `notas` / `nota+` / `nota++` / derivados, OU
-- Canal Discord `nota`.
+Critérios de elegibilidade (regras canónicas A∨C∨D — `_classify_villain_categories` em `backend/app/services/hand_service.py`):
+
+- **Regra A** — `hm3_tags` contém tag a começar por `nota` (`nota`, `notas`, `nota+`, `nota++`, etc) → `category='nota'`.
+- **Regra C** — canal Discord `nota` em `discord_tags` E `match_method` real (não `discord_placeholder_*`) → `category='nota'`.
+- **Regra D** — `villain_nick` em `FRIEND_HEROES` (lista em `backend/app/hero_names.py` — Karluz, flightrisk) → `category='friend'`. Independente de tag; sempre dispara quando o nick aparece como non-hero. Permite ver mãos de amigos sem o Rui ter de marcá-las explicitamente.
+
+**Pré-condição padrão** do classificador: villain tem `has_cards` (showdown) OU `has_vpip` (call/raise/bet preflop). Sem nenhuma das duas evidências, normalmente não é villain a registar.
+
+**Excepção #B19 (pt9)** — quando a mão tem tag HM3 `nota%`, a pré-condição é ignorada: qualquer non-hero que **viu o flop** (acção em street ≠ `preflop` no `all_players_actions`) é elegível, mesmo sem VPIP nem cards. Justificação: a tag explícita do Rui é sinal de intenção — se ele marcou a mão para Vilões, o non-hero relevante pode ser o BB que fez check preflop e agiu postflop sem chegar a SD. Sem esta excepção, perdiam-se 2/140 mãos `nota%` na BD.
+
+**Implementação** da excepção: alargamento de candidates em `_create_villains_for_hand` (`backend/app/routers/mtt.py`) + bypass da pré-condição em `_classify_villain_categories` (`backend/app/services/hand_service.py`). Escopo restrito a tag HM3 `nota%` — Discord e outras tags mantêm pré-condição original.
 
 ### 3.4. Regra de Cross-post Discord
 
