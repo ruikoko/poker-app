@@ -16,6 +16,7 @@ import asyncio
 import discord
 from discord import Intents
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from app.ingest_filters import is_pre_2026
 
@@ -487,14 +488,32 @@ def _ensure_sync_table():
     """)
 
 
-def _get_last_message_id(channel_id: str) -> str | None:
-    """Devolve o último message_id sincronizado para este canal."""
+# Cutoff absoluto da app: nunca varrer mensagens Discord anteriores a
+# 1 Jan 2026 (Europe/Lisbon). Regra de negócio do Rui — é o início da
+# era da app, mensagens anteriores são ruído histórico que polui a BD.
+# Usado quando last_message_id e last_sync_at são ambos NULL (canal novo
+# sem row em discord_sync_state).
+APP_EPOCH_CUTOFF = datetime(2026, 1, 1, 0, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+
+
+# Tech Debt #B7: o caller aplica precedência (a) > (b) > (c):
+#   (a) last_message_id existe          → cursor exacto pela snowflake Discord
+#   (b) last_message_id NULL +
+#       last_sync_at populado           → datetime como ponto de partida
+#   (c) ambos NULL (canal novo)         → APP_EPOCH_CUTOFF (1 Jan 2026)
+# Sem (b), o caso pós-wipe BD (last_message_id=NULL com last_sync_at=cutoff
+# desejado) caía em (c) e o bot varria toda a história do canal — bug pt7
+# que produziu 277 entries em vez de ~50-100 esperadas para -1d.
+def _get_sync_cursor(channel_id: str) -> tuple[str | None, datetime | None]:
+    """Devolve (last_message_id, last_sync_at) para este canal."""
     from app.db import query
     rows = query(
-        "SELECT last_message_id FROM discord_sync_state WHERE channel_id = %s",
+        "SELECT last_message_id, last_sync_at FROM discord_sync_state WHERE channel_id = %s",
         (channel_id,),
     )
-    return rows[0]["last_message_id"] if rows else None
+    if not rows:
+        return None, None
+    return rows[0]["last_message_id"], rows[0]["last_sync_at"]
 
 
 def _update_sync_state(channel_id: str, server_id: str, channel_name: str, last_msg_id: str, count: int):
@@ -621,8 +640,13 @@ class PokerBot(discord.Client):
                 logger.warning(f"Sem permissão para ler #{channel.name}")
                 continue
 
-            last_msg_id = _get_last_message_id(str(channel.id))
-            after = discord.Object(id=int(last_msg_id)) if last_msg_id else None
+            last_msg_id, last_sync_at = _get_sync_cursor(str(channel.id))
+            if last_msg_id:
+                after = discord.Object(id=int(last_msg_id))
+            elif last_sync_at:
+                after = last_sync_at
+            else:
+                after = APP_EPOCH_CUTOFF
 
             count = 0
             latest_msg_id = last_msg_id
