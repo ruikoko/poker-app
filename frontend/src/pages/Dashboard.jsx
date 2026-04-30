@@ -105,6 +105,25 @@ function formatDate(iso) {
   return `${mm}-${dd} ${hh}:${min}`
 }
 
+const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+function formatShortDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return `${d.getDate()} ${MESES_PT[d.getMonth()]}`
+}
+// Compara só dia/mês/ano, ignora hora.
+// Razão: evitar mostrar 2 linhas quando created_at e played_at caem no mesmo
+// dia mas em horas diferentes (ex: 23:50 vs 00:30). Sem isto, mãos GG live
+// (importadas no mesmo dia em que jogadas) mostravam "30 Abr / jogada 30 Abr"
+// redundante.
+function sameCalendarDay(a, b) {
+  if (!a || !b) return false
+  const da = new Date(a), db = new Date(b)
+  return da.getFullYear() === db.getFullYear()
+      && da.getMonth() === db.getMonth()
+      && da.getDate() === db.getDate()
+}
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -318,8 +337,13 @@ export default function DashboardPage() {
                 {(h.hm3_tags || []).length > 3 && <span style={{ fontSize: 9, color: '#4b5563' }}>+{h.hm3_tags.length - 3}</span>}
               </div>
               <div style={{ textAlign: 'center' }}><SiteBadge site={h.site} /></div>
-              <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right' }}>
-                {formatDate(h.played_at || h.created_at)}
+              <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right', lineHeight: 1.3 }}>
+                <div>{formatShortDate(h.created_at)}</div>
+                {h.played_at && !sameCalendarDay(h.created_at, h.played_at) && (
+                  <div style={{ fontSize: 9, color: '#374151', fontStyle: 'italic', marginTop: 1 }}>
+                    jogada {formatShortDate(h.played_at)}
+                  </div>
+                )}
               </div>
               <button
                 onClick={handleDelete}
