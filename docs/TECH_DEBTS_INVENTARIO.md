@@ -207,6 +207,19 @@ Identificados por leitura directa do código + cross-check com docs. **Não docu
 - **Esforço:** ~45 min + validação contra cenário simulado.
 - **Bloqueado por:** nada. Tem prioridade baixa enquanto magnitude=0.
 
+### #B17 — Estudo separa tags por origem em vez de unificar (DIVERGÊNCIA 5)
+
+- **File provável:** `frontend/src/pages/Hands.jsx` (vista "Por Tags") + `backend/app/routers/hands.py` (endpoint tag-groups).
+- **Origem:** Visão de produto pt9 (DIVERGÊNCIA 5 documentada em `docs/REGRAS_NEGOCIO.md` §3.2.2).
+- **Sintoma:** Estudo apresenta a mesma chip de tag em 3 secções separadas: PRINCIPAIS/SECUNDÁRIAS/SPOTS (HM3 only), CANAIS DISCORD (Discord with HH), DISCORD — SÓ SS (Discord without HH). Rui pediu há ~1 mês para unificar; não está implementado.
+- **Severidade:** 🔴 Funcional alto. Viola pedido explícito antigo do Rui. Estudo torna-se redundante e confuso. Inclui caso especialmente grave: secção "DISCORD — SÓ SS" mostra 119 mãos sem HH, violando regra dura 3.2.1.
+- **Fix proposto:**
+  - Backend: query tag-groups deve agregar hm3_tags + discord_tags por NOME (ex: "ICM PKO" + "icm-pko" → mesma chave normalizada).
+  - Frontend: remover secções "CANAIS DISCORD" e "DISCORD — SÓ SS (SEM HH)". Apresentar 1 chip por nome unificado. Cada mão mostra origem como rótulo discreto.
+  - Aplicar regra dura: mãos sem HH NUNCA em Estudo.
+- **Esforço:** ~3-4h (backend agregação + frontend redesign + validação).
+- **Bloqueado por:** nada. Pode atacar em pt10 ou continuação pt9.
+
 ---
 
 ## §3a. UX bugs detectados em validação pt7 (Bloco B Fase 1)

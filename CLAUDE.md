@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ LEITURA OBRIGATÓRIA ANTES DE TUDO
+
+Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro estes 4 documentos, por esta ordem:
+
+1. **`docs/VISAO_PRODUTO.md`** — visão alta da app (propósito, vectores, secções).
+2. **`docs/REGRAS_NEGOCIO.md`** — regras operacionais (entrada, processamento, distribuição, casos canónicos, regras duras).
+3. **`docs/MAPA_ACOPLAMENTO.md`** — mapa técnico de conceitos (`match_method`, `study_state`, `origin`, etc).
+4. **`docs/TECH_DEBTS_INVENTARIO.md`** — backlog actualizado de tech debts.
+
+Sem ler estes 4 documentos, NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
+
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
 **O PC onde este projecto é desenvolvido é o mesmo onde o utilizador joga poker.** As salas (GGPoker, PokerStars, Winamax, WPN, iPoker, 888) têm anti-cheat agressivo que scanneia processos activos. Qualquer processo "suspeito" (editores, terminais, ferramentas de análise, scripts Python a correr) pode gerar falsos positivos e prejudicar a conta.
