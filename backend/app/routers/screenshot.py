@@ -953,14 +953,16 @@ def _link_second_discord_entry_to_existing_hand(
         f"[bg] Linked 2nd Discord entry {entry_id} -> hand {hand_db_id} "
         f"(channel={result['channel_added']}, discord_tags={result['discord_tags']})"
     )
-    _maybe_create_rule_c_villain_for_hand(
-        entry_id, hand_db_id,
-        vision_players=vision_players,
-        hero_name=hero_name,
-        vision_sb=vision_sb,
-        vision_bb=vision_bb,
-        file_meta=file_meta,
-    )
+    # ONDA 1 #B23 refactor: substitui _maybe_create_rule_c_villain_for_hand
+    # pela função canónica única apply_villain_rules (lê tudo de hands +
+    # entries.raw_json internamente, aplica A∨C∨D, idempotente).
+    from app.services.villain_rules import apply_villain_rules
+    try:
+        apply_villain_rules(hand_db_id)
+    except Exception as e:
+        logger.error(
+            f"[bg] apply_villain_rules failed hand={hand_db_id} entry={entry_id}: {e}"
+        )
 
 
 async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
@@ -1536,25 +1538,19 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     finally:
         conn.close()
 
-    # Criar villains usando dados Vision + HH enriched. _create_ggpoker_villain_notes_for_hand
-    # faz lookup do all_players_actions já committed acima (query interna abre nova conn,
-    # vê estado actualizado). Cobre regra B∨C: match_method populado + VPIP / showdown.
-    # Conn nova porque a anterior está fechada. Falha aqui não bloqueia enrichment —
-    # só log error.
+    # ONDA 1 #B23 refactor: substitui _create_ggpoker_villain_notes_for_hand
+    # pela função canónica única apply_villain_rules (services/villain_rules.py).
+    # Lê tudo de hands (apa enriched + player_names JSON) e aplica A∨C∨D.
+    # Função abre conn própria; falha aqui não bloqueia enrich — só log error.
     try:
-        from app.routers.mtt import _create_ggpoker_villain_notes_for_hand
-        villains_conn = get_conn()
-        try:
-            n_villain_notes = _create_ggpoker_villain_notes_for_hand(
-                villains_conn, hand_db_id,
-                players_list=raw_json.get("players_list", []),
-                hero_name=hero_name,
-                screenshot_data=raw_json,
-            )
-            villains_conn.commit()
-            logger.info(f"Villain creation hand {hand_db_id}: {n_villain_notes} villain_notes upsert + hand_villains via _create_villains_for_hand")
-        finally:
-            villains_conn.close()
+        from app.services.villain_rules import apply_villain_rules
+        result = apply_villain_rules(hand_db_id)
+        logger.info(
+            f"Villain creation hand {hand_db_id}: "
+            f"{result['n_villains_created']} villains, "
+            f"{result['n_villain_notes_upserts']} notes"
+            + (f" (skipped: {result['skipped_reason']})" if result.get('skipped_reason') else "")
+        )
     except Exception as e:
         logger.error(f"Villain creation error for hand {hand_db_id}: {e}")
 
