@@ -451,8 +451,8 @@ def append_discord_channel_to_hand(hand_db_id: int, entry_id: int) -> dict:
       - routers/screenshot.py::_link_second_discord_entry_to_existing_hand
         (cross-post via Vision SS pipeline).
 
-    NÃO dispara regra C villain — quem precisar chama
-    _maybe_create_rule_c_villain_for_hand em separado.
+    NÃO dispara regras de villain — quem precisar chama
+    apply_villain_rules (services/villain_rules.py) em separado.
 
     Devolve: {"channel_added": str|None, "discord_tags": list[str], "resolved": bool}.
     Em caso de excepção: rollback, log, devolve resolved=False.

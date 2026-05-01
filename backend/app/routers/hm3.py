@@ -650,23 +650,6 @@ def _parse_hand(hh_text, site_name):
     return result
 
 
-# ── VPIP Detection for HM3 hands ──────────────────────────────────────────────
-
-def _detect_vpip_hm3(raw_text, hero_name=None):
-    """
-    Detects players who made VPIP preflop from raw HH text.
-    Returns { player_name: "action_desc", ... } excluding hero.
-    Works for Winamax, PokerStars, and WPN formats.
-
-    Tech Debt #10: nicks com espaço (ex: "Reg ou Zgg", "la louffe") eram
-    truncados pela regex frouxa antiga `^(.+?)(?::)?\\s+(.+)$`. Solução
-    universal: extrair seat_nicks dos lines `Seat N: nick (...)` e usar
-    prefix-match ordenado por length para identificar o actor.
-    """
-    vpip_players = {}
-    if not raw_text:
-        return vpip_players
-
     # Extrair seat nicks (universal Winamax/PS/WPN). Padrão "Seat N: nick ("
     # cobre as 3 salas:
     #   Winamax:    "Seat 1: thinvalium (50735, 187.50€ bounty)"
@@ -748,139 +731,6 @@ def _detect_vpip_hm3(raw_text, hero_name=None):
             vpip_players[actor] = action_desc
 
     return vpip_players
-
-
-def _create_hand_villains_hm3(
-    cur,
-    hand_db_id: int,
-    parsed: dict,
-    hero_name: str,
-    has_showdown: bool,
-    raw_text: str,
-) -> int:
-    """
-    Cria rows em hand_villains para uma mao HM3 (.bat import path).
-
-    Dispatcher:
-      - has_showdown=True: iterar parsed["all_players"] e pegar nao-hero com
-        pdata["cards"] preenchido (showdown-based).
-      - has_showdown=False: fallback para _detect_vpip_hm3 (VPIP preflop).
-
-    Idempotente via ON CONFLICT DO NOTHING no UNIQUE parcial
-    uq_hand_villains_hand_db_player (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL.
-
-    Sem screenshot em HM3: bounty_pct e country ficam NULL.
-    mtt_hand_id=NULL explicito (nao passa pelo pipeline MTT).
-
-    Retorna numero de rows realmente inseridas (cur.rowcount acumulado).
-    """
-    # GG anonimizada: raw so tem hashes, nao nicks. Inserir hashes em
-    # hand_villains viola o invariante A∨B∨C∨D. O SS pipeline (Discord/upload)
-    # e o ja-idempotente _create_villains_for_hand cobrem GG com match;
-    # sem match, invariante diz "sem villain". Saltar em ambos os casos.
-    if parsed.get("site") == "GGPoker":
-        return 0
-
-    from app.hero_names import HERO_NAMES
-    from app.services.hand_service import _classify_villain_categories, _is_anon_hash
-
-    # ── Carregar hand_meta para regras A∨B∨C∨D (Tech Debt #4) ──
-    # Tech Debt #9: usar `cur` da transação actual (mesma do INSERT em hands)
-    # em vez de abrir conexão nova — read committed isolation não veria a
-    # hand recém-inserida ainda not-committed.
-    hand_meta = {}
-    cur.execute(
-        """SELECT hm3_tags, discord_tags, has_showdown,
-                  player_names->>'match_method' AS match_method
-           FROM hands WHERE id = %s""",
-        (hand_db_id,)
-    )
-    row = cur.fetchone()
-    if row:
-        hand_meta = dict(row)
-
-    all_players = parsed.get("all_players") or {}
-    inserted = 0
-
-    def _clean_pos(p):
-        return p if p and p != "?" else None
-
-    # Construir candidates: non-hero com showdown cards OR VPIP preflop
-    candidates: list[dict] = []  # {name, position, stack, has_cards, has_vpip, vpip_action}
-
-    # SD candidates (com cards)
-    sd_names = set()
-    for name, pdata in all_players.items():
-        if name == "_meta" or not isinstance(pdata, dict):
-            continue
-        if pdata.get("is_hero"):
-            continue
-        if hero_name and name == hero_name:
-            continue
-        cards = pdata.get("cards")
-        if cards:
-            sd_names.add(name)
-            candidates.append({
-                "name": name,
-                "position": _clean_pos(pdata.get("position")),
-                "stack": pdata.get("stack"),
-                "has_cards": True,
-                "has_vpip": False,  # preencher abaixo se aplicável
-                "vpip_action": ", ".join(cards),
-            })
-
-    # VPIP candidates (preflop) — adicionar novos OR marcar has_vpip nos existentes
-    vpip_by_name = _detect_vpip_hm3(raw_text, hero_name)
-    for name, action in vpip_by_name.items():
-        if hero_name and name == hero_name:
-            continue
-        pdata = all_players.get(name) if isinstance(all_players.get(name), dict) else {}
-        if pdata and pdata.get("is_hero"):
-            continue
-        if name in sd_names:
-            for c in candidates:
-                if c["name"] == name:
-                    c["has_vpip"] = True
-                    break
-            continue
-        candidates.append({
-            "name": name,
-            "position": _clean_pos(pdata.get("position")),
-            "stack": pdata.get("stack"),
-            "has_cards": False,
-            "has_vpip": True,
-            "vpip_action": action,
-        })
-
-    for c in candidates:
-        player_name = c["name"]
-        # Filtros: HERO_NAMES puros excluídos; FRIEND_HEROES incluídos via regra D.
-        # Hashes anónimos GG saltados (mas GG já foi early-return acima).
-        if player_name.lower() in HERO_NAMES:
-            continue
-        if _is_anon_hash(player_name):
-            continue
-
-        cats = _classify_villain_categories(
-            hand_meta, player_name, c["has_cards"], c["has_vpip"]
-        )
-        if not cats:
-            continue
-
-        for cat in cats:
-            cur.execute(
-                """INSERT INTO hand_villains
-                       (hand_db_id, player_name, position, stack, vpip_action,
-                        mtt_hand_id, category)
-                   VALUES (%s, %s, %s, %s, %s, NULL, %s)
-                   ON CONFLICT (hand_db_id, player_name, category)
-                   WHERE hand_db_id IS NOT NULL DO NOTHING""",
-                (hand_db_id, player_name, c["position"], c["stack"], c["vpip_action"], cat),
-            )
-            if cur.rowcount > 0:
-                inserted += 1
-
-    return inserted
 
 
 # ── CSV Import ────────────────────────────────────────────────────────────────
@@ -1079,22 +929,6 @@ async def import_hm3(
                     from app.services.villain_rules import apply_villain_rules
                     apply_villain_rules(existing["id"], conn=conn)
 
-                    # Extract villains for nota++ hands (existing too)
-                    if any("nota" in t.lower() for t in hm3_tags_clean):
-                        dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
-                        hero = dealt_m.group(1) if dealt_m else None
-                        vpip_players = _detect_vpip_hm3(parsed.get("raw", ""), hero)
-                        for vp_name in vpip_players:
-                            cur.execute(
-                                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                                   VALUES (%s, %s, 1, NOW())
-                                   ON CONFLICT (site, nick) DO UPDATE SET
-                                       hands_seen = villain_notes.hands_seen + 1,
-                                       updated_at = NOW()""",
-                                (site_name, vp_name)
-                            )
-                            villains_created += 1
-
                     skipped += 1
                     continue
 
@@ -1198,27 +1032,6 @@ async def import_hm3(
                 # Regra D (FRIEND_HEROES sem tag/showdown).
                 from app.services.villain_rules import apply_villain_rules
                 apply_villain_rules(hand_db_id, conn=conn)
-
-                # Extract villains for nota++ hands
-                if any("nota" in t.lower() for t in hm3_tags_clean):
-                    hero_name = parsed.get("raw", "")
-                    dealt_m = re.search(r"Dealt to (\S+)", parsed.get("raw", ""))
-                    hero = dealt_m.group(1) if dealt_m else None
-                    vpip_players = _detect_vpip_hm3(parsed.get("raw", ""), hero)
-                    for vp_name, vp_action in vpip_players.items():
-                        # Get position from all_players
-                        vp_info = all_players.get(vp_name, {})
-                        vp_pos = vp_info.get("position", "?") if isinstance(vp_info, dict) else "?"
-                        # Auto-populate villain_notes
-                        cur.execute(
-                            """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                               VALUES (%s, %s, 1, NOW())
-                               ON CONFLICT (site, nick) DO UPDATE SET
-                                   hands_seen = villain_notes.hands_seen + 1,
-                                   updated_at = NOW()""",
-                            (site_name, vp_name)
-                        )
-                        villains_created += 1
 
         conn.commit()
     except Exception as e:

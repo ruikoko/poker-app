@@ -828,104 +828,6 @@ def _upload_screenshot_to_storage(image_bytes: bytes, filename: str) -> str | No
 _vision_sem = asyncio.Semaphore(2)
 
 
-def _maybe_create_rule_c_villain_for_hand(
-    entry_id: int,
-    hand_db_id: int,
-    vision_players=None,
-    hero_name=None,
-    vision_sb=None,
-    vision_bb=None,
-    file_meta=None,
-) -> None:
-    """
-    Avalia regra C de villain-eligibility (docs/VISAO_PRODUTO.md secção
-    Vilões: 'nota' em discord_tags + match real) e dispara
-    _create_villains_for_hand quando aplicável. Idempotente — não cria se
-    a hand já tem hand_villains.
-
-    Quando vision_players/hero/sb/bb/file_meta vêm None, são lidos de
-    entry.raw_json (caso backfill_ggdiscord, onde Vision já correu antes
-    e os dados estão persistidos).
-    """
-    rows = query(
-        "SELECT discord_tags, player_names, raw, has_showdown FROM hands WHERE id = %s",
-        (hand_db_id,),
-    )
-    if not rows:
-        return
-    row = rows[0]
-
-    discord_tags = list(row["discord_tags"] or [])
-    pn = row["player_names"] or {}
-    if isinstance(pn, str):
-        try:
-            pn = json.loads(pn)
-        except Exception:
-            pn = {}
-    match_method = pn.get("match_method") if isinstance(pn, dict) else None
-    hand_raw = row["raw"] or ""
-
-    if 'nota' not in discord_tags:
-        return
-    if not match_method or not hand_raw:
-        return
-
-    already = query(
-        "SELECT 1 FROM hand_villains WHERE hand_db_id = %s LIMIT 1",
-        (hand_db_id,),
-    )
-    if already:
-        return
-
-    if vision_players is None:
-        ent_rows = query(
-            "SELECT raw_json FROM entries WHERE id = %s",
-            (entry_id,),
-        )
-        rj = (ent_rows[0]["raw_json"] if ent_rows else None) or {}
-        if isinstance(rj, str):
-            try:
-                rj = json.loads(rj)
-            except Exception:
-                rj = {}
-        vision_players = rj.get("players_list") or []
-        hero_name = rj.get("hero")
-        vision_sb = rj.get("vision_sb")
-        vision_bb = rj.get("vision_bb")
-        file_meta = rj.get("file_meta") or {}
-
-    try:
-        from app.routers.mtt import _parse_mtt_hand, _create_villains_for_hand
-        parsed = _parse_mtt_hand(hand_raw)
-        if not parsed:
-            return
-        screenshot_data = {
-            "entry_id": entry_id,
-            "players_list": vision_players,
-            "players_by_position": {},
-            "hero": hero_name,
-            "vision_sb": vision_sb,
-            "vision_bb": vision_bb,
-            "file_meta": file_meta,
-        }
-        conn2 = get_conn()
-        try:
-            _create_villains_for_hand(
-                conn2, parsed, screenshot_data,
-                hand_db_id=hand_db_id,
-                showdown_only=bool(row["has_showdown"]),
-            )
-            conn2.commit()
-            logger.info(f"[bg] Rule-C villain created for hand {hand_db_id} via entry {entry_id}")
-        except Exception as e:
-            conn2.rollback()
-            logger.error(f"[bg] villain create rule-C trigger failed hand={hand_db_id}: {e}")
-        finally:
-            conn2.close()
-    except Exception as e:
-        logger.error(f"[bg] villain rule-C gate failed entry={entry_id}: {e}")
-
-
 def _link_second_discord_entry_to_existing_hand(
     entry_id: int,
     hand_db_id: int,
@@ -941,7 +843,8 @@ def _link_second_discord_entry_to_existing_hand(
       1. Append do canal desta entry a hands.discord_tags (idempotente, via
          hand_service.append_discord_channel_to_hand).
       2. Mark entries.status='resolved' (feito pelo mesmo helper).
-      3. Avalia regra C villain via _maybe_create_rule_c_villain_for_hand.
+      3. Aplica regras canónicas A∨C∨D via apply_villain_rules
+         (services/villain_rules.py).
     entry_id da 1ª entry é preservado — primeiro ingress continua a ser a
     fonte primária da hand.
     """
