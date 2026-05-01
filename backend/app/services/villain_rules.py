@@ -159,9 +159,12 @@ def _build_candidates(hand: dict) -> list[dict]:
         if isinstance(vp, dict)
     }
 
-    has_nota_hm3 = any(
-        (t or "").lower().startswith("nota")
-        for t in (hand.get("hm3_tags") or [])
+    # #B19 (REGRAS_NEGOCIO.md §3.3): tag 'nota' (HM3 ou canal Discord)
+    # sinaliza intenção explícita do Rui de criar villain. Alargar
+    # candidates a postflop-only nesses casos.
+    has_nota_intent = (
+        any((t or "").lower().startswith("nota") for t in (hand.get("hm3_tags") or []))
+        or 'nota' in (hand.get("discord_tags") or [])
     )
 
     candidates: list[dict] = []
@@ -187,7 +190,7 @@ def _build_candidates(hand: dict) -> list[dict]:
         has_postflop = any(actions.get(s) for s in ("flop", "turn", "river"))
 
         eligible = has_cards or has_vpip
-        if not eligible and has_nota_hm3 and has_postflop:
+        if not eligible and has_nota_intent and has_postflop:
             eligible = True
         if not eligible:
             continue

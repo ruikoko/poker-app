@@ -64,14 +64,18 @@ def _classify_villain_categories(
       Lista ordenada de categorias (set→sorted) — INSERT determinístico.
       [] se nem VPIP nem cards (não é villain a registar).
     """
-    # #B19 (REGRAS_NEGOCIO.md §3.3 + caso canónico 2): excepção à pré-condição.
-    # Quando a mão tem tag HM3 'nota%' (intenção explícita do Rui de marcar
-    # villain), aceitar non-hero sem VPIP nem cards — basta ter sido adicionado
-    # pelo alargamento postflop em mtt._create_villains_for_hand. Apenas para
-    # tag HM3 'nota%'; Discord e outros casos mantêm pré-condição original.
+    # #B19 (REGRAS_NEGOCIO.md §3.3): excepção à pré-condição quando o Rui marca
+    # explicitamente a mão para Vilões — via tag HM3 'nota%' OU canal Discord
+    # 'nota'. Em ambos os casos a intenção é idêntica: estudar adversário,
+    # mesmo sem showdown e mesmo se non-hero só agiu postflop (line/sizing
+    # notável seguido de fold sem chegar a SD).
     hm3_tags_for_gate = hand_meta.get('hm3_tags') or []
-    has_hm3_nota = any((t or '').lower().startswith('nota') for t in hm3_tags_for_gate)
-    if not (has_cards or has_vpip) and not has_hm3_nota:
+    discord_tags_for_gate = hand_meta.get('discord_tags') or []
+    has_nota_intent = (
+        any((t or '').lower().startswith('nota') for t in hm3_tags_for_gate)
+        or 'nota' in discord_tags_for_gate
+    )
+    if not (has_cards or has_vpip) and not has_nota_intent:
         return []
 
     from app.hero_names import FRIEND_HEROES
