@@ -839,13 +839,21 @@ def backfill_ggdiscord(
                 # VISAO_PRODUTO.md). Helper centralizado garante idempotência e
                 # marca entry resolved.
                 from app.services.hand_service import append_discord_channel_to_hand
-                from app.routers.screenshot import _maybe_create_rule_c_villain_for_hand
+                from app.services.villain_rules import apply_villain_rules
                 res = append_discord_channel_to_hand(existing_hand[0]["id"], entry_id)
                 if res["resolved"]:
                     linked += 1
-                    # Regra C villain: se o append trouxe 'nota' e a hand já
-                    # tem raw HH real, dispara create villains.
-                    _maybe_create_rule_c_villain_for_hand(entry_id, existing_hand[0]["id"])
+                    # ONDA 2 #B23 refactor: substitui _maybe_create_rule_c_villain_for_hand
+                    # pela função canónica apply_villain_rules. Lê discord_tags
+                    # já apendado por append_discord_channel_to_hand acima e
+                    # aplica A∨C∨D internamente.
+                    try:
+                        apply_villain_rules(existing_hand[0]["id"])
+                    except Exception as e:
+                        logger.error(
+                            f"apply_villain_rules failed hand={existing_hand[0]['id']} "
+                            f"entry={entry_id}: {e}"
+                        )
                 else:
                     failed.append({"id": entry_id, "error": "append helper failed"})
                 continue
