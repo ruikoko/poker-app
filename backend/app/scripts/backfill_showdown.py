@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from app.db import get_conn, query
 from app.parsers.gg_hands import parse_hands as gg_parse_hands
-from app.routers.mtt import _create_villains_for_hand
+from app.services.villain_rules import apply_villain_rules
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backfill_showdown")
@@ -87,9 +87,14 @@ def run():
                     "file_meta": player_names.get("file_meta") or {},
                 }
 
-                # Create villains using showdown mode
+                # ONDA 5 #B23 refactor: substitui _create_villains_for_hand pela
+                # função canónica apply_villain_rules. Flag showdown_only=True
+                # deprecada — apply_villain_rules trata showdown naturalmente
+                # via has_cards no candidate building (per comment legacy
+                # mtt.py:646-648: regra A∨C∨D já lida com ambos os modos).
                 try:
-                    n = _create_villains_for_hand(conn, parsed, screenshot_data, hand_db_id=hand_db_id, showdown_only=True)
+                    result = apply_villain_rules(hand_db_id, conn=conn)
+                    n = result["n_villains_created"]
                     created_total += n
                     if n > 0 and (i < 5 or i % 50 == 0):
                         logger.info(f"[{i+1}/{len(showdown_hands)}] Hand {hand_db_id}: created {n} showdown villains.")

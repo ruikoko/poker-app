@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from app.db import get_conn, query
 from app.parsers.gg_hands import parse_hands as gg_parse_hands
-from app.routers.mtt import _create_villains_for_hand
+from app.services.villain_rules import apply_villain_rules
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("refix_villains")
@@ -141,8 +141,11 @@ def run():
                 # Idempotency: delete existing villains for this hand_db_id
                 cur.execute("DELETE FROM hand_villains WHERE hand_db_id = %s", (hand_db_id,))
                 
-                # Create villains
-                n = _create_villains_for_hand(conn, parsed, screenshot_data, hand_db_id=hand_db_id)
+                # ONDA 5 #B23 refactor: substitui _create_villains_for_hand pela
+                # função canónica apply_villain_rules. DELETE precedente continua
+                # a garantir clear+rebuild semantic.
+                result = apply_villain_rules(hand_db_id, conn=conn)
+                n = result["n_villains_created"]
                 created_total += n
                 logger.info(f"Hand {hand_db_id}: created {n} villains.")
                 
