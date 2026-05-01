@@ -1303,8 +1303,17 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     existing_mm = (
         pn_existing.get("match_method") if isinstance(pn_existing, dict) else None
     )
+    existing_anon_map = (
+        pn_existing.get("anon_map") if isinstance(pn_existing, dict) else None
+    )
     raw_already_present = bool((matched_hand.get("raw") or "").strip())
-    if existing_mm == "anchors_stack_elimination_v2" and raw_already_present:
+    # Fix #B32: guard idempotência exige anon_map populado para considerar
+    # enrich completo. Sem isto, hands com match_method='v2' mas anon_map={}
+    # (estado degenerate causado por enrich correr quando apa só tinha _meta)
+    # ficavam presas — re-enrich nunca corria, apa permanecia com hashes.
+    if (existing_mm == "anchors_stack_elimination_v2"
+            and raw_already_present
+            and existing_anon_map):
         # Marcar entry como resolved (semântica preservada) e retornar.
         conn = get_conn()
         try:
@@ -1339,7 +1348,12 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
             pn_old = json.loads(pn_old)
         except (ValueError, TypeError):
             pn_old = {}
-    if has_real_hh:
+    # Fix #B32: só promover a match_method='v2' quando anon_map foi de facto
+    # produzido. _build_anon_to_real_map devolve {} quando apa só tem _meta
+    # (placeholder Discord, antes do parse completar). Gravar 'v2' nesse caso
+    # é falso positivo: o guard idempotência depois fecha a porta para re-
+    # correr quando apa já foi populada com hashes via outro caminho.
+    if has_real_hh and anon_map:
         match_method_value = "anchors_stack_elimination_v2"
     else:
         # Preservar match_method existente do placeholder (ex:
