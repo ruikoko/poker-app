@@ -226,4 +226,4 @@ Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` d
 
 ---
 
-Última sessão fechada: pt9 (30 Abril 2026, commit `ab8e033`).
+Última sessão fechada: pt10 (1 Maio 2026 madrugada, commit `677a1fb`).

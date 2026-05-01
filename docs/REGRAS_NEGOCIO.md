@@ -130,9 +130,11 @@ Critérios de elegibilidade (regras canónicas A∨C∨D — `_classify_villain_
 
 **Pré-condição padrão** do classificador: villain tem `has_cards` (showdown) OU `has_vpip` (call/raise/bet preflop). Sem nenhuma das duas evidências, normalmente não é villain a registar.
 
-**Excepção #B19 (pt9)** — quando a mão tem tag HM3 `nota%`, a pré-condição é ignorada: qualquer non-hero que **viu o flop** (acção em street ≠ `preflop` no `all_players_actions`) é elegível, mesmo sem VPIP nem cards. Justificação: a tag explícita do Rui é sinal de intenção — se ele marcou a mão para Vilões, o non-hero relevante pode ser o BB que fez check preflop e agiu postflop sem chegar a SD. Sem esta excepção, perdiam-se 2/140 mãos `nota%` na BD.
+**Excepção #B19** (pt9, estendida em pt10) — quando a mão tem tag HM3 `nota%` **OU** `'nota' ∈ discord_tags`, a pré-condição é ignorada: qualquer non-hero que **viu o flop** (acção em street ≠ `preflop` no `all_players_actions`) é elegível, mesmo sem VPIP nem cards. Justificação: a tag `nota` (HM3 ou canal Discord) é sinal de intenção explícita do Hero — quer estudar o adversário, mesmo sem showdown, mesmo se o non-hero só agiu postflop (ex: line/sizing notável seguido de fold sem chegar a SD).
 
-**Implementação** da excepção: alargamento de candidates em `_create_villains_for_hand` (`backend/app/routers/mtt.py`) + bypass da pré-condição em `_classify_villain_categories` (`backend/app/services/hand_service.py`). Escopo restrito a tag HM3 `nota%` — Discord e outras tags mantêm pré-condição original.
+**Implementação:** `backend/app/services/villain_rules.py` (`apply_villain_rules` — função canónica única após refactor #B23). Excepção aplicada em 2 sítios:
+- `_classify_villain_categories` (`hand_service.py`): bypass da pré-condição `has_cards∨has_vpip` quando há `has_nota_intent` (variável agnóstica de origem; pt10 unificou `has_nota_hm3` + verificação Discord).
+- `_build_candidates` (`villain_rules.py`): alarga candidates a postflop-only nesses casos.
 
 ### 3.4. Regra de Cross-post Discord
 
@@ -219,3 +221,9 @@ Exemplo: `Tournament 12345 — $30,000 GTD`.
 - Estudo de população (mãos GG sem tag — Caso 7/8).
 - GTO Brain (documentado separadamente).
 - Integração GTOWizard / HRC.
+
+---
+
+## 8. Limitações conhecidas
+
+- **Path bulk archive (`mtt_hand_id` legacy) NÃO usa `apply_villain_rules`.** 4 call sites em `backend/app/routers/mtt.py` (linhas 1264, 1882, 2202, 2297) e 1 chamada interna em `_create_villains_for_hand` legacy continuam a passar `mtt_hand_id` em vez de `hand_db_id`. Esses caminhos correspondem ao path bulk archive de `mtt_hands` (table separada de `hands`) e não estão no fluxo principal pós-pt10. Merecem revisão futura — ou migrar para `hand_db_id` quando promovidos a `hands`, ou remover se `mtt_hands` for deprecado.
