@@ -1259,11 +1259,15 @@ async def import_mtt(
                 
                 # Criar villains se houver screenshot
                 if has_screenshot and h.get("vpip_seats"):
-                    # Use mtt_hand_id for legacy FK, hands_id for new FK
+                    # ONDA 4 #B23: branch mtt_hand_id legacy mantém função antiga
+                    # (apply_villain_rules não aceita mtt_hand_id — path bulk
+                    # archive). Branch hand_db_id migra para apply_villain_rules.
                     if mtt_hand_id:
                         n = _create_villains_for_hand(conn, h, screenshot, mtt_hand_id=mtt_hand_id)
                     else:
-                        n = _create_villains_for_hand(conn, h, screenshot, hand_db_id=hands_id)
+                        from app.services.villain_rules import apply_villain_rules
+                        result = apply_villain_rules(hands_id, conn=conn)
+                        n = result["n_villains_created"]
                     villains_created += n
                     if n > 0:
                         matched += 1
@@ -1912,14 +1916,12 @@ async def rematch_screenshots(
                         ss_entry["id"], hand_rows[0]["id"], raw
                     )
 
-                    # Criar villain_notes por VPIP (helper partilhado com HH→SS).
-                    villains_created += _create_ggpoker_villain_notes_for_hand(
-                        conn,
-                        hand_db_id=hand_rows[0]["id"],
-                        players_list=raw.get("players_list", []),
-                        hero_name=raw.get("hero", ""),
-                        screenshot_data=raw,
-                    )
+                    # ONDA 4 #B23: substitui _create_ggpoker_villain_notes_for_hand
+                    # pela função canónica apply_villain_rules. Lê players_list e
+                    # screenshot data de hands/entries internamente.
+                    from app.services.villain_rules import apply_villain_rules
+                    result = apply_villain_rules(hand_rows[0]["id"], conn=conn)
+                    villains_created += result["n_villains_created"]
 
                     matched += 1
                     promoted += 1
@@ -2046,13 +2048,11 @@ async def rematch_screenshots(
                 from app.routers.screenshot import _enrich_hand_from_orphan_entry
                 _enrich_hand_from_orphan_entry(ss_entry_hh["id"], h["id"], ss_raw)
 
-                hh_to_ss_villains += _create_ggpoker_villain_notes_for_hand(
-                    conn,
-                    hand_db_id=h["id"],
-                    players_list=ss_raw.get("players_list", []),
-                    hero_name=ss_raw.get("hero", ""),
-                    screenshot_data=ss_raw,
-                )
+                # ONDA 4 #B23: substitui _create_ggpoker_villain_notes_for_hand
+                # pela função canónica apply_villain_rules.
+                from app.services.villain_rules import apply_villain_rules
+                _result = apply_villain_rules(h["id"], conn=conn)
+                hh_to_ss_villains += _result["n_villains_created"]
                 hh_to_ss_matched += 1
                 logger.info(f"Rematch HH→SS: hand {h['id']} ({hand_id_str}) ← entry {ss_entry_hh['id']}")
             except Exception as e:
