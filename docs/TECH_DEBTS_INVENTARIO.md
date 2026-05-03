@@ -1,8 +1,68 @@
-# Inventário Tech Debts — 30-Abr 2026 pt8 (fechada)
+# Inventário Tech Debts — 1-Mai 2026 pt10 (fechada)
 
 Compilação read-only baseada em journals (23-24 Abr → 29-Abr pt6), VALIDACAO_END_TO_END §6/§7/§11, MAPA_ACOPLAMENTO, git log, e leitura directa do código.
 
 Substitui os fragmentos espalhados pelos vários docs como **single source of truth** sobre tech debts pendentes. Para descrição detalhada de cada fix fechado, consultar journal/commit correspondente.
+
+---
+
+## Estado actual (1 Maio 2026 fim pt10)
+
+- **Sessões pt9 + pt10 fecharam:** #B12, #B14, #B15, #B16, #B17, #B18, #B19, #B19-ext, #B23, #B27, #B32 (11 tech debts).
+- **Pendentes numerados pós-pt10:** #11, #B10, #B11, #B13, #B-edge, #13c, #B20, #B21, #B22, #B25, #B26, #B28, #B29, #B30, #B31, #B-NOVO-2.
+- **Pendentes não-numerados:** GTO 404 (router não wired em `main.py:include_router`), Stack inicial GG (não numerado), path bulk archive `mtt_hand_id` legacy (4 call sites em `mtt.py` — REGRAS §8).
+- **Onda 8 e 9 do refactor #B23 ficaram em estado "parcial":** teste regressão (delete + re-import GG ZIP) e validação manual visual SS↔HH adiados para pt11.
+
+### Tech Debts fechados pt9 (carry-over de pt8)
+
+| # | Hash(es) | Descrição |
+|---|---|---|
+| **#B12** ✅ | (pt9) | Helper centralizado `append_discord_channel_to_hand` propaga `discord_tags` mesmo em hands GG sem match. |
+| **#B14** ✅ | (pt9) | Estudo aceitava mãos sem `tournament_name`/`buy_in`/`site` — resolvido na sequência de #B17 (filtros `STUDY_VIEW_*` consolidados). |
+| **#B15** ✅ | `1cca3a6` | Estudo passa a excluir mãos só com tag `nota` (HM3 ou Discord). Caso 2 e 5 dos canónicos. |
+| **#B16** ✅ | (pt9) | `_apply_channel_tags` cross-post HH text — coberto pelo helper centralizado #B12. |
+| **#B17** ✅ | `7806d33` | Estudo unifica tags HM3 + Discord (1 chip por nome normalizado), `OriginBadge` por mão, remove secções por origem. |
+| **#B18** ✅ | (pt9) | Drill-down torneio passa a mostrar `OriginBadge` por mão (consistência com Estudo pós-#B17). |
+| **#B19** ✅ | `ca9fbc3` + `f0b778d` + `ab8e033` | Vilões aceita non-hero postflop quando `hm3_tags ~ 'nota%'`; bypass da pré-condição `has_cards∨has_vpip`. (estendida em pt10 — ver #B19-ext) |
+
+### Tech Debts fechados pt10
+
+| # | Hash(es) | Descrição |
+|---|---|---|
+| **#B10** ✅ (mínimo) | `66db5cc` | Persistir `tournament_name` extraído por Vision em `entries.raw_json` (1 linha em `_run_vision_for_entry`). SS uploaded a partir deste commit. Backfill diferido. |
+| **#B23** ✅ | `abb6d59` → `8476e87` (8 commits) | Refactor completo: 4 funções de criação de villains → 1 canónica `apply_villain_rules` em `services/villain_rules.py`. 18 call sites unificados (12 migrados, 5 skips legacy `mtt_hand_id` + 1 interno). ~470 linhas líquidas removidas. Resolveu Regra C não-disparada no caminho Discord+ZIP. |
+| **#B27** ✅ | `8476e87` | Apagados blocos "Extract villains for nota++ hands" em `hm3.py` + função `_detect_vpip_hm3` redundante. Incluído na Onda 6 do refactor #B23. |
+| **#B32** ✅ | `5fe2201` | Enrich SS↔HH não grava mais `match_method='anchors_stack_v2'` com `anon_map` vazio. Guard idempotência verifica também `existing_anon_map` populado. Defesa em camadas: previne novas + cura estado existente quando auto-rematch revisita. |
+| **#B19-ext** ✅ | `677a1fb` | Excepção #B19 estendida a `'nota' ∈ discord_tags` (paridade semântica com tag HM3 `nota%`). Variável renomeada `has_nota_hm3` → `has_nota_intent`. Hand 261 passou a ter villains. |
+
+### Tech Debts abertos pós-pt10 (carry-over + novos)
+
+| ID | Título | Severidade | Origem | Esforço |
+|---|---|---|---|---|
+| **#11** | Botão eliminar villain manualmente do modal HandDetailPage | 🟡 UX | pt7 | ~2-3h |
+| **#B10** (full) | Vision galeria — extrair `tournament_name` para filtragem (fix mínimo já aplicado) | 🟢 UX | pt7 | ~2-3h |
+| **#B11** | Auto-tag mãos via LLM (ideia exploratória) | 🟢 Feature | pt7 | ~3-4h |
+| **#B13** | Contadores `last_sync` (N/M/K) medem entries criadas em vez de trabalho útil | 🟢 UX | pt8 | ~1h |
+| **#B-edge** | Hero detection seat não-central (1/23 ≈ 4.3% taxa) | 🟢 Edge case | pt7 | ~30 min |
+| **#13c** | Housekeeping aliases SITE_COLORS legacy | 🟢 Housekeeping | pt7 | ~10-15 min |
+| **#B20** | Filtros HM3 por tag (não por nick) | 🟢 UX | pt10 | a estimar |
+| **#B21** | Dashboard "por estudar" filtrar por elegibilidade | 🟢 UX | pt10 | a estimar |
+| **#B22** | Dashboard reordenar painéis (SS debaixo de Total mãos) | 🟢 UX | pt10 | a estimar |
+| **#B25** | Agrupar torneios por `tournament_id` (data 1ª mão cronológica) | 🟢 UX | pt10 | a estimar |
+| **#B26** | Investigar cor das TAGS na secção Estudo | 🟢 UX | pt10 | a estimar |
+| **#B28** | Validar contadores UI pós-refactor #B23 (semântica `villains_created` mudou: rows `hand_villains` vs UPSERTs `villain_notes`) | 🟡 Funcional | pt10 | a estimar |
+| **#B29** | `villain_notes.hands_seen` double-count em refix (pré-existente, não regressão) | 🟡 Funcional | pt10 | a estimar |
+| **#B30** | Scripts ad-hoc obsoletos (`revalidate_techdebt16`, `simulate_create_villains_hm3`) — partem após ONDA 6 do refactor mas não são corridos | 🟢 Housekeeping | pt10 | ~15 min |
+| **#B31** | `MAPA_ACOPLAMENTO.md` actualizar para reflectir refactor #B23 (§7.4-§7.5 stale) | 🟢 Docs | pt10 | ~1h |
+| **#B-NOVO-2** | `_build_anon_to_real_map` em estado degenerate (parcialmente resolvido por #B32, mas merece investigação dedicada se re-aparecer) | 🟡 Funcional latente | pt10 | a investigar |
+| **GTO 404** | Router em `gto.py` existe mas não está registado em `main.py:include_router` | 🟢 | pré-pt7 | ~5 min |
+| **Stack inicial GG** | (não numerado, carry-over) | 🟢 | pré-pt8 | a estimar |
+| **`mtt_hand_id` legacy** | 4 call sites em `mtt.py` (linhas 1264, 1882, 2202, 2297) ainda passam `mtt_hand_id` em vez de `hand_db_id`. REGRAS §8. | 🟢 Refactor | pt10 | a estimar |
+
+### Pendente operacional pt11
+
+- **Onda 8** — teste regressão (delete + re-import GG ZIP) confirma que pipeline produz mesmo resultado em re-execução.
+- **Onda 9** — validação manual visual SS↔HH (Rui escolhe 3-4 hands ao calhas, valida visualmente que nicks atribuídos batem com imagem do SS).
 
 ---
 
