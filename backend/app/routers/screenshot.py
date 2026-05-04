@@ -1337,6 +1337,16 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
             "anon_map": {},
         }
 
+    # #B-NOVO-2: assert defensivo. _build_anon_to_real_map retorna {} silently
+    # quando apa só tem _meta (placeholder Discord pré-HH) — era a precondição
+    # do bug #B32. Hoje #B32 cobre set+guard; chegar aqui com apa placeholder-
+    # only é sinal de bug upstream. Falha explícita > silent skip.
+    if not [k for k in (all_players_raw or {}) if k != "_meta"]:
+        raise ValueError(
+            f"_enrich_hand_from_orphan_entry: hand_db_id={hand_db_id} apa "
+            f"placeholder-only (só _meta) — bug upstream, não devia chegar aqui."
+        )
+
     # Novo algoritmo v2: âncoras + stack esperado + eliminação
     anon_map = _build_anon_to_real_map(matched_hand, raw_json)
     enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json)
