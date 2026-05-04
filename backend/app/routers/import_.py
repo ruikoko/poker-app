@@ -355,6 +355,28 @@ async def import_file(
         except Exception as e:
             logger.warning(f"[import] Falhou UPDATE status entry {entry_id}: {e}")
 
+        # ── Upsert tournaments_meta para TMs afectados ──
+        # Após inserir hands, recalcula metadata canónica per-TM
+        # (starting_stack, name, buy_in, format, currency). Idempotente.
+        try:
+            from app.services.tournament_meta import upsert_tournament_meta
+            tms_affected = query(
+                """SELECT DISTINCT tournament_number, site
+                     FROM hands
+                    WHERE entry_id = %s
+                      AND tournament_number IS NOT NULL""",
+                (entry_id,),
+            )
+            for r in tms_affected:
+                try:
+                    upsert_tournament_meta(r["tournament_number"], r["site"])
+                except Exception as e:
+                    logger.warning(
+                        f"[import] upsert_tournament_meta falhou tm={r['tournament_number']}: {e}"
+                    )
+        except Exception as e:
+            logger.warning(f"[import] tournaments_meta hook falhou: {e}")
+
         # ── Auto-rematch de screenshots órfãos ──
         rematched = []
         migrated_to_study = 0

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { hands, equity, screenshots } from '../api/client'
+import { hands, equity, screenshots, tournaments } from '../api/client'
 import Replayer from '../components/Replayer'
 import { isHero } from '../heroNames'
 import TagEditor from '../components/TagEditor'
@@ -895,7 +895,7 @@ function TierCollapsible({ label, subtitle, count, defaultOpen = false, children
 }
 
 
-function TagGroup({ normKey, displayName, variants, sources, count, wins, losses, totalBB, filters, studyView, onOpenDetail, onDeleteHand }) {
+function TagGroup({ normKey, displayName, variants, sources, count, wins, losses, totalBB, filters, studyView, onOpenDetail, onDeleteHand, tournamentsMeta = {} }) {
   const [open, setOpen] = useState(false)
   const [tagHands, setTagHands] = useState([])
   const [loadingHands, setLoadingHands] = useState(false)
@@ -1095,14 +1095,19 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
               const showHrc = displayName && ICM_TAGS.has(displayName)
 
               const tournamentNumber = tHands.find(h => h.tournament_number)?.tournament_number || null
-              // #B25: SI usa 1ª hand cronológica do bucket (já calculada em ent.handsAsc).
+              // #SI: lookup canónico em tournaments_meta. Fallback ao cálculo
+              // client-side (1ª hand cronológica) se cache miss — graceful.
               let siHero = null
-              const firstHand = ent.handsAsc?.[0]
-              if (firstHand?.site === 'GGPoker') {
-                const apa = firstHand?.all_players_actions || {}
-                for (const [pname, info] of Object.entries(apa)) {
-                  if (pname === '_meta') continue
-                  if (info?.is_hero) { siHero = info.stack || null; break }
+              if (tournamentNumber && tournamentsMeta[tournamentNumber]) {
+                siHero = tournamentsMeta[tournamentNumber].starting_stack || null
+              } else {
+                const firstHand = ent.handsAsc?.[0]
+                if (firstHand?.site === 'GGPoker') {
+                  const apa = firstHand?.all_players_actions || {}
+                  for (const [pname, info] of Object.entries(apa)) {
+                    if (pname === '_meta') continue
+                    if (info?.is_hero) { siHero = info.stack || null; break }
+                  }
                 }
               }
 
@@ -1334,6 +1339,13 @@ export default function HandsPage() {
   const [loading, setLoading]     = useState(false)
   const [selected, setSelected]   = useState(null)
   const [viewMode, setViewMode]   = useState('tags') // 'tags' | 'tournament' | 'grid' | 'table'
+  // #SI: cache de tournaments_meta (lookup canónico de starting_stack/format/etc).
+  // Carregado uma vez por sessão. Frontend faz fallback ao cálculo client-side
+  // se cache miss, garantindo graceful degradation.
+  const [tournamentsMeta, setTournamentsMeta] = useState({})
+  useEffect(() => {
+    tournaments.meta().then(r => setTournamentsMeta(r.data || {})).catch(() => {})
+  }, [])
 
   // Vista "Por Tags": endpoint tag-groups com tag_source='auto' devolve
   // groups unificados (#B17, REGRAS_NEGOCIO.md §3.2.2). Backend agrega
@@ -1581,6 +1593,7 @@ export default function HandsPage() {
             studyView={true}
             onOpenDetail={openDetail}
             onDeleteHand={deleteHand}
+            tournamentsMeta={tournamentsMeta}
           />
         )
 
@@ -1641,15 +1654,19 @@ export default function HandsPage() {
               const losses = tHands.filter(h => h.result != null && Number(h.result) < 0).length
               const totalBB = tHands.reduce((a, h) => a + (Number(h.result) || 0), 0)
               const tournamentNumber = tHands.find(h => h.tournament_number)?.tournament_number || null
-              // SI canónica: 1ª hand cronológica do bucket
-              const sortedAsc = [...tHands].sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
-              const firstHand = sortedAsc[0]
+              // #SI: lookup canónico em tournaments_meta. Fallback client-side se miss.
               let siHero = null
-              if (firstHand?.site === 'GGPoker') {
-                const apa = firstHand?.all_players_actions || {}
-                for (const [pname, info] of Object.entries(apa)) {
-                  if (pname === '_meta') continue
-                  if (info?.is_hero) { siHero = info.stack || null; break }
+              if (tournamentNumber && tournamentsMeta[tournamentNumber]) {
+                siHero = tournamentsMeta[tournamentNumber].starting_stack || null
+              } else {
+                const sortedAsc = [...tHands].sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
+                const firstHand = sortedAsc[0]
+                if (firstHand?.site === 'GGPoker') {
+                  const apa = firstHand?.all_players_actions || {}
+                  for (const [pname, info] of Object.entries(apa)) {
+                    if (pname === '_meta') continue
+                    if (info?.is_hero) { siHero = info.stack || null; break }
+                  }
                 }
               }
               return (
