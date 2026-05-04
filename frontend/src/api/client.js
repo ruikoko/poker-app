@@ -54,6 +54,7 @@ export const tournaments = {
     ).toString()
     return req('GET', `/tournaments/${id}/hands${qs ? '?' + qs : ''}`)
   },
+  meta: (tms) => req('GET', `/tournaments/meta${tms && tms.length ? '?tms=' + tms.join(',') : ''}`),
 }
 
 // ── Hands ────────────────────────────────────────────────────────────────────
