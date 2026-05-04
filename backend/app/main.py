@@ -24,6 +24,7 @@ from app.routers.study import router as study_router, ensure_study_schema
 from app.routers.attachments import router as attachments_router
 from app.routers.images import router as images_router
 from app.routers.gto import router as gto_router
+from app.services.tournament_meta import ensure_tournaments_meta_schema
 
 load_dotenv()
 
@@ -221,6 +222,7 @@ async def lifespan(app: FastAPI):
     ensure_tournament_format_column()
     ensure_tournament_name_and_number_columns()
     ensure_hand_attachments_schema()
+    ensure_tournaments_meta_schema()
 
     # Arrancar bot Discord em background
     from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
