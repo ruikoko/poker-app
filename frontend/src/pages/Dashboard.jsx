@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { hands, study, screenshots, villains } from '../api/client'
-import { SITE_COLORS_DASHBOARD as SITE_COLORS } from '../lib/siteColors'
+import { SITE_COLORS } from '../lib/siteColors'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
