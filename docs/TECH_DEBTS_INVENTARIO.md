@@ -1,4 +1,4 @@
-# Inventário Tech Debts — 1-Mai 2026 pt10 (fechada)
+# Inventário Tech Debts — 3-Mai 2026 pt11 (parcial → pt12)
 
 Compilação read-only baseada em journals (23-24 Abr → 29-Abr pt6), VALIDACAO_END_TO_END §6/§7/§11, MAPA_ACOPLAMENTO, git log, e leitura directa do código.
 
@@ -6,12 +6,16 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (1 Maio 2026 fim pt10)
+## Estado actual (4 Maio 2026 pt12 inicial)
+
+pt11 documentada retrospectivamente (sessão real correu 3-Mai mas contexto perdeu-se antes do journal). Onda 9 (validação visual SS↔HH) executou e fechou — Rui validou 3/3 hands canal nota. Onda 8 (regressão delete+re-import GG ZIP) executou parcialmente: BD pós-re-import tem 1172 hands / 22 enriched / 45 villains, mas regrediu 1 das 7 nota-hands (`GG-5891409707`, id=2297 → `discord_tags=[]`, `mm=NULL`, 0 villains apesar de existir entry Discord id=30). Investigação da regressão e #B33 (a abrir) ficam para pt12.
 
 - **Sessões pt9 + pt10 fecharam:** #B12, #B14, #B15, #B16, #B17, #B18, #B19, #B19-ext, #B23, #B27, #B32 (11 tech debts).
 - **Pendentes numerados pós-pt10:** #11, #B10, #B11, #B13, #B-edge, #13c, #B20, #B21, #B22, #B25, #B26, #B28, #B29, #B30, #B31, #B-NOVO-2.
 - **Pendentes não-numerados:** GTO 404 (router não wired em `main.py:include_router`), Stack inicial GG (não numerado), path bulk archive `mtt_hand_id` legacy (4 call sites em `mtt.py` — REGRAS §8).
 - **Onda 8 e 9 do refactor #B23 ficaram em estado "parcial":** teste regressão (delete + re-import GG ZIP) e validação manual visual SS↔HH adiados para pt11.
+- **Onda 9 (pt11)** — Rui validou visualmente 3/3 hands canal nota (1070, 261, 878). Algoritmo SS↔HH confirmado correcto em prod. **ONDA 9 FECHADA ✓**
+- **Onda 8 (pt11)** — re-import GG ZIP correu 3-Mai 14:11 UTC. Resultado: 1172 hands (1127 GG + 45 Winamax), 22 GG enriched (vs 23 em pt10 — regrediu 1), 45 villains (vs 47 em pt10 — categories=`nota` apenas). 6/7 nota-hands recompostas correctamente; 7ª (`GG-5891409707`, id=2297) ficou sem `discord_tags`/`mm`/villains apesar de entry Discord existir. **Regressão #B33 a abrir em pt12.**
 
 ### Tech Debts fechados pt9 (carry-over de pt8)
 
