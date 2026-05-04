@@ -71,6 +71,11 @@ def upsert_tournament_meta(
     """
     Recalcula e persiste tournaments_meta para 1 (site, tournament_number).
 
+    GG-only: outras salas (Winamax/PS/WPN) entram via HM3 .bat com SÓ hands
+    tagadas — 1a hand cronologica em BD nao e a 1a real do torneio, logo
+    starting_stack seria mid-tournament. Skip explicito para nao corromper
+    semantica.
+
     Le de hands:
       - 1a hand cronologica do TM -> apa[hero].stack -> starting_stack
       - tournament_name, buy_in, tournament_format (per-hand ja populado)
@@ -80,6 +85,9 @@ def upsert_tournament_meta(
     Idempotente. Sobrescreve sempre (UPSERT). Retorna dict do estado
     pos-upsert.
     """
+    if site != "GGPoker":
+        return {"status": "skipped_non_gg", "tm": tournament_number, "site": site}
+
     own_conn = conn is None
     if own_conn:
         conn = get_conn()
