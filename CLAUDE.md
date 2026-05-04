@@ -226,4 +226,4 @@ Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` d
 
 ---
 
-Última sessão fechada: pt12 (4 Maio 2026, #B33 fechado, pipeline ZIP+Discord robusto e idempotente, commits `c979181` + `e7d88b2`).
+Última sessão fechada: pt12 (4 Maio 2026, #B33 fechado + Vilão Principal implementado, commits `c979181` + `e7d88b2` + `542c340` + `0ebacfd`).

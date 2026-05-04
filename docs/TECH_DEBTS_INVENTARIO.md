@@ -22,6 +22,7 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 | # | Hash | Descrição |
 |---|---|---|
 | **#B33** ✅ | `e7d88b2` | Regex TM em parser Vision tolerante a omissão do prefixo (`r'TM(\d+)'` → `r'\b(\d{8,12})\b'` em `screenshot.py:307`). Cura retroactiva: 2 entries afectadas (id=30, id=36) → hands 2297 e 2083 enriched + villains criados onde aplicável (hand 2297: 2 villains via Regra C; hand 2083: 0 villains, canal `icm-pko` não-nota). |
+| **Vilão Principal** ✅ | `0ebacfd` | `apply_villain_rules` filtra candidates a quem chegou mais longe na mão. Spec definida + implementada + backfill retroactivo (47→34 `hand_villains`, 7/7 nota preservadas). Sem migration. Validado visualmente em prod pelo Rui. |
 
 ### Tech Debts fechados pt9 (carry-over de pt8)
 
@@ -65,6 +66,7 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 | **#B30** | Scripts ad-hoc obsoletos (`revalidate_techdebt16`, `simulate_create_villains_hm3`) — partem após ONDA 6 do refactor mas não são corridos | 🟢 Housekeeping | pt10 | ~15 min |
 | **#B31** | `MAPA_ACOPLAMENTO.md` actualizar para reflectir refactor #B23 (§7.4-§7.5 stale) | 🟢 Docs | pt10 | ~1h |
 | **#B-NOVO-2** | `_build_anon_to_real_map` em estado degenerate (parcialmente resolvido por #B32, mas merece investigação dedicada se re-aparecer) | 🟡 Funcional latente | pt10 | a investigar |
+| **#B34** | ID da hand mais visível na UI (actualmente só visível no URL `/hand/{id}`, dificulta validação cruzada e debug) | 🟢 UX | pt12 | a estimar |
 | **GTO 404** | Router em `gto.py` existe mas não está registado em `main.py:include_router` | 🟢 | pré-pt7 | ~5 min |
 | **Stack inicial GG** | (não numerado, carry-over) | 🟢 | pré-pt8 | a estimar |
 | **`mtt_hand_id` legacy** | 4 call sites em `mtt.py` (linhas 1264, 1882, 2202, 2297) ainda passam `mtt_hand_id` em vez de `hand_db_id`. REGRAS §8. | 🟢 Refactor | pt10 | a estimar |
