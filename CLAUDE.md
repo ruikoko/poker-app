@@ -226,4 +226,4 @@ Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` d
 
 ---
 
-Última sessão fechada: pt12 (4 Maio 2026, #B33 fechado + Vilão Principal implementado, commits `c979181` + `e7d88b2` + `542c340` + `0ebacfd`).
+Última sessão fechada: pt12 (4 Maio 2026, 8 features fechadas: #B33, Vilão Principal, GTO 404, #13c, #B25, Stack Inicial GG, #B34, #B30. 14 commits c979181 → 580be1c).

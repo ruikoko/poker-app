@@ -11,8 +11,8 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retrospectivo). Root cause: regex `r'TM(\d+)'` em `screenshot.py:307` exigia prefixo `TM` literal; Vision omitiu em 2/26 entries. Fix: word-boundary `r'\b(\d{8,12})\b'` (commit `e7d88b2`). Backfill retroactivo curou as 2 hands afectadas (id=2083, id=2297) — hand 2297 ganhou 2 villains via Regra C; hand 2083 ficou em canal `icm-pko` com `mm` populado mas 0 villains (correcto). BD final: 1172 hands, 24 enriched, 47 villains, 7/7 nota com villains. **Onda 8 do refactor #B23 declarada COMPLETA.**
 
 - **Sessões pt9 + pt10 fecharam:** #B12, #B14, #B15, #B16, #B17, #B18, #B19, #B19-ext, #B23, #B27, #B32 (11 tech debts).
-- **Pendentes numerados pós-pt10:** #11, #B10, #B11, #B13, #B-edge, #13c, #B20, #B21, #B22, #B25, #B26, #B28, #B29, #B30, #B31, #B-NOVO-2.
-- **Pendentes não-numerados:** GTO 404 (router não wired em `main.py:include_router`), Stack inicial GG (não numerado), path bulk archive `mtt_hand_id` legacy (4 call sites em `mtt.py` — REGRAS §8).
+- **Pendentes numerados pós-pt10:** #11, #B10, #B11, #B13, #B-edge, #B20, #B21, #B22, #B26, #B28, #B29, #B31, #B-NOVO-2.
+- **Pendentes não-numerados:** path bulk archive `mtt_hand_id` legacy (4 call sites em `mtt.py` — REGRAS §8).
 - **Onda 8 e 9 do refactor #B23 ficaram em estado "parcial":** teste regressão (delete + re-import GG ZIP) e validação manual visual SS↔HH adiados para pt11.
 - **Onda 9 (pt11)** — Rui validou visualmente 3/3 hands canal nota (1070, 261, 878). Algoritmo SS↔HH confirmado correcto em prod. **ONDA 9 FECHADA ✓**
 - **Onda 8 (pt11+pt12)** — re-import GG ZIP correu 3-Mai 14:11 UTC. Estado pt11 inicial: 22 enriched, 45 villains, 6/7 nota com villains (regressão #B33). Pt12 fix + backfill retroactivo: **24 enriched, 47 villains, 7/7 nota com villains. ONDA 8 FECHADA ✓**
@@ -23,6 +23,12 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 |---|---|---|
 | **#B33** ✅ | `e7d88b2` | Regex TM em parser Vision tolerante a omissão do prefixo (`r'TM(\d+)'` → `r'\b(\d{8,12})\b'` em `screenshot.py:307`). Cura retroactiva: 2 entries afectadas (id=30, id=36) → hands 2297 e 2083 enriched + villains criados onde aplicável (hand 2297: 2 villains via Regra C; hand 2083: 0 villains, canal `icm-pko` não-nota). |
 | **Vilão Principal** ✅ | `0ebacfd` | `apply_villain_rules` filtra candidates a quem chegou mais longe na mão. Spec definida + implementada + backfill retroactivo (47→34 `hand_villains`, 7/7 nota preservadas). Sem migration. Validado visualmente em prod pelo Rui. |
+| **GTO 404** ✅ | `304eecf` | Router `gto.py` não estava wired em `main.py:include_router` (fix 2 linhas, smoke test HTTP 401). |
+| **#13c** ✅ | `d959ad8` | SITE_COLORS aliases legacy removidos; callers (Dashboard.jsx, HandRow.jsx) consolidados a `SITE_COLORS` directo. 3 ficheiros tocados. |
+| **#B25** ✅ | `ba2792b` | Agrupar torneios por `tournament_id`. Fix bugs cross-midnight (chave `${day}__${name}` dividia 1 torneio em 2) e nomes duplicados (chave `${name}` fundia torneios distintos). Ambos os modos passam a usar `tm:${tournament_number}` como chave. |
+| **Stack Inicial GG** ✅ | `68a9e8a` + `799864e` + `457048f` + `a2158c3` | Tabela canónica `tournaments_meta` (PK `tournament_number+site`, restrito a GG). Hook em `_run_zip_import`, endpoint `GET /api/tournaments/meta?tms=...`, frontend lookup com fallback graceful. Backfill 26 TMs → 20 rows GG. |
+| **#B34** ✅ | `43c0041` | ID hand visível em todas as vistas (Estudo Por Tags / Por Torneio / Tabela / Cards, Dashboard "Últimas mãos", HandDetailPage Normal+Placeholder, Tournaments drill-down). 4 ficheiros tocados. |
+| **#B30** ✅ | `580be1c` | 142 scripts ad-hoc removidos da raiz + 28 patterns adicionados ao `.gitignore`. 3 backfills úteis preservados como tracked. |
 
 ### Tech Debts fechados pt9 (carry-over de pt8)
 
@@ -55,20 +61,14 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 | **#B11** | Auto-tag mãos via LLM (ideia exploratória) | 🟢 Feature | pt7 | ~3-4h |
 | **#B13** | Contadores `last_sync` (N/M/K) medem entries criadas em vez de trabalho útil | 🟢 UX | pt8 | ~1h |
 | **#B-edge** | Hero detection seat não-central (1/23 ≈ 4.3% taxa) | 🟢 Edge case | pt7 | ~30 min |
-| **#13c** | Housekeeping aliases SITE_COLORS legacy | 🟢 Housekeeping | pt7 | ~10-15 min |
 | **#B20** | Filtros HM3 por tag (não por nick) | 🟢 UX | pt10 | a estimar |
 | **#B21** | Dashboard "por estudar" filtrar por elegibilidade | 🟢 UX | pt10 | a estimar |
 | **#B22** | Dashboard reordenar painéis (SS debaixo de Total mãos) | 🟢 UX | pt10 | a estimar |
-| **#B25** | Agrupar torneios por `tournament_id` (data 1ª mão cronológica) | 🟢 UX | pt10 | a estimar |
 | **#B26** | Investigar cor das TAGS na secção Estudo | 🟢 UX | pt10 | a estimar |
 | **#B28** | Validar contadores UI pós-refactor #B23 (semântica `villains_created` mudou: rows `hand_villains` vs UPSERTs `villain_notes`) | 🟡 Funcional | pt10 | a estimar |
 | **#B29** | `villain_notes.hands_seen` double-count em refix (pré-existente, não regressão) | 🟡 Funcional | pt10 | a estimar |
-| **#B30** | Scripts ad-hoc obsoletos (`revalidate_techdebt16`, `simulate_create_villains_hm3`) — partem após ONDA 6 do refactor mas não são corridos | 🟢 Housekeeping | pt10 | ~15 min |
 | **#B31** | `MAPA_ACOPLAMENTO.md` actualizar para reflectir refactor #B23 (§7.4-§7.5 stale) | 🟢 Docs | pt10 | ~1h |
 | **#B-NOVO-2** | `_build_anon_to_real_map` em estado degenerate (parcialmente resolvido por #B32, mas merece investigação dedicada se re-aparecer) | 🟡 Funcional latente | pt10 | a investigar |
-| **#B34** | ID da hand mais visível na UI (actualmente só visível no URL `/hand/{id}`, dificulta validação cruzada e debug) | 🟢 UX | pt12 | a estimar |
-| **GTO 404** | Router em `gto.py` existe mas não está registado em `main.py:include_router` | 🟢 | pré-pt7 | ~5 min |
-| **Stack inicial GG** | (não numerado, carry-over) | 🟢 | pré-pt8 | a estimar |
 | **`mtt_hand_id` legacy** | 4 call sites em `mtt.py` (linhas 1264, 1882, 2202, 2297) ainda passam `mtt_hand_id` em vez de `hand_db_id`. REGRAS §8. | 🟢 Refactor | pt10 | a estimar |
 
 ### Pendente operacional pt11
