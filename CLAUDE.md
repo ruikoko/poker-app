@@ -226,4 +226,4 @@ Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` d
 
 ---
 
-Última sessão fechada: pt11 retrospectiva (3 Maio 2026, BD em `22d6d1d` em git mas com 1172 hands re-importadas a 3 Maio).
+Última sessão fechada: pt12 (4 Maio 2026, #B33 fechado, pipeline ZIP+Discord robusto e idempotente, commits `c979181` + `e7d88b2`).
