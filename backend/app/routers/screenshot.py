@@ -304,7 +304,12 @@ def _parse_vision_response(text: str) -> dict:
 
         if line.startswith("TM:"):
             val = line[3:].strip()
-            m = re.search(r'TM(\d+)', val)
+            # #B33 fix — Tolerante a 4 formatos que o Vision pode devolver:
+            # "TM12345", "12345", "TM 12345", "TM: 12345"
+            # (2/26 entries em 3-Maio falharam porque Vision omitiu o prefixo "TM",
+            # devolvendo só o número. Regex anterior r'TM(\d+)' exigia prefixo
+            # literal e retornava None, partindo backfill_ggdiscord downstream.)
+            m = re.search(r'\b(\d{8,12})\b', val)
             if m:
                 result["tm"] = f"TM{m.group(1)}"
 
