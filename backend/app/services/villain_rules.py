@@ -79,6 +79,14 @@ def apply_villain_rules(hand_db_id: int, *, conn=None) -> dict:
         if not candidates:
             return _result(0, 0, skipped_reason="no_candidates")
 
+        # Filtro "vilão principal" (spec pt12+): manter apenas candidates
+        # que chegaram à street máxima da hand. Sem tie-break — se múltiplos
+        # chegaram à mesma street, todos passam. Edge case (apa placeholder
+        # sem actions): max_street=0, todos passam.
+        candidates = _filter_to_furthest_street(
+            candidates, hand.get("all_players_actions") or {}
+        )
+
         n_villains, n_notes = _persist(conn, hand_db_id, hand, candidates)
 
         if own_conn:
@@ -244,6 +252,56 @@ def _vpip_label(preflop_actions) -> str | None:
         if kw in text:
             return kw.rstrip("s")  # raise/call/bet/all-in
     return None
+
+
+def _street_reached(actions, cards) -> int:
+    """
+    Hierarquia: 0=sem_dados, 1=preflop, 2=flop, 3=turn, 4=river, 5=showdown.
+
+    Showdown = chegou ao river COM acção real E cards reveladas.
+    Cards isoladas (mucked GG side-info) não promovem a showdown.
+    """
+    actions = actions if isinstance(actions, dict) else {}
+    has_cards = bool(cards)
+    has_river = bool(actions.get("river"))
+    has_turn  = bool(actions.get("turn"))
+    has_flop  = bool(actions.get("flop"))
+    has_pf    = bool(actions.get("preflop"))
+
+    if has_river and has_cards:
+        return 5
+    if has_river: return 4
+    if has_turn:  return 3
+    if has_flop:  return 2
+    if has_pf:    return 1
+    return 0
+
+
+def _filter_to_furthest_street(candidates: list[dict], apa: dict) -> list[dict]:
+    """
+    Filtra candidates a quem chegou à street máxima da hand.
+
+    Spec (pt12+):
+      - Hierarquia: showdown > river > turn > flop > preflop > sem_dados.
+      - Sem tie-break: empate na street máxima → todos retornados.
+      - Edge case (max_street=0, ninguém tem dados): todos retornados.
+    """
+    if not candidates:
+        return []
+
+    annotated = []
+    for c in candidates:
+        pdata = apa.get(c["nick"]) if isinstance(apa, dict) else None
+        if not isinstance(pdata, dict):
+            pdata = {}
+        s = _street_reached(pdata.get("actions"), pdata.get("cards"))
+        annotated.append((s, c))
+
+    max_street = max(s for s, _ in annotated)
+    if max_street == 0:
+        # Edge case: apa placeholder / sem dados de actions — todos passam.
+        return [c for _, c in annotated]
+    return [c for s, c in annotated if s == max_street]
 
 
 def _persist(conn, hand_db_id: int, hand: dict, candidates: list[dict]) -> tuple[int, int]:
