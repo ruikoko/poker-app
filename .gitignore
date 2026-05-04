@@ -3,8 +3,36 @@ frontend/node_modules/
 frontend/.vite/
 
 # Scripts ad-hoc de investigação (correm via `railway run`, não fazem parte do produto)
-query.py
-query_*.py
+# Mantidos em root, fora do repo. Tracked exceptions: backfill_attach_orphan_images.py,
+# backfill_revert_placeholder_match.py, backfill_tournament_format.py (tooling de produção).
+/query_*.py
+/check_*.py
+/audit_*.py
+/backfill_*.py
+/diag_*.py
+/investigate_*.py
+/inspect_*.py
+/reparse_*.py
+/snap_*.py
+/backup_pre_*.py
+/wipe_*.py
+/populate_*.py
+/preview_*.py
+/cleanup_*.py
+/delete_*.py
+/validate_*.py
+/verify_*.py
+/simulate_*.py
+/revalidate_*.py
+/test_parser_*.py
+/v.py
+/query.py
+/final_check.py
+/fix_origin.py
+/plan_wipe_inventory.py
+/orazz_all.py
+/hands_multi_villain.py
+/table_multi_villain.py
 *_output.txt
 
 # Snapshots CSV de scripts ad-hoc / backfills / reparses — audit logs locais,
