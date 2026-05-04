@@ -1029,20 +1029,31 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
               Sem mãos neste grupo
             </div>
           ) : (() => {
-            // Agrupar mãos por torneio (stakes)
+            // #B25: chave canónica por tournament_number (TM). Fallback day+name
+            // para hands sem TM (HM3 manual legacy). Day do card vem da 1ª hand
+            // cronológica do bucket — torneios cross-midnight ficam num único card.
             const byTournament = {}
             for (const h of tagHands) {
               const tName = h.stakes || 'Sem torneio'
               const dayIso = h.played_at
                 ? new Date(h.played_at).toISOString().slice(0, 10)
                 : 'sem-data'
-              const key = `${dayIso}__${tName}`
+              const key = h.tournament_number
+                ? `tm:${h.tournament_number}`
+                : `nokey:${dayIso}__${tName}`
               if (!byTournament[key]) {
-                byTournament[key] = { name: tName, day: dayIso, hands: [], maxTime: 0 }
+                byTournament[key] = { key, name: tName, hands: [], maxTime: 0 }
               }
               byTournament[key].hands.push(h)
               const t = h.played_at ? new Date(h.played_at).getTime() : 0
               if (t > byTournament[key].maxTime) byTournament[key].maxTime = t
+            }
+            for (const k of Object.keys(byTournament)) {
+              const ent = byTournament[k]
+              ent.handsAsc = [...ent.hands].sort(
+                (a, b) => new Date(a.played_at) - new Date(b.played_at)
+              )
+              ent.day = ent.handsAsc[0]?.played_at?.slice(0, 10) || 'sem-data'
             }
             const entries = Object.values(byTournament).sort((a, b) => b.maxTime - a.maxTime)
 
@@ -1084,10 +1095,10 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
               const showHrc = displayName && ICM_TAGS.has(displayName)
 
               const tournamentNumber = tHands.find(h => h.tournament_number)?.tournament_number || null
+              // #B25: SI usa 1ª hand cronológica do bucket (já calculada em ent.handsAsc).
               let siHero = null
-              if (tHands[0]?.site === 'GGPoker') {
-                const sortedAsc = [...tHands].sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
-                const firstHand = sortedAsc[0]
+              const firstHand = ent.handsAsc?.[0]
+              if (firstHand?.site === 'GGPoker') {
                 const apa = firstHand?.all_players_actions || {}
                 for (const [pname, info] of Object.entries(apa)) {
                   if (pname === '_meta') continue
@@ -1097,7 +1108,7 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
 
               return (
                 <TournamentGroup
-                  key={`${ent.day}__${ent.name}`}
+                  key={ent.key}
                   name={label}
                   hands={tHands}
                   wins={wins}
@@ -1607,24 +1618,54 @@ export default function HandsPage() {
 
       {/* Tournament View — group hands by tournament name */}
       {!loading && viewMode === 'tournament' && rows.length > 0 && (() => {
+        // #B25: chave canónica por tournament_number; fallback nome puro para
+        // hands sem TM (HM3 manual legacy). 2 entries do mesmo nome em TMs
+        // diferentes ficam em cards separados.
         const tournGroups = {}
         for (const h of rows) {
           const tName = h.stakes || 'Sem torneio'
-          if (!tournGroups[tName]) tournGroups[tName] = []
-          tournGroups[tName].push(h)
+          const key = h.tournament_number ? `tm:${h.tournament_number}` : `name:${tName}`
+          if (!tournGroups[key]) tournGroups[key] = { name: tName, hands: [] }
+          tournGroups[key].hands.push(h)
         }
         const sorted = Object.entries(tournGroups).sort((a, b) => {
-          const aTime = Math.max(...a[1].map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
-          const bTime = Math.max(...b[1].map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
+          const aTime = Math.max(...a[1].hands.map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
+          const bTime = Math.max(...b[1].hands.map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
           return bTime - aTime
         })
         return (
           <div style={{ marginBottom: 24 }}>
-            {sorted.map(([tName, tHands]) => {
+            {sorted.map(([key, ent]) => {
+              const tHands = ent.hands
               const wins = tHands.filter(h => h.result != null && Number(h.result) > 0).length
               const losses = tHands.filter(h => h.result != null && Number(h.result) < 0).length
               const totalBB = tHands.reduce((a, h) => a + (Number(h.result) || 0), 0)
-              return <TournamentGroup key={tName} name={tName} hands={tHands} wins={wins} losses={losses} totalBB={totalBB} onOpenDetail={openDetail} onDeleteHand={deleteHand} />
+              const tournamentNumber = tHands.find(h => h.tournament_number)?.tournament_number || null
+              // SI canónica: 1ª hand cronológica do bucket
+              const sortedAsc = [...tHands].sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
+              const firstHand = sortedAsc[0]
+              let siHero = null
+              if (firstHand?.site === 'GGPoker') {
+                const apa = firstHand?.all_players_actions || {}
+                for (const [pname, info] of Object.entries(apa)) {
+                  if (pname === '_meta') continue
+                  if (info?.is_hero) { siHero = info.stack || null; break }
+                }
+              }
+              return (
+                <TournamentGroup
+                  key={key}
+                  name={ent.name}
+                  hands={tHands}
+                  wins={wins}
+                  losses={losses}
+                  totalBB={totalBB}
+                  onOpenDetail={openDetail}
+                  onDeleteHand={deleteHand}
+                  tournamentNumber={tournamentNumber}
+                  siHero={siHero}
+                />
+              )
             })}
           </div>
         )
