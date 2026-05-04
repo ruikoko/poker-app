@@ -1713,7 +1713,7 @@ export default function HandsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #2a2d3a' }}>
-                  {['Estado', 'Sala', 'Data', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Tags', ''].map(h => (
+                  {['Estado', 'Sala', 'Data', 'ID', 'Torneio', 'Pos', 'Cartas', 'Board', 'Resultado', 'Tags', ''].map(h => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -1735,6 +1735,7 @@ export default function HandsPage() {
                       })()}
                     </td>
                     <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>{h.played_at ? h.played_at.slice(0, 10) : '&mdash;'}</td>
+                    <td style={{ padding: '10px 14px', color: '#374151', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>#{h.id}</td>
                     <td style={{ padding: '10px 14px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#94a3b8', fontSize: 11 }}>{h.stakes || '&mdash;'}</td>
                     <td style={{ padding: '10px 14px' }}><PosBadge pos={h.position} /></td>
                     <td style={{ padding: '10px 14px' }}>
@@ -1822,6 +1823,11 @@ function HandCard({ hand, onClick, onDelete }) {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <StateBadge state={hand.study_state} />
           <PosBadge pos={hand.position} />
+          {hand.id != null && (
+            <span style={{ fontSize: 9, color: '#374151', fontStyle: 'italic', fontFamily: 'monospace' }}>
+              #{hand.id}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <ResultBadge result={hand.result} />

@@ -339,6 +339,11 @@ export default function DashboardPage() {
               <div style={{ textAlign: 'center' }}><SiteBadge site={h.site} /></div>
               <div style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace', textAlign: 'right', lineHeight: 1.3 }}>
                 <div>{formatShortDate(h.created_at)}</div>
+                {h.id != null && (
+                  <div style={{ fontSize: 9, color: '#374151', fontStyle: 'italic' }}>
+                    #{h.id}
+                  </div>
+                )}
                 {h.played_at && !sameCalendarDay(h.created_at, h.played_at) && (
                   <div style={{ fontSize: 9, color: '#374151', fontStyle: 'italic', marginTop: 1 }}>
                     jogada {formatShortDate(h.played_at)}

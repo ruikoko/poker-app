@@ -231,12 +231,17 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
         {lvBlinds}
       </div>
 
-      {/* 11. Data + Hora */}
+      {/* 11. Data + Hora + #B34 ID */}
       <div style={{
         fontSize: 10, color: '#64748b', fontFamily: 'monospace',
-        textAlign: 'right', whiteSpace: 'nowrap',
+        textAlign: 'right', whiteSpace: 'nowrap', lineHeight: 1.3,
       }}>
-        {dateStr} <span style={{ color: '#94a3b8' }}>{timeStr}</span>
+        <div>{dateStr} <span style={{ color: '#94a3b8' }}>{timeStr}</span></div>
+        {hand.id != null && (
+          <div style={{ fontSize: 9, color: '#374151', fontStyle: 'italic' }}>
+            #{hand.id}
+          </div>
+        )}
       </div>
 
       {/* 12. Botões */}
