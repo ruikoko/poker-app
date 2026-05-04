@@ -790,15 +790,15 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
                 )
                 created += 1
 
-            # Auto-populate villain_notes (agnóstico de categoria, 1x por mão)
-            cur.execute(
-                """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                   VALUES (%s, %s, 1, NOW())
-                   ON CONFLICT (site, nick) DO UPDATE SET
-                       hands_seen = villain_notes.hands_seen + 1,
-                       updated_at = NOW()""",
-                (site, player_name)
-            )
+            # [#B29 pt13] Bloco UPSERT removido aqui (8 linhas).
+            # Motivo: este path (legacy bulk archive com mtt_hand_id) populava
+            # villain_notes.hands_seen sem guard de idempotência — duplicava
+            # contadores quando a hand era depois promovida para hands table
+            # e apply_villain_rules era chamado.
+            # Refactor #B23 (pt10) estabeleceu que villain_notes só deve ser
+            # populado via apply_villain_rules (single source of truth com
+            # Q6 guard). Hands puramente bulk-archive (que nunca chegam a
+            # hands) deixam de aparecer em Vilões — comportamento desejado.
 
     return created
 
@@ -2042,44 +2042,19 @@ async def re_enrich_all(
                 errors += 1
                 continue
             
-            # Criar/actualizar villain_notes — só para jogadores com VPIP
-            players_list = raw.get("players_list", [])
-            hero_name = raw.get("hero", "")
-            
-            # Reload hand to get updated all_players_actions
-            updated_hand = query("SELECT all_players_actions FROM hands WHERE id = %s", (hand["id"],))
-            apa = (updated_hand[0].get("all_players_actions") or {}) if updated_hand else {}
-            
-            with conn.cursor() as cur:
-                for player in players_list:
-                    pname = player.get("name", "")
-                    if not pname or pname == "Unknown" or pname == hero_name:
-                        continue
-                    
-                    # Check if player had VPIP (not just fold preflop)
-                    player_data = apa.get(pname, {})
-                    actions = player_data.get("actions", {})
-                    preflop_action = actions.get("preflop", "")
-                    has_vpip = (
-                        actions.get("flop") is not None
-                        or actions.get("turn") is not None
-                        or actions.get("river") is not None
-                        or (preflop_action and "fold" not in preflop_action.lower())
-                    )
-                    
-                    if not has_vpip:
-                        continue
-                    
-                    cur.execute(
-                        """INSERT INTO villain_notes (site, nick, hands_seen, updated_at)
-                           VALUES ('GGPoker', %s, 1, NOW())
-                           ON CONFLICT (site, nick) DO UPDATE SET
-                               hands_seen = villain_notes.hands_seen + 1,
-                               updated_at = NOW()""",
-                        (pname,)
-                    )
-                    villains_created += 1
-            
+            # [#B29 pt13] Loop UPSERT manual removido aqui (~37 linhas:
+            # setup + loop por player). Motivo: este loop incrementava
+            # villain_notes.hands_seen DEPOIS de _enrich_hand_from_orphan_entry
+            # (que já dispara apply_villain_rules com Q6 guard). Resultado:
+            # double-count em cada chamada de re_enrich_all (até triple+ se
+            # chamado várias vezes).
+            # Refactor #B23 (pt10): apply_villain_rules é a única fonte de
+            # verdade. Loop redundante removido. Contador villains_created
+            # deste branch deixa de incrementar — apply_villain_rules já
+            # contou via _enrich_hand_from_orphan_entry mas o resultado não
+            # é exposto a este caller (admin endpoint, count noisy ok).
+
+
             # Também criar na mtt_hands se existir lá
             mtt_rows = query(
                 """SELECT id, raw FROM mtt_hands 
