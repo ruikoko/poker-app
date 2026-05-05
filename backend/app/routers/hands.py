@@ -1003,6 +1003,80 @@ def hand_stats(current_user=Depends(require_auth)):
             "no_match_discord": {"total": 0, "replayer": 0, "image": 0},
         }
 
+    # ── study_breakdown: alimenta painel "Mãos por estudar" expandido ─────────
+    # Agregação Python-side de tags HM3+Discord (normalize_tag_key, espelha
+    # tag-groups). Filtro Estudo: study_state='new' + elegibilidade nicks reais.
+    # Resolved counts já vêm em result["resolved"] do COUNT FILTER acima.
+    try:
+        STUDY_FILTER_FRAGMENT = f"""
+            played_at >= '2026-01-01'
+            AND study_state = 'new'
+            AND ({study_state_filter})
+        """
+
+        rows = query(f"""
+            SELECT id, hm3_tags, discord_tags
+            FROM hands
+            WHERE {STUDY_FILTER_FRAGMENT}
+        """)
+
+        norm_groups = {}  # norm_key -> {hm3, discord, ids}
+        for r in rows:
+            hid = r["id"]
+            for theme in (r.get("hm3_tags") or []):
+                if not theme or theme.lower().startswith("nota") or theme == "GGDiscord":
+                    continue
+                nk = normalize_tag_key(theme)
+                g = norm_groups.setdefault(nk, {"hm3": set(), "discord": set(), "ids": set()})
+                g["hm3"].add(theme)
+                g["ids"].add(hid)
+            for theme in (r.get("discord_tags") or []):
+                if not theme or theme == "nota":
+                    continue
+                nk = normalize_tag_key(theme)
+                g = norm_groups.setdefault(nk, {"hm3": set(), "discord": set(), "ids": set()})
+                g["discord"].add(theme)
+                g["ids"].add(hid)
+
+        tags_list = []
+        for nk, g in norm_groups.items():
+            # Display: prefere HM3 variant (#B17 estratégia i)
+            if g["hm3"]:
+                display = sorted(g["hm3"])[0]
+            elif g["discord"]:
+                display = sorted(g["discord"])[0]
+            else:
+                continue
+            tags_list.append({"display_name": display, "count": len(g["ids"])})
+        tags_list.sort(key=lambda t: -t["count"])
+
+        # 4 salas alfabéticas, sempre presentes mesmo com 0
+        site_rows = query(f"""
+            SELECT site, COUNT(*) AS n
+            FROM hands
+            WHERE {STUDY_FILTER_FRAGMENT}
+            GROUP BY site
+        """)
+        sites_dict = {row["site"]: row["n"] for row in site_rows}
+
+        result["study_breakdown"] = {
+            "total": result.get("new", 0),
+            "tags":  tags_list[:3],
+            "sites": {
+                "GGPoker":    sites_dict.get("GGPoker", 0),
+                "PokerStars": sites_dict.get("PokerStars", 0),
+                "Winamax":    sites_dict.get("Winamax", 0),
+                "WPN":        sites_dict.get("WPN", 0),
+            },
+        }
+    except Exception as e:
+        logger.warning(f"hand_stats study_breakdown failed: {e}")
+        result["study_breakdown"] = {
+            "total": 0,
+            "tags":  [],
+            "sites": {"GGPoker": 0, "PokerStars": 0, "Winamax": 0, "WPN": 0},
+        }
+
     return result
 
 

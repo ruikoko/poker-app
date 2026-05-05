@@ -184,6 +184,9 @@ export default function DashboardPage() {
           {stats?.new_this_week != null && (
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>+{stats.new_this_week} esta semana</div>
           )}
+          {stats?.resolved > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{stats.resolved} revistas</div>
+          )}
         </div>
 
         {/* Mãos por estudar */}
@@ -199,15 +202,21 @@ export default function DashboardPage() {
           <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Mãos por estudar</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontSize: 28, fontWeight: 600, lineHeight: 1 }}>
-              {stats ? Number(stats.new).toLocaleString('pt-PT') : '—'}
+              {stats ? Number(stats.study_breakdown?.total ?? stats.new ?? 0).toLocaleString('pt-PT') : '—'}
             </span>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>novas</span>
           </div>
-          {stats && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, display: 'flex', gap: 10 }}>
-              <span>{stats.review || 0} revisão</span>
-              <span style={{ color: 'var(--border)' }}>·</span>
-              <span>{stats.studying || 0} a estudar</span>
+          {stats?.study_breakdown?.tags?.length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+              {stats.study_breakdown.tags.map(t => `${t.display_name} ${t.count}`).join(' · ')}
+            </div>
+          )}
+          {stats?.study_breakdown?.sites && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+              GG: {stats.study_breakdown.sites.GGPoker || 0}
+              {' · '}PS: {stats.study_breakdown.sites.PokerStars || 0}
+              {' · '}WN: {stats.study_breakdown.sites.Winamax || 0}
+              {' · '}WPN: {stats.study_breakdown.sites.WPN || 0}
             </div>
           )}
         </div>
@@ -254,6 +263,51 @@ export default function DashboardPage() {
           </div>
         </div>
 
+      </div>
+
+      {/* ── Screenshots: 4 painéis + OrphanList (regra de ouro do Rui) ── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', borderBottom: '1px solid var(--border)' }}>
+          {/* 1. SS Total na BD */}
+          <div style={{ padding: '16px 20px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>SS Total na BD</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>
+              {stats?.ss_dashboard?.total != null ? Number(stats.ss_dashboard.total).toLocaleString('pt-PT') : '—'}
+            </div>
+          </div>
+
+          {/* 2. SS com Match */}
+          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>SS com Match</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_dashboard?.with_match > 0 ? '#22c55e' : 'var(--text)' }}>
+              {stats?.ss_dashboard?.with_match != null ? Number(stats.ss_dashboard.with_match).toLocaleString('pt-PT') : '—'}
+            </div>
+          </div>
+
+          {/* 3. SS Sem Match (manual) */}
+          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+              SS Sem Match{' '}
+              <span style={{ textTransform: 'none', fontSize: 10, color: '#4b5563', fontWeight: 400, letterSpacing: 0 }}>(import manual)</span>
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_dashboard?.no_match_manual > 0 ? '#f59e0b' : 'var(--text)' }}>
+              {stats?.ss_dashboard?.no_match_manual != null ? Number(stats.ss_dashboard.no_match_manual).toLocaleString('pt-PT') : '—'}
+            </div>
+          </div>
+
+          {/* 4. Discord sem Match (com sub-divisão Replayer / Imagem) */}
+          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Discord sem Match</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_dashboard?.no_match_discord?.total > 0 ? '#f59e0b' : 'var(--text)' }}>
+              {stats?.ss_dashboard?.no_match_discord?.total != null ? Number(stats.ss_dashboard.no_match_discord.total).toLocaleString('pt-PT') : '—'}
+            </div>
+            <div style={{ marginTop: 6, paddingLeft: 8, borderLeft: '2px solid rgba(245,158,11,0.25)', fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span>Replayer: <span style={{ color: 'var(--text)', fontWeight: 500 }}>{stats?.ss_dashboard?.no_match_discord?.replayer ?? '—'}</span></span>
+              <span>Imagem: <span style={{ color: 'var(--text)', fontWeight: 500 }}>{stats?.ss_dashboard?.no_match_discord?.image ?? '—'}</span></span>
+            </div>
+          </div>
+        </div>
+        <OrphanList onRematchComplete={reloadStats} />
       </div>
 
       {/* ── Últimas 5 mãos importadas ── */}
@@ -415,50 +469,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Screenshots: 4 painéis (regra de ouro do Rui) ── */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 24 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', borderBottom: '1px solid var(--border)' }}>
-          {/* 1. SS Total na BD */}
-          <div style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>SS Total na BD</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>
-              {stats?.ss_dashboard?.total != null ? Number(stats.ss_dashboard.total).toLocaleString('pt-PT') : '—'}
-            </div>
-          </div>
-
-          {/* 2. SS com Match */}
-          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>SS com Match</div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_dashboard?.with_match > 0 ? '#22c55e' : 'var(--text)' }}>
-              {stats?.ss_dashboard?.with_match != null ? Number(stats.ss_dashboard.with_match).toLocaleString('pt-PT') : '—'}
-            </div>
-          </div>
-
-          {/* 3. SS Sem Match (manual) */}
-          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-              SS Sem Match{' '}
-              <span style={{ textTransform: 'none', fontSize: 10, color: '#4b5563', fontWeight: 400, letterSpacing: 0 }}>(import manual)</span>
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_dashboard?.no_match_manual > 0 ? '#f59e0b' : 'var(--text)' }}>
-              {stats?.ss_dashboard?.no_match_manual != null ? Number(stats.ss_dashboard.no_match_manual).toLocaleString('pt-PT') : '—'}
-            </div>
-          </div>
-
-          {/* 4. Discord sem Match (com sub-divisão Replayer / Imagem) */}
-          <div style={{ padding: '16px 20px', borderLeft: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Discord sem Match</div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: stats?.ss_dashboard?.no_match_discord?.total > 0 ? '#f59e0b' : 'var(--text)' }}>
-              {stats?.ss_dashboard?.no_match_discord?.total != null ? Number(stats.ss_dashboard.no_match_discord.total).toLocaleString('pt-PT') : '—'}
-            </div>
-            <div style={{ marginTop: 6, paddingLeft: 8, borderLeft: '2px solid rgba(245,158,11,0.25)', fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span>Replayer: <span style={{ color: 'var(--text)', fontWeight: 500 }}>{stats?.ss_dashboard?.no_match_discord?.replayer ?? '—'}</span></span>
-              <span>Imagem: <span style={{ color: 'var(--text)', fontWeight: 500 }}>{stats?.ss_dashboard?.no_match_discord?.image ?? '—'}</span></span>
-            </div>
-          </div>
-        </div>
-        {(stats?.ss_dashboard?.no_match_total ?? 0) > 0 && <OrphanList onRematchComplete={reloadStats} />}
-      </div>
     </>
   )
 }
@@ -472,6 +482,7 @@ function OrphanList({ onRematchComplete }) {
   const [expandedId, setExpandedId] = useState(null)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkResult, setBulkResult] = useState(null)
+  const [shownCount, setShownCount] = useState(10)
 
   function loadOrphans() {
     setLoading(true)
@@ -552,7 +563,16 @@ function OrphanList({ onRematchComplete }) {
   }
 
   if (loading) return <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>A carregar órfãos...</div>
-  if (orphans.length === 0) return null
+  if (orphans.length === 0) {
+    return (
+      <div style={{ fontSize: 14, color: '#94a3b8', textAlign: 'center', padding: '24px 0' }}>
+        Vazio
+      </div>
+    )
+  }
+
+  const visible = orphans.slice(0, shownCount)
+  const hasMore = shownCount < orphans.length
 
   return (
     <>
@@ -605,7 +625,7 @@ function OrphanList({ onRematchComplete }) {
       </div>
 
     <div style={{ maxHeight: 520, overflowY: 'auto' }}>
-      {orphans.map((o, idx) => {
+      {visible.map((o, idx) => {
         const raw = o.raw_json || {}
         const fileMeta = raw.file_meta || {}
         const tm = raw.tm || raw.tournament_number || '—'
@@ -747,6 +767,20 @@ function OrphanList({ onRematchComplete }) {
         )
       })}
     </div>
+    {hasMore && (
+      <div style={{ padding: '12px 20px', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+        <button
+          onClick={() => setShownCount(c => c + 10)}
+          style={{
+            fontSize: 11, padding: '5px 14px', borderRadius: 4, fontWeight: 600,
+            background: 'transparent', border: '1px solid var(--border)',
+            color: 'var(--muted)', cursor: 'pointer',
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
+        >Ver mais 10 ({orphans.length - shownCount} restantes)</button>
+      </div>
+    )}
     </>
   )
 }
