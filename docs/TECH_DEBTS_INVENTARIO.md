@@ -1,4 +1,4 @@
-# Inventário Tech Debts — 4-Mai 2026 pt12 (fechada)
+# Inventário Tech Debts — 4-Mai 2026 pt13 (fechada)
 
 Compilação read-only baseada em journals (23-24 Abr → 29-Abr pt6), VALIDACAO_END_TO_END §6/§7/§11, MAPA_ACOPLAMENTO, git log, e leitura directa do código.
 
@@ -6,7 +6,7 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (4 Maio 2026 fim pt12)
+## Estado actual (4 Maio 2026 fim pt13)
 
 pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retrospectivo). Root cause: regex `r'TM(\d+)'` em `screenshot.py:307` exigia prefixo `TM` literal; Vision omitiu em 2/26 entries. Fix: word-boundary `r'\b(\d{8,12})\b'` (commit `e7d88b2`). Backfill retroactivo curou as 2 hands afectadas (id=2083, id=2297) — hand 2297 ganhou 2 villains via Regra C; hand 2083 ficou em canal `icm-pko` com `mm` populado mas 0 villains (correcto). BD final: 1172 hands, 24 enriched, 47 villains, 7/7 nota com villains. **Onda 8 do refactor #B23 declarada COMPLETA.**
 
@@ -67,10 +67,10 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 
 | ID | Título | Severidade | Origem | Esforço |
 |---|---|---|---|---|
-| **#11** | Botão eliminar villain manual + decisão Rui pendente: re-import volta a recriar o villain (blacklist persistida) ou re-cria livremente? Ligado historicamente a #12 (re-arquitectura do modal). | 🟡 Funcional | pt7 | ~2-3h |
+| **#11** | Botão eliminar villain manual. Decisão pt13: blacklist persistida escolhida; implementação adiada. Historicamente ligado a #12 (re-arquitectura modal). | 🟡 Funcional | pt7 | ~2-3h |
 | **#B10** (full) | Vision galeria — extrair `tournament_name` para filtragem (fix mínimo já aplicado) | 🟢 UX | pt7 | ~2-3h |
 | **#B11** | Auto-tag mãos via LLM (ideia exploratória) | 🟢 Feature | pt7 | ~3-4h |
-| **#B13** | Contadores `last_sync` (N/M/K) medem entries criadas em vez de trabalho útil | 🟢 UX | pt8 | ~1h |
+| **#B13** | Contadores `last_sync` (N/M/K) medem entries criadas em vez de trabalho útil. Decisão pt13: manter como está, não tocar. Vive na página Discord, não migra para Dashboard. | 🟢 UX | pt8 | ~1h |
 | **#B-edge** | Hero detection seat não-central (1/23 ≈ 4.3% taxa) | 🟢 Edge case | pt7 | ~30 min |
 | **#B20** | Filtros HM3 por tag (não por nick) | 🟢 UX | pt10 | a estimar |
 | **#B21** | Dashboard "por estudar" filtrar por elegibilidade | 🟢 UX | pt10 | a estimar |
