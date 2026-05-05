@@ -458,11 +458,13 @@ Quando HH chega depois (Pipeline 2 ou 4), `_insert_hand` substitui placeholder p
 
 ```sql
 -- Q3.6 hands ex-Discord agora matched (mm='v2'), preservando discord_tags
+-- (#P10c refined pt14: substituído filtro hardcoded por cardinality > 0;
+-- versão antiga falhava em apanhar hands com canais não listados, ex: 'pos-nko').
 SELECT h.hand_id, (h.player_names ->> 'match_method') AS mm,
        h.discord_tags, h.origin,
        (h.raw IS NOT NULL AND h.raw <> '') AS has_raw
 FROM hands h
-WHERE h.discord_tags && ARRAY['nota','icm','pos-pko','icm-pko','pos','speed-racer']
+WHERE cardinality(COALESCE(h.discord_tags, '{}'::text[])) > 0
   AND h.created_at >= NOW() - INTERVAL '30 minutes'
 ORDER BY h.hand_id;
 
@@ -762,14 +764,23 @@ Correr depois de qualquer pipeline para detectar regressões nas regras duras (v
 ### X1. Estudo respeita as 4 regras duras
 
 ```sql
--- X1.1 R1: zero hands GG sem match_method real em Estudo
+-- X1.1 R1: zero hands GG sem match_method real em Estudo (#P10b refined pt14:
+-- alinhado com STUDY_VIEW_REQUIRES_HH + STUDY_VIEW_HAS_STUDY_TAG; versão antiga
+-- era overly broad e reportava 2970 falsos positivos pós-Pipeline 2 ZIP import).
 SELECT COUNT(*) FROM hands h
 WHERE h.played_at >= '2026-01-01'
   AND h.site = 'GGPoker'
   AND h.study_state IN ('new', 'resolved')
+  AND (h.raw IS NOT NULL AND h.raw <> '')   -- STUDY_VIEW_REQUIRES_HH
+  AND (                                     -- STUDY_VIEW_HAS_STUDY_TAG
+    EXISTS (SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}'::text[])) t
+            WHERE t IS NOT NULL AND t NOT ILIKE 'nota%')
+    OR EXISTS (SELECT 1 FROM unnest(COALESCE(h.discord_tags, '{}'::text[])) t
+               WHERE t IS NOT NULL AND t != 'nota')
+  )
   AND ((h.player_names ->> 'match_method') IS NULL
        OR (h.player_names ->> 'match_method') LIKE 'discord_placeholder_%');
--- Esperado: 0.
+-- Esperado: 0. Hand passa STUDY_VIEW_HAS_STUDY_TAG mas falha mm real = violação R1 real.
 
 -- X1.2 R3: zero hands sem HH em Estudo
 SELECT COUNT(*) FROM hands h
@@ -778,18 +789,29 @@ WHERE h.played_at >= '2026-01-01'
   AND (h.raw IS NULL OR h.raw = '');
 -- Esperado: 0.
 
--- X1.3 R2: zero hands só com tag 'nota' em Estudo
+-- X1.3 R2: zero hands só com tag 'nota' em Estudo (#P10b refined pt14:
+-- sentinela do filtro UI — tautologicamente 0 enquanto STUDY_VIEW_HAS_STUDY_TAG
+-- exige tag != nota. Combina filtro UI de Estudo + condição "todas as tags são
+-- nota" — as 2 são contraditórias por construção. Se reportar > 0, há regressão
+-- no STUDY_VIEW_HAS_STUDY_TAG em hands.py:425-432 que permite "só nota" entrar
+-- em Estudo. Versão antiga era overly broad e reportava 3014 falsos positivos.).
 SELECT COUNT(*) FROM hands h
 WHERE h.played_at >= '2026-01-01'
-  AND h.study_state IN ('new', 'resolved')
-  AND NOT EXISTS (
-    SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}')) t WHERE t NOT ILIKE 'nota%'
+  AND h.study_state != 'mtt_archive'
+  AND (h.raw IS NOT NULL AND h.raw <> '')
+  -- STUDY_VIEW_HAS_STUDY_TAG (a hand passa o filtro UI):
+  AND (
+    EXISTS (SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}'::text[])) t
+            WHERE t IS NOT NULL AND t NOT ILIKE 'nota%')
+    OR EXISTS (SELECT 1 FROM unnest(COALESCE(h.discord_tags, '{}'::text[])) t
+               WHERE t IS NOT NULL AND t != 'nota')
   )
-  AND NOT EXISTS (
-    SELECT 1 FROM unnest(COALESCE(h.discord_tags, '{}')) t WHERE t != 'nota'
-  );
--- Esperado: 0. Mãos com 'nota' + outra tag não são apanhadas por esta query
--- (têm tag de estudo válida).
+  -- AND simultaneamente: todas as tags são 'nota' (caso #2 + #5):
+  AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}'::text[])) t
+                  WHERE t IS NOT NULL AND t NOT ILIKE 'nota%')
+  AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(h.discord_tags, '{}'::text[])) t
+                  WHERE t IS NOT NULL AND t != 'nota');
+-- Esperado: 0 (contradição lógica resolvível só por bug no filtro UI).
 
 -- X1.4 R12: queries do playbook respeitam played_at >= 2026 (verificação self-test)
 -- Confirmar que a totalidade de SQL usado neste playbook contém este filtro
