@@ -4,14 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## ⚠️ LEITURA OBRIGATÓRIA ANTES DE TUDO
 
-Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro estes 4 documentos, por esta ordem:
+Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro estes 5 documentos, por esta ordem:
 
-1. **`docs/VISAO_PRODUTO.md`** — visão alta da app (propósito, vectores, secções).
-2. **`docs/REGRAS_NEGOCIO.md`** — regras operacionais (entrada, processamento, distribuição, casos canónicos, regras duras).
-3. **`docs/MAPA_ACOPLAMENTO.md`** — mapa técnico de conceitos (`match_method`, `study_state`, `origin`, etc).
-4. **`docs/TECH_DEBTS_INVENTARIO.md`** — backlog actualizado de tech debts.
+1. **`docs/PAPEIS_E_RESPONSABILIDADES.md`** — explica o papel do Rui, do Claude Web e do Claude Code neste projecto. Leitura obrigatória para Claude novo.
+2. **`docs/VISAO_PRODUTO.md`** — visão alta da app (propósito, vectores, secções).
+3. **`docs/REGRAS_NEGOCIO.md`** — regras operacionais (entrada, processamento, distribuição, casos canónicos, regras duras).
+4. **`docs/MAPA_ACOPLAMENTO.md`** — mapa técnico de conceitos (`match_method`, `study_state`, `origin`, etc).
+5. **`docs/TECH_DEBTS_INVENTARIO.md`** — backlog actualizado de tech debts.
 
-Sem ler estes 4 documentos, NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
+Sem ler estes 5 documentos, NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
 
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
