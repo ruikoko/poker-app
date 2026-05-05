@@ -111,14 +111,18 @@ Fonte de verdade: `backend/app/routers/hands.py:567-574` (3 filtros aplicados qu
 
 **Regra:** tags HM3 e canais Discord são o MESMO conceito. Rui nomeou os canais Discord para coincidirem com tags HM3 (ex: canal `icm-pko` ≡ tag `ICM PKO`).
 
-**Apresentação actual (pt9):**
+**Apresentação (estado actual, pt13):**
 - 1 chip por nome de tag/canal (unificação case-insensitive + hyphen→space; ver `normalizeTagKey` em `frontend/src/pages/Hands.jsx`).
 - Dentro da chip: todas as mãos com essa tag, vindas de qualquer origem (HM3 ou Discord).
 - Cada `HandRow` carrega um `OriginBadge` (`HM3`, `Discord`, ou `HM3+D` quando a tag normalizada existe nas duas origens da mesma mão).
-- Mãos sem HH excluídas do Estudo (regra 3.2.1: "Mão TEM HH").
-- Mãos só com tag `nota` excluídas do Estudo (vão apenas para Vilões — #B15).
+- Mãos sem HH excluídas (regra 3.2.1: "Mão TEM HH").
+- Mãos só com tag `nota` excluídas (vão apenas para Vilões).
+- Cada `HandRow` mostra o ID da mão (monospace cinzento esbatido) — pt12 #B34.
+- Torneios agrupam-se por `tournament_number` (chave `tm:${number}`), não por nome — pt12 #B25 resolveu cross-midnight + nomes duplicados.
 
-**Tech debt:** #B17 RESOLVIDO em pt9 (commit `7806d33`). #B15 (excluir só-nota) RESOLVIDO em pt9 (commit `1cca3a6`).
+**Pista de estudo simplificada (pt13):** `study_state` é um de 3 valores: `new` (ainda por estudar), `resolved` (revista) ou `mtt_archive` (arquivo de torneio, não aparece em Estudo). UI mostra "Nova" / "Revista". CHECK constraint no schema.
+
+**Ponto de entrada (pt13):** o cartão Dashboard "Mãos por estudar" expandiu com top 3 tags normalizadas + 4 salas (GG/PS/WN/WPN sempre presentes); o cartão "Total de mãos" tem sub-linha condicional "X revistas". A Inbox foi eliminada — 7 secções no sidebar (Dashboard / HM3 / Discord / Torneios / Estudo / Vilões / GTO).
 
 ### 3.3. Secções DERIVADAS — Vilões
 
