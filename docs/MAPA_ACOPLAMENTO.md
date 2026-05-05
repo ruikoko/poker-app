@@ -54,8 +54,8 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [7.1 Barreira pre-2026 (`is_pre_2026`)](#71-barreira-pre-2026-is_pre_2026)
   - [7.2 Auto-rematch retroactivo](#72-auto-rematch-retroactivo)
   - [7.3 `_link_second_discord_entry_to_existing_hand`](#73-_link_second_discord_entry_to_existing_hand)
-  - [7.4 `_create_ggpoker_villain_notes_for_hand`](#74-_create_ggpoker_villain_notes_for_hand)
-  - [7.5 `_create_hand_villains_hm3`](#75-_create_hand_villains_hm3)
+  - [7.4 `apply_villain_rules` — função canónica](#74-apply_villain_rules--função-canónica)
+  - [7.5 Call sites de `apply_villain_rules`](#75-call-sites-de-apply_villain_rules)
   - [7.6 `_create_placeholder_if_needed`](#76-_create_placeholder_if_needed)
   - [7.7 `_insert_hand` placeholder upgrade](#77-_insert_hand-placeholder-upgrade)
   - [7.8 `ON CONFLICT (discord_message_id) DO NOTHING`](#78-on-conflict-discord_message_id-do-nothing)
@@ -137,7 +137,7 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 **Armadilhas conhecidas:**
 
 - 42 mãos GG ficaram com o `_meta` (bb/sb/ante) trocado com a chave de um nick por um bug iterativo em `_build_anon_to_real_map`. Detector e fix em `backend/app/routers/hands.py:1149` (`/admin/scope-anonmap-bug`) e `:1430` (`/admin/refix-anonmap-bug`).
-- Falta de defensive guard no `_create_hand_villains_hm3` para GG anonimizada está coberto explicitamente (`backend/app/routers/hm3.py:756`); não tirar.
+- Invariante GG anonimizada coberto em `apply_villain_rules` linhas 73-76 (`services/villain_rules.py`): `site=GGPoker AND (match_method missing OR placeholder)` retorna `skipped_reason='gg_anon_no_match'`. Substitui o guard antigo do extinto `_create_hand_villains_hm3`. Não tirar.
 
 **Quando alguém pergunta...**
 
@@ -516,8 +516,8 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 
 **Comportamento esperado quando muda:**
 
-- `FALSE → TRUE`: torna a mão elegível para regra B (se `match_method` populado). `_create_villains_for_hand` passa a iterar showdown players.
-- `TRUE → FALSE`: dispara fallback para VPIP preflop em `_create_hand_villains_hm3`.
+- `FALSE → TRUE`: promove `_street_reached` em `apply_villain_rules` para 5 (showdown) quando há cards reveladas no river. Filtro vilão principal (`_filter_to_furthest_street`) passa a ser estricter: só candidates que chegaram à street máxima passam. Regra B classification foi eliminada em #B8 (pt7) — showdown sozinho já não cria villains.
+- `TRUE → FALSE`: candidates podem cair em street ≤ 4. Eligibility default (`has_cards ∨ has_vpip`) continua a filtrar; excepção #B19 (tag `nota`) aceita postflop-only.
 
 **Armadilhas conhecidas:**
 
@@ -528,7 +528,7 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 
 - *"Posso fazer trust deste flag para análises de showdown?"* → Sim em mãos com `match_method` populado. Em GG anonimizada sem match, `has_showdown` é unreliable.
 
-**Cross-references:** [`match_method`](#21-match_method), [Vilões (regras A∨B∨C)](#63-vilões-regras-abc), [`_create_hand_villains_hm3`](#75-_create_hand_villains_hm3).
+**Cross-references:** [`match_method`](#21-match_method), [Vilões](#63-vilões-regras-abc), [`apply_villain_rules`](#74-apply_villain_rules--função-canónica).
 
 ---
 
@@ -991,16 +991,15 @@ Cada pipeline escreve um valor diferente em `hands.origin` e marca diferente. Es
    - Filtra `is_pre_2026`.
    - Separa tags do CSV (`hm3_tags_clean`) das auto-geradas (`auto_tags`: `'showdown'` + nicks).
    - INSERT com `origin='hm3'`, `study_state='new'`, `hm3_tags=hm3_tags_clean`, `tags=auto_tags`. ON CONFLICT atualiza preservando GG match (`all_players_actions = CASE ... WHEN match_method ...`).
-   - Se `nota*` em hm3_tags **OR** `has_showdown`: dispara `_create_hand_villains_hm3`.
+   - Após INSERT/UPDATE: dispara `apply_villain_rules(hand_db_id)` (canónico desde refactor #B23, pt10). Aplica A∨C∨D + filtro vilão principal + Q6 guard.
 5. **Auto-rematch** semelhante a `hh_import`.
 
 **O que escreve:**
 
 - `hands.origin='hm3'`, `hm3_tags`, `tags`, `tournament_*`, `buy_in`, `all_players_actions`, `has_showdown`, `position_parse_failed`.
-- `villain_notes` upsert por nick.
-- `hand_villains` via `_create_hand_villains_hm3` (showdown ou VPIP fallback).
+- `hand_villains` + `villain_notes` via `apply_villain_rules` (regras A∨C∨D, idempotente, Q6 guard).
 
-**Cross-references:** [`hm3_tags`](#23-hm3_tags), [`_create_hand_villains_hm3`](#75-_create_hand_villains_hm3), [HM3](#66-hm3).
+**Cross-references:** [`hm3_tags`](#23-hm3_tags), [`apply_villain_rules`](#74-apply_villain_rules--função-canónica), [HM3](#66-hm3).
 
 ---
 
@@ -1038,7 +1037,7 @@ Cada pipeline escreve um valor diferente em `hands.origin` e marca diferente. Es
 2. `_parse_filename` extrai data/hora/blinds/TM. Filtra `is_pre_2026` se filename tem data clara.
 3. Comprime e cria entry com `source='screenshot'`, `entry_type='screenshot'`, `raw_json={tm, file_meta, mime_type, img_b64, vision_done:false}`.
 4. Em background, `_run_vision_for_entry` corre Vision, tenta match com `hands` (via TM `GG-{digits}`) e `mtt_hands`.
-5. Se match: enriquece via `_enrich_hand_from_orphan_entry` e cria villains via `_create_ggpoker_villain_notes_for_hand`.
+5. Se match: enriquece via `_enrich_hand_from_orphan_entry` e dispara `apply_villain_rules(hand_db_id)` (canónico desde refactor #B23, pt10).
 6. Se nenhum match: `_create_placeholder_if_needed` cria mão com `origin='ss_upload'`, `tags=['SSMatch']`, `match_method='discord_placeholder_no_hh'`, `screenshot_url=null` (imagem em entry), `played_at=null` (filename pode não ter data fiável).
 
 **O que escreve:**
@@ -1087,11 +1086,26 @@ Cada pipeline escreve um valor diferente em `hands.origin` e marca diferente. Es
 
 ---
 
-### 6.3 Vilões (regras A∨B∨C)
+### 6.3 Vilões
 
 **Em linguagem simples:** lista de jogadores adversários. Modal mostra mãos do villain.
 
-**Regra de elegibilidade (canónica em `backend/app/routers/villains.py:67`):**
+**⚠️ Distinção crucial — UI filter vs classification logic:**
+
+A app tem **duas regras separadas** com o mesmo prefixo "A/B/C/D":
+
+1. **Classification** (decide o que entra em `hand_villains`): regras
+   **A∨C∨D** em `_classify_villain_categories` (`hand_service.py`).
+   Aplicado por `apply_villain_rules` ([§7.4](#74-apply_villain_rules--função-canónica)).
+   Regra B (showdown sem tag) foi **eliminada em #B8 (pt7)**.
+
+2. **UI filter** (decide o que aparece na lista Vilões): regras
+   **A∨B∨C** em `VILLAIN_ELIGIBILITY_CONDITION` (`villains.py:67-85`).
+   Branch B continua presente no SQL mas é **dead code** — nenhuma row
+   em `hand_villains` é criada com base em showdown sozinho desde #B8.
+   Mantido por opção (#B31 pt13): documentar em vez de mudar SQL.
+
+**Regra de elegibilidade UI (canónica em `backend/app/routers/villains.py:67`):**
 
 ```sql
 h.played_at >= '2026-01-01'
@@ -1099,13 +1113,19 @@ AND (
   -- (A) tag HM3 começa por 'nota'
   EXISTS (SELECT 1 FROM unnest(COALESCE(h.hm3_tags, '{}')) t WHERE t ILIKE 'nota%')
   OR
-  -- (B) match SS↔HH válido + showdown
+  -- (B) match SS↔HH válido + showdown  [DEAD branch pós-#B8 — ver nota acima]
   (h.player_names ->> 'match_method' IS NOT NULL AND h.has_showdown = TRUE)
   OR
   -- (C) canal Discord 'nota' + match SS↔HH
   ('nota' = ANY(COALESCE(h.discord_tags, '{}')) AND h.player_names ->> 'match_method' IS NOT NULL)
 )
 ```
+
+Nota: o filtro inclui A∨B∨C mas o JOIN com `hand_villains` (em
+`recalculate_hands_seen` linha 471 e na search hands linha 394) limita
+resultados a hands que tenham efectivamente row em `hand_villains` — o que
+só acontece via classification A∨C∨D. Logo branch B é over-restrictive
+mas inerte (filtra zero hands incrementais).
 
 **Endpoints:**
 
@@ -1238,7 +1258,7 @@ Outros: `GET /api/mtt/hands` (lista mãos), `GET /api/mtt/hands/{id}` (detalhe),
 
 1. Append do canal desta entry a `hands.discord_tags` (idempotente).
 2. Marca entry como `'resolved'`.
-3. Se a regra C passa a cumprir (`'nota'` em discord_tags + `match_method` populado + tem raw HH real + ainda sem `hand_villains`), dispara `_create_villains_for_hand`.
+3. Se a regra C passa a cumprir (`'nota'` em discord_tags + `match_method` populado + tem raw HH real + ainda sem `hand_villains`), dispara `apply_villain_rules(hand_db_id)` (canónico desde refactor #B23, pt10).
 
 **Comportamento esperado quando muda:** Acrescentar canal `'nota'` a uma mão com match e showdown faz aparecer villain automaticamente.
 
@@ -1246,42 +1266,160 @@ Outros: `GET /api/mtt/hands` (lista mãos), `GET /api/mtt/hands/{id}` (detalhe),
 
 ---
 
-### 7.4 `_create_ggpoker_villain_notes_for_hand`
+### 7.4 `apply_villain_rules` — função canónica
 
-**Em linguagem simples:** "depois de uma mão GG receber match, cria/incrementa villains para os jogadores VPIP".
+**Em linguagem simples:** "depois de uma mão ter nicks reais, decide quais
+adversários merecem entrar em Vilões e por que regra (A∨C∨D)".
 
-**Localização:** `backend/app/routers/mtt.py:709`.
+**Localização:** `backend/app/services/villain_rules.py:45`.
 
-**O que faz:**
+**Substitui** (refactor #B23, pt10, commits `abb6d59` → `8476e87`):
 
-1. Lê `hands.all_players_actions` da BD.
-2. Itera `players_list` (do raw_json da entry SS); para cada não-hero com VPIP (preflop ou pós), faz UPSERT em `villain_notes(site='GGPoker', nick=pname)` (`hands_seen += 1`).
-3. Se `screenshot_data` for passado: chama `_create_villains_for_hand` para popular `hand_villains` (regra B/C).
+- `mtt._create_villains_for_hand` (apagada na sua maioria; 4 call sites
+  legacy mantidos com `mtt_hand_id` only — ver [§7.5](#75-call-sites-de-apply_villain_rules)
+  e REGRAS §8).
+- `mtt._create_ggpoker_villain_notes_for_hand` (apagada Onda 6).
+- `hm3._create_hand_villains_hm3` (apagada Onda 6).
+- `hm3._detect_vpip_hm3` (apagada Onda 6, #B27).
+- `screenshot._maybe_create_rule_c_villain_for_hand` (apagada Onda 6).
 
-**Helper partilhado** entre as fases SS→HH e HH→SS de `/mtt/rematch` para evitar drift da lógica VPIP.
+**Signature:**
 
-**Cross-references:** [Vilões](#63-vilões-regras-abc), [`_enrich_hand_from_orphan_entry`](#76-_create_placeholder_if_needed).
+```python
+apply_villain_rules(hand_db_id: int, *, conn=None) -> dict
+```
 
----
+**Inputs:**
+- `hand_db_id` — id em `hands`.
+- `conn` (opcional) — psycopg2 connection. Se `None`: abre/commita própria.
+  Se fornecida: caller é dono da transacção.
 
-### 7.5 `_create_hand_villains_hm3`
+**Output:**
 
-**Em linguagem simples:** "para mãos do HM3 (Winamax/PS/WPN), cria villains a partir do showdown ou VPIP preflop".
+```
+{
+    "n_villains_created":      int,    # rows inseridas em hand_villains
+    "n_villain_notes_upserts": int,    # candidates 1ª vez (com Q6 guard)
+    "skipped_reason":          str | None  # hand_not_found | gg_anon_no_match | no_candidates
+}
+```
 
-**Localização:** `backend/app/routers/hm3.py:728`.
+**Algoritmo:**
 
-**O que faz:**
+1. `_read_hand` — SELECT atómico (site, raw, apa, has_showdown, hm3_tags,
+   discord_tags, match_method, player_names).
+2. **Invariante GG** — `site=GGPoker AND (match_method missing OR
+   placeholder)` → skip com `skipped_reason='gg_anon_no_match'`. NUNCA cria
+   villains em hands GG anonimizadas (REGRAS §6).
+3. `_build_candidates` — lista non-hero do apa. Eligibility default
+   `has_cards ∨ has_vpip`. Excepção #B19 (REGRAS §3.3): tag `'nota'`
+   (HM3 ou canal Discord) aceita postflop-only (cobre BB-check-preflop a
+   agir postflop sem VPIP).
+4. `_filter_to_furthest_street` — mantém só candidates que chegaram à
+   street máxima da hand (spec vilão principal, pt12). Hierarquia:
+   `5=showdown(river+cards)`, `4=river`, `3=turn`, `2=flop`, `1=preflop`,
+   `0=sem_dados`. Sem tie-break: empate na street máxima → todos passam.
+   Edge case (max=0, apa placeholder): todos passam.
+5. `_persist` — para cada candidate:
+   - `_classify_villain_categories` (em `hand_service.py`) decide categorias
+     aplicáveis (lista de A/C/D). Regra B foi eliminada em #B8 (pt7).
+   - INSERT em `hand_villains` (1 row por categoria) — idempotente via
+     partial UNIQUE `(hand_db_id, player_name, category) WHERE
+     hand_db_id IS NOT NULL`.
+   - **Q6 guard**: SELECT prévio em `hand_villains WHERE
+     (hand_db_id, player_name)`. Se já existe (qualquer category), é
+     repeat-call → skip UPSERT em `villain_notes` (evita duplo-incremento
+     de `hands_seen`). Sem outros guards pós-#B29 (pt13).
+   - UPSERT em `villain_notes(site, nick)` incrementa `hands_seen+1` na
+     1ª chamada (idempotente nas seguintes via Q6).
 
-1. Skip se `site=GGPoker` (anonimizada — invariante: hashes não viram villains).
-2. Se `has_showdown=True`: itera `parsed['all_players']` e pega não-hero com `cards != None` (showdown-based).
-3. Se `has_showdown=False`: fallback para `_detect_vpip_hm3` (VPIP preflop).
-4. INSERT em `hand_villains` com `ON CONFLICT (hand_db_id, player_name) WHERE hand_db_id IS NOT NULL DO NOTHING` (idempotente via `uq_hand_villains_hand_db_player`).
+**Regras de classificação** (delegadas a `_classify_villain_categories` em
+`hand_service.py`):
+
+- **A** — `hm3_tags` contém tag a começar por `'nota'` → `category='nota'`.
+- **C** — `'nota' ∈ discord_tags` AND `match_method` real → `category='nota'`.
+- **D** — `villain_nick ∈ FRIEND_HEROES` (Karluz, flightrisk) → `category='friend'`.
 
 **Comportamento esperado quando muda:**
 
-- Mão com `nota*` mas `has_showdown=False`: passa pelo fallback VPIP. Bug histórico: o `_detect_vpip_hm3` antigo só olhava preflop e deixava mãos showdown sem villains; corrigido com este dispatcher.
+- Adicionar `'nota'` aos `discord_tags` de uma hand já matched faz
+  aparecer villain via Regra C automaticamente (na próxima chamada).
+- Mudar `hm3_tags` para incluir `'nota%'` faz aparecer via Regra A.
+- Re-execução em hand já processada é no-op (Q6 guard + ON CONFLICT).
+- Backfill manual: chamar via script (ver `backend/app/scripts/refix_villains.py`).
 
-**Cross-references:** [`has_showdown`](#28-has_showdown), [Vilões](#63-vilões-regras-abc), [HM3 import](#52-hm3-post-apihm3import--csv).
+**Armadilhas conhecidas:**
+
+- **Path bulk archive `mtt_hand_id` legacy** (REGRAS §8): 4 call sites em
+  `mtt.py` (linhas 1162, 1782, 2098, 2193) ainda usam
+  `_create_villains_for_hand(mtt_hand_id=X)` em vez de `apply_villain_rules`.
+  Esses paths não passam por A∨C∨D e gravam `hand_db_id=NULL` em
+  `hand_villains`. Pendente migração / deprecação.
+- **Filtro SQL UI vs classification logic**: ver §6.3. `VILLAIN_ELIGIBILITY_CONDITION`
+  em `villains.py:67-85` lista A∨B∨C, mas branch B é dead code pós-#B8.
+- **#B29 (pt13) consolidou single source of truth**: `villain_notes.hands_seen`
+  só é incrementado via `_persist` com Q6 guard. Outros 2 sítios
+  (`mtt._create_villains_for_hand` legacy block, `mtt.re_enrich_all` loop)
+  foram removidos. Inflação de `hands_seen` deixou de ser possível em
+  paths normais.
+
+**Cross-references:** [Vilões](#63-vilões-regras-abc), [`hm3_tags`](#23-hm3_tags),
+[`discord_tags`](#24-discord_tags), [`match_method`](#21-match_method),
+[`has_showdown`](#28-has_showdown), [`FRIEND_NICKS`](#45-friend_nicks),
+[Call sites](#75-call-sites-de-apply_villain_rules), [REGRAS_NEGOCIO §3.3](REGRAS_NEGOCIO.md).
+
+---
+
+### 7.5 Call sites de `apply_villain_rules`
+
+**Em linguagem simples:** "todos os sítios na app que disparam a função
+canónica de criação de villains".
+
+**Em produção (8 sítios):**
+
+| Ficheiro:Linha | Contexto | Notas |
+|---|---|---|
+| `screenshot.py:869` | `_run_match_worker` (Bucket 1) | Fire-and-forget após match SS↔HH em background. |
+| `screenshot.py:1479` | `_enrich_hand_from_orphan_entry` | Pipeline Discord/SS upload — após enrich completo. |
+| `discord.py:851` | `backfill_ggdiscord` | Após placeholder Discord ganhar `discord_tags` populadas. |
+| `hm3.py:930` | `import_hm3` (UPDATE branch) | Após UPDATE de hand existente (tags mudaram). |
+| `hm3.py:1034` | `import_hm3` (INSERT branch) | Após INSERT de hand nova. |
+| `mtt.py:1165` | `import_mtt` | Branch `hand_db_id` (não `mtt_hand_id`). |
+| `mtt.py:1819` | `rematch_screenshots` | Endpoint admin, após enrich. |
+| `mtt.py:1950` | `re_enrich_all` | Endpoint admin, após enrich. Loop UPSERT removido em #B29 (pt13). |
+
+**Em scripts ad-hoc (2 sítios, manual):**
+
+| Ficheiro:Linha | Contexto |
+|---|---|
+| `backend/app/scripts/backfill_showdown.py:96` | Backfill via Onda 5 #B23 refactor. Flag `showdown_only=True` deprecada — `apply_villain_rules` trata showdown via `_filter_to_furthest_street`. |
+| `backend/app/scripts/refix_villains.py:147` | Refix manual; DELETE precedente preservado. |
+
+**Caller pattern recomendado:**
+
+```python
+from app.services.villain_rules import apply_villain_rules
+
+# Caso 1: caller possui transacção
+with conn.cursor() as cur:
+    # ... outras operações na mesma transacção ...
+    result = apply_villain_rules(hand_db_id, conn=conn)
+    # caller faz commit no fim
+
+# Caso 2: chamada isolada
+result = apply_villain_rules(hand_db_id)
+# função abre/commita/fecha conn própria
+```
+
+**Comportamento esperado quando muda:**
+
+- Adicionar novo trigger (futuro) que faça `discord_tags` mudar →
+  chamar `apply_villain_rules(hand_db_id)` na transacção do trigger.
+- Remover trigger existente: garantir que outro caller cobre o caso
+  ou hands afectadas perdem cobertura A∨C∨D.
+
+**Cross-references:** [§7.4 `apply_villain_rules`](#74-apply_villain_rules--função-canónica),
+[Pipelines de ingest](#5-pipelines-de-ingest), [Vilões](#63-vilões-regras-abc).
 
 ---
 
@@ -1375,12 +1513,12 @@ Outros: `GET /api/mtt/hands` (lista mãos), `GET /api/mtt/hands/{id}` (detalhe),
 | Index | Tabela | Localização (definição) | Para quê |
 |---|---|---|---|
 | `hands.hand_id` UNIQUE | `hands` | `schema.sql:55` | Deduplicação primária (`GG-{TM}`, `WN-{HID}`, etc.). Suporta o ON CONFLICT (hand_id) DO NOTHING / DO UPDATE em `import_hm3`, `import_mtt`, `_create_placeholder_if_needed`. |
-| `villain_notes (site, nick)` UNIQUE | `villain_notes` | `schema.sql:90` | Suporta UPSERT em `_create_villains_for_hand` e `_create_ggpoker_villain_notes_for_hand`. |
+| `villain_notes (site, nick)` UNIQUE | `villain_notes` | `schema.sql:90` | Suporta UPSERT em `apply_villain_rules._persist` (canónico pós-#B23/#B29). |
 | `uniq_tournaments_with_tid (site, tid, date)` partial | `tournaments` | `schema.sql:41` | Dedup quando `tid` existe (WN/PS/WPN). |
 | `uniq_tournaments_no_tid (site, name, date, buyin, position)` partial | `tournaments` | `schema.sql:47` | Dedup GG (sem tid fiável). `position` distingue re-entries. |
 | `uniq_entries_discord_message` partial | `entries` | `schema.sql:182` / `main.py:78` | Silencia duplicados Discord via ON CONFLICT. **Crítico — não tirar.** |
 | `uniq_mtt_hands_tm_time (tm_number, played_at)` | `mtt_hands` | `mtt.py:62` | Dedup mãos MTT bulk legacy. |
-| `uq_hand_villains_hand_db_player (hand_db_id, player_name)` partial | `hand_villains` | `main.py:139` | Idempotência de `_create_hand_villains_hm3` e `_create_villains_for_hand`. |
+| `uq_hand_villains_hand_db_player (hand_db_id, player_name)` partial | `hand_villains` | `main.py:139` | Idempotência de `apply_villain_rules._persist` (canónico pós-#B23). Também usado pelo Q6 guard (SELECT prévio) para evitar duplo-incremento de `hands_seen`. |
 
 **Comportamento esperado quando se tira:** ON CONFLICT clauses começam a explodir em `UniqueViolation` em re-imports.
 
