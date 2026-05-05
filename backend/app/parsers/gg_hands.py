@@ -113,6 +113,17 @@ def _normalize_action(action_text: str, bb_size: float) -> str | None:
 
 # ── Buy-in extractor ─────────────────────────────────────────────────────────
 
+# #P9 fix (pt14): aceita vírgula de milhar em qualquer dos componentes do buy-in.
+# Padrão de número: 1-3 dígitos + grupos opcionais de ",ddd" + decimal opcional.
+# Bate "5", "50", "1,050", "11,000", "1,500.50", "22.50".
+_NUM_PATTERN = r"\d{1,3}(?:,\d{3})*(?:\.\d+)?"
+
+
+def _to_float(s: str) -> float:
+    """Remove vírgula de milhar e converte. Ex: '1,050.50' → 1050.5."""
+    return float(s.replace(",", ""))
+
+
 def _extract_buyin_numeric(tournament_name: str | None) -> float | None:
     """
     Extrai buy-in numérico total (buy-in + rake + bounty) do tournament_name.
@@ -120,19 +131,21 @@ def _extract_buyin_numeric(tournament_name: str | None) -> float | None:
       '$10+$1 Gladiator'         → 11.0
       'Bounty Builder $5'        → 5.0
       '$25+$2+$3 Zodiac'         → 30.0
+      '$1,050 GGMasters HR'      → 1050.0  (#P9)
+      '$11,000 Gladiator'        → 11000.0 (#P9)
     Devolve None se não encontrar nenhum padrão $X.
     """
     if not tournament_name:
         return None
     m = re.search(
-        r"\$(\d+(?:\.\d+)?)\s*\+\s*\$(\d+(?:\.\d+)?)(?:\s*\+\s*\$(\d+(?:\.\d+)?))?",
+        rf"\$({_NUM_PATTERN})\s*\+\s*\$({_NUM_PATTERN})(?:\s*\+\s*\$({_NUM_PATTERN}))?",
         tournament_name,
     )
     if m:
-        return round(sum(float(x) for x in m.groups() if x), 2)
-    m = re.search(r"\$(\d+(?:\.\d+)?)", tournament_name)
+        return round(sum(_to_float(x) for x in m.groups() if x), 2)
+    m = re.search(rf"\$({_NUM_PATTERN})", tournament_name)
     if m:
-        return round(float(m.group(1)), 2)
+        return round(_to_float(m.group(1)), 2)
     return None
 
 
