@@ -79,6 +79,9 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 | **N1** | MAPA_ACOPLAMENTO.md desactualizado: cabeçalho diz "Última actualização 2026-04-26" + drift pt10/pt12/pt13 (refactor #B23, vilão principal, study_state, tournaments_meta) | 🟢 Docs | pt14 | a estimar |
 | **N2** | VISAO_PRODUTO.md tem refs de linha exactas (ex: `hands.py:567-574`, `hands.py:565-566`) que mexem com refactors. Substituir por refs simbólicas (constantes nomeadas) ou re-âncorar | 🟢 Docs | pt14 | ~30 min |
 | **N3** | Promover regra "imagens directas Discord NUNCA criam mãos" (anexos `.png/.jpg/.webp` + Gyazo) de CLAUDE.md "Imagens de contexto Discord" para REGRAS_NEGOCIO.md §6 como regra dura | 🟢 Docs | pt14 | ~15 min |
+| **#P9** | Parser `buy_in` em `tournaments_meta` falha em vírgula de milhar — torneio com nome `'$1,050 GGMasters HR'` ficou com `buy_in=1.00`. Causa provável: split por vírgula. Afecta display de buy-in + filtros. Detectado pt14 Fase 3 Pipeline 2. | 🟡 Funcional | pt14 | ~30 min |
+| **#P10b** (refinamento playbook) | Queries X1.1 e X1.3 do `VERIFICACAO_PIPELINES.md` usam `study_state IN ('new','resolved')` como proxy para "aparece em Estudo", sem filtrar por `mm` real + tag de estudo. Reportam falsos positivos (X1.1=2970, X1.3=3014 em pt14 Fase A com 0 violações reais). Refinar a alinhar com `STUDY_VIEW_GG_MATCH_FILTER + STUDY_VIEW_HAS_STUDY_TAG`. | 🟢 Docs | pt14 | ~30 min |
+| **#P10c** (refinamento playbook) | Query Q3.6 do `VERIFICACAO_PIPELINES.md` usa filtro hardcoded de canais `['nota','icm','pos-pko','icm-pko','pos','speed-racer']`. Falha em apanhar hands de canais novos (ex: `pos-nko` em pt14 Fase A). Substituir por `cardinality(discord_tags) > 0`. | 🟢 Docs | pt14 | ~10 min |
 | **`mtt_hand_id` legacy** | 4 call sites em `mtt.py` (linhas 1264, 1882, 2202, 2297) ainda passam `mtt_hand_id` em vez de `hand_db_id`. REGRAS §8. | 🟢 Refactor | pt10 | a estimar |
 
 ### Pendente operacional pt11

@@ -957,51 +957,59 @@ WHERE site='GGPoker' AND played_at >= '2026-01-01';
 
 ## Última validação ponta-a-ponta
 
-**Data:** A preencher em pt14 Fase 3
-**Sessão:** —
-**Snapshot BD:** —
-**Tag git:** —
+**Data:** 2026-05-05
+**Sessão:** pt14 Fase 3 — Fase A (3 dias, janela 02-05 → 05-05/2026)
+**Snapshot BD:** ver "Counts BD" abaixo
+**Tag git:** `v2026-05-05-pre-wipe-pt14` (6371d7d, pré-wipe Fase 2) → commit `811fd32` (fix #P10) → tag pendente `v2026-05-05-post-faseA-pt14`
 **Operador:** Rui (visual) + Code (queries)
 
 ### Estado por pipeline
 
 | Pipeline | Estado | Notas |
 |---|---|---|
-| 1. HM3 `.bat` | ❓ | — |
-| 2. Import ZIP/TXT HH | ❓ | — |
-| 3. Discord sync | ❓ | — |
-| 4. Upload manual SS | ❓ | — |
-| 5. Galeria manual de imagens | ❓ | — |
+| 1. HM3 `.bat` | ⚠️ | PASSA COM ANOMALIAS — #B28 vivo (counter `villains_created` reporta 0 quando há 42 reais) |
+| 2. Import ZIP/TXT HH | ⚠️ | PASSA COM ANOMALIAS — #P9 nova (parser `buy_in` falha em `$1,050` → 1.00) |
+| 3. Discord sync | ✅ | PASSA — após fix #P10 nesta sessão (commit 811fd32). 67/69 entries recuperaram tm via backfill |
+| 4. Upload manual SS | ✅ | PASSA — 3/3 SSs uploaded, 3/3 promovidas a `mm='v2'`, 0 placeholders |
+| 5. Galeria manual de imagens | ⏭️ | Saltado (decisão Rui — sem imagens em mãos para testar nesta sessão) |
 
 ### Validações cross-cutting
 
 | Validação | Estado | Notas |
 |---|---|---|
-| X1. Estudo respeita as 4 regras duras (R1/R2/R3/R12) | ❓ | — |
-| X2. Vilões A∨C∨D estritos + vilão principal | ❓ | — |
-| X3. Cross-post Discord preserva canais (R4) | ❓ | — |
-| X4. Dashboard counters coerentes | ❓ | — |
-| X5. Health checks gerais | ❓ | — |
+| X1. Estudo respeita as 4 regras duras (R1/R2/R3/R12) | ✅ | 0 violações reais. X1.1 e X1.3 reportam falsos positivos (queries overly broad — ver INVENTARIO #P10b) |
+| X2. Vilões A∨C∨D estritos + vilão principal | ✅ | 56 villains category=nota; bad_villains=0 |
+| X3. Cross-post Discord preserva canais (R4) | ✅ | 12 cross-posts, todos com canais distintos preservados |
+| X4. Dashboard counters coerentes | ✅ | ss_match_pending=0, GGDiscord placeholders=0 |
+| X5. Health checks gerais | ✅ | 0 NULLs em campos required, 0 FK orphans, 0 dups |
 
 ### Counts BD
 
 | Tabela | Valor |
 |---|---|
-| `hands` (2026) | — |
-| `entries` (2026) | — |
-| `hand_villains` (2026) | — |
-| `villain_notes` (`hands_seen > 0`) | — |
-| `hand_attachments` | — |
-| `tournaments_meta` (GG) | — |
-| `discord_sync_state` (canais activos) | — |
+| `hands` (2026) | 3 124 (94 HM3 + 3 030 GG) |
+| `entries` (2026) | 73 (70 Discord + 3 screenshot) |
+| `hand_villains` (2026) | 56 (42 HM3 Regra A + 14 GG Regra C) |
+| `villain_notes` (`hands_seen > 0`) | 46 |
+| `hand_attachments` | 0 (Pipeline 5 saltado) |
+| `tournaments_meta` (GG) | 40 |
+| `discord_sync_state` (canais activos) | 4 (canais com entries Discord recentes) |
 
 ### Anomalias detectadas
 
-(Lista vazia até preenchimento.)
+- **#P10** — FECHADO. Recidiva de #B33: regex word-boundary em `screenshot.py` falhava em 97% das entries Vision com prefixo "TM" literal. Fix em commit `811fd32`. Backfill executado: 67 entries recuperaram `tm`, 57 hands ganharam `discord_tags`, 57 promovidas a `mm='v2'`, 14 villains via Regra C.
+- **#P9** — NOVA. Parser `buy_in` em `tournaments_meta` falha em vírgula de milhar. Tech debt aberto.
+- **#B28, #B13** — confirmados vivos. Cosméticos.
+- **#P10b, #P10c** — refinamentos do próprio playbook (queries X1.1/X1.3 overly broad; Q3.6 com filtro hardcoded de canais). Tech debts abertos.
 
 ### Decisão final
 
-❓ A preencher.
+✅ **Fase A APROVADA.** 4/5 pipelines validados (P5 saltado). 0 violações reais de regras duras. Fase B (35 dias) pendente para sessão futura.
+
+### Refinamentos pendentes do próprio playbook
+
+- **X1.1 e X1.3:** alinhar com filtro UI real (`STUDY_VIEW_GG_MATCH_FILTER` + `STUDY_VIEW_HAS_STUDY_TAG`). Tech debt #P10b.
+- **Q3.6:** substituir filtro hardcoded por `cardinality(discord_tags) > 0`. Tech debt #P10c.
 
 ---
 
