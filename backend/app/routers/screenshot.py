@@ -304,12 +304,15 @@ def _parse_vision_response(text: str) -> dict:
 
         if line.startswith("TM:"):
             val = line[3:].strip()
-            # #B33 fix — Tolerante a 4 formatos que o Vision pode devolver:
-            # "TM12345", "12345", "TM 12345", "TM: 12345"
-            # (2/26 entries em 3-Maio falharam porque Vision omitiu o prefixo "TM",
-            # devolvendo só o número. Regex anterior r'TM(\d+)' exigia prefixo
-            # literal e retornava None, partindo backfill_ggdiscord downstream.)
-            m = re.search(r'\b(\d{8,12})\b', val)
+            # #P10 fix (pt14) — Recidiva de #B33: regex word-boundary
+            # \b(\d{8,12})\b só casava quando Vision omitia o prefixo "TM"
+            # (3% dos casos). No caso maioritário "TM12345" não havia boundary
+            # entre M e 5 (ambos word chars), logo o regex falhava silenciosamente
+            # em 67/69 entries (97%). Fix correcto: prefixo "TM" opcional
+            # DENTRO do match, sem depender de word boundary. Aceita os 4
+            # formatos pretendidos pelo #B33: "TM12345", "12345", "TM 12345",
+            # "TM: 12345" (este último já tratado pelo line[3:].strip() acima).
+            m = re.search(r'(?:TM\s*)?(\d{8,12})', val)
             if m:
                 result["tm"] = f"TM{m.group(1)}"
 
