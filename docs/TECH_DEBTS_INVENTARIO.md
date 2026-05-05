@@ -75,7 +75,7 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 | **#B20** | Filtros HM3 por tag (não por nick) | 🟢 UX | pt10 | a estimar |
 | **#B21** | Dashboard "por estudar" filtrar por elegibilidade | 🟢 UX | pt10 | a estimar |
 | **#B26** | Investigar cor das TAGS na secção Estudo | 🟢 UX | pt10 | a estimar |
-| **#B28** | Validar contadores UI pós-refactor #B23 (semântica `villains_created` mudou: rows `hand_villains` vs UPSERTs `villain_notes`) | 🟡 Funcional | pt10 | a estimar |
+| **#B28** ✅ FECHADO pt14 | Counter `villains_created` no response do `POST /api/hm3/import` (e por extensão output do `.bat`) ficou silenciosamente em 0 desde refactor #B23 (pt10): a função canónica `apply_villain_rules` passou a devolver `dict` com `n_villains_created` em vez do `int` da predecessora, e os 2 call sites em `hm3.py:930` e `hm3.py:1034` passaram a ignorar o return. Fix: captar return em ambos os call sites e somar `n_villains_created` ao counter. Cosmético — sem efeito em dados, regras de elegibilidade ou pipelines downstream. | 🟡 Funcional | pt10 | ~30 min (consumido) |
 | **N1** | MAPA_ACOPLAMENTO.md desactualizado: cabeçalho diz "Última actualização 2026-04-26" + drift pt10/pt12/pt13 (refactor #B23, vilão principal, study_state, tournaments_meta) | 🟢 Docs | pt14 | a estimar |
 | **N2** | VISAO_PRODUTO.md tem refs de linha exactas (ex: `hands.py:567-574`, `hands.py:565-566`) que mexem com refactors. Substituir por refs simbólicas (constantes nomeadas) ou re-âncorar | 🟢 Docs | pt14 | ~30 min |
 | **N3** | Promover regra "imagens directas Discord NUNCA criam mãos" (anexos `.png/.jpg/.webp` + Gyazo) de CLAUDE.md "Imagens de contexto Discord" para REGRAS_NEGOCIO.md §6 como regra dura | 🟢 Docs | pt14 | ~15 min |

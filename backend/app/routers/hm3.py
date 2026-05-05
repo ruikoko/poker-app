@@ -927,7 +927,12 @@ async def import_hm3(
                     # Removido o guard externo "nota OR showdown" — bloqueava
                     # Regra D (FRIEND_HEROES sem tag/showdown).
                     from app.services.villain_rules import apply_villain_rules
-                    apply_villain_rules(existing["id"], conn=conn)
+                    # #B28 fix (pt14): captar return da funcao canonica para somar
+                    # ao counter villains_created. Pre-refactor #B23 a funcao
+                    # predecessora devolvia int; pos-refactor o dict ficou ignorado
+                    # e o counter ficou silenciosamente em 0 ate ao response.
+                    _avr = apply_villain_rules(existing["id"], conn=conn)
+                    villains_created += _avr.get("n_villains_created", 0)
 
                     skipped += 1
                     continue
@@ -1031,7 +1036,9 @@ async def import_hm3(
                 # Removido o guard externo "nota OR showdown" — bloqueava
                 # Regra D (FRIEND_HEROES sem tag/showdown).
                 from app.services.villain_rules import apply_villain_rules
-                apply_villain_rules(hand_db_id, conn=conn)
+                # #B28 fix (pt14): captar return — ver comentario no path skipped acima.
+                _avr = apply_villain_rules(hand_db_id, conn=conn)
+                villains_created += _avr.get("n_villains_created", 0)
 
         conn.commit()
     except Exception as e:
