@@ -12,20 +12,16 @@ import AttachedImagesSection from '../components/AttachedImagesSection'
 // ── Constantes ──────────────────────────────────────────────────────────────
 
 const STATES = [
-  { v: '',          l: 'Todos os estados' },
-  { v: 'new',       l: 'Novas' },
-  { v: 'review',    l: 'Em Revisão' },
-  { v: 'studying',  l: 'A Estudar' },
-  { v: 'resolved',  l: 'Resolvidas' },
+  { v: '',         l: 'Todos os estados' },
+  { v: 'new',      l: 'Novas' },
+  { v: 'resolved', l: 'Revistas' },
 ]
 
 const POSITIONS = ['', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN', 'SB', 'BB']
 
 const STATE_META = {
-  new:      { label: 'Nova',      color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  review:   { label: 'Revisão',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-  studying: { label: 'A Estudar', color: '#8b5cf6', bg: 'rgba(139,92,246,0.15)' },
-  resolved: { label: 'Resolvida', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
+  new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  resolved: { label: 'Revista', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
 }
 
 const SUIT_COLORS = {
@@ -701,17 +697,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             }}
             disabled={saving} onClick={save}
           >{saving ? 'A guardar...' : 'Guardar'}</button>
-          {hand.study_state !== 'review' && (
-            <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer' }}
-              onClick={() => changeState('review')}>Marcar Revisão</button>
-          )}
-          {hand.study_state !== 'studying' && (
-            <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.3)', cursor: 'pointer' }}
-              onClick={() => changeState('studying')}>A Estudar</button>
-          )}
           {hand.study_state !== 'resolved' && (
             <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }}
-              onClick={() => changeState('resolved')}>Resolvida &#10003;</button>
+              onClick={() => changeState('resolved')}>Revista &#10003;</button>
           )}
         </div>
       </div>

@@ -1134,8 +1134,6 @@ def hm3_import_stats(current_user=Depends(require_auth)):
     rows = query("""
         SELECT site, COUNT(*) as total,
                COUNT(*) FILTER (WHERE study_state = 'new') as new,
-               COUNT(*) FILTER (WHERE study_state = 'review') as review,
-               COUNT(*) FILTER (WHERE study_state = 'studying') as studying,
                COUNT(*) FILTER (WHERE study_state = 'resolved') as resolved
         FROM hands
         WHERE site IN ('Winamax', 'PokerStars', 'WPN')

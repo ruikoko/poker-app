@@ -2421,20 +2421,9 @@ def migrate_mtt_to_hands(current_user=Depends(require_auth)):
     batch_size = 100
     offset = 0
 
-    # First ensure study_state allows mtt_archive
-    conn0 = get_conn()
-    try:
-        with conn0.cursor() as cur:
-            cur.execute("""
-                ALTER TABLE hands DROP CONSTRAINT IF EXISTS hands_study_state_check;
-                ALTER TABLE hands ADD CONSTRAINT hands_study_state_check
-                    CHECK (study_state IN ('new', 'review', 'studying', 'resolved', 'mtt_archive'));
-            """)
-        conn0.commit()
-    except Exception:
-        conn0.rollback()
-    finally:
-        conn0.close()
+    # CHECK constraint pt13: 'review' e 'studying' removidos. Migração canónica
+    # vive em hands.py:ensure_study_state_check_constraint (corre no lifespan).
+    # Esta admin-route já não toca no constraint — o lifespan garante a forma certa.
 
     # Count total
     count_rows = query("SELECT COUNT(*) as cnt FROM mtt_hands")

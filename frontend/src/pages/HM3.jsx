@@ -10,18 +10,14 @@ const SUIT_BG = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
 const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 
 const STATES = [
-  { v: '',          l: 'Todos os estados' },
-  { v: 'new',       l: 'Novas' },
-  { v: 'review',    l: 'Em Revisão' },
-  { v: 'studying',  l: 'A Estudar' },
-  { v: 'resolved',  l: 'Resolvidas' },
+  { v: '',         l: 'Todos os estados' },
+  { v: 'new',      l: 'Novas' },
+  { v: 'resolved', l: 'Revistas' },
 ]
 
 const STATE_META = {
-  new:      { label: 'Nova',      color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  review:   { label: 'Revisão',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-  studying: { label: 'A Estudar', color: '#8b5cf6', bg: 'rgba(139,92,246,0.15)' },
-  resolved: { label: 'Resolvida', color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
+  new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  resolved: { label: 'Revista', color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -242,9 +238,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid #2a2d3a', paddingTop: 16 }}>
           <button style={{ padding: '7px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer', opacity: saving ? 0.6 : 1 }} disabled={saving} onClick={save}>{saving ? 'A guardar...' : 'Guardar'}</button>
-          {hand.study_state !== 'review' && <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer' }} onClick={() => changeState('review')}>Revisão</button>}
-          {hand.study_state !== 'studying' && <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.3)', cursor: 'pointer' }} onClick={() => changeState('studying')}>A Estudar</button>}
-          {hand.study_state !== 'resolved' && <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }} onClick={() => changeState('resolved')}>Resolvida &#10003;</button>}
+          {hand.study_state !== 'resolved' && <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }} onClick={() => changeState('resolved')}>Revista &#10003;</button>}
         </div>
       </div>
     </div>
@@ -720,7 +714,7 @@ export default function HM3Page() {
         <div style={{ textAlign: 'center', padding: '64px 0', color: '#64748b' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>&#128202;</div>
           <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 6 }}>Sem mãos HM3</div>
-          <div style={{ fontSize: 13 }}>Importa mãos na Inbox via "Importar HM3"</div>
+          <div style={{ fontSize: 13 }}>Importa mãos via "Importar HM3"</div>
         </div>
       )}
 

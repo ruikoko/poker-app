@@ -3,7 +3,6 @@ import { useAuth } from './hooks/useAuth'
 import Shell from './components/Shell'
 import LoginPage from './pages/Login'
 import DashboardPage from './pages/Dashboard'
-import InboxPage from './pages/Inbox'
 import PnlPage from './pages/Pnl'
 import HandsPage from './pages/Hands'
 import VillainsPage from './pages/Villains'
@@ -48,7 +47,6 @@ export default function App() {
           </RequireAuth>
         }>
           <Route index element={<DashboardPage />} />
-          <Route path="inbox" element={<InboxPage />} />
           <Route path="hands" element={<HandsPage />} />
           <Route path="hm3" element={<HM3Page />} />
           <Route path="stats" element={<StatsPage />} />

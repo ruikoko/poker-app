@@ -188,7 +188,7 @@ ADD COLUMN IF NOT EXISTS entry_id BIGINT REFERENCES entries(id) ON DELETE SET NU
 
 ALTER TABLE hands
 ADD COLUMN IF NOT EXISTS study_state TEXT NOT NULL DEFAULT 'new' CHECK (
-    study_state IN ('new', 'review', 'studying', 'resolved')
+    study_state IN ('new', 'resolved', 'mtt_archive')
 );
 
 ALTER TABLE hands

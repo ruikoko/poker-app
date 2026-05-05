@@ -194,6 +194,29 @@ def ensure_tournament_name_and_number_columns():
         conn.close()
 
 
+def ensure_study_state_check_constraint():
+    """
+    Reduz CHECK constraint de hands.study_state ao modelo simplificado pt13:
+    {'new', 'resolved', 'mtt_archive'}. Estados 'review' e 'studying' nunca
+    foram usados em prod (0 rows desde início) — removidos por decisão de
+    produto pt13. Migration idempotente: DROP IF EXISTS + ADD.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands DROP CONSTRAINT IF EXISTS hands_study_state_check;
+                ALTER TABLE hands ADD CONSTRAINT hands_study_state_check
+                    CHECK (study_state IN ('new', 'resolved', 'mtt_archive'));
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_study_state_check_constraint: {e}")
+    finally:
+        conn.close()
+
+
 def ensure_hand_attachments_schema():
     """
     Cria tabela hand_attachments (Bucket 1 — imagens directas Discord como
@@ -837,8 +860,6 @@ def hand_stats(current_user=Depends(require_auth)):
         SELECT
             COUNT(*) FILTER (WHERE study_state != 'mtt_archive') AS total,
             COUNT(*) FILTER (WHERE study_state = 'new'      AND ({study_state_filter})) AS new,
-            COUNT(*) FILTER (WHERE study_state = 'review'   AND ({study_state_filter})) AS review,
-            COUNT(*) FILTER (WHERE study_state = 'studying' AND ({study_state_filter})) AS studying,
             COUNT(*) FILTER (WHERE study_state = 'resolved' AND ({study_state_filter})) AS resolved,
             COUNT(*) FILTER (WHERE study_state = 'mtt_archive') AS mtt_archive,
             COUNT(*) FILTER (

@@ -262,7 +262,7 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
         </div>
       )}
 
-      {/* Screenshot fullscreen overlay (mesmo padrão de Hands/Villains/Inbox) */}
+      {/* Screenshot fullscreen overlay (mesmo padrão de Hands/Villains) */}
       {ssFullscreen && imgUrl && (
         <div
           style={{
