@@ -22,7 +22,7 @@ const SITE_HALO_BG = {
 const SITE_BARE_GRADIENT_BG = {
   WPN:        'linear-gradient(to right, transparent 0%, transparent 45%, rgba(107,142,35,0.12) 75%, rgba(107,142,35,0.20) 100%), #0A0A0E',
   Winamax:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,40,50,0.12) 75%, rgba(220,40,50,0.20) 100%), #0A0A0E',
-  PokerStars: 'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,215,200,0.10) 75%, rgba(220,215,200,0.18) 100%), #0A0A0E',
+  PokerStars: 'linear-gradient(to right, transparent 0%, transparent 45%, rgba(255,255,255,0.10) 75%, rgba(255,255,255,0.18) 100%), #0A0A0E',
   GGPoker:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(45,110,145,0.12) 75%, rgba(45,110,145,0.20) 100%), #0A0A0E',
 }
 
@@ -52,7 +52,7 @@ const SITE_BARE_WATERMARK = {
   },
   PokerStars: {
     text: 'POKERSTARS',
-    color: 'rgba(220,40,50,0.12)',
+    color: 'rgba(220,40,50,0.22)',
     fontFamily: "'Cinzel', Georgia, serif",
     fontWeight: 700,
     fontSize: 48,
@@ -73,7 +73,7 @@ function SiteWatermark({ site }) {
   if (!w) return null
   const containerStyle = {
     position: 'absolute',
-    right: 16,
+    right: 40,
     top: '50%',
     transform: 'translateY(-50%)',
     fontFamily: w.fontFamily,
