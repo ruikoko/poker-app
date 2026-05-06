@@ -5,11 +5,11 @@ import { useState } from 'react'
 // (right 160, 320×80); só muda a cor do radial-gradient.
 const HALO_BASE = {
   position: 'absolute',
-  right: 160,
+  right: 88,
   top: '50%',
   transform: 'translateY(-50%)',
-  width: 320,
-  height: 80,
+  width: 640,
+  height: 160,
   pointerEvents: 'none',
   zIndex: 0,
 }
@@ -30,11 +30,11 @@ function SiteHalo({ site }) {
 // Wordmark container — igual em TODAS as salas. Conteúdo varia por sala.
 const WORDMARK_CONTAINER = {
   position: 'absolute',
-  right: 220,
+  right: 208,
   top: '50%',
   transform: 'translateY(-50%)',
-  width: 200,
-  height: 60,
+  width: 400,
+  height: 120,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -51,9 +51,9 @@ function SiteWordmark({ site }) {
           fontFamily: "Impact, 'Arial Black', sans-serif",
           fontStyle: 'italic',
           fontWeight: 900,
-          fontSize: 32,
+          fontSize: 64,
           color: '#FFFFFF',
-          letterSpacing: -0.5,
+          letterSpacing: -1,
           lineHeight: 1,
           opacity: 0.85,
         }}>YaPoker</span>
@@ -65,7 +65,7 @@ function SiteWordmark({ site }) {
       <div aria-hidden style={WORDMARK_CONTAINER}>
         <div style={{
           fontFamily: "'Oswald', sans-serif",
-          fontSize: 34,
+          fontSize: 68,
           fontWeight: 600,
           color: '#FFFFFF',
           lineHeight: 1,
@@ -78,9 +78,9 @@ function SiteWordmark({ site }) {
             <span style={{
               position: 'absolute',
               top: '50%',
-              left: -1,
-              right: -1,
-              height: 3.5,
+              left: -2,
+              right: -2,
+              height: 7,
               background: '#FFFFFF',
               transform: 'translateY(-50%)',
               pointerEvents: 'none',
@@ -94,22 +94,22 @@ function SiteWordmark({ site }) {
   if (site === 'PokerStars') {
     return (
       <div aria-hidden style={WORDMARK_CONTAINER}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <img
             src="/logos/ps_logo.png"
             alt="PokerStars"
             style={{
-              height: 28,
+              height: 56,
               pointerEvents: 'none',
               userSelect: 'none',
             }}
           />
           <span style={{
             fontFamily: "'Cinzel', Georgia, serif",
-            fontSize: 22,
+            fontSize: 44,
             fontWeight: 700,
             color: '#FFFFFF',
-            letterSpacing: 1,
+            letterSpacing: 2,
             lineHeight: 1,
             opacity: 0.92,
           }}>POKERSTARS</span>
@@ -124,7 +124,7 @@ function SiteWordmark({ site }) {
           src="/logos/gg1.png"
           alt="GGPoker"
           style={{
-            height: 60,
+            height: 120,
             pointerEvents: 'none',
             userSelect: 'none',
           }}
@@ -140,11 +140,11 @@ function GGStarsLocal() {
   return (
     <div aria-hidden style={{
       position: 'absolute',
-      right: 160,
+      right: 88,
       top: '50%',
       transform: 'translateY(-50%)',
-      width: 320,
-      height: 80,
+      width: 640,
+      height: 160,
       pointerEvents: 'none',
       opacity: 0.6,
       zIndex: 0,
@@ -262,7 +262,7 @@ export default function TournamentHeader({
         position: 'relative',
         overflow: 'hidden',
         background: '#0A0A0E',
-        minHeight: 70,
+        minHeight: 170,
         padding: `14px 20px 14px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
@@ -298,7 +298,7 @@ export default function TournamentHeader({
       <div style={{
         flex: '0 1 auto',
         minWidth: 0,
-        maxWidth: 'calc(100% - 480px)',
+        maxWidth: 'calc(100% - 728px)',
         position: 'relative', zIndex: 2,
       }}>
         <div style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
