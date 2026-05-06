@@ -6,7 +6,7 @@ import TagEditor from '../components/TagEditor'
 import HandRow from '../components/HandRow'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
-import TournamentHeader from '../components/TournamentHeader'
+import TournamentHeader, { SiteWatermark } from '../components/TournamentHeader'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -920,7 +920,9 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
       <div style={{ fontSize: 11, color: '#FBBF24', fontFamily: 'monospace', fontWeight: 700 }}>
         {siHero != null ? `SI ${Number(siHero).toLocaleString('en-US')}` : ''}
       </div>
-      <div />
+      <div style={{ position: 'relative', minWidth: 0 }}>
+        <SiteWatermark site={site} centerInCell />
+      </div>
     </div>
   )
 

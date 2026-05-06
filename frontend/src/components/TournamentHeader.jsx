@@ -68,14 +68,18 @@ const SITE_BARE_WATERMARK = {
   },
 }
 
-function SiteWatermark({ site }) {
+// Exportada para permitir render dentro do grid customTitle (centerInCell).
+// Sem centerInCell: ancorada ao canto direito do parent (modo legacy).
+// Com centerInCell: centrada no parent (usada em Hands.jsx, dentro da 7ª cell).
+export function SiteWatermark({ site, centerInCell = false }) {
   const w = SITE_BARE_WATERMARK[site]
   if (!w) return null
+  const positionStyle = centerInCell
+    ? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
+    : { right: 40, top: '50%', transform: 'translateY(-50%)' }
   const containerStyle = {
     position: 'absolute',
-    right: 40,
-    top: '50%',
-    transform: 'translateY(-50%)',
+    ...positionStyle,
     fontFamily: w.fontFamily,
     fontStyle: w.fontStyle,
     fontWeight: w.fontWeight,
@@ -346,9 +350,6 @@ export default function TournamentHeader({
         transition: 'filter 0.15s',
       }}
     >
-      {/* Marca d'água em bareMode — texto absolute, atrás de tudo (zIndex 0) */}
-      {bareMode && <SiteWatermark site={site} />}
-
       {/* Setinha play */}
       <span style={{
         color: '#6E91BC',
