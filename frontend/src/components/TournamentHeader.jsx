@@ -1,13 +1,14 @@
 import { useState } from 'react'
 
-// Logo banner esbatido. mixBlendMode aplicado quando o ficheiro fonte tem fundo
-// opaco (gg2.jpg é JPEG sem alpha → screen faz pixels escuros desaparecerem;
-// PS sem blend até confirmarmos visualmente se aparece rectângulo branco).
+// Logo banner esbatido. mixBlendMode 'screen' em todas as salas — pixels escuros
+// desaparecem (importa para gg2.jpg JPEG opaco) e logos integram-se naturalmente
+// com o gradient. PS pode precisar de fallback para 'lighten'/'plus-lighter' se
+// o fundo branco brilhar — testar visualmente na próxima iteração.
 const SITE_LOGOS = {
-  WPN:        { src: '/logos/ya.webp',   opacity: 0.35 },
-  Winamax:    { src: '/logos/wina2.png', opacity: 0.35 },
-  PokerStars: { src: '/logos/ps.png',    opacity: 0.40 },
-  GGPoker:    { src: '/logos/gg2.jpg',   opacity: 0.35, mixBlendMode: 'screen' },
+  WPN:        { src: '/logos/ya.webp',   opacity: 0.25, mixBlendMode: 'screen' },
+  Winamax:    { src: '/logos/wina2.png', opacity: 0.25, mixBlendMode: 'screen' },
+  PokerStars: { src: '/logos/ps.png',    opacity: 0.28, mixBlendMode: 'screen' },
+  GGPoker:    { src: '/logos/gg2.jpg',   opacity: 0.22, mixBlendMode: 'screen' },
 }
 
 const SITE_GRADIENTS = {
@@ -131,7 +132,7 @@ export default function TournamentHeader({
         position: 'relative',
         overflow: 'hidden',
         background: gradient,
-        minHeight: 64,
+        minHeight: 90,
         padding: `14px 20px 14px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
@@ -145,7 +146,7 @@ export default function TournamentHeader({
     >
       {isGG && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.6 }}>
-          <svg viewBox="0 0 1000 64" preserveAspectRatio="none" width="100%" height="100%">
+          <svg viewBox="0 0 1000 90" preserveAspectRatio="none" width="100%" height="100%">
             {GG_STARS.map((s, i) => (
               <circle key={i} cx={s.cx} cy={s.cy} r={s.r} fill="#FFFFFF" />
             ))}
@@ -163,9 +164,10 @@ export default function TournamentHeader({
             right: 200,
             top: '50%',
             transform: 'translateY(-50%)',
-            height: 80,
+            height: 110,
             opacity: logo.opacity,
             mixBlendMode: logo.mixBlendMode || 'normal',
+            filter: 'blur(0.5px)',
             pointerEvents: 'none',
             userSelect: 'none',
           }}
