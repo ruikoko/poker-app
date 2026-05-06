@@ -1,17 +1,20 @@
 import { useState } from 'react'
 
+// Logo banner esbatido. mixBlendMode aplicado quando o ficheiro fonte tem fundo
+// opaco (gg2.jpg é JPEG sem alpha → screen faz pixels escuros desaparecerem;
+// PS sem blend até confirmarmos visualmente se aparece rectângulo branco).
 const SITE_LOGOS = {
-  WPN:        { src: '/logos/ya.webp',   opacity: 0.92 },
-  Winamax:    { src: '/logos/wina2.png', opacity: 0.95 },
-  PokerStars: { src: '/logos/ps.png',    opacity: 0.95 },
-  GGPoker:    { src: '/logos/gg2.jpg',   opacity: 0.95 },
+  WPN:        { src: '/logos/ya.webp',   opacity: 0.35 },
+  Winamax:    { src: '/logos/wina2.png', opacity: 0.35 },
+  PokerStars: { src: '/logos/ps.png',    opacity: 0.40 },
+  GGPoker:    { src: '/logos/gg2.jpg',   opacity: 0.35, mixBlendMode: 'screen' },
 }
 
 const SITE_GRADIENTS = {
-  WPN:        'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 35%, #1F1F22 75%, #2D2D32 100%)',
-  Winamax:    'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 35%, #3D1416 75%, #5C1E20 100%)',
-  PokerStars: 'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 35%, #5A5A56 75%, #8A8A85 100%)',
-  GGPoker:    'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 35%, #0F4C5C 70%, #1B6B7E 100%)',
+  WPN:        'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #1F1F22 65%, #2D2D32 100%)',
+  Winamax:    'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #3D1416 65%, #5C1E20 100%)',
+  PokerStars: 'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #5A5A56 65%, #8A8A85 100%)',
+  GGPoker:    'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #0F4C5C 65%, #1B6B7E 100%)',
 }
 
 // Estrelas determinísticas para o card GG (não tremem entre renders).
@@ -160,9 +163,11 @@ export default function TournamentHeader({
             right: 200,
             top: '50%',
             transform: 'translateY(-50%)',
-            height: 58,
+            height: 80,
             opacity: logo.opacity,
+            mixBlendMode: logo.mixBlendMode || 'normal',
             pointerEvents: 'none',
+            userSelect: 'none',
           }}
         />
       )}
