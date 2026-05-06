@@ -95,10 +95,15 @@ function SiteWordmark({ site }) {
     return (
       <div aria-hidden style={WORDMARK_CONTAINER}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <svg width="22" height="28" viewBox="0 0 60 60">
-            <path d="M30 6 C20 14, 12 22, 12 36 C12 44, 18 50, 26 48 L24 56 L36 56 L34 48 C42 50, 48 44, 48 36 C48 22, 40 14, 30 6 Z" fill="#E63946" fillOpacity="0.9" />
-            <polygon points="30,18 32.5,27 41.5,27 34.2,32.5 36.7,41.5 30,36 23.3,41.5 25.8,32.5 18.5,27 27.5,27" fill="#FFFFFF" />
-          </svg>
+          <img
+            src="/logos/ps_logo.png"
+            alt="PokerStars"
+            style={{
+              height: 28,
+              pointerEvents: 'none',
+              userSelect: 'none',
+            }}
+          />
           <span style={{
             fontFamily: "'Cinzel', Georgia, serif",
             fontSize: 22,
