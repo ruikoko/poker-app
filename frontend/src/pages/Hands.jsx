@@ -772,16 +772,70 @@ const ICM_TAGS = new Set([
   'SB vs Steal PKO', 'SB vs Steal', 'SB vs Steal LS',
 ])
 
+// Helpers duplicados de Tournaments.jsx — extrair para lib partilhada se 3º
+// caller aparecer.
+function cleanTournamentName(name) {
+  if (!name) return name
+  return name
+    .replace(/(?<=^|\s)\$\d+(?:[.,]\d+)?(?=\s|$)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function fmtBuyIn(v, site) {
+  if (v == null) return ''
+  const n = Number(v)
+  if (Number.isNaN(n)) return ''
+  const c = site === 'WPN' ? '$' : '€'
+  return n % 1 === 0 ? `${c}${n}` : `${c}${n.toFixed(2)}`
+}
+
+// TM number como span clicável com feedback "Copiado!" 600ms. Estado local —
+// substitui o onTmClick do TournamentHeader (que não chega cá porque o TM
+// passa a viver dentro do customTitle).
+function TmSpan({ tournamentNumber }) {
+  const [copied, setCopied] = useState(false)
+  if (!tournamentNumber) return null
+  return (
+    <span
+      onClick={(e) => {
+        e.stopPropagation()
+        try {
+          navigator.clipboard?.writeText(String(tournamentNumber))
+          setCopied(true)
+          setTimeout(() => setCopied(false), 600)
+        } catch {
+          // noop
+        }
+      }}
+      title={copied ? 'Copiado!' : 'Copiar TM'}
+      style={{
+        fontSize: 11,
+        fontFamily: "'Fira Code', monospace",
+        color: copied ? '#97C459' : '#6E6E6A',
+        fontWeight: 400,
+        cursor: 'pointer',
+        transition: 'color 0.15s',
+        userSelect: 'none',
+      }}
+    >{String(tournamentNumber)}</span>
+  )
+}
+
 function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null }) {
   const [open, setOpen] = useState(false)
 
-  // Site + janela temporal derivados das próprias hands (sort cronológico ASC).
+  // Hands ordenadas cronologicamente. Primeira hand alimenta site/data; restantes
+  // procuradas para buy_in (não-null).
   const sortedAsc = [...hands].sort((a, b) =>
     new Date(a.played_at || 0) - new Date(b.played_at || 0)
   )
   const site = sortedAsc.find(h => h.site)?.site
-  const timeStart = sortedAsc[0]?.played_at?.slice(11, 16)
-  const timeEnd = sortedAsc[sortedAsc.length - 1]?.played_at?.slice(11, 16)
+  const buyIn = sortedAsc.find(h => h.buy_in != null)?.buy_in
+  const cleanName = cleanTournamentName(name)
+  const buyInStr = fmtBuyIn(buyIn, site)
+  const firstPlayed = sortedAsc[0]?.played_at  // ISO string YYYY-MM-DDTHH:MM:SS
+  const dateLabel = firstPlayed ? `${firstPlayed.slice(8, 10)}/${firstPlayed.slice(5, 7)}` : ''
 
   const hrcButton = showHrcButton ? (
     <a
@@ -797,24 +851,49 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
     >HRC</a>
   ) : null
 
+  // Layout pt15 final em Estudo: TM (small) — Nome — BuyIn — Data — handCount — SI.
+  // Sem time range. Sem tags subline.
+  const customTitle = (
+    <>
+      {tournamentNumber && <TmSpan tournamentNumber={tournamentNumber} />}
+      {cleanName && (
+        <span style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', marginLeft: tournamentNumber ? 10 : 0 }}>
+          {cleanName}
+        </span>
+      )}
+      {buyInStr && (
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#F5C16C', marginLeft: 10 }}>
+          {buyInStr}
+        </span>
+      )}
+      {dateLabel && (
+        <span style={{ fontSize: 12, color: '#8A8A85', marginLeft: 10 }}>
+          {dateLabel}
+        </span>
+      )}
+      <span style={{ fontSize: 11, color: '#6E6E6A', fontWeight: 400, marginLeft: 10 }}>
+        {hands.length} {hands.length === 1 ? 'mão' : 'mãos'}
+      </span>
+      {siHero != null && (
+        <span style={{ fontSize: 11, color: '#FBBF24', fontFamily: 'monospace', fontWeight: 700, marginLeft: 10 }}>
+          SI {Number(siHero).toLocaleString('en-US')}
+        </span>
+      )}
+    </>
+  )
+
   return (
     <div style={{ marginBottom: 8, border: `1px solid ${open ? 'rgba(99,102,241,0.3)' : '#2a2d3a'}`, borderRadius: 12, overflow: 'hidden' }}>
       <TournamentHeader
         site={site}
-        tournamentName={name}
-        tournamentNumber={tournamentNumber}
-        timeStart={timeStart}
-        timeEnd={timeEnd}
-        handCount={hands.length}
         wins={wins}
         losses={losses}
         bbResult={totalBB}
-        siHero={siHero}
         expanded={open}
         onToggle={() => setOpen(o => !o)}
         isLast
-        onTmClick={(tm) => { try { navigator.clipboard?.writeText(String(tm)) } catch { /* noop */ } }}
         extraRight={hrcButton}
+        customTitle={customTitle}
       />
       {open && hands.map((h, idx) => <HandRow key={h.id} hand={h} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} idx={idx} />)}
     </div>

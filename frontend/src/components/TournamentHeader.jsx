@@ -195,6 +195,7 @@ export default function TournamentHeader({
   onTmClick,
   indent = 0,
   hoverable = true,
+  customTitle,
 }) {
   const [tmCopied, setTmCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
@@ -301,41 +302,45 @@ export default function TournamentHeader({
         position: 'relative', zIndex: 2,
       }}>
         <div style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {titleParts.map((p, i) => (
-            <span key={p.k}>{i > 0 && ' — '}{p.node}</span>
-          ))}
-          {handCount != null && (
-            <span style={{ color: '#6E6E6A', fontWeight: 400, marginLeft: 8 }}>
-              {handCount} {handCount === 1 ? 'mão' : 'mãos'}
-            </span>
-          )}
-          {buyIn != null && (
-            <span style={{ color: '#F0B040', marginLeft: 10, fontSize: 12, fontWeight: 600 }}>
-              {fmtBuyIn(buyIn, site)}
-            </span>
-          )}
-          {blindsLabel && (
-            <span style={{ color: '#A0A0A0', marginLeft: 10, fontSize: 12, fontFamily: 'monospace' }}>
-              {blindsLabel}
-            </span>
-          )}
-          {tournamentFormat && (
-            <span style={{
-              marginLeft: 10, fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
-              color: /KO/i.test(tournamentFormat) ? '#F0B040' : '#A0A0A0',
-              background: /KO/i.test(tournamentFormat) ? 'rgba(240,176,64,0.12)' : 'rgba(160,160,160,0.10)',
-            }}>{tournamentFormat}</span>
-          )}
-          {siHero != null && (
-            <span style={{ color: '#FBBF24', marginLeft: 10, fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
-              SI {Number(siHero).toLocaleString('en-US')}
-            </span>
-          )}
-          {ssCount != null && ssCount > 0 && (
-            <span style={{ color: '#97C459', marginLeft: 10, fontSize: 11 }}>{ssCount} SS</span>
-          )}
-          {villainCount != null && villainCount > 0 && (
-            <span style={{ color: '#A78BFA', marginLeft: 10, fontSize: 11 }}>{villainCount} V</span>
+          {customTitle != null ? customTitle : (
+            <>
+              {titleParts.map((p, i) => (
+                <span key={p.k}>{i > 0 && ' — '}{p.node}</span>
+              ))}
+              {handCount != null && (
+                <span style={{ color: '#6E6E6A', fontWeight: 400, marginLeft: 8 }}>
+                  {handCount} {handCount === 1 ? 'mão' : 'mãos'}
+                </span>
+              )}
+              {buyIn != null && (
+                <span style={{ color: '#F0B040', marginLeft: 10, fontSize: 12, fontWeight: 600 }}>
+                  {fmtBuyIn(buyIn, site)}
+                </span>
+              )}
+              {blindsLabel && (
+                <span style={{ color: '#A0A0A0', marginLeft: 10, fontSize: 12, fontFamily: 'monospace' }}>
+                  {blindsLabel}
+                </span>
+              )}
+              {tournamentFormat && (
+                <span style={{
+                  marginLeft: 10, fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
+                  color: /KO/i.test(tournamentFormat) ? '#F0B040' : '#A0A0A0',
+                  background: /KO/i.test(tournamentFormat) ? 'rgba(240,176,64,0.12)' : 'rgba(160,160,160,0.10)',
+                }}>{tournamentFormat}</span>
+              )}
+              {siHero != null && (
+                <span style={{ color: '#FBBF24', marginLeft: 10, fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
+                  SI {Number(siHero).toLocaleString('en-US')}
+                </span>
+              )}
+              {ssCount != null && ssCount > 0 && (
+                <span style={{ color: '#97C459', marginLeft: 10, fontSize: 11 }}>{ssCount} SS</span>
+              )}
+              {villainCount != null && villainCount > 0 && (
+                <span style={{ color: '#A78BFA', marginLeft: 10, fontSize: 11 }}>{villainCount} V</span>
+              )}
+            </>
           )}
         </div>
         {tagsLine && (
