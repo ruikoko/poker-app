@@ -338,7 +338,7 @@ export default function TournamentHeader({
         position: 'relative',
         overflow: 'hidden',
         background: bareMode ? (SITE_BARE_GRADIENT_BG[site] || '#0A0A0E') : '#0A0A0E',
-        minHeight: bareMode ? 90 : 148,
+        minHeight: bareMode ? 110 : 148,
         padding: `${bareMode ? 10 : 14}px 16px ${bareMode ? 10 : 14}px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
@@ -367,7 +367,14 @@ export default function TournamentHeader({
         minWidth: 0,
         position: 'relative', zIndex: 2,
       }}>
-        <div style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{
+          fontSize: 14,
+          fontWeight: 500,
+          color: '#ECECEC',
+          ...(customTitle == null
+            ? { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+            : null),
+        }}>
           {customTitle != null ? customTitle : (
             <>
               {titleParts.map((p, i) => (

@@ -777,10 +777,20 @@ const ICM_TAGS = new Set([
 function cleanTournamentName(name, site) {
   if (!name || name === 'Sem torneio') return ''
   let s = name
-    .replace(/(?<=^|\s)\$\d+(?:[.,]\d+)?(?=\s|$)/g, '')
   if (site === 'WPN') {
-    // WPN tournament_name termina sempre em "Tournament" (ex: "$60,000 GTD Tournament")
+    // WPN: PRESERVAR prefix "$X GTD" / "$X,XXX GTD"; remover só "Tournament" trailing.
+    // Ex: "$75,000 GTD Tournament" → "$75,000 GTD".
     s = s.replace(/\s*Tournament\s*$/i, '')
+  } else {
+    // GG/outras: strip "$X" embebido. Regex apanha separadores de milhar
+    // (ex: "$1,050" e "$1,050,000") e decimais. Boundary aceita whitespace,
+    // vírgula ou fim — preserva "$30K" (K não casa) e cleanup remove pontuação
+    // órfã.
+    s = s.replace(/(?<=^|\s)\$\d{1,3}(?:[.,]\d{3})*(?:\.\d+)?(?=[\s,]|$)/g, '')
+    s = s
+      .replace(/\s+,/g, ',')
+      .replace(/,\s*,/g, ',')
+      .replace(/\s*,\s*$/g, '')
   }
   return s.replace(/\s+/g, ' ').trim()
 }
@@ -798,7 +808,7 @@ const Dash = () => <span style={{ color: '#4B5563' }}>—</span>
 // Mede largura de texto em pixels via canvas — preciso (≠ heurística char×N).
 // Reutiliza um único canvas no módulo. SSR-safe (return 0).
 let _measureCanvas = null
-function measureTextWidth(text, font = '500 14px system-ui, sans-serif') {
+function measureTextWidth(text, font = '500 18px system-ui, sans-serif') {
   if (typeof document === 'undefined' || !text) return 0
   if (!_measureCanvas) _measureCanvas = document.createElement('canvas')
   const ctx = _measureCanvas.getContext('2d')
@@ -895,7 +905,7 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
       </div>
       <div style={{ minWidth: 0 }}>
         <span style={{
-          fontSize: 14,
+          fontSize: 18,
           fontWeight: 500,
           color: '#ECECEC',
           display: 'inline-block',
@@ -908,13 +918,13 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
           {cleanName || <Dash />}
         </span>
       </div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#F5C16C' }}>
+      <div style={{ fontSize: 15, fontWeight: 600, color: '#F5C16C' }}>
         {buyInStr || <Dash />}
       </div>
-      <div style={{ fontSize: 12, color: '#8A8A85' }}>
+      <div style={{ fontSize: 14, color: '#8A8A85' }}>
         {dateLabel || <Dash />}
       </div>
-      <div style={{ fontSize: 11, color: '#6E6E6A', fontWeight: 400 }}>
+      <div style={{ fontSize: 14, color: '#6E6E6A', fontWeight: 400 }}>
         {hands.length} {hands.length === 1 ? 'mão' : 'mãos'}
       </div>
       <div style={{ fontSize: 11, color: '#FBBF24', fontFamily: 'monospace', fontWeight: 700 }}>
