@@ -1,143 +1,162 @@
 import { useState } from 'react'
 
-// Wordmarks CSS puros com gradiente interno via background-clip: text. Cada
-// texto acompanha o esbatimento do gradient do card (escuro à esquerda, vivo à
-// direita). Winamax tem 2 camadas (W gigante + WINAMAX); GGPoker tem 2 camadas
-// (GG + riscas vermelhas SVG sobre).
-const WORDMARK_BASE = {
+// Halos radiais por sala — pintados atrás do wordmark, criam um foco de luz
+// localizado em volta do mesmo. Posição/dimensão são iguais em todas as salas
+// (right 160, 320×80); só muda a cor do radial-gradient.
+const HALO_BASE = {
   position: 'absolute',
+  right: 160,
   top: '50%',
   transform: 'translateY(-50%)',
+  width: 320,
+  height: 80,
+  pointerEvents: 'none',
+  zIndex: 0,
+}
+
+const SITE_HALO_BG = {
+  WPN:        'radial-gradient(ellipse 45% 60% at center, rgba(146, 212, 0, 0.55) 0%, rgba(120, 175, 0, 0.30) 35%, rgba(70, 105, 0, 0.12) 65%, transparent 100%)',
+  Winamax:    'radial-gradient(ellipse 45% 60% at center, rgba(168, 37, 45, 0.75) 0%, rgba(146, 32, 40, 0.50) 35%, rgba(100, 22, 28, 0.22) 65%, transparent 100%)',
+  PokerStars: 'radial-gradient(ellipse 45% 60% at center, rgba(255, 255, 255, 0.18) 0%, rgba(220, 220, 220, 0.10) 40%, rgba(180, 180, 180, 0.04) 70%, transparent 100%)',
+  GGPoker:    'radial-gradient(ellipse 45% 60% at center, rgba(27, 107, 126, 0.55) 0%, rgba(20, 80, 95, 0.32) 40%, rgba(15, 50, 60, 0.15) 70%, transparent 100%)',
+}
+
+function SiteHalo({ site }) {
+  const bg = SITE_HALO_BG[site]
+  if (!bg) return null
+  return <div aria-hidden style={{ ...HALO_BASE, backgroundImage: bg }} />
+}
+
+// Wordmark container — igual em TODAS as salas. Conteúdo varia por sala.
+const WORDMARK_CONTAINER = {
+  position: 'absolute',
+  right: 220,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  width: 200,
+  height: 60,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
   pointerEvents: 'none',
   userSelect: 'none',
-  WebkitBackgroundClip: 'text',
-  backgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  color: 'transparent',
-  lineHeight: 1,
-  whiteSpace: 'nowrap',
+  zIndex: 1,
 }
 
 function SiteWordmark({ site }) {
   if (site === 'WPN') {
     return (
-      <span
-        aria-hidden
-        style={{
-          ...WORDMARK_BASE,
-          right: 220,
+      <div aria-hidden style={WORDMARK_CONTAINER}>
+        <span style={{
           fontFamily: "Impact, 'Arial Black', sans-serif",
           fontStyle: 'italic',
           fontWeight: 900,
-          fontSize: 76,
-          letterSpacing: -2,
-          backgroundImage: 'linear-gradient(to right, #1A1A1A 0%, #3A5318 30%, #6B9D2E 65%, #92D400 100%)',
-        }}
-      >Ya</span>
+          fontSize: 32,
+          color: '#FFFFFF',
+          letterSpacing: -0.5,
+          lineHeight: 1,
+          opacity: 0.85,
+        }}>YaPoker</span>
+      </div>
     )
   }
   if (site === 'Winamax') {
     return (
-      <>
-        <span
-          aria-hidden
-          style={{
-            ...WORDMARK_BASE,
-            right: 200,
-            fontFamily: "Impact, 'Arial Black', sans-serif",
-            fontWeight: 900,
-            fontSize: 96,
-            letterSpacing: -2,
-            backgroundImage: 'linear-gradient(to right, #2A0808 0%, #6E1D24 35%, #B83A40 70%, #E63946 100%)',
-          }}
-        >W</span>
-        <span
-          aria-hidden
-          style={{
-            ...WORDMARK_BASE,
-            right: 145,
-            fontFamily: "'Arial Black', Impact, sans-serif",
-            fontWeight: 900,
-            fontSize: 16,
-            letterSpacing: 3,
-            backgroundImage: 'linear-gradient(to right, #5A5A5A 0%, #B0B0B0 35%, #E8E8E8 70%, #FFFFFF 100%)',
-          }}
-        >WINAMAX</span>
-      </>
+      <div aria-hidden style={WORDMARK_CONTAINER}>
+        <div style={{
+          fontFamily: "'Oswald', sans-serif",
+          fontSize: 34,
+          fontWeight: 600,
+          color: '#FFFFFF',
+          lineHeight: 1,
+          letterSpacing: 0,
+          display: 'inline-flex',
+          alignItems: 'baseline',
+        }}>
+          <span style={{ position: 'relative', display: 'inline-block' }}>
+            W
+            <span style={{
+              position: 'absolute',
+              top: '50%',
+              left: -1,
+              right: -1,
+              height: 3.5,
+              background: '#FFFFFF',
+              transform: 'translateY(-50%)',
+              pointerEvents: 'none',
+            }} />
+          </span>
+          <span>INAMAX</span>
+        </div>
+      </div>
     )
   }
   if (site === 'PokerStars') {
     return (
-      <span
-        aria-hidden
-        style={{
-          ...WORDMARK_BASE,
-          right: 200,
-          fontFamily: "Georgia, 'Times New Roman', serif",
-          fontWeight: 700,
-          fontSize: 44,
-          letterSpacing: -1,
-          backgroundImage: 'linear-gradient(to right, #2A0E11 0%, #6B1D24 35%, #B82B33 65%, #E63946 100%)',
-        }}
-      >PokerStars</span>
+      <div aria-hidden style={WORDMARK_CONTAINER}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <svg width="22" height="28" viewBox="0 0 60 60">
+            <path d="M30 6 C20 14, 12 22, 12 36 C12 44, 18 50, 26 48 L24 56 L36 56 L34 48 C42 50, 48 44, 48 36 C48 22, 40 14, 30 6 Z" fill="#E63946" fillOpacity="0.9" />
+            <polygon points="30,18 32.5,27 41.5,27 34.2,32.5 36.7,41.5 30,36 23.3,41.5 25.8,32.5 18.5,27 27.5,27" fill="#FFFFFF" />
+          </svg>
+          <span style={{
+            fontFamily: "'Cinzel', Georgia, serif",
+            fontSize: 22,
+            fontWeight: 700,
+            color: '#FFFFFF',
+            letterSpacing: 1,
+            lineHeight: 1,
+            opacity: 0.92,
+          }}>POKERSTARS</span>
+        </div>
+      </div>
     )
   }
   if (site === 'GGPoker') {
     return (
-      <>
-        <span
-          aria-hidden
+      <div aria-hidden style={WORDMARK_CONTAINER}>
+        <img
+          src="/logos/gg2.jpg"
+          alt="GGPoker"
           style={{
-            ...WORDMARK_BASE,
-            right: 200,
-            fontFamily: "'Arial Black', Impact, sans-serif",
-            fontWeight: 900,
-            fontSize: 56,
-            letterSpacing: -3,
-            backgroundImage: 'linear-gradient(to right, #1A1A1A 0%, #5A5A5A 25%, #C8C8C8 60%, #FFFFFF 100%)',
-          }}
-        >GG</span>
-        <svg
-          aria-hidden
-          width="80" height="8" viewBox="0 0 100 8"
-          preserveAspectRatio="none"
-          style={{
-            position: 'absolute',
-            right: 230,
-            top: 'calc(50% - 14px)',
-            opacity: 0.7,
+            height: 60,
+            mixBlendMode: 'screen',
             pointerEvents: 'none',
             userSelect: 'none',
           }}
-        >
-          <rect x="8"  y="0" width="36" height="6" fill="#E63946" transform="skewX(-20)" />
-          <rect x="56" y="0" width="36" height="6" fill="#E63946" transform="skewX(-20)" />
-        </svg>
-      </>
+        />
+      </div>
     )
   }
   return null
 }
 
-const SITE_GRADIENTS = {
-  WPN:        'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #1F1F22 65%, #2D2D32 100%)',
-  Winamax:    'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #3D1416 65%, #5C1E20 100%)',
-  PokerStars: 'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #5A5A56 65%, #8A8A85 100%)',
-  GGPoker:    'linear-gradient(to right, #0A0A0C 0%, #0A0A0C 25%, #0F4C5C 65%, #1B6B7E 100%)',
+// Estrelas decorativas localizadas dentro da zona do halo do GG.
+function GGStarsLocal() {
+  return (
+    <div aria-hidden style={{
+      position: 'absolute',
+      right: 160,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      width: 320,
+      height: 80,
+      pointerEvents: 'none',
+      opacity: 0.6,
+      zIndex: 0,
+    }}>
+      <svg viewBox="0 0 320 80" preserveAspectRatio="none" width="100%" height="100%">
+        <circle cx="60"  cy="20" r="0.7" fill="#FFFFFF" />
+        <circle cx="100" cy="55" r="0.5" fill="#FFFFFF" />
+        <circle cx="150" cy="30" r="0.9" fill="#FFFFFF" />
+        <circle cx="240" cy="58" r="0.4" fill="#FFFFFF" />
+        <circle cx="270" cy="18" r="0.6" fill="#FFFFFF" />
+      </svg>
+    </div>
+  )
 }
 
-// Estrelas determinísticas para o card GG (não tremem entre renders).
-const GG_STARS = [
-  { cx: 462, cy: 18, r: 0.6 }, { cx: 488, cy: 42, r: 0.4 },
-  { cx: 515, cy: 12, r: 0.7 }, { cx: 541, cy: 28, r: 0.5 },
-  { cx: 568, cy: 45, r: 0.4 }, { cx: 594, cy: 22, r: 0.8 },
-  { cx: 621, cy: 38, r: 0.5 }, { cx: 648, cy: 14, r: 0.6 },
-  { cx: 674, cy: 30, r: 0.7 }, { cx: 701, cy: 50, r: 0.4 },
-  { cx: 728, cy: 24, r: 0.9 }, { cx: 754, cy: 40, r: 0.5 },
-  { cx: 781, cy: 16, r: 0.6 }, { cx: 808, cy: 32, r: 0.4 },
-  { cx: 836, cy: 48, r: 0.7 }, { cx: 870, cy: 26, r: 0.5 },
-]
-
+// WPN usa $; restantes €.
 function fmtBuyIn(v, site) {
   if (v == null) return ''
   const n = Number(v)
@@ -176,7 +195,6 @@ export default function TournamentHeader({
   const [tmCopied, setTmCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
 
-  const gradient = SITE_GRADIENTS[site] || SITE_GRADIENTS.WPN
   const isGG = site === 'GGPoker'
 
   const timeStr = timeRangeOverride
@@ -238,8 +256,8 @@ export default function TournamentHeader({
       style={{
         position: 'relative',
         overflow: 'hidden',
-        background: gradient,
-        minHeight: 78,
+        background: '#0A0A0E',
+        minHeight: 70,
         padding: `14px 20px 14px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
@@ -251,29 +269,33 @@ export default function TournamentHeader({
         transition: 'filter 0.15s',
       }}
     >
-      {isGG && (
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.6 }}>
-          <svg viewBox="0 0 1000 78" preserveAspectRatio="none" width="100%" height="100%">
-            {GG_STARS.map((s, i) => (
-              <circle key={i} cx={s.cx} cy={s.cy} r={s.r} fill="#FFFFFF" />
-            ))}
-          </svg>
-        </div>
-      )}
+      {/* Halo radial — atrás de tudo */}
+      <SiteHalo site={site} />
 
+      {/* Estrelas decorativas só para GG, dentro da zona do halo */}
+      {isGG && <GGStarsLocal />}
+
+      {/* Wordmark — sobre o halo */}
       <SiteWordmark site={site} />
 
+      {/* Setinha play — z-index acima do halo/wordmark */}
       <span style={{
         color: '#6E91BC',
         fontSize: 14,
         marginRight: 12,
         flex: '0 0 auto',
-        position: 'relative', zIndex: 1,
+        position: 'relative', zIndex: 2,
         transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
         transition: 'transform 0.15s',
       }}>▶</span>
 
-      <div style={{ flex: '1 1 auto', minWidth: 0, position: 'relative', zIndex: 1 }}>
+      {/* Texto principal — max-width impede invasão da zona do wordmark+stats */}
+      <div style={{
+        flex: '0 1 auto',
+        minWidth: 0,
+        maxWidth: 'calc(100% - 480px)',
+        position: 'relative', zIndex: 2,
+      }}>
         <div style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {titleParts.map((p, i) => (
             <span key={p.k}>{i > 0 && ' — '}{p.node}</span>
@@ -319,11 +341,29 @@ export default function TournamentHeader({
         )}
       </div>
 
+      {/* Slot extraRight — depois do texto, antes das stats absolute */}
+      {extraRight && (
+        <div
+          style={{ position: 'relative', zIndex: 2, marginLeft: 12, flex: '0 0 auto' }}
+          onClick={e => e.stopPropagation()}
+        >
+          {extraRight}
+        </div>
+      )}
+
+      {/* Stats absolute right 16 — sempre fora do fluxo, zero sobreposição */}
       {hasStats && (
         <div style={{
-          display: 'flex', gap: 22, fontSize: 13,
-          minWidth: 180, justifyContent: 'flex-end',
-          position: 'relative', zIndex: 1, flex: '0 0 auto',
+          position: 'absolute',
+          right: 16,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          display: 'flex',
+          gap: 22,
+          fontSize: 13,
+          minWidth: 180,
+          justifyContent: 'flex-end',
+          zIndex: 2,
         }}>
           {wins != null && <span style={{ color: '#97C459' }}>{wins}W</span>}
           {losses != null && <span style={{ color: '#F09595' }}>{losses}L</span>}
@@ -332,15 +372,6 @@ export default function TournamentHeader({
               {bbStr}
             </span>
           )}
-        </div>
-      )}
-
-      {extraRight && (
-        <div
-          style={{ position: 'relative', zIndex: 1, marginLeft: 12, flex: '0 0 auto' }}
-          onClick={e => e.stopPropagation()}
-        >
-          {extraRight}
         </div>
       )}
     </div>
