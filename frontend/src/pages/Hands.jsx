@@ -936,6 +936,7 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
         isLast
         extraRight={hrcButton}
         customTitle={customTitle}
+        bareMode
       />
       {open && hands.map((h, idx) => <HandRow key={h.id} hand={h} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} idx={idx} />)}
     </div>

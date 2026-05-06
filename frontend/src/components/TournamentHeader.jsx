@@ -17,6 +17,15 @@ const SITE_HALO_BG = {
   GGPoker:    'radial-gradient(ellipse 45% 60% at center, rgba(27, 107, 126, 0.55) 0%, rgba(20, 80, 95, 0.32) 40%, rgba(15, 50, 60, 0.15) 70%, transparent 100%)',
 }
 
+// Gradients para bareMode — substituem halo+wordmark por um único div com
+// degradé radial esbatido nas pontas. Cor por sala.
+const SITE_BARE_GRADIENTS = {
+  WPN:        'radial-gradient(ellipse at center, rgba(140,160,60,0.45) 0%, rgba(140,160,60,0.18) 50%, transparent 100%)',
+  Winamax:    'radial-gradient(ellipse at center, rgba(220,40,50,0.5) 0%, rgba(220,40,50,0.18) 50%, transparent 100%)',
+  PokerStars: 'radial-gradient(ellipse at center, rgba(220,220,220,0.4) 0%, rgba(220,220,220,0.15) 50%, transparent 100%)',
+  GGPoker:    'radial-gradient(ellipse at center, rgba(150,150,150,0.42) 0%, rgba(150,150,150,0.16) 50%, transparent 100%)',
+}
+
 function SiteHalo({ site }) {
   const bg = SITE_HALO_BG[site]
   if (!bg) return null
@@ -185,6 +194,7 @@ export default function TournamentHeader({
   indent = 0,
   hoverable = true,
   customTitle,
+  bareMode = false,
 }) {
   const [tmCopied, setTmCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
@@ -339,18 +349,28 @@ export default function TournamentHeader({
         </div>
       )}
 
-      {/* Wordmark area — flex item (480×120). Halo + estrelas GG + wordmark
-          ficam absolute inset:0 dentro deste container. */}
-      <div aria-hidden style={{
-        flex: '0 0 480px',
-        height: 120,
-        position: 'relative',
-        pointerEvents: 'none',
-      }}>
-        <SiteHalo site={site} />
-        {isGG && <GGStarsLocal />}
-        <SiteWordmark site={site} />
-      </div>
+      {/* Wordmark area — flex item (480×120). Em bareMode, é um único div com
+          degradé radial cor-da-sala esbatido nas pontas. Em modo normal,
+          contém halo + estrelas GG + wordmark (todos absolute inset:0). */}
+      {bareMode ? (
+        <div aria-hidden style={{
+          flex: '0 0 480px',
+          height: 120,
+          backgroundImage: SITE_BARE_GRADIENTS[site] || 'none',
+          pointerEvents: 'none',
+        }} />
+      ) : (
+        <div aria-hidden style={{
+          flex: '0 0 480px',
+          height: 120,
+          position: 'relative',
+          pointerEvents: 'none',
+        }}>
+          <SiteHalo site={site} />
+          {isGG && <GGStarsLocal />}
+          <SiteWordmark site={site} />
+        </div>
+      )}
 
       {/* Stats — flex item, justifica para o fim. Sem position absolute. */}
       {hasStats && (
