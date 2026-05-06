@@ -774,12 +774,15 @@ const ICM_TAGS = new Set([
 
 // Helpers duplicados de Tournaments.jsx — extrair para lib partilhada se 3º
 // caller aparecer.
-function cleanTournamentName(name) {
-  if (!name) return name
-  return name
+function cleanTournamentName(name, site) {
+  if (!name || name === 'Sem torneio') return ''
+  let s = name
     .replace(/(?<=^|\s)\$\d+(?:[.,]\d+)?(?=\s|$)/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  if (site === 'WPN') {
+    // WPN tournament_name termina sempre em "Tournament" (ex: "$60,000 GTD Tournament")
+    s = s.replace(/\s*Tournament\s*$/i, '')
+  }
+  return s.replace(/\s+/g, ' ').trim()
 }
 
 function fmtBuyIn(v, site) {
@@ -789,6 +792,41 @@ function fmtBuyIn(v, site) {
   const c = site === 'WPN' ? '$' : '€'
   return n % 1 === 0 ? `${c}${n}` : `${c}${n.toFixed(2)}`
 }
+
+// Mapeia tournament_format do backend para label do chip exibido.
+// Vanilla / null → null (sem chip, default silencioso).
+function mapFormatToChip(fmt) {
+  if (!fmt) return null
+  const f = String(fmt).toLowerCase()
+  if (f === 'super ko') return 'SKO'
+  if (f === 'mystery ko' || f === 'mystery') return 'MKO'
+  if (f === 'pko' || f === 'ko') return 'PKO'
+  return null
+}
+
+const FORMAT_CHIP_STYLES = {
+  PKO: { text: '#A78BFA', bg: 'rgba(167,139,250,0.15)' },
+  SKO: { text: '#A78BFA', bg: 'rgba(167,139,250,0.15)' },
+  MKO: { text: '#FB7185', bg: 'rgba(251,113,133,0.15)' },
+}
+
+function FormatChip({ format }) {
+  const s = FORMAT_CHIP_STYLES[format]
+  if (!s) return null
+  return (
+    <span style={{
+      fontSize: 10,
+      fontWeight: 700,
+      padding: '2px 6px',
+      borderRadius: 3,
+      color: s.text,
+      background: s.bg,
+      letterSpacing: 0.4,
+    }}>{format}</span>
+  )
+}
+
+const Dash = () => <span style={{ color: '#4B5563' }}>—</span>
 
 // TM number como span clicável com feedback "Copiado!" 600ms. Estado local —
 // substitui o onTmClick do TournamentHeader (que não chega cá porque o TM
@@ -832,10 +870,12 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
   )
   const site = sortedAsc.find(h => h.site)?.site
   const buyIn = sortedAsc.find(h => h.buy_in != null)?.buy_in
-  const cleanName = cleanTournamentName(name)
+  const cleanName = cleanTournamentName(name, site)
   const buyInStr = fmtBuyIn(buyIn, site)
   const firstPlayed = sortedAsc[0]?.played_at  // ISO string YYYY-MM-DDTHH:MM:SS
   const dateLabel = firstPlayed ? `${firstPlayed.slice(8, 10)}/${firstPlayed.slice(5, 7)}` : ''
+  const tournamentFormat = sortedAsc.find(h => h.tournament_format)?.tournament_format
+  const chipFormat = mapFormatToChip(tournamentFormat)
 
   const hrcButton = showHrcButton ? (
     <a
@@ -851,35 +891,45 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
     >HRC</a>
   ) : null
 
-  // Layout pt15 final em Estudo: TM (small) — Nome — BuyIn — Data — handCount — SI.
-  // Sem time range. Sem tags subline.
+  // Layout pt15 final em Estudo: grid de 6 colunas alinhadas verticalmente entre
+  // cards. SI é coluna fantasma para non-GG (mantém alinhamento vertical).
+  // Chip de formato (PKO/SKO/MKO) inline ao lado do nome; Vanilla/NULL = sem chip.
   const customTitle = (
-    <>
-      {tournamentNumber && <TmSpan tournamentNumber={tournamentNumber} />}
-      {cleanName && (
-        <span style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', marginLeft: tournamentNumber ? 10 : 0 }}>
-          {cleanName}
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '90px 1fr 70px 60px 70px 80px',
+      gap: 12,
+      alignItems: 'center',
+    }}>
+      <div>
+        {tournamentNumber ? <TmSpan tournamentNumber={tournamentNumber} /> : <Dash />}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <span style={{
+          fontSize: 14,
+          fontWeight: 500,
+          color: '#ECECEC',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {cleanName || <Dash />}
         </span>
-      )}
-      {buyInStr && (
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#F5C16C', marginLeft: 10 }}>
-          {buyInStr}
-        </span>
-      )}
-      {dateLabel && (
-        <span style={{ fontSize: 12, color: '#8A8A85', marginLeft: 10 }}>
-          {dateLabel}
-        </span>
-      )}
-      <span style={{ fontSize: 11, color: '#6E6E6A', fontWeight: 400, marginLeft: 10 }}>
+        {chipFormat && <FormatChip format={chipFormat} />}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#F5C16C' }}>
+        {buyInStr || <Dash />}
+      </div>
+      <div style={{ fontSize: 12, color: '#8A8A85' }}>
+        {dateLabel || <Dash />}
+      </div>
+      <div style={{ fontSize: 11, color: '#6E6E6A', fontWeight: 400 }}>
         {hands.length} {hands.length === 1 ? 'mão' : 'mãos'}
-      </span>
-      {siHero != null && (
-        <span style={{ fontSize: 11, color: '#FBBF24', fontFamily: 'monospace', fontWeight: 700, marginLeft: 10 }}>
-          SI {Number(siHero).toLocaleString('en-US')}
-        </span>
-      )}
-    </>
+      </div>
+      <div style={{ fontSize: 11, color: '#FBBF24', fontFamily: 'monospace', fontWeight: 700 }}>
+        {siHero != null ? `SI ${Number(siHero).toLocaleString('en-US')}` : ''}
+      </div>
+    </div>
   )
 
   return (
@@ -1084,7 +1134,7 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
             // cronológica do bucket — torneios cross-midnight ficam num único card.
             const byTournament = {}
             for (const h of tagHands) {
-              const tName = h.stakes || 'Sem torneio'
+              const tName = h.tournament_name || h.stakes || 'Sem torneio'
               const dayIso = h.played_at
                 ? new Date(h.played_at).toISOString().slice(0, 10)
                 : 'sem-data'
@@ -1103,7 +1153,6 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
               ent.handsAsc = [...ent.hands].sort(
                 (a, b) => new Date(a.played_at) - new Date(b.played_at)
               )
-              ent.day = ent.handsAsc[0]?.played_at?.slice(0, 10) || 'sem-data'
             }
             const entries = Object.values(byTournament).sort((a, b) => b.maxTime - a.maxTime)
 
@@ -1128,19 +1177,12 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
               return tagHands.map((h, idx) => renderHand(h, idx))
             }
 
-            const fmtDay = (iso) => {
-              if (!iso || iso === 'sem-data') return ''
-              const [_, m, d] = iso.split('-')
-              return `${d}/${m}`
-            }
-
             return entries.map(ent => {
               const tHands = ent.hands
               const wins   = tHands.filter(h => Number(h.result) > 0).length
               const losses = tHands.filter(h => Number(h.result) < 0).length
               const tBB    = tHands.reduce((s, h) => s + Number(h.result || 0), 0)
-              const dayLabel = fmtDay(ent.day)
-              const label = dayLabel ? `${ent.name} · ${dayLabel}` : ent.name
+              const label = ent.name
               // Botão HRC quando display_name está na lista ICM
               const showHrc = displayName && ICM_TAGS.has(displayName)
 
@@ -1686,7 +1728,7 @@ export default function HandsPage() {
         // diferentes ficam em cards separados.
         const tournGroups = {}
         for (const h of rows) {
-          const tName = h.stakes || 'Sem torneio'
+          const tName = h.tournament_name || h.stakes || 'Sem torneio'
           const key = h.tournament_number ? `tm:${h.tournament_number}` : `name:${tName}`
           if (!tournGroups[key]) tournGroups[key] = { name: tName, hands: [] }
           tournGroups[key].hands.push(h)
