@@ -1,14 +1,122 @@
 import { useState } from 'react'
 
-// Logo banner esbatido. mixBlendMode 'screen' em todas as salas — pixels escuros
-// desaparecem (importa para gg2.jpg JPEG opaco) e logos integram-se naturalmente
-// com o gradient. PS pode precisar de fallback para 'lighten'/'plus-lighter' se
-// o fundo branco brilhar — testar visualmente na próxima iteração.
-const SITE_LOGOS = {
-  WPN:        { src: '/logos/ya.webp',   opacity: 0.25, mixBlendMode: 'screen' },
-  Winamax:    { src: '/logos/wina2.png', opacity: 0.25, mixBlendMode: 'screen' },
-  PokerStars: { src: '/logos/ps.png',    opacity: 0.28, mixBlendMode: 'screen' },
-  GGPoker:    { src: '/logos/gg2.jpg',   opacity: 0.22, mixBlendMode: 'screen' },
+// Wordmarks CSS puros com gradiente interno via background-clip: text. Cada
+// texto acompanha o esbatimento do gradient do card (escuro à esquerda, vivo à
+// direita). Winamax tem 2 camadas (W gigante + WINAMAX); GGPoker tem 2 camadas
+// (GG + riscas vermelhas SVG sobre).
+const WORDMARK_BASE = {
+  position: 'absolute',
+  top: '50%',
+  transform: 'translateY(-50%)',
+  pointerEvents: 'none',
+  userSelect: 'none',
+  WebkitBackgroundClip: 'text',
+  backgroundClip: 'text',
+  WebkitTextFillColor: 'transparent',
+  color: 'transparent',
+  lineHeight: 1,
+  whiteSpace: 'nowrap',
+}
+
+function SiteWordmark({ site }) {
+  if (site === 'WPN') {
+    return (
+      <span
+        aria-hidden
+        style={{
+          ...WORDMARK_BASE,
+          right: 220,
+          fontFamily: "Impact, 'Arial Black', sans-serif",
+          fontStyle: 'italic',
+          fontWeight: 900,
+          fontSize: 76,
+          letterSpacing: -2,
+          background: 'linear-gradient(to right, #1A1A1A 0%, #3A5318 30%, #6B9D2E 65%, #92D400 100%)',
+        }}
+      >Ya</span>
+    )
+  }
+  if (site === 'Winamax') {
+    return (
+      <>
+        <span
+          aria-hidden
+          style={{
+            ...WORDMARK_BASE,
+            right: 200,
+            fontFamily: "Impact, 'Arial Black', sans-serif",
+            fontWeight: 900,
+            fontSize: 96,
+            letterSpacing: -2,
+            background: 'linear-gradient(to right, #2A0808 0%, #6E1D24 35%, #B83A40 70%, #E63946 100%)',
+          }}
+        >W</span>
+        <span
+          aria-hidden
+          style={{
+            ...WORDMARK_BASE,
+            right: 145,
+            fontFamily: "'Arial Black', Impact, sans-serif",
+            fontWeight: 900,
+            fontSize: 16,
+            letterSpacing: 3,
+            background: 'linear-gradient(to right, #5A5A5A 0%, #B0B0B0 35%, #E8E8E8 70%, #FFFFFF 100%)',
+          }}
+        >WINAMAX</span>
+      </>
+    )
+  }
+  if (site === 'PokerStars') {
+    return (
+      <span
+        aria-hidden
+        style={{
+          ...WORDMARK_BASE,
+          right: 200,
+          fontFamily: "Georgia, 'Times New Roman', serif",
+          fontWeight: 700,
+          fontSize: 44,
+          letterSpacing: -1,
+          background: 'linear-gradient(to right, #2A0E11 0%, #6B1D24 35%, #B82B33 65%, #E63946 100%)',
+        }}
+      >PokerStars</span>
+    )
+  }
+  if (site === 'GGPoker') {
+    return (
+      <>
+        <span
+          aria-hidden
+          style={{
+            ...WORDMARK_BASE,
+            right: 200,
+            fontFamily: "'Arial Black', Impact, sans-serif",
+            fontWeight: 900,
+            fontSize: 56,
+            letterSpacing: -3,
+            background: 'linear-gradient(to right, #1A1A1A 0%, #5A5A5A 25%, #C8C8C8 60%, #FFFFFF 100%)',
+          }}
+        >GG</span>
+        <svg
+          aria-hidden
+          width="80" height="8" viewBox="0 0 100 8"
+          preserveAspectRatio="none"
+          style={{
+            position: 'absolute',
+            right: 230,
+            top: 'calc(50% - 14px)',
+            opacity: 0.7,
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          <rect x="8"  y="0" width="36" height="6" fill="#E63946" transform="skewX(-20)" />
+          <rect x="56" y="0" width="36" height="6" fill="#E63946" transform="skewX(-20)" />
+        </svg>
+      </>
+    )
+  }
+  return null
 }
 
 const SITE_GRADIENTS = {
@@ -68,7 +176,6 @@ export default function TournamentHeader({
   const [tmCopied, setTmCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
 
-  const logo = SITE_LOGOS[site]
   const gradient = SITE_GRADIENTS[site] || SITE_GRADIENTS.WPN
   const isGG = site === 'GGPoker'
 
@@ -132,7 +239,7 @@ export default function TournamentHeader({
         position: 'relative',
         overflow: 'hidden',
         background: gradient,
-        minHeight: 90,
+        minHeight: 78,
         padding: `14px 20px 14px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
@@ -146,7 +253,7 @@ export default function TournamentHeader({
     >
       {isGG && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.6 }}>
-          <svg viewBox="0 0 1000 90" preserveAspectRatio="none" width="100%" height="100%">
+          <svg viewBox="0 0 1000 78" preserveAspectRatio="none" width="100%" height="100%">
             {GG_STARS.map((s, i) => (
               <circle key={i} cx={s.cx} cy={s.cy} r={s.r} fill="#FFFFFF" />
             ))}
@@ -154,25 +261,7 @@ export default function TournamentHeader({
         </div>
       )}
 
-      {logo && (
-        <img
-          src={logo.src}
-          alt=""
-          aria-hidden
-          style={{
-            position: 'absolute',
-            right: 200,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            height: 110,
-            opacity: logo.opacity,
-            mixBlendMode: logo.mixBlendMode || 'normal',
-            filter: 'blur(0.5px)',
-            pointerEvents: 'none',
-            userSelect: 'none',
-          }}
-        />
-      )}
+      <SiteWordmark site={site} />
 
       <span style={{
         color: '#6E91BC',
