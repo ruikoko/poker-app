@@ -793,40 +793,30 @@ function fmtBuyIn(v, site) {
   return n % 1 === 0 ? `${c}${n}` : `${c}${n.toFixed(2)}`
 }
 
-// Mapeia tournament_format do backend para label do chip exibido.
-// Vanilla / null → null (sem chip, default silencioso).
-function mapFormatToChip(fmt) {
-  if (!fmt) return null
-  const f = String(fmt).toLowerCase()
-  if (f === 'super ko') return 'SKO'
-  if (f === 'mystery ko' || f === 'mystery') return 'MKO'
-  if (f === 'pko' || f === 'ko') return 'PKO'
-  return null
-}
-
-const FORMAT_CHIP_STYLES = {
-  PKO: { text: '#A78BFA', bg: 'rgba(167,139,250,0.15)' },
-  SKO: { text: '#A78BFA', bg: 'rgba(167,139,250,0.15)' },
-  MKO: { text: '#FB7185', bg: 'rgba(251,113,133,0.15)' },
-}
-
-function FormatChip({ format }) {
-  const s = FORMAT_CHIP_STYLES[format]
-  if (!s) return null
-  return (
-    <span style={{
-      fontSize: 10,
-      fontWeight: 700,
-      padding: '2px 6px',
-      borderRadius: 3,
-      color: s.text,
-      background: s.bg,
-      letterSpacing: 0.4,
-    }}>{format}</span>
-  )
-}
-
 const Dash = () => <span style={{ color: '#4B5563' }}>—</span>
+
+// Mede largura de texto em pixels via canvas — preciso (≠ heurística char×N).
+// Reutiliza um único canvas no módulo. SSR-safe (return 0).
+let _measureCanvas = null
+function measureTextWidth(text, font = '500 14px system-ui, sans-serif') {
+  if (typeof document === 'undefined' || !text) return 0
+  if (!_measureCanvas) _measureCanvas = document.createElement('canvas')
+  const ctx = _measureCanvas.getContext('2d')
+  ctx.font = font
+  return ctx.measureText(text).width
+}
+
+// Largura da coluna Nome alinhada entre cards de uma lista. Usada na grid de
+// customTitle (TournamentGroup). Recebe array de {name, site}; aplica
+// cleanTournamentName a cada um, mede com canvas, cap a 500. Mínimo 60.
+function computeNameColWidth(items) {
+  if (!items || items.length === 0) return 240
+  const widths = items.map(({ name, site }) => {
+    const cleaned = cleanTournamentName(name, site) || ''
+    return Math.ceil(measureTextWidth(cleaned))
+  })
+  return Math.min(500, Math.max(60, ...widths))
+}
 
 // TM number como span clicável com feedback "Copiado!" 600ms. Estado local —
 // substitui o onTmClick do TournamentHeader (que não chega cá porque o TM
@@ -860,7 +850,7 @@ function TmSpan({ tournamentNumber }) {
   )
 }
 
-function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null }) {
+function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null, nameColWidth = 240 }) {
   const [open, setOpen] = useState(false)
 
   // Hands ordenadas cronologicamente. Primeira hand alimenta site/data; restantes
@@ -874,8 +864,6 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
   const buyInStr = fmtBuyIn(buyIn, site)
   const firstPlayed = sortedAsc[0]?.played_at  // ISO string YYYY-MM-DDTHH:MM:SS
   const dateLabel = firstPlayed ? `${firstPlayed.slice(8, 10)}/${firstPlayed.slice(5, 7)}` : ''
-  const tournamentFormat = sortedAsc.find(h => h.tournament_format)?.tournament_format
-  const chipFormat = mapFormatToChip(tournamentFormat)
 
   const hrcButton = showHrcButton ? (
     <a
@@ -891,31 +879,34 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
     >HRC</a>
   ) : null
 
-  // Layout pt15 final em Estudo: grid de 6 colunas alinhadas verticalmente entre
-  // cards. SI é coluna fantasma para non-GG (mantém alinhamento vertical).
-  // Chip de formato (PKO/SKO/MKO) inline ao lado do nome; Vanilla/NULL = sem chip.
+  // Layout pt15 final em Estudo: grid de 6 colunas. Coluna Nome usa largura
+  // calculada pelo parent (computeNameColWidth) — alinhada entre todos os cards
+  // da mesma lista. SI é coluna fantasma para non-GG (mantém alinhamento entre
+  // GG e non-GG). Sem chip de formato (a tag do grupo já indica).
   const customTitle = (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '90px 1fr 70px 60px 70px 80px',
-      gap: 12,
+      gridTemplateColumns: `90px ${nameColWidth}px 70px 60px 70px 80px`,
+      gap: 8,
       alignItems: 'center',
     }}>
       <div>
         {tournamentNumber ? <TmSpan tournamentNumber={tournamentNumber} /> : <Dash />}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <div style={{ minWidth: 0 }}>
         <span style={{
           fontSize: 14,
           fontWeight: 500,
           color: '#ECECEC',
+          display: 'inline-block',
+          maxWidth: '100%',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
+          verticalAlign: 'bottom',
         }}>
           {cleanName || <Dash />}
         </span>
-        {chipFormat && <FormatChip format={chipFormat} />}
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, color: '#F5C16C' }}>
         {buyInStr || <Dash />}
@@ -1177,6 +1168,12 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
               return tagHands.map((h, idx) => renderHand(h, idx))
             }
 
+            // Largura da coluna Nome alinhada entre todos os cards desta lista.
+            const nameColWidth = computeNameColWidth(entries.map(ent => ({
+              name: ent.name,
+              site: ent.handsAsc?.[0]?.site,
+            })))
+
             return entries.map(ent => {
               const tHands = ent.hands
               const wins   = tHands.filter(h => Number(h.result) > 0).length
@@ -1215,6 +1212,7 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
                   onDeleteHand={onDeleteHand}
                   showHrcButton={showHrc}
                   tournamentNumber={tournamentNumber}
+                  nameColWidth={nameColWidth}
                   siHero={siHero}
                 />
               )
@@ -1738,6 +1736,11 @@ export default function HandsPage() {
           const bTime = Math.max(...b[1].hands.map(h => h.played_at ? new Date(h.played_at).getTime() : 0))
           return bTime - aTime
         })
+        // Largura da coluna Nome alinhada entre todos os cards desta lista.
+        const nameColWidth = computeNameColWidth(sorted.map(([, ent]) => ({
+          name: ent.name,
+          site: ent.hands.find(h => h.site)?.site,
+        })))
         return (
           <div style={{ marginBottom: 24 }}>
             {sorted.map(([key, ent]) => {
@@ -1773,6 +1776,7 @@ export default function HandsPage() {
                   onDeleteHand={deleteHand}
                   tournamentNumber={tournamentNumber}
                   siHero={siHero}
+                  nameColWidth={nameColWidth}
                 />
               )
             })}
