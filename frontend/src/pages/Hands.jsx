@@ -886,7 +886,7 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
   const customTitle = (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: `90px ${nameColWidth}px 70px 60px 70px 80px`,
+      gridTemplateColumns: `90px ${nameColWidth}px 70px 60px 70px 1fr 80px`,
       gap: 8,
       alignItems: 'center',
     }}>
@@ -917,6 +917,7 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
       <div style={{ fontSize: 11, color: '#6E6E6A', fontWeight: 400 }}>
         {hands.length} {hands.length === 1 ? 'mão' : 'mãos'}
       </div>
+      <div />
       <div style={{ fontSize: 11, color: '#FBBF24', fontFamily: 'monospace', fontWeight: 700 }}>
         {siHero != null ? `SI ${Number(siHero).toLocaleString('en-US')}` : ''}
       </div>

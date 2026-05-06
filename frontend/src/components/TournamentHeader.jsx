@@ -1,15 +1,11 @@
 import { useState } from 'react'
 
-// Halos radiais por sala — pintados atrás do wordmark, criam um foco de luz
-// localizado em volta do mesmo. Posição/dimensão são iguais em todas as salas
-// (right 160, 320×80); só muda a cor do radial-gradient.
+// Halos radiais por sala. Pintados atrás do wordmark, dentro do "wordmark area"
+// flex item (480×120) — preenchem-no via absolute inset:0. Só varia a cor do
+// radial-gradient por sala.
 const HALO_BASE = {
   position: 'absolute',
-  right: 88,
-  top: '50%',
-  transform: 'translateY(-50%)',
-  width: 640,
-  height: 160,
+  inset: 0,
   pointerEvents: 'none',
   zIndex: 0,
 }
@@ -27,14 +23,11 @@ function SiteHalo({ site }) {
   return <div aria-hidden style={{ ...HALO_BASE, backgroundImage: bg }} />
 }
 
-// Wordmark container — igual em TODAS as salas. Conteúdo varia por sala.
-const WORDMARK_CONTAINER = {
+// Wordmark inner — preenche o "wordmark area" flex item via absolute inset:0,
+// flex-centra o conteúdo (texto/img). Conteúdo varia por sala.
+const WORDMARK_INNER = {
   position: 'absolute',
-  right: 208,
-  top: '50%',
-  transform: 'translateY(-50%)',
-  width: 400,
-  height: 120,
+  inset: 0,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -46,7 +39,7 @@ const WORDMARK_CONTAINER = {
 function SiteWordmark({ site }) {
   if (site === 'WPN') {
     return (
-      <div aria-hidden style={WORDMARK_CONTAINER}>
+      <div aria-hidden style={WORDMARK_INNER}>
         <span style={{
           fontFamily: "Impact, 'Arial Black', sans-serif",
           fontStyle: 'italic',
@@ -62,7 +55,7 @@ function SiteWordmark({ site }) {
   }
   if (site === 'Winamax') {
     return (
-      <div aria-hidden style={WORDMARK_CONTAINER}>
+      <div aria-hidden style={WORDMARK_INNER}>
         <div style={{
           fontFamily: "'Oswald', sans-serif",
           fontSize: 68,
@@ -93,7 +86,7 @@ function SiteWordmark({ site }) {
   }
   if (site === 'PokerStars') {
     return (
-      <div aria-hidden style={WORDMARK_CONTAINER}>
+      <div aria-hidden style={WORDMARK_INNER}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <img
             src="/logos/ps_logo.png"
@@ -119,12 +112,12 @@ function SiteWordmark({ site }) {
   }
   if (site === 'GGPoker') {
     return (
-      <div aria-hidden style={WORDMARK_CONTAINER}>
+      <div aria-hidden style={WORDMARK_INNER}>
         <img
-          src="/logos/gg1.png"
+          src="/logos/gg_horizontal.png"
           alt="GGPoker"
           style={{
-            height: 120,
+            height: 90,
             pointerEvents: 'none',
             userSelect: 'none',
           }}
@@ -140,11 +133,7 @@ function GGStarsLocal() {
   return (
     <div aria-hidden style={{
       position: 'absolute',
-      right: 88,
-      top: '50%',
-      transform: 'translateY(-50%)',
-      width: 640,
-      height: 160,
+      inset: 0,
       pointerEvents: 'none',
       opacity: 0.6,
       zIndex: 0,
@@ -262,11 +251,11 @@ export default function TournamentHeader({
         position: 'relative',
         overflow: 'hidden',
         background: '#0A0A0E',
-        minHeight: 170,
-        padding: `14px 20px 14px ${14 + indent}px`,
+        minHeight: 148,
+        padding: `14px 16px 14px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
-        gap: 14,
+        gap: 12,
         borderBottom: isLast ? 'none' : '1px solid #1A1A1F',
         cursor: onToggle ? 'pointer' : 'default',
         userSelect: 'none',
@@ -274,31 +263,21 @@ export default function TournamentHeader({
         transition: 'filter 0.15s',
       }}
     >
-      {/* Halo radial — atrás de tudo */}
-      <SiteHalo site={site} />
-
-      {/* Estrelas decorativas só para GG, dentro da zona do halo */}
-      {isGG && <GGStarsLocal />}
-
-      {/* Wordmark — sobre o halo */}
-      <SiteWordmark site={site} />
-
-      {/* Setinha play — z-index acima do halo/wordmark */}
+      {/* Setinha play */}
       <span style={{
         color: '#6E91BC',
         fontSize: 14,
-        marginRight: 12,
         flex: '0 0 auto',
         position: 'relative', zIndex: 2,
         transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
         transition: 'transform 0.15s',
       }}>▶</span>
 
-      {/* Texto principal — max-width impede invasão da zona do wordmark+stats */}
+      {/* Texto principal — flex 1 1 auto. Custom title interno (em Hands.jsx)
+          tem coluna 1fr antes do SI para empurrar SI até ao fim do slot. */}
       <div style={{
-        flex: '0 1 auto',
+        flex: '1 1 auto',
         minWidth: 0,
-        maxWidth: 'calc(100% - 728px)',
         position: 'relative', zIndex: 2,
       }}>
         <div style={{ fontSize: 14, fontWeight: 500, color: '#ECECEC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -350,29 +329,39 @@ export default function TournamentHeader({
         )}
       </div>
 
-      {/* Slot extraRight — depois do texto, antes das stats absolute */}
+      {/* Slot extraRight — entre texto e wordmark area */}
       {extraRight && (
         <div
-          style={{ position: 'relative', zIndex: 2, marginLeft: 12, flex: '0 0 auto' }}
+          style={{ position: 'relative', zIndex: 2, flex: '0 0 auto' }}
           onClick={e => e.stopPropagation()}
         >
           {extraRight}
         </div>
       )}
 
-      {/* Stats absolute right 16 — sempre fora do fluxo, zero sobreposição */}
+      {/* Wordmark area — flex item (480×120). Halo + estrelas GG + wordmark
+          ficam absolute inset:0 dentro deste container. */}
+      <div aria-hidden style={{
+        flex: '0 0 480px',
+        height: 120,
+        position: 'relative',
+        pointerEvents: 'none',
+      }}>
+        <SiteHalo site={site} />
+        {isGG && <GGStarsLocal />}
+        <SiteWordmark site={site} />
+      </div>
+
+      {/* Stats — flex item, justifica para o fim. Sem position absolute. */}
       {hasStats && (
         <div style={{
-          position: 'absolute',
-          right: 16,
-          top: '50%',
-          transform: 'translateY(-50%)',
+          flex: '0 0 180px',
           display: 'flex',
+          alignItems: 'center',
           gap: 22,
           fontSize: 13,
-          minWidth: 180,
           justifyContent: 'flex-end',
-          zIndex: 2,
+          position: 'relative', zIndex: 2,
         }}>
           {wins != null && <span style={{ color: '#97C459' }}>{wins}W</span>}
           {losses != null && <span style={{ color: '#F09595' }}>{losses}L</span>}
