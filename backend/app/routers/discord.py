@@ -253,21 +253,76 @@ async def sync_and_process(
 
     # 3. Contar entries criados
     from app.db import query as _q
+    # #P13 fix (pt14): counter agora cobre 2 estados pendentes —
+    # (a) sem extracção img ainda, (b) extracção feita mas Vision pendente.
+    # Garante que step 4/4b são chamados quando há trabalho qualquer pendente.
     new_entries = _q("""
         SELECT COUNT(*) AS n FROM entries
         WHERE source = 'discord'
           AND entry_type = 'replayer_link'
           AND site = 'GGPoker'
-          AND (raw_json->>'img_b64') IS NULL
+          AND (
+            (raw_json->>'img_b64') IS NULL
+            OR (raw_json->>'vision_done') IS NULL
+          )
     """)[0]["n"]
 
-    # 4. Processar replayer_links (extract + Vision em background)
+    # 4. Processar replayer_links (extract + Vision em background).
+    # #P13 fix (pt14): paginação interna agora cobre volumes >200 sem cortar
+    # silenciosamente. Limit por página mantém-se em 200 (memória).
     processed_response = None
     if new_entries > 0:
         try:
             processed_response = await process_replayer_links(confirm=True, limit=200, current_user=current_user)
         except HTTPException as e:
             processed_response = {"error": str(e.detail)}
+
+    # 4b. Recuperar estado intermediário: replayer_link com img_b64 populado
+    # mas vision_done=null. Acontece quando Vision falha transitoriamente
+    # (ex: API key inválida, deploy a meio). Filtro do step 4 (img_b64 IS NULL)
+    # não apanha este estado. #P13 fix (pt14).
+    import base64
+    from app.routers.screenshot import _run_vision_for_entry
+    intermediate_rows = _q("""
+        SELECT id, raw_text, discord_posted_at, raw_json
+        FROM entries
+        WHERE entry_type = 'replayer_link'
+          AND site = 'GGPoker'
+          AND source = 'discord'
+          AND (raw_json->>'img_b64') IS NOT NULL
+          AND (raw_json->>'vision_done') IS NULL
+        ORDER BY id ASC
+        LIMIT 500
+    """)
+    intermediate_queued = 0
+    for r in intermediate_rows:
+        rj = r["raw_json"] or {}
+        img_b64 = rj.get("img_b64")
+        if not img_b64:
+            continue
+        try:
+            content = base64.b64decode(img_b64)
+            file_meta = rj.get("file_meta") or {
+                "source_url": r["raw_text"],
+                "og_image_url": rj.get("img_url"),
+                "via": "discord",
+                "posted_at": r["discord_posted_at"].isoformat() if r["discord_posted_at"] else None,
+            }
+            asyncio.create_task(
+                _run_vision_for_entry(
+                    entry_id=r["id"],
+                    content=content,
+                    mime_type=rj.get("mime_type") or "image/png",
+                    tm_number=None,
+                    file_meta=file_meta,
+                    img_b64=img_b64,
+                )
+            )
+            intermediate_queued += 1
+        except Exception as exc:
+            logger.error(f"[#P13 4b] dispatch Vision falhou entry={r['id']}: {exc}")
+    if intermediate_queued > 0:
+        logger.info(f"[#P13 4b] {intermediate_queued} replayer_links em estado intermediário re-dispatchadas para Vision")
 
     # 5. Backfill GGDiscord para os que não tiveram match
     #    Esperar um pouco para Vision correr em background antes de criar placeholders
@@ -607,22 +662,36 @@ async def process_replayer_links(
     from app.discord_bot import _extract_gg_replayer_image
     from app.routers.screenshot import _run_vision_for_entry
 
-    rows = query("""
-        SELECT id, raw_text, discord_posted_at, raw_json
-        FROM entries
-        WHERE entry_type = 'replayer_link'
-          AND site = 'GGPoker'
-          AND source = 'discord'
-          AND (raw_json->>'img_b64') IS NULL
-        ORDER BY id DESC
-        LIMIT %s
-    """, (limit,))
-
+    # #P13 fix (pt14): paginar até esgotar candidatos. Limit antigo (200)
+    # cortava silenciosamente quando volume >200 (29% das entries em pt14
+    # Fase B ficaram pendentes, 100% canal 'nota' afectado). Cap defensivo
+    # de 50 iterações × limit evita loop infinito (improvável — cada iter
+    # consome rows do estado img_b64 IS NULL via UPDATE imediato dentro do
+    # loop interno).
+    # ORDER BY id ASC: processa cronologicamente — primeiras mensagens do
+    # batch primeiro. Antes ('id DESC') canais sincronizados pelo bot
+    # primeiro (id mais baixo) ficavam sempre cortados pelo LIMIT.
     report = []
     vision_queued = 0
+    total_scanned = 0
+    _PAGINATION_CAP = 50
 
     conn = get_conn()
     try:
+      for _iter in range(_PAGINATION_CAP):
+        rows = query("""
+            SELECT id, raw_text, discord_posted_at, raw_json
+            FROM entries
+            WHERE entry_type = 'replayer_link'
+              AND site = 'GGPoker'
+              AND source = 'discord'
+              AND (raw_json->>'img_b64') IS NULL
+            ORDER BY id ASC
+            LIMIT %s
+        """, (limit,))
+        if not rows:
+            break
+        total_scanned += len(rows)
         for r in rows:
             entry_id = r["id"]
             url = (r["raw_text"] or "").strip()
@@ -714,7 +783,7 @@ async def process_replayer_links(
 
     return {
         "ok": True,
-        "total_scanned": len(rows),
+        "total_scanned": total_scanned,
         "vision_queued": vision_queued,
         "report": report,
         "note": "Vision corre em background. Verifica /preview daqui a ~30s para veres quantos têm vision_done.",
