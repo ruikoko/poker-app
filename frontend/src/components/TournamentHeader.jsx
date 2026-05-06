@@ -17,10 +17,75 @@ const SITE_HALO_BG = {
   GGPoker:    'radial-gradient(ellipse 45% 60% at center, rgba(27, 107, 126, 0.55) 0%, rgba(20, 80, 95, 0.32) 40%, rgba(15, 50, 60, 0.15) 70%, transparent 100%)',
 }
 
-// bareMode aplica este background ao CARD raiz (em vez de halo+wordmark). Só
-// salas listadas têm gradient — restantes ficam fundo preto puro até spec.
-const SITE_BARE_CARD_BG = {
-  WPN: 'linear-gradient(180deg, #0A0A0E 0%, rgba(107,142,35,0.25) 50%, #0A0A0E 100%)',
+// Gradient horizontal "emergente" do lado direito do card — camada por baixo
+// da watermark. Aplicado ao background do card raiz em bareMode.
+const SITE_BARE_GRADIENT_BG = {
+  WPN:        'linear-gradient(to right, transparent 0%, transparent 45%, rgba(107,142,35,0.12) 75%, rgba(107,142,35,0.20) 100%), #0A0A0E',
+  Winamax:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,40,50,0.12) 75%, rgba(220,40,50,0.20) 100%), #0A0A0E',
+  PokerStars: 'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,30,50,0.12) 75%, rgba(220,30,50,0.20) 100%), #0A0A0E',
+  GGPoker:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(160,160,160,0.12) 75%, rgba(160,160,160,0.20) 100%), #0A0A0E',
+}
+
+// Marca d'água em bareMode — texto da sala absolute right, opacity baixa,
+// fica atrás (zIndex 0) das stats e customTitle (que estão em zIndex 2).
+const SITE_BARE_WATERMARK = {
+  WPN: {
+    text: 'YaPoker',
+    color: 'rgba(107,142,35,0.10)',
+    fontFamily: "Impact, 'Arial Black', sans-serif",
+    fontStyle: 'italic',
+    fontWeight: 900,
+    fontSize: 56,
+    letterSpacing: -1,
+  },
+  Winamax: {
+    text: 'WINAMAX',
+    color: 'rgba(220,40,50,0.10)',
+    fontFamily: "'Oswald', sans-serif",
+    fontWeight: 700,
+    fontSize: 56,
+    letterSpacing: 1,
+  },
+  PokerStars: {
+    text: 'POKERSTARS',
+    color: 'rgba(220,30,50,0.10)',
+    fontFamily: "'Cinzel', Georgia, serif",
+    fontWeight: 700,
+    fontSize: 48,
+    letterSpacing: 2,
+  },
+  GGPoker: {
+    text: 'GGPOKER',
+    color: 'rgba(160,160,160,0.10)',
+    fontFamily: "'Oswald', sans-serif",
+    fontWeight: 700,
+    fontSize: 56,
+    letterSpacing: 1,
+  },
+}
+
+function SiteWatermark({ site }) {
+  const w = SITE_BARE_WATERMARK[site]
+  if (!w) return null
+  return (
+    <span aria-hidden style={{
+      position: 'absolute',
+      right: 16,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      fontFamily: w.fontFamily,
+      fontStyle: w.fontStyle,
+      fontWeight: w.fontWeight,
+      fontSize: w.fontSize,
+      letterSpacing: w.letterSpacing,
+      color: w.color,
+      lineHeight: 1,
+      whiteSpace: 'nowrap',
+      pointerEvents: 'none',
+      userSelect: 'none',
+      zIndex: 0,
+    }}>{w.text}</span>
+  )
 }
 
 function SiteHalo({ site }) {
@@ -257,9 +322,9 @@ export default function TournamentHeader({
       style={{
         position: 'relative',
         overflow: 'hidden',
-        background: bareMode ? (SITE_BARE_CARD_BG[site] || '#0A0A0E') : '#0A0A0E',
-        minHeight: 148,
-        padding: `14px 16px 14px ${14 + indent}px`,
+        background: bareMode ? (SITE_BARE_GRADIENT_BG[site] || '#0A0A0E') : '#0A0A0E',
+        minHeight: bareMode ? 90 : 148,
+        padding: `${bareMode ? 10 : 14}px 16px ${bareMode ? 10 : 14}px ${14 + indent}px`,
         display: 'flex',
         alignItems: 'center',
         gap: 12,
@@ -270,6 +335,9 @@ export default function TournamentHeader({
         transition: 'filter 0.15s',
       }}
     >
+      {/* Marca d'água em bareMode — texto absolute, atrás de tudo (zIndex 0) */}
+      {bareMode && <SiteWatermark site={site} />}
+
       {/* Setinha play */}
       <span style={{
         color: '#6E91BC',
