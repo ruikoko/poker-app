@@ -22,16 +22,20 @@ const SITE_HALO_BG = {
 const SITE_BARE_GRADIENT_BG = {
   WPN:        'linear-gradient(to right, transparent 0%, transparent 45%, rgba(107,142,35,0.12) 75%, rgba(107,142,35,0.20) 100%), #0A0A0E',
   Winamax:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,40,50,0.12) 75%, rgba(220,40,50,0.20) 100%), #0A0A0E',
-  PokerStars: 'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,30,50,0.12) 75%, rgba(220,30,50,0.20) 100%), #0A0A0E',
-  GGPoker:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(160,160,160,0.12) 75%, rgba(160,160,160,0.20) 100%), #0A0A0E',
+  PokerStars: 'linear-gradient(to right, transparent 0%, transparent 45%, rgba(220,215,200,0.10) 75%, rgba(220,215,200,0.18) 100%), #0A0A0E',
+  GGPoker:    'linear-gradient(to right, transparent 0%, transparent 45%, rgba(45,110,145,0.12) 75%, rgba(45,110,145,0.20) 100%), #0A0A0E',
 }
 
 // Marca d'água em bareMode — texto da sala absolute right, opacity baixa,
 // fica atrás (zIndex 0) das stats e customTitle (que estão em zIndex 2).
+// Cada entrada tem `text` (cor única) OU `parts` (array de {text, color} para
+// palavras com cores diferentes — caso YaPoker).
 const SITE_BARE_WATERMARK = {
   WPN: {
-    text: 'YaPoker',
-    color: 'rgba(107,142,35,0.10)',
+    parts: [
+      { text: 'Ya',    color: 'rgba(107,142,35,0.12)' },
+      { text: 'Poker', color: 'rgba(255,255,255,0.10)' },
+    ],
     fontFamily: "Impact, 'Arial Black', sans-serif",
     fontStyle: 'italic',
     fontWeight: 900,
@@ -40,7 +44,7 @@ const SITE_BARE_WATERMARK = {
   },
   Winamax: {
     text: 'WINAMAX',
-    color: 'rgba(220,40,50,0.10)',
+    color: 'rgba(255,255,255,0.08)',
     fontFamily: "'Oswald', sans-serif",
     fontWeight: 700,
     fontSize: 56,
@@ -48,7 +52,7 @@ const SITE_BARE_WATERMARK = {
   },
   PokerStars: {
     text: 'POKERSTARS',
-    color: 'rgba(220,30,50,0.10)',
+    color: 'rgba(220,40,50,0.12)',
     fontFamily: "'Cinzel', Georgia, serif",
     fontWeight: 700,
     fontSize: 48,
@@ -56,7 +60,7 @@ const SITE_BARE_WATERMARK = {
   },
   GGPoker: {
     text: 'GGPOKER',
-    color: 'rgba(160,160,160,0.10)',
+    color: 'rgba(45,110,145,0.14)',
     fontFamily: "'Oswald', sans-serif",
     fontWeight: 700,
     fontSize: 56,
@@ -67,25 +71,32 @@ const SITE_BARE_WATERMARK = {
 function SiteWatermark({ site }) {
   const w = SITE_BARE_WATERMARK[site]
   if (!w) return null
-  return (
-    <span aria-hidden style={{
-      position: 'absolute',
-      right: 16,
-      top: '50%',
-      transform: 'translateY(-50%)',
-      fontFamily: w.fontFamily,
-      fontStyle: w.fontStyle,
-      fontWeight: w.fontWeight,
-      fontSize: w.fontSize,
-      letterSpacing: w.letterSpacing,
-      color: w.color,
-      lineHeight: 1,
-      whiteSpace: 'nowrap',
-      pointerEvents: 'none',
-      userSelect: 'none',
-      zIndex: 0,
-    }}>{w.text}</span>
-  )
+  const containerStyle = {
+    position: 'absolute',
+    right: 16,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    fontFamily: w.fontFamily,
+    fontStyle: w.fontStyle,
+    fontWeight: w.fontWeight,
+    fontSize: w.fontSize,
+    letterSpacing: w.letterSpacing,
+    lineHeight: 1,
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+    userSelect: 'none',
+    zIndex: 0,
+  }
+  if (w.parts) {
+    return (
+      <span aria-hidden style={containerStyle}>
+        {w.parts.map((p, i) => (
+          <span key={i} style={{ color: p.color }}>{p.text}</span>
+        ))}
+      </span>
+    )
+  }
+  return <span aria-hidden style={{ ...containerStyle, color: w.color }}>{w.text}</span>
 }
 
 function SiteHalo({ site }) {
