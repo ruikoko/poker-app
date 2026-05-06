@@ -17,13 +17,10 @@ const SITE_HALO_BG = {
   GGPoker:    'radial-gradient(ellipse 45% 60% at center, rgba(27, 107, 126, 0.55) 0%, rgba(20, 80, 95, 0.32) 40%, rgba(15, 50, 60, 0.15) 70%, transparent 100%)',
 }
 
-// Gradients para bareMode — substituem halo+wordmark por um único div com
-// degradé radial esbatido nas pontas. Cor por sala.
-const SITE_BARE_GRADIENTS = {
-  WPN:        'radial-gradient(ellipse at center, rgba(140,160,60,0.45) 0%, rgba(140,160,60,0.18) 50%, transparent 100%)',
-  Winamax:    'radial-gradient(ellipse at center, rgba(220,40,50,0.5) 0%, rgba(220,40,50,0.18) 50%, transparent 100%)',
-  PokerStars: 'radial-gradient(ellipse at center, rgba(220,220,220,0.4) 0%, rgba(220,220,220,0.15) 50%, transparent 100%)',
-  GGPoker:    'radial-gradient(ellipse at center, rgba(150,150,150,0.42) 0%, rgba(150,150,150,0.16) 50%, transparent 100%)',
+// bareMode aplica este background ao CARD raiz (em vez de halo+wordmark). Só
+// salas listadas têm gradient — restantes ficam fundo preto puro até spec.
+const SITE_BARE_CARD_BG = {
+  WPN: 'linear-gradient(180deg, #0A0A0E 0%, rgba(107,142,35,0.25) 50%, #0A0A0E 100%)',
 }
 
 function SiteHalo({ site }) {
@@ -260,7 +257,7 @@ export default function TournamentHeader({
       style={{
         position: 'relative',
         overflow: 'hidden',
-        background: '#0A0A0E',
+        background: bareMode ? (SITE_BARE_CARD_BG[site] || '#0A0A0E') : '#0A0A0E',
         minHeight: 148,
         padding: `14px 16px 14px ${14 + indent}px`,
         display: 'flex',
@@ -349,17 +346,10 @@ export default function TournamentHeader({
         </div>
       )}
 
-      {/* Wordmark area — flex item (480×120). Em bareMode, é um único div com
-          degradé radial cor-da-sala esbatido nas pontas. Em modo normal,
-          contém halo + estrelas GG + wordmark (todos absolute inset:0). */}
-      {bareMode ? (
-        <div aria-hidden style={{
-          flex: '0 0 480px',
-          height: 120,
-          backgroundImage: SITE_BARE_GRADIENTS[site] || 'none',
-          pointerEvents: 'none',
-        }} />
-      ) : (
+      {/* Wordmark area — só em modo normal. Em bareMode, o gradient (se houver
+          para esta sala) está aplicado ao background do card raiz e este bloco
+          desaparece — layout vira [play] [customTitle] [stats]. */}
+      {!bareMode && (
         <div aria-hidden style={{
           flex: '0 0 480px',
           height: 120,
