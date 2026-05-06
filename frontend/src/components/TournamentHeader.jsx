@@ -31,7 +31,7 @@ function SiteWordmark({ site }) {
           fontWeight: 900,
           fontSize: 76,
           letterSpacing: -2,
-          background: 'linear-gradient(to right, #1A1A1A 0%, #3A5318 30%, #6B9D2E 65%, #92D400 100%)',
+          backgroundImage: 'linear-gradient(to right, #1A1A1A 0%, #3A5318 30%, #6B9D2E 65%, #92D400 100%)',
         }}
       >Ya</span>
     )
@@ -48,7 +48,7 @@ function SiteWordmark({ site }) {
             fontWeight: 900,
             fontSize: 96,
             letterSpacing: -2,
-            background: 'linear-gradient(to right, #2A0808 0%, #6E1D24 35%, #B83A40 70%, #E63946 100%)',
+            backgroundImage: 'linear-gradient(to right, #2A0808 0%, #6E1D24 35%, #B83A40 70%, #E63946 100%)',
           }}
         >W</span>
         <span
@@ -60,7 +60,7 @@ function SiteWordmark({ site }) {
             fontWeight: 900,
             fontSize: 16,
             letterSpacing: 3,
-            background: 'linear-gradient(to right, #5A5A5A 0%, #B0B0B0 35%, #E8E8E8 70%, #FFFFFF 100%)',
+            backgroundImage: 'linear-gradient(to right, #5A5A5A 0%, #B0B0B0 35%, #E8E8E8 70%, #FFFFFF 100%)',
           }}
         >WINAMAX</span>
       </>
@@ -77,7 +77,7 @@ function SiteWordmark({ site }) {
           fontWeight: 700,
           fontSize: 44,
           letterSpacing: -1,
-          background: 'linear-gradient(to right, #2A0E11 0%, #6B1D24 35%, #B82B33 65%, #E63946 100%)',
+          backgroundImage: 'linear-gradient(to right, #2A0E11 0%, #6B1D24 35%, #B82B33 65%, #E63946 100%)',
         }}
       >PokerStars</span>
     )
@@ -94,7 +94,7 @@ function SiteWordmark({ site }) {
             fontWeight: 900,
             fontSize: 56,
             letterSpacing: -3,
-            background: 'linear-gradient(to right, #1A1A1A 0%, #5A5A5A 25%, #C8C8C8 60%, #FFFFFF 100%)',
+            backgroundImage: 'linear-gradient(to right, #1A1A1A 0%, #5A5A5A 25%, #C8C8C8 60%, #FFFFFF 100%)',
           }}
         >GG</span>
         <svg
