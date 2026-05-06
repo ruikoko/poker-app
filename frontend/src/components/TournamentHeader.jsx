@@ -116,11 +116,10 @@ function SiteWordmark({ site }) {
     return (
       <div aria-hidden style={WORDMARK_CONTAINER}>
         <img
-          src="/logos/gg2.jpg"
+          src="/logos/gg1.png"
           alt="GGPoker"
           style={{
             height: 60,
-            mixBlendMode: 'screen',
             pointerEvents: 'none',
             userSelect: 'none',
           }}
