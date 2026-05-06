@@ -6,6 +6,7 @@ import TagEditor from '../components/TagEditor'
 import HandRow from '../components/HandRow'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
+import TournamentHeader from '../components/TournamentHeader'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -773,66 +774,48 @@ const ICM_TAGS = new Set([
 
 function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null }) {
   const [open, setOpen] = useState(false)
-  const [tmCopied, setTmCopied] = useState(false)
-  const bbColor = totalBB > 0 ? '#22c55e' : totalBB < 0 ? '#ef4444' : '#64748b'
 
-  function copyTm(e) {
-    e.stopPropagation()
-    if (!tournamentNumber) return
-    try {
-      navigator.clipboard?.writeText(String(tournamentNumber))
-      setTmCopied(true)
-      setTimeout(() => setTmCopied(false), 600)
-    } catch {
-      // clipboard API indisponível (browsers antigos / contexto inseguro) — noop
-    }
-  }
+  // Site + janela temporal derivados das próprias hands (sort cronológico ASC).
+  const sortedAsc = [...hands].sort((a, b) =>
+    new Date(a.played_at || 0) - new Date(b.played_at || 0)
+  )
+  const site = sortedAsc.find(h => h.site)?.site
+  const timeStart = sortedAsc[0]?.played_at?.slice(11, 16)
+  const timeEnd = sortedAsc[sortedAsc.length - 1]?.played_at?.slice(11, 16)
+
+  const hrcButton = showHrcButton ? (
+    <a
+      href="https://hrc.ninja/create-structure/"
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Abrir HRC Ninja (criar estrutura ICM)"
+      style={{
+        fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+        color: '#f87171', textDecoration: 'none', letterSpacing: 0.3,
+      }}
+    >HRC</a>
+  ) : null
+
   return (
-    <div style={{ marginBottom: 8, border: `1px solid ${open ? 'rgba(99,102,241,0.3)' : '#2a2d3a'}`, borderRadius: 10, overflow: 'hidden' }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: open ? 'rgba(99,102,241,0.06)' : '#1a1d27', cursor: 'pointer', userSelect: 'none' }}
-        onMouseEnter={e => { if (!open) e.currentTarget.style.background = '#1e2130' }}
-        onMouseLeave={e => { if (!open) e.currentTarget.style.background = open ? 'rgba(99,102,241,0.06)' : '#1a1d27' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ display: 'inline-block', fontSize: 11, color: '#818cf8', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9654;</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>{name}</span>
-          {showHrcButton && (
-            <a
-              href="https://hrc.ninja/create-structure/"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={e => e.stopPropagation()}
-              title="Abrir HRC Ninja (criar estrutura ICM)"
-              style={{
-                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-                color: '#f87171', textDecoration: 'none', letterSpacing: 0.3,
-              }}
-            >HRC</a>
-          )}
-          {tournamentNumber && (
-            <span
-              onClick={copyTm}
-              title={tmCopied ? 'Copiado!' : 'Copiar'}
-              style={{
-                fontSize: 11,
-                color: tmCopied ? '#22c55e' : '#64748b',
-                fontFamily: 'monospace',
-                cursor: 'pointer',
-                transition: 'color 0.15s',
-                userSelect: 'none',
-              }}
-            >{tournamentNumber}</span>
-          )}
-          {siHero && <span style={{ fontSize: 11, color: '#fbbf24', fontFamily: 'monospace', fontWeight: 700 }}>SI {siHero.toLocaleString('en-US')}</span>}
-          <span style={{ fontSize: 11, color: '#64748b' }}>{hands.length} mãos</span>
-        </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, fontFamily: 'monospace' }}>
-          <span style={{ color: '#22c55e' }}>{wins}W</span>
-          <span style={{ color: '#ef4444' }}>{losses}L</span>
-          <span style={{ color: bbColor, fontWeight: 700 }}>{totalBB > 0 ? '+' : ''}{totalBB.toFixed(1)} BB</span>
-        </div>
-      </div>
+    <div style={{ marginBottom: 8, border: `1px solid ${open ? 'rgba(99,102,241,0.3)' : '#2a2d3a'}`, borderRadius: 12, overflow: 'hidden' }}>
+      <TournamentHeader
+        site={site}
+        tournamentName={name}
+        tournamentNumber={tournamentNumber}
+        timeStart={timeStart}
+        timeEnd={timeEnd}
+        handCount={hands.length}
+        wins={wins}
+        losses={losses}
+        bbResult={totalBB}
+        siHero={siHero}
+        expanded={open}
+        onToggle={() => setOpen(o => !o)}
+        isLast
+        onTmClick={(tm) => { try { navigator.clipboard?.writeText(String(tm)) } catch { /* noop */ } }}
+        extraRight={hrcButton}
+      />
       {open && hands.map((h, idx) => <HandRow key={h.id} hand={h} onClick={() => onOpenDetail(h.id)} onDelete={() => onDeleteHand(h.id)} idx={idx} />)}
     </div>
   )

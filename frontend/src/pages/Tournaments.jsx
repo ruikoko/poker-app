@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { mtt } from '../api/client'
 import HandRow from '../components/HandRow'
+import TournamentHeader from '../components/TournamentHeader'
 
 // ── Constantes ───────────────────────────────────────────────────────────────
 
@@ -347,7 +348,7 @@ function TournamentDetail({ hand, onDeleteHand, onDeleteScreenshot }) {
 // ── Tournament Group ─────────────────────────────────────────────────────────
 
 function TournamentGroup({
-  tmNumber, tournamentName, hands, tmSummary, onLoadHands,
+  tmNumber, tournamentName, hands, tmSummary, onLoadHands, defaultSite,
   expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot,
 }) {
   const [open, setOpen] = useState(false)
@@ -376,14 +377,10 @@ function TournamentGroup({
   // Sumário pode vir do servidor (lazy) ou derivar-se das hands (eager).
   const newest = loadedHands[0]
   const oldest = loadedHands[loadedHands.length - 1]
-  const blindsLabel = tmSummary
-    ? (tmSummary.blinds_first === tmSummary.blinds_last
-        ? cleanBlinds(tmSummary.blinds_first)
-        : `${cleanBlinds(tmSummary.blinds_first)} → ${cleanBlinds(tmSummary.blinds_last)}`)
-    : (!oldest ? ''
-        : (oldest.blinds === newest.blinds
-            ? cleanBlinds(oldest.blinds)
-            : `${cleanBlinds(oldest.blinds)} → ${cleanBlinds(newest.blinds)}`))
+  const blindsFirstRaw = tmSummary?.blinds_first ?? oldest?.blinds
+  const blindsLastRaw  = tmSummary?.blinds_last  ?? newest?.blinds
+  const blindsFirst = blindsFirstRaw ? cleanBlinds(blindsFirstRaw) : null
+  const blindsLast  = blindsLastRaw  ? cleanBlinds(blindsLastRaw)  : null
   const firstTs = tmSummary?.first_played_at ?? oldest?.played_at
   const lastTs  = tmSummary?.last_played_at  ?? newest?.played_at
   const timeRange = formatDayTimeRange(firstTs, lastTs)
@@ -391,68 +388,41 @@ function TournamentGroup({
     ?? loadedHands.find(h => h.tournament_format)?.tournament_format
 
   const displayName = cleanTournamentName(tournamentName)
-  const sep = { fontSize: 11, color: '#4b5563', flex: '0 0 auto' }
+
+  // Site para gradient/logo + W/L/BB derivados de loadedHands. Em modo lazy
+  // (loadedHands vazio até abrir), wins/losses/bb passam null e o header
+  // oculta a secção stats — evita "0W 0L +0.0 BB" enganador.
+  const hasHands = loadedHands.length > 0
+  const site = loadedHands.find(h => h.site)?.site || defaultSite
+  const wins = hasHands ? loadedHands.filter(h => Number(h.result) > 0).length : null
+  const losses = hasHands ? loadedHands.filter(h => Number(h.result) < 0).length : null
+  const bbResult = hasHands ? loadedHands.reduce((a, h) => a + (Number(h.result) || 0), 0) : null
 
   return (
     <div style={{
       background: 'rgba(255,255,255,0.02)',
       border: '1px solid rgba(255,255,255,0.05)',
-      borderRadius: 6, marginBottom: 4, overflow: 'hidden',
+      borderRadius: 12, marginBottom: 4, overflow: 'hidden',
     }}>
-      {/* Tournament header — colunas fixas calibradas pela linha mais longa. */}
-      <div
-        onClick={() => setOpen(!open)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
-          cursor: 'pointer', background: 'rgba(255,255,255,0.02)',
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
-      >
-        <span style={{ color: '#6366f1', fontSize: 12, flex: '0 0 14px' }}>{open ? '▼' : '▶'}</span>
-        <span style={{
-          flex: '0 0 110px', fontSize: 12, fontWeight: 700, color: '#e2e8f0',
-          fontFamily: "'Fira Code', monospace",
-        }}>{tmNumber}</span>
-        <span style={sep}>·</span>
-        <span
-          title={displayName || ''}
-          style={{
-            flex: '0 0 320px', fontSize: 11, color: '#94a3b8',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}
-        >{displayName || ''}</span>
-        <span style={sep}>·</span>
-        <span style={{ flex: '0 0 56px', fontSize: 11, fontWeight: 600, color: '#f59e0b' }}>
-          {buyIn != null ? fmtBuyIn(buyIn) : ''}
-        </span>
-        <span style={sep}>·</span>
-        <span style={{
-          flex: '0 0 260px', fontSize: 11, color: '#64748b',
-          fontFamily: "'Fira Code', monospace",
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{blindsLabel || ''}</span>
-        <span style={sep}>·</span>
-        <span style={{
-          flex: '0 0 170px', fontSize: 11, color: '#64748b',
-          fontFamily: "'Fira Code', monospace",
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>{timeRange || ''}</span>
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
-          {formatBadge && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
-              color: /KO/i.test(formatBadge) ? '#f59e0b' : '#64748b',
-              background: /KO/i.test(formatBadge) ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)',
-            }}>{formatBadge}</span>
-          )}
-          <span style={{ fontSize: 11, color: '#94a3b8' }}>{handCount} mãos</span>
-          {!isLazy && <span style={{ fontSize: 11, color: '#22c55e' }}>{ssCount} SS</span>}
-          {totalVillains > 0 && (
-            <span style={{ fontSize: 11, color: '#8b5cf6' }}>{totalVillains} V</span>
-          )}
-        </span>
-      </div>
+      <TournamentHeader
+        site={site}
+        tournamentName={displayName}
+        tournamentNumber={tmNumber}
+        timeRangeOverride={timeRange}
+        handCount={handCount}
+        wins={wins}
+        losses={losses}
+        bbResult={bbResult}
+        buyIn={buyIn}
+        blindsFirst={blindsFirst}
+        blindsLast={blindsLast}
+        tournamentFormat={formatBadge}
+        ssCount={isLazy ? null : ssCount}
+        villainCount={totalVillains}
+        expanded={open}
+        onToggle={() => setOpen(!open)}
+        isLast
+      />
 
       {/* Hands list */}
       {open && (
@@ -489,7 +459,7 @@ function TournamentGroup({
 
 function DateGroup({
   dateKey, dateLabel, tournaments, dateSummary, onLoadTournamentHands, handsByTm,
-  expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot,
+  expandedHands, toggleHand, onDeleteHand, onDeleteScreenshot, defaultSite,
 }) {
   const [open, setOpen] = useState(false)
 
@@ -547,6 +517,7 @@ function DateGroup({
               tournamentName={t.name}
               hands={isLazy ? handsByTm?.[t.tm] : t.hands}
               tmSummary={isLazy ? t : undefined}
+              defaultSite={defaultSite}
               onLoadHands={isLazy ? onLoadTournamentHands : undefined}
               expandedHands={expandedHands}
               toggleHand={toggleHand}
@@ -921,6 +892,7 @@ export default function TournamentsPage() {
                 dateLabel={formatDateLabel(d.date_key + 'T12:00:00')}
                 tournaments={d.tournaments}
                 dateSummary={d}
+                defaultSite="GGPoker"
                 handsByTm={handsByTm}
                 onLoadTournamentHands={async (tm) => {
                   if (handsByTm[tm] !== undefined) return

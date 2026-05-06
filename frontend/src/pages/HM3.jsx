@@ -3,6 +3,7 @@ import { hands, hm3 } from '../api/client'
 import Replayer from '../components/Replayer'
 import HandRow from '../components/HandRow'
 import HandHistoryViewer from '../components/HandHistoryViewer'
+import TournamentHeader from '../components/TournamentHeader'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -319,38 +320,44 @@ function TournamentSubGroup({ hands, onOpenDetail, onDeleteHand }) {
   const losses = hands.filter(h => h.result != null && Number(h.result) < 0).length
   const totalBB = hands.reduce((a, h) => a + (Number(h.result) || 0), 0)
 
-  const title = composeTournamentTitle(hands)
+  // Inline da lógica de composeTournamentTitle — campos separados em vez da
+  // string monolítica, para alimentar TournamentHeader.
+  const site = hands.find(h => h.site)?.site
+  const tournamentName = hands.find(h => h.tournament_name)?.tournament_name
+  const tournamentNumber = hands.find(h => h.tournament_number)?.tournament_number
+  const rawFmt = hands.find(h => h.tournament_format)?.tournament_format
+  const fmt = normalizeFormat(rawFmt) || ''
+  const buyinHand = hands.find(h => h.buy_in != null)
+  const buyIn = buyinHand ? Number(buyinHand.buy_in) : null
+  // WPN: omitir fmt — a prize-pool-string (tournament_name) já é a categoria.
+  const tournamentFormat = (site === 'WPN') ? null : (fmt || null)
+
+  const times = hands.map(h => h.played_at).filter(Boolean).sort()
+  const timeStart = times.length ? times[0].slice(11, 16) : undefined
+  const timeEnd = times.length ? times[times.length - 1].slice(11, 16) : undefined
+
   const tags = aggregateTags(hands)
 
   return (
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-      <div onClick={() => setOpen(!open)} style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '7px 16px 7px 32px', cursor: 'pointer', userSelect: 'none',
-      }}
-        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
-        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: '#6366f1', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>&#9654;</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{title}</span>
-            <span style={{ fontSize: 11, color: '#4b5563' }}>{hands.length} {hands.length === 1 ? 'mão' : 'mãos'}</span>
-          </div>
-          {tags.length > 0 && (
-            <div style={{ marginLeft: 18, marginTop: 2, fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {tags.join(' · ')}
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, marginLeft: 12, flexShrink: 0 }}>
-          <span style={{ color: '#22c55e' }}>{wins}W</span>
-          <span style={{ color: '#ef4444' }}>{losses}L</span>
-          <span style={{ color: totalBB >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600, fontFamily: 'monospace' }}>
-            {totalBB >= 0 ? '+' : ''}{totalBB.toFixed(1)} BB
-          </span>
-        </div>
-      </div>
+      <TournamentHeader
+        site={site}
+        tournamentName={tournamentName}
+        tournamentNumber={tournamentNumber}
+        timeStart={timeStart}
+        timeEnd={timeEnd}
+        handCount={hands.length}
+        wins={wins}
+        losses={losses}
+        bbResult={totalBB}
+        buyIn={buyIn}
+        tournamentFormat={tournamentFormat}
+        tags={tags}
+        expanded={open}
+        onToggle={() => setOpen(!open)}
+        indent={18}
+        isLast
+      />
       {open && hands.map((h, idx) => (
         <HandRow
           key={h.id}
