@@ -10,12 +10,88 @@ const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const STREET_COLORS = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', river: '#ef4444', showdown: '#8b5cf6' }
 const SEAT_ORDER = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
 
-// Slots 4 e 5 (topo) movidos de y:4 para y:18 — cabem dentro do felt (top 14%)
+// Slots 4 e 5 (topo) movidos de y:4 para y:18 — cabem dentro do felt
 // agora que as cards cresceram 80% e iam transbordar pelo limite superior.
 const POSITIONS_9 = [
   { x: 50, y: 88 }, { x: 14, y: 74 }, { x: 8, y: 42 }, { x: 14, y: 12 },
   { x: 36, y: 18 }, { x: 64, y: 18 }, { x: 86, y: 12 }, { x: 92, y: 42 }, { x: 86, y: 74 },
 ]
+
+// Quando apenas um dos slots topo {4, 5} é usado (caso 6-max e 8-max), centrar
+// esse slot em x:50. Quando ambos são usados (7-max, 9-max), manter assimétrico.
+function adjustedPositions(slots) {
+  const usesTop4 = slots.includes(4)
+  const usesTop5 = slots.includes(5)
+  if (usesTop4 === usesTop5) return POSITIONS_9
+  return POSITIONS_9.map((p, idx) => (idx === 4 || idx === 5) ? { ...p, x: 50 } : p)
+}
+
+// ── Chip stack / aggression coloring ────────────────────────────────────────
+
+function chipCountForBB(bb) {
+  if (bb < 1) return 2
+  if (bb < 2) return 3
+  if (bb < 5) return 5
+  if (bb < 10) return 8
+  if (bb < 25) return 12
+  return 16
+}
+
+function ChipPile({ count, color }) {
+  return (
+    <div style={{ position: 'relative', width: 24, height: 6 + (count - 1) * 4 }}>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} style={{
+          position: 'absolute', left: 0, bottom: i * 4,
+          width: 24, height: 6, borderRadius: '50%',
+          background: color,
+          border: '1px solid rgba(0,0,0,0.5)',
+          boxShadow: '0 1px 1px rgba(0,0,0,0.4)',
+        }} />
+      ))}
+    </div>
+  )
+}
+
+// Per-player aggression level desde início da street até step actual.
+// 0 = blinds/check; 1+ = rank do raise/bet na sequência da street.
+// Calls inheritam o nível da agressão actual (mesmo amount).
+function getPlayerAggressionLevels(steps, currentSi, currentStreet) {
+  const levels = {}
+  let raiseCount = 0
+  for (let i = 0; i <= currentSi; i++) {
+    const s = steps[i]
+    if (s.street !== currentStreet) continue
+    if (!s.actor) continue
+    if (s.actionType === 'raises' || s.actionType === 'bets') {
+      raiseCount += 1
+      levels[s.actor] = raiseCount
+    } else if (s.actionType === 'calls') {
+      levels[s.actor] = raiseCount
+    } else if (s.actionType === 'folds') {
+      delete levels[s.actor]
+    } else if (s.actionType === 'checks') {
+      levels[s.actor] = 0
+    }
+  }
+  return levels
+}
+
+// Map (level, street) → cor. Pré: 1→gold, 2→orange, 3→red, 4+→purple.
+// Pós: 1→light gold (cbet), 2→orange, 3+→red. 0 → cinza neutro (blinds).
+function aggressionColor(level, street) {
+  if (street === 'preflop') {
+    if (level >= 4) return '#A855F7'
+    if (level === 3) return '#DC2626'
+    if (level === 2) return '#F97316'
+    if (level === 1) return '#F5C16C'
+    return '#94A3B8'
+  }
+  if (level >= 3) return '#DC2626'
+  if (level === 2) return '#F97316'
+  if (level === 1) return '#FBBF24'
+  return '#94A3B8'
+}
 const CHIP_OFFSETS_9 = [
   { x: 50, y: 72 }, { x: 24, y: 64 }, { x: 20, y: 42 }, { x: 24, y: 22 },
   { x: 40, y: 16 }, { x: 60, y: 16 }, { x: 76, y: 22 }, { x: 80, y: 42 }, { x: 76, y: 64 },
@@ -108,8 +184,10 @@ export default function ReplayerPage() {
   const step = steps[si] || steps[0]
   const ps = step?.ps || []
   const slots = getSlots(ps.length)
-  const positions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return POSITIONS_9[slots[idx] || 0] })
+  const adjPositions = adjustedPositions(slots)
+  const positions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return adjPositions[slots[idx] || 0] })
   const chipPositions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return CHIP_OFFSETS_9[slots[idx] || 0] })
+  const playerLevels = step ? getPlayerAggressionLevels(steps, si, step.street) : {}
 
   // GTO matching — find closest tree when hand loads
   useEffect(() => {
@@ -278,7 +356,14 @@ export default function ReplayerPage() {
           <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14, padding: '4px 8px' }}>&larr; Voltar</button>
           <span style={{ fontSize: 14, fontWeight: 700 }}>REPLAYER</span>
           <span style={{ fontSize: 12, color: '#64748b' }}>Mão #{hand.id}</span>
-          {meta.sb && meta.bb && <span style={{ fontSize: 12, color: '#4b5563', fontFamily: 'monospace' }}>{Math.round(meta.sb)}/{Math.round(meta.bb)}{meta.ante ? `(${Math.round(meta.ante)})` : ''}{meta.level != null ? ` Lv${meta.level}` : ''}</span>}
+          {meta.sb && meta.bb && (
+            <span style={{
+              fontSize: 12, color: '#F5C16C', fontFamily: 'monospace',
+              background: 'rgba(245,158,11,0.20)', padding: '4px 8px', borderRadius: 4,
+            }}>
+              {Math.round(meta.sb)}/{Math.round(meta.bb)}{meta.ante ? `(${Math.round(meta.ante)})` : ''}{meta.level != null ? ` Lv${meta.level}` : ''}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {hand.stakes && <span style={{ fontSize: 12, color: '#4b5563', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hand.stakes}</span>}
@@ -316,10 +401,10 @@ export default function ReplayerPage() {
         {/* Center — Table */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ flex: 1, position: 'relative', background: 'radial-gradient(ellipse at center,#0f2318,#0a1510 40%,#080d0f)' }}>
-            <div style={{ position: 'absolute', top: '14%', left: '14%', width: '72%', height: '72%', borderRadius: '50%', border: '3px solid #1a3828', background: 'radial-gradient(ellipse at center,#14392a,#0d2b1e 60%,#091f15)', boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)' }} />
+            <div style={{ position: 'absolute', top: '18%', left: '18%', width: '64%', height: '64%', borderRadius: '50%', border: '3px solid #1a3828', background: 'radial-gradient(ellipse at center,#14392a,#0d2b1e 60%,#091f15)', boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)' }} />
 
             {/* Pot */}
-            <div style={{ position: 'absolute', top: '35%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 2 }}>
+            <div style={{ position: 'absolute', top: '28%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 2 }}>
               <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 2 }}>POT</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", textShadow: '0 0 12px rgba(251,191,36,0.3)', cursor: 'pointer' }} onClick={() => setShowBB(v => !v)}>
                 {showBB ? `${step.potBB}BB` : step.pot?.toLocaleString()}
@@ -334,7 +419,7 @@ export default function ReplayerPage() {
 
             {/* Board */}
             {step.board?.length > 0 && (
-              <div style={{ position: 'absolute', top: '54%', left: '50%', transform: 'translate(-50%,-50%)', display: 'flex', gap: 5, zIndex: 2 }}>
+              <div style={{ position: 'absolute', top: '40%', left: '50%', transform: 'translate(-50%,-50%)', display: 'flex', gap: 5, zIndex: 2 }}>
                 {step.board.map((c, i) => <RCard key={i} card={c} size="board" />)}
               </div>
             )}
@@ -361,20 +446,40 @@ export default function ReplayerPage() {
               const active = step.actorIdx === i
               const bountyStr = p.bounty != null ? (typeof p.bounty === 'string' ? p.bounty : `${p.bounty}€`) : null
               const isAllIn = p.stack <= 0 && !p.folded && p.currentBet > 0
+              const pLevel = playerLevels[p.name] ?? 0
+              const pColor = aggressionColor(pLevel, step.street)
+              const bbValue = (p.currentBet || 0) / bbSize
+              const cCount = chipCountForBB(bbValue)
+              // Hero cards: fallback a hand.hero_cards quando p.cards está vazio
+              // (parseHH nem sempre populates hero cards a partir do HH).
+              const cardsToShow = (p.cards && p.cards.length > 0)
+                ? p.cards
+                : (p.isHero && hand?.hero_cards?.length > 0 ? hand.hero_cards : [])
               return (
                 <div key={i}>
                   {p.currentBet > 0 && !p.folded && (
                     <div style={{ position: 'absolute', left: `${chipPos.x}%`, top: `${chipPos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 6 }}>
-                      {p.actionLabel && <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2, whiteSpace: 'nowrap' }}>{p.actionLabel}</div>}
-                      <div onClick={() => setShowBB(v => !v)} style={{ fontSize: 14, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", background: 'rgba(0,0,0,0.88)', padding: '4px 12px', borderRadius: 5, border: `2px solid ${isAllIn ? '#ef4444' : 'rgba(251,191,36,0.5)'}`, whiteSpace: 'nowrap', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>
-                        {formatChip(p.currentBet)}
+                      {p.actionLabel && <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4, whiteSpace: 'nowrap' }}>{p.actionLabel}</div>}
+                      <div onClick={() => setShowBB(v => !v)} style={{
+                        display: 'inline-flex', flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+                        padding: '5px 10px', background: 'rgba(0,0,0,0.7)',
+                        borderRadius: 5, border: `1.5px solid ${isAllIn ? '#ef4444' : pColor}`,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.6)',
+                        whiteSpace: 'nowrap', cursor: 'pointer',
+                      }}>
+                        <ChipPile count={cCount} color={pColor} />
+                        <span style={{ fontSize: 14, fontWeight: 800, color: pColor, fontFamily: "'Fira Code',monospace", lineHeight: 1 }}>
+                          {showBB ? bbValue.toFixed(1) : Math.round(p.currentBet).toLocaleString()}
+                        </span>
                       </div>
                       {isAllIn && <div style={{ fontSize: 10, fontWeight: 800, color: '#ef4444', marginTop: 2, letterSpacing: 1 }}>ALL-IN</div>}
                     </div>
                   )}
                   <div style={{ position: 'absolute', left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%,-50%)', textAlign: 'center', minWidth: 100, zIndex: 3, transition: 'all 0.3s' }}>
                     <div style={{ display: 'flex', gap: 3, justifyContent: 'center', marginBottom: 3 }}>
-                      {p.cards?.length > 0 ? p.cards.map((c, ci) => <RCard key={ci} card={c} size={p.isHero ? 'xl' : 'md'} />) : !p.folded ? <><RCard faceDown size="md" /><RCard faceDown size="md" /></> : null}
+                      {cardsToShow.length > 0
+                        ? cardsToShow.map((c, ci) => <RCard key={ci} card={c} size={p.isHero ? 'xl' : 'md'} />)
+                        : !p.folded ? <><RCard faceDown size="md" /><RCard faceDown size="md" /></> : null}
                     </div>
                     <div style={{ background: active ? 'rgba(251,191,36,0.15)' : isAllIn ? 'rgba(239,68,68,0.12)' : p.isHero ? 'rgba(99,102,241,0.12)' : 'rgba(0,0,0,0.7)', border: `1.5px solid ${active ? '#fbbf24' : isAllIn ? '#ef4444' : p.isHero ? '#6366f1' : '#2a2d3a'}`, borderRadius: 7, padding: '4px 10px', opacity: p.folded ? 0.3 : 1, transition: 'all 0.3s' }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: p.isHero ? '#818cf8' : '#94a3b8', letterSpacing: 0.3 }}>{p.position}</div>
