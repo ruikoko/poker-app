@@ -7,16 +7,15 @@ import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const SEAT_ORDER = ['SB','BB','UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN']
 const POS_COLORS = { BTN: '#6366f1', CO: '#8b5cf6', HJ: '#a78bfa', SB: '#f59e0b', BB: '#ef4444', UTG: '#22c55e', 'UTG1': '#16a34a', 'UTG+1': '#16a34a', 'UTG2': '#15803d', 'UTG+2': '#15803d', MP: '#06b6d4', 'MP1': '#0891b2', 'MP+1': '#0891b2' }
 
 function RCard({ card, size = 'md' }) {
   if (!card || card.length < 2) return <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 50, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 5, fontSize: 14, color: '#4b5563' }}>?</span>
-  const w = size === 'lg' ? 48 : 36, h = size === 'lg' ? 66 : 50, fs = size === 'lg' ? 19 : 15
+  const w = size === 'lg' ? 48 : 36, h = size === 'lg' ? 66 : 50, fsRank = size === 'lg' ? 26 : 20
   const rank = card.slice(0, -1).toUpperCase(), suit = card.slice(-1).toLowerCase()
-  return <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: w, height: h, background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}50`, borderRadius: 5, fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fs, color: '#fff', lineHeight: 1, userSelect: 'none', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}><span>{rank}</span><span style={{ fontSize: fs * 0.8, color: SUIT_COLORS[suit] }}>{SUIT_SYMBOLS[suit]}</span></span>
+  return <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: w, height: h, background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}50`, borderRadius: 5, fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fsRank, color: '#fff', lineHeight: 1, userSelect: 'none', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>{rank}</span>
 }
 
 function PosBadge({ pos }) {

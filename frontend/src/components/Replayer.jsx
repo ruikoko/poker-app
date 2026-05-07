@@ -4,7 +4,6 @@ import { HERO_NAMES } from '../heroNames'
 import { parseHH } from '../lib/handParser'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const STREET_COLORS = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', river: '#ef4444', showdown: '#8b5cf6' }
 const SEAT_ORDER = ['UTG','UTG1','UTG2','MP','MP1','HJ','CO','BTN','SB','BB']
@@ -12,10 +11,10 @@ const SEAT_ORDER = ['UTG','UTG1','UTG2','MP','MP1','HJ','CO','BTN','SB','BB']
 function RCard({ card, faceDown, size = 'md' }) {
   const w = size === 'lg' ? 44 : size === 'md' ? 34 : 26
   const h = size === 'lg' ? 60 : size === 'md' ? 46 : 36
-  const fs = size === 'lg' ? 15 : size === 'md' ? 12 : 10
+  const fsRank = size === 'lg' ? 20 : size === 'md' ? 16 : 14
   if (faceDown || !card || card.length < 2) return <div style={{ width: w, height: h, borderRadius: 4, background: 'linear-gradient(135deg,#1e40af,#7c3aed,#1e40af)', border: '1.5px solid rgba(255,255,255,0.2)', boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }} />
   const rank = card.slice(0, -1).toUpperCase(), suit = card.slice(-1).toLowerCase()
-  return <div style={{ width: w, height: h, borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}40`, boxShadow: '0 2px 8px rgba(0,0,0,0.5)', fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fs, color: '#fff', lineHeight: 1, userSelect: 'none' }}><span>{rank}</span><span style={{ fontSize: fs * 0.75, color: SUIT_COLORS[suit] }}>{SUIT_SYMBOLS[suit]}</span></div>
+  return <div style={{ width: w, height: h, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}40`, boxShadow: '0 2px 8px rgba(0,0,0,0.5)', fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fsRank, color: '#fff', lineHeight: 1, userSelect: 'none' }}>{rank}</div>
 }
 
 const POSITIONS_9 = [

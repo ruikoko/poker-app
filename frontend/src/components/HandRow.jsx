@@ -1,10 +1,8 @@
 import TagEditor from './TagEditor'
-import { SITE_COLORS, SITE_COLOR_DEFAULT } from '../lib/siteColors'
 
 // ── Constantes (cópia de Hands.jsx para auto-conteúdo) ──────────────────────
 
-const SUIT_BG      = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
-const SUIT_SYMBOLS = { h: '♥', d: '♦', c: '♣', s: '♠' }
+const SUIT_BG = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
 
 const STATE_META = {
   new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
@@ -36,17 +34,14 @@ function PokerCard({ card, size = 'sm' }) {
   const bg = SUIT_BG[suit] || '#1e2130'
   return (
     <span style={{
-      display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: size === 'sm' ? 26 : 34, height: size === 'sm' ? 36 : 46,
       background: bg, border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 4, fontFamily: "'Fira Code', monospace",
-      fontSize: size === 'sm' ? 10 : 12, fontWeight: 700, color: '#fff',
-      lineHeight: 1, gap: 1, userSelect: 'none',
+      fontSize: size === 'sm' ? 14 : 16, fontWeight: 700, color: '#fff',
+      lineHeight: 1, userSelect: 'none',
       boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-    }}>
-      <span>{rank}</span>
-      <span style={{ fontSize: size === 'sm' ? 9 : 11 }}>{SUIT_SYMBOLS[suit] || suit}</span>
-    </span>
+    }}>{rank}</span>
   )
 }
 
@@ -95,15 +90,6 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
 
   const zebra = idx % 2 === 0 ? '#1a1d27' : '#1e2130'
 
-  // Site short + cor
-  const siteShort =
-    hand.site === 'Winamax'    ? 'WN'
-    : hand.site === 'PokerStars' ? 'PS'
-    : hand.site === 'WPN'        ? 'WPN'
-    : hand.site === 'GGPoker'    ? 'GG'
-    : '?'
-  const siteColor = SITE_COLORS[hand.site] || SITE_COLOR_DEFAULT
-
   // Buy-in: soma componentes do stakes (ex: €45+€45+€10 → €100)
   const stakesStr = hand.stakes || ''
   let buyin = ''
@@ -116,13 +102,6 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
     buyin = `${stakesStr.includes('$') ? '$' : '€'}${total}`
   }
 
-  // Tournament name: limpar buy-in/moeda/parênteses
-  const tourneyName = stakesStr
-    .replace(/\(.*?\)/g, '')
-    .replace(/[\d€$.,]+\s*\+\s*[\d€$.,]+(?:\s*\+\s*[\d€$.,]+)?/g, '')
-    .replace(/EUR|USD/gi, '')
-    .trim() || stakesStr
-
   // DD/MM + HH:MM em TZ local. Antes slicava a string ISO (UTC), agora
   // converte via Date para bater com as horas a que o utilizador jogou.
   const playedDt = hand.played_at ? new Date(hand.played_at) : null
@@ -133,12 +112,6 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
     ? `${String(playedDt.getHours()).padStart(2, '0')}:${String(playedDt.getMinutes()).padStart(2, '0')}`
     : ''
 
-  // KO/NKO
-  const fmt = hand.tournament_format
-  // Dual-accept: legacy 'vanilla' e novo canonical 'Vanilla' (D3).
-  const isKO = fmt && fmt.toLowerCase() !== 'vanilla'
-  const showFmt = !!fmt
-
   // GG.gl link (se existir em raw ou notes)
   const ggMatch = (hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/)
 
@@ -148,7 +121,7 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       style={{
         display: 'grid',
         gridTemplateColumns:
-          '5.6% 5.6% 5.6% 5.6% 8.6% 3.9% 23.3% 3.6% 3.4% 7.9% 8.3% 1fr',
+          '5.6% 5.6% 5.6% 5.6% 3.9% 23.3% 7.9% 8.3% 1fr',
         alignItems: 'center',
         padding: '7px 8px',
         background: zebra,
@@ -175,21 +148,12 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       {/* 4. Resultado BB */}
       <div><ResultBadge result={result} /></div>
 
-      {/* 5. Nome do torneio */}
-      <div style={{
-        fontSize: 11, color: '#94a3b8',
-        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        minWidth: 0, paddingRight: 10,
-      }}>
-        {tourneyName}
-      </div>
-
-      {/* 6. Buy-in */}
+      {/* 5. Buy-in */}
       <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
         {buyin}
       </div>
 
-      {/* 7. Board */}
+      {/* 6. Board */}
       <div style={{ display: 'flex', gap: 4, minWidth: 0 }}>
         {hand.board?.length > 0
           ? hand.board.slice(0, 5).map((c, i) => (
@@ -200,28 +164,7 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
           : <span style={{ color: '#4b5563', fontSize: 10 }}>—</span>}
       </div>
 
-      {/* 8. Sala */}
-      <div style={{ textAlign: 'center' }}>
-        <span style={{
-          fontSize: 10, fontWeight: 700,
-          color: siteColor, background: `${siteColor}15`,
-          padding: '2px 5px', borderRadius: 3,
-        }}>{siteShort}</span>
-      </div>
-
-      {/* 9. KO / NKO (novo) */}
-      <div style={{ textAlign: 'center' }}>
-        {showFmt && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-            fontFamily: 'monospace', padding: '2px 5px', borderRadius: 3,
-            background: isKO ? '#064e3b' : '#1e293b',
-            color: isKO ? '#6ee7b7' : '#64748b',
-          }}>{isKO ? 'KO' : 'NKO'}</span>
-        )}
-      </div>
-
-      {/* 10. Level / Blinds */}
+      {/* 7. Level / Blinds */}
       <div style={{
         fontSize: 10, color: '#4b5563', fontFamily: 'monospace',
         fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap',

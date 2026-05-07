@@ -7,7 +7,6 @@ import TournamentHeader from '../components/TournamentHeader'
 
 const SUIT_COLORS  = { h: '#ef4444', d: '#f97316', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_BG      = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 
 const POS_COLORS = {
   BTN: '#6366f1', CO: '#8b5cf6', HJ: '#a78bfa',
@@ -32,19 +31,15 @@ function PokerCard({ card, size = 'sm' }) {
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
   const bg = SUIT_BG[suit] || '#1e2130'
-  const symbol = SUIT_SYMBOLS[suit] || suit
   return (
     <span style={{
-      display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: 24, height: 34,
       background: bg, border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 3, fontFamily: "'Fira Code', monospace",
-      fontSize: 11, fontWeight: 700, color: '#fff', lineHeight: 1, gap: 0,
+      fontSize: 14, fontWeight: 700, color: '#fff', lineHeight: 1,
       boxShadow: '0 1px 2px rgba(0,0,0,0.3)', userSelect: 'none',
-    }}>
-      <span>{rank}</span>
-      <span style={{ fontSize: 9 }}>{symbol}</span>
-    </span>
+    }}>{rank}</span>
   )
 }
 

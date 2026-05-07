@@ -19,17 +19,18 @@
 import React from 'react'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
-const SUIT_SYMBOLS = { h: '♥', d: '♦', c: '♣', s: '♠' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 
+// fs = placeholder ("?"); fsRank = rank num/letra (maior, ocupa todo o espaço
+// agora que o naipe foi removido).
 const SIZES = {
-  sm: { w: 26, h: 36, fs: 11 },
-  md: { w: 36, h: 50, fs: 15 },
-  lg: { w: 48, h: 66, fs: 19 },
+  sm: { w: 26, h: 36, fs: 11, fsRank: 14 },
+  md: { w: 36, h: 50, fs: 15, fsRank: 20 },
+  lg: { w: 48, h: 66, fs: 19, fsRank: 26 },
 }
 
 export default function PokerCard({ card, size = 'md', faceDown = false }) {
-  const { w, h, fs } = SIZES[size] || SIZES.md
+  const { w, h, fs, fsRank } = SIZES[size] || SIZES.md
 
   if (faceDown) {
     return (
@@ -58,22 +59,18 @@ export default function PokerCard({ card, size = 'md', faceDown = false }) {
   const suit = card.slice(-1).toLowerCase()
   const suitColor = SUIT_COLORS[suit] || '#e2e8f0'
   const suitBg = SUIT_BG[suit] || '#1e293b'
-  const suitSym = SUIT_SYMBOLS[suit] || suit
 
   return (
     <span style={{
-      display: 'inline-flex', flexDirection: 'column',
+      display: 'inline-flex',
       alignItems: 'center', justifyContent: 'center',
       width: w, height: h, borderRadius: 5,
       background: suitBg,
       border: `1.5px solid ${suitColor}50`,
       fontFamily: "'Fira Code',monospace",
-      fontWeight: 700, fontSize: fs, color: '#fff',
+      fontWeight: 700, fontSize: fsRank, color: '#fff',
       lineHeight: 1, userSelect: 'none',
       boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-    }}>
-      <span>{rank}</span>
-      <span style={{ fontSize: fs * 0.8, color: suitColor }}>{suitSym}</span>
-    </span>
+    }}>{rank}</span>
   )
 }

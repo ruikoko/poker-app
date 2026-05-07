@@ -6,7 +6,6 @@ import { SITE_COLORS } from '../lib/siteColors'
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SUIT_BG = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 
 const STATE_META = {
   new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
@@ -33,15 +32,12 @@ function PokerCard({ card }) {
   const suit = card.slice(-1).toLowerCase()
   return (
     <span style={{
-      display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: 24, height: 33, background: SUIT_BG[suit] || '#1e293b',
       border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
-      fontFamily: "'Fira Code',monospace", fontSize: 10, fontWeight: 700, color: '#fff',
-      lineHeight: 1, gap: 0, userSelect: 'none',
-    }}>
-      <span>{rank}</span>
-      <span style={{ fontSize: 8 }}>{SUIT_SYMBOLS[suit] || suit}</span>
-    </span>
+      fontFamily: "'Fira Code',monospace", fontSize: 14, fontWeight: 700, color: '#fff',
+      lineHeight: 1, userSelect: 'none',
+    }}>{rank}</span>
   )
 }
 

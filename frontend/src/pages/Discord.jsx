@@ -27,7 +27,6 @@ const STATE_META = {
 }
 
 const SUIT_COLORS = { h: '#ef4444', d: '#f97316', c: '#22c55e', s: '#e2e8f0' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 
 const TAG_COLORS = {
   icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e',
@@ -48,12 +47,8 @@ function PokerCard({ card, size = 'sm' }) {
   const rank = card.slice(0, -1).toUpperCase()
   const suit = card.slice(-1).toLowerCase()
   const color = SUIT_COLORS[suit] || '#e2e8f0'
-  const symbol = SUIT_SYMBOLS[suit] || suit
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: size === 'sm' ? 26 : 34, height: size === 'sm' ? 36 : 46, background: '#1e2130', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, fontFamily: "'Fira Code', monospace", fontSize: size === 'sm' ? 10 : 12, fontWeight: 700, color, lineHeight: 1, gap: 1, userSelect: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
-      <span>{rank}</span>
-      <span style={{ fontSize: size === 'sm' ? 9 : 11 }}>{symbol}</span>
-    </span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: size === 'sm' ? 26 : 34, height: size === 'sm' ? 36 : 46, background: '#1e2130', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, fontFamily: "'Fira Code', monospace", fontSize: size === 'sm' ? 14 : 16, fontWeight: 700, color, lineHeight: 1, userSelect: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>{rank}</span>
   )
 }
 

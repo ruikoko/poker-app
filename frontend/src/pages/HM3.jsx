@@ -8,7 +8,6 @@ import TournamentHeader from '../components/TournamentHeader'
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SUIT_BG = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 
 const STATES = [
   { v: '',         l: 'Todos os estados' },
@@ -30,12 +29,9 @@ function PokerCard({ card, size = 'sm' }) {
   const bg = SUIT_BG[suit] || '#1e2130'
   const w = size === 'lg' ? 38 : size === 'md' ? 34 : 24
   const h = size === 'lg' ? 50 : size === 'md' ? 46 : 34
-  const fs = size === 'lg' ? 14 : size === 'md' ? 12 : 10
+  const fsRank = size === 'lg' ? 20 : size === 'md' ? 16 : 14
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: w, height: h, background: bg, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: fs, fontWeight: 700, color: '#fff', lineHeight: 1, gap: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.3)', userSelect: 'none' }}>
-      <span>{rank}</span>
-      <span style={{ fontSize: fs - 1 }}>{SUIT_SYMBOLS[suit] || suit}</span>
-    </span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: w, height: h, background: bg, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3, fontFamily: "'Fira Code', monospace", fontSize: fsRank, fontWeight: 700, color: '#fff', lineHeight: 1, boxShadow: '0 1px 2px rgba(0,0,0,0.3)', userSelect: 'none' }}>{rank}</span>
   )
 }
 
