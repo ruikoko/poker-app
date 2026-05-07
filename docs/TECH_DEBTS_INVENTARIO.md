@@ -6,6 +6,40 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (7 Maio 2026 fim pt15)
+
+pt15 foi sessão exclusiva de iteração visual — UI/UX. Sem mudanças de backend, parsers, schema ou dados. Painel torneio (TournamentHeader + Hands.jsx Estudo), popup do replayer (ReplayerPage), e cartas de poker (9 callers) reformulados. Detalhes em `JOURNAL_2026-05-06-07-pt15.md`.
+
+- **Sessão pt15 fechou**: zero tech debts numerados de backlog (sessão visual não atacou tech debts pendentes).
+- **Sessão pt15 introduziu** 1 novo tech debt: 8 cópias inline de `PokerCard` + 1 shared (ver §pt15 abaixo).
+- **Sessão pt14 fechou** (não documentado nesta inventário ainda): #P10. **Pendentes carry-over de pt14**: #P9, #P11, #P12.
+
+### Tech Debts e pendências pt15
+
+#### Tech Debt nova
+| # | Descrição | Esforço |
+|---|---|---|
+| **#TD-pt15-1** | Unificar 8 cópias inline de `PokerCard` num componente único (`components/PokerCard.jsx` shared). Cópias actuais em: `HandRow.jsx`, `Dashboard.jsx`, `Discord.jsx`, `Hands.jsx`, `HM3.jsx`, `Tournaments.jsx`, `Replayer.jsx` (RCard), `ReplayerPage.jsx` (RCard), `HandDetailPage.jsx` (RCard). Divergências entre cópias (sizes, paletas) já harmonizadas em pt15 mas mantidas em código separado. | ~1h |
+
+#### Pendências de iteração visual (média prioridade — opcional UX)
+- **Tournaments e HM3**: aplicar mesma limpeza visual do Estudo (bareMode + watermark)? Adiada nesta sessão. Decisão Rui se aplicar a todas as páginas para consistência ou manter modo normal nessas duas.
+- **Replayer head-up**: D + SB badges sobrepostas no mesmo player (BTN = SB em head-up). Cenário raro em MTT.
+- **Replayer slot único topo (50,10)**: badge cobre o nome do player. Aceitável por agora, melhorar se aparecer queixa.
+
+#### Housekeeping (baixa prioridade)
+- **Assets em `frontend/public/logos/`** ficaram não-referenciados após pt15: `gg1.png`, `gg2.jpg`, `ya.webp`, `wina1.png`, `wina2.png`, `ps.png`. Apenas `gg_horizontal.png` e `ps_logo.png` em uso. Candidatos a remoção numa sessão futura de housekeeping.
+- **`composeTournamentTitle` em `HM3.jsx`**: sem callers depois da iteração customTitle (substituída por extracção inline). Limpeza cosmética.
+- **`components/Replayer.jsx`** (legacy, distinto de `pages/ReplayerPage.jsx`): possivelmente não-usado. Verificar e remover se confirmado.
+
+#### Backlog operacional carry-over (NÃO atacado em pt15)
+- **Discord/HM3 tag fragmentation** (carry-over de sessões anteriores) — afecta quase todas as study hands. URGENTE quando voltarmos ao backend.
+- **2nd Discord entry para duplicate TMs** — pendente.
+- **Discord pipeline para Winamax replayer URLs** (Vision não extrai TM dos URLs Winamax).
+- **71 SS Discord sem match** (Replayer 57 + Imagem 14): listagem com link/data/origem, pendente investigação.
+- **Estudo: torneios estudados rasurados** → desaparecem; toggle para mostrar ocultos.
+
+---
+
 ## Estado actual (4 Maio 2026 fim pt13)
 
 pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retrospectivo). Root cause: regex `r'TM(\d+)'` em `screenshot.py:307` exigia prefixo `TM` literal; Vision omitiu em 2/26 entries. Fix: word-boundary `r'\b(\d{8,12})\b'` (commit `e7d88b2`). Backfill retroactivo curou as 2 hands afectadas (id=2083, id=2297) — hand 2297 ganhou 2 villains via Regra C; hand 2083 ficou em canal `icm-pko` com `mm` populado mas 0 villains (correcto). BD final: 1172 hands, 24 enriched, 47 villains, 7/7 nota com villains. **Onda 8 do refactor #B23 declarada COMPLETA.**
