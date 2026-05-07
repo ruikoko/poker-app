@@ -9,17 +9,21 @@ const STREET_COLORS = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', ri
 const SEAT_ORDER = ['UTG','UTG1','UTG2','MP','MP1','HJ','CO','BTN','SB','BB']
 
 function RCard({ card, faceDown, size = 'md' }) {
-  const w = size === 'lg' ? 44 : size === 'md' ? 34 : 26
-  const h = size === 'lg' ? 60 : size === 'md' ? 46 : 36
-  const fsRank = size === 'lg' ? 20 : size === 'md' ? 16 : 14
+  // +80% vs versão pré-iteração (sm 26→47, md 34→61, lg 44→79). Aplica-se a
+  // player cards (sm/lg) e community board (md).
+  const w = size === 'lg' ? 79 : size === 'md' ? 61 : 47
+  const h = size === 'lg' ? 108 : size === 'md' ? 83 : 65
+  const fsRank = size === 'lg' ? 36 : size === 'md' ? 29 : 25
   if (faceDown || !card || card.length < 2) return <div style={{ width: w, height: h, borderRadius: 4, background: 'linear-gradient(135deg,#1e40af,#7c3aed,#1e40af)', border: '1.5px solid rgba(255,255,255,0.2)', boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }} />
   const rank = card.slice(0, -1).toUpperCase(), suit = card.slice(-1).toLowerCase()
   return <div style={{ width: w, height: h, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}40`, boxShadow: '0 2px 8px rgba(0,0,0,0.5)', fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fsRank, color: '#fff', lineHeight: 1, userSelect: 'none' }}>{rank}</div>
 }
 
+// Slots 4 e 5 (topo) movidos de y:2 para y:18 — cabem dentro do felt (top 15%)
+// agora que as cards cresceram 80% e iam transbordar pelo limite superior.
 const POSITIONS_9 = [
   { x: 50, y: 92 }, { x: 12, y: 75 }, { x: 5, y: 40 }, { x: 12, y: 10 },
-  { x: 38, y: 2 }, { x: 62, y: 2 }, { x: 88, y: 10 }, { x: 95, y: 40 }, { x: 88, y: 75 },
+  { x: 38, y: 18 }, { x: 62, y: 18 }, { x: 88, y: 10 }, { x: 95, y: 40 }, { x: 88, y: 75 },
 ]
 
 function getSlots(n) {
