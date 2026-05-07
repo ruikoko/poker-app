@@ -18,12 +18,24 @@ const POSITIONS_9 = [
 ]
 
 // Quando apenas um dos slots topo {4, 5} é usado (caso 6-max e 8-max), centrar
-// esse slot em x:50. Quando ambos são usados (7-max, 9-max), manter assimétrico.
+// esse slot em x:50 e subir para y:10. Quando ambos são usados (7-max, 9-max),
+// manter assimétrico em y:18 para terem espaço lado-a-lado.
 function adjustedPositions(slots) {
   const usesTop4 = slots.includes(4)
   const usesTop5 = slots.includes(5)
   if (usesTop4 === usesTop5) return POSITIONS_9
-  return POSITIONS_9.map((p, idx) => (idx === 4 || idx === 5) ? { ...p, x: 50 } : p)
+  return POSITIONS_9.map((p, idx) => (idx === 4 || idx === 5) ? { ...p, x: 50, y: 10 } : p)
+}
+
+// Posição do pot (em % do container). Usada também para calcular onde colocar
+// os chip stacks (ratio interpolado entre player e pot).
+const POT_POSITION = { x: 50, y: 30 }
+const CHIP_RATIO = 0.50  // chip stack a 50% do caminho entre player e pot
+function chipPosFor(playerPos) {
+  return {
+    x: playerPos.x + (POT_POSITION.x - playerPos.x) * CHIP_RATIO,
+    y: playerPos.y + (POT_POSITION.y - playerPos.y) * CHIP_RATIO,
+  }
 }
 
 // ── Chip stack / aggression coloring ────────────────────────────────────────
@@ -92,10 +104,6 @@ function aggressionColor(level, street) {
   if (level === 1) return '#FBBF24'
   return '#94A3B8'
 }
-const CHIP_OFFSETS_9 = [
-  { x: 50, y: 72 }, { x: 24, y: 64 }, { x: 20, y: 42 }, { x: 24, y: 22 },
-  { x: 40, y: 16 }, { x: 60, y: 16 }, { x: 76, y: 22 }, { x: 80, y: 42 }, { x: 76, y: 64 },
-]
 
 function getSlots(n) {
   if (n <= 2) return [0, 4]
@@ -186,7 +194,9 @@ export default function ReplayerPage() {
   const slots = getSlots(ps.length)
   const adjPositions = adjustedPositions(slots)
   const positions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return adjPositions[slots[idx] || 0] })
-  const chipPositions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return CHIP_OFFSETS_9[slots[idx] || 0] })
+  // Chip stack: dinâmico. Ratio 0.50 (era ~0.30 com hardcoded CHIP_OFFSETS_9)
+  // — chip mais afastado das cartas, mais próximo do pot.
+  const chipPositions = positions.map(chipPosFor)
   const playerLevels = step ? getPlayerAggressionLevels(steps, si, step.street) : {}
 
   // GTO matching — find closest tree when hand loads
@@ -404,7 +414,7 @@ export default function ReplayerPage() {
             <div style={{ position: 'absolute', top: '18%', left: '18%', width: '64%', height: '64%', borderRadius: '50%', border: '3px solid #1a3828', background: 'radial-gradient(ellipse at center,#14392a,#0d2b1e 60%,#091f15)', boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)' }} />
 
             {/* Pot */}
-            <div style={{ position: 'absolute', top: '28%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 2 }}>
+            <div style={{ position: 'absolute', top: '30%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center', zIndex: 2 }}>
               <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 2 }}>POT</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: '#fbbf24', fontFamily: "'Fira Code',monospace", textShadow: '0 0 12px rgba(251,191,36,0.3)', cursor: 'pointer' }} onClick={() => setShowBB(v => !v)}>
                 {showBB ? `${step.potBB}BB` : step.pot?.toLocaleString()}
@@ -419,7 +429,7 @@ export default function ReplayerPage() {
 
             {/* Board */}
             {step.board?.length > 0 && (
-              <div style={{ position: 'absolute', top: '40%', left: '50%', transform: 'translate(-50%,-50%)', display: 'flex', gap: 5, zIndex: 2 }}>
+              <div style={{ position: 'absolute', top: '44%', left: '50%', transform: 'translate(-50%,-50%)', display: 'flex', gap: 5, zIndex: 2 }}>
                 {step.board.map((c, i) => <RCard key={i} card={c} size="board" />)}
               </div>
             )}
