@@ -533,7 +533,16 @@ def parse_hands(content: bytes, filename: str) -> tuple[list[dict], list[str]]:
     except Exception as e:
         return [], [f"Erro a ler ficheiro: {e}"]
 
-    blocks = re.split(r"(?=(?:Poker\s+)?Hand\s*#)", text)
+    # Split ancorado em "Poker Hand #" no início de linha. Regex anterior
+    # `(?=(?:Poker\s+)?Hand\s*#)` cortava cada hand em DUAS posições — antes
+    # de "Poker" e antes de "Hand" — porque o `(?:Poker\s+)?` opcional
+    # satisfaz o lookahead também em posição vazia. Resultado: o block que
+    # ia para `_parse_single_hand` começava em "Hand #..." sem "Poker ", e o
+    # `raw` guardado na BD perdia o prefixo (HRC rejeita: "No valid
+    # hand-history found"). Bug atingia 100% das 15.809 hands GG 2026 em
+    # prod. Fix: âncora explícita ^Poker (MULTILINE) — só corta no início
+    # real do header.
+    blocks = re.split(r"(?=^Poker\s+Hand\s*#)", text, flags=re.MULTILINE)
 
     for i, block in enumerate(blocks):
         block = block.strip()
