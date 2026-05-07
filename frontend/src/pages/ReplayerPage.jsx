@@ -6,14 +6,15 @@ import TagEditor from '../components/TagEditor'
 import { parseHH } from '../lib/handParser'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
-const SUIT_SYMBOLS = { h: '\u2665', d: '\u2666', c: '\u2663', s: '\u2660' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
 const STREET_COLORS = { preflop: '#6366f1', flop: '#22c55e', turn: '#f59e0b', river: '#ef4444', showdown: '#8b5cf6' }
 const SEAT_ORDER = ['UTG','UTG1','UTG+1','UTG2','UTG+2','MP','MP1','MP+1','HJ','CO','BTN','SB','BB']
 
+// Slots 4 e 5 (topo) movidos de y:4 para y:18 — cabem dentro do felt (top 14%)
+// agora que as cards cresceram 80% e iam transbordar pelo limite superior.
 const POSITIONS_9 = [
   { x: 50, y: 88 }, { x: 14, y: 74 }, { x: 8, y: 42 }, { x: 14, y: 12 },
-  { x: 36, y: 4 }, { x: 64, y: 4 }, { x: 86, y: 12 }, { x: 92, y: 42 }, { x: 86, y: 74 },
+  { x: 36, y: 18 }, { x: 64, y: 18 }, { x: 86, y: 12 }, { x: 92, y: 42 }, { x: 86, y: 74 },
 ]
 const CHIP_OFFSETS_9 = [
   { x: 50, y: 72 }, { x: 24, y: 64 }, { x: 20, y: 42 }, { x: 24, y: 22 },
@@ -32,12 +33,14 @@ function getSlots(n) {
 }
 
 function RCard({ card, faceDown, size = 'md' }) {
-  const w = size === 'xl' ? 52 : size === 'lg' ? 44 : size === 'board' ? 42 : size === 'md' ? 34 : 28
-  const h = size === 'xl' ? 72 : size === 'lg' ? 62 : size === 'board' ? 58 : size === 'md' ? 48 : 38
-  const fs = size === 'xl' ? 18 : size === 'lg' ? 15 : size === 'board' ? 14 : size === 'md' ? 12 : 11
+  // +80% vs versão pré-iteração (xl 52→94, lg 44→79, board 42→76, md 34→61,
+  // sm 28→50). Sem suit symbol — uniforme com restantes 9 callers.
+  const w = size === 'xl' ? 94 : size === 'lg' ? 79 : size === 'board' ? 76 : size === 'md' ? 61 : 50
+  const h = size === 'xl' ? 130 : size === 'lg' ? 112 : size === 'board' ? 104 : size === 'md' ? 86 : 68
+  const fsRank = size === 'xl' ? 32 : size === 'lg' ? 27 : size === 'board' ? 25 : size === 'md' ? 22 : 20
   if (faceDown || !card || card.length < 2) return <div style={{ width: w, height: h, borderRadius: 4, background: 'linear-gradient(135deg,#1e40af,#7c3aed,#1e40af)', border: '1.5px solid rgba(255,255,255,0.2)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }} />
   const rank = card.slice(0, -1).toUpperCase(), suit = card.slice(-1).toLowerCase()
-  return <div style={{ width: w, height: h, borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}40`, boxShadow: '0 2px 6px rgba(0,0,0,0.4)', fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fs, color: '#fff', lineHeight: 1, userSelect: 'none' }}><span>{rank}</span><span style={{ fontSize: fs * 0.75, color: SUIT_COLORS[suit] }}>{SUIT_SYMBOLS[suit]}</span></div>
+  return <div style={{ width: w, height: h, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SUIT_BG[suit] || '#1e293b', border: `1.5px solid ${SUIT_COLORS[suit]}40`, boxShadow: '0 2px 6px rgba(0,0,0,0.4)', fontFamily: "'Fira Code',monospace", fontWeight: 700, fontSize: fsRank, color: '#fff', lineHeight: 1, userSelect: 'none' }}>{rank}</div>
 }
 
 // ── Parse HH with correct stack tracking and pot calculation ────────────────
