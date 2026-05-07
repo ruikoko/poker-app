@@ -54,6 +54,27 @@ function chipPosFor(playerPos, isHero = false) {
   return { x: cx, y: cy }
 }
 
+// Posição das badges D / SB / BB. Usa ratio 0.30 para o centro com clamp ao
+// oval (0.85 do raio). Hero (player_y > 80) usa offset vertical especial
+// porque cards xl extendem-se ao redor do player_y; badge em player_y - 17
+// fica acima das cards.
+function badgePosFor(playerPos) {
+  if (playerPos.y > 80) {
+    return { x: playerPos.x, y: playerPos.y - 17 }
+  }
+  let cx = playerPos.x + (FELT_CENTER.x - playerPos.x) * 0.30
+  let cy = playerPos.y + (FELT_CENTER.y - playerPos.y) * 0.30
+  const dx = cx - FELT_CENTER.x
+  const dy = cy - FELT_CENTER.y
+  const ovalDist = Math.sqrt(dx * dx + dy * dy) / FELT_RADIUS
+  if (ovalDist > 0.85) {
+    const scale = 0.85 / ovalDist
+    cx = FELT_CENTER.x + dx * scale
+    cy = FELT_CENTER.y + dy * scale
+  }
+  return { x: cx, y: cy }
+}
+
 // ── Chip stack / aggression coloring ────────────────────────────────────────
 
 function chipCountForBB(bb) {
@@ -451,19 +472,28 @@ export default function ReplayerPage() {
             )}
 
             {/* Dealer button */}
-            {btnPlayerIdx >= 0 && positions[btnPlayerIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[btnPlayerIdx].x + (positions[btnPlayerIdx].x > 50 ? -6 : 6)}%`, top: `${positions[btnPlayerIdx].y + (positions[btnPlayerIdx].y > 50 ? -5 : 5)}%`, width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#000', fontSize: 12, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(251,191,36,0.5)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.3)' }}>D</div>
-            )}
+            {btnPlayerIdx >= 0 && positions[btnPlayerIdx] && (() => {
+              const bp = badgePosFor(positions[btnPlayerIdx])
+              return (
+                <div style={{ position: 'absolute', left: `${bp.x}%`, top: `${bp.y}%`, width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#000', fontSize: 12, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(251,191,36,0.5)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.3)' }}>D</div>
+              )
+            })()}
 
             {/* SB badge — inside table */}
-            {sbIdx >= 0 && positions[sbIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[sbIdx].x + (positions[sbIdx].x > 50 ? -8 : 8)}%`, top: `${positions[sbIdx].y + (positions[sbIdx].y > 50 ? -8 : 8)}%`, width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #64748b, #475569)', color: '#fff', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>SB</div>
-            )}
+            {sbIdx >= 0 && positions[sbIdx] && (() => {
+              const bp = badgePosFor(positions[sbIdx])
+              return (
+                <div style={{ position: 'absolute', left: `${bp.x}%`, top: `${bp.y}%`, width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #64748b, #475569)', color: '#fff', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>SB</div>
+              )
+            })()}
 
             {/* BB badge — inside table */}
-            {bbIdx >= 0 && positions[bbIdx] && (
-              <div style={{ position: 'absolute', left: `${positions[bbIdx].x + (positions[bbIdx].x > 50 ? -8 : 8)}%`, top: `${positions[bbIdx].y + (positions[bbIdx].y > 50 ? -8 : 8)}%`, width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>BB</div>
-            )}
+            {bbIdx >= 0 && positions[bbIdx] && (() => {
+              const bp = badgePosFor(positions[bbIdx])
+              return (
+                <div style={{ position: 'absolute', left: `${bp.x}%`, top: `${bp.y}%`, width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 6, transform: 'translate(-50%,-50%)', border: '2px solid rgba(255,255,255,0.2)' }}>BB</div>
+              )
+            })()}
 
             {/* Players */}
             {ps.map((p, i) => {
