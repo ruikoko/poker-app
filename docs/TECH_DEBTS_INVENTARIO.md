@@ -6,6 +6,39 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (7 Maio 2026 fim pt16)
+
+pt16 atacou 3 itens num único arco de sessão. Sem journal próprio ainda — registo neste inventário substitui temporariamente.
+
+- **#5 / #B26** (TAGS Discord vazia em Estudo): verificado em prod já resolvido. Chips Discord azul e `OriginBadge` (HM3 amarelo / Discord azul / HM3+D roxo) implementados em #B17 (pt9, commit `7806d33`) e reforçados em pt15. Sem código novo; backlog estava desactualizado.
+- **#6** (status inconsistency Discord ao re-linkar via Vision): mãos `'resolved'` (Revista) voltavam a `'new'` (Nova) sempre que Vision corria enrichment. Causa: `screenshot.py:1432` forçava `study_state='new'` incondicionalmente. Fix em 3 fases num só commit (`be0b9c3`):
+  - **Fase 1** — `screenshot.py` deixa de força `'new'`: passa a `CASE WHEN study_state = 'mtt_archive' THEN 'new' ELSE study_state END` (preserva `resolved`).
+  - **Fase 2** — `match_state` computado por SQL CASE em 8 endpoints (`hands.py` × 3, `mtt.py` × 2, `tournaments.py`, `villains.py`, `hm3.py`). 5 valores: `archive` > `orphan` > `pending` > `matched`.
+  - **Fase 3** — badge unificado de 5 estados (Nova azul / Revista verde / Pendente âmbar / Arquivo cinza / Órfã vermelho discreto) em `HandRow.jsx`, `Hands.jsx`, `Discord.jsx`, `Dashboard.jsx`, `HM3.jsx`. Botão "Marcar Revista" guarded para `match_state='matched'` (placeholders/arquivo/órfãs não estudáveis). Princípio invariante registado: linkagem é precondição obrigatória para o eixo Estudo.
+- **Bug "Copiar HH"** (rejeitado pelo HRC com "No valid hand-history found"): regex `re.split(r"(?=(?:Poker\s+)?Hand\s*#)")` em `gg_hands.py:536` matcheia 2 vezes por hand (uma com `Poker `, outra sem) — `re.split` corta em ambos os pontos, descartando o prefixo `Poker ` para fora do bloco. Magnitude prod: 100% das 15.809 hands GG 2026. Fix (commit `0d18c52`): split ancorado em `^Poker\s+Hand\s*#` com `re.MULTILINE`. Validado: novo regex produz blocos com prefixo intacto; antigo produz `["", "Poker ", "Hand #..."]`.
+- **Bug HRC concatenar BB+ante**: confirmado externo. App reproduz exactamente o input do GG; HRC interpreta `Level12(3,500/7,000(1,000))` agregando BB+ante quando colado directo do ZIP HH original. Sem acção do nosso lado.
+
+### Tech Debts fechados pt16
+
+| # | Hash | Descrição |
+|---|---|---|
+| **#B26** ✅ | (verificação) | Investigar cor das TAGS na secção Estudo. Verificado em prod (2026-05-07): vista 'tags' mostra chips Discord (azul `#5865F2`) e `OriginBadge` (HM3 amarelo / Discord azul / HM3+D roxo) — implementado em #B17 (pt9). Backlog desactualizado, sem código novo. |
+| **#6** ✅ | `be0b9c3` | Status inconsistency Discord ao re-linkar via Vision. Backend: `screenshot.py:1432` preserva `resolved` (só promove `mtt_archive→new`); 8 endpoints adicionam coluna computada `match_state` por SQL CASE. Frontend: badge unificado de 5 estados; botão "Revista" guarded. Princípio: linkagem é precondição para Estudo. |
+| **Bug "Copiar HH"** ✅ | `0d18c52` | Parser GG `gg_hands.py:536` re-split com lookahead `(?:Poker\s+)?Hand\s*#` matcheia 2× por hand, descartando `Poker `. Fix: split ancorado `^Poker\s+Hand\s*#` MULTILINE. 100% das 15.809 hands GG 2026 afectadas — wipe BD + re-import ZIP HM3 GG → 15.811 hands restauradas com prefixo correcto. Bug HRC ao interpretar BB(ante) registado como problema externo. |
+
+### Operações pt16 (sem código)
+
+- **Wipe BD**: 15.815 hands GG + 88 `hand_villains` apagadas. 305 entries Discord revertidas para `status='new'` para re-processamento. Tudo em transacção única; validações intra-transacção todas zero (órfãs, hands GG residuais).
+- **Re-import ZIP HM3 GG**: 15.811 hands restauradas com `raw` começando em `Poker Hand #`. Confirmado em prod via SQL: `prefix 'Poker Hand #' = 15811 / 15811`.
+- **Discord re-sync**: ainda por fazer pelo Rui — 319 entries em `status='new'` à espera. Re-sync vai re-criar as 4 placeholders Discord/SS em falta + atribuir matches SS↔HH com pipeline corrigido.
+
+### Ainda em aberto pt16
+
+- Re-sync Discord pelo Rui (operacional, fora de tech debt).
+- Validação visual end-to-end na app (Estudo, Discord, Dashboard, modal de mão).
+
+---
+
 ## Estado actual (7 Maio 2026 fim pt15)
 
 pt15 foi sessão exclusiva de iteração visual — UI/UX. Sem mudanças de backend, parsers, schema ou dados. Painel torneio (TournamentHeader + Hands.jsx Estudo), popup do replayer (ReplayerPage), e cartas de poker (9 callers) reformulados. Detalhes em `JOURNAL_2026-05-06-07-pt15.md`.
@@ -108,7 +141,7 @@ pt12 fechou #B33 (regressão da Onda 8 do refactor #B23 documentada em pt11 retr
 | **#B-edge** | Hero detection seat não-central (1/23 ≈ 4.3% taxa) | 🟢 Edge case | pt7 | ~30 min |
 | **#B20** | Filtros HM3 por tag (não por nick) | 🟢 UX | pt10 | a estimar |
 | **#B21** | Dashboard "por estudar" filtrar por elegibilidade | 🟢 UX | pt10 | a estimar |
-| **#B26** | Investigar cor das TAGS na secção Estudo | 🟢 UX | pt10 | a estimar |
+| **#B26** ✅ FECHADO pt16 | Investigar cor das TAGS na secção Estudo. Verificado em prod (2026-05-07): chips Discord + `OriginBadge` já existiam (#B17 pt9). Backlog desactualizado, sem código novo. Detalhes em "Estado actual fim pt16" no topo. | 🟢 UX | pt10 | 0 (verificação) |
 | **#B28** ✅ FECHADO pt14 | Counter `villains_created` no response do `POST /api/hm3/import` (e por extensão output do `.bat`) ficou silenciosamente em 0 desde refactor #B23 (pt10): a função canónica `apply_villain_rules` passou a devolver `dict` com `n_villains_created` em vez do `int` da predecessora, e os 2 call sites em `hm3.py:930` e `hm3.py:1034` passaram a ignorar o return. Fix: captar return em ambos os call sites e somar `n_villains_created` ao counter. Cosmético — sem efeito em dados, regras de elegibilidade ou pipelines downstream. | 🟡 Funcional | pt10 | ~30 min (consumido) |
 | **N1** | MAPA_ACOPLAMENTO.md desactualizado: cabeçalho diz "Última actualização 2026-04-26" + drift pt10/pt12/pt13 (refactor #B23, vilão principal, study_state, tournaments_meta) | 🟢 Docs | pt14 | a estimar |
 | **N2** | VISAO_PRODUTO.md tem refs de linha exactas (ex: `hands.py:567-574`, `hands.py:565-566`) que mexem com refactors. Substituir por refs simbólicas (constantes nomeadas) ou re-âncorar | 🟢 Docs | pt14 | ~30 min |
