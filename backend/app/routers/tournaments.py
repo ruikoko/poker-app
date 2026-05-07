@@ -154,7 +154,14 @@ def tournament_hands(
         SELECT id, hand_id, played_at, stakes, position,
                hero_cards, board, result, currency, notes, tags,
                study_state, all_players_actions, screenshot_url, player_names,
-               tournament_name, tournament_number, tournament_format, buy_in
+               tournament_name, tournament_number, tournament_format, buy_in,
+               CASE
+                   WHEN study_state = 'mtt_archive' THEN 'archive'
+                   WHEN entry_id IS NULL THEN 'orphan'
+                   WHEN raw IS NULL OR raw = '' THEN 'pending'
+                   WHEN (player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                   ELSE 'matched'
+               END AS match_state
         FROM hands
         WHERE tournament_id = %s
         ORDER BY played_at ASC NULLS LAST, id ASC

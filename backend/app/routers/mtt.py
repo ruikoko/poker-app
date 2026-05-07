@@ -1263,7 +1263,14 @@ def list_mtt_hands(
                    h.hero_cards, h.board, h.result, h.study_state,
                    h.screenshot_url, h.player_names, h.all_players_actions,
                    h.entry_id, h.buy_in, h.hm3_tags, h.discord_tags,
-                   h.tournament_format, h.tournament_name, h.tournament_number
+                   h.tournament_format, h.tournament_name, h.tournament_number,
+                   CASE
+                       WHEN h.study_state = 'mtt_archive' THEN 'archive'
+                       WHEN h.entry_id IS NULL THEN 'orphan'
+                       WHEN h.raw IS NULL OR h.raw = '' THEN 'pending'
+                       WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                       ELSE 'matched'
+                   END AS match_state
             FROM hands h
             {where}
             ORDER BY h.played_at DESC NULLS LAST
@@ -1558,7 +1565,14 @@ def get_mtt_hand(
                   hero_cards, board, result, study_state,
                   screenshot_url, player_names, all_players_actions,
                   entry_id,
-                  tournament_name, tournament_number, tournament_format, buy_in
+                  tournament_name, tournament_number, tournament_format, buy_in,
+                  CASE
+                      WHEN study_state = 'mtt_archive' THEN 'archive'
+                      WHEN entry_id IS NULL THEN 'orphan'
+                      WHEN raw IS NULL OR raw = '' THEN 'pending'
+                      WHEN (player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                      ELSE 'matched'
+                  END AS match_state
            FROM hands WHERE id = %s""",
         (hand_id,)
     )

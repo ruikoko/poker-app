@@ -15,9 +15,14 @@ const STATES = [
   { v: 'resolved', l: 'Revistas' },
 ]
 
+// Eixo Estudo (linkadas) + eixo Match (5 estados consolidados pt16, item #6).
+// pending/archive/orphan precedem o study_state quando match_state ≠ 'matched'.
 const STATE_META = {
-  new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  resolved: { label: 'Revista', color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
+  new:      { label: 'Nova',     color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  resolved: { label: 'Revista',  color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
+  pending:  { label: 'Pendente', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  archive:  { label: 'Arquivo',  color: '#475569', bg: 'rgba(71,85,105,0.15)'  },
+  orphan:   { label: 'Órfã',     color: '#dc2626', bg: 'rgba(220,38,38,0.15)'  },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -35,8 +40,12 @@ function PokerCard({ card, size = 'sm' }) {
   )
 }
 
-function StateBadge({ state }) {
-  const meta = STATE_META[state] || { label: state, color: '#666', bg: 'rgba(100,100,100,0.15)' }
+// Badge unificado dos 2 eixos (item #6, pt16). matchState ≠ 'matched' tem
+// prioridade sobre study_state. Se matchState undefined (backend velho durante
+// deploy staged), cai no comportamento antigo via state.
+function StateBadge({ state, matchState }) {
+  const key = matchState && matchState !== 'matched' ? matchState : state
+  const meta = STATE_META[key] || { label: key || '—', color: '#666', bg: 'rgba(100,100,100,0.15)' }
   return <span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 0.3, color: meta.color, background: meta.bg }}>{meta.label}</span>
 }
 
@@ -118,7 +127,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 17 }}>Mão #{hand.id}</span>
-              <StateBadge state={hand.study_state} />
+              <StateBadge state={hand.study_state} matchState={hand.match_state} />
               {hand.result != null && <ResultBadge result={hand.result} />}
             </div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -235,7 +244,10 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid #2a2d3a', paddingTop: 16 }}>
           <button style={{ padding: '7px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer', opacity: saving ? 0.6 : 1 }} disabled={saving} onClick={save}>{saving ? 'A guardar...' : 'Guardar'}</button>
-          {hand.study_state !== 'resolved' && <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }} onClick={() => changeState('resolved')}>Revista &#10003;</button>}
+          {/* Botão Revista só para mãos linkadas (matched). pending/archive/orphan
+              não são estudáveis — botão oculto. Fallback: se match_state undefined
+              (backend velho durante deploy staged), assume matched. */}
+          {hand.study_state !== 'resolved' && (hand.match_state ?? 'matched') === 'matched' && <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }} onClick={() => changeState('resolved')}>Revista &#10003;</button>}
         </div>
       </div>
     </div>

@@ -4,9 +4,14 @@ import TagEditor from './TagEditor'
 
 const SUIT_BG = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e293b' }
 
+// Eixo Estudo (linkadas) + eixo Match (5 estados consolidados pt16, item #6).
+// pending/archive/orphan precedem o study_state quando match_state ≠ 'matched'.
 const STATE_META = {
-  new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  resolved: { label: 'Revista', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
+  new:      { label: 'Nova',     color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  resolved: { label: 'Revista',  color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
+  pending:  { label: 'Pendente', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  archive:  { label: 'Arquivo',  color: '#475569', bg: 'rgba(71,85,105,0.15)'  },
+  orphan:   { label: 'Órfã',     color: '#dc2626', bg: 'rgba(220,38,38,0.15)'  },
 }
 
 const POS_COLORS = {
@@ -45,8 +50,12 @@ function PokerCard({ card, size = 'sm' }) {
   )
 }
 
-function StateBadge({ state }) {
-  const meta = STATE_META[state] || { label: state || '—', color: '#666', bg: 'rgba(100,100,100,0.15)' }
+// Badge unificado dos 2 eixos (item #6, pt16). matchState ≠ 'matched' tem
+// prioridade sobre study_state. Se matchState undefined (backend velho durante
+// deploy staged), cai no comportamento antigo via state.
+function StateBadge({ state, matchState }) {
+  const key = matchState && matchState !== 'matched' ? matchState : state
+  const meta = STATE_META[key] || { label: key || '—', color: '#666', bg: 'rgba(100,100,100,0.15)' }
   return (
     <span style={{
       display: 'inline-block', padding: '2px 9px', borderRadius: 999,
@@ -132,8 +141,8 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.06)' }}
       onMouseLeave={e => { e.currentTarget.style.background = zebra }}
     >
-      {/* 1. Estado */}
-      <div><StateBadge state={hand.study_state} /></div>
+      {/* 1. Estado (badge unificado: matchState tem prioridade quando ≠ matched) */}
+      <div><StateBadge state={hand.study_state} matchState={hand.match_state} /></div>
 
       {/* 2. Hero cards */}
       <div style={{ display: 'flex', gap: 2 }}>

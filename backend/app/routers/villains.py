@@ -399,7 +399,14 @@ def villain_hands(
                    h.hero_cards, h.board, h.result, h.study_state,
                    h.all_players_actions, h.screenshot_url, h.player_names,
                    h.entry_id, h.raw, h.site,
-                   h.tournament_name, h.tournament_number, h.tournament_format, h.buy_in
+                   h.tournament_name, h.tournament_number, h.tournament_format, h.buy_in,
+                   CASE
+                       WHEN h.study_state = 'mtt_archive' THEN 'archive'
+                       WHEN h.entry_id IS NULL THEN 'orphan'
+                       WHEN h.raw IS NULL OR h.raw = '' THEN 'pending'
+                       WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                       ELSE 'matched'
+                   END AS match_state
             {base_from_where}
             ORDER BY h.played_at DESC NULLS LAST
             LIMIT %s OFFSET %s""",

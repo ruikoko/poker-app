@@ -1429,8 +1429,16 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     extra_updates.append("entry_id = %s")
     extra_params.append(entry_id)
 
-    # Study state: promote to 'new' if was mtt_archive
-    extra_updates.append("study_state = 'new'")
+    # Study state: promove a 'new' SÓ quando estava 'mtt_archive'.
+    # Antes do fix #6 (pt16) este UPDATE forçava 'new' incondicionalmente,
+    # causando regressão visual: mãos já marcadas como 'resolved' (Revista
+    # pelo Rui) voltavam a 'new' (Nova) sempre que Vision re-corria
+    # enrichment para a mesma TM. Agora preserva 'resolved' e 'new'; só
+    # promove archive→new (intenção original do comentário).
+    extra_updates.append(
+        "study_state = CASE WHEN study_state = 'mtt_archive' "
+        "THEN 'new' ELSE study_state END"
+    )
 
     # Se a entry veio do Discord, append discord_tags com o nome raw do canal.
     # NAO tocamos em origin nem em tags: a hand ja veio de um path primario

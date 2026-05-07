@@ -20,9 +20,14 @@ const STATES = [
 
 const POSITIONS = ['', 'UTG', 'UTG1', 'UTG2', 'MP', 'MP1', 'HJ', 'CO', 'BTN', 'SB', 'BB']
 
+// Eixo Estudo (linkadas) + eixo Match (5 estados consolidados pt16, item #6).
+// pending/archive/orphan precedem o study_state quando match_state ≠ 'matched'.
 const STATE_META = {
-  new:      { label: 'Nova',    color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  resolved: { label: 'Revista', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
+  new:      { label: 'Nova',     color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  resolved: { label: 'Revista',  color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },
+  pending:  { label: 'Pendente', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  archive:  { label: 'Arquivo',  color: '#475569', bg: 'rgba(71,85,105,0.15)'  },
+  orphan:   { label: 'Órfã',     color: '#dc2626', bg: 'rgba(220,38,38,0.15)'  },
 }
 
 const SUIT_COLORS = {
@@ -93,8 +98,12 @@ function BoardCards({ board, size = 'sm' }) {
 
 // ── Badges ───────────────────────────────────────────────────────────────────
 
-function StateBadge({ state }) {
-  const meta = STATE_META[state] || { label: state, color: '#666', bg: 'rgba(100,100,100,0.15)' }
+// Badge unificado dos 2 eixos (item #6, pt16). matchState ≠ 'matched' tem
+// prioridade sobre study_state. Se matchState undefined (backend velho durante
+// deploy staged), cai no comportamento antigo via state.
+function StateBadge({ state, matchState }) {
+  const key = matchState && matchState !== 'matched' ? matchState : state
+  const meta = STATE_META[key] || { label: key || '—', color: '#666', bg: 'rgba(100,100,100,0.15)' }
   return (
     <span style={{
       display: 'inline-block', padding: '2px 9px', borderRadius: 999,
@@ -490,7 +499,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 17 }}>Mão #{hand.id}</span>
-              <StateBadge state={hand.study_state} />
+              <StateBadge state={hand.study_state} matchState={hand.match_state} />
               {hand.result != null && <ResultBadge result={hand.result} />}
             </div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -691,7 +700,10 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             }}
             disabled={saving} onClick={save}
           >{saving ? 'A guardar...' : 'Guardar'}</button>
-          {hand.study_state !== 'resolved' && (
+          {/* Botão Revista só para mãos linkadas (matched). pending/archive/orphan
+              não são estudáveis — botão oculto. Fallback: se match_state undefined
+              (backend velho durante deploy staged), assume matched. */}
+          {hand.study_state !== 'resolved' && (hand.match_state ?? 'matched') === 'matched' && (
             <button style={{ padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }}
               onClick={() => changeState('resolved')}>Revista &#10003;</button>
           )}
@@ -1829,7 +1841,7 @@ export default function HandsPage() {
                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
                     onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'}
                   >
-                    <td style={{ padding: '10px 14px' }}><StateBadge state={h.study_state} /></td>
+                    <td style={{ padding: '10px 14px' }}><StateBadge state={h.study_state} matchState={h.match_state} /></td>
                     <td style={{ padding: '10px 14px' }}>
                       {(() => {
                         const ss = h.site === 'Winamax' ? 'WN' : h.site === 'PokerStars' ? 'PS' : h.site === 'WPN' ? 'WPN' : h.site === 'GGPoker' ? 'GG' : '?'
@@ -1924,7 +1936,7 @@ function HandCard({ hand, onClick, onDelete }) {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: meta.color, opacity: 0.7 }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <StateBadge state={hand.study_state} />
+          <StateBadge state={hand.study_state} matchState={hand.match_state} />
           <PosBadge pos={hand.position} />
           {hand.id != null && (
             <span style={{ fontSize: 9, color: '#374151', fontStyle: 'italic', fontFamily: 'monospace' }}>

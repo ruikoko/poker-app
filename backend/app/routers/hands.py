@@ -614,6 +614,13 @@ def list_hands(
                h.study_state, h.entry_id, h.viewed_at, h.studied_at, h.created_at,
                h.all_players_actions, h.screenshot_url, h.player_names,
                h.tournament_format, h.tournament_name, h.tournament_number, h.buy_in,
+               CASE
+                   WHEN h.study_state = 'mtt_archive' THEN 'archive'
+                   WHEN h.entry_id IS NULL THEN 'orphan'
+                   WHEN h.raw IS NULL OR h.raw = '' THEN 'pending'
+                   WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                   ELSE 'matched'
+               END AS match_state,
                e.discord_channel, e.discord_posted_at,
                d.channel_name AS discord_channel_name,
                (SELECT COUNT(*) FROM hand_attachments WHERE hand_db_id = h.id)::int AS attachment_count,
@@ -882,7 +889,14 @@ def hand_stats(current_user=Depends(require_auth)):
         SELECT id, site, hand_id, played_at, stakes, position,
                hero_cards, board, result, currency, study_state,
                tags, hm3_tags, created_at,
-               tournament_format, tournament_name, tournament_number, buy_in
+               tournament_format, tournament_name, tournament_number, buy_in,
+               CASE
+                   WHEN study_state = 'mtt_archive' THEN 'archive'
+                   WHEN entry_id IS NULL THEN 'orphan'
+                   WHEN raw IS NULL OR raw = '' THEN 'pending'
+                   WHEN (player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                   ELSE 'matched'
+               END AS match_state
         FROM hands
         WHERE study_state != 'mtt_archive'
           AND NOT (
@@ -1190,7 +1204,14 @@ def ss_without_match(current_user=Depends(require_auth)):
 def get_hand(hand_pk: int, current_user=Depends(require_auth)):
     rows = query("""
         SELECT h.*, e.discord_channel, e.discord_posted_at,
-               d.channel_name AS discord_channel_name
+               d.channel_name AS discord_channel_name,
+               CASE
+                   WHEN h.study_state = 'mtt_archive' THEN 'archive'
+                   WHEN h.entry_id IS NULL THEN 'orphan'
+                   WHEN h.raw IS NULL OR h.raw = '' THEN 'pending'
+                   WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                   ELSE 'matched'
+               END AS match_state
         FROM hands h
         LEFT JOIN entries e ON h.entry_id = e.id
         LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id

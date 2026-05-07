@@ -1170,7 +1170,14 @@ def list_nota_hands(
         """SELECT id, hand_id, played_at, stakes, position,
                   hero_cards, board, result, study_state, site, tags,
                   all_players_actions,
-                  tournament_name, tournament_number, tournament_format, buy_in
+                  tournament_name, tournament_number, tournament_format, buy_in,
+                  CASE
+                      WHEN study_state = 'mtt_archive' THEN 'archive'
+                      WHEN entry_id IS NULL THEN 'orphan'
+                      WHEN raw IS NULL OR raw = '' THEN 'pending'
+                      WHEN (player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
+                      ELSE 'matched'
+                  END AS match_state
            FROM hands
            WHERE site IN ('Winamax', 'PokerStars', 'WPN')
              AND EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%%nota%%')
