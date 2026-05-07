@@ -27,15 +27,31 @@ function adjustedPositions(slots) {
   return POSITIONS_9.map((p, idx) => (idx === 4 || idx === 5) ? { ...p, x: 50, y: 10 } : p)
 }
 
-// Posição do pot (em % do container). Usada também para calcular onde colocar
-// os chip stacks (ratio interpolado entre player e pot).
+// Geometria do felt: oval centrado em (50,50), semi-eixos 32 (= half of 64%
+// felt size). Chip stack interpolado entre player e pot, clampado ao oval
+// (max 0.9 do raio) — evita slots top-corner (3, 6) ficarem fora do felt.
+// Hero usa ratio especial (mais alto) porque as cards xl 130px do hero
+// extendem-se PARA CIMA do player_y; chip a ratio default ficaria DENTRO
+// dos cards. Ratio 0.45 coloca chip acima dos cards e abaixo do board.
 const POT_POSITION = { x: 50, y: 30 }
-const CHIP_RATIO = 0.50  // chip stack a 50% do caminho entre player e pot
-function chipPosFor(playerPos) {
-  return {
-    x: playerPos.x + (POT_POSITION.x - playerPos.x) * CHIP_RATIO,
-    y: playerPos.y + (POT_POSITION.y - playerPos.y) * CHIP_RATIO,
+const FELT_CENTER = { x: 50, y: 50 }
+const FELT_RADIUS = 32
+const CHIP_RATIO = 0.40
+const CHIP_RATIO_HERO = 0.45
+const OVAL_BUFFER = 0.9
+function chipPosFor(playerPos, isHero = false) {
+  const ratio = isHero ? CHIP_RATIO_HERO : CHIP_RATIO
+  let cx = playerPos.x + (POT_POSITION.x - playerPos.x) * ratio
+  let cy = playerPos.y + (POT_POSITION.y - playerPos.y) * ratio
+  const dx = cx - FELT_CENTER.x
+  const dy = cy - FELT_CENTER.y
+  const ovalDist = Math.sqrt(dx * dx + dy * dy) / FELT_RADIUS
+  if (ovalDist > OVAL_BUFFER) {
+    const scale = OVAL_BUFFER / ovalDist
+    cx = FELT_CENTER.x + dx * scale
+    cy = FELT_CENTER.y + dy * scale
   }
+  return { x: cx, y: cy }
 }
 
 // ── Chip stack / aggression coloring ────────────────────────────────────────
@@ -194,9 +210,9 @@ export default function ReplayerPage() {
   const slots = getSlots(ps.length)
   const adjPositions = adjustedPositions(slots)
   const positions = ps.map((_, i) => { const idx = (i - (heroIdx >= 0 ? heroIdx : 0) + ps.length) % ps.length; return adjPositions[slots[idx] || 0] })
-  // Chip stack: dinâmico. Ratio 0.50 (era ~0.30 com hardcoded CHIP_OFFSETS_9)
-  // — chip mais afastado das cartas, mais próximo do pot.
-  const chipPositions = positions.map(chipPosFor)
+  // Chip stack: dinâmico via chipPosFor. Hero usa ratio especial (0.45)
+  // para chip ficar ACIMA das cards xl. Outros 0.40 + clamp ao oval.
+  const chipPositions = positions.map((pos, i) => chipPosFor(pos, ps[i]?.isHero))
   const playerLevels = step ? getPlayerAggressionLevels(steps, si, step.street) : {}
 
   // GTO matching — find closest tree when hand loads
