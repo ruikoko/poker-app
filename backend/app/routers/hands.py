@@ -646,12 +646,32 @@ def list_hands(
         params + [page_size, offset]
     )
 
+    # IRE v2 (GG-only, ratio 25%). Bulk-fetch tournaments_meta + compute em-memoria.
+    from app.services.ire import compute_ire
+    tm_numbers = sorted({r["tournament_number"] for r in rows
+                         if r.get("tournament_number") and r.get("site") == "GGPoker"})
+    tm_meta_by_num: dict = {}
+    if tm_numbers:
+        meta_rows = query(
+            "SELECT tournament_number, tournament_name, starting_stack "
+            "  FROM tournaments_meta "
+            " WHERE site = 'GGPoker' AND tournament_number = ANY(%s)",
+            (tm_numbers,)
+        )
+        tm_meta_by_num = {m["tournament_number"]: dict(m) for m in meta_rows}
+
+    data = []
+    for r in rows:
+        d = dict(r)
+        d["ire"] = compute_ire(d, tm_meta_by_num.get(d.get("tournament_number")))
+        data.append(d)
+
     return {
         "total":     total,
         "page":      page,
         "page_size": page_size,
         "pages":     (total + page_size - 1) // page_size,
-        "data":      [dict(r) for r in rows],
+        "data":      data,
     }
 
 
@@ -1250,6 +1270,20 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
             (hand_pk,)
         )
         hand["viewed_at"] = datetime.utcnow().isoformat()
+
+    # IRE v2 (GG-only, ratio 25%) — mesma logica do list_hands.
+    from app.services.ire import compute_ire
+    tm_meta = None
+    if hand.get("site") == "GGPoker" and hand.get("tournament_number"):
+        meta_rows = query(
+            "SELECT tournament_number, tournament_name, starting_stack "
+            "  FROM tournaments_meta "
+            " WHERE site = 'GGPoker' AND tournament_number = %s",
+            (hand["tournament_number"],)
+        )
+        if meta_rows:
+            tm_meta = dict(meta_rows[0])
+    hand["ire"] = compute_ire(hand, tm_meta)
 
     return hand
 
