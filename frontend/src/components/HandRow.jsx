@@ -87,6 +87,23 @@ function ResultBadge({ result }) {
   return <span style={{ color: '#64748b', fontFamily: 'monospace' }}>0 BB</span>
 }
 
+// IRE v1 (Bounty Power) — so aparece quando hand.ire != null.
+// Cor purpura para distinguir dos badges de posicao (azul/laranja/verde).
+// Tooltip com villain + call + bounty para diagnostico.
+function IreBadge({ ire }) {
+  if (!ire || ire.ire_pct == null) return null
+  const tip = `Villain: ${ire.villain} · Call: ${ire.call_chips.toLocaleString()} · Bounty: ${ire.bounty_chips.toLocaleString()}`
+  return (
+    <span title={tip} style={{
+      display: 'inline-block', padding: '2px 7px', borderRadius: 4,
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+      color: '#c4b5fd', background: 'rgba(124,58,237,0.18)',
+      border: '1px solid rgba(124,58,237,0.35)',
+      fontFamily: 'monospace', whiteSpace: 'nowrap',
+    }}>IRE {ire.ire_pct}%</span>
+  )
+}
+
 // ── HandRow ──────────────────────────────────────────────────────────────────
 
 export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0, extraEnd }) {
@@ -130,7 +147,7 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       style={{
         display: 'grid',
         gridTemplateColumns:
-          '5.6% 5.6% 5.6% 5.6% 3.9% 23.3% 7.9% 8.3% 1fr',
+          '5.6% 5.6% 5.6% 5.6% 3.9% 18.3% 5% 7.9% 8.3% 1fr',
         alignItems: 'center',
         padding: '7px 8px',
         background: zebra,
@@ -173,7 +190,12 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
           : <span style={{ color: '#4b5563', fontSize: 10 }}>—</span>}
       </div>
 
-      {/* 7. Level / Blinds */}
+      {/* 7. IRE badge (v1) */}
+      <div style={{ textAlign: 'center' }}>
+        <IreBadge ire={hand.ire} />
+      </div>
+
+      {/* 8. Level / Blinds */}
       <div style={{
         fontSize: 10, color: '#4b5563', fontFamily: 'monospace',
         fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap',
@@ -181,7 +203,7 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
         {lvBlinds}
       </div>
 
-      {/* 11. Data + Hora + #B34 ID */}
+      {/* 9. Data + Hora + #B34 ID */}
       <div style={{
         fontSize: 10, color: '#64748b', fontFamily: 'monospace',
         textAlign: 'right', whiteSpace: 'nowrap', lineHeight: 1.3,
@@ -194,7 +216,7 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
         )}
       </div>
 
-      {/* 12. Botões */}
+      {/* 10. Botões */}
       <div style={{
         display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end',
       }}>
