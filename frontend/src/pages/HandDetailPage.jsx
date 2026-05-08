@@ -92,10 +92,8 @@ export default function HandDetailPage() {
         </div>
       </div>
 
-      {/* ── INFO GRID — 2 linhas (pt17 IRE v1) ──
-           Linha 1: 6 cards pequenos (metade do tamanho actual).
-           Linha 2: 5 cards tamanho normal, com IRE em destaque purpura.            */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 8 }}>
+      {/* ── INFO GRID — FIRST THING ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
         {[
           { l: 'SALA', v: hand.site },
           { l: 'DATA', v: playedDate },
@@ -103,40 +101,14 @@ export default function HandDetailPage() {
           { l: 'POSIÇÃO', v: null, badge: hand.position },
           { l: 'TORNEIO', v: tourneyName },
           { l: 'HAND ID', v: hand.hand_id },
-        ].map(({ l, v, c, badge, big }) => (
-          <div key={l} style={{ background: '#0f1117', borderRadius: 5, padding: '7px 10px' }}>
-            <div style={{ fontSize: 9, color: '#64748b', fontWeight: 700, letterSpacing: 0.4, marginBottom: 3 }}>{l}</div>
-            {badge ? <PosBadge pos={badge} /> : <div style={{ fontSize: big ? 14 : 12, color: c || '#f1f5f9', fontWeight: 700, wordBreak: 'break-all', lineHeight: 1.2 }}>{v || '—'}</div>}
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 14 }}>
-        {/* IRE card — purpura quando aplicavel */}
-        <div style={{ background: '#0f1117', borderRadius: 6, padding: '12px 16px' }}>
-          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>IRE</div>
-          {hand.ire ? (
-            <>
-              <div style={{ fontSize: 18, color: '#c4b5fd', fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>
-                {hand.ire.ire_pct}%
-              </div>
-              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3, fontFamily: 'monospace' }}>
-                vs {hand.ire.villain}
-              </div>
-            </>
-          ) : (
-            <div style={{ fontSize: 15, color: '#4b5563', fontWeight: 700 }}>—</div>
-          )}
-        </div>
-        {[
           { l: 'DB ID', v: `#${hand.id}` },
           { l: 'BLINDS', v: blindsLabel || '—' },
           { l: 'LEVEL', v: meta.level != null ? `Lv ${meta.level}` : '—' },
           { l: 'JOGADORES', v: players.length },
-        ].map(({ l, v }) => (
+        ].map(({ l, v, c, badge, big }) => (
           <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '12px 16px' }}>
             <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>{l}</div>
-            <div style={{ fontSize: 15, color: '#f1f5f9', fontWeight: 700, wordBreak: 'break-all' }}>{v || '—'}</div>
+            {badge ? <PosBadge pos={badge} /> : <div style={{ fontSize: big ? 18 : 15, color: c || '#f1f5f9', fontWeight: 700, wordBreak: 'break-all' }}>{v || '—'}</div>}
           </div>
         ))}
       </div>
