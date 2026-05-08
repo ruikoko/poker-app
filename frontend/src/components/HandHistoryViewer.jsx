@@ -95,6 +95,27 @@ function actionColor(type, allIn) {
   return { c: '#94a3b8', bg: 'rgba(148,163,184,0.06)' }
 }
 
+// IRE v2 (Bounty Power) per opponent — purpura na linha MESA.
+// is_main destaca o vilao escolhido pela regra D (border/bg mais fortes).
+function IreOpBadge({ ire }) {
+  if (!ire || ire.ire_pct == null) return null
+  const isMain = !!ire.is_main
+  const tip = `Stack ${ire.stack_si.toFixed(2)} SI · KO ${ire.ko_units.toFixed(2)}` +
+              `${ire.is_active ? '' : ' · folded'}` +
+              `${ire.is_covered ? ' · covered' : ''}` +
+              `${isMain ? ' · MAIN' : ''}`
+  return (
+    <span title={tip} style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+      fontSize: 12, fontWeight: 700, fontFamily: 'monospace',
+      color: '#c4b5fd',
+      background: isMain ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.15)',
+      border: `1px solid rgba(124,58,237,${isMain ? 0.6 : 0.3})`,
+      whiteSpace: 'nowrap',
+    }}>IRE {ire.ire_pct}%</span>
+  )
+}
+
 export default function HandHistoryViewer({ hand }) {
   if (!hand?.raw) return null
   const apa = hand.all_players_actions || {}
@@ -147,6 +168,8 @@ export default function HandHistoryViewer({ hand }) {
           // Hotfix: usar startStack (intacto desde init em parseHH) em vez de stack
           // (mutado durante parsing — fica a 0 para jogadores all-in).
           const stackLabel = formatTableStack(p.startStack, bb)
+          // IRE v2: lookup per opponent (matching por nick). Hero excluido.
+          const ireOp = !isHero && hand.ire?.per_opponent?.find(o => o.nick === p.name)
           return (
             <div key={i} style={{
               display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px',
@@ -169,6 +192,7 @@ export default function HandHistoryViewer({ hand }) {
                   {typeof p.bounty === 'number' && p.bounty < 10 ? `${p.bounty}%` : `${p.bounty}€`}
                 </span>
               )}
+              <IreOpBadge ire={ireOp} />
             </div>
           )
         })}
