@@ -1272,20 +1272,6 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
         )
         hand["viewed_at"] = datetime.utcnow().isoformat()
 
-    # IRE v1 (GG-only) — mesma logica do list_hands.
-    from app.services.ire import compute_ire
-    tm_meta = None
-    if hand.get("site") == "GGPoker" and hand.get("tournament_number"):
-        meta_rows = query(
-            "SELECT tournament_number, tournament_name, starting_stack "
-            "  FROM tournaments_meta "
-            " WHERE site = 'GGPoker' AND tournament_number = %s",
-            (hand["tournament_number"],)
-        )
-        if meta_rows:
-            tm_meta = dict(meta_rows[0])
-    hand["ire"] = compute_ire(hand, tm_meta)
-
     return hand
 
 
