@@ -39,6 +39,56 @@ pt16 atacou 3 itens num único arco de sessão. Sem journal próprio ainda — r
 
 ---
 
+## Estado actual (9 Maio 2026 — pós-pt18, FASE A pipeline lobbys validado parcialmente)
+
+Sessão pt18 fechada. **FASE 1 HRC export queue validated end-to-end em prod** (smoke real BBG $215). **FASE A C1-C3 deployed** com 9 commits totais (5 feature + 4 fixes/instrumentation). Pipeline lobbys responde no `#lobbys`, Vision API verde, mas TM resolver tem 3 gaps que bloqueiam upserts reais. Backlog ordenado A→B→C→E para pt19. Detalhe completo em `docs/JOURNAL_2026-05-09-pt18.md`.
+
+### Commits FASE 1 + FASE A em main (cronológico)
+
+```
+2078eef  FASE 1 C1 — tabela tournament_payouts + endpoints upload
+a3dc193  FASE 1 C2 — conversor HH GG → PokerStars-compativel
+d16f291  FASE 1 C3 — endpoint GET /api/queue/hrc + build_queue_zip
+93b9abc  FASE A C1 — payouts_service refactor
+da36f56  FASE A C2 — Anthropic Claude Sonnet 4.6 + lobby_vision + tm_resolver
+1ed640c  C2.5    — _DEFAULT_TAGS update (icm-pko/PKO SS/sqz-pko/ICM)
+7e302e4  docs    — #FASE-3-MINIPC entry
+68f40f9  FASE A C3 — Discord bot dispatch + lobby handler
+1d15ac8  C3 patch — instrumentacao temporaria [debug-msg-lobby]
+4dd3017  C3 fix   — filtro images Discord CDN URLs (content_type)
+cd02d89  C3 fix   — remover assistant pre-fill (Sonnet 4.6 nao suporta)
+0a1241b  C3 fix   — MIME magic-number + verbose [lobby] FAIL logs
+```
+
+### Gaps identificados na validação real (5 SSs no #lobbys)
+
+| Gap | Casos (5 SSs) | Causa | Fix planeado |
+|---|---|---|---|
+| **G1** — `tournaments_meta` non-GG vazio | 2/5 (Winamax `GRAVITY`, `HIGHROLLER`) | `services/tournament_meta.py:upsert_tournament_meta` faz skip explícito para Winamax/PS/WPN | **Commit B** |
+| **G2** — fuzzy matching insuficiente | 1/5 (`Bounty Hunters Hyper Special $108` → BD tem `Bounty Hunters Sunday Hyper Special $108`) | Vision pode omitir partes do nome; substring `%name%` falha quando nome lido < BD | **Commit A** |
+| **G3** — `start_time_iso` ausente / nome muito comum | 2/5 (`Daily Hyper $80` × 2) | Vision não leu timestamp → fallback `LIMIT 5` sem janela; nome corre todos os dias | **Commit C** (caption TM) |
+
+### Tech Debts pendentes pt19 (ordem de prioridade)
+
+| ID | Título | Severidade | Esforço |
+|---|---|---|---|
+| **A** | Fuzzy / token-set match em `tm_resolver.resolve_tournament_number`. Cada token do nome lido por Vision tem que estar no nome do BD (sem ordem importar). Cobre G2 e elimina sensibilidade a "Sunday/Daily/etc" omitidos. | 🔴 ALTA | ~1-2h |
+| **B** | Estender `tm_resolver` com fallback que consulta `hands` directamente quando `tournaments_meta` retorna 0 rows. Group by `(tournament_number, tournament_name, MIN(played_at))` com janela ±2h. Cobre G1 (Winamax/PS sem catálogo). | 🔴 ALTA | ~1h |
+| **C** | Suportar caption manual com TM no `message.content`: regex `\b(?:#|TM)?\s*(\d{8,12})\b`. Quando presente, override do Vision-resolved TM e bypass do resolver. Cobre G3 e qualquer caso ambíguo futuro. | 🟡 MÉDIA | ~30 min |
+| **E** | Refactor manual sync de lobbys: endpoint `POST /api/lobbys/sync-recent` + botão UI. Permite backfill retroactivo do canal `#lobbys` sem depender de `LOBBY_AUTO=true` global. Útil quando Rui posta SS em batch. | 🟡 MÉDIA | ~2-3h |
+| **D** | Suporte Gyazo URLs em `_handle_lobby_message` — extrair imagem do `message.content` quando contém `gyazo.com` link. | 🟢 BAIXA | ~1h |
+| **F** | Cleanup `[debug-msg-lobby]` instrumentation + lobby channel list log no `on_ready` após pipeline estável (commit "remove temporary instrumentation"). | 🟢 BAIXA | ~10 min |
+
+### Tech Debts IRE (carry-over de pt16, sem trabalho em pt18)
+
+Mantêm-se em backlog: **#IRE-MB**, **#IRE-CL**, **#IRE-VB**, **#IRE-SK** (ver secção "Estado actual (8 Maio 2026 — pós-pt16, investigação IRE prod)" abaixo). Não atacados em pt18 por foco em FASE 1 + FASE A.
+
+### Tech Debts FASE 3 (carry-over de pt18)
+
+**#FASE-3-MINIPC** (Beelink GTR5) mantém-se 🔴 ALTA mas **adiada até FASE A pipeline lobbys completo** (= commits A+B+C+E fechados e pipeline a fazer upserts reais consistentemente).
+
+---
+
 ## Estado actual (8 Maio 2026 — pós-pt16, investigação IRE prod)
 
 Sessão de investigação read-only sobre o IRE v2 em prod (deployed pt16). 3 tech debts identificados, todos do lado IRE; nenhum requer mudança no `compute_ire` core nem no W3cray lookup.

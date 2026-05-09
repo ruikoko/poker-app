@@ -52,7 +52,10 @@ desactualizado e mente ao próximo Claude (pior do que não existir).
 
 - **Backend**: FastAPI + `psycopg2` contra PostgreSQL. Entry point `backend/app/main.py`; routers em `backend/app/routers/`; lógica em `backend/app/services/` e `backend/app/hand_service.py` (top-level); parsers por sala em `backend/app/parsers/`.
 - **Frontend**: React 18 + Vite + React Router. Todo o HTTP passa por `frontend/src/api/client.js` (cookie-based auth, path relativo `/api`, proxy Vite para `localhost:8000`).
-- **Integrações**: OpenAI Vision (GPT-4o-mini / GPT-4.1-mini) para screenshots; `discord.py` para puxar mãos de canais de estudo.
+- **Integrações**:
+  - **OpenAI Vision** (GPT-4.1-mini) — screenshots de mesas/replayers GG. `screenshot.py`. Env: `OPENAI_API_KEY`.
+  - **Anthropic Claude Sonnet 4.6** (model id `claude-sonnet-4-6`) — screenshots de lobbys (FASE A, pipeline `tournament_payouts`). `services/lobby_vision.py`. Env: `ANTHROPIC_API_KEY`. Adicionada em pt18 (9 Maio 2026).
+  - `discord.py` para puxar mãos de canais de estudo + handler dedicado para canal `#lobbys` (pt18).
 - **Deploy real**: Railway.
   - Backend: `poker-app-production-34a7.up.railway.app`
   - Frontend: `comfortable-hope-production-a87a.up.railway.app`
@@ -228,3 +231,46 @@ Rui só estuda mãos de 2026. **Qualquer query ad-hoc ou script contra `hands` d
 ---
 
 Última sessão fechada: pt13 (4 Maio 2026, 5 features fechadas: #B-NOVO-2, #B29, #B31, refactor study_state, dashboard expandido. Limpeza HANDOFF + TECH_DEBTS §5-§10. ~15 commits c979181 → final).
+
+## FASE 1 — HRC Export Queue (deployed 8 Maio 2026)
+
+Pipeline completo `tournament_payouts` → endpoint `GET /api/queue/hrc` → zip com `<hand_id>/hh.txt` + `<hand_id>/payouts.json` + `manifest.json`. Validado end-to-end em prod com smoke real BBG $215.
+
+- `routers/payouts.py` — `POST /api/payouts` upsert opaco do blob HRC Structure Manager.
+- `services/queue_export.py` — conversor HH GG → PokerStars-compativel + `build_queue_zip()`.
+- `routers/queue.py` — `GET /api/queue/hrc` com filtros tags/study_state/played_after/played_before/include_no_payout.
+
+Smoke test em prod: 1 row em `tournament_payouts` (TM 281416137 BBG $215), zip download OK com 4 mãos.
+
+## FASE A — Pipeline lobbys via Discord (deployed 9 Maio 2026, parcial)
+
+C1+C2+C2.5+C3 deployed em prod (sessão pt18). Pipeline real-time: SS no canal `#lobbys` → Vision Anthropic Claude Sonnet 4.6 → `tm_resolver` → upsert `tournament_payouts`.
+
+**Estado:** pipeline funcional até ao TM resolver. Vision API verde, parsing OK, mas resolver tem **3 gaps** que bloqueiam upserts reais até serem fixados em pt19:
+
+- **G1** — `tournaments_meta` está vazia para Winamax/PS (skip explícito em `services/tournament_meta.py:upsert_tournament_meta`). Lobbys Winamax/PS falham com `tm_not_found`.
+- **G2** — Substring match `%name%` falha quando Vision lê o nome mais curto que está no BD (ex: lê `Bounty Hunters Hyper Special $108` mas BD tem `Bounty Hunters **Sunday** Hyper Special $108`).
+- **G3** — Quando Vision não consegue ler `start_time_iso`, resolver cai em fallback sem janela e fica ambíguo para nomes que correm todos os dias (`Daily Hyper $80`).
+
+**Commits pendentes pt19** (ordem A → B → C → E):
+- **A** — Fuzzy / token-set match em `tm_resolver` (cobre G2). 🔴 ALTA, ~1-2h.
+- **B** — Resolver com fallback consulta `hands` source (cobre G1 Winamax/PS). 🔴 ALTA, ~1h.
+- **C** — Caption manual com TM (cobre G3). 🟡 MÉDIA, ~30 min.
+- **E** — Endpoint `POST /api/lobbys/sync-recent` + UI button (manual sync retroactivo). 🟡 MÉDIA, ~2-3h.
+
+(Backlog secundário: **D** Gyazo URLs, **F** cleanup instrumentation `[debug-msg-lobby]`.)
+
+Detalhe completo em `docs/JOURNAL_2026-05-09-pt18.md` e `docs/TECH_DEBTS_INVENTARIO.md` "Estado actual (9 Maio 2026)".
+
+### Variáveis de ambiente FASE A (Railway service `poker-app`)
+
+| Var | Default | Descrição |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | (obrigatório) | API key Anthropic. Adicionada em pt18. Usado por `services/lobby_vision.py`. |
+| `OPENAI_API_KEY` | (obrigatório) | Já existia. Continua para Vision GG screenshots em `routers/screenshot.py`. **Rotada em pt18.** |
+| `DISCORD_LOBBY_CHANNEL` | `lobbys` | Nome do canal Discord dedicado a screenshots de lobbys. Lowercase. |
+| `DISCORD_LOBBY_AUTO` | `false` | Real-time processing do canal lobby. **Independente** de `DISCORD_AUTO_SYNC` global. Activado em prod em pt18. |
+
+**Importante:** mudanças em `DISCORD_LOBBY_*` precisam de redeploy (`railway redeploy -s poker-app` ou push trivial) — env vars são lidas no module load, não em runtime.
+
+Última sessão fechada: pt18 (9 Maio 2026 — FASE 1 validada end-to-end, FASE A C1-C3 deployed com gaps G1/G2/G3 identificados, plano A→B→C→E para pt19).
