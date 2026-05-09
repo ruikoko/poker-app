@@ -1,6 +1,6 @@
 """Unit tests para PokerBot._handle_lobby_message (FASE A COMMIT 3).
 
-Mocks: discord.Message + attachments, lobby_vision functions, tm_resolver,
+Mocks: discord.Message + attachments, lobby_vision functions, tournament_resolver,
 payouts_service. Sem ligacao Discord nem Anthropic real.
 """
 import asyncio
@@ -75,7 +75,7 @@ def test_lobby_success_inserted():
                return_value=_GOOD_VJ), \
          patch("app.services.lobby_vision.build_hrc_payouts_blob",
                return_value=_GOOD_BLOB), \
-         patch("app.services.tm_resolver.resolve_tournament_number",
+         patch("app.services.tournament_resolver.resolve_tournament_number",
                return_value=("281416137", [])), \
          patch("app.services.payouts_service.upsert_payout",
                return_value=upsert_result) as m_upsert:
@@ -128,14 +128,14 @@ def test_lobby_tm_ambiguous_lists_candidates():
                return_value='{"...":""}'), \
          patch("app.services.lobby_vision.parse_and_validate_lobby_json",
                return_value=_GOOD_VJ), \
-         patch("app.services.tm_resolver.resolve_tournament_number",
+         patch("app.services.tournament_resolver.resolve_tournament_number",
                return_value=(None, candidates)):
         asyncio.run(bot._handle_lobby_message(msg))
     reply = msg.reply.call_args[0][0]
     assert "❌" in reply
     assert "2 candidatos" in reply
-    assert "TM 111" in reply
-    assert "TM 222" in reply
+    assert "#111" in reply
+    assert "#222" in reply
 
 
 def test_lobby_tm_not_found_replies_error():
@@ -145,7 +145,7 @@ def test_lobby_tm_not_found_replies_error():
                return_value='{"...":""}'), \
          patch("app.services.lobby_vision.parse_and_validate_lobby_json",
                return_value=_GOOD_VJ), \
-         patch("app.services.tm_resolver.resolve_tournament_number",
+         patch("app.services.tournament_resolver.resolve_tournament_number",
                return_value=(None, [])):
         asyncio.run(bot._handle_lobby_message(msg))
     reply = msg.reply.call_args[0][0]

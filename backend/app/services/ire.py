@@ -199,7 +199,7 @@ def _pick_main_villain(per_opponent: list, hero_stack_chips: float) -> Optional[
 
 # ── API publica ──────────────────────────────────────────────────────────────
 
-def compute_ire(hand: dict, tm_meta: Optional[dict]) -> Optional[dict]:
+def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
     """Devolve {main_villain, per_opponent} ou None.
     Hero e excluido de per_opponent. Vilao principal escolhido pela regra D."""
     if hand.get("site") != "GGPoker":
@@ -216,16 +216,16 @@ def compute_ire(hand: dict, tm_meta: Optional[dict]) -> Optional[dict]:
     if not _has_ko_tag(hand.get("hm3_tags"), hand.get("discord_tags")):
         return None
 
-    if not tm_meta or not tm_meta.get("starting_stack"):
+    if not tournament_meta or not tournament_meta.get("starting_stack"):
         return None
     try:
-        si = float(tm_meta["starting_stack"])
+        si = float(tournament_meta["starting_stack"])
     except (TypeError, ValueError):
         return None
     if si <= 0:
         return None
 
-    tname = (tm_meta.get("tournament_name") or "").lower()
+    tname = (tournament_meta.get("tournament_name") or "").lower()
     if SUPER_KO_NEEDLE in tname:
         return None  # ratio 40%, escondido em v1
 

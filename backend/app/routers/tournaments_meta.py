@@ -19,13 +19,13 @@ def get_tournaments_meta(
     Sem param tms -> todos os tournaments_meta. Com tms -> so os pedidos.
     """
     if tms:
-        tm_list = [t.strip() for t in tms.split(",") if t.strip()]
-        if not tm_list:
+        tournament_numbers = [t.strip() for t in tms.split(",") if t.strip()]
+        if not tournament_numbers:
             return {"data": {}}
         rows = query(
             """SELECT * FROM tournaments_meta
                 WHERE tournament_number = ANY(%s)""",
-            (tm_list,),
+            (tournament_numbers,),
         )
     else:
         rows = query("SELECT * FROM tournaments_meta")

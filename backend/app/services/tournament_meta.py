@@ -77,7 +77,7 @@ def upsert_tournament_meta(
     semantica.
 
     Le de hands:
-      - 1a hand cronologica do TM -> apa[hero].stack -> starting_stack
+      - 1a hand cronologica do tournament_number -> apa[hero].stack -> starting_stack
       - tournament_name, buy_in, tournament_format (per-hand ja populado)
       - MIN(played_at) -> start_time
       - COUNT(*) -> hand_count
@@ -86,7 +86,7 @@ def upsert_tournament_meta(
     pos-upsert.
     """
     if site != "GGPoker":
-        return {"status": "skipped_non_gg", "tm": tournament_number, "site": site}
+        return {"status": "skipped_non_gg", "tournament_number": tournament_number, "site": site}
 
     own_conn = conn is None
     if own_conn:
@@ -114,7 +114,7 @@ def upsert_tournament_meta(
             )
             agg = cur.fetchone()
             if not agg or agg["hand_count"] == 0:
-                return {"status": "no_hands", "tm": tournament_number, "site": site}
+                return {"status": "no_hands", "tournament_number": tournament_number, "site": site}
 
             cur.execute(
                 """
@@ -170,7 +170,7 @@ def upsert_tournament_meta(
 
         return {
             "status": "ok",
-            "tm": tournament_number,
+            "tournament_number": tournament_number,
             "site": site,
             "starting_stack": float(starting_stack) if starting_stack is not None else None,
             "tournament_name": agg["tournament_name"],

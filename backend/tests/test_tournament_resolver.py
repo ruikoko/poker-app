@@ -1,9 +1,9 @@
-"""Unit tests para services/tm_resolver.resolve_tournament_number (FASE A C2).
-Mocked DB via patch a app.services.tm_resolver.query."""
+"""Unit tests para services/tournament_resolver.resolve_tournament_number (FASE A C2).
+Mocked DB via patch a app.services.tournament_resolver.query."""
 from unittest.mock import patch
 from datetime import datetime, timezone
 
-from app.services.tm_resolver import resolve_tournament_number, _tokenize_name
+from app.services.tournament_resolver import resolve_tournament_number, _tokenize_name
 
 
 def _row(tn, name, st):
@@ -13,7 +13,7 @@ def _row(tn, name, st):
 def test_resolve_unique_match_returns_tn():
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tm_resolver.query", return_value=rows):
+    with patch("app.services.tournament_resolver.query", return_value=rows):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Big Game $215",
             "2026-05-05T18:30:00Z",
@@ -23,7 +23,7 @@ def test_resolve_unique_match_returns_tn():
 
 
 def test_resolve_zero_matches_returns_none_and_empty():
-    with patch("app.services.tm_resolver.query", return_value=[]):
+    with patch("app.services.tournament_resolver.query", return_value=[]):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "NonExistent", "2026-05-05T18:30:00Z"
         )
@@ -38,7 +38,7 @@ def test_resolve_multiple_matches_returns_none_and_list():
         _row("281200092", "Bounty Hunters Big Game $215",
              datetime(2026, 5, 5, 19, 30, tzinfo=timezone.utc)),
     ]
-    with patch("app.services.tm_resolver.query", return_value=rows):
+    with patch("app.services.tournament_resolver.query", return_value=rows):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Big Game $215",
             "2026-05-05T18:30:00Z",
@@ -52,7 +52,7 @@ def test_resolve_passes_token_array_to_sql():
     array para ILIKE ALL (substitui o antigo substring_match_passes_through)."""
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number("GGPoker", "BBG $215", "2026-05-05T18:30:00Z")
     args = m.call_args[0]
     sql_args = args[1]
@@ -63,7 +63,7 @@ def test_resolve_passes_token_array_to_sql():
 def test_resolve_no_start_time_falls_back_to_no_window():
     """Sem start_time_iso, query nao filtra por janela — usa LIMIT 5."""
     rows = [_row("281416137", "Bounty Hunters Big Game $215", None)]
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         tn, _ = resolve_tournament_number("GGPoker", "BBG $215", None)
     args = m.call_args[0]
     assert len(args[1]) == 2
@@ -72,7 +72,7 @@ def test_resolve_no_start_time_falls_back_to_no_window():
 
 def test_resolve_invalid_iso_falls_back_gracefully():
     rows = []
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number("GGPoker", "BBG $215", "not-iso")
     args = m.call_args[0]
     assert len(args[1]) == 2
@@ -81,7 +81,7 @@ def test_resolve_invalid_iso_falls_back_gracefully():
 def test_resolve_handles_z_suffix_in_iso():
     rows = [_row("281416137", "x",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number("GGPoker", "x", "2026-05-05T18:30:00Z")
     args = m.call_args[0]
     assert len(args[1]) == 4
@@ -95,7 +95,7 @@ def test_resolve_empty_name_returns_early_no_db_call():
     """Nome vazio / None / só whitespace / só pontuação curto-circuita
     antes de qualquer hit à BD. Cobre o early return novo + log FAIL."""
     for empty_input in ("", None, "   ", ",.!?"):
-        with patch("app.services.tm_resolver.query") as m:
+        with patch("app.services.tournament_resolver.query") as m:
             tn, candidates = resolve_tournament_number(
                 "GGPoker", empty_input, "2026-05-05T18:30:00Z"
             )
@@ -113,7 +113,7 @@ def test_resolve_subset_match_simulated():
     rows = [_row("123456789",
                  "Bounty Hunters Sunday Hyper Special $108",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tm_resolver.query", return_value=rows):
+    with patch("app.services.tournament_resolver.query", return_value=rows):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Hyper Special $108",
             "2026-05-05T18:30:00Z",
@@ -127,7 +127,7 @@ def test_resolve_patterns_preserve_input_token_order():
     comutatividade real de ILIKE ALL é semântica do Postgres (precisa
     integração para validar) — aqui só fixamos a construção do array."""
     rows = [_row("123", "x", None)]
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number("GGPoker", "Hunters Bounty $108", None)
     args = m.call_args[0]
     assert args[1][1] == ["%hunters%", "%bounty%", "%$108%"]
@@ -139,7 +139,7 @@ def test_resolve_extra_vision_token_excludes_match():
     → BD devolve 0 rows e resolver propaga (None, []). Confirma que o
     token estranho FOI efectivamente enviado ao SQL (não silenciosamente
     descartado)."""
-    with patch("app.services.tm_resolver.query", return_value=[]) as m:
+    with patch("app.services.tournament_resolver.query", return_value=[]) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "NEW Bounty Hunters", "2026-05-05T18:30:00Z"
         )
@@ -185,7 +185,7 @@ def test_resolve_uses_posted_at_window_when_no_start_time():
     """start_time_iso=None + posted_at_hint -> janela [posted-12h, posted-30min]."""
     rows = [_row("X", "x", None)]
     posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number(
             "GGPoker", "x", None, posted_at_hint=posted,
         )
@@ -200,7 +200,7 @@ def test_resolve_start_time_takes_precedence_over_posted_at():
     """Ambos passados -> janela final e a do start_time, nao a do posted_at."""
     rows = [_row("X", "x", None)]
     posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number(
             "GGPoker", "x", "2026-05-09T18:30:00Z", posted_at_hint=posted,
         )
@@ -214,7 +214,7 @@ def test_resolve_start_time_takes_precedence_over_posted_at():
 def test_resolve_no_hints_falls_back_to_limit_5():
     """Nem start_time nem posted_at -> SQL com LIMIT 5 e 2 args."""
     rows = [_row("X", "x", None)]
-    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
         resolve_tournament_number("GGPoker", "x", None)
     args = m.call_args[0]
     assert "LIMIT 5" in args[0]
@@ -228,7 +228,7 @@ def test_resolve_falls_back_to_hands_when_meta_empty():
     meta_rows: list[dict] = []
     hands_rows = [_row("987654321", "Winamax Daily $50",
                        datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc))]
-    with patch("app.services.tm_resolver.query",
+    with patch("app.services.tournament_resolver.query",
                side_effect=[meta_rows, hands_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "Winamax", "Winamax Daily $50", "2026-05-09T13:30:00Z",
@@ -242,7 +242,7 @@ def test_resolve_prefers_meta_when_meta_has_match():
     """Meta retorna 1 row -> hands query NAO e chamada (call_count == 1)."""
     meta_rows = [_row("281416137", "BBG $215",
                       datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tm_resolver.query", return_value=meta_rows) as m:
+    with patch("app.services.tournament_resolver.query", return_value=meta_rows) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "BBG $215", "2026-05-05T18:30:00Z",
         )
@@ -253,7 +253,7 @@ def test_resolve_prefers_meta_when_meta_has_match():
 
 def test_resolve_fallback_query_uses_group_by_against_hands():
     """SQL da 2a call: FROM hands, GROUP BY, study_state filter, regra 2026."""
-    with patch("app.services.tm_resolver.query",
+    with patch("app.services.tournament_resolver.query",
                side_effect=[[], []]) as m:
         resolve_tournament_number(
             "Winamax", "Winamax Daily $50", "2026-05-09T13:30:00Z",
@@ -273,7 +273,7 @@ def test_resolve_winamax_with_posted_at_hint_only():
     hands_rows = [_row("987654321", "Winamax Daily $50",
                        datetime(2026, 5, 9, 8, 0, tzinfo=timezone.utc))]
     posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
-    with patch("app.services.tm_resolver.query",
+    with patch("app.services.tournament_resolver.query",
                side_effect=[meta_rows, hands_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "Winamax", "Winamax Daily $50", None,

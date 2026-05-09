@@ -1,7 +1,7 @@
 """Resolve tournament_number via tournaments_meta lookup (name + start_time).
 
 FASE A COMMIT 2 — bot Discord chama isto apos Vision para descobrir qual
-TM da BD corresponde a lobby uploaded. Sem caption obrigatorio.
+tournament_number na BD corresponde ao lobby uploaded. Sem caption obrigatorio.
 
 COMMIT B (FASE A) — adiciona dois caminhos complementares ao resolver:
   (i) fallback a `hands` quando tournaments_meta devolve 0 rows (cobre
@@ -17,7 +17,7 @@ from typing import Optional
 
 from app.db import query
 
-logger = logging.getLogger("tm_resolver")
+logger = logging.getLogger("tournament_resolver")
 
 
 def _tokenize_name(name: Optional[str]) -> list[str]:
@@ -105,7 +105,7 @@ def resolve_tournament_number(
     """
     tokens = _tokenize_name(tournament_name)
     if not tokens:
-        logger.warning("[tm_resolver] FAIL name_empty")
+        logger.warning("[tournament_resolver] FAIL name_empty")
         return (None, [])
 
     patterns = [f"%{t}%" for t in tokens]

@@ -101,18 +101,21 @@ def _detect_image_mime(image_bytes: bytes) -> str:
     return "image/png"
 
 
-_TM_CAPTION_RE = re.compile(r"(?:#|[Tt][Mm])\s*(\d{8,12})\b")
+_TN_CAPTION_RE = re.compile(r"(?:(?:#|[Tt][Mm]|[Tt][Nn])\s*)?(?<!\d)(\d{8,12})(?!\d)")
 
 
-def _extract_tm_from_caption(content: Optional[str]) -> Optional[str]:
-    """Extrai TM (8-12 digitos) do texto da mensagem Discord.
+def _extract_tn_from_caption(content: Optional[str]) -> Optional[str]:
+    """Extrai tournament_number (8-12 digitos) do texto da mensagem Discord.
 
-    Aceita prefixo 'TM' (qualquer caso) ou '#', com espacos opcionais.
-    Rejeita numeros nus (sem prefixo), curtos (<8) ou longos (>12).
+    Aceita prefixo 'TM'/'TN' (qualquer caso) ou '#', todos opcionais.
+    Numero sozinho tambem bate. Lookarounds (?<!\\d)/(?!\\d) garantem
+    que o numero nao esta embebido noutro mais longo (rejeita 13+
+    digitos como um todo). Rejeita curtos (<8 digitos) ou longos
+    (>12 digitos).
     """
     if not content:
         return None
-    m = _TM_CAPTION_RE.search(content)
+    m = _TN_CAPTION_RE.search(content)
     return m.group(1) if m else None
 
 
@@ -706,7 +709,7 @@ class PokerBot(discord.Client):
 
     async def _handle_lobby_message(self, message: discord.Message):
         """Processa SS de lobby do canal dedicado: Vision Anthropic ->
-        TM resolver -> upsert tournament_payouts -> reply Discord OK/erro.
+        tournament_resolver -> upsert tournament_payouts -> reply Discord OK/erro.
 
         NAO toca em entries nem hands (pipeline de maos isolado).
         Source = 'discord_lobby_vision:<msg_id>' para audit em BD.
@@ -717,7 +720,7 @@ class PokerBot(discord.Client):
             parse_and_validate_lobby_json,
             build_hrc_payouts_blob,
         )
-        from app.services.tm_resolver import resolve_tournament_number
+        from app.services.tournament_resolver import resolve_tournament_number
         from app.services.payouts_service import upsert_payout
 
         if is_pre_2026(message.created_at):
@@ -744,10 +747,10 @@ class PokerBot(discord.Client):
         if not images:
             return  # sem imagens — ignorar silently (pode ser texto/discussao)
 
-        tm_override = _extract_tm_from_caption(message.content or "")
-        if tm_override:
+        tn_override = _extract_tn_from_caption(message.content or "")
+        if tn_override:
             logger.info(
-                f"[lobby] caption_override msg_id={message.id} tm={tm_override}"
+                f"[lobby] caption_override msg_id={message.id} tn={tn_override}"
             )
 
         replies: list[str] = []
@@ -803,8 +806,8 @@ class PokerBot(discord.Client):
             tournament_name = vj["tournament_name"]
             start_iso = vj.get("start_time_iso")
 
-            if tm_override:
-                tn = tm_override
+            if tn_override:
+                tn = tn_override
                 candidates = []
             else:
                 tn, candidates = await asyncio.to_thread(
@@ -831,12 +834,13 @@ class PokerBot(discord.Client):
                         f"n_candidates={len(candidates)}"
                     )
                     lines = "\n".join(
-                        f"  • TM {c['tournament_number']} ({c['tournament_name']})"
+                        f"  • #{c['tournament_number']} ({c['tournament_name']})"
                         for c in candidates[:5]
                     )
                     replies.append(
                         f"❌ {len(candidates)} candidatos para "
-                        f"'{tournament_name}'. Cola TM no caption:\n{lines}"
+                        f"'{tournament_name}'. Cola o número do torneio no "
+                        f"caption (ex: #281017175):\n{lines}"
                     )
                 continue
 
@@ -860,7 +864,7 @@ class PokerBot(discord.Client):
             pf_pct = int(round(s["progressiveFactor"] * 100))
             verb = "Adicionado" if result["action"] == "inserted" else "Actualizado"
             replies.append(
-                f"✅ {verb} payouts para TM {tn}\n"
+                f"✅ {verb} payouts para tournament {tn}\n"
                 f"  • {tournament_name} ({site})\n"
                 f"  • {bt} {pf_pct}% • {n_prizes} posições pagas"
             )
