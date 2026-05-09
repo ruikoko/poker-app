@@ -13,8 +13,12 @@ Decisoes (D1-D4 do plano FASE 1):
   D4: bounty inline em seats NAO e adicionado em FASE 1. HRC le do payouts.json.
 """
 from __future__ import annotations
+import io
 import json
 import re
+import zipfile
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
@@ -80,3 +84,94 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
     out = _format_level_line(raw)
     out = _replace_hashes(out, anon_map)
     return out
+
+
+def build_queue_zip(
+    hands: list[dict],
+    payouts_by_key: dict[tuple[str, str], Any],
+    *,
+    include_no_payout: bool = False,
+    filters_meta: Optional[dict] = None,
+) -> bytes:
+    """Constroi um zip com pasta por mao + manifest.json no root.
+
+    Args:
+      hands: lista de dicts com keys: id, hand_id, site, tournament_number,
+             raw, player_names, played_at.
+      payouts_by_key: lookup {(site, tournament_number): payouts_json_blob}.
+      include_no_payout: se True, mao sem payout entra no zip sem payouts.json.
+                         Se False, mao sem payout e excluida (vai para
+                         manifest.missing_payouts).
+      filters_meta: dict de filters echoado no manifest (observabilidade).
+
+    Estrutura:
+      <hand_id_1>/hh.txt
+      <hand_id_1>/payouts.json    # se houver payouts ou include_no_payout=True
+      <hand_id_2>/hh.txt
+      ...
+      manifest.json
+    """
+    hands_included = []
+    missing_payouts = []
+    skipped = []
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for h in hands:
+            hand_id = h.get("hand_id")
+            site = h.get("site")
+            tnum = h.get("tournament_number")
+
+            if not hand_id:
+                skipped.append({"hand_id": None, "reason": "no_hand_id"})
+                continue
+
+            hh_text = convert_gg_hh_to_pokerstars_compatible(h)
+            if not hh_text:
+                skipped.append({"hand_id": hand_id, "reason": "no_raw_hh"})
+                continue
+
+            key = (site, tnum) if site and tnum else None
+            payout_blob = payouts_by_key.get(key) if key else None
+
+            if payout_blob is None and not include_no_payout:
+                missing_payouts.append({
+                    "hand_id": hand_id,
+                    "tournament_number": tnum,
+                    "site": site,
+                    "reason": "no_row_in_tournament_payouts",
+                })
+                continue
+
+            zf.writestr(f"{hand_id}/hh.txt", hh_text)
+            if payout_blob is not None:
+                zf.writestr(
+                    f"{hand_id}/payouts.json",
+                    json.dumps(payout_blob, indent=2, ensure_ascii=False),
+                )
+
+            hands_included.append({
+                "hand_id": hand_id,
+                "tournament_number": tnum,
+                "site": site,
+                "has_payouts": payout_blob is not None,
+                "converted_format": (
+                    "pokerstars_compat" if site == "GGPoker" else "passthrough"
+                ),
+            })
+
+        manifest = {
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "filters": filters_meta or {},
+            "total_hands_queried": len(hands),
+            "total_in_zip": len(hands_included),
+            "hands_included": hands_included,
+            "missing_payouts": missing_payouts,
+            "skipped": skipped,
+        }
+        zf.writestr(
+            "manifest.json",
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+        )
+
+    return buf.getvalue()

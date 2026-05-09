@@ -133,3 +133,106 @@ def test_player_names_as_string_is_parsed():
     out = convert_gg_hh_to_pokerstars_compatible(hand)
     assert "msthtb66" in out
     assert "96c226b8" not in out
+
+
+# ── build_queue_zip ───────────────────────────────────────────────────────────
+
+import io as _io
+import json as _json
+import zipfile as _zipfile
+
+from app.services.queue_export import build_queue_zip
+
+
+def _fake_payout_blob():
+    return {
+        "name": "/",
+        "folders": [],
+        "structures": [{
+            "name": "Test BBG $54",
+            "chips": 1000000.0,
+            "prizes": {"1": 100.0, "2": 50.0},
+            "bountyType": "PKO",
+            "progressiveFactor": 0.5,
+        }],
+    }
+
+
+def test_build_queue_zip_basic_includes_hh_payouts_manifest():
+    hand = {
+        "id": 1, "hand_id": "GG-X", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    names = set(zf.namelist())
+    assert "GG-X/hh.txt" in names
+    assert "GG-X/payouts.json" in names
+    assert "manifest.json" in names
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 1
+    assert manifest["hands_included"][0]["has_payouts"] is True
+    assert manifest["hands_included"][0]["converted_format"] == "pokerstars_compat"
+
+
+def test_build_queue_zip_excludes_missing_payouts_by_default():
+    hand = {
+        "id": 1, "hand_id": "GG-Y", "site": "GGPoker",
+        "tournament_number": "999",
+        "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    blob = build_queue_zip([hand], {})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    assert "GG-Y/hh.txt" not in set(zf.namelist())
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 0
+    assert manifest["missing_payouts"][0]["hand_id"] == "GG-Y"
+    assert manifest["missing_payouts"][0]["reason"] == "no_row_in_tournament_payouts"
+
+
+def test_build_queue_zip_includes_no_payout_when_flag_set():
+    hand = {
+        "id": 1, "hand_id": "GG-Z", "site": "GGPoker",
+        "tournament_number": "999",
+        "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    blob = build_queue_zip([hand], {}, include_no_payout=True)
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    names = set(zf.namelist())
+    assert "GG-Z/hh.txt" in names
+    assert "GG-Z/payouts.json" not in names
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 1
+    assert manifest["hands_included"][0]["has_payouts"] is False
+
+
+def test_build_queue_zip_skips_hand_without_raw():
+    hand = {
+        "id": 1, "hand_id": "GG-NORAW", "site": "GGPoker",
+        "tournament_number": "111", "raw": "", "player_names": {},
+    }
+    blob = build_queue_zip(
+        [hand], {("GGPoker", "111"): _fake_payout_blob()},
+    )
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 0
+    assert manifest["skipped"][0]["reason"] == "no_raw_hh"
+
+
+def test_build_queue_zip_manifest_filters_echo():
+    blob = build_queue_zip(
+        [], {},
+        filters_meta={"tags": ["icm-pko"], "include_no_payout": False},
+    )
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["filters"] == {
+        "tags": ["icm-pko"], "include_no_payout": False,
+    }
+    assert manifest["total_hands_queried"] == 0
+    assert manifest["hands_included"] == []

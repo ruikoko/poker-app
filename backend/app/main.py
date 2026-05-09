@@ -31,6 +31,7 @@ from app.routers.payouts import (
     router as payouts_router,
     ensure_tournament_payouts_schema,
 )
+from app.routers.queue import router as queue_router
 
 load_dotenv()
 
@@ -280,6 +281,7 @@ app.include_router(images_router)
 app.include_router(gto_router)
 app.include_router(tournaments_meta_router)
 app.include_router(payouts_router)
+app.include_router(queue_router)
 
 # Serve uploaded screenshots as static files
 import os
