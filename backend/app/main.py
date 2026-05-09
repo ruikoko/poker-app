@@ -31,6 +31,10 @@ from app.routers.payouts import (
     router as payouts_router,
     ensure_tournament_payouts_schema,
 )
+from app.routers.tournament_summaries import (
+    router as tournament_summaries_router,
+    ensure_tournament_summaries_schema,
+)
 from app.routers.queue import router as queue_router
 
 load_dotenv()
@@ -231,6 +235,7 @@ async def lifespan(app: FastAPI):
     ensure_hand_attachments_schema()
     ensure_tournaments_meta_schema()
     ensure_tournament_payouts_schema()
+    ensure_tournament_summaries_schema()
     ensure_study_state_check_constraint()
 
     # Arrancar bot Discord em background
@@ -281,6 +286,7 @@ app.include_router(images_router)
 app.include_router(gto_router)
 app.include_router(tournaments_meta_router)
 app.include_router(payouts_router)
+app.include_router(tournament_summaries_router)
 app.include_router(queue_router)
 
 # Serve uploaded screenshots as static files

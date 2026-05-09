@@ -161,6 +161,19 @@ export const imports = {
   logs: () => req('GET', '/import/logs'),
 }
 
+// ── Tournament Summaries (GG TS files) ────────────────────────────────────
+export const tournamentSummaries = {
+  upload: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/tournament-summaries/import`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(r => r.json())
+  },
+}
+
 // ── MTT ──────────────────────────────────────────────────────────────────────
 export const mtt = {
   import: (file) => {

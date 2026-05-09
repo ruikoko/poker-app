@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { mtt } from '../api/client'
+import { mtt, tournamentSummaries } from '../api/client'
 import HandRow from '../components/HandRow'
 import TournamentHeader from '../components/TournamentHeader'
 
@@ -537,6 +537,10 @@ export default function TournamentsPage() {
   const [filter, setFilter] = useState({ ss_filter: 'with' })
   const [expandedHands, setExpandedHands] = useState(new Set())
 
+  // TS import (FASE B B1)
+  const [tsImporting, setTsImporting] = useState(false)
+  const [tsResult, setTsResult] = useState(null)
+
   // ── Estado lazy (aba Sem SS) ─────────────────────────────────────────────
   const [dateIndex, setDateIndex] = useState({ dates: [], total_dates: 0, total_hands: 0, has_more: false })
   const [dateOffset, setDateOffset] = useState(0)
@@ -696,12 +700,60 @@ export default function TournamentsPage() {
     borderBottom: active ? '2px solid #6366f1' : '2px solid transparent',
   })
 
+  async function handleImportTS(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setTsImporting(true)
+    setTsResult(null)
+    try {
+      const res = await tournamentSummaries.upload(file)
+      setTsResult(res)
+    } catch (err) {
+      setTsResult({ error: err.message })
+    } finally {
+      setTsImporting(false)
+      e.target.value = ''
+    }
+  }
+
   return (
     <div style={{ padding: '24px 32px' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', marginBottom: 4 }}>MTT</h1>
-      <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
-        Mãos de torneios para estudo
-      </p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', marginBottom: 4 }}>MTT</h1>
+          <p style={{ fontSize: 13, color: '#64748b' }}>Mãos de torneios para estudo</p>
+        </div>
+        <label style={{
+          padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+          border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)',
+          color: '#818cf8', cursor: 'pointer', whiteSpace: 'nowrap',
+        }}>
+          {tsImporting ? 'A importar…' : '↑ Importar Tournament Summaries (GG)'}
+          <input type="file" accept=".txt,.zip" onChange={handleImportTS}
+                 style={{ display: 'none' }} disabled={tsImporting} />
+        </label>
+      </div>
+      {tsResult && (
+        <div style={{
+          marginBottom: 16, padding: '8px 12px', borderRadius: 6, fontSize: 12,
+          background: tsResult.error ? 'rgba(239,68,68,0.05)' : 'rgba(34,197,94,0.05)',
+          border: `1px solid ${tsResult.error ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)'}`,
+          color: '#94a3b8',
+        }}>
+          {tsResult.error ? (
+            <span style={{ color: '#ef4444' }}>{tsResult.error}</span>
+          ) : (
+            <>
+              <strong style={{ color: '#22c55e' }}>{tsResult.inserted}</strong> inseridos ·{' '}
+              <strong style={{ color: '#6366f1' }}>{tsResult.updated}</strong> actualizados ·{' '}
+              <strong style={{ color: '#f59e0b' }}>{tsResult.skipped_pre_2026}</strong> pre-2026 skipped
+              {tsResult.failed?.length > 0 && (
+                <> · <strong style={{ color: '#ef4444' }}>{tsResult.failed.length}</strong> falharam</>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
