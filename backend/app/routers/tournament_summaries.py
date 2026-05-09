@@ -305,11 +305,12 @@ async def import_tournament_summaries(
                     cur.execute("RELEASE SAVEPOINT row_sp")
                 except Exception as e:
                     cur.execute("ROLLBACK TO SAVEPOINT row_sp")
-                    logger.warning(
-                        f"[ts_import] db error tn={parsed['tournament_number']}: {e}"
+                    logger.exception(
+                        f"[ts_import] db error tn={parsed['tournament_number']} "
+                        f"type={type(e).__name__} repr={e!r} args={e.args!r}"
                     )
                     stats["failed"].append(
-                        {"filename": name, "error": f"db: {type(e).__name__}: {e}"}
+                        {"filename": name, "error": f"db: {type(e).__name__}: {e!r}"}
                     )
                     continue
         conn.commit()
