@@ -122,6 +122,19 @@ def test_parse_vanilla_sample_real():
     assert p["hero_re_entries"] == 0
     assert p["source_filename"] == "vanilla.txt"
     assert p["raw_text"] == TS_VANILLA
+    # B1.x — 12 campos novos
+    assert p["game_type"] == "Hold'em No Limit"
+    assert p["buy_in_entry"] == Decimal("73.6")
+    assert p["buy_in_rake"] == Decimal("6.4")
+    assert p["buy_in_bounty"] is None
+    assert p["hero_total_received"] == Decimal("0")
+    assert p["hero_finish_phrase_position"] == 42
+    assert p["tournament_modifiers"] == []
+    assert p["tournament_series"] is None
+    assert p["tournament_speed"] == "Hyper"
+    assert p["tournament_schedule"] == "Daily"
+    assert p["tournament_format"] == "None"
+    assert p["tournament_pko_ratio"] is None
 
 
 def test_parse_pre_2026_returns_dt_unfiltered():
@@ -170,6 +183,14 @@ def test_parse_pko_3_parts_buyin():
     assert p["tournament_number"] == "282066003"
     assert p["buy_in_total"] == Decimal("88.00")
     assert p["hero_payout"] == Decimal("40")
+    # B1.x
+    assert p["buy_in_entry"] == Decimal("40.96")
+    assert p["buy_in_rake"] == Decimal("7.04")
+    assert p["buy_in_bounty"] == Decimal("40")
+    assert p["tournament_speed"] == "Turbo"  # "turbo" bate antes de "deepstack"
+    assert p["tournament_format"] == "PKO"
+    assert p["tournament_pko_ratio"] == Decimal("0.50")
+    assert p["tournament_modifiers"] == []
 
 
 def test_parse_mystery_3_parts_buyin():
@@ -177,21 +198,75 @@ def test_parse_mystery_3_parts_buyin():
     assert p["tournament_number"] == "281143347"
     assert p["buy_in_total"] == Decimal("55.0")
     assert p["prize_pool"] == Decimal("604214.6")
+    # B1.x
+    assert p["buy_in_entry"] == Decimal("25.3")
+    assert p["buy_in_rake"] == Decimal("4.4")
+    assert p["buy_in_bounty"] == Decimal("25.3")
+    assert p["tournament_modifiers"] == ["Mystery Bounty"]
+    assert p["tournament_series"] == "12-M"
+    assert p["tournament_schedule"] == "Sunday"
+    assert p["tournament_format"] == "KO"
+    assert p["tournament_pko_ratio"] == Decimal("0.33")
 
 
 def test_parse_re_entries_count():
     p = parse_tournament_summary(TS_RE_ENTRY)
     assert p["hero_re_entries"] == 1
+    # B1.x — cross-check: total_received bate com hero_payout mesmo com re-entry
+    assert p["hero_total_received"] == Decimal("185.56")
+    assert p["hero_total_received"] == p["hero_payout"]
 
 
 def test_parse_complex_tournament_name_brackets():
     p = parse_tournament_summary(TS_BRACKETS)
     assert p["tournament_name"] == "Speed Racer Bounty Europe $108 [10 BB]"
+    # B1.x
+    assert p["tournament_modifiers"] == ["10 BB"]
+    assert p["tournament_speed"] == "Hyper"  # "speed racer" branded -> Hyper
+    assert p["tournament_format"] == "PKO"   # "Bounty" no nome
+    assert p["tournament_pko_ratio"] == Decimal("0.50")
 
 
 def test_parse_prize_pool_with_thousands_separator():
     p = parse_tournament_summary(TS_MYSTERY_3PARTS)
     assert p["prize_pool"] == Decimal("604214.6")
+
+
+# ── B1.x: cross-check defensivos ────────────────────────────────────
+
+def test_parse_buy_in_split_sums_to_total():
+    """Cross-check: buy_in_entry + buy_in_rake + (buy_in_bounty or 0)
+    deve igualar buy_in_total para todos os 5 samples."""
+    for fixture_name, fixture in [
+        ("TS_VANILLA", TS_VANILLA),
+        ("TS_PKO_3PARTS", TS_PKO_3PARTS),
+        ("TS_MYSTERY_3PARTS", TS_MYSTERY_3PARTS),
+        ("TS_RE_ENTRY", TS_RE_ENTRY),
+        ("TS_BRACKETS", TS_BRACKETS),
+    ]:
+        p = parse_tournament_summary(fixture)
+        parts_sum = (
+            (p["buy_in_entry"] or Decimal(0))
+            + (p["buy_in_rake"] or Decimal(0))
+            + (p["buy_in_bounty"] or Decimal(0))
+        )
+        assert parts_sum == p["buy_in_total"], \
+            f"split mismatch in {fixture_name}: parts={parts_sum} total={p['buy_in_total']}"
+
+
+def test_parse_hero_total_received_matches_hero_payout():
+    """Cross-check: hero_total_received da ultima linha == hero_payout
+    da linha 'Nth : Hero, $X' em todos os samples (mesmo com re-entry)."""
+    for fixture_name, fixture in [
+        ("TS_VANILLA", TS_VANILLA),
+        ("TS_PKO_3PARTS", TS_PKO_3PARTS),
+        ("TS_MYSTERY_3PARTS", TS_MYSTERY_3PARTS),
+        ("TS_RE_ENTRY", TS_RE_ENTRY),
+        ("TS_BRACKETS", TS_BRACKETS),
+    ]:
+        p = parse_tournament_summary(fixture)
+        assert p["hero_total_received"] == p["hero_payout"], \
+            f"discrepancy in {fixture_name}: total_received={p['hero_total_received']} hero_payout={p['hero_payout']}"
 
 
 # ── Endpoint tests (mocked DB) ───────────────────────────────────────
