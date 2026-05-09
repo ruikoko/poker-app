@@ -298,7 +298,7 @@ async def import_tournament_summaries(
                         ),
                     )
                     row = cur.fetchone()
-                    if row[0]:
+                    if row["inserted"]:
                         stats["inserted"] += 1
                     else:
                         stats["updated"] += 1

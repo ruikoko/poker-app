@@ -215,7 +215,11 @@ def _zip_bytes(files):
 
 
 def _mock_conn(fetchone_side_effect):
-    """Mock conn cujo cursor.fetchone segue side_effect (lista de tuplas)."""
+    """Mock conn cujo cursor.fetchone segue side_effect (lista de dicts).
+
+    Reflecte RealDictCursor (default do projecto): cur.fetchone()
+    devolve dict com chaves de coluna, não tupla.
+    """
     cur = MagicMock()
     cur.fetchone.side_effect = list(fetchone_side_effect)
     cur.__enter__ = MagicMock(return_value=cur)
@@ -232,7 +236,7 @@ def test_endpoint_zip_with_mixed_pre_post_2026():
         ("ts2_pre.txt", TS_PRE_2026),
     ])
     upload = _FakeUploadFile("batch.zip", zip_bytes)
-    conn = _mock_conn([(True,)])  # só 1 INSERT chega ao SQL
+    conn = _mock_conn([{"inserted": True}])  # só 1 INSERT chega ao SQL
 
     with patch("app.routers.tournament_summaries.get_conn", return_value=conn):
         result = asyncio.run(
@@ -249,7 +253,7 @@ def test_endpoint_zip_with_mixed_pre_post_2026():
 def test_endpoint_idempotency():
     """1ª upload = inserted; 2ª upload mesmo TS = updated."""
     payload = TS_VANILLA.encode("utf-8")
-    conn = _mock_conn([(True,), (False,)])  # 1ª insert, 2ª update
+    conn = _mock_conn([{"inserted": True}, {"inserted": False}])  # 1ª insert, 2ª update
 
     with patch("app.routers.tournament_summaries.get_conn", return_value=conn):
         r1 = asyncio.run(import_tournament_summaries(
