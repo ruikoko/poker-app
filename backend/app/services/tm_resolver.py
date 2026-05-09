@@ -13,6 +13,24 @@ from app.db import query
 logger = logging.getLogger("tm_resolver")
 
 
+def _tokenize_name(name: Optional[str]) -> list[str]:
+    """Quebra um nome de torneio em tokens prontos para ILIKE match.
+
+    Split por whitespace, lowercase, strip de pontuação leve trailing/leading
+    (",.;:!?"). Preserva ``$`` e ``-`` que carregam significado (ex: "$108",
+    "WSOP-SC"). Tokens vazios após strip são descartados. ``None`` / ``""`` /
+    só whitespace / só pontuação devolvem lista vazia.
+    """
+    if not name:
+        return []
+    tokens: list[str] = []
+    for raw in name.split():
+        t = raw.strip(",.;:!?").lower()
+        if t:
+            tokens.append(t)
+    return tokens
+
+
 def resolve_tournament_number(
     site: str,
     tournament_name: str,
@@ -32,11 +50,12 @@ def resolve_tournament_number(
         (tn, []) se 1 match unico.
         (None, [candidates]) se 0 ou 2+ matches (caller pede clarificacao).
     """
-    tournament_name = (tournament_name or "").strip()
-    if not tournament_name:
+    tokens = _tokenize_name(tournament_name)
+    if not tokens:
+        logger.warning("[tm_resolver] FAIL name_empty")
         return (None, [])
 
-    pat = f"%{tournament_name}%"
+    patterns = [f"%{t}%" for t in tokens]
 
     st = None
     if start_time_iso:
@@ -54,20 +73,20 @@ def resolve_tournament_number(
             """SELECT tournament_number, tournament_name, start_time
                  FROM tournaments_meta
                 WHERE site = %s
-                  AND tournament_name ILIKE %s
+                  AND tournament_name ILIKE ALL (%s::text[])
                   AND start_time BETWEEN %s AND %s
                 ORDER BY start_time ASC""",
-            (site, pat, lo, hi),
+            (site, patterns, lo, hi),
         )
     else:
         rows = query(
             """SELECT tournament_number, tournament_name, start_time
                  FROM tournaments_meta
                 WHERE site = %s
-                  AND tournament_name ILIKE %s
+                  AND tournament_name ILIKE ALL (%s::text[])
                 ORDER BY start_time DESC NULLS LAST
                 LIMIT 5""",
-            (site, pat),
+            (site, patterns),
         )
 
     candidates = [dict(r) for r in rows]

@@ -3,7 +3,7 @@ Mocked DB via patch a app.services.tm_resolver.query."""
 from unittest.mock import patch
 from datetime import datetime, timezone
 
-from app.services.tm_resolver import resolve_tournament_number
+from app.services.tm_resolver import resolve_tournament_number, _tokenize_name
 
 
 def _row(tn, name, st):
@@ -47,8 +47,9 @@ def test_resolve_multiple_matches_returns_none_and_list():
     assert len(candidates) == 2
 
 
-def test_resolve_substring_match_passes_through_to_sql():
-    """Caller diz 'BBG $215'; SQL recebe '%BBG $215%' como ILIKE pattern."""
+def test_resolve_passes_token_array_to_sql():
+    """Caller diz 'BBG $215'; SQL recebe ['%bbg%', '%$215%'] como
+    array para ILIKE ALL (substitui o antigo substring_match_passes_through)."""
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
     with patch("app.services.tm_resolver.query", return_value=rows) as m:
@@ -56,7 +57,7 @@ def test_resolve_substring_match_passes_through_to_sql():
     args = m.call_args[0]
     sql_args = args[1]
     assert sql_args[0] == "GGPoker"
-    assert sql_args[1] == "%BBG $215%"
+    assert sql_args[1] == ["%bbg%", "%$215%"]
 
 
 def test_resolve_no_start_time_falls_back_to_no_window():
@@ -86,3 +87,93 @@ def test_resolve_handles_z_suffix_in_iso():
     assert len(args[1]) == 4
     assert args[1][2].tzinfo is not None  # lo
     assert args[1][3].tzinfo is not None  # hi
+
+
+# ── Token-set match — resolver-level (G2 cobertura) ─────────────────────────
+
+def test_resolve_empty_name_returns_early_no_db_call():
+    """Nome vazio / None / só whitespace / só pontuação curto-circuita
+    antes de qualquer hit à BD. Cobre o early return novo + log FAIL."""
+    for empty_input in ("", None, "   ", ",.!?"):
+        with patch("app.services.tm_resolver.query") as m:
+            tn, candidates = resolve_tournament_number(
+                "GGPoker", empty_input, "2026-05-05T18:30:00Z"
+            )
+        assert tn is None, f"input={empty_input!r}"
+        assert candidates == [], f"input={empty_input!r}"
+        m.assert_not_called()
+
+
+def test_resolve_subset_match_simulated():
+    """G2 happy path: Vision lê nome curto que é subset do BD.
+    'Bounty Hunters Hyper Special $108' (Vision) vs
+    'Bounty Hunters Sunday Hyper Special $108' (BD) — ILIKE ALL tolera
+    palavras extra no lado do BD. Mock devolve a row; documentamos o
+    caminho feliz no resolver."""
+    rows = [_row("123456789",
+                 "Bounty Hunters Sunday Hyper Special $108",
+                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+    with patch("app.services.tm_resolver.query", return_value=rows):
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Bounty Hunters Hyper Special $108",
+            "2026-05-05T18:30:00Z",
+        )
+    assert tn == "123456789"
+    assert candidates == []
+
+
+def test_resolve_patterns_preserve_input_token_order():
+    """Os patterns chegam ao SQL na ordem dos tokens do input. A
+    comutatividade real de ILIKE ALL é semântica do Postgres (precisa
+    integração para validar) — aqui só fixamos a construção do array."""
+    rows = [_row("123", "x", None)]
+    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+        resolve_tournament_number("GGPoker", "Hunters Bounty $108", None)
+    args = m.call_args[0]
+    assert args[1][1] == ["%hunters%", "%bounty%", "%$108%"]
+
+
+def test_resolve_extra_vision_token_excludes_match():
+    """G2 outra face: Vision alucina token extra ('NEW') que não bate
+    em nenhum tournament_name do BD. ILIKE ALL é estritamente conjuntivo
+    → BD devolve 0 rows e resolver propaga (None, []). Confirma que o
+    token estranho FOI efectivamente enviado ao SQL (não silenciosamente
+    descartado)."""
+    with patch("app.services.tm_resolver.query", return_value=[]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "NEW Bounty Hunters", "2026-05-05T18:30:00Z"
+        )
+    args = m.call_args[0]
+    sql_args = args[1]
+    assert tn is None
+    assert candidates == []
+    assert "%new%" in sql_args[1]
+    assert "%bounty%" in sql_args[1]
+    assert "%hunters%" in sql_args[1]
+
+
+# ── _tokenize_name unit tests ───────────────────────────────────────────────
+
+def test_tokenize_basic_preserves_dollar():
+    assert _tokenize_name("Bounty Hunters Sunday Hyper Special $108") == [
+        "bounty", "hunters", "sunday", "hyper", "special", "$108"
+    ]
+
+
+def test_tokenize_strips_trailing_comma():
+    assert _tokenize_name("GGMasters High Rollers, 750K GTD") == [
+        "ggmasters", "high", "rollers", "750k", "gtd"
+    ]
+
+
+def test_tokenize_preserves_hyphen_strips_colon():
+    assert _tokenize_name("WSOP-SC HR: $525 Bounty Hunters Circuit HR") == [
+        "wsop-sc", "hr", "$525", "bounty", "hunters", "circuit", "hr"
+    ]
+
+
+def test_tokenize_empty_and_none_and_whitespace():
+    assert _tokenize_name("") == []
+    assert _tokenize_name(None) == []
+    assert _tokenize_name("   ") == []
+    assert _tokenize_name(",.!?") == []
