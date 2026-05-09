@@ -39,6 +39,95 @@ pt16 atacou 3 itens num único arco de sessão. Sem journal próprio ainda — r
 
 ---
 
+## Estado actual (8 Maio 2026 — pós-pt16, investigação IRE prod)
+
+Sessão de investigação read-only sobre o IRE v2 em prod (deployed pt16). 3 tech debts identificados, todos do lado IRE; nenhum requer mudança no `compute_ire` core nem no W3cray lookup.
+
+### #IRE-MB — Monster Bounties tratado como PKO 25% (bug crítico)
+
+- **File:** `backend/app/services/ire.py` (`compute_ire`, gates de filtragem) + `backend/app/services/tournament_meta.py` (schema `tournaments_meta`).
+- **Origem:** Investigação prod 2026-05-08 sobre 6 mãos. Hand id=29675 é do torneio "$215 Sunday Bounty Overload [Monster Bounties]" — Monster Bounties = ratio bounty 75%, não 25%.
+- **Vector:** A tabela W3cray hardcoded em `ire.py:54-76` (`W3CRAY_TABLE_25PCT`) é exclusivamente para ratio 25% (PKO standard). O único guard contra ratios diferentes é a deny-list textual `SUPER_KO_NEEDLE = "super ko"` que esconde Super KO 40%. Monster Bounties 75% **não** está na deny-list → IRE é calculado mas o valor está errado contra a tabela errada. UI mostra um número aparentemente válido que não corresponde à realidade do torneio.
+- **Severidade:** 🔴 Funcional crítico. Dados errados apresentados como certos — pior que esconder.
+- **Status:** **por corrigir**.
+- **Solução temporária (~1h):** alargar a deny-list para apanhar todos os formatos não-25%. Adicionar needles tipo `"monster bounties"`, `"mystery bounties"` (case-insens). IRE fica escondido em vez de errado.
+- **Solução robusta (~4h):** adicionar coluna `pko_ratio NUMERIC(4,2)` em `tournaments_meta` (ex: 0.25, 0.40, 0.75) com derivação automática via parser de nome do torneio + override manual. `compute_ire` selecciona a tabela W3cray correcta (ou fórmula fallback) consoante `pko_ratio`. Permite suportar todos os formatos sem deny-list crescente.
+- **Esforço:** 1h (deny-list temporária) ou 4h (coluna `pko_ratio`).
+
+### #IRE-CL — Clamp duro em off-table (sem fallback fórmula)
+
+- **File:** `backend/app/services/ire.py:149-181` (`_nearest_idx`, `lookup_ire_pct`, `_formula_fallback`).
+- **Origem:** Investigação prod 2026-05-08.
+- **Vector:** A tabela W3cray é 17 linhas (stack_si 0.25–7.0) × 9 colunas (ko_units 1–5). Quando `(stack_si, ko_units)` cai fora destes limites, `_nearest_idx` faz **clamp para nearest-neighbour** (`if value <= axis[0]: return 0; if value >= axis[-1]: return len(axis)-1`). O `_formula_fallback` só é invocado quando a célula da tabela é `None` — não quando estamos genuinamente off-table. Resultado: stacks deep (>7×SI) ou bounties acumulados (>5 KO_iniciais) recebem o valor da última célula da tabela, que pode estar muito longe do correcto.
+- **Severidade:** 🟡 Funcional. Valores aproximados grosseiros em casos extremos (late-stage MTT com stacks muito deep ou bounties acumulados).
+- **Status:** **por iterar**.
+- **Fix proposto:** detectar off-table antes do clamp (`if stack_si > rows[-1] or ko_units > cols[-1]: return _formula_fallback(...)`). Mantém clamp apenas para casos *interpolados* dentro do envelope da tabela.
+- **Esforço:** ~2h (lógica + testes contra Mathematics.xlsx em ≥3 pontos off-table).
+
+### #IRE-VB — Cobertura silenciosa zero quando Vision falha bounty_pct
+
+- **File:** `backend/app/routers/screenshot.py` (Vision pipeline) + `backend/app/services/ire.py:282-284` (gate `any(op["ko_pct"] > 0)`).
+- **Origem:** Investigação prod 2026-05-08 — 3 mãos sem badge IRE (18726, 19798, 20886) revelaram causa.
+- **Vector:** Vision (GPT-4o-mini) falha por vezes em extrair `bounty_pct` da SS (% pouco legível, cortado, ou prompt não converge). Quando isso acontece, **todos** os jogadores no `players_list` ficam com `bounty_pct=0` e o mesmo se propaga para `all_players_actions`. O `compute_ire` deteca isto no GATE 9 (`not any(op["ko_pct"] > 0)`) e devolve `None` silenciosamente — UI esconde o badge sem qualquer aviso. Confirmado: 3/3 mãos afectadas têm config válida (GG PKO, `match_method='anchors_stack_elimination_v2'`, `starting_stack` válido, tag `icm-pko`); diferença é exclusivamente Vision-OCR. Nota: 20886 é mesmo torneio-tipo que 20879/20827 (Deepstack Turbo $88, SI 20k) — mesma config, resultados Vision diferentes em SSs distintas.
+- **Severidade:** 🟡 Funcional. Sem corrupção de dados, mas o utilizador perde silenciosamente o IRE em mãos onde devia aparecer; sem sinal nenhum de que a Vision falhou esse campo específico.
+- **Status:** **por iterar**.
+- **Possíveis abordagens:**
+  - **(a) Re-correr Vision com prompt melhorado** focado no campo bounty (~3h): ajustar prompt + re-processar entries afectadas + medir hit rate. Custo OpenAI moderado.
+  - **(b) Parser de bounty do HH GG** (~5h): GG escreve `Total Bounty Awarded:` ou similar nas linhas de showdown. Parsear estas linhas dá ground-truth sem depender de Vision. Funciona retroactivamente sobre todas as HHs em BD, mas só apanha bounties de jogadores que efectivamente bustaram alguém na mão (não captura `bounty_pct` actual de jogadores que ainda não bustaram ninguém).
+  - **(c) Aviso na UI quando bounty missing em PKO** (~1h): se mão é PKO/Mystery KO + match real + zero bounties detectados, mostrar badge cinza tipo "IRE indisponível (bounty não lido)" em vez de esconder silenciosamente. Não corrige a causa, mas torna a falha visível.
+- **Esforço:** 3-5h (consoante abordagem).
+- **Detectado em:** mãos id=18726, 19798, 20886 (todas GG PKO 2026, todas com SS matched, todas com `bounty_pct=0` em todos os jogadores).
+
+### #IRE-SK — Super KO 40% (e outros ratios não-standard) escondido
+
+- **File:** `backend/app/services/ire.py:42` (`SUPER_KO_NEEDLE`) + `ire.py:54-76` (`W3CRAY_TABLE_25PCT`) + `ire.py:228-230` (gate de filtragem por nome do torneio).
+- **Origem:** Decisão de design v2 (pt16): expor IRE só para PKO standard 25%; esconder activamente Super KO 40% via deny-list. Outros ratios (Mystery KO 33%, Monster Bounties 75%) não estão na deny-list e caem em #IRE-MB.
+- **Vector:** O lookup `lookup_ire_pct` consulta `W3CRAY_TABLE_25PCT` — tabela hardcoded para ratio 25%. Não há suporte para ratios diferentes; a única defesa contra falsa apresentação é a deny-list textual de nomes (`"super ko"` em `SUPER_KO_NEEDLE`). Resultado:
+  - Super KO 40% → IRE escondido (gate `SUPER_KO_NEEDLE in tname`).
+  - Mystery KO 33% → não-coberto (nem escondido, nem suportado correctamente — ver #IRE-MB).
+  - Monster Bounties 75% → idem (#IRE-MB).
+- **Severidade:** 🟡 Funcional. Não corrompe dados; só limita cobertura do produto. Rui perde análise IRE em formatos que joga (Super KO regularmente).
+- **Status:** **por implementar**.
+- **Solução A — tabelas W3cray paralelas por ratio (~3-4h):** uma tabela hardcoded `W3CRAY_TABLE_<ratio>PCT` para cada ratio suportado (25, 33, 40, 75). Validação de cada tabela contra Mathematics.xlsx sheet IRE para o ratio respectivo. `lookup_ire_pct` recebe `ratio` como param e selecciona a tabela. Vantagem: replica exactamente o que a Excel devolve (acceptance criterion). Desvantagem: requer Mathematics.xlsx ter sheets para todos os ratios pretendidos.
+- **Solução B — fórmula matemática genérica (~2-3h):** generalizar `_formula_fallback` para aceitar qualquer ratio (`bounty_si = ko_units * ratio`) e usá-la como fonte primária quando ratio ≠ 25%. Vantagem: funciona para qualquer ratio sem tabela. Desvantagem: a fórmula é aproximação; pode divergir da W3cray real (que tem ajustes de modelo não-fórmula).
+- **Híbrido recomendado:** tabela paralela para ratios comuns (25, 33, 40, 75) + fórmula fallback para ratios raros. Mantém precisão onde importa, cobertura onde for preciso.
+- **Dependência:** **idealmente resolver #IRE-MB primeiro** — coluna `pko_ratio` em `tournaments_meta` permite detectar o ratio sem pattern matching frágil sobre nomes. Sem isso, a deny-list/needle-list cresce indefinidamente.
+- **Esforço:** 3-4h (consoante solução A vs híbrido; ambos assumem `pko_ratio` resolvido por #IRE-MB).
+
+---
+
+## Estado actual (9 Maio 2026 — planeamento FASE 3)
+
+Sessão de planeamento da FASE 3. FASE A (pipeline lobbys via Discord) em curso paralelamente — sem overlap directo. Esta entry regista a infra-estrutura nova (mini PC dedicado) que vai correr o watcher HRC 24/7 quando FASE A C3 estabilizar.
+
+### #FASE-3-MINIPC — Mini PC dedicado para watcher HRC
+
+- **Prioridade:** 🔴 ALTA (futura — apenas após FASE A C3 estabilizar).
+- **Origem:** decisão Rui 9-Mai-2026.
+- **Contexto:** Rui tem mini PC parado disponível. Decisão de o dedicar a watcher HRC 24/7, libertando o PC principal para jogar poker (sem o conflict ToS das salas a verem processos análise activos durante sessão).
+- **Hardware (validado):**
+  - Beelink GTR5
+  - CPU: AMD Ryzen 9 5900HX (8C/16T, 3.3-4.6 GHz, Zen 3)
+  - RAM: 32 GB DDR4 3200 MHz
+  - Storage: 500 GB NVMe SSD
+  - iGPU: AMD Radeon Vega 8
+  - Network: Dual 2.5GbE + WiFi 6E
+  - OS: Windows 11 Pro pré-instalado
+- **Setup confirmado:** monitor + teclado + rato disponíveis (setup local). Mesma divisão do PC principal. WiFi por default; Ethernet opcional. Licença HRC já existente.
+- **Limitação:** iGPU sem CUDA — **NÃO** permite OCR/Vision local (PaddleOCR-VL ou similar). Irrelevante para watcher HRC (que só consome cálculo CPU + filesystem queue), mas elimina cenário "all-in-one" (watcher + Vision local).
+- **Plano (3 sub-steps):**
+  1. **Setup ambiente:** HRC + Python 3.12 + watcher script (porting/adaptação do `hrc_watcher.exe` do amigo Baltazar — análise estática completa em `_local_only/ANALYSIS.md`).
+  2. **Sync loop:** poll `GET /api/queue/hrc` → import zip → run analysis no HRC → POST `/api/queue/hrc/results` (endpoint a criar em FASE 4).
+  3. **Operação 24/7:** auto-restart, logging estruturado, monitorização (uptime + queue depth).
+- **Dependências:**
+  - FASE 1 ✅ (queue endpoint deployed em prod, `da36f56`).
+  - FASE A em curso (popular `tournament_payouts` via Discord lobby Vision).
+  - Watcher Python script (a adaptar/escrever — base no exe do Baltazar).
+  - Endpoint upload resultado `POST /api/queue/hrc/results` (FASE 4).
+- **Estimativa:** 6-10h Code + algumas horas Rui setup HW.
+
+---
+
 ## Estado actual (7 Maio 2026 fim pt15)
 
 pt15 foi sessão exclusiva de iteração visual — UI/UX. Sem mudanças de backend, parsers, schema ou dados. Painel torneio (TournamentHeader + Hands.jsx Estudo), popup do replayer (ReplayerPage), e cartas de poker (9 callers) reformulados. Detalhes em `JOURNAL_2026-05-06-07-pt15.md`.
