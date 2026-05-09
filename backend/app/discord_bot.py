@@ -40,6 +40,13 @@ IGNORED_CHANNELS = [
 # das salas de poker. Ligar extracção manual apenas após sessão terminada.
 AUTO_SYNC = os.getenv("DISCORD_AUTO_SYNC", "false").lower() in ("true", "1", "yes")
 
+# Canal Discord dedicado a screenshots de lobby (HRC payout structures).
+# Mensagens neste canal NAO criam entries (bypass do pipeline de maos).
+LOBBY_CHANNEL_NAME = os.getenv("DISCORD_LOBBY_CHANNEL", "lobbys").lower()
+# Real-time processing do canal lobby. Default false — Rui liga no Railway
+# quando quiser comecar a usar. Independente de DISCORD_AUTO_SYNC global.
+LOBBY_AUTO = os.getenv("DISCORD_LOBBY_AUTO", "false").lower() in ("true", "1", "yes")
+
 # ── Regex para detecção de conteúdo ──────────────────────────────────────────
 
 PATTERNS = {
@@ -60,6 +67,13 @@ PATTERNS = {
         re.IGNORECASE,
     ),
 }
+
+
+def _is_lobby_channel(channel) -> bool:
+    """True se o canal Discord eh o canal dedicado a lobby screenshots."""
+    if not channel or not hasattr(channel, "name"):
+        return False
+    return channel.name.lower() == LOBBY_CHANNEL_NAME
 
 
 def _channel_to_tags(channel_name: str) -> list[str]:
@@ -575,16 +589,25 @@ class PokerBot(discord.Client):
         return True
 
     async def on_message(self, message: discord.Message):
-        """Processa mensagens em tempo real — desligado se AUTO_SYNC=false."""
-        if not AUTO_SYNC:
-            return  # standby
-
+        """Processa mensagens em tempo real.
+        - Canal lobby: dispatch dedicado (respeita LOBBY_AUTO).
+        - Outros canais: respeita AUTO_SYNC global.
+        """
         # Ignorar mensagens do próprio bot
         if message.author == self.user:
             return
 
         if not self._should_monitor(message.channel):
             return
+
+        # Canal lobby tem path proprio — bypass de _save_to_db / pipeline maos.
+        if _is_lobby_channel(message.channel):
+            if LOBBY_AUTO:
+                asyncio.create_task(self._handle_lobby_message(message))
+            return
+
+        if not AUTO_SYNC:
+            return  # standby para outros canais
 
         await self._process_message(message)
 
@@ -625,6 +648,129 @@ class PokerBot(discord.Client):
             except Exception as e:
                 logger.error(f"Erro ao guardar item de #{channel_name}: {e}")
 
+    async def _handle_lobby_message(self, message: discord.Message):
+        """Processa SS de lobby do canal dedicado: Vision Anthropic ->
+        TM resolver -> upsert tournament_payouts -> reply Discord OK/erro.
+
+        NAO toca em entries nem hands (pipeline de maos isolado).
+        Source = 'discord_lobby_vision:<msg_id>' para audit em BD.
+        """
+        from app.ingest_filters import is_pre_2026
+        from app.services.lobby_vision import (
+            extract_lobby_payout_json,
+            parse_and_validate_lobby_json,
+            build_hrc_payouts_blob,
+        )
+        from app.services.tm_resolver import resolve_tournament_number
+        from app.services.payouts_service import upsert_payout
+
+        if is_pre_2026(message.created_at):
+            logger.info(f"[lobby] msg pre-2026 ignorada: id={message.id}")
+            return
+
+        images = []
+        for att in (message.attachments or []):
+            url = (att.url or "").lower()
+            if any(url.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]):
+                images.append(att)
+
+        if not images:
+            return  # sem imagens — ignorar silently (pode ser texto/discussao)
+
+        replies: list[str] = []
+        for att in images:
+            try:
+                content_bytes = await att.read()
+            except Exception as e:
+                logger.error(f"[lobby] download failed: {e}")
+                replies.append("❌ Falha download da imagem")
+                continue
+
+            mime = getattr(att, "content_type", None) or "image/png"
+
+            raw = await asyncio.to_thread(
+                extract_lobby_payout_json, content_bytes, mime
+            )
+            if raw is None:
+                replies.append("❌ Vision falhou (timeout/erro API)")
+                continue
+
+            vj = parse_and_validate_lobby_json(raw)
+            if vj is None:
+                replies.append("❌ Estrutura de payouts nao detectada")
+                continue
+
+            site = vj.get("site")
+            if site not in ("GGPoker", "PokerStars", "Winamax"):
+                replies.append(
+                    f"❌ Site nao detectado (Vision: {site!r}). "
+                    "Tira nova SS com client logo visivel."
+                )
+                continue
+
+            tournament_name = vj["tournament_name"]
+            start_iso = vj.get("start_time_iso")
+
+            tn, candidates = await asyncio.to_thread(
+                resolve_tournament_number, site, tournament_name, start_iso,
+            )
+            if tn is None:
+                if not candidates:
+                    replies.append(
+                        f"❌ Sem match para '{tournament_name}' "
+                        f"em {site} ({start_iso or 'sem hora'})"
+                    )
+                else:
+                    lines = "\n".join(
+                        f"  • TM {c['tournament_number']} ({c['tournament_name']})"
+                        for c in candidates[:5]
+                    )
+                    replies.append(
+                        f"❌ {len(candidates)} candidatos para "
+                        f"'{tournament_name}'. Cola TM no caption:\n{lines}"
+                    )
+                continue
+
+            blob = build_hrc_payouts_blob(vj)
+            try:
+                result = await asyncio.to_thread(
+                    upsert_payout,
+                    site=site,
+                    tournament_number=tn,
+                    payouts_json=blob,
+                    source=f"discord_lobby_vision:{message.id}",
+                )
+            except Exception as e:
+                logger.error(f"[lobby] upsert failed tn={tn}: {e}")
+                replies.append(f"❌ Erro a guardar payouts: {type(e).__name__}")
+                continue
+
+            s = blob["structures"][0]
+            n_prizes = len(s["prizes"])
+            bt = s["bountyType"]
+            pf_pct = int(round(s["progressiveFactor"] * 100))
+            verb = "Adicionado" if result["action"] == "inserted" else "Actualizado"
+            replies.append(
+                f"✅ {verb} payouts para TM {tn}\n"
+                f"  • {tournament_name} ({site})\n"
+                f"  • {bt} {pf_pct}% • {n_prizes} posições pagas"
+            )
+            logger.info(
+                f"[lobby] {verb.lower()} site={site} tn={tn} "
+                f"name={tournament_name!r} prizes={n_prizes}"
+            )
+
+        full_reply = "\n\n".join(replies)
+        if len(full_reply) > 1900:
+            full_reply = full_reply[:1900] + "\n... (truncated)"
+
+        try:
+            await message.reply(full_reply)
+        except discord.Forbidden:
+            logger.warning("[lobby] sem permissao para reply em #lobbys")
+        except Exception as e:
+            logger.error(f"[lobby] reply error: {e}")
+
     async def _sync_guild_history(
         self, guild: discord.Guild, before: datetime | None = None
     ):
@@ -640,6 +786,11 @@ class PokerBot(discord.Client):
 
         for channel in guild.text_channels:
             if not self._should_monitor(channel):
+                continue
+            # Canal lobby NAO eh varrido em sync historico — handler real-time
+            # eh o unico path para FASE A C3. Backfill fica para FASE A bis.
+            if _is_lobby_channel(channel):
+                logger.info(f"[sync] skip canal lobby {channel.name!r}")
                 continue
 
             # Verificar permissões
