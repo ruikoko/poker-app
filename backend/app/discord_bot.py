@@ -782,7 +782,11 @@ class PokerBot(discord.Client):
             start_iso = vj.get("start_time_iso")
 
             tn, candidates = await asyncio.to_thread(
-                resolve_tournament_number, site, tournament_name, start_iso,
+                resolve_tournament_number,
+                site,
+                tournament_name,
+                start_iso,
+                posted_at_hint=message.created_at,
             )
             if tn is None:
                 if not candidates:

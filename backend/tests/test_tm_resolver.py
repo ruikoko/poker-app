@@ -177,3 +177,112 @@ def test_tokenize_empty_and_none_and_whitespace():
     assert _tokenize_name(None) == []
     assert _tokenize_name("   ") == []
     assert _tokenize_name(",.!?") == []
+
+
+# ── COMMIT B: posted_at_hint window precedence ──────────────────────────────
+
+def test_resolve_uses_posted_at_window_when_no_start_time():
+    """start_time_iso=None + posted_at_hint -> janela [posted-12h, posted-30min]."""
+    rows = [_row("X", "x", None)]
+    posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+        resolve_tournament_number(
+            "GGPoker", "x", None, posted_at_hint=posted,
+        )
+    args = m.call_args[0]
+    assert len(args[1]) == 4  # site, patterns, lo, hi
+    lo, hi = args[1][2], args[1][3]
+    assert lo == datetime(2026, 5, 9, 2, 0, tzinfo=timezone.utc)   # posted - 12h
+    assert hi == datetime(2026, 5, 9, 13, 30, tzinfo=timezone.utc)  # posted - 30min
+
+
+def test_resolve_start_time_takes_precedence_over_posted_at():
+    """Ambos passados -> janela final e a do start_time, nao a do posted_at."""
+    rows = [_row("X", "x", None)]
+    posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+        resolve_tournament_number(
+            "GGPoker", "x", "2026-05-09T18:30:00Z", posted_at_hint=posted,
+        )
+    args = m.call_args[0]
+    lo, hi = args[1][2], args[1][3]
+    # window_hours default = 2.0 -> [16:30, 20:30] em torno de 18:30.
+    assert lo == datetime(2026, 5, 9, 16, 30, tzinfo=timezone.utc)
+    assert hi == datetime(2026, 5, 9, 20, 30, tzinfo=timezone.utc)
+
+
+def test_resolve_no_hints_falls_back_to_limit_5():
+    """Nem start_time nem posted_at -> SQL com LIMIT 5 e 2 args."""
+    rows = [_row("X", "x", None)]
+    with patch("app.services.tm_resolver.query", return_value=rows) as m:
+        resolve_tournament_number("GGPoker", "x", None)
+    args = m.call_args[0]
+    assert "LIMIT 5" in args[0]
+    assert len(args[1]) == 2  # site, patterns
+
+
+# ── COMMIT B: fallback to `hands` when meta empty ───────────────────────────
+
+def test_resolve_falls_back_to_hands_when_meta_empty():
+    """Winamax: meta retorna []; 2a query (hands) devolve row; resolver retorna tn."""
+    meta_rows: list[dict] = []
+    hands_rows = [_row("987654321", "Winamax Daily $50",
+                       datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc))]
+    with patch("app.services.tm_resolver.query",
+               side_effect=[meta_rows, hands_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "Winamax", "Winamax Daily $50", "2026-05-09T13:30:00Z",
+        )
+    assert tn == "987654321"
+    assert candidates == []
+    assert m.call_count == 2
+
+
+def test_resolve_prefers_meta_when_meta_has_match():
+    """Meta retorna 1 row -> hands query NAO e chamada (call_count == 1)."""
+    meta_rows = [_row("281416137", "BBG $215",
+                      datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+    with patch("app.services.tm_resolver.query", return_value=meta_rows) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "BBG $215", "2026-05-05T18:30:00Z",
+        )
+    assert tn == "281416137"
+    assert candidates == []
+    assert m.call_count == 1
+
+
+def test_resolve_fallback_query_uses_group_by_against_hands():
+    """SQL da 2a call: FROM hands, GROUP BY, study_state filter, regra 2026."""
+    with patch("app.services.tm_resolver.query",
+               side_effect=[[], []]) as m:
+        resolve_tournament_number(
+            "Winamax", "Winamax Daily $50", "2026-05-09T13:30:00Z",
+        )
+    assert m.call_count == 2
+    sql_2nd = m.call_args_list[1][0][0]
+    assert "FROM hands" in sql_2nd
+    assert "GROUP BY tournament_number" in sql_2nd
+    assert "study_state != 'mtt_archive'" in sql_2nd
+    assert "played_at >= '2026-01-01'" in sql_2nd
+
+
+def test_resolve_winamax_with_posted_at_hint_only():
+    """Combinado: Winamax + meta vazio + posted_at_hint -> fallback hands
+    com janela [posted-12h, posted-30min] aplicada a hands."""
+    meta_rows: list[dict] = []
+    hands_rows = [_row("987654321", "Winamax Daily $50",
+                       datetime(2026, 5, 9, 8, 0, tzinfo=timezone.utc))]
+    posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+    with patch("app.services.tm_resolver.query",
+               side_effect=[meta_rows, hands_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "Winamax", "Winamax Daily $50", None,
+            posted_at_hint=posted,
+        )
+    assert tn == "987654321"
+    assert candidates == []
+    assert m.call_count == 2
+    sql_args_2nd = m.call_args_list[1][0][1]
+    lo, hi = sql_args_2nd[2], sql_args_2nd[3]
+    assert lo == datetime(2026, 5, 9, 2, 0, tzinfo=timezone.utc)
+    assert hi == datetime(2026, 5, 9, 13, 30, tzinfo=timezone.utc)
