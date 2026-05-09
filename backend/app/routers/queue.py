@@ -19,7 +19,10 @@ router = APIRouter(prefix="/api/queue", tags=["queue"])
 logger = logging.getLogger("queue")
 
 
-_DEFAULT_TAGS = ["pos-pko", "icm-pko", "mw-pko", "sqz-pko", "PKO SS"]
+# ICM aparece como tag HM3 (capitalizada) E como canal Discord (lowercase).
+# _expand_icm_case (abaixo) garante que pedir uma forma traz a outra,
+# sem afectar outras tags (escopo cirurgico, sem mudar SQL).
+_DEFAULT_TAGS = ["icm-pko", "PKO SS", "sqz-pko", "ICM"]
 _DEFAULT_STUDY_STATES = ["new"]
 _ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
 
@@ -31,6 +34,20 @@ def _csv(value: Optional[str], default: list[str]) -> list[str]:
     return parts or default
 
 
+def _expand_icm_case(tags: list[str]) -> list[str]:
+    """Expande tag `ICM` (HM3) <-> `icm` (Discord channel) — referem-se ao
+    mesmo conceito mas vivem em sistemas com case diferente.
+    Outras tags ficam tal e qual (case-sensitive). Dedup preservando ordem."""
+    out = []
+    for t in tags:
+        out.append(t)
+        if t == "ICM":
+            out.append("icm")
+        elif t == "icm":
+            out.append("ICM")
+    return list(dict.fromkeys(out))
+
+
 @router.get("/hrc")
 def export_queue(
     tags: Optional[str] = Query(None, description="CSV de tags (hm3+discord)"),
@@ -40,7 +57,7 @@ def export_queue(
     include_no_payout: bool = Query(False),
     current_user=Depends(require_auth),
 ):
-    tags_list = _csv(tags, _DEFAULT_TAGS)
+    tags_list = _expand_icm_case(_csv(tags, _DEFAULT_TAGS))
     states_list = _csv(study_state, _DEFAULT_STUDY_STATES)
     now = datetime.now(timezone.utc)
     after_str = played_after or (now - timedelta(days=30)).date().isoformat()
