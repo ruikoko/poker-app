@@ -76,6 +76,30 @@ def _is_lobby_channel(channel) -> bool:
     return channel.name.lower() == LOBBY_CHANNEL_NAME
 
 
+def _detect_image_mime(image_bytes: bytes) -> str:
+    """Detecta mime type pelos magic numbers nos primeiros bytes.
+
+    Discord pode reportar content_type errado (ex: 'image/webp' em bytes PNG),
+    e Anthropic rejeita 400 quando media_type nao bate com magic. Esta funcao
+    ignora o que Discord reporta e usa os bytes como fonte de verdade.
+
+    Fallback para 'image/png' se nenhum magic match (Anthropic e tolerante a
+    PNG declarado para outros formatos comuns)."""
+    if not image_bytes:
+        return "image/png"
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if image_bytes[:3] == b"\xFF\xD8\xFF":
+        return "image/jpeg"
+    if (
+        len(image_bytes) >= 12
+        and image_bytes[:4] == b"RIFF"
+        and image_bytes[8:12] == b"WEBP"
+    ):
+        return "image/webp"
+    return "image/png"
+
+
 def _channel_to_tags(channel_name: str) -> list[str]:
     """
     Converte o nome do canal em tags.
@@ -713,22 +737,41 @@ class PokerBot(discord.Client):
                 replies.append("❌ Falha download da imagem")
                 continue
 
-            mime = getattr(att, "content_type", None) or "image/png"
+            # FIX 1: detectar mime via magic numbers — ignorar att.content_type
+            # que Discord reporta erradamente ('image/webp' em bytes PNG -> 400).
+            detected_mime = _detect_image_mime(content_bytes)
+            discord_mime = (getattr(att, "content_type", None) or "").lower()
+            if discord_mime and discord_mime != detected_mime:
+                logger.info(
+                    f"[lobby] mime override msg_id={message.id} "
+                    f"discord={discord_mime!r} detected={detected_mime!r}"
+                )
+            mime = detected_mime
 
             raw = await asyncio.to_thread(
                 extract_lobby_payout_json, content_bytes, mime
             )
             if raw is None:
+                logger.info(
+                    f"[lobby] FAIL vision_failed msg_id={message.id} mime={mime}"
+                )
                 replies.append("❌ Vision falhou (timeout/erro API)")
                 continue
 
             vj = parse_and_validate_lobby_json(raw)
             if vj is None:
+                logger.info(
+                    f"[lobby] FAIL json_invalid msg_id={message.id} "
+                    f"raw_len={len(raw)} raw_head={raw[:200]!r}"
+                )
                 replies.append("❌ Estrutura de payouts nao detectada")
                 continue
 
             site = vj.get("site")
             if site not in ("GGPoker", "PokerStars", "Winamax"):
+                logger.info(
+                    f"[lobby] FAIL site_undetected msg_id={message.id} site={site!r}"
+                )
                 replies.append(
                     f"❌ Site nao detectado (Vision: {site!r}). "
                     "Tira nova SS com client logo visivel."
@@ -743,11 +786,20 @@ class PokerBot(discord.Client):
             )
             if tn is None:
                 if not candidates:
+                    logger.info(
+                        f"[lobby] FAIL tm_not_found msg_id={message.id} "
+                        f"site={site} name={tournament_name!r} start={start_iso!r}"
+                    )
                     replies.append(
                         f"❌ Sem match para '{tournament_name}' "
                         f"em {site} ({start_iso or 'sem hora'})"
                     )
                 else:
+                    logger.info(
+                        f"[lobby] FAIL tm_ambiguous msg_id={message.id} "
+                        f"site={site} name={tournament_name!r} "
+                        f"n_candidates={len(candidates)}"
+                    )
                     lines = "\n".join(
                         f"  • TM {c['tournament_number']} ({c['tournament_name']})"
                         for c in candidates[:5]
@@ -791,6 +843,10 @@ class PokerBot(discord.Client):
         if len(full_reply) > 1900:
             full_reply = full_reply[:1900] + "\n... (truncated)"
 
+        logger.info(
+            f"[lobby] reply msg_id={message.id} replies_count={len(replies)} "
+            f"reply_len={len(full_reply)}"
+        )
         try:
             await message.reply(full_reply)
         except discord.Forbidden:
