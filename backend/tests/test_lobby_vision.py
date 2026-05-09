@@ -121,6 +121,33 @@ def test_parse_returns_none_for_empty_or_none_input():
     assert parse_and_validate_lobby_json("") is None
 
 
+# -- B2.1: prize_pool field (opcional, sem validacao especifica) -------------
+
+def test_parse_accepts_prize_pool_when_present():
+    """Vision le 'Total Prize Pool'; campo opcional novo no schema."""
+    raw = json.dumps({
+        "site": "GGPoker",
+        "tournament_name": "Bounty Hunters Big Game $215",
+        "prize_pool": 644713.55,
+        "entrants": 2996,
+        "prizes": {"1": 9119.22},
+    })
+    result = parse_and_validate_lobby_json(raw)
+    assert result is not None
+    assert result["prize_pool"] == 644713.55
+
+
+def test_parse_accepts_when_prize_pool_missing():
+    """Compat: JSONs sem prize_pool (Vision falhou ler) ainda validam."""
+    raw = json.dumps({
+        "tournament_name": "Daily Hyper $80",
+        "prizes": {"1": 100.0},
+    })
+    result = parse_and_validate_lobby_json(raw)
+    assert result is not None
+    assert "prize_pool" not in result or result.get("prize_pool") is None
+
+
 # -- build_hrc_payouts_blob --------------------------------------------------
 
 def test_build_blob_pko_with_full_chips_calc():

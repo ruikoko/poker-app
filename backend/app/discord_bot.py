@@ -816,6 +816,8 @@ class PokerBot(discord.Client):
                     tournament_name,
                     start_iso,
                     posted_at_hint=message.created_at,
+                    prize_pool=vj.get("prize_pool"),
+                    total_players=vj.get("entrants"),
                 )
             if tn is None:
                 if not candidates:

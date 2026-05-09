@@ -68,6 +68,7 @@ _LOBBY_PROMPT = (
     '  "start_time_iso": "<ISO 8601 timestamp UTC>" | null,\n'
     '  "starting_stack": <int chips> | null,\n'
     '  "entrants": <int total registered> | null,\n'
+    '  "prize_pool": <float USD/EUR total prize pool> | null,\n'
     '  "buy_in": <float USD/EUR> | null,\n'
     '  "prizes": {"1": <float>, "2": <float>, ...},\n'
     '  "bounty_type_text": "<e.g. PKO 50%, Mystery KO>" | null\n'
@@ -75,6 +76,7 @@ _LOBBY_PROMPT = (
     "RULES:\n"
     "- prizes keys must be string digits (\"1\", \"2\", not \"1st\").\n"
     "- prizes values must be plain numbers (no currency symbol, no commas).\n"
+    "- prize_pool: read 'Total Prize Pool' from the lobby header (plain number, no symbol, no commas).\n"
     "- Use null for fields you cannot read with confidence.\n"
     "- Do NOT invent values not visible in the screenshot.\n"
     "- Output ONLY the JSON object."

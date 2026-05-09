@@ -93,27 +93,25 @@ def _decide_window(
     return None
 
 
-def _query_summaries(site, patterns, window):
-    """TIER 0 — tournament_summaries (autoritativo)."""
-    if window is not None:
-        lo, hi = window
-        return query(
-            """SELECT tournament_number, tournament_name, start_time
-                 FROM tournament_summaries
-                WHERE site = %s
-                  AND tournament_name ILIKE ALL (%s::text[])
-                  AND start_time BETWEEN %s AND %s
-                ORDER BY start_time ASC""",
-            (site, patterns, lo, hi),
-        )
+def _query_summaries(site, patterns, prize_pool=None, total_players=None):
+    """TIER 0 — tournament_summaries (autoritativo).
+
+    B2.1: sem janela temporal. TS sao fonte autoritativa post-jogo
+    e podem ser importados em backfill semanas depois da SS.
+    Discriminacao via prize_pool / total_players da Vision.
+
+    NULL no parametro = sem filtro. Valor = filtro estricto (=).
+    """
     return query(
         """SELECT tournament_number, tournament_name, start_time
              FROM tournament_summaries
             WHERE site = %s
               AND tournament_name ILIKE ALL (%s::text[])
+              AND (%s::numeric IS NULL OR prize_pool = %s::numeric)
+              AND (%s::integer IS NULL OR total_players = %s::integer)
             ORDER BY start_time DESC NULLS LAST
             LIMIT 5""",
-        (site, patterns),
+        (site, patterns, prize_pool, prize_pool, total_players, total_players),
     )
 
 
@@ -186,6 +184,8 @@ def resolve_tournament_number(
     *,
     window_hours: float = 2.0,
     posted_at_hint: Optional[datetime] = None,
+    prize_pool: Optional[float] = None,
+    total_players: Optional[int] = None,
 ) -> tuple[Optional[str], list[dict]]:
     """Cascata em 3 tiers: tournament_summaries -> tournaments_meta -> hands.
 
@@ -195,7 +195,11 @@ def resolve_tournament_number(
         start_time_iso: timestamp ISO 8601 (UTC) lido pela Vision, ou None.
         window_hours: tolerancia +/- em horas para o ramo start_time (default 2h).
         posted_at_hint: timestamp tz-aware do post Discord. Usado como
-            ancora quando start_time_iso e ausente/invalido.
+            ancora para tiers 1+2 quando start_time_iso e ausente/invalido.
+        prize_pool: B2.1 — discriminador para TIER 0 (filtro estricto =).
+            None = sem filtro. Vision le 'Total Prize Pool' do header.
+        total_players: B2.1 — discriminador para TIER 0 (filtro estricto =).
+            None = sem filtro. Vision le 'entrants' (total registered).
 
     Returns:
         (tn, []) se 1 match unico em qualquer tier (paragem imediata).
@@ -210,8 +214,10 @@ def resolve_tournament_number(
     patterns = [f"%{t}%" for t in tokens]
     window = _decide_window(start_time_iso, posted_at_hint, window_hours)
 
-    # TIER 0 — tournament_summaries (autoritativo)
-    candidates_summaries = [dict(r) for r in _query_summaries(site, patterns, window)]
+    # TIER 0 — tournament_summaries (autoritativo, sem janela; B2.1)
+    candidates_summaries = [dict(r) for r in _query_summaries(
+        site, patterns, prize_pool=prize_pool, total_players=total_players,
+    )]
     if candidates_summaries:
         if len(candidates_summaries) == 1:
             tn = candidates_summaries[0]["tournament_number"]

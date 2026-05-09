@@ -375,3 +375,78 @@ def test_b2_summaries_query_targets_correct_table():
         resolve_tournament_number("GGPoker", "x", "2026-05-05T18:30:00Z")
     sql_1st = m.call_args_list[0][0][0]
     assert "FROM tournament_summaries" in sql_1st
+
+
+# ── B2.1: TIER 0 sem janela + prize_pool/total_players discriminadores ──────
+
+def test_b21_match_via_summaries_with_prize_pool_unique():
+    """prize_pool passado como discriminador estricto. SQL recebe-o como param."""
+    ts_rows = [_row("281017175", "Speed Racer Bounty $108",
+                    datetime(2026, 5, 3, 21, 0, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Speed Racer Bounty $108", "2026-05-03T21:00:00Z",
+            prize_pool=23150.88, total_players=233,
+        )
+    assert tn == "281017175"
+    assert candidates == []
+    assert m.call_count == 1
+    # SQL params: (site, patterns, pp, pp, tp, tp) — 6 valores
+    sql_args = m.call_args_list[0][0][1]
+    assert len(sql_args) == 6
+    assert sql_args[2] == 23150.88
+    assert sql_args[3] == 23150.88
+    assert sql_args[4] == 233
+    assert sql_args[5] == 233
+
+
+def test_b21_match_summaries_no_prize_pool_falls_back_name_only():
+    """Vision nao leu prize_pool nem entrants -> filtros opt-in NULL ->
+    match so por nome (TS sem janela)."""
+    ts_rows = [_row("X", "x", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "x", "2026-05-05T18:30:00Z",
+            # prize_pool e total_players nao passados (default None)
+        )
+    assert tn == "X"
+    assert candidates == []
+    sql_args = m.call_args_list[0][0][1]
+    assert sql_args[2] is None  # prize_pool NULL -> filtro skipped via IS NULL
+    assert sql_args[4] is None  # total_players idem
+
+
+def test_b21_summaries_no_window_returns_old_tournament():
+    """Caso real Rui: TS importado em backfill (semanas atras), SS postada
+    hoje -> match deterministico mesmo sem hint temporal coincidente."""
+    posted_today = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+    old_ts_start = datetime(2026, 4, 15, 19, 30, tzinfo=timezone.utc)  # 24 dias antes
+    ts_rows = [_row("OLD-TN", "Daily Hyper $80", old_ts_start)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Daily Hyper $80", None,
+            posted_at_hint=posted_today,
+            prize_pool=7948.8, total_players=108,
+        )
+    assert tn == "OLD-TN"
+    assert candidates == []
+    assert m.call_count == 1
+
+
+def test_b21_summaries_query_omits_window_clauses():
+    """Defensivo: SQL do TIER 0 NAO inclui BETWEEN nem filtro de start_time.
+    B2.1 colapsou os branches window/no-window."""
+    ts_rows = [_row("X", "x", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        resolve_tournament_number(
+            "GGPoker", "x", "2026-05-05T18:30:00Z",
+            posted_at_hint=datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc),
+        )
+    sql = m.call_args_list[0][0][0]
+    assert "BETWEEN" not in sql
+    assert "start_time BETWEEN" not in sql
+    assert "ORDER BY start_time" in sql  # ordenacao mantida
