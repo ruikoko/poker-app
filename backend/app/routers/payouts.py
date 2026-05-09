@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.auth import require_auth
-from app.db import get_conn, query, execute_returning
+from app.db import get_conn, query
+from app.services.payouts_service import upsert_payout as _svc_upsert_payout
 
 router = APIRouter(prefix="/api/payouts", tags=["payouts"])
 logger = logging.getLogger("payouts")
@@ -58,32 +59,22 @@ class PayoutUpsert(BaseModel):
 def upsert_payout(body: PayoutUpsert, current_user=Depends(require_auth)):
     """Upsert opaco. Sem schema validation em FASE 1 — má estrutura falha
     downstream no HRC."""
-    site = (body.site or "").strip()
-    tnum = (body.tournament_number or "").strip()
-    if not site or not tnum:
-        raise HTTPException(400, "site e tournament_number obrigatorios")
-    if body.payouts_json is None:
-        raise HTTPException(400, "payouts_json nao pode ser null")
-
-    row = execute_returning(
-        """
-        INSERT INTO tournament_payouts
-            (site, tournament_number, payouts_json, source, uploaded_at)
-        VALUES (%s, %s, %s, %s, NOW())
-        ON CONFLICT (site, tournament_number) DO UPDATE SET
-            payouts_json = EXCLUDED.payouts_json,
-            source       = EXCLUDED.source,
-            uploaded_at  = NOW()
-        RETURNING site, tournament_number, source, uploaded_at
-        """,
-        (site, tnum, body.payouts_json, body.source),
-    )
+    try:
+        result = _svc_upsert_payout(
+            site=body.site,
+            tournament_number=body.tournament_number,
+            payouts_json=body.payouts_json,
+            source=body.source,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {
         "status": "ok",
-        "site": row["site"],
-        "tournament_number": row["tournament_number"],
-        "source": row["source"],
-        "uploaded_at": row["uploaded_at"].isoformat(),
+        "site": result["site"],
+        "tournament_number": result["tournament_number"],
+        "source": result["source"],
+        "uploaded_at": result["uploaded_at"].isoformat(),
+        "action": result["action"],
     }
 
 
