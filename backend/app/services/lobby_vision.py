@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger("lobby_vision")
@@ -115,10 +116,13 @@ def extract_lobby_payout_json(
                         {"type": "text", "text": _LOBBY_PROMPT},
                     ],
                 },
-                {"role": "assistant", "content": "{"},
             ],
         )
-        return "{" + (response.content[0].text or "")
+        # Sonnet 4.6 nao aceita assistant prefill (400). Apanha primeiro
+        # {...} no output via regex — resiliente a markdown wrap / prosa.
+        text = (response.content[0].text or "").strip()
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        return m.group(0) if m else None
     except Exception as e:
         logger.error(f"lobby_vision API error: {type(e).__name__}: {e}")
         return None
