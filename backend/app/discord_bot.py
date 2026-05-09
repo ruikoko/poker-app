@@ -684,11 +684,22 @@ class PokerBot(discord.Client):
             logger.info(f"[lobby] msg pre-2026 ignorada: id={message.id}")
             return
 
+        # Discord CDN URLs tem query string assinada (?ex=&is=&hm=...).
+        # url.endswith(".png") falha — usar content_type ou filename.
         images = []
         for att in (message.attachments or []):
-            url = (att.url or "").lower()
-            if any(url.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]):
+            ct = (getattr(att, "content_type", None) or "").lower()
+            fn = (getattr(att, "filename", None) or "").lower()
+            if ct.startswith("image/") or any(
+                fn.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]
+            ):
                 images.append(att)
+
+        logger.info(
+            f"[lobby] handler msg_id={message.id} "
+            f"attachments={len(message.attachments or [])} "
+            f"images_filtered={len(images)}"
+        )
 
         if not images:
             return  # sem imagens — ignorar silently (pode ser texto/discussao)
