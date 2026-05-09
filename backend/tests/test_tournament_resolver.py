@@ -13,7 +13,7 @@ def _row(tn, name, st):
 def test_resolve_unique_match_returns_tn():
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tournament_resolver.query", return_value=rows):
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Big Game $215",
             "2026-05-05T18:30:00Z",
@@ -38,7 +38,7 @@ def test_resolve_multiple_matches_returns_none_and_list():
         _row("281200092", "Bounty Hunters Big Game $215",
              datetime(2026, 5, 5, 19, 30, tzinfo=timezone.utc)),
     ]
-    with patch("app.services.tournament_resolver.query", return_value=rows):
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Big Game $215",
             "2026-05-05T18:30:00Z",
@@ -52,7 +52,7 @@ def test_resolve_passes_token_array_to_sql():
     array para ILIKE ALL (substitui o antigo substring_match_passes_through)."""
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number("GGPoker", "BBG $215", "2026-05-05T18:30:00Z")
     args = m.call_args[0]
     sql_args = args[1]
@@ -63,7 +63,7 @@ def test_resolve_passes_token_array_to_sql():
 def test_resolve_no_start_time_falls_back_to_no_window():
     """Sem start_time_iso, query nao filtra por janela — usa LIMIT 5."""
     rows = [_row("281416137", "Bounty Hunters Big Game $215", None)]
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         tn, _ = resolve_tournament_number("GGPoker", "BBG $215", None)
     args = m.call_args[0]
     assert len(args[1]) == 2
@@ -81,7 +81,7 @@ def test_resolve_invalid_iso_falls_back_gracefully():
 def test_resolve_handles_z_suffix_in_iso():
     rows = [_row("281416137", "x",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number("GGPoker", "x", "2026-05-05T18:30:00Z")
     args = m.call_args[0]
     assert len(args[1]) == 4
@@ -113,7 +113,7 @@ def test_resolve_subset_match_simulated():
     rows = [_row("123456789",
                  "Bounty Hunters Sunday Hyper Special $108",
                  datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tournament_resolver.query", return_value=rows):
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Hyper Special $108",
             "2026-05-05T18:30:00Z",
@@ -127,7 +127,7 @@ def test_resolve_patterns_preserve_input_token_order():
     comutatividade real de ILIKE ALL é semântica do Postgres (precisa
     integração para validar) — aqui só fixamos a construção do array."""
     rows = [_row("123", "x", None)]
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number("GGPoker", "Hunters Bounty $108", None)
     args = m.call_args[0]
     assert args[1][1] == ["%hunters%", "%bounty%", "%$108%"]
@@ -185,7 +185,7 @@ def test_resolve_uses_posted_at_window_when_no_start_time():
     """start_time_iso=None + posted_at_hint -> janela [posted-12h, posted-30min]."""
     rows = [_row("X", "x", None)]
     posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number(
             "GGPoker", "x", None, posted_at_hint=posted,
         )
@@ -200,7 +200,7 @@ def test_resolve_start_time_takes_precedence_over_posted_at():
     """Ambos passados -> janela final e a do start_time, nao a do posted_at."""
     rows = [_row("X", "x", None)]
     posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number(
             "GGPoker", "x", "2026-05-09T18:30:00Z", posted_at_hint=posted,
         )
@@ -214,7 +214,7 @@ def test_resolve_start_time_takes_precedence_over_posted_at():
 def test_resolve_no_hints_falls_back_to_limit_5():
     """Nem start_time nem posted_at -> SQL com LIMIT 5 e 2 args."""
     rows = [_row("X", "x", None)]
-    with patch("app.services.tournament_resolver.query", return_value=rows) as m:
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number("GGPoker", "x", None)
     args = m.call_args[0]
     assert "LIMIT 5" in args[0]
@@ -229,41 +229,44 @@ def test_resolve_falls_back_to_hands_when_meta_empty():
     hands_rows = [_row("987654321", "Winamax Daily $50",
                        datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc))]
     with patch("app.services.tournament_resolver.query",
-               side_effect=[meta_rows, hands_rows]) as m:
+               side_effect=[[], meta_rows, hands_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "Winamax", "Winamax Daily $50", "2026-05-09T13:30:00Z",
         )
     assert tn == "987654321"
     assert candidates == []
-    assert m.call_count == 2
+    assert m.call_count == 3
 
 
 def test_resolve_prefers_meta_when_meta_has_match():
-    """Meta retorna 1 row -> hands query NAO e chamada (call_count == 1)."""
+    """Meta retorna 1 row -> hands query NAO e chamada (call_count == 2 pos-B2:
+    TS empty + meta hit)."""
     meta_rows = [_row("281416137", "BBG $215",
                       datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
-    with patch("app.services.tournament_resolver.query", return_value=meta_rows) as m:
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[[], meta_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "BBG $215", "2026-05-05T18:30:00Z",
         )
     assert tn == "281416137"
     assert candidates == []
-    assert m.call_count == 1
+    assert m.call_count == 2
 
 
 def test_resolve_fallback_query_uses_group_by_against_hands():
-    """SQL da 2a call: FROM hands, GROUP BY, study_state filter, regra 2026."""
+    """SQL da 3a call: FROM hands, GROUP BY, study_state filter, regra 2026.
+    (Pos-B2: 1a call e TS, 2a meta, 3a hands.)"""
     with patch("app.services.tournament_resolver.query",
-               side_effect=[[], []]) as m:
+               side_effect=[[], [], []]) as m:
         resolve_tournament_number(
             "Winamax", "Winamax Daily $50", "2026-05-09T13:30:00Z",
         )
-    assert m.call_count == 2
-    sql_2nd = m.call_args_list[1][0][0]
-    assert "FROM hands" in sql_2nd
-    assert "GROUP BY tournament_number" in sql_2nd
-    assert "study_state != 'mtt_archive'" in sql_2nd
-    assert "played_at >= '2026-01-01'" in sql_2nd
+    assert m.call_count == 3
+    sql_3rd = m.call_args_list[2][0][0]
+    assert "FROM hands" in sql_3rd
+    assert "GROUP BY tournament_number" in sql_3rd
+    assert "study_state != 'mtt_archive'" in sql_3rd
+    assert "played_at >= '2026-01-01'" in sql_3rd
 
 
 def test_resolve_winamax_with_posted_at_hint_only():
@@ -274,15 +277,101 @@ def test_resolve_winamax_with_posted_at_hint_only():
                        datetime(2026, 5, 9, 8, 0, tzinfo=timezone.utc))]
     posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
     with patch("app.services.tournament_resolver.query",
-               side_effect=[meta_rows, hands_rows]) as m:
+               side_effect=[[], meta_rows, hands_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "Winamax", "Winamax Daily $50", None,
             posted_at_hint=posted,
         )
     assert tn == "987654321"
     assert candidates == []
-    assert m.call_count == 2
-    sql_args_2nd = m.call_args_list[1][0][1]
-    lo, hi = sql_args_2nd[2], sql_args_2nd[3]
+    assert m.call_count == 3
+    sql_args_3rd = m.call_args_list[2][0][1]
+    lo, hi = sql_args_3rd[2], sql_args_3rd[3]
     assert lo == datetime(2026, 5, 9, 2, 0, tzinfo=timezone.utc)
     assert hi == datetime(2026, 5, 9, 13, 30, tzinfo=timezone.utc)
+
+
+# ── B2: tier 0 (tournament_summaries) ───────────────────────────────────────
+
+def test_b2_match_via_summaries_unique():
+    """1 row em TS -> resolve directo, nao toca em meta nem hands."""
+    ts_rows = [_row("281416137", "BBG $215",
+                    datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "BBG $215", "2026-05-05T18:30:00Z",
+        )
+    assert tn == "281416137"
+    assert candidates == []
+    assert m.call_count == 1  # so TS, sem fallback
+
+
+def test_b2_match_via_summaries_ambiguous():
+    """2 rows em TS -> tm_ambiguous, nao toca em meta nem hands
+    (preserva semantica do commit B: ambig curto-circuita tiers seguintes)."""
+    ts_rows = [
+        _row("281416137", "BBG $215",
+             datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc)),
+        _row("281200092", "BBG $215",
+             datetime(2026, 5, 5, 19, 30, tzinfo=timezone.utc)),
+    ]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "BBG $215", "2026-05-05T18:30:00Z",
+        )
+    assert tn is None
+    assert len(candidates) == 2
+    assert m.call_count == 1
+
+
+def test_b2_no_match_summaries_falls_back_to_meta():
+    """0 rows em TS, 1 row em meta -> resolve via meta, sem tocar hands."""
+    meta_rows = [_row("Y", "y", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[[], meta_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "y", "2026-05-05T18:30:00Z",
+        )
+    assert tn == "Y"
+    assert candidates == []
+    assert m.call_count == 2  # TS + meta
+
+
+def test_b2_no_match_summaries_no_meta_falls_back_to_hands():
+    """0 em TS, 0 em meta, 1 em hands -> resolve via hands."""
+    hands_rows = [_row("Z", "z", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[[], [], hands_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "z", "2026-05-05T18:30:00Z",
+        )
+    assert tn == "Z"
+    assert candidates == []
+    assert m.call_count == 3  # TS + meta + hands
+
+
+def test_b2_summaries_match_takes_precedence_over_meta():
+    """TS devolve 1 row com tn=AAA. Meta nunca e chamado mesmo que
+    tivesse outro tn — TS ganha e curto-circuita."""
+    ts_rows = [_row("AAA", "tournament", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "tournament", "2026-05-05T18:30:00Z",
+        )
+    assert tn == "AAA"
+    assert candidates == []
+    assert m.call_count == 1  # so TS — meta nao foi chamado
+
+
+def test_b2_summaries_query_targets_correct_table():
+    """Defensivo: garante que a 1a call do resolver vai a tournament_summaries.
+    Protege contra refactor que troque tabela inadvertidamente."""
+    ts_rows = [_row("X", "x", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[ts_rows]) as m:
+        resolve_tournament_number("GGPoker", "x", "2026-05-05T18:30:00Z")
+    sql_1st = m.call_args_list[0][0][0]
+    assert "FROM tournament_summaries" in sql_1st

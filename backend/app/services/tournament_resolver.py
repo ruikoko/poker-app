@@ -1,4 +1,4 @@
-"""Resolve tournament_number via tournaments_meta lookup (name + start_time).
+"""Resolve tournament_number via cascata em 3 tiers.
 
 FASE A COMMIT 2 — bot Discord chama isto apos Vision para descobrir qual
 tournament_number na BD corresponde ao lobby uploaded. Sem caption obrigatorio.
@@ -9,6 +9,19 @@ COMMIT B (FASE A) — adiciona dois caminhos complementares ao resolver:
   (ii) parametro keyword-only posted_at_hint que ancora janela
        [posted_at - 12h, posted_at - 30min] quando Vision nao le
        start_time (cobre G3 parcialmente).
+
+COMMIT B2 (FASE B) — adiciona TIER 0 antes dos existentes:
+  TIER 0  tournament_summaries  ← NOVO (autoritativo)
+  TIER 1  tournaments_meta      ← existente
+  TIER 2  hands fallback        ← existente
+
+TS contem tournament_number literal (parseado do header do ficheiro
+"Tournament #<tn>") — match deterministico para torneios ja terminados.
+Janela temporal _decide_window aplica-se igual aos 3 tiers.
+
+Cada tier emite logs INFO uniformes:
+  [tournament_resolver] OK    tier=<tier> tn=<tn> site=<site>
+  [tournament_resolver] AMBIG tier=<tier> n=<N>   site=<site>
 """
 from __future__ import annotations
 import logging
@@ -80,40 +93,35 @@ def _decide_window(
     return None
 
 
-def resolve_tournament_number(
-    site: str,
-    tournament_name: str,
-    start_time_iso: Optional[str],
-    *,
-    window_hours: float = 2.0,
-    posted_at_hint: Optional[datetime] = None,
-) -> tuple[Optional[str], list[dict]]:
-    """Procura tournaments_meta por nome similar + janela temporal,
-    com fallback a `hands` quando meta devolve 0 rows.
-
-    Args:
-        site: 'GGPoker' | 'PokerStars' | 'Winamax'.
-        tournament_name: nome lido pela Vision.
-        start_time_iso: timestamp ISO 8601 (UTC) lido pela Vision, ou None.
-        window_hours: tolerancia +/- em horas para o ramo start_time (default 2h).
-        posted_at_hint: timestamp tz-aware do post Discord. Usado como
-            ancora quando start_time_iso e ausente/invalido.
-
-    Returns:
-        (tn, []) se 1 match unico (de meta OU de hands).
-        (None, [candidates]) se 0 ou 2+ matches em meta + 0 ou 2+ em hands.
-    """
-    tokens = _tokenize_name(tournament_name)
-    if not tokens:
-        logger.warning("[tournament_resolver] FAIL name_empty")
-        return (None, [])
-
-    patterns = [f"%{t}%" for t in tokens]
-    window = _decide_window(start_time_iso, posted_at_hint, window_hours)
-
+def _query_summaries(site, patterns, window):
+    """TIER 0 — tournament_summaries (autoritativo)."""
     if window is not None:
         lo, hi = window
-        rows_meta = query(
+        return query(
+            """SELECT tournament_number, tournament_name, start_time
+                 FROM tournament_summaries
+                WHERE site = %s
+                  AND tournament_name ILIKE ALL (%s::text[])
+                  AND start_time BETWEEN %s AND %s
+                ORDER BY start_time ASC""",
+            (site, patterns, lo, hi),
+        )
+    return query(
+        """SELECT tournament_number, tournament_name, start_time
+             FROM tournament_summaries
+            WHERE site = %s
+              AND tournament_name ILIKE ALL (%s::text[])
+            ORDER BY start_time DESC NULLS LAST
+            LIMIT 5""",
+        (site, patterns),
+    )
+
+
+def _query_meta(site, patterns, window):
+    """TIER 1 — tournaments_meta."""
+    if window is not None:
+        lo, hi = window
+        return query(
             """SELECT tournament_number, tournament_name, start_time
                  FROM tournaments_meta
                 WHERE site = %s
@@ -122,28 +130,24 @@ def resolve_tournament_number(
                 ORDER BY start_time ASC""",
             (site, patterns, lo, hi),
         )
-    else:
-        rows_meta = query(
-            """SELECT tournament_number, tournament_name, start_time
-                 FROM tournaments_meta
-                WHERE site = %s
-                  AND tournament_name ILIKE ALL (%s::text[])
-                ORDER BY start_time DESC NULLS LAST
-                LIMIT 5""",
-            (site, patterns),
-        )
+    return query(
+        """SELECT tournament_number, tournament_name, start_time
+             FROM tournaments_meta
+            WHERE site = %s
+              AND tournament_name ILIKE ALL (%s::text[])
+            ORDER BY start_time DESC NULLS LAST
+            LIMIT 5""",
+        (site, patterns),
+    )
 
-    candidates_meta = [dict(r) for r in rows_meta]
-    if candidates_meta:
-        if len(candidates_meta) == 1:
-            return (candidates_meta[0]["tournament_number"], [])
-        return (None, candidates_meta)
 
-    # Fallback: tournaments_meta vazio. Tenta `hands` com a mesma janela.
-    # Cobre G1 (Winamax/PS sem meta) e G3 parcial via posted_at_hint.
+def _query_hands(site, patterns, window):
+    """TIER 2 — hands fallback. GROUP BY (tn, name), MIN(played_at) aproxima
+    start_time. Guard rails: tn IS NOT NULL, played_at >= '2026-01-01',
+    study_state != 'mtt_archive'."""
     if window is not None:
         lo, hi = window
-        rows_hands = query(
+        return query(
             """SELECT tournament_number,
                       tournament_name,
                       MIN(played_at) AS start_time
@@ -158,24 +162,95 @@ def resolve_tournament_number(
                 ORDER BY MIN(played_at) ASC""",
             (site, patterns, lo, hi),
         )
-    else:
-        rows_hands = query(
-            """SELECT tournament_number,
-                      tournament_name,
-                      MIN(played_at) AS start_time
-                 FROM hands
-                WHERE site = %s
-                  AND tournament_name ILIKE ALL (%s::text[])
-                  AND tournament_number IS NOT NULL
-                  AND played_at >= '2026-01-01'
-                  AND study_state != 'mtt_archive'
-                GROUP BY tournament_number, tournament_name
-                ORDER BY MIN(played_at) DESC NULLS LAST
-                LIMIT 5""",
-            (site, patterns),
-        )
+    return query(
+        """SELECT tournament_number,
+                  tournament_name,
+                  MIN(played_at) AS start_time
+             FROM hands
+            WHERE site = %s
+              AND tournament_name ILIKE ALL (%s::text[])
+              AND tournament_number IS NOT NULL
+              AND played_at >= '2026-01-01'
+              AND study_state != 'mtt_archive'
+            GROUP BY tournament_number, tournament_name
+            ORDER BY MIN(played_at) DESC NULLS LAST
+            LIMIT 5""",
+        (site, patterns),
+    )
 
-    candidates_hands = [dict(r) for r in rows_hands]
+
+def resolve_tournament_number(
+    site: str,
+    tournament_name: str,
+    start_time_iso: Optional[str],
+    *,
+    window_hours: float = 2.0,
+    posted_at_hint: Optional[datetime] = None,
+) -> tuple[Optional[str], list[dict]]:
+    """Cascata em 3 tiers: tournament_summaries -> tournaments_meta -> hands.
+
+    Args:
+        site: 'GGPoker' | 'PokerStars' | 'Winamax'.
+        tournament_name: nome lido pela Vision.
+        start_time_iso: timestamp ISO 8601 (UTC) lido pela Vision, ou None.
+        window_hours: tolerancia +/- em horas para o ramo start_time (default 2h).
+        posted_at_hint: timestamp tz-aware do post Discord. Usado como
+            ancora quando start_time_iso e ausente/invalido.
+
+    Returns:
+        (tn, []) se 1 match unico em qualquer tier (paragem imediata).
+        (None, [candidates]) se 2+ matches no 1o tier nao-vazio (curto-circuita
+            tiers seguintes). (None, []) se todos os tiers vazios.
+    """
+    tokens = _tokenize_name(tournament_name)
+    if not tokens:
+        logger.warning("[tournament_resolver] FAIL name_empty")
+        return (None, [])
+
+    patterns = [f"%{t}%" for t in tokens]
+    window = _decide_window(start_time_iso, posted_at_hint, window_hours)
+
+    # TIER 0 — tournament_summaries (autoritativo)
+    candidates_summaries = [dict(r) for r in _query_summaries(site, patterns, window)]
+    if candidates_summaries:
+        if len(candidates_summaries) == 1:
+            tn = candidates_summaries[0]["tournament_number"]
+            logger.info(
+                f"[tournament_resolver] OK tier=summaries tn={tn} site={site}"
+            )
+            return (tn, [])
+        logger.info(
+            f"[tournament_resolver] AMBIG tier=summaries "
+            f"n={len(candidates_summaries)} site={site}"
+        )
+        return (None, candidates_summaries)
+
+    # TIER 1 — tournaments_meta
+    candidates_meta = [dict(r) for r in _query_meta(site, patterns, window)]
+    if candidates_meta:
+        if len(candidates_meta) == 1:
+            tn = candidates_meta[0]["tournament_number"]
+            logger.info(
+                f"[tournament_resolver] OK tier=meta tn={tn} site={site}"
+            )
+            return (tn, [])
+        logger.info(
+            f"[tournament_resolver] AMBIG tier=meta "
+            f"n={len(candidates_meta)} site={site}"
+        )
+        return (None, candidates_meta)
+
+    # TIER 2 — hands fallback
+    candidates_hands = [dict(r) for r in _query_hands(site, patterns, window)]
     if len(candidates_hands) == 1:
-        return (candidates_hands[0]["tournament_number"], [])
+        tn = candidates_hands[0]["tournament_number"]
+        logger.info(
+            f"[tournament_resolver] OK tier=hands tn={tn} site={site}"
+        )
+        return (tn, [])
+    if candidates_hands:
+        logger.info(
+            f"[tournament_resolver] AMBIG tier=hands "
+            f"n={len(candidates_hands)} site={site}"
+        )
     return (None, candidates_hands)
