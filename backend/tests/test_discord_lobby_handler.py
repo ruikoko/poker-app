@@ -22,6 +22,7 @@ def _mock_message(
 ):
     msg = MagicMock()
     msg.id = msg_id
+    msg.content = ""
     msg.created_at = posted_at
     msg.author = MagicMock(id=999)
     msg.channel = MagicMock()

@@ -17,6 +17,7 @@ import discord
 from discord import Intents
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from typing import Optional
 
 from app.ingest_filters import is_pre_2026
 
@@ -98,6 +99,21 @@ def _detect_image_mime(image_bytes: bytes) -> str:
     ):
         return "image/webp"
     return "image/png"
+
+
+_TM_CAPTION_RE = re.compile(r"(?:#|[Tt][Mm])\s*(\d{8,12})\b")
+
+
+def _extract_tm_from_caption(content: Optional[str]) -> Optional[str]:
+    """Extrai TM (8-12 digitos) do texto da mensagem Discord.
+
+    Aceita prefixo 'TM' (qualquer caso) ou '#', com espacos opcionais.
+    Rejeita numeros nus (sem prefixo), curtos (<8) ou longos (>12).
+    """
+    if not content:
+        return None
+    m = _TM_CAPTION_RE.search(content)
+    return m.group(1) if m else None
 
 
 def _channel_to_tags(channel_name: str) -> list[str]:
@@ -728,6 +744,12 @@ class PokerBot(discord.Client):
         if not images:
             return  # sem imagens — ignorar silently (pode ser texto/discussao)
 
+        tm_override = _extract_tm_from_caption(message.content or "")
+        if tm_override:
+            logger.info(
+                f"[lobby] caption_override msg_id={message.id} tm={tm_override}"
+            )
+
         replies: list[str] = []
         for att in images:
             try:
@@ -781,13 +803,17 @@ class PokerBot(discord.Client):
             tournament_name = vj["tournament_name"]
             start_iso = vj.get("start_time_iso")
 
-            tn, candidates = await asyncio.to_thread(
-                resolve_tournament_number,
-                site,
-                tournament_name,
-                start_iso,
-                posted_at_hint=message.created_at,
-            )
+            if tm_override:
+                tn = tm_override
+                candidates = []
+            else:
+                tn, candidates = await asyncio.to_thread(
+                    resolve_tournament_number,
+                    site,
+                    tournament_name,
+                    start_iso,
+                    posted_at_hint=message.created_at,
+                )
             if tn is None:
                 if not candidates:
                     logger.info(
