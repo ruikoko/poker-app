@@ -16,7 +16,7 @@ export const HM3_TAGS = [
   'IP vs mcbet Flop PKO', 'MW IP', 'OP vs 3bet', 'OP vs 3bet PKO',
   'OP vs cbet Flop PKO -', 'RFI PKO LS', 'RFI PKO+', 'SB SS vs open',
   'analise field', 'bet vs mcbet', 'bvB PKO pos', 'probe MW',
-  'vs Turn cbet OP', 'GG Hands',
+  'vs Turn cbet OP', 'GG Hands', 'pos-nko',
 ]
 
 /**

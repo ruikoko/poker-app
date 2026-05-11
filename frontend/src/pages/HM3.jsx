@@ -66,7 +66,7 @@ function ResultBadge({ result }) {
 }
 
 function Tag({ t }) {
-  const colors = { icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e', bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b', 'nota++': '#818cf8', 'ICM PKO': '#f59e0b', 'PKO pos': '#22c55e', 'For Review': '#3b82f6', GTw: '#06b6d4', 'MW PKO': '#fb923c' }
+  const colors = { icm: '#6366f1', pko: '#f59e0b', ko: '#f59e0b', pos: '#22c55e', bvb: '#8b5cf6', ss: '#ef4444', ft: '#06b6d4', nota: '#64748b', 'nota++': '#818cf8', 'ICM PKO': '#f59e0b', 'PKO pos': '#22c55e', 'For Review': '#3b82f6', GTw: '#06b6d4', 'MW PKO': '#fb923c', 'pos-nko': '#22c55e' }
   const c = colors[t] || '#64748b'
   return <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, marginRight: 3, color: c, background: `${c}18`, border: `1px solid ${c}30` }}>#{t}</span>
 }

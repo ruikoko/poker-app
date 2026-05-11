@@ -346,6 +346,10 @@ HM3_REAL_TAGS = [
     (79, "nando"),
     (80, "analise field"),
     (81, "nota ex"),
+    # 9999 é sintético — 'pos-nko' não vem do HM3 (é canal Discord),
+    # mas listamos aqui para o admin/UI reconhecer. O importer
+    # converte GTw → pos-nko via apply_hm3_tag_aliases().
+    (9999, "pos-nko"),
 ]
 
 # Set de nomes de tags HM3 para match rápido
