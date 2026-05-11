@@ -26,6 +26,7 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [2.9 `position_parse_failed`](#29-position_parse_failed)  *(adicionado ao índice)*
   - [2.10 `tournament_format` / `tournament_name` / `tournament_number` / `buy_in`](#210-tournament_format--tournament_name--tournament_number--buy_in)  *(adicionado ao índice)*
   - [2.11 `hand_attachments`](#211-hand_attachments)  *(adicionado pós-Bucket 1)*
+  - [2.12 `tournament_summaries`](#212-tournament_summaries)  *(adicionado pós-FASE B pt19)*
 - [3. Estado / marcação de entries](#3-estado--marcação-de-entries)
   - [3.1 `entry_type`](#31-entry_type)
   - [3.2 `source`](#32-source)
@@ -261,6 +262,9 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 - *"Porque é que `'GGDiscord'` aparece em `hm3_tags`?"* → Marker interno do placeholder — não tag de estudo. É apagado pelo `_insert_hand` ao substituir o placeholder.
 
 **Cross-references:** [`tags`](#25-tags), [`discord_tags`](#24-discord_tags), [Vilões (regras A∨B∨C)](#63-vilões-regras-abc), [`_insert_hand` placeholder upgrade](#77-_insert_hand-placeholder-upgrade).
+
+**Nota pós-pt19 — id sintético 9999 (`pos-nko`):**
+A entrada `(9999, "pos-nko")` em `HM3_REAL_TAGS` é sintética: `pos-nko` é nome de **canal Discord**, não tag do HM3. Está listada aí para que (i) o admin `migrate-hm3-tags` reconheça e (ii) o dropdown manual em `TagEditor.jsx` ofereça. O importer `import_hm3` aplica `apply_hm3_tag_aliases()` (`backend/app/services/hm3_tag_aliases.py`) ao loop CSV pré-INSERT, traduzindo automaticamente `'GTw' → 'pos-nko'`. Mapping idempotente face a re-imports do `.bat` (que continuam a ler `'GTw'` da BD HM3 enquanto o Rui não apagar a categoria 16 lá). Backfill prod aplicado a 25 mãos em pt19 (commit `a4a9595`, snapshot em `_local_only/backfill_GTw_<ts>.txt`).
 
 ---
 
@@ -1651,6 +1655,90 @@ Investigação a 2026-04-26 contra prod confirmou que a discrepância (119 hands
 | 1 | 8 | Imagens directas Discord (`entry_type='image'`) nunca processadas pelo Vision; `process_replayer_links` filtrava só `replayer_link` | Bucket 1 redesign — ver §8.5.10 |
 | 2 | 3 | Vision processou mas TM não detectado pela imagem; `_create_placeholder_if_needed` faz early return se `tm_final IS NULL` | Aceitar como falha ocasional do Vision |
 | 3 | 27 | Cross-post: mesmo TM em múltiplos canais Discord → 1 hand por TM (UNIQUE em `hand_id`); `_link_second_discord_entry_to_existing_hand` agrega canais em `discord_tags` em vez de criar hand nova | **By design** — entries 2-N órfãs do JOIN mas agregadas via tags |
+
+### 2.12 `tournament_summaries`
+
+> **Nota:** entrada inserida em pt19 (11 Mai 2026). Por construção do documento original, todas as entradas de conceito vivem sob `## 2.`; mantendo coerência mesmo aparecendo aqui no final do ficheiro junto aos aditamentos pós-26-Abr.
+
+**Em linguagem simples:** tabela onde guardamos os ficheiros TS (Tournament Summary) que a GGPoker emite quando um torneio termina. Cada linha = 1 torneio concluído; serve para o resolver saber, sem ambiguidade, qual o `tournament_number` de uma lobby vista numa SS.
+
+**O que é (humano):** quando um torneio acaba na GG, o cliente emite um ficheiro `.txt` resumo (placement, payout, prize pool, total players, start time, etc). O Rui pode fazer upload em batch (`.zip`) ou um a um (`.txt`) via `Tournaments.jsx`. Cada TS contém `Tournament #<numero>` no header — match determinístico do `tournament_number`, sem dependência de `tournaments_meta` (que é populado por outros caminhos) nem de janelas temporais.
+
+A tabela é **GG-only** por construção do parser (regex assume o formato GG, currency default USD). Site hard-coded a `'GGPoker'` no `parse_tournament_summary`. PS/Winamax/WPN podem ser adicionados quando aparecer caso de uso — o schema (PK composto `(site, tournament_number)`) já está preparado.
+
+**Detalhes (técnico):**
+
+| Onde é produzido | Função |
+|---|---|
+| `backend/app/routers/tournament_summaries.py:32` | `ensure_tournament_summaries_schema()` — `CREATE TABLE IF NOT EXISTS` + 12 `ALTER TABLE ADD COLUMN IF NOT EXISTS` (B1.x) + 2 índices |
+| `backend/app/routers/tournament_summaries.py:226` | `parse_tournament_summary(text, filename)` — regex tolerante por campo, levanta `ValueError` se `tournament_number` ou `start_time` ausentes |
+| `backend/app/routers/tournament_summaries.py:374` | `POST /api/tournament-summaries/import` — aceita `.txt` ou `.zip`; SAVEPOINT/ROLLBACK por row; UPSERT com `(xmax = 0) AS inserted` para distinguir insert vs update |
+| `frontend/src/pages/Tournaments.jsx:703-735` | `handleImportTS()` + botão "↑ Importar Tournament Summaries (GG)" |
+| `frontend/src/api/client.js:165` | `tournamentSummaries.upload(file)` — multipart POST |
+
+| Onde é consumido | Função |
+|---|---|
+| `backend/app/services/tournament_resolver.py:96` | `_query_summaries(site, patterns, prize_pool=None, total_players=None)` — TIER 0 do `resolve_tournament_number`. **Sem janela temporal** (B2.1). Filtros opt-in `prize_pool` e `total_players` estritos (=). |
+| `backend/app/services/tournament_resolver.py:217-232` | TIER 0 testado antes de `tournaments_meta` (TIER 1) e `hands` fallback (TIER 2). Match único curto-circuita; ambiguidade devolve `(None, candidates)`. |
+
+**Schema** (criado por `ensure_tournament_summaries_schema()`):
+
+```sql
+site                          TEXT NOT NULL
+tournament_number             TEXT NOT NULL
+tournament_name               TEXT
+buy_in_text                   TEXT
+buy_in_total                  NUMERIC(10,2)
+buy_in_currency               TEXT
+total_players                 INTEGER
+prize_pool                    NUMERIC(12,2)
+start_time                    TIMESTAMPTZ
+hero_position                 INTEGER
+hero_payout                   NUMERIC(10,2)
+hero_re_entries               INTEGER NOT NULL DEFAULT 0
+raw_text                      TEXT
+source_filename               TEXT
+imported_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- B1.x (12 colunas novas, idempotentes)
+game_type                     TEXT
+buy_in_entry                  NUMERIC(10,2)
+buy_in_rake                   NUMERIC(10,2)
+buy_in_bounty                 NUMERIC(10,2)
+hero_total_received           NUMERIC(10,2)
+hero_finish_phrase_position   INTEGER
+tournament_modifiers          TEXT[]
+tournament_series             TEXT
+tournament_speed              TEXT          -- 'Hyper'/'Turbo'/'Deepstack'/'Slow'
+tournament_schedule           TEXT          -- 'Daily'/'Sunday'/etc, None se ausente
+tournament_format             TEXT          -- 'PKO'/'KO'/'None' (via apply_ratio_lookup)
+tournament_pko_ratio          NUMERIC(4,2)  -- 0.50/0.75/0.40/0.33, NULL se sem bounty
+PRIMARY KEY (site, tournament_number)
+```
+
+Índices: `idx_tournament_summaries_start_time` (`start_time DESC`), `idx_tournament_summaries_name` (`tournament_name`).
+
+**Comportamento esperado quando muda:**
+
+- INSERT: torneio passa a ser resolvível por TIER 0 (autoritativo, sem janela). Qualquer SS de lobby futura desse `tournament_number` faz match determinístico (subject a `prize_pool`/`total_players` discriminantes quando Vision os lê).
+- UPDATE (`ON CONFLICT DO UPDATE`): re-upload do mesmo TS actualiza campos derivados sem perder o `tournament_number`. Útil quando B1.x adicionou campos novos — re-upload backfilla.
+- DELETE (manual): torneio cai para TIER 1/2. Sem mudança de comportamento user-facing imediata.
+
+**Armadilhas conhecidas:**
+
+- **`tournament_speed` heurística "speed racer" → "Hyper":** GG tem produto branded `Speed Racer` (10BB starting stack). O parser classifica como `Hyper`. Outros nomes "speed" passariam pela default `Slow`. Verificar se aparecem outros antes de tratar como `Slow`.
+- **`tournament_pko_ratio` reutiliza `apply_ratio_lookup` de `lobby_vision.py`:** lookup ordenado (primeiro match ganha). Mudanças nessa lista impactam **dois** consumidores (Vision SS + parser TS). Coordenar.
+- **`_RE_HERO_TOTAL_RECEIVED` regex** corrigida em B1.x (`417c071`) — `[\d,\.]+` greedy capturava o `.` final. Hoje `[\d,]+(?:\.\d+)?`. Apanhado pelos tests defensivos `hero_total_received == hero_payout`.
+
+**Quando alguém pergunta...**
+
+- *"Como populo a tabela?"* → UI `Tournaments.jsx` → botão "↑ Importar Tournament Summaries (GG)". Aceita `.txt` ou `.zip` de TSs GG.
+- *"O TIER 0 ignora a janela temporal — não dá conflitos?"* → Não, porque é autoritativo: o header do TS tem o `tournament_number` literal. Para o caso `Daily Hyper $80` (mesmo nome, instâncias diferentes) há discriminantes `prize_pool` e `total_players` lidos pela Vision da lobby SS — filtros estritos opt-in.
+- *"E para PS/Winamax/WPN?"* → Parser é GG-only em B1. As outras salas dependem do TIER 2 fallback (`hands` source). Quando aparecer caso de uso para PS/Wina, adapta o parser e tira o hard-code do site.
+- *"Posso usar os 12 campos novos (B1.x) para outras coisas além do resolver?"* → Sim. `tournament_format`, `tournament_pko_ratio`, `tournament_modifiers`, etc. são potencialmente úteis para IRE (cross-check do ratio actual vs hardcoded em W3cray) e para enriquecimento de `hands` (backfill de `tournament_format` quando ausente). Não consumidores ainda.
+
+**Cross-references:** [`tournament_format / tournament_name / tournament_number / buy_in`](#210-tournament_format--tournament_name--tournament_number--buy_in), [`hm3_tags`](#23-hm3_tags) (não há relação directa, mas ambos vivem em `hands`/`tournament_summaries`), `lobby_vision.apply_ratio_lookup` (consumidor partilhado).
+
+---
 
 ### 8.5.10 Tabela `hand_attachments` — implementada
 

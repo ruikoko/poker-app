@@ -6,6 +6,77 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (11 Maio 2026 — pós-pt19, FASE A + FASE B fechadas)
+
+Sessão pt19 fechada. **FASE A pipeline lobbys fechada em prod** (3 commits A/B/C resolvem G1/G2/G3 de pt18 + refactor terminológico). **FASE B Tournament Summaries fechada em prod** (B1 import + B1.x parser extendido + B2 TIER 0 + B2.1 sem janela com discriminantes Vision). **Backfill GTw → pos-nko** aplicado a 25 mãos em prod (0 GG, 0 overlap). 11 commits totais, HEAD `a4a9595`. Detalhe completo em `docs/JOURNAL_2026-05-11-pt19.md`.
+
+### Commits da pt19 em main (cronológico)
+
+```
+d6dedda  FASE A commit A — token-set match em tm_resolver
+c6088ee  FASE A commit B — fallback hands + posted_at_hint
+f87be3a  FASE A commit C — caption manual TM em #lobbys
+440b248  refactor — TM → tournament_number (categoria a/b/c)
+9ad1ceb  FASE B B1 — import de Tournament Summaries GG
+e6bef2d  diag — logger.exception + repr no except do TS import
+0b0a087  fix B1 — usar RealDictCursor key no RETURNING
+cdbbc59  FASE B B2 — tier 0 tournament_summaries no resolver
+417c071  FASE B B1.x — parser TS extendido (12 campos novos)
+c0ddef5  FASE B B2.1 — TIER 0 sem janela + prize_pool/players
+a4a9595  GTw → pos-nko backfill + alias no importer
+```
+
+### Tech Debts fechados pt19
+
+| ID | Hash | Resumo |
+|---|---|---|
+| **FASE A — A** ✅ | `d6dedda` | Token-set match em `tournament_resolver` (cobre G2). |
+| **FASE A — B** ✅ | `c6088ee` | Fallback `hands` source + `posted_at_hint` window (cobre G1 Winamax/PS, mitiga G3). |
+| **FASE A — C** ✅ | `f87be3a` | Caption manual `#TM<num>` no post Discord (bypass do resolver; cobre G3 final). |
+| **Refactor TM** ✅ | `440b248` | TM → tournament_number (categoria a/b/c — serviços, símbolos, regex, mensagens). Categoria (d) deferida pt20+. |
+| **FASE B B1** ✅ | `9ad1ceb` + `e6bef2d` + `0b0a087` | Import GG TS — tabela, parser 14 campos, endpoint, UI. Fix RealDictCursor row key. |
+| **FASE B B1.x** ✅ | `417c071` | Parser TS extendido — 12 campos novos (literais + heurísticas + derivados). Bug regex `_RE_HERO_TOTAL_RECEIVED` apanhado pelos tests defensivos cross-check. |
+| **FASE B B2** ✅ | `cdbbc59` | TIER 0 `tournament_summaries` no resolver. 3 helpers privados por tier. |
+| **FASE B B2.1** ✅ | `c0ddef5` | TIER 0 sem janela (TS é autoritativo post-jogo). Discriminantes Vision `prize_pool` + `total_players`. |
+| **GTw → pos-nko** ✅ | `a4a9595` | Backfill 25 mãos PS/WN/WPN + helper `apply_hm3_tag_aliases` no importer + `(9999, "pos-nko")` em `HM3_REAL_TAGS` + frontend (dropdown + cor). |
+
+### Tech Debts URGENT pendentes pós-pt19
+
+#### Mãos órfãs em massa (🔴 URGENT — reproducer concreto)
+
+- **Reproducer:** Rui partilhou em pt19 screenshot do torneio HIGHROLLER €250 WINAMAX 08/05 com **27 mãos todas órfãs** em `#icm-pko`.
+- **Hipótese inicial:** mão sem villain associado em `hand_villains` — regras A/B/C de `_classify_villain_categories` não dispararam. Causa-raiz possível: pre-condição padrão `has_cards ∨ has_vpip` muito restritiva para o tipo de mão deste torneio (Hyper, swings rápidos, pouca acção postflop), e nenhuma das tags HM3/Discord disparou a excepção `nota%`/`nota`.
+- **Investigação adiada para pt20+.**
+
+### Tech Debts pendentes (medium / future)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **TS-backfill** | 🟡 MEDIUM | Backfill histórico de Tournament Summaries GG para popular TIER 0 retroactivamente. Sem isto, casos antigos continuam a cair em TIER 1/2. Endpoint `/api/tournament-summaries/import` existe + UI em `Tournaments.jsx`; só falta correr os uploads. |
+| **B2.1 Wina/PS** | 🟡 MEDIUM | Validação em campo da B2.1 com Winamax/PS. TIER 0 é GG-only (parser TS é GG-only). Winamax/PS dependem de TIER 2 fallback; field-testing necessário. |
+| **Estudo TAGS column** | 🟡 MEDIUM | Vista "TAGS" na secção Estudo só mostra `hm3_tags`; `discord_tags` omitidos. Cosmético mas confunde Rui. |
+| **2º Discord entry texto bruto** | 🟢 BAIXA | Marcado como "provavelmente resolvido pelo fix pt9; não-reproduzível em pt19". Reabrir só se Rui voltar a ver. |
+| **Refactor TM cat. (d)** | 🟢 FUTURE | ~50 sítios no pipeline `hand_id GG` (screenshot.py, mtt.py, hm3.py, import_.py, discord.py, hands.py). Envolve coluna `mtt_hands.tm_number`, índices, lógica string-replace. Migração de dados necessária. |
+| **Vilões vs Estudo arquitectura** | 🟢 FUTURE | Rui levantou em pt19 nuance entre as duas pistas. Discussão de produto antes de mexer. |
+| **D — Gyazo URLs em #lobbys** | 🟢 BAIXA | Suporte a links Gyazo em `_handle_lobby_message` (hoje só Discord attachments). ~1h. |
+| **E — Sync-recent UI** | 🟡 MEDIUM | `POST /api/lobbys/sync-recent` + botão UI. Permite backfill retroactivo do canal `#lobbys` sem depender de `LOBBY_AUTO=true`. ~2-3h. |
+| **F — Cleanup instrumentation** | 🟢 BAIXA | Remover `[debug-msg-lobby]` + lobby channel list log no `on_ready` agora que pipeline está estável. ~10 min. |
+
+### NEW — FASE 3 HRC (Watcher local Beelink GTR5)
+
+- **🔴 ALTA, agendada pt20+.**
+- Briefing `HRC_WATCHER_BRIEFING.md` recebido do Rui durante pt19. Cobre as 4 fases do plano de automação HRC; Fase A (FASE A deste repo, pipeline lobbys para popular `tournament_payouts`) **fechada** com este journal.
+- **Hardware:** Beelink GTR5 em casa, ainda não ligado. Limpeza prévia necessária.
+- **Licença HRC:** OK.
+- **Plano:** porting do `hrc_watcher.exe` do Baltazar (`_local_only/ANALYSIS.md`) como referência, mas evitar fragilidades conhecidas — PKO ratio dinâmico do buy-in (não hardcoded), retries em GUI driving Win32 ctypes, error handling robusto.
+- **Dependência:** limpeza/setup Beelink (operacional pelo Rui).
+
+### Tech Debts IRE (carry-over de pt16, sem trabalho em pt18/pt19)
+
+Mantêm-se em backlog: **#IRE-MB**, **#IRE-CL**, **#IRE-VB**, **#IRE-SK** (ver secção "Estado actual (8 Maio 2026 — pós-pt16, investigação IRE prod)" abaixo).
+
+---
+
 ## Estado actual (7 Maio 2026 fim pt16)
 
 pt16 atacou 3 itens num único arco de sessão. Sem journal próprio ainda — registo neste inventário substitui temporariamente.

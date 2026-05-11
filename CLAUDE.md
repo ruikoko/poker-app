@@ -242,25 +242,59 @@ Pipeline completo `tournament_payouts` → endpoint `GET /api/queue/hrc` → zip
 
 Smoke test em prod: 1 row em `tournament_payouts` (TM 281416137 BBG $215), zip download OK com 4 mãos.
 
-## FASE A — Pipeline lobbys via Discord (deployed 9 Maio 2026, parcial)
+## FASE A — Pipeline lobbys via Discord (✅ DEPLOYED, fechada em pt19)
 
-C1+C2+C2.5+C3 deployed em prod (sessão pt18). Pipeline real-time: SS no canal `#lobbys` → Vision Anthropic Claude Sonnet 4.6 → `tm_resolver` → upsert `tournament_payouts`.
+Pipeline real-time `SS no #lobbys → Vision Anthropic Sonnet 4.6 → tournament_resolver → upsert tournament_payouts`. Gaps G1/G2/G3 identificados em pt18 fechados em pt19:
 
-**Estado:** pipeline funcional até ao TM resolver. Vision API verde, parsing OK, mas resolver tem **3 gaps** que bloqueiam upserts reais até serem fixados em pt19:
+- **A** (`d6dedda`) — token-set match em `tournament_resolver` (cobre G2 — nome com palavras omitidas).
+- **B** (`c6088ee`) — fallback `hands` source + `posted_at_hint` window (cobre G1 Winamax/PS e mitiga G3).
+- **C** (`f87be3a`) — caption manual `#TM<numero>` no post Discord (bypass total do resolver; cobre G3 final).
+- **refactor** (`440b248`) — terminologia TM → `tournament_number`. Serviço renomeado `tm_resolver.py → tournament_resolver.py`. Categoria (a)(b)(c) fechada; categoria (d) (~50 sítios no pipeline `hand_id GG`) deferida para pt20+.
 
-- **G1** — `tournaments_meta` está vazia para Winamax/PS (skip explícito em `services/tournament_meta.py:upsert_tournament_meta`). Lobbys Winamax/PS falham com `tm_not_found`.
-- **G2** — Substring match `%name%` falha quando Vision lê o nome mais curto que está no BD (ex: lê `Bounty Hunters Hyper Special $108` mas BD tem `Bounty Hunters **Sunday** Hyper Special $108`).
-- **G3** — Quando Vision não consegue ler `start_time_iso`, resolver cai em fallback sem janela e fica ambíguo para nomes que correm todos os dias (`Daily Hyper $80`).
+Pendente apenas: **D** Gyazo URLs, **E** sync-recent UI, **F** cleanup instrumentation `[debug-msg-lobby]`.
 
-**Commits pendentes pt19** (ordem A → B → C → E):
-- **A** — Fuzzy / token-set match em `tm_resolver` (cobre G2). 🔴 ALTA, ~1-2h.
-- **B** — Resolver com fallback consulta `hands` source (cobre G1 Winamax/PS). 🔴 ALTA, ~1h.
-- **C** — Caption manual com TM (cobre G3). 🟡 MÉDIA, ~30 min.
-- **E** — Endpoint `POST /api/lobbys/sync-recent` + UI button (manual sync retroactivo). 🟡 MÉDIA, ~2-3h.
+## FASE B — Tournament Summaries GG (✅ DEPLOYED em pt19)
 
-(Backlog secundário: **D** Gyazo URLs, **F** cleanup instrumentation `[debug-msg-lobby]`.)
+GG emite ficheiros TS quando torneios terminam, com `tournament_number` literal no header. Fonte autoritativa post-jogo. Integrada como TIER 0 do resolver.
 
-Detalhe completo em `docs/JOURNAL_2026-05-09-pt18.md` e `docs/TECH_DEBTS_INVENTARIO.md` "Estado actual (9 Maio 2026)".
+- **B1** (`9ad1ceb`) — tabela `tournament_summaries (site, tournament_number)` PK composto. Parser GG-only com 14 campos: `tournament_name`, `buy_in_text/total/currency`, `total_players`, `prize_pool`, `start_time`, `hero_position/payout/re_entries`, `raw_text`, `source_filename`. Endpoint `POST /api/tournament-summaries/import` (`.txt` ou `.zip`). UI: botão em `Tournaments.jsx`.
+- **B1.x** (`417c071`) — parser estendido com 12 campos novos. **Literais**: `game_type`, `buy_in_entry/rake/bounty`, `hero_total_received`, `hero_finish_phrase_position`, `tournament_modifiers`, `tournament_series`. **Heurísticas**: `tournament_speed`, `tournament_schedule`. **Derivados** (via `apply_ratio_lookup`): `tournament_format`, `tournament_pko_ratio`. Total: **26 campos**.
+- **B2** (`cdbbc59`) — TIER 0 `tournament_summaries` antes de TIER 1 `tournaments_meta` e TIER 2 `hands` fallback. 3 helpers privados `_query_summaries/_query_meta/_query_hands` isolam SQL por tier.
+- **B2.1** (`c0ddef5`) — TIER 0 **sem janela temporal** (TS é autoritativo post-jogo). Discriminação por `prize_pool` + `total_players` da Vision (estritos, opt-in). Tiers 1+2 inalterados — torneios em curso (sem TS ainda) continuam com janela apertada.
+
+## Cinco fontes de input
+
+Após FASE B a app tem 5 fontes de input distintas (era 4 em pt13):
+
+| Fonte | Como entra | Marca/destino |
+|---|---|---|
+| **HM3 (.bat)** | Script .bat lê BD do HoldemManager3 e faz POST | `hm3_tags` |
+| **Discord** | Bot puxa mensagens de canais monitorizados | `discord_tags` |
+| **Upload manual SS** | Drag-and-drop de screenshot na UI | `origin = 'ss_upload'` |
+| **Import ZIP/TXT HH** | Upload de ficheiro HH bruto | `origin = 'hh_import'` |
+| **Tournament Summaries GG** | Upload `.txt`/`.zip` em `Tournaments.jsx` | `tournament_summaries` (não toca `hands`) |
+
+Detalhe completo em `docs/JOURNAL_2026-05-11-pt19.md` e `docs/TECH_DEBTS_INVENTARIO.md` "Estado actual (11 Maio 2026)".
+
+## 11 commits da pt19 em main
+
+```
+d6dedda  FASE A commit A — token-set match em tm_resolver
+c6088ee  FASE A commit B — fallback hands + posted_at_hint
+f87be3a  FASE A commit C — caption manual TM em #lobbys
+440b248  refactor — TM → tournament_number (categoria a/b/c)
+9ad1ceb  FASE B B1 — import de Tournament Summaries GG
+e6bef2d  diag — logger.exception + repr no except do TS import
+0b0a087  fix B1 — usar RealDictCursor key no RETURNING
+cdbbc59  FASE B B2 — tier 0 tournament_summaries no resolver
+417c071  FASE B B1.x — parser TS extendido (12 campos novos)
+c0ddef5  FASE B B2.1 — TIER 0 sem janela + prize_pool/players
+a4a9595  GTw → pos-nko backfill + alias no importer
+```
+
+## Backfill operacional pt19 — GTw → pos-nko
+
+Rui descontinuou tag HM3 `GTw`. 25 mãos PS/Winamax/WPN migradas em prod (0 GG, 0 overlap). Tag canónica nova: `pos-nko` em `HM3_REAL_TAGS` com id sintético `9999` (não vem do HM3 — é nome de canal Discord). Helper `apply_hm3_tag_aliases()` em `backend/app/services/hm3_tag_aliases.py` aplica o rename pre-INSERT no `import_hm3`, garantindo idempotência face a re-imports do `.bat`.
 
 ### Variáveis de ambiente FASE A (Railway service `poker-app`)
 
@@ -273,4 +307,4 @@ Detalhe completo em `docs/JOURNAL_2026-05-09-pt18.md` e `docs/TECH_DEBTS_INVENTA
 
 **Importante:** mudanças em `DISCORD_LOBBY_*` precisam de redeploy (`railway redeploy -s poker-app` ou push trivial) — env vars são lidas no module load, não em runtime.
 
-Última sessão fechada: pt18 (9 Maio 2026 — FASE 1 validada end-to-end, FASE A C1-C3 deployed com gaps G1/G2/G3 identificados, plano A→B→C→E para pt19).
+Última sessão fechada: pt19 (9 + 11 Maio 2026 — FASE A fechada (A/B/C/refactor), FASE B fechada (B1/B1.x/B2/B2.1), backfill GTw → pos-nko aplicado em prod. 11 commits, HEAD `a4a9595`).

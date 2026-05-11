@@ -106,6 +106,50 @@ imediatamente o seu papel sem precisar de inferir do contexto.
 - **DOCUMENTAR** cada sessão num journal `docs/JOURNAL_YYYY-MM-DD-ptN.md`.
 - **ATUALIZAR** âncora em `CLAUDE.md` no fim de cada sessão.
 
+## Autonomia do Claude Code
+
+Acordo refinado em pt19 (11-Mai-2026). Substitui interpretações
+estritas anteriores que faziam o Code parar em cada PASSO mesmo
+para refactors mecânicos.
+
+### Decide sozinho e flagga no fim
+
+O Code pode executar sem aprovação intermédia:
+
+- **Decisões puramente internas:** estrutura de helpers, nomes de
+  variáveis, ordem de hunks dentro de um diff, escolha entre
+  estilos equivalentes.
+- **Refinamentos óbvios** dentro do âmbito aprovado: docstrings,
+  mensagens de erro, fixes de typo, comentários explicativos.
+- **Juntar PASSOS** para refactors mecânicos: plano + diff + commit
+  numa só apresentação, desde que a mudança seja contida e a
+  reversão trivial.
+
+No fim, devolve um resumo curto do que decidiu para o Web validar
+em revisão batched (não em tempo real).
+
+### Pede OK explícito antes
+
+Continuam a exigir aprovação prévia:
+
+- **Schema BD, migrations** — qualquer `ALTER TABLE`, `CREATE
+  TABLE`, índice, ou mudança em `ensure_*_schema()`.
+- **Deploys** — `git push origin main` (auto-deploy Railway).
+- **Mudanças de comportamento user-facing** — UI, copy, regras
+  de filtro/visibilidade.
+- **Decisões de produto / UX** — escolha entre 2+ abordagens com
+  trade-offs visíveis ao utilizador.
+- **Mudanças de dados em prod** — backfills SQL, UPDATEs/DELETEs
+  fora do worker normal da app.
+- **Rotação de segredos** ou alterações a variáveis de ambiente em
+  Railway que afectem produção.
+
+### Em caso de dúvida
+
+Se o Code não tem certeza de em que categoria a mudança cai, pede
+OK. O custo de uma pergunta extra é baixo; o custo de um deploy
+prematuro é alto.
+
 ## Quando este modelo NÃO se aplica
 
 - Sessões puramente de pensamento de produto (sem mexer em código):

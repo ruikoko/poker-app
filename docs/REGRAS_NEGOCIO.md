@@ -206,6 +206,48 @@ Exemplo: `Tournament 12345 — $30,000 GTD`.
 
 **Particularidade:** GG não mostra bounty value nas stacks (todas anonimizadas). Por isso a regra de stacks do PS/Wina não se aplica — só o nome conta.
 
+### 5.5. GG Tournament Summaries — fonte autoritativa post-jogo
+
+Adicionado em pt19 (FASE B). Tabela `tournament_summaries` (ver `docs/MAPA_ACOPLAMENTO.md` §2.12) é populada por upload manual via `Tournaments.jsx` de ficheiros `.txt`/`.zip` emitidos pelo cliente GG quando um torneio termina.
+
+**Regra autoritativa:**
+
+- Cada TS contém `Tournament #<numero>` literal no header → match determinístico do `tournament_number`.
+- O resolver (`backend/app/services/tournament_resolver.py:resolve_tournament_number`) usa `tournament_summaries` como **TIER 0** (antes de `tournaments_meta` e `hands` fallback).
+- TIER 0 corre **sem janela temporal**. Justificação: TS é post-jogo, não há risco de "torneio ainda nem começou"; tempo não acrescenta informação útil.
+- Quando há múltiplas instâncias do mesmo nome (ex: `Daily Hyper $80` corre todos os dias), discriminam-se por **`prize_pool` e `total_players`** lidos pela Vision do header da lobby SS — filtros estritos opt-in (NULL = sem filtro).
+
+**Quando TS não chega para resolver:**
+
+- Vision falha a ler `prize_pool` e há 2+ torneios com mesmo nome → resolver devolve `(None, candidates)`. Caption manual `#<TM>` no post Discord faz bypass total.
+- Torneio em curso (TS ainda não emitido) → cai para TIER 1 (`tournaments_meta`) ou TIER 2 (`hands` fallback) com janela apertada.
+
+### 5.6. Parser de Tournament Summaries — campos extraídos
+
+`backend/app/routers/tournament_summaries.py:parse_tournament_summary`. Total **26 campos**.
+
+**14 originais (B1):** `tournament_number`, `tournament_name`, `buy_in_text`, `buy_in_total`, `buy_in_currency`, `total_players`, `prize_pool`, `start_time` (UTC), `hero_position`, `hero_payout`, `hero_re_entries`, `raw_text`, `source_filename`, `site` (hard-coded `'GGPoker'`).
+
+**12 estendidos (B1.x):** divididos em 3 categorias:
+
+- **Literais (do raw text):**
+  - `game_type` (ex: "Hold'em No Limit")
+  - `buy_in_entry`, `buy_in_rake`, `buy_in_bounty` (split do total: 2 tokens = entry+rake; 3 tokens = entry+rake+bounty/mystery)
+  - `hero_total_received` (cross-check com `hero_payout`)
+  - `hero_finish_phrase_position` (cross-check com `hero_position`)
+  - `tournament_modifiers TEXT[]` (tokens em `[…]`)
+  - `tournament_series` (prefixo antes de `:` no nome)
+
+- **Heurísticas (keyword no nome):**
+  - `tournament_speed` — `Hyper`/`Turbo`/`Deepstack`; `'speed racer'` branded → `Hyper`; default `Slow`.
+  - `tournament_schedule` — `Daily`/`Sunday`/`Monday`/…/`Weekly`/`Monthly`; `None` se ausente.
+
+- **Derivados (via `apply_ratio_lookup` reusada de `lobby_vision`):**
+  - `tournament_format` — `PKO`/`KO`/`None`.
+  - `tournament_pko_ratio NUMERIC(4,2)` — `0.50`/`0.75`/`0.40`/`0.33`; `None` se sem bounty.
+
+Campos opcionais que faltam no TS resultam em `NULL`/`None`. Apenas `tournament_number` e `start_time` são obrigatórios — ausência levanta `ValueError` e a row é registada em `failed[]` no endpoint sem abortar o batch.
+
 ---
 
 ## 6. Regras DURAS — o que a app NUNCA pode fazer
@@ -231,3 +273,27 @@ Exemplo: `Tournament 12345 — $30,000 GTD`.
 ## 8. Limitações conhecidas
 
 - **Path bulk archive (`mtt_hand_id` legacy) NÃO usa `apply_villain_rules`.** 4 call sites em `backend/app/routers/mtt.py` (linhas 1264, 1882, 2202, 2297) e 1 chamada interna em `_create_villains_for_hand` legacy continuam a passar `mtt_hand_id` em vez de `hand_db_id`. Esses caminhos correspondem ao path bulk archive de `mtt_hands` (table separada de `hands`) e não estão no fluxo principal pós-pt10. Merecem revisão futura — ou migrar para `hand_db_id` quando promovidos a `hands`, ou remover se `mtt_hands` for deprecado.
+
+---
+
+## 11. Terminologia
+
+Adicionado em pt19. Pivot deliberado de vocabulário para reduzir ambiguidade com a linguagem do Rui.
+
+### Tags HM3 / canais Discord
+
+- **`GTw` descontinuada** (pt19, commit `a4a9595`). Tag canónica para "posição em torneios não-KO (vanilla, sem bounty)" é **`pos-nko`** (originalmente nome de canal Discord — `discord_tags`). Continua listada em `HM3_REAL_TAGS` com id sintético `9999` para que UI/admin a reconheçam; o importer `import_hm3` aplica `apply_hm3_tag_aliases()` (`backend/app/services/hm3_tag_aliases.py`) pré-INSERT a re-imports do `.bat` que ainda trazem `GTw`.
+
+### TM vs tournament_number
+
+Refactor categoria (a)(b)(c) em pt19 (commit `440b248`).
+
+- **No vocabulário do Rui** (linguagem do replayer GG): **TM** = número da **mão** visível no canto do replayer (ex: `TM5672663145`). Faz parte do `hand_id` GG (`GG-{TM}`).
+- **No vocabulário interno antigo da app**: **TM** era o número do **torneio** (`tournament_number`). Causava colisão.
+- **A partir de pt19** o código usa `tournament_number` para o identificador do torneio. Serviços, símbolos, log prefixes, mensagens user-facing renomeados.
+
+**Restos do vocabulário antigo** (categoria d, deferida pt20+): ~50 sítios em `screenshot.py`/`mtt.py`/`hm3.py`/`import_.py`/`discord.py`/`hands.py` ainda usam `tm_number` no pipeline `hand_id GG = GG-{tm_digits}`. Mexe em coluna `mtt_hands.tm_number`, índices, e lógica de string-replace — separado por envolver migração de dados.
+
+### Caption manual `#<numero>`
+
+No canal `#lobbys` o Rui pode bypassar o resolver escrevendo `#12345678` ou `TM12345678` no texto da mensagem com a SS. A regex aceita prefixos `#`, `TM`/`tm`, `TN`/`tn`, ou número sozinho (8-12 dígitos, lookarounds `(?<!\d)`/`(?!\d)`).
