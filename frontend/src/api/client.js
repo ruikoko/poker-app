@@ -161,6 +161,11 @@ export const imports = {
   logs: () => req('GET', '/import/logs'),
 }
 
+// ── Lobbys (sync-recent) ──────────────────────────────────────────────────
+export const lobbys = {
+  syncRecent: (body = {}) => req('POST', '/lobbys/sync-recent', body),
+}
+
 // ── Tournament Summaries (GG TS files) ────────────────────────────────────
 export const tournamentSummaries = {
   upload: (file) => {

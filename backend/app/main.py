@@ -36,6 +36,8 @@ from app.routers.tournament_summaries import (
     ensure_tournament_summaries_schema,
 )
 from app.routers.queue import router as queue_router
+from app.routers.lobbys import router as lobbys_router
+from app.services.lobby_sync import ensure_lobby_processing_log_schema
 
 load_dotenv()
 
@@ -236,6 +238,7 @@ async def lifespan(app: FastAPI):
     ensure_tournaments_meta_schema()
     ensure_tournament_payouts_schema()
     ensure_tournament_summaries_schema()
+    ensure_lobby_processing_log_schema()
     ensure_study_state_check_constraint()
 
     # Arrancar bot Discord em background
@@ -288,6 +291,7 @@ app.include_router(tournaments_meta_router)
 app.include_router(payouts_router)
 app.include_router(tournament_summaries_router)
 app.include_router(queue_router)
+app.include_router(lobbys_router)
 
 # Serve uploaded screenshots as static files
 import os

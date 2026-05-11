@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 
 from app.ingest_filters import is_pre_2026
+from app.services.lobby_sync import process_lobby_message
 
 logger = logging.getLogger("discord_bot")
 
@@ -708,21 +709,14 @@ class PokerBot(discord.Client):
                 logger.error(f"Erro ao guardar item de #{channel_name}: {e}")
 
     async def _handle_lobby_message(self, message: discord.Message):
-        """Processa SS de lobby do canal dedicado: Vision Anthropic ->
-        tournament_resolver -> upsert tournament_payouts -> reply Discord OK/erro.
+        """Wrapper real-time: pega na mensagem Discord, chama
+        process_lobby_message para cada attachment imagem, e responde no canal
+        com ✅/❌. A lógica core (Vision -> resolver -> upsert + log) vive em
+        services/lobby_sync.py:process_lobby_message.
 
         NAO toca em entries nem hands (pipeline de maos isolado).
         Source = 'discord_lobby_vision:<msg_id>' para audit em BD.
         """
-        from app.ingest_filters import is_pre_2026
-        from app.services.lobby_vision import (
-            extract_lobby_payout_json,
-            parse_and_validate_lobby_json,
-            build_hrc_payouts_blob,
-        )
-        from app.services.tournament_resolver import resolve_tournament_number
-        from app.services.payouts_service import upsert_payout
-
         if is_pre_2026(message.created_at):
             logger.info(f"[lobby] msg pre-2026 ignorada: id={message.id}")
             return
@@ -773,27 +767,68 @@ class PokerBot(discord.Client):
                 )
             mime = detected_mime
 
-            raw = await asyncio.to_thread(
-                extract_lobby_payout_json, content_bytes, mime
-            )
-            if raw is None:
-                logger.info(
-                    f"[lobby] FAIL vision_failed msg_id={message.id} mime={mime}"
+            try:
+                r = await process_lobby_message(
+                    content_bytes, mime, str(message.id),
+                    str(message.channel.id), message.created_at,
+                    message.content or "", tn_override,
+                    throttle_seconds=0.0,
                 )
-                replies.append("❌ Vision falhou (timeout/erro API)")
+            except Exception as e:
+                logger.exception(f"[lobby] process error msg_id={message.id}: {e}")
+                replies.append(f"❌ Erro: {type(e).__name__}")
                 continue
 
-            vj = parse_and_validate_lobby_json(raw)
-            if vj is None:
-                logger.info(
-                    f"[lobby] FAIL json_invalid msg_id={message.id} "
-                    f"raw_len={len(raw)} raw_head={raw[:200]!r}"
+            result = r["result"]
+            tn = r["tournament_number"]
+            tournament_name = r["tournament_name"]
+            site = r["site"]
+
+            if result == "success":
+                bt = r["bounty_type"]
+                pf = r["progressive_factor"] or 0.0
+                pf_pct = int(round(pf * 100))
+                n_prizes = r["prizes_count"]
+                verb = "Adicionado" if r["action"] == "inserted" else "Actualizado"
+                replies.append(
+                    f"✅ {verb} payouts para tournament {tn}\n"
+                    f"  • {tournament_name} ({site})\n"
+                    f"  • {bt} {pf_pct}% • {n_prizes} posições pagas"
                 )
+                logger.info(
+                    f"[lobby] {verb.lower()} site={site} tn={tn} "
+                    f"name={tournament_name!r} prizes={n_prizes}"
+                )
+            elif result == "tm_not_found":
+                start_iso = (r["vision_json"] or {}).get("start_time_iso")
+                logger.info(
+                    f"[lobby] FAIL tm_not_found msg_id={message.id} "
+                    f"site={site} name={tournament_name!r} start={start_iso!r}"
+                )
+                replies.append(
+                    f"❌ Sem match para '{tournament_name}' "
+                    f"em {site} ({start_iso or 'sem hora'})"
+                )
+            elif result == "tm_ambiguous":
+                candidates = r["candidates"]
+                logger.info(
+                    f"[lobby] FAIL tm_ambiguous msg_id={message.id} "
+                    f"site={site} name={tournament_name!r} "
+                    f"n_candidates={len(candidates)}"
+                )
+                lines = "\n".join(
+                    f"  • #{c['tournament_number']} ({c['tournament_name']})"
+                    for c in candidates[:5]
+                )
+                replies.append(
+                    f"❌ {len(candidates)} candidatos para "
+                    f"'{tournament_name}'. Cola o número do torneio no "
+                    f"caption (ex: #281017175):\n{lines}"
+                )
+            elif result == "json_invalid":
+                logger.info(f"[lobby] FAIL json_invalid msg_id={message.id}")
                 replies.append("❌ Estrutura de payouts nao detectada")
-                continue
-
-            site = vj.get("site")
-            if site not in ("GGPoker", "PokerStars", "Winamax"):
+            elif result == "site_undetected":
                 logger.info(
                     f"[lobby] FAIL site_undetected msg_id={message.id} site={site!r}"
                 )
@@ -801,79 +836,15 @@ class PokerBot(discord.Client):
                     f"❌ Site nao detectado (Vision: {site!r}). "
                     "Tira nova SS com client logo visivel."
                 )
-                continue
-
-            tournament_name = vj["tournament_name"]
-            start_iso = vj.get("start_time_iso")
-
-            if tn_override:
-                tn = tn_override
-                candidates = []
+            elif result == "vision_failed":
+                logger.info(f"[lobby] FAIL vision_failed msg_id={message.id}")
+                replies.append("❌ Vision falhou (timeout/erro API)")
+            elif result == "upsert_error":
+                replies.append(
+                    f"❌ Erro a guardar payouts: {r['reason_detail']}"
+                )
             else:
-                tn, candidates = await asyncio.to_thread(
-                    resolve_tournament_number,
-                    site,
-                    tournament_name,
-                    start_iso,
-                    posted_at_hint=message.created_at,
-                    prize_pool=vj.get("prize_pool"),
-                    total_players=vj.get("entrants"),
-                )
-            if tn is None:
-                if not candidates:
-                    logger.info(
-                        f"[lobby] FAIL tm_not_found msg_id={message.id} "
-                        f"site={site} name={tournament_name!r} start={start_iso!r}"
-                    )
-                    replies.append(
-                        f"❌ Sem match para '{tournament_name}' "
-                        f"em {site} ({start_iso or 'sem hora'})"
-                    )
-                else:
-                    logger.info(
-                        f"[lobby] FAIL tm_ambiguous msg_id={message.id} "
-                        f"site={site} name={tournament_name!r} "
-                        f"n_candidates={len(candidates)}"
-                    )
-                    lines = "\n".join(
-                        f"  • #{c['tournament_number']} ({c['tournament_name']})"
-                        for c in candidates[:5]
-                    )
-                    replies.append(
-                        f"❌ {len(candidates)} candidatos para "
-                        f"'{tournament_name}'. Cola o número do torneio no "
-                        f"caption (ex: #281017175):\n{lines}"
-                    )
-                continue
-
-            blob = build_hrc_payouts_blob(vj)
-            try:
-                result = await asyncio.to_thread(
-                    upsert_payout,
-                    site=site,
-                    tournament_number=tn,
-                    payouts_json=blob,
-                    source=f"discord_lobby_vision:{message.id}",
-                )
-            except Exception as e:
-                logger.error(f"[lobby] upsert failed tn={tn}: {e}")
-                replies.append(f"❌ Erro a guardar payouts: {type(e).__name__}")
-                continue
-
-            s = blob["structures"][0]
-            n_prizes = len(s["prizes"])
-            bt = s["bountyType"]
-            pf_pct = int(round(s["progressiveFactor"] * 100))
-            verb = "Adicionado" if result["action"] == "inserted" else "Actualizado"
-            replies.append(
-                f"✅ {verb} payouts para tournament {tn}\n"
-                f"  • {tournament_name} ({site})\n"
-                f"  • {bt} {pf_pct}% • {n_prizes} posições pagas"
-            )
-            logger.info(
-                f"[lobby] {verb.lower()} site={site} tn={tn} "
-                f"name={tournament_name!r} prizes={n_prizes}"
-            )
+                replies.append(f"❌ {result}")
 
         full_reply = "\n\n".join(replies)
         if len(full_reply) > 1900:

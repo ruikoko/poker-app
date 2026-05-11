@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { discord, hands as handsApi, images as imagesApi } from '../api/client'
+import { discord, hands as handsApi, images as imagesApi, lobbys } from '../api/client'
 import HandRow from '../components/HandRow'
 
 // ── Constantes ──────────────────────────────────────────────────────────────
@@ -329,6 +329,16 @@ export default function DiscordPage() {
   const [lastSync, setLastSync] = useState(null)
   const [lastSyncDismissed, setLastSyncDismissed] = useState(false)
   const [, setNowTick] = useState(0)
+  // Sub-painel Sincronizar Lobbys (Commit E pt20)
+  const [lobbySyncing, setLobbySyncing] = useState(false)
+  const [lobbySyncResult, setLobbySyncResult] = useState(null)
+  const [lobbyWindowKey, setLobbyWindowKey] = useState('24h')
+  const [lobbyDryRun, setLobbyDryRun] = useState(false)
+  const [lobbyThrottle, setLobbyThrottle] = useState(1.2)
+  const [lobbyAdvancedOpen, setLobbyAdvancedOpen] = useState(false)
+  const [lobbySites, setLobbySites] = useState([])
+  const [lobbyFailureTypes, setLobbyFailureTypes] = useState([])
+  const [lobbyRetrySuccess, setLobbyRetrySuccess] = useState(false)
 
   const loadStatus = useCallback(() => {
     discord.status().then(setStatus).catch(e => setError(e.message))
@@ -570,6 +580,157 @@ export default function DiscordPage() {
               <span style={{ color: '#ef4444', fontSize: 11 }}>Data 'Até' deve ser ≥ 'De'</span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Sub-painel Sincronizar Lobbys (Commit E pt20) */}
+      {panelOpen && !syncing && (
+        <div style={{ maxWidth: 720, marginLeft: 'auto', background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+            Sincronizar Lobbys (#lobbys)
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, minWidth: 64 }}>Janela:</span>
+            {[
+              { key: '24h', label: '24h', hours: 24 },
+              { key: '72h', label: '72h', hours: 72 },
+              { key: '7d',  label: '7 dias', hours: 168 },
+              { key: '30d', label: '30 dias', hours: 720 },
+            ].map(({ key, label }) => {
+              const active = lobbyWindowKey === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setLobbyWindowKey(key)}
+                  style={{ padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500, border: '1px solid', borderColor: active ? '#6366f1' : '#2a2d3a', background: active ? 'rgba(99,102,241,0.15)' : 'transparent', color: active ? '#818cf8' : '#64748b', cursor: 'pointer' }}
+                >{label}</button>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#94a3b8', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={lobbyDryRun} onChange={e => setLobbyDryRun(e.target.checked)} />
+              Dry run (não escreve)
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              Throttle Vision:
+              <input
+                type="number" step="0.1" min="0" max="30"
+                value={lobbyThrottle}
+                onChange={e => setLobbyThrottle(parseFloat(e.target.value) || 1.2)}
+                style={{ width: 56, padding: '2px 6px', background: '#0f172a', border: '1px solid #2a2d3a', color: '#e2e8f0', borderRadius: 4 }}
+              />s
+            </label>
+            <button
+              onClick={() => setLobbyAdvancedOpen(o => !o)}
+              style={{ padding: '3px 10px', fontSize: 11, color: '#64748b', background: 'transparent', border: '1px solid #2a2d3a', borderRadius: 4, cursor: 'pointer' }}
+            >Avançado… {lobbyAdvancedOpen ? '▴' : '▾'}</button>
+          </div>
+          {lobbyAdvancedOpen && (
+            <div style={{ padding: 10, background: '#0f172a', border: '1px solid #2a2d3a', borderRadius: 6, marginBottom: 10, fontSize: 11, color: '#94a3b8' }}>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ marginRight: 8 }}>Sites:</span>
+                {['GGPoker', 'PokerStars', 'Winamax'].map(s => (
+                  <label key={s} style={{ marginRight: 10, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={lobbySites.includes(s)}
+                      onChange={() => setLobbySites(arr => arr.includes(s) ? arr.filter(x => x !== s) : [...arr, s])} /> {s}
+                  </label>
+                ))}
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ marginRight: 8 }}>Failure types:</span>
+                {['vision_failed', 'json_invalid', 'site_undetected', 'tm_not_found', 'tm_ambiguous'].map(ft => (
+                  <label key={ft} style={{ marginRight: 10, cursor: 'pointer', fontFamily: 'monospace', fontSize: 10 }}>
+                    <input type="checkbox" checked={lobbyFailureTypes.includes(ft)}
+                      onChange={() => setLobbyFailureTypes(arr => arr.includes(ft) ? arr.filter(x => x !== ft) : [...arr, ft])} /> {ft}
+                  </label>
+                ))}
+              </div>
+              <label style={{ cursor: 'pointer' }}>
+                <input type="checkbox" checked={lobbyRetrySuccess}
+                  onChange={e => setLobbyRetrySuccess(e.target.checked)} /> Retry success (re-corre Vision em msgs já com sucesso)
+              </label>
+            </div>
+          )}
+          <button
+            disabled={lobbySyncing}
+            onClick={async () => {
+              setLobbySyncing(true); setLobbySyncResult(null)
+              const hoursMap = { '24h': 24, '72h': 72, '7d': 168, '30d': 720 }
+              const hours = hoursMap[lobbyWindowKey] || 24
+              const now = new Date()
+              const since = new Date(now.getTime() - hours * 3600_000)
+              const body = {
+                since: since.toISOString(),
+                until: now.toISOString(),
+                dry_run: lobbyDryRun,
+                vision_throttle_seconds: lobbyThrottle,
+              }
+              if (lobbySites.length) body.sites = lobbySites
+              if (lobbyFailureTypes.length) body.failure_types = lobbyFailureTypes
+              if (lobbyRetrySuccess) body.retry_success = true
+              try {
+                const r = await lobbys.syncRecent(body)
+                setLobbySyncResult(r)
+              } catch (e) {
+                setLobbySyncResult({ error: e.message })
+              } finally {
+                setLobbySyncing(false)
+              }
+            }}
+            style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: lobbySyncing ? 'wait' : 'pointer', opacity: lobbySyncing ? 0.5 : 1 }}
+          >{lobbySyncing ? 'A sincronizar lobbys…' : 'Sincronizar Lobbys'}</button>
+
+          {lobbySyncResult && (
+            <div style={{ marginTop: 12, padding: 10, background: '#0f172a', border: '1px solid #2a2d3a', borderRadius: 6, fontSize: 11 }}>
+              {lobbySyncResult.error ? (
+                <span style={{ color: '#ef4444' }}>Erro: {lobbySyncResult.error}</span>
+              ) : (
+                <>
+                  <div style={{ color: '#cbd5e1' }}>
+                    Candidatos: {lobbySyncResult.candidates} ·
+                    ✅ {lobbySyncResult.results.success_new} novos ·
+                    ❌ {lobbySyncResult.results.still_failed} falharam ·
+                    ⚠️ {lobbySyncResult.results.errors} erros ·
+                    ⏱️ {lobbySyncResult.duration_seconds.toFixed(1)}s
+                  </div>
+                  {lobbySyncResult.failures && lobbySyncResult.failures.length > 0 && (
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer', color: '#94a3b8' }}>Falhas ({lobbySyncResult.failures.length})</summary>
+                      <table style={{ marginTop: 6, fontSize: 10, width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ color: '#64748b', textAlign: 'left' }}>
+                            <th style={{ padding: '2px 4px' }}>msg_id</th>
+                            <th style={{ padding: '2px 4px' }}>razão</th>
+                            <th style={{ padding: '2px 4px' }}>site</th>
+                            <th style={{ padding: '2px 4px' }}>nome</th>
+                            <th style={{ padding: '2px 4px' }}>tries</th>
+                          </tr>
+                        </thead>
+                        <tbody style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>
+                          {lobbySyncResult.failures.map((f, i) => (
+                            <tr key={i}>
+                              <td style={{ padding: '2px 4px' }}>
+                                <button
+                                  onClick={() => navigator.clipboard.writeText(f.message_id)}
+                                  title="copiar message_id"
+                                  style={{ background: 'transparent', border: 'none', color: '#818cf8', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10 }}
+                                >{f.message_id} 📋</button>
+                              </td>
+                              <td style={{ padding: '2px 4px' }}>{f.reason}</td>
+                              <td style={{ padding: '2px 4px' }}>{f.site || '—'}</td>
+                              <td style={{ padding: '2px 4px' }}>{f.name || '—'}</td>
+                              <td style={{ padding: '2px 4px' }}>{f.attempt_count || 1}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
