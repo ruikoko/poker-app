@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.auth import require_auth
+from app.auth import require_auth_or_api_key
 from app.db import query
 from app.services.queue_export import build_queue_zip
 
@@ -55,7 +55,7 @@ def export_queue(
     played_after: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
     played_before: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
     include_no_payout: bool = Query(False),
-    current_user=Depends(require_auth),
+    current_user=Depends(require_auth_or_api_key),
 ):
     tags_list = _expand_icm_case(_csv(tags, _DEFAULT_TAGS))
     states_list = _csv(study_state, _DEFAULT_STUDY_STATES)
