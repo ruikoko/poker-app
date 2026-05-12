@@ -329,3 +329,5 @@ Rui descontinuou tag HM3 `GTw`. 25 mãos PS/Winamax/WPN migradas em prod (0 GG, 
 **Precedência `tournament_payouts.source`:** `manual:` > `backoffice_vision:` > `discord_lobby_vision:`. UPSERT sempre permitido em real-time; `skip_existing` opt-in skipa apenas backoffice/manual prévios.
 
 Última sessão fechada: pt20 (12 Maio 2026 — sync-recent + backoffice import. 2 commits, HEAD `af7e3c8`. 5 tech debts novos, 2 fechados).
+
+Próxima sessão: **pt21 — Fase 3 HRC arranque + Beelink prep.** Plano detalhado em `docs/PLAN_PT21_HRC_FASE3.md`: 6 gaps identificados (tabela `hrc_jobs`, auth API key, `POST /api/queue/hrc/results`, UI export+badge, adapter zip→pastas no Beelink), 4 fases ordenadas (Beelink limpo pelo Rui → backend → backfill TSs → UI+smoke), 5 decisões pendentes para Web/Rui antes do arranque. Pré-requisito operacional: Beelink GTR5 limpo (35 GB livres actuais, McAfee instalado).
