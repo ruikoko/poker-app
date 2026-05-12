@@ -6,6 +6,87 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (12 Maio 2026 — pós-pt20, sync-recent + backoffice import deployed)
+
+Sessão pt20 fechada. **2 commits feature em main:** `5465b32` (Commit E sync-recent + `lobby_processing_log`) e `af7e3c8` (endpoint backoffice `/api/tournament-results/import`). Ambos validados em campo. 5 tech debts novos registados, 2 fechados implicitamente. Suite **122 → 154 PASSED** (16+16 tests novos). HEAD `af7e3c8`. Detalhe completo em `docs/JOURNAL_2026-05-11-pt20.md`.
+
+### Commits da pt20 em main (cronológico)
+
+```
+5465b32  Commit E — sync-recent de lobbys + lobby_processing_log
+af7e3c8  Backoffice import — /tournament-results/import (vanilla+PKO)
+```
+
+### Tech debts fechados pt20
+
+| ID | Hash | Resumo |
+|---|---|---|
+| **Persistência falhas #lobbys** ✅ | `5465b32` | Tabela `lobby_processing_log` UPSERT por `discord_message_id`. Handler real-time + sync-recent registam cada tentativa com `attempt_count`, `reason_detail`, `vision_json`. Logs Railway deixaram de ser source-of-truth para falhas. |
+| **Buraco TS → tournament_payouts** ✅ | `af7e3c8` | Endpoint `POST /api/tournament-results/import` faz upload de SSs do backoffice GG, cruza com `tournament_summaries` via TIER 0 resolver, popula `tournament_payouts` com blob HRC completo (distribuição de prizes por posição). Vanilla + PKO; Mystery em tech debt separado. |
+
+### Tech debts novos levantados pt20
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#BACKOFFICE-MYSTERY** | 🟡 MEDIUM | Suportar Mystery KO no backoffice import. Hoje devolve `mystery_unsupported` (fail-fast em `tournament_results._process_one` quando `ts_tournament_format == 'KO'`). Precisa de sample SS Mystery real + confirmação do `bountyType` aceite pelo HRC Structure Manager (`"KO"` ou mapear para `"PKO"` com factor especial). |
+| **#TS-RATIO-MYSTERY-CONFIRM** | 🟢 LOW | Confirmar `apply_ratio_lookup` em `services/lobby_vision.py:35-45` para Mystery KO `("KO", 0.33)`. Web mencionou em pt20 que regra GG real é 25/75 — clarificar antes de fechar #BACKOFFICE-MYSTERY (impacta validação de drift). |
+| **#TS-AUTO-PAYOUTS-ICM** | 🟢 FUTURE | Derivar `tournament_payouts` automaticamente a partir do TS via algoritmo ICM (TS tem pool+players+ratio; falta distribuição). Decisão de produto: ICM é estimativa, backoffice é literal. Manter pipelines distintos a não ser que Rui peça automação. |
+| **#SYNC-RECENT-RESPECT-MANUAL** | 🟡 MEDIUM | `sync-recent` actualmente re-tenta SSs onde já há `tournament_payouts.source` `manual:` ou `backoffice_vision:` — overwrite com `discord_lobby_vision:` (dados parciais) seria regressão de qualidade. Adicionar guard: `process_lobby_message` skipa UPSERT se source actual ≠ `discord_lobby_vision:`. Hoje a precedência D11 está documentada mas não enforced no lobby pipeline (só no backoffice). |
+| **#PYDANTIC-V1-VALIDATOR-DEPRECATION** | 🟢 LOW | `routers/lobbys.py:34` usa `@validator` Pydantic V1 (1 warning durante pytest). Migrar para `@field_validator` V2. Sem impacto funcional; cosmético. |
+
+### Decisões fechadas pt20
+
+**Commit E (sync-recent lobbys):**
+
+| # | Decisão |
+|---|---|
+| D1 | Síncrono (4-10 min worst-case; sem job queue) |
+| D2 | Throttle Anthropic default 1.2s; override no body |
+| D3 | `max_messages` default 200, hard cap 500 |
+| D4 | UI sub-painel em `Discord.jsx` |
+| D5 | Extracção α — core para `services/lobby_sync.py` |
+| D6 | Tabela `lobby_processing_log` (β) criada |
+| D7 | Reusar `tournament_resolver.resolve_tournament_number` |
+| D8 | Sem log da Vision para casos sem `#lobbys` |
+
+**Backoffice import:**
+
+| # | Decisão |
+|---|---|
+| D1 | Naming `/api/tournament-results/import` |
+| D2 | Hardcoded `GGPoker` (param ignorado) |
+| D3 | Tolerância 0.05 vanilla / 2% PKO relativa |
+| D4 | Cap 20 imagens / 50 em zip |
+| D5 | UI inline (não modal) |
+| D6 | Source `backoffice_vision:<filename>` |
+| D7 | Reusar resolver TIER 0 |
+| D8 | NÃO registar em `lobby_processing_log` |
+| D9 | Refactor `detect_image_mime` → `services/image_utils.py` |
+| D10 | Scope vanilla + PKO; Mystery fora |
+| D11 | Precedência `manual > backoffice > lobby` |
+| D12 | Mystery ratio mantém `0.33` (tech debt para confirmar) |
+| D13 | Mystery → fail-fast `mystery_unsupported` |
+
+### Smokes validados em campo (pt20)
+
+- **sync-recent** (Commit E): 6 candidatos, 4 successes, 2 falhas (Daily Hyper $80 GG, Vision `json_invalid`). Persistência em `lobby_processing_log` confirmada.
+- **backoffice vanilla** (`af7e3c8`): Daily Hyper $80 tn=283542054, 18 prizes, 7.4s.
+- **backoffice PKO** (`af7e3c8`): Bounty Hunters Deepstack Turbo $88 tn=282721937, 51 prizes, 13.1s.
+
+### Operações ad-hoc pt20
+
+- INSERT manual tn=283542120 (errado, detectado por Web), revertido via `DELETE`+`INSERT` para tn=283542054 (correcto, pool 9420.80, 18 prizes). Soma das prizes bateu **exactamente** ao `prize_pool` do TS. Source: `manual:rui_backoffice_ss_pt20_correction`.
+
+### Tech debts URGENT carry-over (pt19+)
+
+- **Mãos órfãs em massa** (reproducer: HIGHROLLER €250 WINAMAX, 27 mãos `#icm-pko` sem villains em `hand_villains`). Não atacado em pt20. Hipótese: pre-condição `has_cards ∨ has_vpip` muito restritiva para Hyper.
+
+### Tech debts FASE 3 carry-over
+
+- **#FASE-3-MINIPC** (Beelink GTR5 watcher HRC 24/7). Dependência: setup hardware operacional pelo Rui.
+
+---
+
 ## Estado actual (11 Maio 2026 — pós-pt19, FASE A + FASE B fechadas)
 
 Sessão pt19 fechada. **FASE A pipeline lobbys fechada em prod** (3 commits A/B/C resolvem G1/G2/G3 de pt18 + refactor terminológico). **FASE B Tournament Summaries fechada em prod** (B1 import + B1.x parser extendido + B2 TIER 0 + B2.1 sem janela com discriminantes Vision). **Backfill GTw → pos-nko** aplicado a 25 mãos em prod (0 GG, 0 overlap). 11 commits totais, HEAD `a4a9595`. Detalhe completo em `docs/JOURNAL_2026-05-11-pt19.md`.

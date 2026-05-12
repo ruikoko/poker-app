@@ -27,6 +27,7 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [2.10 `tournament_format` / `tournament_name` / `tournament_number` / `buy_in`](#210-tournament_format--tournament_name--tournament_number--buy_in)  *(adicionado ao índice)*
   - [2.11 `hand_attachments`](#211-hand_attachments)  *(adicionado pós-Bucket 1)*
   - [2.12 `tournament_summaries`](#212-tournament_summaries)  *(adicionado pós-FASE B pt19)*
+  - [2.13 `lobby_processing_log`](#213-lobby_processing_log)  *(adicionado pós-Commit E pt20)*
 - [3. Estado / marcação de entries](#3-estado--marcação-de-entries)
   - [3.1 `entry_type`](#31-entry_type)
   - [3.2 `source`](#32-source)
@@ -1737,6 +1738,90 @@ PRIMARY KEY (site, tournament_number)
 - *"Posso usar os 12 campos novos (B1.x) para outras coisas além do resolver?"* → Sim. `tournament_format`, `tournament_pko_ratio`, `tournament_modifiers`, etc. são potencialmente úteis para IRE (cross-check do ratio actual vs hardcoded em W3cray) e para enriquecimento de `hands` (backfill de `tournament_format` quando ausente). Não consumidores ainda.
 
 **Cross-references:** [`tournament_format / tournament_name / tournament_number / buy_in`](#210-tournament_format--tournament_name--tournament_number--buy_in), [`hm3_tags`](#23-hm3_tags) (não há relação directa, mas ambos vivem em `hands`/`tournament_summaries`), `lobby_vision.apply_ratio_lookup` (consumidor partilhado).
+
+---
+
+### 2.13 `lobby_processing_log`
+
+> **Nota:** entrada inserida em pt20 (12 Mai 2026, Commit E `5465b32`).
+
+**Em linguagem simples:** tabela onde guardamos uma linha por cada SS de lobby que o bot Discord tentou processar — sucessos e falhas — para que falhas fiquem em BD em vez de se perderem nos logs Railway quando há redeploy.
+
+**O que é (humano):** antes da pt20, o handler `_handle_lobby_message` em `discord_bot.py` chamava Vision + resolver + upsert silenciosamente. Quando algo falhava (`json_invalid`, `tm_not_found`, etc.), o único rasto era um `[lobby] FAIL <reason>` nos logs Railway — que são apagados quando há redeploy. A primeira evidência prática surgiu na noite de 11-Mai pt19, quando 3/4 SSs do Rui falharam e o diagnóstico só foi possível via `railway logs <deployment_id>` do deployment antigo (com IDs lookup-able).
+
+A tabela `lobby_processing_log` (Commit E) resolve isso: cada tentativa do handler real-time **e** do endpoint `sync-recent` faz UPSERT por `discord_message_id`, incrementando `attempt_count` em conflict. Falhas BD do próprio log são defensivas (`logger.error`, não partem o handler).
+
+**Detalhes (técnico):**
+
+| Onde é produzido | Função |
+|---|---|
+| `backend/app/services/lobby_sync.py:_upsert_lobby_log` (`5465b32`) | UPSERT por `discord_message_id`. Chamado por `process_lobby_message` em todos os outcomes (sucesso + 8 razões de falha). Tolerante a falhas BD. |
+| `backend/app/services/lobby_sync.py:ensure_lobby_processing_log_schema` | Idempotente. Chamada no lifespan startup do FastAPI. |
+
+| Onde é consumido | Função |
+|---|---|
+| `backend/app/services/lobby_sync.py:gather_candidates` | Cruza `channel.history(#lobbys)` com `lobby_processing_log` para identificar candidatos a re-processar. Skipa rows com `result='success'` (excepto se `retry_success=true`). |
+| `backend/app/services/lobby_sync.py:run_sync` | Lê `attempt_count` e `attempted_at` para enriquecer cada falha na response do endpoint `POST /api/lobbys/sync-recent`. |
+
+**Schema** (`ensure_lobby_processing_log_schema`):
+
+```sql
+discord_message_id  TEXT PRIMARY KEY
+channel_id          TEXT
+attempted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+attempt_count       INTEGER NOT NULL DEFAULT 1
+result              TEXT NOT NULL   -- 8 valores válidos (ver lista abaixo)
+reason_detail       TEXT
+site                TEXT
+tournament_name     TEXT
+tournament_number   TEXT
+vision_json         JSONB
+posted_at           TIMESTAMPTZ
+```
+
+Índices: `idx_lobby_log_attempted_at` (`attempted_at DESC`), `idx_lobby_log_result` (`result`).
+
+| Valor `result` | Significado |
+|---|---|
+| `success` | Pipeline completo: Vision OK → resolver match → upsert `tournament_payouts` OK. |
+| `vision_failed` | Anthropic API erro/timeout/SDK ausente. |
+| `json_invalid` | Vision devolveu JSON malformado, sem `prizes`, ou sem `tournament_name`. |
+| `site_undetected` | Vision devolveu `site=null` ou site não em `('GGPoker','PokerStars','Winamax')`. |
+| `tm_not_found` | Resolver devolveu `(None, [])` — 0 candidatos em todos os tiers. |
+| `tm_ambiguous` | Resolver devolveu `(None, [c1, c2, …])` — 2+ candidatos. |
+| `no_attachments` | Mensagem sem imagens válidas no `#lobbys`. |
+| `pre_2026_skip` | Mensagem com `created_at < 2026-01-01` (filtro `is_pre_2026`). **NÃO** persiste — é o único outcome sem `_upsert_lobby_log`. |
+| `upsert_error` | `payouts_service.upsert_payout` falhou (raro). |
+
+**Comportamento esperado quando muda:**
+
+- INSERT (1ª tentativa de um msg_id): row nova com `attempt_count=1`.
+- UPSERT (re-tentativa): `attempt_count++`, `result` actualiza para o último outcome, `vision_json` actualiza só se novo é não-NULL (COALESCE).
+- Endpoint `sync-recent` com `retry_success=true`: re-corre Vision mesmo em sucessos prévios; `attempt_count` cresce, último `result` mantém `success` se voltou a funcionar.
+
+**Armadilhas conhecidas:**
+
+- **`_upsert_lobby_log` engole falhas BD silenciosamente** (try/except). Justificação: handler real-time não deve partir se Postgres estiver indisponível momentaneamente. Tradeoff: falhas a logar não são visíveis ao caller — só nos logs Railway via `logger.error`. Se padrão "log silencioso" se repetir em prod, considerar adicionar métrica de monitoring.
+- **Tabela cresce indefinidamente.** Não há TTL nem janela de rotação. Para 10 SSs/dia, ~3650 rows/ano — tamanho irrelevante. Se Rui começar a postar centenas por dia, considerar pruning por `attempted_at < NOW() - INTERVAL '90 days'`.
+- **`pre_2026_skip` não persiste** — é o único path no `process_lobby_message` que retorna sem chamar `_upsert_lobby_log`. Consistente com o gate `is_pre_2026` em todos os outros pipelines.
+
+**Quando alguém pergunta...**
+
+- *"O bot processou esta SS?"* → `SELECT * FROM lobby_processing_log WHERE discord_message_id = '<msg_id>';`. Se ausente, **nunca foi processada** (bot offline na altura, ou foi pré-deploy do Commit E).
+- *"Quantas falhas de cada tipo nos últimos 7 dias?"* → `SELECT result, COUNT(*) FROM lobby_processing_log WHERE attempted_at > NOW() - INTERVAL '7 days' GROUP BY result;`.
+- *"Vale a pena rodar `sync-recent` retroactivo?"* → Se há gap no `attempt_count` (ex: msg_id existe em Discord mas não em `lobby_processing_log`), sim — `gather_candidates` apanha esses gaps.
+
+**Cross-references:** [§2.12 `tournament_summaries`](#212-tournament_summaries) (o resolver TIER 0 que o `process_lobby_message` invoca), `services/lobby_vision.py` (Vision + parse), `services/payouts_service.py` (UPSERT final). Endpoint `POST /api/lobbys/sync-recent` em `backend/app/routers/lobbys.py`.
+
+---
+
+### Módulos novos pt20
+
+Pequenas adições não-conceito (apenas referência):
+
+- **`backend/app/services/image_utils.py`** (NEW pt20, `af7e3c8`) — `detect_image_mime(image_bytes) -> str`. Magic-number detection. Extraído de `discord_bot._detect_image_mime` (mantém alias `_detect_image_mime = detect_image_mime` para backward compat). Consumido em 3 sítios: `discord_bot._handle_lobby_message` (via alias), `services/lobby_sync.run_sync`, `routers/tournament_results._process_one`.
+- **`backend/app/services/tournament_result_vision.py`** (NEW pt20, `af7e3c8`) — prompt + Anthropic call + `parse_and_validate_backoffice_json` + `build_backoffice_payouts_blob`. Schema com `is_pko` flag + prizes dual-format `{prize, bounty_won}`.
+- **`backend/app/routers/tournament_results.py`** (NEW pt20, `af7e3c8`) — endpoint `POST /api/tournament-results/import`. Multipart (1 imagem ou .zip). Cap 20 imagens / 50 em zip. 9 outcomes (`success`, `missing_ts`, `ambiguous_ts`, `vision_failed`, `validation_failed`, `mystery_unsupported`, `skipped_existing`, `upsert_error`, `missing_pko_ratio`). Mystery KO fail-fast (D13 pt20).
 
 ---
 

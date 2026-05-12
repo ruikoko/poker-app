@@ -150,6 +150,30 @@ Se o Code não tem certeza de em que categoria a mudança cai, pede
 OK. O custo de uma pergunta extra é baixo; o custo de um deploy
 prematuro é alto.
 
+### Refinamentos defensivos (pt20 — exemplos validados)
+
+Web reforçou em pt20 que **refinamentos defensivos** caem em "decide
+sozinho e flagga no fim". Exemplos concretos validados:
+
+- **Fail-fast para casos fora de scope** (ex: `mystery_unsupported` no
+  endpoint backoffice quando o TS tem `tournament_format='KO'`). Em vez de
+  tentar processar com dados não confirmados, devolve outcome explícito +
+  erro útil. Flaggado no resumo final.
+- **Fixture programaticamente derivado** em vez de hardcoded quando
+  validação interna apanha drift matemático (ex: `_PKO_POOL = round(sum *
+  2, 2)`). Decidido durante PASSO 5 após primeiro pytest run; flaggado.
+- **Defensividade em side-effects auxiliares** (ex: `_upsert_lobby_log`
+  com try/except em `get_conn` para não partir handler real-time se BD
+  ficar indisponível). Decidido após 5 tests existentes partirem com
+  `Connection refused`; flaggado.
+- **Imports por módulo** (`from app.services import X` vs `from
+  app.services.X import f`) para preservar patches em tests existentes.
+  Decisão técnica documentada no docstring dos serviços novos.
+
+Em todos estes casos, o Code aplicou o refinamento, completou os PASSOS,
+e listou as decisões no resumo final do passo para o Web validar em
+revisão batched. Padrão a manter.
+
 ## Quando este modelo NÃO se aplica
 
 - Sessões puramente de pensamento de produto (sem mexer em código):

@@ -297,3 +297,42 @@ Refactor categoria (a)(b)(c) em pt19 (commit `440b248`).
 ### Caption manual `#<numero>`
 
 No canal `#lobbys` o Rui pode bypassar o resolver escrevendo `#12345678` ou `TM12345678` no texto da mensagem com a SS. A regex aceita prefixos `#`, `TM`/`tm`, `TN`/`tn`, ou número sozinho (8-12 dígitos, lookarounds `(?<!\d)`/`(?!\d)`).
+
+---
+
+## 12. Pipelines de payouts (pt20+)
+
+Adicionado em pt20 (Commit E + endpoint backoffice).
+
+### 12.1. Três caminhos para `tournament_payouts`
+
+| Caminho | Como entra | `source` na row |
+|---|---|---|
+| **Manual** (raro) | `POST /api/payouts` ou INSERT directo | `manual:<rotulo>` (ex: `manual:rui_backoffice_ss_pt20_correction`) |
+| **Lobby Vision** (real-time + sync) | SS no `#lobbys` Discord → Vision → resolver TIER 0/1/2 | `discord_lobby_vision:<msg_id>` |
+| **Backoffice import** (pt20) | Upload imagem do backoffice GG via `Tournaments.jsx` → Vision → resolver TIER 0 | `backoffice_vision:<filename>` |
+
+### 12.2. Precedência (D11 pt20)
+
+Quando uma row já existe em `tournament_payouts` para um `(site, tn)`:
+
+- `manual:` **nunca** é sobrescrito automaticamente (intervenção humana explícita).
+- `backoffice_vision:` **sobrescreve** `discord_lobby_vision:` (backoffice tem dados mais completos: distribuição de prizes por posição vs lobby SS que muitas vezes só mostra top-N visível).
+- `skip_existing=true` no endpoint backoffice skipa apenas rows com source `backoffice_vision:` ou `manual:` (não skipa lobby).
+
+**Limitação pt20:** o lobby pipeline (`process_lobby_message`) hoje não verifica a precedência ao fazer UPSERT — pode sobrescrever uma row `backoffice_vision:` com `discord_lobby_vision:` (regressão de qualidade). Tech debt `#SYNC-RECENT-RESPECT-MANUAL`.
+
+### 12.3. Mystery KO actualmente unsupported no backoffice
+
+O endpoint `/api/tournament-results/import` devolve `result='mystery_unsupported'` quando o TS resolvido tem `tournament_format='KO'`. Justificação:
+
+- Sample real de blob HRC para Mystery não está disponível para confirmar o `bountyType` aceite pelo HRC Structure Manager (`"KO"` vs mapear para `"PKO"` com factor especial).
+- Web/Rui escolheram em pt20 entregar o pipeline vanilla+PKO e deixar Mystery para commit subsequente (D13).
+
+Para popular `tournament_payouts` de um torneio Mystery hoje: caminho manual (lobby SS no `#lobbys` se ainda decorrer, ou `POST /api/payouts` directo). Tech debt: **`#BACKOFFICE-MYSTERY`**.
+
+### 12.4. Buraco TS→payouts (resolvido em pt20)
+
+Importar um `.txt` TS popula `tournament_summaries` (metadata pós-jogo) mas **não** `tournament_payouts` (não há distribuição de prizes por posição no `.txt`). Regra (pt20): para o `/api/queue/hrc` poder incluir as mãos de um torneio no zip para o HRC watcher, é necessário **um dos 3 caminhos** acima popular `tournament_payouts` independentemente do TS.
+
+Caso Rui peça automação no futuro (derivar payouts via ICM a partir de TS), tech debt `#TS-AUTO-PAYOUTS-ICM` está registado — não implementado por defeito (ICM é estimativa; backoffice é literal).

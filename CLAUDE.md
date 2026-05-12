@@ -307,4 +307,25 @@ Rui descontinuou tag HM3 `GTw`. 25 mãos PS/Winamax/WPN migradas em prod (0 GG, 
 
 **Importante:** mudanças em `DISCORD_LOBBY_*` precisam de redeploy (`railway redeploy -s poker-app` ou push trivial) — env vars são lidas no module load, não em runtime.
 
-Última sessão fechada: pt19 (9 + 11 Maio 2026 — FASE A fechada (A/B/C/refactor), FASE B fechada (B1/B1.x/B2/B2.1), backfill GTw → pos-nko aplicado em prod. 11 commits, HEAD `a4a9595`).
+## pt20 — sync-recent + backoffice import (12 Maio 2026)
+
+2 commits feature em main:
+
+- **Commit E** (`5465b32`) — `POST /api/lobbys/sync-recent` + tabela nova `lobby_processing_log` (PK `discord_message_id`, regista cada tentativa do handler real-time + sync). Refactor: lógica core de `_handle_lobby_message` extraída para `services/lobby_sync.py:process_lobby_message`. Sub-painel UI em `Discord.jsx`. Suite 122→138.
+- **Backoffice import** (`af7e3c8`) — `POST /api/tournament-results/import` para upload de SSs do backoffice GG (página de resultados pós-jogo). Vanilla + PKO; Mystery KO → `mystery_unsupported` fail-fast. Cruza com `tournament_summaries` via TIER 0 resolver (prize_pool+total_players). Refactor: `detect_image_mime` extraído para `services/image_utils.py`. Suite 138→154.
+
+**6 fontes de input** (era 5 pós-pt19, +1 com backoffice import):
+
+| Fonte | Como entra | Marca/destino |
+|---|---|---|
+| **HM3 (.bat)** | Script .bat lê BD do HoldemManager3 e faz POST | `hm3_tags` |
+| **Discord (canais estudo)** | Bot puxa mensagens de canais monitorizados | `discord_tags` |
+| **Discord (#lobbys)** | Real-time + sync-recent batch | `tournament_payouts` + `lobby_processing_log` |
+| **Upload manual SS** | Drag-and-drop de screenshot na UI | `origin = 'ss_upload'` |
+| **Import ZIP/TXT HH** | Upload de ficheiro HH bruto | `origin = 'hh_import'` |
+| **Tournament Summaries GG** | Upload `.txt`/`.zip` em `Tournaments.jsx` | `tournament_summaries` |
+| **Tournament Results backoffice GG** | Upload `.png/.jpg/.zip` em `Tournaments.jsx` | `tournament_payouts` (cruza com TS por pool+players) |
+
+**Precedência `tournament_payouts.source`:** `manual:` > `backoffice_vision:` > `discord_lobby_vision:`. UPSERT sempre permitido em real-time; `skip_existing` opt-in skipa apenas backoffice/manual prévios.
+
+Última sessão fechada: pt20 (12 Maio 2026 — sync-recent + backoffice import. 2 commits, HEAD `af7e3c8`. 5 tech debts novos, 2 fechados).
