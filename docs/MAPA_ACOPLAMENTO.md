@@ -28,6 +28,7 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [2.11 `hand_attachments`](#211-hand_attachments)  *(adicionado pós-Bucket 1)*
   - [2.12 `tournament_summaries`](#212-tournament_summaries)  *(adicionado pós-FASE B pt19)*
   - [2.13 `lobby_processing_log`](#213-lobby_processing_log)  *(adicionado pós-Commit E pt20)*
+  - [2.14 `hrc_jobs`](#214-hrc_jobs)  *(adicionado em pt21 — G3 Fase 3 HRC)*
 - [3. Estado / marcação de entries](#3-estado--marcação-de-entries)
   - [3.1 `entry_type`](#31-entry_type)
   - [3.2 `source`](#32-source)
@@ -1812,6 +1813,75 @@ posted_at           TIMESTAMPTZ
 - *"Vale a pena rodar `sync-recent` retroactivo?"* → Se há gap no `attempt_count` (ex: msg_id existe em Discord mas não em `lobby_processing_log`), sim — `gather_candidates` apanha esses gaps.
 
 **Cross-references:** [§2.12 `tournament_summaries`](#212-tournament_summaries) (o resolver TIER 0 que o `process_lobby_message` invoca), `services/lobby_vision.py` (Vision + parse), `services/payouts_service.py` (UPSERT final). Endpoint `POST /api/lobbys/sync-recent` em `backend/app/routers/lobbys.py`.
+
+---
+
+### 2.14 `hrc_jobs`
+
+> **Nota:** entrada inserida em pt21 (Mai 2026), gap G3 do plano Fase 3 HRC.
+
+**Em linguagem simples:** tabela onde guardamos uma linha por cada mão que enviámos ao watcher HRC no Beelink — estado actual (submetida / a correr / pronta / falhou / expirou), zip dos resultados, e metadados. Permite à UI mostrar o estado por mão e ao watcher reportar resultados via API.
+
+**O que é (humano):** a Fase 3 HRC alimenta um Beelink local com mãos elegíveis (pipeline `GET /api/queue/hrc`). O watcher corre HRC Beta sobre cada mão e devolve um zip de resultados. Sem `hrc_jobs`, o estado de cada mão seria opaco — não saberíamos se uma mão já foi enviada, está a ser processada, ou falhou. Esta tabela é o registo persistente que cose: queue export → watcher → feedback → UI.
+
+G3 cria apenas o schema. Os caminhos de escrita (G2 — `POST /api/queue/hrc/results`) e leitura (G6 — badge na UI) chegam em commits seguintes.
+
+**Detalhes (técnico):**
+
+| Onde é produzido | Função |
+|---|---|
+| `backend/app/services/hrc_jobs.py:ensure_hrc_jobs_schema` (pt21) | Idempotente. Chamada no lifespan startup do FastAPI. |
+| _(G2 — pt21+)_ `POST /api/queue/hrc/results` | UPSERT por `hand_db_id` (ON CONFLICT (hand_db_id) DO UPDATE) com payload do watcher. |
+
+| Onde é consumido | Função |
+|---|---|
+| _(G6 — pt21+)_ Frontend `HandRow` badge | Lê `status` por `hand_db_id` para mostrar ✓ / ⏳ / ❌ / ` `. |
+
+**Schema** (`ensure_hrc_jobs_schema`):
+
+```sql
+id              BIGSERIAL PRIMARY KEY
+hand_db_id      INTEGER NOT NULL REFERENCES hands(id) ON DELETE CASCADE
+status          TEXT NOT NULL DEFAULT 'submitted'
+                CHECK (status IN ('submitted','running','done','failed','expired'))
+submitted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+completed_at    TIMESTAMPTZ
+result_zip      BYTEA
+result_zip_size INTEGER
+meta_json       JSONB
+error           TEXT
+UNIQUE (hand_db_id)
+```
+
+Índices: `idx_hrc_jobs_status_submitted_at` (`status, submitted_at`).
+
+| Valor `status` | Significado |
+|---|---|
+| `submitted` | UI/backend inseriu a row; watcher ainda não pegou. Default. |
+| `running` | Watcher iniciou processamento (opcional — pode saltar directo para `done`). |
+| `done` | Watcher devolveu zip com sucesso; `result_zip` e `completed_at` populados. |
+| `failed` | Watcher tentou e falhou (HRC error, malformed input, etc.); `error` populado. |
+| `expired` | TTL excedido sem feedback (decisão de produto futura — manualmente ou por job). |
+
+**Comportamento esperado quando muda:**
+
+- INSERT (1ª submissão): row nova com `status='submitted'`, `submitted_at=NOW()`.
+- UPSERT via G2: actualiza `status`, `completed_at`, `result_zip`, `result_zip_size`, `meta_json`, `error`. `submitted_at` preservado.
+- DELETE em `hands` (raro): cascade apaga jobs dessa mão. Justificação: `hrc_jobs` é derivado; sem a mão, o job não tem semântica.
+
+**Armadilhas conhecidas:**
+
+- **`UNIQUE (hand_db_id)`** significa **1 job por mão**. Se a regra de produto vier a exigir histórico de re-attempts, criar tabela auxiliar `hrc_job_attempts (id BIGSERIAL, hrc_job_id BIGINT FK, attempted_at, result_zip, …)`. Tech debt `#HRC-JOBS-HISTORY-SUBSEQUENT` aberto em pt21.
+- **`result_zip BYTEA`** cresce indefinidamente em BD. Para volumes pequenos (Rui ~10-50 mãos/dia) é aceitável. Tech debt `#HRC-RESULT-STORAGE-MIGRATION` se volume exigir migração para storage externo.
+- **CHECK constraint em `status`** — se um dia adicionarmos um valor novo, é preciso `ALTER TABLE … DROP CONSTRAINT + ADD CONSTRAINT` (`ensure_*` actual usa CHECK inline na coluna, herdado da criação; PostgreSQL gera nome auto). Padrão coerente com `study_state` constraint que tem helper dedicado (`ensure_study_state_check_constraint`); se a frequência de mudança for alta, criar helper similar.
+
+**Quando alguém pergunta...**
+
+- *"Esta mão foi para o HRC?"* → `SELECT status, submitted_at, completed_at, error FROM hrc_jobs WHERE hand_db_id = <id>;`. Se ausente, nunca foi submetida.
+- *"Quantas mãos estão em queue agora?"* → `SELECT COUNT(*) FROM hrc_jobs WHERE status IN ('submitted','running');`. Índice cobre.
+- *"Quanto espaço ocupam os zips?"* → `SELECT pg_size_pretty(SUM(result_zip_size)::bigint) FROM hrc_jobs WHERE result_zip_size IS NOT NULL;`.
+
+**Cross-references:** `tournament_payouts` (queue só inclui mãos com payouts), `services/queue_export.py` (gerador do zip de queue), [`study_state`](#33-status) (HRC resolver ≠ Rui estudar — manter manual conforme D5 do plano pt21).
 
 ---
 

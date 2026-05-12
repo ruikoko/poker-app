@@ -204,3 +204,21 @@ ADD COLUMN IF NOT EXISTS confidence_level TEXT CHECK (
 
 CREATE INDEX IF NOT EXISTS idx_hands_entry_id ON hands(entry_id);
 CREATE INDEX IF NOT EXISTS idx_hands_study_state ON hands(study_state);
+
+-- pt21 G3: tabela hrc_jobs (jobs do watcher HRC no Beelink)
+CREATE TABLE IF NOT EXISTS hrc_jobs (
+    id              BIGSERIAL PRIMARY KEY,
+    hand_db_id      INTEGER NOT NULL REFERENCES hands(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL DEFAULT 'submitted'
+                    CHECK (status IN ('submitted','running','done','failed','expired')),
+    submitted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ,
+    result_zip      BYTEA,
+    result_zip_size INTEGER,
+    meta_json       JSONB,
+    error           TEXT,
+    UNIQUE (hand_db_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hrc_jobs_status_submitted_at
+    ON hrc_jobs (status, submitted_at);
