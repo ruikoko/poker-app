@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { mtt, tournamentSummaries } from '../api/client'
+import { mtt, tournamentSummaries, tournamentResults } from '../api/client'
 import HandRow from '../components/HandRow'
 import TournamentHeader from '../components/TournamentHeader'
 
@@ -540,6 +540,8 @@ export default function TournamentsPage() {
   // TS import (FASE B B1)
   const [tsImporting, setTsImporting] = useState(false)
   const [tsResult, setTsResult] = useState(null)
+  const [trImporting, setTrImporting] = useState(false)
+  const [trResult, setTrResult] = useState(null)
 
   // ── Estado lazy (aba Sem SS) ─────────────────────────────────────────────
   const [dateIndex, setDateIndex] = useState({ dates: [], total_dates: 0, total_hands: 0, has_more: false })
@@ -716,6 +718,22 @@ export default function TournamentsPage() {
     }
   }
 
+  async function handleImportTR(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setTrImporting(true)
+    setTrResult(null)
+    try {
+      const res = await tournamentResults.upload(file)
+      setTrResult(res)
+    } catch (err) {
+      setTrResult({ error: err.message })
+    } finally {
+      setTrImporting(false)
+      e.target.value = ''
+    }
+  }
+
   return (
     <div style={{ padding: '24px 32px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -723,15 +741,26 @@ export default function TournamentsPage() {
           <h1 style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', marginBottom: 4 }}>MTT</h1>
           <p style={{ fontSize: 13, color: '#64748b' }}>Mãos de torneios para estudo</p>
         </div>
-        <label style={{
-          padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-          border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)',
-          color: '#818cf8', cursor: 'pointer', whiteSpace: 'nowrap',
-        }}>
-          {tsImporting ? 'A importar…' : '↑ Importar Tournament Summaries (GG)'}
-          <input type="file" accept=".txt,.zip" onChange={handleImportTS}
-                 style={{ display: 'none' }} disabled={tsImporting} />
-        </label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <label style={{
+            padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+            border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)',
+            color: '#818cf8', cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>
+            {tsImporting ? 'A importar…' : '↑ Importar Tournament Summaries (GG)'}
+            <input type="file" accept=".txt,.zip" onChange={handleImportTS}
+                   style={{ display: 'none' }} disabled={tsImporting} />
+          </label>
+          <label style={{
+            padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+            border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)',
+            color: '#4ade80', cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>
+            {trImporting ? 'A importar…' : '↑ Importar Tournament Results (Backoffice GG, vanilla+PKO)'}
+            <input type="file" accept=".png,.jpg,.jpeg,.webp,.zip" onChange={handleImportTR}
+                   style={{ display: 'none' }} disabled={trImporting} />
+          </label>
+        </div>
       </div>
       {tsResult && (
         <div style={{
@@ -750,6 +779,56 @@ export default function TournamentsPage() {
               {tsResult.failed?.length > 0 && (
                 <> · <strong style={{ color: '#ef4444' }}>{tsResult.failed.length}</strong> falharam</>
               )}
+            </>
+          )}
+        </div>
+      )}
+      {trResult && (
+        <div style={{
+          marginBottom: 16, padding: '10px 12px', borderRadius: 6, fontSize: 12,
+          background: trResult.error ? 'rgba(239,68,68,0.05)' : 'rgba(34,197,94,0.05)',
+          border: `1px solid ${trResult.error ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)'}`,
+          color: '#94a3b8',
+        }}>
+          {trResult.error ? (
+            <span style={{ color: '#ef4444' }}>{trResult.error}</span>
+          ) : (
+            <>
+              <div style={{ marginBottom: 6 }}>
+                <strong style={{ color: '#22c55e' }}>{trResult.summary?.success || 0}</strong> sucessos ·{' '}
+                <strong style={{ color: '#ef4444' }}>{trResult.summary?.missing_ts || 0}</strong> missing_ts ·{' '}
+                <strong style={{ color: '#f59e0b' }}>{trResult.summary?.ambiguous_ts || 0}</strong> ambíguos ·{' '}
+                <strong style={{ color: '#f97316' }}>{trResult.summary?.validation_failed || 0}</strong> validation ·{' '}
+                <strong style={{ color: '#94a3b8' }}>{trResult.summary?.mystery_unsupported || 0}</strong> mystery ·{' '}
+                <strong style={{ color: '#94a3b8' }}>{(trResult.duration_seconds || 0).toFixed(1)}s</strong>
+              </div>
+              <details>
+                <summary style={{ cursor: 'pointer', color: '#94a3b8' }}>
+                  Por ficheiro ({trResult.results?.length || 0})
+                </summary>
+                <table style={{ marginTop: 6, fontSize: 11, width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', textAlign: 'left' }}>
+                      <th style={{ padding: '2px 6px' }}>ficheiro</th>
+                      <th style={{ padding: '2px 6px' }}>result</th>
+                      <th style={{ padding: '2px 6px' }}>tn</th>
+                      <th style={{ padding: '2px 6px' }}>prizes</th>
+                      <th style={{ padding: '2px 6px' }}>erro</th>
+                    </tr>
+                  </thead>
+                  <tbody style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>
+                    {(trResult.results || []).map((r, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: '2px 6px' }}>{r.filename}</td>
+                        <td style={{ padding: '2px 6px' }}>{r.result}</td>
+                        <td style={{ padding: '2px 6px' }}>{r.tournament_number || '—'}</td>
+                        <td style={{ padding: '2px 6px' }}>{r.n_prizes || 0}</td>
+                        <td style={{ padding: '2px 6px', color: '#94a3b8' }}>{r.error || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
             </>
           )}
         </div>

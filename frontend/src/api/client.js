@@ -166,6 +166,24 @@ export const lobbys = {
   syncRecent: (body = {}) => req('POST', '/lobbys/sync-recent', body),
 }
 
+// ── Tournament Results (backoffice GG SS) ────────────────────────────────
+export const tournamentResults = {
+  upload: (file, opts = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts.dry_run) form.append('dry_run', 'true')
+    if (opts.skip_existing) form.append('skip_existing', 'true')
+    if (opts.vision_throttle_seconds != null) {
+      form.append('vision_throttle_seconds', opts.vision_throttle_seconds)
+    }
+    return fetch(`${BASE}/tournament-results/import`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(r => r.json())
+  },
+}
+
 // ── Tournament Summaries (GG TS files) ────────────────────────────────────
 export const tournamentSummaries = {
   upload: (file) => {

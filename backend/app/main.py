@@ -38,6 +38,7 @@ from app.routers.tournament_summaries import (
 from app.routers.queue import router as queue_router
 from app.routers.lobbys import router as lobbys_router
 from app.services.lobby_sync import ensure_lobby_processing_log_schema
+from app.routers.tournament_results import router as tournament_results_router
 
 load_dotenv()
 
@@ -292,6 +293,7 @@ app.include_router(payouts_router)
 app.include_router(tournament_summaries_router)
 app.include_router(queue_router)
 app.include_router(lobbys_router)
+app.include_router(tournament_results_router)
 
 # Serve uploaded screenshots as static files
 import os

@@ -422,8 +422,9 @@ async def run_sync(
             })
             continue
 
-        from app.discord_bot import _detect_image_mime, _extract_tn_from_caption
-        mime = _detect_image_mime(content_bytes)
+        from app.services.image_utils import detect_image_mime
+        from app.discord_bot import _extract_tn_from_caption
+        mime = detect_image_mime(content_bytes)
         tn_override = _extract_tn_from_caption(msg.content or "")
 
         try:
