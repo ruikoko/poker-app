@@ -328,6 +328,37 @@ Rui descontinuou tag HM3 `GTw`. 25 mãos PS/Winamax/WPN migradas em prod (0 GG, 
 
 **Precedência `tournament_payouts.source`:** `manual:` > `backoffice_vision:` > `discord_lobby_vision:`. UPSERT sempre permitido em real-time; `skip_existing` opt-in skipa apenas backoffice/manual prévios.
 
-Última sessão fechada: pt20 (12 Maio 2026 — sync-recent + backoffice import. 2 commits, HEAD `af7e3c8`. 5 tech debts novos, 2 fechados).
+## pt21 — Backend Fase 3 HRC (12 Maio 2026)
 
-Próxima sessão: **pt21 — Fase 3 HRC arranque + Beelink prep.** Plano detalhado em `docs/PLAN_PT21_HRC_FASE3.md`: 6 gaps identificados (tabela `hrc_jobs`, auth API key, `POST /api/queue/hrc/results`, UI export+badge, adapter zip→pastas no Beelink), 4 fases ordenadas (Beelink limpo pelo Rui → backend → backfill TSs → UI+smoke), 5 decisões pendentes para Web/Rui antes do arranque. Pré-requisito operacional: Beelink GTR5 limpo (35 GB livres actuais, McAfee instalado).
+3 commits feature em main fecham backend Fase B do plano HRC:
+
+- **G3** (`5b9c10a`) — tabela `hrc_jobs` (schema). `ensure_hrc_jobs_schema()` no lifespan startup. PK `id BIGSERIAL`, FK `hand_db_id INTEGER REFERENCES hands(id) ON DELETE CASCADE`, `UNIQUE (hand_db_id)`, status CHECK constraint (5 valores: `submitted/running/done/failed/expired`), `result_zip BYTEA` + `result_zip_size INTEGER`, `meta_json JSONB`, índice `(status, submitted_at)`. Sem tests dedicados (opção B — cobertura indirecta via G2). Suite 154→154.
+- **G4** (`764b53e`) — auth dual-path `require_auth_or_api_key` em `app/auth.py`. Aceita cookie OU `Authorization: Bearer <token>` comparado em constant-time com env var `HRC_WATCHER_API_KEY`. Aplicado em `GET /api/queue/hrc` (futuro `POST /results` em G2). Bearer inválido NÃO faz fallback para cookie. `require_auth` legado mantido para cookie-only nos outros 21 routers. Suite 154→161 (+7 cases).
+- **G2** (`2fa1f60`) — `POST /api/queue/hrc/results` multipart. Pipeline: lookup `hand_id` (404 ausente), validar zip (50 MB cap, parseable, contém `meta.json`), extrair meta server-side, augmentar com `hand_id/received_at/received_from`, UPSERT em `hrc_jobs` por `hand_db_id`. `submitted_at` preservado em UPDATE (semântica "1ª submissão"). Helpers novos em `services/hrc_jobs.py`. Suite 161→172 (+11 cases, todos <0.01s).
+
+**`HRC_WATCHER_API_KEY`** setada em Railway → service `poker-app` → environment `production` pelo Rui (gerada via `python -c "import secrets; print(secrets.token_urlsafe(48))"`, colada directamente, sem passar por Code/Web). Smoke validado: GET com Bearer → 200, size=279910 bytes (zip elegível). POST sem auth → 401 (rota activa); POST com Bearer + hand_id inexistente → 404 (pipeline completo).
+
+### Variáveis de ambiente FASE 3 (Railway service `poker-app`)
+
+| Var | Default | Descrição |
+|---|---|---|
+| `HRC_WATCHER_API_KEY` | (obrigatório para watcher) | Token URL-safe 48 bytes. Aceite em paralelo ao cookie em `require_auth_or_api_key`. Adicionada em pt21. Usada por endpoints `/api/queue/hrc` (GET) e `/api/queue/hrc/results` (POST). Rotação = mudar env var + redeploy. |
+
+### Fontes de input (era 6 pós-pt20; +1 com results do watcher = 7 entradas + 1 saída-com-retorno)
+
+A 8ª linha abaixo é o **único caminho** que **devolve dados ao backend** (em vez de só entrar):
+
+| Fonte | Como entra | Marca/destino |
+|---|---|---|
+| **HM3 (.bat)** | Script .bat lê BD do HoldemManager3 e faz POST | `hm3_tags` |
+| **Discord (canais estudo)** | Bot puxa mensagens de canais monitorizados | `discord_tags` |
+| **Discord (#lobbys)** | Real-time + sync-recent batch | `tournament_payouts` + `lobby_processing_log` |
+| **Upload manual SS** | Drag-and-drop de screenshot na UI | `origin = 'ss_upload'` |
+| **Import ZIP/TXT HH** | Upload de ficheiro HH bruto | `origin = 'hh_import'` |
+| **Tournament Summaries GG** | Upload `.txt`/`.zip` em `Tournaments.jsx` | `tournament_summaries` |
+| **Tournament Results backoffice GG** | Upload `.png/.jpg/.zip` em `Tournaments.jsx` | `tournament_payouts` |
+| **Watcher HRC (Beelink)** *(pt21)* | `POST /api/queue/hrc/results` com zip Complete Export | `hrc_jobs` |
+
+Última sessão fechada: pt21 (12 Maio 2026 — backend Fase B HRC: G3 + G4 + G2. 3 commits feature, HEAD `2fa1f60` + commit docs. Suite 154→172. 3 tech debts novos. Operacional Beelink: reset nuclear + setup base por Rui em paralelo).
+
+Próxima sessão: **pt22 — Adapter Beelink G1 + UI G5/G6 + smoke real end-to-end.** Plano detalhado em `docs/PLAN_PT22.md`: 6 passos ordenados (validação Beelink → G1 adapter → smoke real → G5 botão exportar → G6 badge → fecho). Pré-requisitos: `C:\hrc\queue\` e `C:\hrc\done\` criadas no Beelink; `hrc_watcher.exe --help` capturado.

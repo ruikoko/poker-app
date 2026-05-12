@@ -28,7 +28,7 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [2.11 `hand_attachments`](#211-hand_attachments)  *(adicionado pós-Bucket 1)*
   - [2.12 `tournament_summaries`](#212-tournament_summaries)  *(adicionado pós-FASE B pt19)*
   - [2.13 `lobby_processing_log`](#213-lobby_processing_log)  *(adicionado pós-Commit E pt20)*
-  - [2.14 `hrc_jobs`](#214-hrc_jobs)  *(adicionado em pt21 — G3 Fase 3 HRC)*
+  - [2.14 `hrc_jobs`](#214-hrc_jobs)  *(pt21 — G3+G2+G4 deployed)*
 - [3. Estado / marcação de entries](#3-estado--marcação-de-entries)
   - [3.1 `entry_type`](#31-entry_type)
   - [3.2 `source`](#32-source)
@@ -1830,12 +1830,14 @@ G3 cria apenas o schema. Os caminhos de escrita (G2 — `POST /api/queue/hrc/res
 
 | Onde é produzido | Função |
 |---|---|
-| `backend/app/services/hrc_jobs.py:ensure_hrc_jobs_schema` (pt21) | Idempotente. Chamada no lifespan startup do FastAPI. |
-| _(G2 — pt21+)_ `POST /api/queue/hrc/results` | UPSERT por `hand_db_id` (ON CONFLICT (hand_db_id) DO UPDATE) com payload do watcher. |
+| `backend/app/services/hrc_jobs.py:ensure_hrc_jobs_schema` (pt21 — `5b9c10a`) | Idempotente. Chamada no lifespan startup do FastAPI. |
+| `backend/app/services/hrc_jobs.py:upsert_hrc_job_result` (pt21 — `2fa1f60`) | UPSERT por `hand_db_id` (ON CONFLICT DO UPDATE). `submitted_at` preservado em UPDATE (semântica "1ª submissão"); `completed_at` actualiza em cada UPSERT. `(xmax = 0) AS inserted` distingue caminho. |
+| `backend/app/routers/queue.py:upload_hrc_result` (pt21 — `2fa1f60`) | Handler de `POST /api/queue/hrc/results` (multipart + query params). Lookup `hand_id → hands.id` (404 ausente), validar zip (50 MB cap, parseable, contém meta.json), extrair meta server-side, augmentar `{hand_id, received_at, received_from}`, chamar `upsert_hrc_job_result`. |
 
 | Onde é consumido | Função |
 |---|---|
-| _(G6 — pt21+)_ Frontend `HandRow` badge | Lê `status` por `hand_db_id` para mostrar ✓ / ⏳ / ❌ / ` `. |
+| `backend/app/services/hrc_jobs.py:extract_meta_from_result_zip` (pt21 — `2fa1f60`) | Helper standalone usado pelo handler. Valida zip parseable + meta.json presente + JSON object. Raise `ValueError` em erro. |
+| _(G6 — pt22+)_ Frontend `HandRow` badge | Lê `status` por `hand_db_id` para mostrar ✓ / ⏳ / ❌ / ` `. |
 
 **Schema** (`ensure_hrc_jobs_schema`):
 
@@ -1862,6 +1864,10 @@ UNIQUE (hand_db_id)
 | `done` | Watcher devolveu zip com sucesso; `result_zip` e `completed_at` populados. |
 | `failed` | Watcher tentou e falhou (HRC error, malformed input, etc.); `error` populado. |
 | `expired` | TTL excedido sem feedback (decisão de produto futura — manualmente ou por job). |
+
+**Endpoint upstream (`GET /api/queue/hrc`):** auth `require_auth_or_api_key` (pt21 — `764b53e`); query params `tags/study_state/played_after/played_before/include_no_payout`; devolve zip com `<hand_id>/hh.txt + payouts.json + manifest.json` (gerado por `services/queue_export.build_queue_zip`).
+
+**Endpoint downstream (`POST /api/queue/hrc/results`):** auth `require_auth_or_api_key`; multipart com `file` + query params `hand_id/status/error`; status só `done`/`failed`; UPSERT por `hand_db_id`. Sem batch (1 zip por request, D-G2-12 pt21).
 
 **Comportamento esperado quando muda:**
 

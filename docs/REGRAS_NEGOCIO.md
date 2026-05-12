@@ -331,6 +331,69 @@ O endpoint `/api/tournament-results/import` devolve `result='mystery_unsupported
 
 Para popular `tournament_payouts` de um torneio Mystery hoje: caminho manual (lobby SS no `#lobbys` se ainda decorrer, ou `POST /api/payouts` directo). Tech debt: **`#BACKOFFICE-MYSTERY`**.
 
+---
+
+## §13. Pipeline HRC end-to-end (pt21)
+
+Resumo da Fase 3 HRC backend, deployed em pt21 (12 Maio 2026, commits `5b9c10a` + `764b53e` + `2fa1f60`).
+
+### 13.1. Fluxo conceptual
+
+```text
+App backend                                    Beelink (Rui local)
+─────────────                                  ─────────────────────
+GET /api/queue/hrc        ───── zip ────►      adapter G1 (pt22+)
+  (Bearer auth)                                  unzip → C:\hrc\queue\<hand_id>\
+                                                 vê hrc_watcher.exe consumir
+                                                 → C:\hrc\done\<hand_id>.zip
+POST /api/queue/hrc/results ◄── zip + hand_id   adapter G1 detecta e envia
+  (Bearer auth)                                  com status=done ou failed
+
+UPSERT em hrc_jobs                              hrc_jobs row criada/actualizada
+hand_db_id (FK hands.id)                        com result_zip BYTEA + meta JSONB
+```
+
+### 13.2. Cobertura `tournament_payouts` é pré-requisito
+
+`GET /api/queue/hrc` só inclui mãos no zip se `tournament_payouts` tem row para o `(site, tournament_number)` da mão. Mãos sem payouts são listadas em `manifest.missing_payouts` mas não entram no zip (a não ser que `include_no_payout=true`).
+
+Logo, antes de pôr mãos em queue para o HRC:
+
+1. Mão tem que estar em `hands` com `played_at >= '2026-01-01'`.
+2. Mão tem que ter pelo menos uma das tags default: `icm-pko`, `PKO SS`, `sqz-pko`, `ICM` (ajustável por query param).
+3. `study_state` tem que estar em `('new',)` por defeito (ajustável).
+4. `tournament_payouts` tem que ter row para `(site, tournament_number)` da mão (via lobby Vision, backoffice import, ou manual — §12.1).
+
+Estado pt21 (snapshot 12-Mai): 324 mãos elegíveis pelos filtros default; 42 (13%) com payouts; 282 (87%) em `missing_payouts`. Backfill operacional dos 112 torneios sem `tournament_summaries` é Fase C do plano pt22.
+
+### 13.3. Auth dual-path (pt21)
+
+Os 2 endpoints HRC (`GET /api/queue/hrc` + `POST /api/queue/hrc/results`) aceitam **dois caminhos** de autenticação:
+
+- **Cookie de sessão** (`session`, HttpOnly, 7 dias, signed `SESSION_SECRET` via `itsdangerous`) — usado pela UI do Rui no browser. Caminho legado, idêntico aos 21 outros routers.
+- **`Authorization: Bearer <token>`** — token de 48 bytes URL-safe na env var `HRC_WATCHER_API_KEY` (Railway service `poker-app`). Comparado em constant-time. Aceite **só** nestes 2 endpoints; outros routers continuam cookie-only.
+
+Bearer inválido **não** faz fallback para cookie — princípio de menor surpresa. Cookie continua a funcionar sozinho (regressão coberta por test em `test_auth_api_key.py`).
+
+### 13.4. Estado da mão pós-watcher (`hrc_jobs.status`)
+
+| Status | Quando |
+|---|---|
+| (ausente) | Mão ainda não foi para o watcher. |
+| `submitted` | Default em INSERT. Reservado para casos onde alguém marca queue sem feedback. |
+| `running` | Reservado. Watcher hoje salta para `done`/`failed` directo. |
+| `done` | Watcher concluiu solve, `result_zip` populado, `meta_json` tem `rank/players_left/stage/ci`. |
+| `failed` | Watcher reportou falha; `error` populado (`export_timeout`, `setup_failed`, etc.). |
+| `expired` | Reservado para TTL automático (decisão de produto futura — ainda sem job). |
+
+Re-upload do mesmo `hand_id` faz **overwrite** (UPSERT por `UNIQUE (hand_db_id)`). `submitted_at` preservado da primeira submissão; `completed_at` actualiza em cada upsert. Tech debt `#HRC-JOBS-HISTORY-SUBSEQUENT` se Rui quiser histórico de re-attempts.
+
+### 13.5. Onde a mão entra no track de estudo após HRC
+
+**Hoje (pt21):** o watcher resolver ≠ Rui ter estudado (D5 do plano pt21). A mão fica em `study_state='new'` mesmo após `hrc_jobs.status='done'`. Rui marca manualmente como "Revista" quando estudar.
+
+Tech debt futuro: badge UI no `HandRow` (G6 pt22) mostra estado HRC sem afectar `study_state`. Decisão a re-visitar depois de o Rui ter usado o pipeline durante algumas semanas.
+
 ### 12.4. Buraco TS→payouts (resolvido em pt20)
 
 Importar um `.txt` TS popula `tournament_summaries` (metadata pós-jogo) mas **não** `tournament_payouts` (não há distribuição de prizes por posição no `.txt`). Regra (pt20): para o `/api/queue/hrc` poder incluir as mãos de um torneio no zip para o HRC watcher, é necessário **um dos 3 caminhos** acima popular `tournament_payouts` independentemente do TS.

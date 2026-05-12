@@ -6,6 +6,71 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (12 Maio 2026 — pós-pt21, backend Fase 3 HRC G3+G4+G2 deployed)
+
+Sessão pt21 fechada. **3 commits feature em main:** `5b9c10a` (G3 hrc_jobs schema), `764b53e` (G4 auth dual-path), `2fa1f60` (G2 POST /results). HRC_WATCHER_API_KEY setada em Railway env vars pelo Rui. Smokes G4+G2 validados em prod. Suite **154 → 172 PASSED** (7+11 tests novos, G3 sem tests dedicados — opção B). HEAD `2fa1f60` + commit docs. Detalhe completo em `docs/JOURNAL_2026-05-12-pt21.md`.
+
+### Commits da pt21 em main (cronológico)
+
+```
+5b9c10a  G3 — tabela hrc_jobs schema
+764b53e  G4 — auth dual-path cookie + Bearer
+2fa1f60  G2 — POST /api/queue/hrc/results
+```
+
+### Tech debts fechados pt21
+
+| ID | Hash | Resumo |
+|---|---|---|
+| **Schema persistência HRC** ✅ | `5b9c10a` | Tabela `hrc_jobs` criada com PK BIGSERIAL, FK ON DELETE CASCADE para `hands(id)`, UNIQUE (hand_db_id), status CHECK 5 valores, result_zip BYTEA. Fecha G3 do plano Fase 3. |
+| **Auth long-lived para watcher** ✅ | `764b53e` | `require_auth_or_api_key` aceita cookie OU `Authorization: Bearer` constant-time. Aplicado em `/api/queue/hrc` + `/api/queue/hrc/results`. Fecha G4 do plano. |
+| **Endpoint feedback do watcher** ✅ | `2fa1f60` | `POST /api/queue/hrc/results` multipart com lookup hand_id, validação zip, extract meta, UPSERT idempotente. Fecha G2 do plano. |
+
+### Tech debts novos levantados pt21
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#HRC-JOBS-HISTORY-SUBSEQUENT** | 🟢 FUTURE | `UNIQUE (hand_db_id)` significa 1 job por mão. Re-upload overwrite. Se a regra de produto exigir histórico de re-attempts (2º solve com depth maior, comparação A/B), criar tabela auxiliar `hrc_job_attempts (id BIGSERIAL, hrc_job_id BIGINT FK, attempted_at, result_zip, meta_json)`. Migração não-destrutiva — adiciona, não muda. |
+| **#HRC-RESULT-STORAGE-MIGRATION** | 🟢 FUTURE | `result_zip BYTEA` em BD. Volume actual estimado: Rui ~10-50 mãos/dia × ~273 KB de zip (GET) + zip results de ordem similar ≈ ~30 MB/dia. Aceitável durante meses. Migrar para storage externo (S3/R2/Railway storage quando existir) se chegar a GBs. Schema fica igual; coluna passa a TEXT (URL) + helper de read async. |
+| **#HRC-AUTH-MULTI-KEY** | 🟢 LOW | `HRC_WATCHER_API_KEY` env var única cobre 1 watcher. Para 2+ máquinas (Beelink 2, watcher cloud, local test), migrar para tabela `hrc_api_keys (id, name, key_hash, created_at, last_used_at, revoked_at)`. Revogação granular sem redeploy, auditoria por key. Endpoint admin `POST/DELETE /api/admin/hrc-keys` protegido por cookie. |
+
+### Decisões fechadas pt21
+
+**G3 (schema hrc_jobs):** S1 FK INTEGER ON DELETE CASCADE / S2 BYTEA + size / S3 TEXT CHECK 5 valores / S4 JSONB / S5 BIGSERIAL PK + UNIQUE hand_db_id / S6 índice (status, submitted_at) / S7 services/hrc_jobs.py novo.
+
+**G4 (auth dual-path):** D-G4-1 env var (opção A) / D-G4-2 `Authorization: Bearer` / D-G4-3 `HRC_WATCHER_API_KEY` / D-G4-4 48 bytes URL-safe / D-G4-5 `{id: None, email: None, auth_type: 'api_key'}` / D-G4-6 só endpoints HRC / D-G4-7 MAPA deferido / D-G4-8 log INFO em uso / D-G4-9 Bearer inválido não fallback / D-G4-10 key setada na sessão / D-G4-11 Rui gera local.
+
+**G2 (POST /results):** D-G2-1 `/api/queue/hrc/results` / D-G2-2 multipart / D-G2-3 hand_id query / D-G2-4 50 MB cap / D-G2-5 validação minimal / D-G2-6 meta server-side / D-G2-7 augmentar meta / D-G2-8 UPSERT overwrite / D-G2-9 404 ausente / D-G2-10 só done+failed / D-G2-11 failed→error obrigatório / D-G2-12 1 por request / D-G2-13 MAPA fecho / D-G2-14 zip sintético / D-EXTRA-1 11 tests / D-EXTRA-2 submitted_at preservado / D-EXTRA-3 server-side wins / D-EXTRA-4 WARNING no failed com file.
+
+### Smokes validados em prod (pt21)
+
+- **G4 GET com Bearer**: `GET /api/queue/hrc?include_no_payout=true` → HTTP 200, size=279910 bytes (zip elegível). Via `railway run python` (env var injectada no subprocess, key nunca printed).
+- **G2 POST sem auth**: HTTP 401 `"Não autenticado"` (rota registada).
+- **G2 POST com Bearer + hand_id inexistente**: HTTP 404 `"hand_id 'GG-NONEXISTENT-99999' não encontrado"` (pipeline completo end-to-end).
+
+### Achados operacionais (verificação BD pós-G3)
+
+- `DATABASE_PUBLIC_URL` no serviço Postgres tem password stale (32 chars vs 31 chars real do `poker-app`). App usa internal URL, prod não bloqueada. Para queries externas: usar password do `poker-app` + proxy público do `Postgres`. Não formalizado como tech debt (workaround conhecido).
+- `backend/.env` local com encoding não-UTF8 (byte `0xe3` em position 82). Causa `UnicodeDecodeError` em scripts ad-hoc que importam `app.db`. Workaround: ler vars via `subprocess(railway variables --kv)`. Não formalizado como tech debt (workaround conhecido).
+
+### Operacional paralelo — Beelink GTR5 (Rui)
+
+Reset PC nuclear (Windows reinstall local), conta `riand` criada, updates terminados, Python 3.12 instalado, HRC reinstalado, `hrc_watcher.exe` (30.5 MB PyInstaller) copiado do PC principal. **Pendente pt22:** `C:\hrc\queue\` + `C:\hrc\done\`; `hrc_watcher.exe --help` captura output.
+
+### Tech debts URGENT carry-over (pt19+, **nenhum atacado pt21**)
+
+- **Mãos órfãs em massa** (HIGHROLLER €250 WINAMAX, 27 mãos `#icm-pko` sem villains).
+
+### Tech debts FASE 3 carry-over
+
+- **#FASE-3-MINIPC** — substancialmente avançado em pt21 (reset+setup base); falta G1 adapter + smoke real (pt22).
+
+### Tech debts pt20 carry-over abertos (5)
+
+- `#BACKOFFICE-MYSTERY` 🟡 / `#TS-RATIO-MYSTERY-CONFIRM` 🟢 / `#TS-AUTO-PAYOUTS-ICM` 🟢 / `#SYNC-RECENT-RESPECT-MANUAL` 🟡 / `#PYDANTIC-V1-VALIDATOR-DEPRECATION` 🟢.
+
+---
+
 ## Estado actual (12 Maio 2026 — pós-pt20, sync-recent + backoffice import deployed)
 
 Sessão pt20 fechada. **2 commits feature em main:** `5465b32` (Commit E sync-recent + `lobby_processing_log`) e `af7e3c8` (endpoint backoffice `/api/tournament-results/import`). Ambos validados em campo. 5 tech debts novos registados, 2 fechados implicitamente. Suite **122 → 154 PASSED** (16+16 tests novos). HEAD `af7e3c8`. Detalhe completo em `docs/JOURNAL_2026-05-11-pt20.md`.
