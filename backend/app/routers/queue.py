@@ -8,11 +8,15 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import require_auth_or_api_key
 from app.db import query
+from app.services.hrc_jobs import (
+    extract_meta_from_result_zip,
+    upsert_hrc_job_result,
+)
 from app.services.queue_export import build_queue_zip
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
@@ -25,6 +29,11 @@ logger = logging.getLogger("queue")
 _DEFAULT_TAGS = ["icm-pko", "PKO SS", "sqz-pko", "ICM"]
 _DEFAULT_STUDY_STATES = ["new"]
 _ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
+
+# Cap de upload do zip de resultados (D-G2-4: 50 MB defensivo). Samples reais
+# do HRC Complete Export ficam tipicamente em KB-MB; cap protege contra
+# accident/abuse sem rejeitar uso legítimo.
+_MAX_RESULT_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def _csv(value: Optional[str], default: list[str]) -> list[str]:
@@ -130,3 +139,99 @@ def export_queue(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@router.post("/hrc/results")
+async def upload_hrc_result(
+    hand_id: str = Query(..., description="hand_id TEXT (ex: 'GG-281416137')"),
+    status: str = Query("done", description="'done' ou 'failed'"),
+    error: Optional[str] = Query(None, description="motivo (obrigatório se status='failed')"),
+    file: Optional[UploadFile] = File(None),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """Recebe resultado HRC para uma mão (do watcher Beelink).
+
+    - `status='done'`: `file` obrigatório (zip Complete Export do HRC).
+      O zip deve conter `meta.json` no root com pelo menos
+      `{rank, players_left, stage, ci}`.
+    - `status='failed'`: `error` obrigatório, `file` ignorado se vier.
+
+    UPSERT em `hrc_jobs` por `hand_db_id`. Re-upload sobrescreve
+    (preserva `submitted_at` original).
+
+    Auth: cookie (UI) OU `Authorization: Bearer <HRC_WATCHER_API_KEY>` (G4).
+
+    Returns: `{hand_db_id, status, action, meta}`.
+    """
+    if status not in ("done", "failed"):
+        raise HTTPException(400, f"status inválido: '{status}' (use 'done' ou 'failed')")
+    if status == "failed" and not error:
+        raise HTTPException(400, "error obrigatório quando status='failed'")
+    if error and len(error) > 500:
+        raise HTTPException(400, "error excede 500 chars")
+
+    rows = query(
+        "SELECT id FROM hands WHERE hand_id = %s LIMIT 1", (hand_id,)
+    )
+    if not rows:
+        raise HTTPException(404, f"hand_id '{hand_id}' não encontrado")
+    hand_db_id = rows[0]["id"]
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    base_meta = {
+        "hand_id": hand_id,
+        "received_at": now_iso,
+        "received_from": "watcher",
+    }
+
+    if status == "failed":
+        if file is not None:
+            logger.warning(
+                "hrc_jobs: file ignored on failed upload hand_id=%s", hand_id
+            )
+        meta_aug = {**base_meta, "failure_reported_by": "watcher"}
+        row = upsert_hrc_job_result(
+            hand_db_id=hand_db_id,
+            status="failed",
+            result_zip=None,
+            meta_json=meta_aug,
+            error=error,
+        )
+        size = 0
+    else:  # done
+        if file is None:
+            raise HTTPException(400, "file obrigatório quando status='done'")
+        content = await file.read()
+        size = len(content)
+        if size == 0:
+            raise HTTPException(400, "file vazio")
+        if size > _MAX_RESULT_ZIP_BYTES:
+            raise HTTPException(
+                413, f"file excede {_MAX_RESULT_ZIP_BYTES // 1024 // 1024} MB"
+            )
+        try:
+            meta = extract_meta_from_result_zip(content)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        # base_meta DEPOIS de meta para que server-side sobrescreva
+        # eventuais campos homónimos no meta.json do zip (D-G2-EXTRA-3).
+        meta_aug = {**meta, **base_meta}
+        row = upsert_hrc_job_result(
+            hand_db_id=hand_db_id,
+            status="done",
+            result_zip=content,
+            meta_json=meta_aug,
+            error=None,
+        )
+
+    action = "inserted" if row.get("inserted") else "updated"
+    logger.info(
+        "hrc_jobs: upsert hand_id=%s db_id=%d status=%s size=%d action=%s",
+        hand_id, hand_db_id, status, size, action,
+    )
+    return {
+        "hand_db_id": hand_db_id,
+        "status": status,
+        "action": action,
+        "meta": meta_aug,
+    }
