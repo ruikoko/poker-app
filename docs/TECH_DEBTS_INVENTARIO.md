@@ -6,6 +6,64 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (13 Maio 2026 — pós-pt22, Adapter G1 deployed, 3 bugs watcher tracked)
+
+Sessão pt22 fechada. **2 commits feature em main:** `cc93698` (G1 adapter Python Beelink), `67761a0` (fix regex hand_id Winamax). + commit docs de fecho. Pipeline mecânico Beelink ↔ poker-app **validado ponta-a-ponta**; smoke funcional bloqueado por **3 bugs do watcher Baltazar** que exigem descompilação do exe. Suite **172 PASSED** inalterada (adapter é cliente externo). Detalhe completo em `docs/JOURNAL_2026-05-13-pt22.md`.
+
+### Commits da pt22 em main (cronológico)
+
+```
+cc93698  feat(hrc-adapter): G1 adapter Python Beelink ↔ poker-app API
+67761a0  fix(hrc-adapter): regex hand_id aceita formato Winamax multi-segmento
+```
+
+### Tech debts fechados pt22
+
+| ID | Hash | Resumo |
+|---|---|---|
+| **G1 adapter (queue/results bridge)** ✅ | `cc93698` | 4 ficheiros novos em `tools/hrc_adapter/`. Loop Python 3.14 a correr no Beelink: GET zip → unzip → watcher → POST results. state.json local atomic. Logging diário rotativo 14d. Fecha G1 do plano Fase 3. |
+| **Adapter regex multi-segmento** ✅ | `67761a0` | `HAND_ID_RE` agora `^[A-Z]+-\d+(-\d+)*$` — cobre GG (1 segmento) + Winamax (3 segmentos). 40 mãos WN saltadas no 1º tick smoke deixam de ser skipped. |
+
+### Tech debts novos levantados pt22 (9)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#HRC-WATCHER-EQUITY-MODEL-FIXO** | 🔴 HIGH | Bug A — watcher fixo em `Malmuth-Harville ICM`, sem branch para `Multi-Table FGS`. Mãos mid-MTT ficam com equity FT-style → solver dá EVs científicamente questionáveis. Solução proposta pelo Rui: tag-based design via canais Discord `#icm-ft`/`#icm-pko-ft` + HM3 tags → hint `equity_model` no payouts.json → watcher (recompilado) lê hint. Especificação em `REGRAS_NEGOCIO.md §14`. **Bloqueia G5/G6 funcionais**. Requer recompilação do watcher (pt23). |
+| **#HRC-WATCHER-MAX-PLAYERS-ESTATICO** | 🔴 HIGH | Bug B — `get_player_count_from_hh()` regex de seats sentados na HH (ex: 8-9) em vez de jogadores relevantes à decisão (ex: 3 para `UTG raise / MP+CO+SB fold / BTN call / BB→hero`). Árvore do solver explode com combos irrelevantes → tempo de cálculo + EV diluído. Solução: parsing HH no watcher (`last_raiser_position → hero_position` + `players_after_hero_still_active`). Requer recompilação. |
+| **#HRC-WATCHER-JS-HARDCODED** | 🔴 HIGH | Bug C — script `mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js` carregado por nome literal. Ranges muito largos → tree >20GB → OOM crash HRC. Mitigação imediata (sem recompilar): substituir o ficheiro do mesmo nome por versão tight. Final: config externa no watcher (env var `HRC_SCRIPT_PATH` ou metadata por mão). Requer recompilação. |
+| **#HRC-WATCHER-DECOMPILE-REQUIRED** | 🔴 HIGH | Baltazar (autor do `hrc_watcher.exe`) emigrou, sem contacto. Sem fonte Python original. Material já no repo: `_local_only/hrc_watcher.exe` (30.5 MB), `_local_only/extracted/` (bytecode raw via pyinstxtractor), `_local_only/ANALYSIS.md` (~80% mapeado por análise estática). Próximo: `pycdc` ou `decompyle3` para gerar `.py` legível. Bloqueia A/B/C. Sessão pt23. |
+| **#HRC-WATCHER-PATH-BETA-LEGACY** | 🟡 MED | Watcher hardcoded a 3 paths sob `C:\Users\Administrator\...` incluindo `AppData\Local\HoldemResources\HRC Beta\hrc.exe`. Hoje funcional via perfil legacy preservado pelo reset Windows; instalação HRC moderna do `riand` é em `Local\Programs\HoldemResources\HRC\` (sem "Beta"). Reconsiderar pós-recompilação — tornar paths configuráveis (env var ou config file). |
+| **#HRC-ADAPTER-SCHEDULED-TASK** | 🟢 LOW | Adapter actualmente em interactive console (`python hrc_adapter.py`). Migrar para Windows Scheduled Task com restart-on-fail (instruções em `tools/hrc_adapter/README.md`). Não bloqueia nada — Rui pode parar com Ctrl+C; útil quando o adapter for 24/7. |
+| **#SERVER-FILTER-HRC-STATUS** | 🟢 LOW | `GET /api/queue/hrc` (`routers/queue.py:export_queue`) **não** filtra mãos que já têm `hrc_jobs.status='done'`. Devolve sempre o mesmo conjunto baseado em tags/study_state. Adapter usa `state.json` local para dedup (D10 aprovado em pt22). Servidor podia filtrar para reduzir bandwidth — adicionar `WHERE NOT EXISTS (SELECT 1 FROM hrc_jobs WHERE hrc_jobs.hand_db_id = hands.id AND hrc_jobs.status = 'done')`. |
+| **#HRC-RESET-PRESERVATION** | 🟡 MED | Perfil `Administrator` legacy intacto pós-reset Windows é **frágil** — qualquer reset/reinstall futuro pode levar tudo (script Charles, pasta `Teste completo\`, subpastas `done/arquivo/replied`). Mitigação: clonar pasta `Teste completo\` para `C:\Users\riand\Documents\Teste completo\` e reconsiderar paths hardcoded. Depende de `#HRC-WATCHER-PATH-BETA-LEGACY`. |
+| **#TOKEN-ROTATION-DEFENSIVE-PT23** | 🟡 MED | `HRC_WATCHER_API_KEY` actual (mask `Z10Soz9...37zSZ`) foi visto numa screenshot Railway que Rui partilhou ao Web durante debug pt22. Rotação defensiva pré-pt23: gerar novo via `python -c "import secrets; print(secrets.token_urlsafe(48))"`, meter no Railway dashboard (save + redeploy), atualizar `.bat` no Desktop, executar no Beelink. Code valida via CLI que mask mudou. |
+
+### Decisões fechadas pt22
+
+**Adapter G1 (D1-D10 + A1-A5):** D1 Python 3.14.5 / D2 source em `tools/hrc_adapter/` + copy manual / D3 interactive→Scheduled Task faseado / D4 `TimedRotatingFileHandler` 14d / D5 60s poll / D6 2 patterns (done/*.zip + <hand>/.failed) / D7 state.json atomic / D8 setx HKCU / D9 Retry urllib3 nativo 3x backoff 5/10/20s / D10 state.json local source of truth / A1 startup_scan / A2 estrutura repo / A3 logging com hand_id / A4 except amplo / A5 validação regex+RESERVED_NAMES.
+
+**Watcher fix (decisão Web+Rui):** Opção 2 — descompilar `hrc_watcher.exe` em pt23. ANALYSIS.md cobre ~80%; resto via `pycdc`. Fixes cirúrgicos A/B/C + recompilar PyInstaller.
+
+### Smokes validados em prod (pt22)
+
+- **GET /api/queue/hrc** com Bearer válido → 200 OK + zip `queue_<ts>.zip` (size ~280 KB).
+- **POST /api/queue/hrc/results** (status=done) → 200 OK, `hrc_jobs.status='done'`, `result_zip` populado em BD prod.
+- **Pipeline mecânico ponta-a-ponta** — pull → unzip → watcher abre HRC → wizard completo executou → zip exportado para `done/<hand_id>.zip` → adapter POST → BD actualizada.
+
+### Tech debts URGENT carry-over (pt19+, **nenhum atacado em pt22**)
+
+- **Mãos órfãs em massa** (HIGHROLLER €250 WINAMAX, 27 mãos `#icm-pko` sem villains).
+
+### Tech debts pt21 carry-over abertos (3)
+
+- `#HRC-JOBS-HISTORY-SUBSEQUENT` 🟢 FUTURE / `#HRC-RESULT-STORAGE-MIGRATION` 🟢 FUTURE / `#HRC-AUTH-MULTI-KEY` 🟢 LOW.
+
+### Tech debts pt20 carry-over abertos (5)
+
+- `#BACKOFFICE-MYSTERY` 🟡 / `#TS-RATIO-MYSTERY-CONFIRM` 🟢 / `#TS-AUTO-PAYOUTS-ICM` 🟢 / `#SYNC-RECENT-RESPECT-MANUAL` 🟡 / `#PYDANTIC-V1-VALIDATOR-DEPRECATION` 🟢.
+
+---
+
 ## Estado actual (12 Maio 2026 — pós-pt21, backend Fase 3 HRC G3+G4+G2 deployed)
 
 Sessão pt21 fechada. **3 commits feature em main:** `5b9c10a` (G3 hrc_jobs schema), `764b53e` (G4 auth dual-path), `2fa1f60` (G2 POST /results). HRC_WATCHER_API_KEY setada em Railway env vars pelo Rui. Smokes G4+G2 validados em prod. Suite **154 → 172 PASSED** (7+11 tests novos, G3 sem tests dedicados — opção B). HEAD `2fa1f60` + commit docs. Detalhe completo em `docs/JOURNAL_2026-05-12-pt21.md`.

@@ -399,3 +399,115 @@ Tech debt futuro: badge UI no `HandRow` (G6 pt22) mostra estado HRC sem afectar 
 Importar um `.txt` TS popula `tournament_summaries` (metadata pós-jogo) mas **não** `tournament_payouts` (não há distribuição de prizes por posição no `.txt`). Regra (pt20): para o `/api/queue/hrc` poder incluir as mãos de um torneio no zip para o HRC watcher, é necessário **um dos 3 caminhos** acima popular `tournament_payouts` independentemente do TS.
 
 Caso Rui peça automação no futuro (derivar payouts via ICM a partir de TS), tech debt `#TS-AUTO-PAYOUTS-ICM` está registado — não implementado por defeito (ICM é estimativa; backoffice é literal).
+
+---
+
+## §14. Tag-based equity model para HRC (proposta pt22)
+
+Especificação da solução para **Bug A** do watcher (`#HRC-WATCHER-EQUITY-MODEL-FIXO`). **Não implementada ainda** — bloqueada por `#HRC-WATCHER-DECOMPILE-REQUIRED` (recompilação do watcher é pré-requisito para o passo `e`). Cadeia completa fica para pt23+.
+
+### 14.1. Contexto
+
+Watcher actual (Baltazar) chama `set_equity_model(stage)` com 2 valores possíveis:
+
+- `'FT'` → typeahead `M` → selecciona `Malmuth-Harville ICM`
+- `'MTT'` → typeahead `M` → selecciona algo na lista (provavelmente `Malmuth-Harville` também, sem switch real para `Multi-Table FGS`)
+
+O parâmetro `stage` é derivado upstream em `try_setup`/`setup_hand` baseado em `players_left` lido do meta — mas em pt22 confirmou-se que **na prática só corre Malmuth-Harville**, independentemente do stage. Mãos mid-MTT acabam com equity FT-style → solver dá EVs deslocados.
+
+### 14.2. Solução proposta
+
+Tag-based hint na payouts.json com 5 elos:
+
+```
+[a] Backend ingest: derive_equity_model(hand)
+        |
+        v
+[b] Backend export: payouts.json contém "equity_model"
+        |
+        v
+[c] Adapter: zip vai para watcher sem mudanças (passthrough)
+        |
+        v
+[d] Watcher (recompilado): set_equity_model lê hint
+        |
+        v
+[e] HRC: branch para FGS ou MH-ICM correcto
+```
+
+Origem do hint = tags do utilizador:
+
+- Canais Discord `#icm-ft` e `#icm-pko-ft` → `discord_tags` populados pelo bot.
+- Tags HM3 correspondentes (a definir em `HM3_REAL_TAGS`) → `hm3_tags`.
+- Qualquer tag combinada → mão classificada como FT → hint `malmuth_harville_icm`.
+- **Default** (sem tag FT) → `multi_table_fgs`.
+
+### 14.3. Cadeia técnica
+
+**(a) Backend ingest** — `backend/app/services/ingest_filters.py` (ficheiro novo):
+
+```python
+def derive_equity_model(hand: dict) -> str:
+    """Classifica equity model baseado em tags. Default: multi_table_fgs."""
+    discord = set(hand.get("discord_tags") or [])
+    hm3 = set(hand.get("hm3_tags") or [])
+    ft_tags = {"icm-ft", "icm-pko-ft", "FT", "FT PKO"}
+    if discord & ft_tags or hm3 & ft_tags:
+        return "malmuth_harville_icm"
+    return "multi_table_fgs"
+```
+
+**(b) Backend export** — `backend/app/services/queue_export.py:build_queue_zip` aceita parâmetro `equity_model_by_hand: dict[str, str]` (mapa `hand_id → model`). Inclui hint no payouts.json:
+
+```json
+{
+  "CompletedTournament": { ... },
+  "TournamentEntry": [ ... ],
+  "_equity_model": "multi_table_fgs"
+}
+```
+
+Chave prefixada com `_` para não colidir com schema HRC nativo. Watcher (recompilado) procura `_equity_model` no JSON.
+
+**(c) Adapter** — passthrough. `tools/hrc_adapter/hrc_adapter.py:pull_queue` não toca no `payouts.json`. Escreve byte-a-byte do zip do backend.
+
+**(d) Watcher (recompilado em pt23)** — modificar `set_equity_model`:
+
+```python
+def set_equity_model(payouts_path: str, stage: str = "MTT"):
+    with open(payouts_path) as f:
+        meta = json.load(f)
+    model = meta.get("_equity_model", "multi_table_fgs")
+    if model == "malmuth_harville_icm":
+        typeahead("M")  # selecciona 1ª opção
+    elif model == "multi_table_fgs":
+        typeahead("M"); arrow_down(N)  # navega até FGS
+    else:
+        # default defensive
+        typeahead("M"); arrow_down(N)
+```
+
+`N` = nº de presses confirmado empiricamente. Validar no smoke pt23.
+
+**(e) HRC** — recebe equity model correcto para a mão.
+
+### 14.4. UI Rui (pré-condição para activar)
+
+Rui precisa de:
+
+- Subscrever-se aos canais Discord `#icm-ft` e `#icm-pko-ft` (criar se não existem) e partilhar mãos FT lá.
+- Marcar tags `FT` / `FT PKO` no HM3 manualmente quando filtra mãos para estudo.
+
+Sem tags FT, **toda a mão é tratada como mid-MTT** (FGS) — comportamento conservador desejado por Rui em pt22.
+
+### 14.5. Estado actual (pt22)
+
+| Passo | Estado |
+|---|---|
+| `a` ingest_filters.py | ⏸ não implementado |
+| `b` queue_export hint | ⏸ não implementado |
+| `c` adapter passthrough | ✓ já funciona (sem mudanças necessárias) |
+| `d` watcher branch | ⏸ bloqueado por recompilação |
+| `e` HRC behaviour | ⏸ valida-se em smoke |
+
+Tech debt master: `#HRC-WATCHER-EQUITY-MODEL-FIXO`. Sub-tech-debts: `#HRC-WATCHER-DECOMPILE-REQUIRED` (bloqueador hard). Plano de execução: `docs/PLAN_PT23.md` §Passo 5.

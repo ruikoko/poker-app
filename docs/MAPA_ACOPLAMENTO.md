@@ -29,6 +29,7 @@ Documento permanente que mapeia, para cada conceito-chave da app, **quem o produ
   - [2.12 `tournament_summaries`](#212-tournament_summaries)  *(adicionado pós-FASE B pt19)*
   - [2.13 `lobby_processing_log`](#213-lobby_processing_log)  *(adicionado pós-Commit E pt20)*
   - [2.14 `hrc_jobs`](#214-hrc_jobs)  *(pt21 — G3+G2+G4 deployed)*
+  - [2.15 `tools/hrc_adapter/`](#215-toolshrc_adapter)  *(pt22 — G1 deployed)*
 - [3. Estado / marcação de entries](#3-estado--marcação-de-entries)
   - [3.1 `entry_type`](#31-entry_type)
   - [3.2 `source`](#32-source)
@@ -1888,6 +1889,85 @@ UNIQUE (hand_db_id)
 - *"Quanto espaço ocupam os zips?"* → `SELECT pg_size_pretty(SUM(result_zip_size)::bigint) FROM hrc_jobs WHERE result_zip_size IS NOT NULL;`.
 
 **Cross-references:** `tournament_payouts` (queue só inclui mãos com payouts), `services/queue_export.py` (gerador do zip de queue), [`study_state`](#33-status) (HRC resolver ≠ Rui estudar — manter manual conforme D5 do plano pt21).
+
+---
+
+### 2.15 `tools/hrc_adapter/`
+
+> **Nota:** entrada inserida em pt22 (Mai 2026), gap G1 do plano Fase 3 HRC.
+
+**Em linguagem simples:** pasta nova no repo com um programa Python que corre no Beelink e cose duas pontas — a API REST do poker-app (em Railway) e o `hrc_watcher.exe` do Baltazar (em filesystem local). Sem este adapter, o backend e o watcher ficavam de costas voltadas; era preciso copy-paste manual de zips entre os dois.
+
+**O que é (humano):** o Beelink é a máquina que corre HRC. O adapter é o motor que: (1) pede zips de mãos elegíveis ao backend, (2) descomprime as mãos para a pasta onde o watcher procura, (3) espera o watcher processar (zip em `done/` ou marker `.failed`), (4) faz `POST` ao backend com o resultado. Mantém `state.json` local para nunca processar a mesma mão duas vezes. Sobrevive a reinícios (idempotente), faz log diário rotativo, retenta em falhas de rede.
+
+**Detalhes (técnico):**
+
+| Onde é produzido | Função |
+|---|---|
+| `tools/hrc_adapter/hrc_adapter.py:main` (pt22 — `cc93698`) | Loop principal. Carrega state, faz startup_scan (A1), entra em loop infinito a chamar pull_queue + reconcile_done + reconcile_failed + save_state a cada `HRC_POLL_INTERVAL_S` (default 60s). KeyboardInterrupt = save+exit limpo. |
+| `tools/hrc_adapter/hrc_adapter.py:setup_logging` | Configura logger `hrc_adapter` com `TimedRotatingFileHandler` para `C:\hrc\adapter\logs\hrc_adapter.log` (rotação midnight, retention 14d) + StreamHandler para stdout. UTF-8 explicit. |
+| `tools/hrc_adapter/hrc_adapter.py:build_session` | Cria `requests.Session` com Bearer `HRC_WATCHER_API_KEY` + Retry urllib3 nativo (3 retries, backoff_factor=5 → ~5/10/20s, status_forcelist [502/503/504], 4xx não retenta). |
+| `tools/hrc_adapter/hrc_adapter.py:save_state` | Atomic write: `state.json.tmp` + `os.replace`. Tolera crash mid-write. |
+
+| Onde é consumido | Função |
+|---|---|
+| `tools/hrc_adapter/hrc_adapter.py:startup_scan` (A1) | Scaneia `QUEUE_DIR` raiz por pastas de mãos pre-existentes (de corrida anterior); marca-as `pulled` no state. Previne race a frio — sem isto, o próximo pull descomprime por cima de mãos a meio. Tolera variante sufixo `<hand>.failed/`. |
+| `tools/hrc_adapter/hrc_adapter.py:pull_queue` | `GET /api/queue/hrc?include_no_payout=false`. Agrupa entries do zip por `hand_id`. Para cada hand_id novo (não em state e que passa A5 — regex `^[A-Z]+-\d+(-\d+)*$` + RESERVED_NAMES check): mkdir + writes ficheiros + state[hand_id]={status:pulled, pulled_at:now}. `manifest.json` guardado em `logs/manifests/manifest_<ts>.json` (nunca em QUEUE_DIR). |
+| `tools/hrc_adapter/hrc_adapter.py:detect_done_zips` | `glob` em `QUEUE_DIR\done\*.zip`. Filename = `<hand_id>.zip`. |
+| `tools/hrc_adapter/hrc_adapter.py:detect_failed_markers` | Cobre 2 layouts: `<hand_id>/.failed` (ficheiro marker dentro) + `<hand_id>.failed/` (sufixo no nome). Lê motivo do marker (fallback `failed.txt`/`error.txt`/`FAILED`/`error`, encoding UTF-8 com replace). |
+| `tools/hrc_adapter/hrc_adapter.py:reconcile_done` | Para cada done zip: se state já tem `done` → unlink (cleanup stale). Senão `post_done` → se 200, marca state `done` + size + unlink. Se POST falha, mantém para próximo tick. |
+| `tools/hrc_adapter/hrc_adapter.py:reconcile_failed` | Análogo para falhados: `post_failed` com motivo do marker → state `failed` + rmtree da pasta. |
+
+**Env vars:**
+
+| Var | Default | Onde |
+|---|---|---|
+| `HRC_WATCHER_API_KEY` | (obrigatório) | Token Railway 48-byte URL-safe. Comparado em constant-time pelo backend (`require_auth_or_api_key`). Setado no Beelink via `setx` (HKCU). |
+| `HRC_ADAPTER_API_BASE` | `https://poker-app-production-34a7.up.railway.app` | Override só para tests local. |
+| `HRC_ADAPTER_QUEUE_DIR` | `C:\Users\Administrator\Documents\Teste completo` | Path canónico do watcher Baltazar (hardcoded no exe). |
+| `HRC_POLL_INTERVAL_S` | `60` | Intervalo entre pulls. Configurável; 15 em debug. |
+
+**Junction NTFS (pt22 setup):** o `hrc_watcher.exe` tem 3 paths hardcoded sob `C:\Users\Administrator\...`. No Beelink (utilizador `riand`), o perfil `Administrator` legacy foi **preservado pelo reset Windows** com a pasta `Teste completo\` intacta. Watcher corre directo sob esse path sem junctions. Se Beelink for reinstalado de novo, o caminho seguro é re-criar o perfil legacy (tech debt `#HRC-RESET-PRESERVATION`).
+
+**state.json schema (D7 + D10):**
+
+```json
+{
+  "<hand_id>": {
+    "status": "pulled" | "processing" | "done" | "failed",
+    "pulled_at": "ISO8601 UTC",
+    "posted_at": "ISO8601 UTC | null",
+    "result_zip_size": int | null,
+    "error": "string | null",
+    "note": "discovered_at_startup (opcional)"
+  }
+}
+```
+
+Source of truth **local** — backend ainda não filtra `GET /api/queue/hrc` por `hrc_jobs.status` (tech debt `#SERVER-FILTER-HRC-STATUS`). Reset manual = apagar linha do state ou apagar ficheiro inteiro.
+
+**Comportamento esperado quando muda:**
+
+- Pull novo `hand_id`: row nova no state, pasta criada em `QUEUE_DIR\<hand_id>\`. Idempotente.
+- Done detectado: POST OK → state `done` + zip apagado de `done\`. Falha POST → mantém zip + reconcilia próximo tick.
+- Failed detectado: POST OK → state `failed` + rmtree da pasta. Falha POST → mantém + reconcilia.
+- KeyboardInterrupt em loop ou sleep: save_state + return 0.
+- Exception não-KI no tick: log traceback completo, sleep, continue (A4).
+
+**Armadilhas conhecidas:**
+
+- **Sessão PowerShell precisa de ser nova após `setx`** — HKCU não propaga a processos já abertos. Erro típico do Rui em pt22.
+- **3 bugs do watcher (pt22)** — descobertos via smoke real. Bug A (equity fixo), Bug B (max players estático), Bug C (JS hardcoded → OOM). Todos exigem fonte Python do exe (`#HRC-WATCHER-DECOMPILE-REQUIRED`). Adapter está OK; bloqueio é no watcher.
+- **`HAND_ID_RE`** — regex evoluiu mid-sessão pt22 (`67761a0`) para aceitar formato Winamax multi-segmento (`WN-XXX-YY-ZZZ`). Antes só apanhava `GG-NNN`.
+
+**Quando alguém pergunta...**
+
+- *"O adapter está a correr no Beelink?"* → ver logs em `C:\hrc\adapter\logs\hrc_adapter.log`. Tail mostra ticks; falta de ticks = paragem.
+- *"Esta mão saiu da queue?"* → ver `state.json` no Beelink, key `<hand_id>`. Estados `done`/`failed` = processada; `pulled` = em queue do watcher.
+- *"Como faço reset?"* → soft: apagar entrada do state.json; hard: parar adapter + apagar state.json + apagar pastas pendentes em `Teste completo\<hand_id>\`.
+- *"Como faço o adapter correr sozinho ao login?"* → Scheduled Task Windows (tech debt `#HRC-ADAPTER-SCHEDULED-TASK`, instruções em `tools/hrc_adapter/README.md`).
+
+**Cross-references:** [`hrc_jobs`](#214-hrc_jobs) (BD downstream), `backend/app/routers/queue.py:export_queue` + `upload_hrc_result` (endpoints peers), `_local_only/ANALYSIS.md` (análise estática do `hrc_watcher.exe`), `_local_only/extracted/` (bytecode raw via pyinstxtractor).
 
 ---
 

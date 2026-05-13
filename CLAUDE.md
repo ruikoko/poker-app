@@ -359,6 +359,46 @@ A 8ª linha abaixo é o **único caminho** que **devolve dados ao backend** (em 
 | **Tournament Results backoffice GG** | Upload `.png/.jpg/.zip` em `Tournaments.jsx` | `tournament_payouts` |
 | **Watcher HRC (Beelink)** *(pt21)* | `POST /api/queue/hrc/results` com zip Complete Export | `hrc_jobs` |
 
-Última sessão fechada: pt21 (12 Maio 2026 — backend Fase B HRC: G3 + G4 + G2. 3 commits feature, HEAD `2fa1f60` + commit docs. Suite 154→172. 3 tech debts novos. Operacional Beelink: reset nuclear + setup base por Rui em paralelo).
+## pt22 — Adapter Beelink G1 + smoke real (13 Maio 2026)
 
-Próxima sessão: **pt22 — Adapter Beelink G1 + UI G5/G6 + smoke real end-to-end.** Plano detalhado em `docs/PLAN_PT22.md`: 6 passos ordenados (validação Beelink → G1 adapter → smoke real → G5 botão exportar → G6 badge → fecho). Pré-requisitos: `C:\hrc\queue\` e `C:\hrc\done\` criadas no Beelink; `hrc_watcher.exe --help` capturado.
+2 commits feature em main:
+
+- **G1 adapter** (`cc93698`) — `tools/hrc_adapter/` (4 ficheiros novos, 705 insertions): `hrc_adapter.py` (410 linhas), `requirements.txt`, `.gitignore`, `README.md`. Loop Python 3.14 corre no Beelink (perfil `riand` elevated UAC) e cose `GET /api/queue/hrc` ↔ filesystem watcher ↔ `POST /api/queue/hrc/results`. Decisões D1-D10 + A1-A5 aprovadas. `state.json` local com atomic write é dedup (D10). Logging `TimedRotatingFileHandler` retenção 14 dias.
+- **Fix regex Winamax** (`67761a0`) — `HAND_ID_RE` passa de `^[A-Z]+-\d+$` para `^[A-Z]+-\d+(-\d+)*$`. 40 mãos `WN-XXXX-YY-ZZ` saltadas no 1º tick smoke real.
+
+**Setup Beelink (Rui):** Python 3.14.5 instalado, HRC reinstalado em `C:\Users\riand\AppData\Local\Programs\HoldemResources\HRC\` (path moderno sem "Beta"). Perfil `Administrator` legacy **preservado pelo reset Windows nuclear** — pasta `C:\Users\Administrator\Documents\Teste completo\` com `queue/done/arquivo/replied` + script Charles literal `mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js` ficou intacta post-reset. Watcher corre directo sob `Administrator` legacy, sem junctions externas.
+
+**Pipeline mecânico validado ponta-a-ponta:** GG-5914506215 + GG-5915052810 entraram em queue, watcher abriu HRC, executou wizard completo (paste HH → max players → equity model → scripting → calculate). Smoke real funcional bloqueado por 3 bugs do watcher (ver `#HRC-WATCHER-*` em TECH_DEBTS).
+
+### 3 bugs watcher descobertos via smoke real
+
+| Bug | Sintoma | Solução |
+|---|---|---|
+| **A — equity model fixo** | Watcher escolhe sempre `Malmuth-Harville ICM`, sem branch para `Multi-Table FGS`. Mãos mid-MTT têm equity FT-style. | Tag-based hint via `payouts.json` (Discord canais `#icm-ft`/`#icm-pko-ft` + HM3 tags). Ver `REGRAS_NEGOCIO.md §14`. |
+| **B — max players estático** | `get_player_count_from_hh()` usa regex de seats sentados em vez de jogadores relevantes à decisão. Árvore explode com seats vazios. | Parsing HH no watcher: `last_raiser→hero` + `hero→action_close`. |
+| **C — JS hardcoded → OOM** | Nome literal `mtt_advanced_..._bvb.js` carregado fixo; ranges largos provocam tree >20GB → crash HRC. | Imediato: substituir o ficheiro com mesmo nome por versão tight. Final: config externa por tag/profundidade. |
+
+Todos os 3 exigem fonte Python do watcher. Baltazar emigrou, sem contacto. **Decisão pt22**: descompilar `hrc_watcher.exe` em pt23 via `pyinstxtractor` (já corrido — bytecode em `_local_only/extracted/`) + `pycdc`, fix cirúrgico, recompilar com PyInstaller. Plano em `docs/PLAN_PT23.md`.
+
+### Auth debug pt22 (resumo)
+
+3 rotações no Railway dashboard + copy-paste contaminado + sessões PowerShell sem refresh do `setx` causaram 401s repetidos. Diagnóstico CLI confirmou Railway estável; desalinhamento estava sempre do lado Beelink. **Solução final**: `.bat` no Desktop do PC principal extrai token live via `railway variables --kv` (token nunca exposto ao chat) e faz `setx` automático no Beelink quando Rui dá duplo-clique. Token `Z10Soz9...37zSZ` exposto numa screenshot Railway durante debug → tech debt `#TOKEN-ROTATION-DEFENSIVE-PT23`.
+
+### Estado Fase 3 HRC pós-pt22
+
+- **G1 adapter** ✓ deployed (`cc93698`)
+- **G2 POST /results** ✓ pt21 (`2fa1f60`)
+- **G3 schema hrc_jobs** ✓ pt21 (`5b9c10a`)
+- **G4 auth dual-path** ✓ pt21 (`764b53e`)
+- **Smoke real mecânico** ✓ ponta-a-ponta validado
+- **Smoke real funcional** ✗ bloqueado por bugs A/B/C
+- **G5 UI botão exportar** ⏸ pendente (depende de smoke funcional)
+- **G6 UI badge HRC** ⏸ pendente
+
+### Pasta nova `tools/hrc_adapter/`
+
+Repo passa a ter `tools/` para utilities locais não-backend não-frontend. Fica fora do dev server / build. Conteúdo source-controlled (audit + review via PR); cópia manual para o Beelink.
+
+Última sessão fechada: pt22 (13 Maio 2026 — Adapter G1 deployed, 3 bugs watcher tracked, decisão de descompilar para pt23. 2 commits feature + commit docs. Suite 172 PASSED inalterada).
+
+Próxima sessão: **pt23 — Descompilar watcher + tag-based equity model.** Plano detalhado em `docs/PLAN_PT23.md`: 6 passos ordenados (rotação token → `pyinstxtractor`+`pycdc` → fixes A/B/C → recompilar PyInstaller → smoke pós-recompilação → tag-based equity end-to-end). Sessão mais longa projectada até agora (~10-15h, possivelmente split em 2 dias).
