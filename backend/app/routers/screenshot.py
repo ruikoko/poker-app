@@ -215,14 +215,25 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
             "- The tournament LEVEL number is shown in the LEFT PANEL (e.g. 'Lv 5' or 'Level 5').\n"
             "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
             "- Players with 'WIN' overlay on their avatar must still be included.\n"
-            "- Players who went all-in may show stack 0.\n\n"
+            "- Players who went all-in may show stack 0.\n"
+            "- Each player has TWO distinct badges, do NOT confuse them:\n"
+            "    * ORANGE FLAME (small circle next to nickname) -> VPIP percentage (an integer,\n"
+            "      e.g. '28', '23', '0'). This represents how often the player voluntarily puts\n"
+            "      money in the pot.\n"
+            "    * GOLDEN CROWN (icon above the nickname) -> bounty value in USD\n"
+            "      (e.g. '$50', '$75', '$100', '$112.50', '$125'). This is the dollar prize\n"
+            "      awarded to whoever knocks this player out.\n\n"
             "YOUR TASKS:\n"
             "1. Read the title bar for TM number and tournament name.\n"
             "2. Read the LEFT PANEL to identify the SB and BB player names.\n"
             "3. Read the LEFT PANEL for the current tournament LEVEL number.\n"
-            "4. For EVERY player seated at the table, read their nickname, chip stack,\n"
-            "   bounty percentage (if shown), and country flag.\n"
-            "   The chip stack is the colored number shown directly below each player's name.\n\n"
+            "4. For EVERY player seated at the table, read:\n"
+            "   (a) Nickname.\n"
+            "   (b) Chip stack — the colored number shown directly below each player's name.\n"
+            "   (c) VPIP percentage — the integer inside the ORANGE FLAME badge (use 0 if not shown).\n"
+            "   (d) Bounty USD value — the dollar amount inside the GOLDEN CROWN above the name\n"
+            "       (output the number ONLY, no '$' or commas; use 0 if not shown).\n"
+            "   (e) Country code from the flag (2 letters, or NONE).\n\n"
             "Reply in EXACTLY this format (no extra text, no markdown):\n"
             "TM: <TM number, e.g. TM5672663145>\n"
             "TOURNAMENT: <tournament name from title>\n"
@@ -232,13 +243,16 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
             "POT: <pot size number, or NONE>\n"
             "SB: <SB player name from LEFT PANEL>\n"
             "BB: <BB player name from LEFT PANEL>\n"
-            "PLAYER: <name> | <stack> | <bounty_pct> | <country>\n"
-            "PLAYER: <name> | <stack> | <bounty_pct> | <country>\n"
+            "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
+            "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
             "... (one PLAYER line per player, including Hero, SB, and BB)\n\n"
             "RULES:\n"
             "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
             "- If a player's stack shows 0, write 0\n"
-            "- Bounty_pct is the percentage in the badge (e.g. 18%), or 0 if none\n"
+            "- vpip_pct is the integer in the ORANGE FLAME badge (e.g. '28' for 28%); use 0 if not visible\n"
+            "- bounty_value_usd is the dollar amount in the GOLDEN CROWN above the nickname\n"
+            "  (e.g. '125' for $125, '112.50' for $112.50). NEVER include '$' or commas. Use 0 if not visible.\n"
+            "- DO NOT confuse VPIP (orange flame, integer like '28') with Bounty (golden crown, dollar like '$125'). They are TWO DIFFERENT badges in DIFFERENT positions on the avatar.\n"
             "- Country is the 2-letter code from the flag, or NONE\n"
             "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
             "- Include ALL players visible at the table, even if eliminated\n"
@@ -363,8 +377,19 @@ def _parse_vision_response(text: str) -> dict:
             if len(parts) >= 2:
                 name = parts[0]
                 raw_stack = parts[1]
-                bounty_str = parts[2] if len(parts) > 2 else "0%"
-                country = parts[3] if len(parts) > 3 else None
+                # pt24: format estendido `name | stack | vpip_pct | bounty_value_usd | country`
+                # (5 fields). Backward-compat com format legacy 4-field
+                # `name | stack | bounty_pct | country` — onde bounty_pct historicamente
+                # era usado para VPIP % (orange flame), não para bounty $. Tech debt
+                # #FIELD-BOUNTY-PCT-MISNAMED traceia o rename futuro do field key.
+                if len(parts) >= 5:
+                    vpip_str = parts[2]
+                    bounty_value_str = parts[3]
+                    country = parts[4]
+                else:
+                    vpip_str = parts[2] if len(parts) > 2 else "0%"
+                    bounty_value_str = "0"
+                    country = parts[3] if len(parts) > 3 else None
 
                 # Parse stack. Vision devolve em 2 formatos possíveis:
                 #   "215940"     → fichas (inteiro)
@@ -398,10 +423,26 @@ def _parse_vision_response(text: str) -> dict:
                     except ValueError:
                         stack_value = 0.0
 
+                # VPIP % (orange flame badge). Field key keeps `bounty_pct` para backward-compat
+                # com 4 consumidores: villain_rules.py, mtt.py (incl. coluna BD hand_villains.bounty_pct),
+                # ire.py (gate), screenshot.py _replace_hashes_in_actions. Rename para `vpip_pct`
+                # deferido — ver #FIELD-BOUNTY-PCT-MISNAMED.
                 bounty_pct = 0
-                bounty_m = re.search(r'(\d+)', bounty_str)
-                if bounty_m:
-                    bounty_pct = int(bounty_m.group(1))
+                vpip_m = re.search(r'(\d+)', vpip_str)
+                if vpip_m:
+                    bounty_pct = int(vpip_m.group(1))
+
+                # pt24: bounty_value_usd — dollar amount inside the golden crown badge.
+                # Aceita floats (e.g. "112.50") e ints (e.g. "125"). Strip de "$" e ","
+                # defensivos caso Vision desobedeça à regra "no symbols".
+                bounty_value_usd = 0.0
+                bv = bounty_value_str.replace("$", "").replace(",", "").strip()
+                bv_m = re.search(r'[\d]+(?:\.[\d]+)?', bv)
+                if bv_m:
+                    try:
+                        bounty_value_usd = float(bv_m.group(0))
+                    except ValueError:
+                        bounty_value_usd = 0.0
 
                 player_info = {
                     "name": name,
@@ -412,7 +453,8 @@ def _parse_vision_response(text: str) -> dict:
                     "stack_raw": stack_value,
                     "stack_unit": stack_unit,
                     "stack_chips": int(stack_value) if stack_unit == "chips" else None,
-                    "bounty_pct": bounty_pct,
+                    "bounty_pct": bounty_pct,             # historic name; semantically VPIP % — see #FIELD-BOUNTY-PCT-MISNAMED
+                    "bounty_value_usd": bounty_value_usd, # pt24: USD bounty (golden crown)
                     "country": country if country and country.upper() != "NONE" else None,
                 }
                 result["players_list"].append(player_info)

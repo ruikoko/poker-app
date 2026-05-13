@@ -6,6 +6,24 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (13 Maio 2026 — pt24 em curso, Vision bounty_value_usd validado)
+
+Sessão pt24 em curso. Foco em `#HRC-GG-KOS-EXTRACTION` (HIGH gatekeeper pt24): Vision extrai `bounty_value_usd` (coroa dourada) por player no `players_list`. Prompt + parser de `backend/app/routers/screenshot.py:_extract_hand_data_from_image` actualizado para 5-field format (`name|stack|vpip_pct|bounty_value_usd|country`) com backward-compat 4-field. Smoke pt24 valida 8/8 contra ground truth do Rui em GG-5914506215 (bounty e vpip ambos correctos). **Sem commits ainda**.
+
+### Tech debts novos levantados pt24 (em curso) (3)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#VISION-STACK-UNIT-DETECTION** | 🟡 MED | Vision às vezes devolve stack em BB sem preservar o sufixo `BB` no output (ex: `28.1` quando devia ser `28.1 BB`). Parser `_parse_vision_response` (`screenshot.py:361`) detecta unit via regex `\\d+\\s*BB`; sem "BB" cai em `stack_unit='chips'` e o valor fica errado (28.1 chips em vez de 28.1 BB ≈ 196 700 fichas a BB=7000). Reproduzido em smoke pt24 (GG-5914506215): 8/8 stacks parseados como chips com valores ridiculos. Solução: cross-ref com a HH (que tem chips canónicos em "(N in chips)") via `_normalize_vision_stacks` (já existe parcialmente). Tunar prompt para reforçar "preserve BB suffix" não é definitivo (Vision pode escapar). Fix robusto: aceitar Vision como advisory, autoritativo = HH parser. |
+| **#FIELD-BOUNTY-PCT-MISNAMED** | 🟢 LOW | Historicamente o field `players_list[].bounty_pct` armazena **VPIP %** (orange flame badge), não bounty. Mantido por backward-compat com 4 consumidores backend (`villain_rules.py`, `mtt.py`, `ire.py`, `screenshot.py:_replace_hashes_in_actions`) + 1 coluna BD (`hand_villains.bounty_pct TEXT`). Em pt24 o **prompt** novo de Vision foi clarificado: `vpip_pct` na output line; field key dict `bounty_pct` continua a existir com mesma semântica. Rename completo (key + coluna + 4 consumidores + frontend) fica para refactor futuro. |
+| **#FIELD-STACK-CHIPS-AMBIGUOUS** | 🟢 LOW | `players_list[].stack_chips` está em "chips" para stacks que Vision lê numericamente (sem unit declarado) mas pode ser BB-derivado (×bb_size em `_normalize_vision_stacks`) ou valores fictícios (Vision a esquecer-se de preservar BB suffix — ver `#VISION-STACK-UNIT-DETECTION`). Frontend (`HandDetailPage.jsx:233`, `Hands.jsx:1259`) e backend IRE (`ire.py:186-269`) consomem como se fosse autoritativo. Unificar unidade para "chips canónicos" (sempre, com fallback a HH `(N in chips)`) eventualmente. |
+
+### Edit pt24 ainda uncommitted
+
+- `backend/app/routers/screenshot.py` — prompt + parser ganha campo `bounty_value_usd` (smoke 8/8 PASS).
+
+---
+
 ## Estado actual (13 Maio 2026 — pt23 em curso, marshal swap + recompile validados)
 
 Sessão pt23 em curso. Descompilação `hrc_watcher.exe` via `pycdc` (build local com VS 2022 Build Tools + CMake) + `dis` manual concluída. Marshal swap das 4 funções alteradas (`set_equity_model`, `get_player_count_from_hh`, `setup_scripting`, `setup_hand`) validado em smoke local (8/8 sub-tests PASS). Re-bundle PyInstaller `--onefile` valida arranque end-to-end no PC principal: launcher carrega `.pyc` swapped, `exec` do main inicia, bate como esperado em `os.makedirs('C:\\Users\\Administrator\\...')` (path do Beelink, não escrevível no PC principal). Pronto para smoke real no Beelink. **Sem commits ainda**.
