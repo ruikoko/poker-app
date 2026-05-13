@@ -6,6 +6,18 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (13 Maio 2026 — pt25 em curso, prune-in-gap-downstream wired)
+
+Sessão pt25 em curso. Foco em `#HRC-PRUNE-IN-GAP-DOWNSTREAM` (HIGH gatekeeper, herdado de pt24). 4 frentes implementadas: (i) helpers backend `derive_real_aggressor_position` + `derive_prune_downstream` + `generate_hrc_script` em `services/queue_export.py` com convenção HRC index (SB=0, BB=1, UTG=2, …, BTN=N-1); (ii) JS template `tools/hrc_scripts/...bvb.js` ganha guard `REAL_AGGRESSOR_POS` + `DOWNSTREAM_POSITIONS` em `getSizingsOpening` (no-op com defaults null/[]); (iii) `build_queue_zip` escreve `<hand>/script.js` no zip + override `script_path="script.js"` quando prune fires; (iv) adapter (`tools/hrc_adapter/hrc_adapter.py`) reescreve `script_path` para path absoluto pós-unzip via novo `payouts_helpers.rewrite_script_path_in_payouts`. Para o trigger `players_left > 3 × max_players`: `lobby_vision` ganha extracção de `players_left` mid-tournament (campo novo no prompt + RULES diferenciam vs `entrants`); `lobby_processing_log` ganha coluna `players_left` (idempotente em `ensure_lobby_processing_log_schema`); `_resolve_players_left` em queue_export faz lookup SQL nessa tabela (graceful fallback `None` → prune off). Smoke real (PASSO B5) aguarda SS de lobby fresca via canal `#lobbys` no Discord.
+
+### Tech debts novos levantados pt25 (em curso) (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#BACKFILL-LOBBY-PLAYERS-LEFT-DISCORD-REFETCH** | 🟢 LOW | Cobertura retroactiva dos 18 lobby snapshots históricos via Discord API re-fetch. Script `scripts/backfill_lobby_players_left.py` está em **shell com `NotImplementedError`** no fetch step (lobby_processing_log NÃO persiste `img_b64`; imagens lobby passam in-memory por `process_lobby_message`). Implementação real exige bot token + lifecycle + rate-limit handling (custo ~$0.18-$0.36 Vision + 30-60min). Sem urgência: Rui posta SS fresca para qualquer torneio recente e o pipeline real-time captura. |
+
+---
+
 ## Estado actual (13 Maio 2026 — pt24 em curso, Vision bounty_value_usd validado)
 
 Sessão pt24 em curso. Foco em `#HRC-GG-KOS-EXTRACTION` (HIGH gatekeeper pt24): Vision extrai `bounty_value_usd` (coroa dourada) por player no `players_list`. Prompt + parser de `backend/app/routers/screenshot.py:_extract_hand_data_from_image` actualizado para 5-field format (`name|stack|vpip_pct|bounty_value_usd|country`) com backward-compat 4-field. Smoke pt24 valida 8/8 contra ground truth do Rui em GG-5914506215 (bounty e vpip ambos correctos). **Sem commits ainda**.

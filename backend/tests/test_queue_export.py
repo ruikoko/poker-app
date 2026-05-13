@@ -249,6 +249,230 @@ def test_inject_bounties_currency_EUR_from_euro_in_header():
     assert "$" not in seat_lines
 
 
+# ── pt25: #HRC-PRUNE-IN-GAP-DOWNSTREAM helpers ─────────────────────────────
+
+import os as _os
+from app.services.queue_export import (
+    derive_real_aggressor_position,
+    derive_prune_downstream,
+    generate_hrc_script,
+)
+
+
+# ── derive_real_aggressor_position ──────────────────────────────────────────
+
+# Helper builder para HHs de teste. 8-max, button configurável.
+# HRC convention para 8-max com button = Seat #4:
+#   SB=Seat 5 (idx 0), BB=Seat 6 (idx 1), UTG=Seat 7 (idx 2),
+#   UTG+1/EP=Seat 8 (idx 3), MP=Seat 1 (idx 4), HJ=Seat 2 (idx 5),
+#   CO=Seat 3 (idx 6), BTN=Seat 4 (idx 7).
+
+def _hh_8max_btn4(preflop_actions: list[str]) -> str:
+    """Constrói uma HH 8-max minimal com button Seat #4 e acções preflop
+    customizáveis."""
+    lines = [
+        "Poker Hand #TM1: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00",
+        "Table 'A' 8-max Seat #4 is the button",
+        "Seat 1: MPplayer (10000 in chips)",      # MP, HRC idx 4
+        "Seat 2: HJplayer (10000 in chips)",      # HJ, HRC idx 5
+        "Seat 3: COplayer (10000 in chips)",      # CO, HRC idx 6
+        "Seat 4: Hero (10000 in chips)",          # BTN, HRC idx 7
+        "Seat 5: SBplayer (10000 in chips)",      # SB, HRC idx 0
+        "Seat 6: BBplayer (10000 in chips)",      # BB, HRC idx 1
+        "Seat 7: UTGplayer (10000 in chips)",     # UTG, HRC idx 2
+        "Seat 8: EPplayer (10000 in chips)",      # UTG+1/EP, HRC idx 3
+        "SBplayer: posts small blind 200",
+        "BBplayer: posts big blind 400",
+        "*** HOLE CARDS ***",
+        "Dealt to Hero [As Kd]",
+    ]
+    lines.extend(preflop_actions)
+    lines.append("*** SUMMARY ***")
+    return "\n".join(lines) + "\n"
+
+
+def test_aggressor_UTG_opens():
+    """8-max, UTG raise first → HRC idx 2."""
+    hh = _hh_8max_btn4(["UTGplayer: raises 800 to 1200"])
+    assert derive_real_aggressor_position(hh) == 2
+
+
+def test_aggressor_EP_opens():
+    """UTG folds, EP (UTG+1) raises → HRC idx 3."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: raises 800 to 1200",
+    ])
+    assert derive_real_aggressor_position(hh) == 3
+
+
+def test_aggressor_MP_opens():
+    """UTG/EP fold, MP raises → HRC idx 4."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: raises 800 to 1200",
+    ])
+    assert derive_real_aggressor_position(hh) == 4
+
+
+def test_aggressor_HJ_opens():
+    """UTG/EP/MP fold, HJ raises → HRC idx 5."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: folds",
+        "HJplayer: raises 800 to 1200",
+    ])
+    assert derive_real_aggressor_position(hh) == 5
+
+
+def test_aggressor_CO_opens():
+    """UTG/EP/MP/HJ fold, CO raises → HRC idx 6."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: folds",
+        "HJplayer: folds",
+        "COplayer: raises 800 to 1200",
+    ])
+    assert derive_real_aggressor_position(hh) == 6
+
+
+def test_aggressor_SB_completes_returns_None():
+    """Limp pot — todos foldam até SB, SB completa, BB checks → None
+    (sem raise voluntário; também não é SB-opens-excepção, é literalmente
+    sem aggressor)."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: folds",
+        "HJplayer: folds",
+        "COplayer: folds",
+        "Hero: folds",
+        "SBplayer: calls 200",
+        "BBplayer: checks",
+    ])
+    assert derive_real_aggressor_position(hh) is None
+
+
+def test_aggressor_SB_opens_returns_None_per_exception():
+    """Todos foldam até SB, SB faz raise — regra pt23 excepção "SB-aberto"
+    devolve None (sem prune downstream porque ninguém depois excepto BB)."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: folds",
+        "HJplayer: folds",
+        "COplayer: folds",
+        "Hero: folds",
+        "SBplayer: raises 600 to 1200",
+        "BBplayer: folds",
+    ])
+    assert derive_real_aggressor_position(hh) is None
+
+
+def test_aggressor_BU_opens_returns_idx7():
+    """UTG..CO fold, BTN (Hero, idx 7) raises → 7. Test crítico para
+    GG-5914506215 real (Hero=BTN opens, smoke pt23)."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: folds",
+        "HJplayer: folds",
+        "COplayer: folds",
+        "Hero: raises 800 to 1200",
+    ])
+    assert derive_real_aggressor_position(hh) == 7
+
+
+# ── derive_prune_downstream ─────────────────────────────────────────────────
+
+def test_prune_UTG_aggressor_8max():
+    """UTG (idx 2) → [EP=3, MP=4, HJ=5, CO=6, BU=7, SB=0]."""
+    assert derive_prune_downstream(2, 6, 200) == [3, 4, 5, 6, 7, 0]
+
+
+def test_prune_EP_aggressor_8max():
+    assert derive_prune_downstream(3, 6, 200) == [4, 5, 6, 7, 0]
+
+
+def test_prune_MP_aggressor_8max():
+    assert derive_prune_downstream(4, 6, 200) == [5, 6, 7, 0]
+
+
+def test_prune_HJ_aggressor_8max():
+    assert derive_prune_downstream(5, 6, 200) == [6, 7, 0]
+
+
+def test_prune_CO_aggressor_8max():
+    assert derive_prune_downstream(6, 6, 200) == [7, 0]
+
+
+def test_prune_BU_aggressor_8max():
+    assert derive_prune_downstream(7, 6, 200) == [0]
+
+
+def test_prune_SB_aggressor_exception_returns_empty():
+    """SB (idx 0) → [] (excepção regra)."""
+    assert derive_prune_downstream(0, 6, 200) == []
+
+
+def test_prune_FT_phase_no_prune():
+    """players_left ≤ 3 × max_players → [] (FT phase, não prune)."""
+    # max_players=6, threshold=18
+    assert derive_prune_downstream(2, 6, 18) == []
+    assert derive_prune_downstream(2, 6, 10) == []
+    # = threshold → no prune (≤, não strict)
+    assert derive_prune_downstream(2, 6, 18) == []
+
+
+def test_prune_None_aggressor_returns_empty():
+    """aggressor None → [] (defensivo)."""
+    assert derive_prune_downstream(None, 6, 200) == []
+
+
+def test_prune_missing_threshold_returns_empty():
+    """max_players ou players_left None → [] (defensivo)."""
+    assert derive_prune_downstream(2, None, 200) == []
+    assert derive_prune_downstream(2, 6, None) == []
+
+
+# ── generate_hrc_script ─────────────────────────────────────────────────────
+
+_TEMPLATE_PATH = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))),
+    "tools", "hrc_scripts",
+    "mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js",
+)
+
+
+def test_generate_hrc_script_with_hint():
+    """Com hint válido: hint block presente, valores reais injectados."""
+    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
+                              downstream_positions=[3, 4, 5, 6, 7, 0])
+    assert "let REAL_AGGRESSOR_POS = 2;" in out
+    assert "let DOWNSTREAM_POSITIONS = [3, 4, 5, 6, 7, 0];" in out
+    assert "pt25 prune-in-gap-downstream hints" in out
+    # Marker do template ainda existe (não destruímos)
+    assert "let ALLIN = 9999;" in out
+    # Template original preservado (procurar uma const conhecida)
+    assert "SIZES_OPEN_OTHERS" in out
+
+
+def test_generate_hrc_script_without_hint():
+    """Sem hint (aggressor None ou downstream empty): defaults null/[]
+    inseridos → no-op behavior (JS comporta-se idêntico ao original)."""
+    out_none = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=None,
+                                   downstream_positions=[])
+    assert "let REAL_AGGRESSOR_POS = null;" in out_none
+    assert "let DOWNSTREAM_POSITIONS = [];" in out_none
+
+    out_empty_ds = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
+                                       downstream_positions=[])
+    assert "let REAL_AGGRESSOR_POS = null;" in out_empty_ds
+
+
 # ── build_queue_zip ───────────────────────────────────────────────────────────
 
 import io as _io
@@ -399,3 +623,210 @@ def test_build_queue_zip_manifest_filters_echo():
     }
     assert manifest["total_hands_queried"] == 0
     assert manifest["hands_included"] == []
+
+
+# ── pt25: prune-in-gap-downstream integration nos zips ─────────────────────
+
+# HH UTG-open com 8 seats, 6 voluntários (UTG raise + 5 calls), hero=BB FT-ish.
+# 6 players relevantes na mão (max_players=6, derive_max_players). Para
+# o prune disparar: players_left > 3 × 6 = 18 → usar 200.
+_HH_UTG_OPEN_8MAX = """Poker Hand #TM999: Tournament #99999, Test Tournament $100 - Level5 (200/400) - 2026/05/01 00:00:00
+Table 'X' 8-max Seat #4 is the button
+Seat 1: P1 (10000 in chips)
+Seat 2: P2 (10000 in chips)
+Seat 3: P3 (10000 in chips)
+Seat 4: P4 (10000 in chips)
+Seat 5: P5 (10000 in chips)
+Seat 6: Hero (10000 in chips)
+Seat 7: UTGopener (10000 in chips)
+Seat 8: P8 (10000 in chips)
+P5: posts small blind 200
+Hero: posts big blind 400
+*** HOLE CARDS ***
+Dealt to Hero [As Kd]
+UTGopener: raises 800 to 1200
+P8: calls 1200
+P1: calls 1200
+P2: calls 1200
+P3: calls 1200
+P4: calls 1200
+P5: folds
+Hero: folds
+*** SUMMARY ***
+"""
+
+
+def test_build_queue_zip_includes_script_js_when_prune_fires():
+    """pt25: aggressor=UTG (idx 2), max_players=6, players_left=200 (200 > 3*6=18)
+    → script.js no zip + payouts.script_path='script.js' + manifest tem
+    prune_aggressor=2, prune_downstream=[3,4,5,6,7,0]."""
+    hand = {
+        "id": 1, "hand_id": "GG-PRUNE", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 200,  # > 3*6 → prune fires
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    names = set(zf.namelist())
+    assert "GG-PRUNE/script.js" in names
+    assert "GG-PRUNE/payouts.json" in names
+
+    # payouts.json contém script_path apontando para "script.js" (relativo)
+    payouts = _json.loads(zf.read("GG-PRUNE/payouts.json"))
+    assert payouts["script_path"] == "script.js"
+
+    # script.js contém hints injectados (não defaults)
+    js = zf.read("GG-PRUNE/script.js").decode("utf-8")
+    assert "let REAL_AGGRESSOR_POS = 2;" in js
+    assert "let DOWNSTREAM_POSITIONS = [3, 4, 5, 6, 7, 0];" in js
+
+    # manifest tem metadata do prune
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["prune_aggressor"] == 2
+    assert entry["prune_downstream"] == [3, 4, 5, 6, 7, 0]
+    assert entry["has_prune_script"] is True
+
+
+def test_build_queue_zip_excludes_script_js_when_no_players_left():
+    """pt25: aggressor identificado mas players_left None → derive_prune
+    devolve [] → sem script.js no zip + script_path mantém None."""
+    hand = {
+        "id": 1, "hand_id": "GG-NOPL", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        # SEM players_left → fallback None
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    names = set(zf.namelist())
+    assert "GG-NOPL/script.js" not in names
+
+    payouts = _json.loads(zf.read("GG-NOPL/payouts.json"))
+    assert payouts["script_path"] is None  # hint default mantém
+
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    # aggressor ainda foi computed (UTG=2) mas downstream=[] → no script
+    assert entry["prune_aggressor"] == 2
+    assert entry["prune_downstream"] == []
+    assert entry["has_prune_script"] is False
+
+
+def test_build_queue_zip_excludes_script_js_when_FT_phase():
+    """pt25: aggressor=UTG, max_players=6, players_left=18 (= threshold 3*6=18,
+    não strict-greater) → [] → sem script.js."""
+    hand = {
+        "id": 1, "hand_id": "GG-FT", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 18,  # = threshold → não dispara
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    assert "GG-FT/script.js" not in set(zf.namelist())
+
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["has_prune_script"] is False
+
+
+# ── pt25-revisado: _resolve_players_left via lobby_processing_log ───────────
+
+from app.services.queue_export import _resolve_players_left
+
+
+def test_resolve_players_left_inline_hand_wins():
+    """Branch 1: se hand['players_left'] tem int → devolve directo, sem DB."""
+    assert _resolve_players_left({"players_left": 87}, None) == 87
+    # Mesmo com tournament_number presente, inline tem prioridade.
+    assert _resolve_players_left(
+        {"players_left": 50, "tournament_number": "ZZZ"}, None,
+    ) == 50
+
+
+def test_resolve_players_left_via_lobby_lookup(monkeypatch):
+    """Branch 2: hand sem players_left inline → query lobby_processing_log
+    por tournament_number; mock devolve row com players_left."""
+    calls: list = []
+
+    def fake_query(sql, params=None):
+        calls.append((sql, params))
+        return [{"players_left": 42}]
+
+    monkeypatch.setattr("app.db.query", fake_query)
+
+    out = _resolve_players_left({"tournament_number": "281416137"}, None)
+    assert out == 42
+    # Confirma que query foi disparada com o tn correcto.
+    assert len(calls) == 1
+    assert calls[0][1] == ("281416137",)
+    assert "lobby_processing_log" in calls[0][0]
+    assert "result = 'success'" in calls[0][0]
+    assert "players_left IS NOT NULL" in calls[0][0]
+
+
+def test_resolve_players_left_no_lobby_row(monkeypatch):
+    """Branch 2 mas 0 rows → None (prune off, graceful)."""
+    monkeypatch.setattr("app.db.query", lambda *a, **kw: [])
+    out = _resolve_players_left({"tournament_number": "281416137"}, None)
+    assert out is None
+
+
+def test_resolve_players_left_no_tournament_number():
+    """Sem tn → None imediato (não chega a tocar DB)."""
+    assert _resolve_players_left({"hand_id": "GG-X"}, None) is None
+    assert _resolve_players_left({}, None) is None
+    assert _resolve_players_left(None, None) is None
+
+
+def test_resolve_players_left_db_error_returns_None(monkeypatch):
+    """Excepção no query (BD down, schema mismatch) → None (graceful)."""
+
+    def raising(*a, **kw):
+        raise RuntimeError("simulated DB error")
+
+    monkeypatch.setattr("app.db.query", raising)
+    out = _resolve_players_left({"tournament_number": "281416137"}, None)
+    assert out is None
+
+
+def test_resolve_players_left_non_int_row_returns_None(monkeypatch):
+    """Row devolve coluna mas com tipo inesperado → None (defensivo)."""
+    monkeypatch.setattr("app.db.query", lambda *a, **kw: [{"players_left": "not_an_int"}])
+    out = _resolve_players_left({"tournament_number": "281416137"}, None)
+    assert out is None
+
+
+# ── pt25-revisado: lobby_vision parse passa por players_left ────────────────
+
+from app.services.lobby_vision import parse_and_validate_lobby_json
+
+
+def test_lobby_vision_parses_players_left():
+    """Vision JSON com players_left int → parser preserva-o intacto."""
+    raw = (
+        '{"site": "GGPoker", "tournament_name": "Bounty Hunters Big Game $215",'
+        ' "prizes": {"1": 100.0, "2": 50.0},'
+        ' "entrants": 500, "players_left": 87, "starting_stack": 10000}'
+    )
+    parsed = parse_and_validate_lobby_json(raw)
+    assert parsed is not None
+    assert parsed["players_left"] == 87
+    assert parsed["entrants"] == 500
+
+
+def test_lobby_vision_players_left_optional():
+    """Vision JSON sem players_left (campo omitted) → parser ainda devolve
+    dict válido (field é opcional, não invalida)."""
+    raw = (
+        '{"site": "GGPoker", "tournament_name": "X",'
+        ' "prizes": {"1": 100.0}, "entrants": 500}'
+    )
+    parsed = parse_and_validate_lobby_json(raw)
+    assert parsed is not None
+    assert parsed.get("players_left") is None

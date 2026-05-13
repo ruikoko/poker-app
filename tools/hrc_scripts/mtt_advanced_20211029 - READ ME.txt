@@ -1,0 +1,25 @@
+Advanced MTT example (no limping)
+This script should be suitable for most stack sizes and is very flexible in the way it can be customized. The main restriction is that limps are generally not allowed, except for the small blind player who can complete.
+
+ Download mtt_advanced_20211029.js (Use right click: Save link as...)
+
+View Source Code
+
+Preflop:
+
+Opening / 3-bet / squeeze sizes in big blinds
+Configurable number of flats against opens / 3-bets / etc
+Separate sizings for SB / BB
+Sizing for 4-bets and 5-bets in relation to the pot IP & OOP
+Option to disable cold calls against 3-bets+
+Option to always allow flat calls if they close the action
+Adding all-in if SPR is below a set value
+All-in threshold like UI
+Postflop:
+
+Option to disable donk betting
+Option to allow donk betting only if a player showed previous aggression
+Option to force a checkdown for multiway pots after a set street
+Option for additional pot-% sizings for all flop bets
+Option for additional pot-% sizings only for flop c-bets
+Adding all-in if SPR is below a set value

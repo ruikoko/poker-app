@@ -60,12 +60,27 @@ def ensure_lobby_processing_log_schema():
         "CREATE INDEX IF NOT EXISTS idx_lobby_log_result "
         "ON lobby_processing_log (result);"
     )
+    # pt25: coluna players_left dedicada para o queue_export trigger do
+    # prune-in-gap-downstream. Idempotente (IF NOT EXISTS). Permanece NULL
+    # nos 18 rows historicos enquanto não houver backfill via Discord re-fetch.
+    add_players_left = (
+        "ALTER TABLE lobby_processing_log "
+        "ADD COLUMN IF NOT EXISTS players_left INTEGER;"
+    )
+    # Index para o lookup BY tournament_number ORDER BY posted_at DESC
+    idx_tn_posted = (
+        "CREATE INDEX IF NOT EXISTS idx_lobby_log_tn_posted "
+        "ON lobby_processing_log (tournament_number, posted_at DESC) "
+        "WHERE tournament_number IS NOT NULL AND players_left IS NOT NULL;"
+    )
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
             cur.execute(idx_attempted)
             cur.execute(idx_result)
+            cur.execute(add_players_left)
+            cur.execute(idx_tn_posted)
         conn.commit()
     finally:
         conn.close()
@@ -82,12 +97,18 @@ def _upsert_lobby_log(
     tournament_number: Optional[str] = None,
     vision_json: Optional[dict] = None,
     posted_at: Optional[datetime] = None,
+    players_left: Optional[int] = None,
 ) -> None:
     """UPSERT por message_id. Incrementa attempt_count em conflito.
 
     Falhas BD são engolidas com logger.error — não devem partir o handler
     real-time ou o batch sync se a tabela estiver indisponível. ValueError
     em `result` inválido continua a propagar (caller bug).
+
+    pt25: `players_left` (int|None) — extraído pelo Vision da SS lobby
+    mid-tournament; usado como trigger do prune-in-gap-downstream em
+    queue_export. Coluna dedicada (não apenas dentro de vision_json) para
+    query simples por `tournament_number`.
     """
     if result not in _VALID_RESULTS:
         raise ValueError(f"invalid result {result!r}")
@@ -103,9 +124,9 @@ def _upsert_lobby_log(
                 INSERT INTO lobby_processing_log (
                     discord_message_id, channel_id, attempted_at, attempt_count,
                     result, reason_detail, site, tournament_name,
-                    tournament_number, vision_json, posted_at
+                    tournament_number, vision_json, posted_at, players_left
                 ) VALUES (
-                    %s, %s, NOW(), 1, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, NOW(), 1, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (discord_message_id) DO UPDATE SET
                     attempted_at      = NOW(),
@@ -116,13 +137,14 @@ def _upsert_lobby_log(
                     tournament_name   = COALESCE(EXCLUDED.tournament_name, lobby_processing_log.tournament_name),
                     tournament_number = COALESCE(EXCLUDED.tournament_number, lobby_processing_log.tournament_number),
                     vision_json       = COALESCE(EXCLUDED.vision_json, lobby_processing_log.vision_json),
-                    posted_at         = COALESCE(EXCLUDED.posted_at, lobby_processing_log.posted_at)
+                    posted_at         = COALESCE(EXCLUDED.posted_at, lobby_processing_log.posted_at),
+                    players_left      = COALESCE(EXCLUDED.players_left, lobby_processing_log.players_left)
                 """,
                 (
                     message_id, channel_id, result, reason_detail,
                     site, tournament_name, tournament_number,
                     json.dumps(vision_json) if vision_json else None,
-                    posted_at,
+                    posted_at, players_left,
                 ),
             )
         conn.commit()
@@ -201,6 +223,13 @@ async def process_lobby_message(
 
     site = vj.get("site")
     name = vj.get("tournament_name")
+    # pt25: players_left lido do prompt extension; pode ser None se Vision
+    # não encontrou o número (e.g. campo invisível em alguns layouts).
+    # Coerce defensiva: aceita só int positivo, descarta None/0/strings.
+    _pl_raw = vj.get("players_left")
+    players_left: Optional[int] = (
+        int(_pl_raw) if isinstance(_pl_raw, int) and _pl_raw > 0 else None
+    )
     base["site"] = site
     base["tournament_name"] = name
     base["vision_json"] = vj
@@ -213,6 +242,7 @@ async def process_lobby_message(
             reason_detail=f"vision_site={site!r}",
             site=site, tournament_name=name,
             vision_json=vj, posted_at=posted_at,
+            players_left=players_left,
         )
         base["result"] = "site_undetected"
         base["reason_detail"] = f"vision_site={site!r}"
@@ -239,6 +269,7 @@ async def process_lobby_message(
             result=result, reason_detail=reason,
             site=site, tournament_name=name,
             vision_json=vj, posted_at=posted_at,
+            players_left=players_left,
         )
         base["result"] = result
         base["reason_detail"] = reason
@@ -261,6 +292,7 @@ async def process_lobby_message(
             reason_detail=f"{type(e).__name__}: {e}",
             site=site, tournament_name=name, tournament_number=tn,
             vision_json=vj, posted_at=posted_at,
+            players_left=players_left,
         )
         base["result"] = "upsert_error"
         base["reason_detail"] = str(e)
@@ -277,6 +309,7 @@ async def process_lobby_message(
         result="success",
         site=site, tournament_name=name, tournament_number=tn,
         vision_json=vj, posted_at=posted_at,
+        players_left=players_left,
     )
     base["result"] = "success"
     base["tournament_number"] = tn

@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -27,6 +28,16 @@ from typing import Any, Optional
 from app.services.derive_max_players import derive_max_players
 
 logger = logging.getLogger("queue_export")
+
+# pt25: caminho canónico do JS template usado por generate_hrc_script.
+# Resolve-se relativo a este ficheiro (backend/app/services/queue_export.py)
+# → <repo>/tools/hrc_scripts/...bvb.js. Mudar nome do template aqui se a
+# variante canónica mudar.
+_PRUNE_JS_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "..", "..", "tools", "hrc_scripts",
+    "mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js",
+)
 
 
 # pt23 fix Bug A: tags que disparam Malmuth-Harville ICM (FT-style equity).
@@ -85,6 +96,173 @@ def _coerce_player_names(pn) -> dict:
 # + " (CHIPS in chips" — o `)` final fica fora dos grupos para podermos
 # injectar conteúdo antes de o fechar.
 _SEAT_RE = re.compile(r"^(Seat \d+: )(.+?)( \([\d,]+ in chips)\)", re.MULTILINE)
+
+
+# pt25: helpers para #HRC-PRUNE-IN-GAP-DOWNSTREAM
+# HRC scripting convention: índices 0..N-1 onde SB=0, BB=1, UTG=2, ..., BTN=N-1.
+# Preflop turn order = [UTG, UTG+1, ..., BTN, SB, BB] = [2, 3, ..., N-1, 0, 1].
+_SEAT_ALL_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
+_BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
+_PREFLOP_OPEN_RE = re.compile(r"^(.+?): (raises|bets)\b", re.MULTILINE)
+
+
+def _build_nick_to_hrc_index(hh_text: str) -> dict:
+    """Mapa nick → HRC player index (SB=0, BB=1, UTG=2, ...) a partir das
+    Seat lines + linha "Seat #N is the button".
+
+    Devolve dict vazio se parsing falhar (sem button, sem seats, etc.).
+
+    IMPORTANTE: limita scan ao header pre-`*** HOLE CARDS ***`. Caso contrário
+    apanha também linhas SUMMARY tipo `Seat 4: Hero (button) won (130,500)` —
+    a regex `\\(\\d` é satisfeita por essas linhas e o dict overwrite faz com
+    que o nick correcto seja substituído pelo phrase do SUMMARY.
+    """
+    end = hh_text.find("*** HOLE CARDS ***")
+    header = hh_text[:end] if end > 0 else hh_text
+
+    seats: dict[int, str] = {}
+    for m in _SEAT_ALL_RE.finditer(header):
+        seats[int(m.group(1))] = m.group(2).strip()
+    if len(seats) < 2:
+        return {}
+    btn_m = _BUTTON_RE.search(hh_text)
+    if not btn_m:
+        return {}
+    btn_seat = int(btn_m.group(1))
+    seat_list = sorted(seats.keys())
+    if btn_seat not in seat_list:
+        return {}
+    btn_idx_in_list = seat_list.index(btn_seat)
+    n = len(seat_list)
+    # SB = seat imediatamente a seguir ao button (clockwise)
+    sb_idx_in_list = (btn_idx_in_list + 1) % n
+    out: dict = {}
+    for hrc_idx in range(n):
+        seat_in_list = (sb_idx_in_list + hrc_idx) % n
+        seat_num = seat_list[seat_in_list]
+        out[seats[seat_num]] = hrc_idx
+    return out
+
+
+def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
+    """pt25 — devolve o HRC player index do primeiro a abrir o pot preflop
+    com raise/bet voluntário.
+
+    Excepções (devolvem None per regra pt23):
+    - Nenhum raise/bet preflop (limp pot, walk-to-BB)
+    - Primeiro raiser é SB (HRC idx 0) — "SB-aberto", excepção da regra
+    - Parsing falha (sem button, sem HOLE CARDS marker, etc.)
+
+    Calls preflop (incluindo SB-completes) NÃO contam como abertura.
+    """
+    if not hh_text:
+        return None
+    nick_to_idx = _build_nick_to_hrc_index(hh_text)
+    if not nick_to_idx:
+        return None
+
+    start = hh_text.find("*** HOLE CARDS ***")
+    if start < 0:
+        return None
+    end_flop = hh_text.find("*** FLOP ***", start)
+    end_summary = hh_text.find("*** SUMMARY ***", start)
+    ends = [e for e in (end_flop, end_summary) if e > 0]
+    end = min(ends) if ends else len(hh_text)
+    preflop = hh_text[start:end]
+
+    m = _PREFLOP_OPEN_RE.search(preflop)
+    if not m:
+        return None  # limp pot / walk-to-BB
+    nick = m.group(1).strip()
+    idx = nick_to_idx.get(nick)
+    if idx is None:
+        return None  # nick não está em seats (HH inválido)
+    if idx == 0:
+        return None  # SB-aberto excepção
+    return idx
+
+
+def derive_prune_downstream(
+    aggressor_pos: Optional[int],
+    max_players: Optional[int],
+    players_left: Optional[int],
+    table_format: int = 8,
+) -> list:
+    """pt25 — devolve lista de HRC player indexes a prune (opens-in-gap downstream).
+
+    Regra Rui pt23:
+    - aggressor_pos None ou SB (idx 0) → [] (excepção, nada a prune)
+    - players_left <= 3 * max_players → [] (FT phase, prune não vale a pena)
+    - max_players None → [] (defensivo, sem threshold)
+    - Senão → posições downstream do aggressor em ordem preflop, até SB
+      inclusive (BB excluído porque é tipicamente o respondedor/hero).
+
+    Para table_format=8 (8-max):
+      aggressor=UTG (2) → [3, 4, 5, 6, 7, 0]   (EP, MP, HJ, CO, BU, SB)
+      aggressor=EP  (3) → [4, 5, 6, 7, 0]
+      aggressor=MP  (4) → [5, 6, 7, 0]
+      aggressor=HJ  (5) → [6, 7, 0]
+      aggressor=CO  (6) → [7, 0]
+      aggressor=BU  (7) → [0]
+      aggressor=SB  (0) → []
+    """
+    if aggressor_pos is None or aggressor_pos == 0:
+        return []
+    if max_players is None or players_left is None:
+        return []
+    if players_left <= 3 * max_players:
+        return []
+
+    # Preflop turn order excluindo BB: UTG (2), UTG+1 (3), ..., BTN (N-1), SB (0)
+    preflop_order: list = []
+    for offset in range(table_format):
+        idx = (2 + offset) % table_format
+        if idx == 1:  # BB excluído
+            continue
+        preflop_order.append(idx)
+    if aggressor_pos not in preflop_order:
+        return []
+    i = preflop_order.index(aggressor_pos)
+    return preflop_order[i + 1:]
+
+
+def generate_hrc_script(
+    template_path: str,
+    aggressor_pos: Optional[int],
+    downstream_positions: list,
+) -> str:
+    """pt25 — gera JS HRC com hint REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
+    injectado no topo, antes da config do template.
+
+    Se aggressor_pos é None ou downstream_positions é empty (SB-aberto, FT
+    phase, parsing falha): injecta defaults null/[] → JS comporta-se idêntico
+    ao original (no-op, sem prune).
+
+    Inserção: bloco hint vai imediatamente antes da linha `let ALLIN = 9999;`
+    (1ª linha de config no template Charles). Se essa marca não existir,
+    prepend no topo do ficheiro.
+    """
+    with open(template_path, "r", encoding="utf-8") as f:
+        template = f.read()
+
+    if aggressor_pos is None or not downstream_positions:
+        agg_val = "null"
+        ds_val = "[]"
+    else:
+        agg_val = str(aggressor_pos)
+        ds_val = "[" + ", ".join(str(p) for p in downstream_positions) + "]"
+
+    hint = (
+        "// pt25 prune-in-gap-downstream hints (injected by backend per-hand)\n"
+        f"let REAL_AGGRESSOR_POS = {agg_val};\n"
+        f"let DOWNSTREAM_POSITIONS = {ds_val};\n"
+        "\n"
+    )
+
+    marker = "let ALLIN = 9999;"
+    if marker in template:
+        return template.replace(marker, hint + marker, 1)
+    return hint + template
 
 
 def _detect_currency_symbol(hh_text: str) -> str:
@@ -210,6 +388,88 @@ def _build_watcher_hints(hand: dict, hh_text: str) -> dict:
     return hints
 
 
+def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
+    """pt25-revisado — resolve `players_left` para o trigger da prune.
+
+    Ordem de prioridade:
+    1. `hand["players_left"]` quando o router/SELECT vier a popular.
+       Hoje não é (column inexistente em `hands`), mas mantemos para tests
+       in-memory e futura wiring caso seja necessário.
+    2. Lookup em `lobby_processing_log`: pega o `players_left` mais recente
+       associado ao `tournament_number` da mão, restringido a `result='success'`
+       e `players_left IS NOT NULL`. Valor extraído pelo Vision pt25 sobre
+       SSs de lobby mid-tournament postadas em `#lobbys`.
+
+    Devolve None quando nenhuma fonte fornece valor — `derive_prune_downstream`
+    com `None` → [] → prune off para a mão (graceful).
+
+    NOTA: `payout_blob` mantém-se na assinatura por compatibilidade com o
+    caller; não é mais consultado (pt25 diagnóstico confirmou que
+    `tournament_payouts.payouts_json.CompletedTournament.PlayersLeft` nunca
+    existe em prod).
+    """
+    if isinstance(hand, dict) and isinstance(hand.get("players_left"), int):
+        return hand["players_left"]
+
+    tn = hand.get("tournament_number") if isinstance(hand, dict) else None
+    if not tn:
+        return None
+
+    try:
+        # Lazy import: evita acoplamento ao app.db em tests que mockam query.
+        from app.db import query
+    except Exception:
+        return None
+
+    try:
+        rows = query(
+            """
+            SELECT players_left
+              FROM lobby_processing_log
+             WHERE tournament_number = %s
+               AND result = 'success'
+               AND players_left IS NOT NULL
+             ORDER BY posted_at DESC NULLS LAST
+             LIMIT 1
+            """,
+            (str(tn),),
+        )
+    except Exception:
+        logger.exception(
+            "_resolve_players_left lookup failed tn=%s hand_id=%s",
+            tn, hand.get("hand_id") if isinstance(hand, dict) else None,
+        )
+        return None
+
+    if not rows:
+        return None
+    val = rows[0].get("players_left") if isinstance(rows[0], dict) else None
+    return val if isinstance(val, int) else None
+
+
+def _try_build_prune_script(hand: dict, hh_text: str, hints: dict, payout_blob):
+    """pt25 — devolve (aggressor_pos, downstream, js_string|None).
+
+    Não tem side-effects; o caller (build_queue_zip) decide se escreve no
+    zip + actualiza `hints['script_path']`. None no js_string significa "não
+    há prune para esta mão" (SB-aberto, FT phase, players_left missing,
+    parsing falha, etc.) — caller mantém comportamento default (sem JS no
+    zip, script_path mantém valor pre-existente).
+    """
+    aggressor = derive_real_aggressor_position(hh_text)
+    max_players = hints.get("max_players")
+    players_left = _resolve_players_left(hand, payout_blob)
+    downstream = derive_prune_downstream(aggressor, max_players, players_left)
+    if not downstream:
+        return aggressor, [], None
+    try:
+        js = generate_hrc_script(_PRUNE_JS_TEMPLATE_PATH, aggressor, downstream)
+    except OSError as e:
+        logger.warning("generate_hrc_script falhou (template I/O): %s", e)
+        return aggressor, downstream, None
+    return aggressor, downstream, js
+
+
 def build_queue_zip(
     hands: list[dict],
     payouts_by_key: dict[tuple[str, str], Any],
@@ -273,6 +533,24 @@ def build_queue_zip(
             # o payout_blob. Hints aplicam-se sempre — mesmo sem blob, escreve
             # payouts.json só com hints para o watcher os ler.
             hints = _build_watcher_hints(h, hh_text)
+
+            # pt25 prune-in-gap-downstream: se há aggressor identificado e
+            # condições da regra batem (players_left > 3 × max_players, etc.),
+            # gera JS dinâmico com hints REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
+            # injectados; escreve no zip + override do hint script_path para
+            # path relativo "script.js" (adapter no Beelink reescreve para
+            # absoluto antes do watcher ler).
+            try:
+                prune_aggressor, prune_downstream, prune_script = _try_build_prune_script(
+                    h, hh_text, hints, payout_blob,
+                )
+            except Exception:
+                logger.exception("prune-in-gap build falhou hand_id=%s", hand_id)
+                prune_aggressor, prune_downstream, prune_script = None, [], None
+            if prune_script is not None:
+                zf.writestr(f"{hand_id}/script.js", prune_script)
+                hints["script_path"] = "script.js"
+
             if payout_blob is not None:
                 merged: dict = dict(payout_blob) if isinstance(payout_blob, dict) else {"_blob": payout_blob}
                 merged.update(hints)
@@ -291,6 +569,9 @@ def build_queue_zip(
                 "tournament_number": tnum,
                 "site": site,
                 "has_payouts": payout_blob is not None,
+                "prune_aggressor": prune_aggressor,
+                "prune_downstream": prune_downstream,
+                "has_prune_script": prune_script is not None,
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"
                 ),

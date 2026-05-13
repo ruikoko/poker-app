@@ -30,6 +30,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# pt25: helper para rewrite de script_path no payouts.json pós-unzip.
+# Pure-stdlib, importável sem o resto do adapter (facilita pytest do backend).
+from payouts_helpers import rewrite_script_path_in_payouts
+
 
 # ----- config -----
 API_BASE_DEFAULT  = "https://poker-app-production-34a7.up.railway.app"
@@ -257,6 +261,24 @@ def pull_queue(session: requests.Session, api_base: str, queue_dir: Path,
                     if hand_id not in state and target_dir.exists():
                         _safe_rmtree(target_dir)
                     continue
+
+                # pt25 prune-in-gap-downstream: backend pode escrever script.js
+                # no zip (com hints REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
+                # injectados). Reescreve script_path no payouts.json com path
+                # absoluto, para o watcher pegar via setup_scripting.
+                script_js = target_dir / "script.js"
+                payouts_path = target_dir / "payouts.json"
+                if script_js.is_file() and payouts_path.is_file():
+                    if rewrite_script_path_in_payouts(payouts_path, str(script_js)):
+                        logger.info(
+                            "pull %s: script.js detected -> payouts.script_path=%s",
+                            hand_id, str(script_js),
+                        )
+                    else:
+                        logger.warning(
+                            "pull %s: script.js presente mas rewrite payouts falhou",
+                            hand_id,
+                        )
 
                 state[hand_id] = {
                     "status": STATUS_PULLED,

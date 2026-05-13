@@ -10,6 +10,7 @@ Schema esperado da resposta Vision (JSON puro, sem markdown):
       "start_time_iso": "2026-05-05T18:30:00Z" | null,
       "starting_stack": int | null,
       "entrants": int | null,
+      "players_left": int | null,           # pt25: mid-tournament players remaining
       "buy_in": float | null,
       "prizes": {"1": float, ...} | {},
       "bounty_type_text": "PKO 50%" | "Mystery KO" | etc | null
@@ -68,6 +69,7 @@ _LOBBY_PROMPT = (
     '  "start_time_iso": "<ISO 8601 timestamp UTC>" | null,\n'
     '  "starting_stack": <int chips> | null,\n'
     '  "entrants": <int total registered> | null,\n'
+    '  "players_left": <int players still alive mid-tournament> | null,\n'
     '  "prize_pool": <float USD/EUR total prize pool> | null,\n'
     '  "buy_in": <float USD/EUR> | null,\n'
     '  "prizes": {"1": <float>, "2": <float>, ...},\n'
@@ -77,6 +79,13 @@ _LOBBY_PROMPT = (
     "- prizes keys must be string digits (\"1\", \"2\", not \"1st\").\n"
     "- prizes values must be plain numbers (no currency symbol, no commas).\n"
     "- prize_pool: read 'Total Prize Pool' from the lobby header (plain number, no symbol, no commas).\n"
+    "- entrants: TOTAL registered players (static after registration closes,\n"
+    "  e.g. 500). Often labelled 'Entries', 'Players Entered', 'Total Entries'.\n"
+    "- players_left: players STILL ALIVE in the event RIGHT NOW (decreases as\n"
+    "  busts happen). Common formats in lobby header: 'Players Left: X',\n"
+    "  'Remaining: X', 'X/Y' (where X is left, Y is entrants), or a 'Players'\n"
+    "  count distinct from 'Entries'. If only one number is shown and it's\n"
+    "  ambiguous, prefer null to guessing.\n"
     "- Use null for fields you cannot read with confidence.\n"
     "- Do NOT invent values not visible in the screenshot.\n"
     "- Output ONLY the JSON object."
