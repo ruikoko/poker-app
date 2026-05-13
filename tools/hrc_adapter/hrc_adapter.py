@@ -48,7 +48,7 @@ LOG_FILE           = LOG_DIR / "hrc_adapter.log"
 LOG_RETENTION_DAYS = 14
 
 POLL_INTERVAL_DEFAULT = 60
-HAND_ID_RE = re.compile(r"^[A-Z]+-\d+$")
+HAND_ID_RE = re.compile(r"^[A-Z]+-\d+(-\d+)*$")
 
 ENV_API_KEY      = "HRC_WATCHER_API_KEY"
 ENV_API_BASE     = "HRC_ADAPTER_API_BASE"
