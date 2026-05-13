@@ -26,7 +26,14 @@ logger = logging.getLogger("queue")
 # ICM aparece como tag HM3 (capitalizada) E como canal Discord (lowercase).
 # _expand_icm_case (abaixo) garante que pedir uma forma traz a outra,
 # sem afectar outras tags (escopo cirurgico, sem mudar SQL).
-_DEFAULT_TAGS = ["icm-pko", "PKO SS", "sqz-pko", "ICM"]
+# pt23: ICM FT + ICM PKO FT (HM3) e icm-ft + icm-pko-ft (Discord channels) entram
+# no basket por defeito — alvo dos hints `equity_model="malmuth_harville_icm"`
+# escritos por `queue_export._build_watcher_hints`.
+_DEFAULT_TAGS = [
+    "icm-pko", "PKO SS", "sqz-pko", "ICM",
+    "ICM FT", "ICM PKO FT",
+    "icm-ft", "icm-pko-ft",
+]
 _DEFAULT_STUDY_STATES = ["new"]
 _ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
 
@@ -83,7 +90,7 @@ def export_queue(
     rows = query(
         """
         SELECT id, hand_id, site, tournament_number, raw, player_names,
-               played_at
+               played_at, hm3_tags, discord_tags
           FROM hands
          WHERE played_at >= '2026-01-01'
            AND site = ANY(%s)

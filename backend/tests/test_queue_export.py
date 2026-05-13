@@ -194,6 +194,9 @@ def test_build_queue_zip_excludes_missing_payouts_by_default():
 
 
 def test_build_queue_zip_includes_no_payout_when_flag_set():
+    """pt23: mesmo sem payout_blob, escrevemos payouts.json só com os 3 hints
+    do watcher (equity_model, max_players, script_path). `has_payouts` no
+    manifest reflecte a presença do blob, não do hints-file."""
     hand = {
         "id": 1, "hand_id": "GG-Z", "site": "GGPoker",
         "tournament_number": "999",
@@ -204,10 +207,56 @@ def test_build_queue_zip_includes_no_payout_when_flag_set():
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     names = set(zf.namelist())
     assert "GG-Z/hh.txt" in names
-    assert "GG-Z/payouts.json" not in names
+    # pt23: payouts.json escrito SEMPRE (mesmo sem blob) para entregar hints
+    assert "GG-Z/payouts.json" in names
+    payouts = _json.loads(zf.read("GG-Z/payouts.json"))
+    # hints presentes, sem dados de payout
+    assert payouts["equity_model"] in ("malmuth_harville_icm", "multi_table_icm")
+    assert isinstance(payouts["max_players"], int)
+    assert payouts["script_path"] is None
+    assert "CompletedTournament" not in payouts  # sem blob, só hints
     manifest = _json.loads(zf.read("manifest.json"))
     assert manifest["total_in_zip"] == 1
     assert manifest["hands_included"][0]["has_payouts"] is False
+
+
+def test_build_queue_zip_hints_merged_with_payouts():
+    """pt23: quando há payout_blob, hints são merged como top-level keys
+    no payouts.json (sem destruir CompletedTournament/structures)."""
+    hand = {
+        "id": 1, "hand_id": "GG-HINT", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+        "hm3_tags": ["ICM FT"],          # → equity_model = malmuth_harville_icm
+        "discord_tags": None,
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    payouts = _json.loads(zf.read("GG-HINT/payouts.json"))
+    # payout blob preservado
+    assert payouts["structures"][0]["name"] == "Test BBG $54"
+    assert payouts["structures"][0]["bountyType"] == "PKO"
+    # hints presentes
+    assert payouts["equity_model"] == "malmuth_harville_icm"
+    assert isinstance(payouts["max_players"], int)
+    assert payouts["script_path"] is None
+
+
+def test_build_queue_zip_default_equity_when_no_FT_tags():
+    """pt23: sem tags FT (HM3 ou Discord), default = multi_table_icm."""
+    hand = {
+        "id": 1, "hand_id": "GG-DEF", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+        "hm3_tags": ["icm-pko"],         # tag não-FT
+        "discord_tags": ["sqz-pko"],     # tag não-FT
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    payouts = _json.loads(zf.read("GG-DEF/payouts.json"))
+    assert payouts["equity_model"] == "multi_table_icm"
 
 
 def test_build_queue_zip_skips_hand_without_raw():

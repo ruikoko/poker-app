@@ -15,10 +15,22 @@ Decisoes (D1-D4 do plano FASE 1):
 from __future__ import annotations
 import io
 import json
+import logging
 import re
 import zipfile
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+from app.services.derive_max_players import derive_max_players
+
+logger = logging.getLogger("queue_export")
+
+
+# pt23 fix Bug A: tags que disparam Malmuth-Harville ICM (FT-style equity).
+# Restantes mãos default → multi_table_icm. HM3 usa nomes capitalizados;
+# Discord usa nomes lowercase hyphenated.
+_EQUITY_FT_HM3 = {"ICM FT", "ICM PKO FT"}
+_EQUITY_FT_DISCORD = {"icm-ft", "icm-pko-ft"}
 
 
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
@@ -86,6 +98,45 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
     return out
 
 
+def _derive_equity_model(hm3_tags, discord_tags) -> str:
+    """pt23 fix Bug A. Decide equity model hint based on tag membership.
+
+    Devolve 'malmuth_harville_icm' se houver tag FT (HM3 ou Discord);
+    caso contrário 'multi_table_icm' (default p/ mid-MTT).
+    """
+    hm3 = set(hm3_tags or [])
+    disc = set(discord_tags or [])
+    if hm3 & _EQUITY_FT_HM3 or disc & _EQUITY_FT_DISCORD:
+        return "malmuth_harville_icm"
+    return "multi_table_icm"
+
+
+def _build_watcher_hints(hand: dict, hh_text: str) -> dict:
+    """pt23 fix A/B/C — 3 hints que o watcher patched lê em setup_hand.
+
+    Defensivo: cada hint é wrapped em try/except. Falha individual → omite
+    a key (watcher cai no default seguro). Falha total → dict vazio.
+    """
+    hints: dict = {}
+    try:
+        hints["equity_model"] = _derive_equity_model(
+            hand.get("hm3_tags"), hand.get("discord_tags"),
+        )
+    except Exception:
+        logger.exception(
+            "derive equity_model falhou hand_id=%s", hand.get("hand_id"),
+        )
+    try:
+        hints["max_players"] = derive_max_players(hh_text)
+    except Exception:
+        logger.exception(
+            "derive max_players falhou hand_id=%s", hand.get("hand_id"),
+        )
+    # pt24+: derivar script_path por tag/profundidade. Por agora None.
+    hints["script_path"] = None
+    return hints
+
+
 def build_queue_zip(
     hands: list[dict],
     payouts_by_key: dict[tuple[str, str], Any],
@@ -144,10 +195,22 @@ def build_queue_zip(
                 continue
 
             zf.writestr(f"{hand_id}/hh.txt", hh_text)
+
+            # pt23: merge hints (equity_model, max_players, script_path) com
+            # o payout_blob. Hints aplicam-se sempre — mesmo sem blob, escreve
+            # payouts.json só com hints para o watcher os ler.
+            hints = _build_watcher_hints(h, hh_text)
             if payout_blob is not None:
+                merged: dict = dict(payout_blob) if isinstance(payout_blob, dict) else {"_blob": payout_blob}
+                merged.update(hints)
                 zf.writestr(
                     f"{hand_id}/payouts.json",
-                    json.dumps(payout_blob, indent=2, ensure_ascii=False),
+                    json.dumps(merged, indent=2, ensure_ascii=False),
+                )
+            else:
+                zf.writestr(
+                    f"{hand_id}/payouts.json",
+                    json.dumps(hints, indent=2, ensure_ascii=False),
                 )
 
             hands_included.append({
