@@ -103,45 +103,133 @@ _SEAT_RE = re.compile(r"^(Seat \d+: )(.+?)( \([\d,]+ in chips)\)", re.MULTILINE)
 # Preflop turn order = [UTG, UTG+1, ..., BTN, SB, BB] = [2, 3, ..., N-1, 0, 1].
 _SEAT_ALL_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
 _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
-_PREFLOP_OPEN_RE = re.compile(r"^(.+?): (raises|bets)\b", re.MULTILINE)
+# pt25b: regex tolera ambos os formatos de action line:
+# - PS/GG: `Hero: raises 800 to 1200` (com colon após nick)
+# - Winamax: `blueballs67 raises 8000 to 16000` (sem colon)
+# `(?::)?` torna o `:` opcional. `(?: ... )?` é non-capturing.
+_PREFLOP_OPEN_RE = re.compile(r"^(.+?)(?::)?\s+(raises|bets)\b", re.MULTILINE)
 
 
-def _build_nick_to_hrc_index(hh_text: str) -> dict:
-    """Mapa nick → HRC player index (SB=0, BB=1, UTG=2, ...) a partir das
-    Seat lines + linha "Seat #N is the button".
+def find_preflop_marker(hh_text: str) -> Optional[int]:
+    """pt25b — posição do marker preflop num HH, agnóstico de site.
 
-    Devolve dict vazio se parsing falhar (sem button, sem seats, etc.).
+    Aceita 2 variantes:
+    - `*** HOLE CARDS ***` (PokerStars, GGPoker)
+    - `*** PRE-FLOP ***` (Winamax)
 
-    IMPORTANTE: limita scan ao header pre-`*** HOLE CARDS ***`. Caso contrário
-    apanha também linhas SUMMARY tipo `Seat 4: Hero (button) won (130,500)` —
-    a regex `\\(\\d` é satisfeita por essas linhas e o dict overwrite faz com
-    que o nick correcto seja substituído pelo phrase do SUMMARY.
+    Devolve a posição mais cedo (qual encontrar primeiro) ou None se nenhum
+    estiver presente.
     """
-    end = hh_text.find("*** HOLE CARDS ***")
-    header = hh_text[:end] if end > 0 else hh_text
+    if not hh_text:
+        return None
+    candidates: list = []
+    for marker in ("*** HOLE CARDS ***", "*** PRE-FLOP ***"):
+        pos = hh_text.find(marker)
+        if pos >= 0:
+            candidates.append(pos)
+    return min(candidates) if candidates else None
 
-    seats: dict[int, str] = {}
+
+# pt25b: labels canónicos por número de jogadores sentados na mão. HRC convention
+# SB=0, BB=1, UTG=2, ... — labels post-UTG variam consoante o N (mesa "regular"
+# de N-max). Para tables com seats vazios (e.g. 6-max com 5 sentados após
+# eliminação), tratamos como N-handed (CO desaparece em 5-handed).
+_POSITION_LABELS_BY_N: dict = {
+    2: ["BTN/SB", "BB"],
+    3: ["SB", "BB", "BTN"],
+    4: ["SB", "BB", "UTG", "BTN"],
+    5: ["SB", "BB", "UTG", "HJ", "BTN"],
+    6: ["SB", "BB", "UTG", "HJ", "CO", "BTN"],
+    7: ["SB", "BB", "UTG", "EP", "MP", "CO", "BTN"],
+    8: ["SB", "BB", "UTG", "EP", "MP", "HJ", "CO", "BTN"],
+    9: ["SB", "BB", "UTG", "EP1", "EP2", "MP", "HJ", "CO", "BTN"],
+}
+
+
+def derive_seats_in_preflop_order(hh_text: str) -> list:
+    """pt25b — fonte canónica do mapping seat ↔ HRC player index ↔ position
+    label ↔ nick, ordenado pre-flop (SB primeiro = hrc_idx 0).
+
+    Parsing:
+    - Header (pre `find_preflop_marker`): Seat lines com nick + chip stack
+    - Button: `Seat #N is the button` (universal nos 4 sites)
+    - SB = seat imediatamente clockwise após button
+
+    Posições labelled por convenção `_POSITION_LABELS_BY_N[N]` onde N é o
+    nº de jogadores sentados na mão (não o table_format). Mesa 6-max com
+    5 sentados → tratada como 5-handed (CO desaparece).
+
+    Devolve `[]` se parsing falhar (sem button, sem seats, button fora do
+    seat list). Cada entry: `{seat: int, position: str, hrc_idx: int, nick: str}`.
+    """
+    if not hh_text:
+        return []
+    end = find_preflop_marker(hh_text)
+    header = hh_text[:end] if end is not None else hh_text
+
+    seats_dict: dict = {}
     for m in _SEAT_ALL_RE.finditer(header):
-        seats[int(m.group(1))] = m.group(2).strip()
-    if len(seats) < 2:
-        return {}
+        seats_dict[int(m.group(1))] = m.group(2).strip()
+    if len(seats_dict) < 2:
+        return []
+
     btn_m = _BUTTON_RE.search(hh_text)
     if not btn_m:
-        return {}
+        return []
     btn_seat = int(btn_m.group(1))
-    seat_list = sorted(seats.keys())
+    seat_list = sorted(seats_dict.keys())
     if btn_seat not in seat_list:
-        return {}
+        return []
+
     btn_idx_in_list = seat_list.index(btn_seat)
     n = len(seat_list)
-    # SB = seat imediatamente a seguir ao button (clockwise)
     sb_idx_in_list = (btn_idx_in_list + 1) % n
-    out: dict = {}
+
+    labels = _POSITION_LABELS_BY_N.get(n) or [f"POS{i}" for i in range(n)]
+
+    out: list = []
     for hrc_idx in range(n):
         seat_in_list = (sb_idx_in_list + hrc_idx) % n
         seat_num = seat_list[seat_in_list]
-        out[seats[seat_num]] = hrc_idx
+        out.append({
+            "seat": seat_num,
+            "position": labels[hrc_idx] if hrc_idx < len(labels) else f"POS{hrc_idx}",
+            "hrc_idx": hrc_idx,
+            "nick": seats_dict[seat_num],
+        })
     return out
+
+
+def derive_table_format(hh_text: str) -> int:
+    """pt25b — extrai table_format (N-max) do header, universal nos 4 sites.
+
+    PS: `Table '3983882920 23' 6-max Seat #5 is the button`
+    GG: `Table '155' 8-max Seat #1 is the button`
+    WN: `Table: 'INTERSTELLAR(...)' 6-max (real money) Seat #2 is the button`
+    WPN: `Table '39' 8-max Seat #1 is the button`
+
+    Fallback 8 com log warning se não encontrar (defensive).
+    """
+    if not hh_text:
+        return 8
+    m = re.search(r"\b(\d+)-max\b", hh_text)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+    logger.warning("derive_table_format: no N-max in header, fallback 8")
+    return 8
+
+
+def _build_nick_to_hrc_index(hh_text: str) -> dict:
+    """Mapa nick → HRC player index. Wrapper de `derive_seats_in_preflop_order`
+    para preservar chamadas existentes (e.g. `derive_real_aggressor_position`).
+
+    Devolve `{}` se parsing falhar.
+    """
+    seats = derive_seats_in_preflop_order(hh_text)
+    return {s["nick"]: s["hrc_idx"] for s in seats}
 
 
 def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
@@ -151,9 +239,14 @@ def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
     Excepções (devolvem None per regra pt23):
     - Nenhum raise/bet preflop (limp pot, walk-to-BB)
     - Primeiro raiser é SB (HRC idx 0) — "SB-aberto", excepção da regra
-    - Parsing falha (sem button, sem HOLE CARDS marker, etc.)
+    - Parsing falha (sem button, sem marker preflop, etc.)
 
     Calls preflop (incluindo SB-completes) NÃO contam como abertura.
+
+    pt25b: marker preflop resolved via `find_preflop_marker` (PS/GG/WPN
+    usam `*** HOLE CARDS ***`, Winamax usa `*** PRE-FLOP ***`).
+    `_PREFLOP_OPEN_RE` tolera ambos os formatos de action line (com colon
+    PS/GG e sem colon Winamax/WPN).
     """
     if not hh_text:
         return None
@@ -161,8 +254,8 @@ def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
     if not nick_to_idx:
         return None
 
-    start = hh_text.find("*** HOLE CARDS ***")
-    if start < 0:
+    start = find_preflop_marker(hh_text)
+    if start is None:
         return None
     end_flop = hh_text.find("*** FLOP ***", start)
     end_summary = hh_text.find("*** SUMMARY ***", start)
@@ -186,6 +279,7 @@ def derive_prune_downstream(
     aggressor_pos: Optional[int],
     max_players: Optional[int],
     players_left: Optional[int],
+    seated_hrc_indices: Optional[list] = None,
     table_format: int = 8,
 ) -> list:
     """pt25 — devolve lista de HRC player indexes a prune (opens-in-gap downstream).
@@ -197,14 +291,17 @@ def derive_prune_downstream(
     - Senão → posições downstream do aggressor em ordem preflop, até SB
       inclusive (BB excluído porque é tipicamente o respondedor/hero).
 
-    Para table_format=8 (8-max):
-      aggressor=UTG (2) → [3, 4, 5, 6, 7, 0]   (EP, MP, HJ, CO, BU, SB)
-      aggressor=EP  (3) → [4, 5, 6, 7, 0]
-      aggressor=MP  (4) → [5, 6, 7, 0]
-      aggressor=HJ  (5) → [6, 7, 0]
-      aggressor=CO  (6) → [7, 0]
-      aggressor=BU  (7) → [0]
-      aggressor=SB  (0) → []
+    pt25b: `seated_hrc_indices` (list[int]) é a fonte canónica do tamanho da
+    mesa em uso na mão (N-handed). Vem de `derive_seats_in_preflop_order`.
+    Se fornecido, walk pelos sentados em ordem preflop. Caso contrário cai
+    em `table_format` (default 8) — usado pelos tests sintéticos pt25 e por
+    callers legacy.
+
+    Exemplos:
+    - 8-max full (seated=[0..7]): aggressor UTG (2) → [3, 4, 5, 6, 7, 0]
+    - 6-max 5-sentados (seated=[0..4], e.g. INTERSTELLAR pós-eliminação):
+        aggressor UTG (2) → [3, 4, 0]  (HJ, BTN, SB — sem CO em 5-handed)
+    - 6-max full (seated=[0..5]): aggressor UTG (2) → [3, 4, 5, 0]
     """
     if aggressor_pos is None or aggressor_pos == 0:
         return []
@@ -213,17 +310,36 @@ def derive_prune_downstream(
     if players_left <= 3 * max_players:
         return []
 
-    # Preflop turn order excluindo BB: UTG (2), UTG+1 (3), ..., BTN (N-1), SB (0)
+    # N = número de sentados (canónico) ou table_format (fallback legacy)
+    if seated_hrc_indices is not None:
+        n = len(seated_hrc_indices)
+    else:
+        n = table_format
+
+    # Preflop turn order excluindo BB (idx 1):
+    # [UTG=2, 3, ..., N-1, SB=0]
     preflop_order: list = []
-    for offset in range(table_format):
-        idx = (2 + offset) % table_format
-        if idx == 1:  # BB excluído
+    for offset in range(n):
+        idx = (2 + offset) % n
+        if idx == 1:
             continue
         preflop_order.append(idx)
+
     if aggressor_pos not in preflop_order:
         return []
     i = preflop_order.index(aggressor_pos)
     return preflop_order[i + 1:]
+
+
+# pt25b: regex que match as 2 linhas do bloco placeholder no template B2.
+# `[^;\\n]+` captura qualquer valor entre `=` e `;` (null/int para AGGRESSOR;
+# []/lista para DOWNSTREAM). Permite re-substituir após injecção prévia →
+# idempotência ao rodar `generate_hrc_script` 2× com mesmos args.
+_PRUNE_PLACEHOLDER_RE = re.compile(
+    r"^let REAL_AGGRESSOR_POS = [^;\n]+;[\t ]*\n"
+    r"let DOWNSTREAM_POSITIONS = [^;\n]+;",
+    re.MULTILINE,
+)
 
 
 def generate_hrc_script(
@@ -232,15 +348,21 @@ def generate_hrc_script(
     downstream_positions: list,
 ) -> str:
     """pt25 — gera JS HRC com hint REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
-    injectado no topo, antes da config do template.
+    para a mão actual.
 
     Se aggressor_pos é None ou downstream_positions é empty (SB-aberto, FT
     phase, parsing falha): injecta defaults null/[] → JS comporta-se idêntico
     ao original (no-op, sem prune).
 
-    Inserção: bloco hint vai imediatamente antes da linha `let ALLIN = 9999;`
-    (1ª linha de config no template Charles). Se essa marca não existir,
-    prepend no topo do ficheiro.
+    pt25b: usa `_PRUNE_PLACEHOLDER_RE.subn` para SUBSTITUIR o bloco placeholder
+    existente do template (introduzido em B2 com defaults null/[]). Evita
+    duplicate `let` declarations que causariam JS SyntaxError no Nashorn/HRC.
+    **Idempotente**: chamar 2× consecutivas com mesmos args produz output
+    byte-idêntico.
+
+    Fallback legacy: se template não tem o placeholder (versão antiga ou
+    template alternativo), insere bloco hint antes de `let ALLIN = 9999;`.
+    Se nem o marker ALLIN existir, prepend no topo (degrade gracioso).
     """
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
@@ -252,13 +374,23 @@ def generate_hrc_script(
         agg_val = str(aggressor_pos)
         ds_val = "[" + ", ".join(str(p) for p in downstream_positions) + "]"
 
-    hint = (
-        "// pt25 prune-in-gap-downstream hints (injected by backend per-hand)\n"
+    replacement = (
         f"let REAL_AGGRESSOR_POS = {agg_val};\n"
-        f"let DOWNSTREAM_POSITIONS = {ds_val};\n"
-        "\n"
+        f"let DOWNSTREAM_POSITIONS = {ds_val};"
     )
 
+    new_template, n_subs = _PRUNE_PLACEHOLDER_RE.subn(
+        replacement, template, count=1,
+    )
+    if n_subs > 0:
+        return new_template
+
+    # Fallback: template sem placeholder. Insere bloco hint (com header
+    # comment próprio) antes de `let ALLIN = 9999;`. Sem ALLIN → prepend.
+    hint = (
+        "// pt25 prune-in-gap-downstream hints (injected by backend per-hand)\n"
+        + replacement + "\n\n"
+    )
     marker = "let ALLIN = 9999;"
     if marker in template:
         return template.replace(marker, hint + marker, 1)
@@ -455,11 +587,20 @@ def _try_build_prune_script(hand: dict, hh_text: str, hints: dict, payout_blob):
     há prune para esta mão" (SB-aberto, FT phase, players_left missing,
     parsing falha, etc.) — caller mantém comportamento default (sem JS no
     zip, script_path mantém valor pre-existente).
+
+    pt25b: passa `seated_hrc_indices` derivado de `derive_seats_in_preflop_order`
+    para `derive_prune_downstream`. Suporta mesas com seats vazios (e.g.
+    6-max com 5 sentados pós-eliminação) cross-site (GG/PS/WN/WPN).
     """
     aggressor = derive_real_aggressor_position(hh_text)
     max_players = hints.get("max_players")
     players_left = _resolve_players_left(hand, payout_blob)
-    downstream = derive_prune_downstream(aggressor, max_players, players_left)
+    seats = derive_seats_in_preflop_order(hh_text)
+    seated_indices = [s["hrc_idx"] for s in seats] if seats else None
+    downstream = derive_prune_downstream(
+        aggressor, max_players, players_left,
+        seated_hrc_indices=seated_indices,
+    )
     if not downstream:
         return aggressor, [], None
     try:

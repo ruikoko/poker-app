@@ -386,6 +386,315 @@ def test_aggressor_BU_opens_returns_idx7():
     assert derive_real_aggressor_position(hh) == 7
 
 
+# ── pt25b: cross-site marker + action format compat ────────────────────────
+
+from app.services.queue_export import find_preflop_marker
+
+
+def test_find_preflop_marker_PS_GG_HOLE_CARDS():
+    """PS/GG: `*** HOLE CARDS ***`."""
+    hh = "... header ...\n*** HOLE CARDS ***\nDealt to Hero [As Kd]\n..."
+    pos = find_preflop_marker(hh)
+    assert pos is not None
+    assert hh[pos:pos + 18] == "*** HOLE CARDS ***"
+
+
+def test_find_preflop_marker_WN_PRE_FLOP():
+    """Winamax: `*** PRE-FLOP ***`."""
+    hh = "... header ...\n*** ANTE/BLINDS ***\n[antes]\n*** PRE-FLOP ***\nplayer raises 100\n..."
+    pos = find_preflop_marker(hh)
+    assert pos is not None
+    assert hh[pos:pos + 16] == "*** PRE-FLOP ***"
+
+
+def test_find_preflop_marker_none_returns_None():
+    """Sem nenhum marker → None."""
+    assert find_preflop_marker("just header text\nno markers here\n") is None
+    assert find_preflop_marker("") is None
+    assert find_preflop_marker(None) is None  # type: ignore[arg-type]
+
+
+def test_find_preflop_marker_both_returns_earlier():
+    """Se ambos markers existirem (defensive), devolve o mais cedo."""
+    # PS marker primeiro
+    hh1 = "x\n*** HOLE CARDS ***\nstuff\n*** PRE-FLOP ***\nmore\n"
+    assert find_preflop_marker(hh1) == hh1.find("*** HOLE CARDS ***")
+    # WN marker primeiro (improvável real, mas testa o min())
+    hh2 = "y\n*** PRE-FLOP ***\nstuff\n*** HOLE CARDS ***\nmore\n"
+    assert find_preflop_marker(hh2) == hh2.find("*** PRE-FLOP ***")
+
+
+# Samples reais (snippets minimalistas) de cada site para validar end-to-end.
+# Estrutura essencial preservada: header com Seat #N is the button + N-max,
+# Seat lines com nicks, marker preflop, primeira action raise/bet.
+
+_HH_PS_REAL = """PokerStars Hand #260299428000: Tournament #3983882920, €45+€45+€10 EUR Hold'em No Limit - Level XXVI (12500/25000) - 2026/03/31 23:40:45 WET [2026/03/31 18:40:45 ET]
+Table '3983882920 23' 6-max Seat #5 is the button
+Seat 1: kokonakueka (736340 in chips, €196.87 bounty)
+Seat 2: carlos8surf (925129 in chips, €292.50 bounty)
+Seat 4: QuimDiamond (763155 in chips, €163.12 bounty)
+Seat 5: Votsarrr (633451 in chips, €323.43 bounty)
+Seat 6: UltraLoubard (391164 in chips, €191.25 bounty)
+kokonakueka: posts the ante 3250
+*** HOLE CARDS ***
+Dealt to Hero [Ah As]
+carlos8surf: folds
+QuimDiamond: folds
+Votsarrr: raises 605201 to 630201 and is all-in
+UltraLoubard: folds
+kokonakueka: folds
+*** SUMMARY ***
+"""
+
+
+_HH_GG_REAL = """Poker Hand #TM5939385803: Tournament #282699155, Bounty Hunters Forty Stack $44 Hold'em No Limit - Level3(150/300(45)) - 2026/05/11 17:16:38
+Table '155' 8-max Seat #1 is the button
+Seat 1: Hero (40,000 in chips)
+Seat 5: b839c780 (90,299 in chips)
+Seat 6: 3343ebc6 (47,788 in chips)
+Seat 7: 8db88342 (44,636 in chips)
+Seat 8: 221ebf0d (42,483 in chips)
+*** HOLE CARDS ***
+Dealt to Hero [As Kd]
+8db88342: folds
+221ebf0d: raises 300 to 600
+Hero: calls 600
+b839c780: folds
+*** SUMMARY ***
+"""
+
+
+_HH_WN_REAL = """Winamax Poker - Tournament "INTERSTELLAR" buyIn: 90€ + 10€ level: 22 - HandId: #4699459877053923331-277-1778535900 - Holdem no limit (1000/4000/8000) - 2026/05/11 21:45:00 UTC
+Table: 'INTERSTELLAR(1094178268)#002' 6-max (real money) Seat #2 is the button
+Seat 1: yousnouf75 (163754, 194.40€ bounty)
+Seat 2: imbagosu (615675, 532.70€ bounty)
+Seat 3: Beu_Teu (663845, 311.97€ bounty)
+Seat 4: thinvalium (351657, 244.20€ bounty)
+Seat 5: blueballs67 (354758, 140€ bounty)
+*** ANTE/BLINDS ***
+Beu_Teu posts ante 1000
+*** PRE-FLOP ***
+blueballs67 raises 8000 to 16000
+yousnouf75 calls 16000
+imbagosu folds
+Beu_Teu raises 48000 to 64000
+*** SUMMARY ***
+"""
+
+
+_HH_WPN_REAL = """Game Hand #2735377673 - $60,000 GTD Tournament #35005597 - Holdem (No Limit) - Level 4 (800.00/1600.00) - 2026/05/11 16:51:23 UTC
+Table '39' 8-max Seat #1 is the button
+Seat 1: Jetsies (448465.00)
+Seat 2: cringemeariver (130314.00)
+Seat 3: AbamaAbezyana (100200.00)
+Seat 4: TuuusTuuuuus (89400.00)
+Seat 5: egegey1 (112340.00)
+Seat 6: pocahontas94 (79244.00)
+Seat 7: DAVIDSBAGOFICE (110968.00)
+Seat 8: eagle47 (34502.00)
+Jetsies posts ante 200.00
+*** HOLE CARDS ***
+TuuusTuuuuus folds
+egegey1 folds
+pocahontas94 folds
+DAVIDSBAGOFICE raises 1600.00 to 3200.00
+*** SUMMARY ***
+"""
+
+
+def test_aggressor_PS_real_sample():
+    """PS sample (PS-260299428000, 6-max BTN=Seat 5): preflop UTG-style raiser
+    é Votsarrr@Seat5 — mas espera, Votsarrr=BTN (Seat #5 is the button).
+    HRC index: BTN=Seat 5, SB=Seat 6 (idx 0), BB=Seat 1 (idx 1), UTG=Seat 2
+    (idx 2), HJ=Seat 4 (idx 3), CO/BTN=Seat 5 (idx 4)
+    Mas Votsarrr=Seat 5 = BTN → idx 4 em 5-sentados-6-max."""
+    out = derive_real_aggressor_position(_HH_PS_REAL)
+    # Validação: aggressor deve ser identificado (não None) e mapear para
+    # alguém na BTN-side (Votsarrr@Seat5).
+    assert out is not None
+    # Compute expected: button=Seat5; seat_list=[1,2,4,5,6] (5 sentados);
+    # btn_idx_in_list=3; sb_idx_in_list=(3+1)%5=4 → Seat 6 (UltraLoubard=SB);
+    # walking: hrc0=Seat6(UltraLoubard,SB), hrc1=Seat1(kokonakueka,BB),
+    #          hrc2=Seat2(carlos8surf,UTG), hrc3=Seat4(QuimDiamond,HJ),
+    #          hrc4=Seat5(Votsarrr,BTN). Votsarrr opens → idx 4. ✓
+    assert out == 4
+
+
+def test_aggressor_GG_real_sample():
+    """GG sample (GG real, 8-max BTN=Seat 1, 5 sentados): 1º raise é
+    221ebf0d@Seat8."""
+    out = derive_real_aggressor_position(_HH_GG_REAL)
+    assert out is not None
+    # Compute: button=Seat1; seat_list=[1,5,6,7,8]; btn_idx_in_list=0;
+    # sb_idx_in_list=1 → Seat5 (b839c780=SB).
+    # hrc0=Seat5(SB), hrc1=Seat6(BB), hrc2=Seat7(8db88342,UTG),
+    # hrc3=Seat8(221ebf0d,UTG+1 / EP), hrc4=Seat1(Hero,BTN).
+    # 221ebf0d raises = idx 3 (EP).
+    assert out == 3
+
+
+def test_aggressor_WN_real_sample_INTERSTELLAR():
+    """Winamax sample (INTERSTELLAR target do smoke pt25b): 6-max 5-sentados
+    BTN=Seat 2; blueballs67@Seat5 raises first."""
+    out = derive_real_aggressor_position(_HH_WN_REAL)
+    assert out is not None
+    # Compute: seat_list=[1,2,3,4,5]; btn_idx_in_list=1; sb_idx_in_list=2 → Seat3
+    # hrc0=Seat3(Beu_Teu,SB), hrc1=Seat4(thinvalium,BB), hrc2=Seat5(blueballs67,UTG),
+    # hrc3=Seat1(yousnouf75,HJ?), hrc4=Seat2(imbagosu,BTN).
+    # blueballs67 raises = idx 2 (UTG). ✓ Matches dry-run expectation.
+    assert out == 2
+
+
+def test_aggressor_WPN_real_sample():
+    """WPN sample (8-max BTN=Seat 1, 8 sentados full): DAVIDSBAGOFICE@Seat7
+    raises after 3 folds."""
+    out = derive_real_aggressor_position(_HH_WPN_REAL)
+    assert out is not None
+    # Compute: 8 sentados, btn=Seat1, sb=Seat2, bb=Seat3, ..., btn-1=Seat8 (idx 7).
+    # btn_idx_in_list=0; sb_idx_in_list=1 → Seat2 (cringemeariver=SB).
+    # hrc0=Seat2(SB), hrc1=Seat3(BB), hrc2=Seat4(UTG), hrc3=Seat5,
+    # hrc4=Seat6, hrc5=Seat7(DAVIDSBAGOFICE), hrc6=Seat8, hrc7=Seat1(BTN).
+    # DAVIDSBAGOFICE raises after Seat4/5/6 fold (idx 2/3/4). DAVIDSBAGOFICE = idx 5 (CO).
+    assert out == 5
+
+
+# ── pt25b ETAPA 3: derive_seats_in_preflop_order + derive_table_format ──────
+
+from app.services.queue_export import (
+    derive_seats_in_preflop_order,
+    derive_table_format,
+)
+
+
+def test_seats_PS_real_sample():
+    """PS-260299428000: 6-max BTN=Seat 5, 5 sentados (Seat 3 missing)."""
+    seats = derive_seats_in_preflop_order(_HH_PS_REAL)
+    assert len(seats) == 5
+    # SB=Seat 6 (btn+1 wrapping), BB=Seat 1, UTG=Seat 2, HJ=Seat 4, BTN=Seat 5
+    assert seats[0] == {"seat": 6, "position": "SB",  "hrc_idx": 0, "nick": "UltraLoubard"}
+    assert seats[1] == {"seat": 1, "position": "BB",  "hrc_idx": 1, "nick": "kokonakueka"}
+    assert seats[2] == {"seat": 2, "position": "UTG", "hrc_idx": 2, "nick": "carlos8surf"}
+    assert seats[3] == {"seat": 4, "position": "HJ",  "hrc_idx": 3, "nick": "QuimDiamond"}
+    assert seats[4] == {"seat": 5, "position": "BTN", "hrc_idx": 4, "nick": "Votsarrr"}
+
+
+def test_seats_GG_real_sample():
+    """GG-5939385803: 8-max BTN=Seat 1, 5 sentados (Seats 2,3,4 missing)."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    assert len(seats) == 5
+    # btn_idx=0 (Seat 1 first in [1,5,6,7,8]), sb_idx=1 → Seat 5
+    nicks = [s["nick"] for s in seats]
+    assert nicks == ["b839c780", "3343ebc6", "8db88342", "221ebf0d", "Hero"]
+    positions = [s["position"] for s in seats]
+    assert positions == ["SB", "BB", "UTG", "HJ", "BTN"]  # 5-handed labels
+
+
+def test_seats_WN_real_sample_INTERSTELLAR():
+    """WN-INTERSTELLAR: 6-max BTN=Seat 2, 5 sentados (Seat 6 missing).
+    Smoke target pt25b."""
+    seats = derive_seats_in_preflop_order(_HH_WN_REAL)
+    assert len(seats) == 5
+    nicks = [s["nick"] for s in seats]
+    assert nicks == ["Beu_Teu", "thinvalium", "blueballs67", "yousnouf75", "imbagosu"]
+    positions = [s["position"] for s in seats]
+    assert positions == ["SB", "BB", "UTG", "HJ", "BTN"]
+    # blueballs67 = UTG = hrc_idx 2 (aggressor confirmado por ETAPA 1)
+    assert next(s for s in seats if s["nick"] == "blueballs67")["hrc_idx"] == 2
+
+
+def test_seats_WPN_real_sample():
+    """WPN: 8-max BTN=Seat 1, 8 sentados full."""
+    seats = derive_seats_in_preflop_order(_HH_WPN_REAL)
+    assert len(seats) == 8
+    nicks = [s["nick"] for s in seats]
+    # btn=Seat 1, sb=Seat 2 (cringemeariver), bb=Seat 3, ..., btn=Seat 1 (Jetsies)
+    assert nicks[0] == "cringemeariver"   # SB
+    assert nicks[1] == "AbamaAbezyana"    # BB
+    assert nicks[2] == "TuuusTuuuuus"     # UTG
+    assert nicks[7] == "Jetsies"          # BTN
+    positions = [s["position"] for s in seats]
+    assert positions == ["SB", "BB", "UTG", "EP", "MP", "HJ", "CO", "BTN"]
+
+
+def test_seats_no_button_returns_empty():
+    """Defensive: header sem 'Seat #N is the button' → []."""
+    hh = "Some HH header without button info\nSeat 1: Foo (100 in chips)\nSeat 2: Bar (200 in chips)\n*** HOLE CARDS ***\n"
+    assert derive_seats_in_preflop_order(hh) == []
+
+
+def test_seats_no_seats_returns_empty():
+    """Defensive: HH sem seat lines parseable → []."""
+    assert derive_seats_in_preflop_order("") == []
+    assert derive_seats_in_preflop_order("Just a header\n*** HOLE CARDS ***\n") == []
+
+
+# ── derive_table_format ─────────────────────────────────────────────────────
+
+def test_table_format_PS():
+    assert derive_table_format(_HH_PS_REAL) == 6
+
+
+def test_table_format_GG():
+    assert derive_table_format(_HH_GG_REAL) == 8
+
+
+def test_table_format_WN():
+    assert derive_table_format(_HH_WN_REAL) == 6
+
+
+def test_table_format_WPN():
+    assert derive_table_format(_HH_WPN_REAL) == 8
+
+
+def test_table_format_no_N_max_fallback_8():
+    assert derive_table_format("Just some text without max format\n") == 8
+    assert derive_table_format("") == 8
+    assert derive_table_format(None) == 8  # type: ignore[arg-type]
+
+
+# ── derive_prune_downstream com seated_hrc_indices (pt25b ETAPA 3 core) ────
+
+def test_prune_8max_full_seated_uses_8():
+    """seated=[0..7] (8 sentados) — UTG aggressor → 6 downstream (BB excluded)."""
+    assert derive_prune_downstream(2, 6, 200, seated_hrc_indices=[0,1,2,3,4,5,6,7]) == [3,4,5,6,7,0]
+
+
+def test_prune_6max_full_seated_uses_6():
+    """seated=[0..5] (6 sentados full) — UTG aggressor → [HJ=3, CO=4, BTN=5, SB=0]."""
+    assert derive_prune_downstream(2, 6, 200, seated_hrc_indices=[0,1,2,3,4,5]) == [3,4,5,0]
+
+
+def test_prune_INTERSTELLAR_5_seated_6max():
+    """SMOKE TARGET pt25b: seated=[0..4] (5 sentados em 6-max table),
+    aggressor UTG (idx 2) = blueballs67 → downstream [HJ=3, BTN=4, SB=0].
+    Note: 5-handed labels têm BTN=hrc_idx 4 (não 5), porque CO desaparece."""
+    out = derive_prune_downstream(2, 6, 36, seated_hrc_indices=[0,1,2,3,4])
+    assert out == [3, 4, 0]
+
+
+def test_prune_5_seated_SB_aggressor_returns_empty():
+    """SB-aberto excepção: aggressor=0 → [] mesmo com seated populated."""
+    assert derive_prune_downstream(0, 5, 200, seated_hrc_indices=[0,1,2,3,4]) == []
+
+
+def test_prune_FT_phase_with_seated_returns_empty():
+    """FT phase: players_left <= 3*max_players → [] mesmo com seated populated."""
+    assert derive_prune_downstream(2, 6, 18, seated_hrc_indices=[0,1,2,3,4,5]) == []
+
+
+def test_prune_BTN_aggressor_5_seated():
+    """5-handed: BTN aggressor (idx 4) → downstream [SB=0]."""
+    assert derive_prune_downstream(4, 6, 200, seated_hrc_indices=[0,1,2,3,4]) == [0]
+
+
+def test_prune_legacy_no_seated_falls_back_to_table_format():
+    """Sem seated_hrc_indices: usa table_format=8 (default). Preserva
+    chamadas pt25 sintéticas."""
+    assert derive_prune_downstream(2, 6, 200) == [3,4,5,6,7,0]
+    # Com table_format override
+    assert derive_prune_downstream(2, 6, 200, table_format=6) == [3,4,5,0]
+
+
 # ── derive_prune_downstream ─────────────────────────────────────────────────
 
 def test_prune_UTG_aggressor_8max():
@@ -471,6 +780,98 @@ def test_generate_hrc_script_without_hint():
     out_empty_ds = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
                                        downstream_positions=[])
     assert "let REAL_AGGRESSOR_POS = null;" in out_empty_ds
+
+
+# ── pt25b: generate_hrc_script — anti-duplicate-let + idempotência ─────────
+
+import tempfile as _tempfile
+
+
+def test_generate_hrc_script_no_duplicate_let_with_hint():
+    """pt25b core: template real (com placeholder B2) + hint → output tem
+    EXACTAMENTE 1 declaração let por variável (sem duplicate que causaria
+    SyntaxError no Nashorn)."""
+    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
+                              downstream_positions=[3, 4, 0])
+    # Conta ocorrências EXACTAS — qualquer duplicate aparece >1
+    n_agg = out.count("let REAL_AGGRESSOR_POS")
+    n_ds = out.count("let DOWNSTREAM_POSITIONS")
+    assert n_agg == 1, f"duplicate REAL_AGGRESSOR_POS: {n_agg} occurrences"
+    assert n_ds == 1, f"duplicate DOWNSTREAM_POSITIONS: {n_ds} occurrences"
+    # Valores reais presentes (não os defaults)
+    assert "let REAL_AGGRESSOR_POS = 2;" in out
+    assert "let DOWNSTREAM_POSITIONS = [3, 4, 0];" in out
+    # Comment do template B2 preservado
+    assert "pt25 prune-in-gap-downstream hints" in out
+
+
+def test_generate_hrc_script_idempotent():
+    """pt25b: chamar 2× consecutivas com MESMOS args → output byte-idêntico.
+    Garante que re-runs do queue_export não corrompem o JS."""
+    out1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=4,
+                               downstream_positions=[5, 6, 7, 0])
+    # 2ª chamada com os mesmos args — escreve para tmp e re-gera
+    tmp_path = _os.path.join(_tempfile.mkdtemp(), "stage1.js")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(out1)
+    out2 = generate_hrc_script(tmp_path, aggressor_pos=4,
+                               downstream_positions=[5, 6, 7, 0])
+    assert out1 == out2, "non-idempotent: 2nd call produced different output"
+
+
+def test_generate_hrc_script_substitutes_after_prior_injection():
+    """pt25b: template ALREADY com hint (e.g. {REAL=2, DS=[3,4,0]}) + nova
+    chamada com diferentes args (e.g. {REAL=5, DS=[6,7,0]}) → substitui pelos
+    novos, sem duplicate."""
+    # Stage 1: inject {REAL=2, DS=[3,4,0]} no template real
+    stage1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
+                                 downstream_positions=[3, 4, 0])
+    tmp_path = _os.path.join(_tempfile.mkdtemp(), "stage1.js")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(stage1)
+    # Stage 2: re-inject {REAL=5, DS=[6,7,0]} sobre o output do stage 1
+    stage2 = generate_hrc_script(tmp_path, aggressor_pos=5,
+                                 downstream_positions=[6, 7, 0])
+    # Novos valores presentes
+    assert "let REAL_AGGRESSOR_POS = 5;" in stage2
+    assert "let DOWNSTREAM_POSITIONS = [6, 7, 0];" in stage2
+    # Stage 1 valores ausentes (substituídos)
+    assert "let REAL_AGGRESSOR_POS = 2;" not in stage2
+    assert "let DOWNSTREAM_POSITIONS = [3, 4, 0];" not in stage2
+    # Ainda só 1 occurrence cada
+    assert stage2.count("let REAL_AGGRESSOR_POS") == 1
+    assert stage2.count("let DOWNSTREAM_POSITIONS") == 1
+
+
+def test_generate_hrc_script_legacy_template_fallback():
+    """pt25b: template legacy (sem placeholder B2) + hint → fallback insere
+    bloco hint antes de `let ALLIN = 9999;` (mantém compat com templates
+    antigos ou variantes que não passaram pela edit B2)."""
+    legacy = (
+        "// legacy template — sem hints declarados\n"
+        "let ALLIN = 9999;\n"
+        "let SIZES_OPEN_OTHERS = [2, ALLIN];\n"
+        "function getSizingsPreflop(ctx) { return SIZES_OPEN_OTHERS; }\n"
+    )
+    tmp_path = _os.path.join(_tempfile.mkdtemp(), "legacy.js")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(legacy)
+    out = generate_hrc_script(tmp_path, aggressor_pos=2,
+                              downstream_positions=[3, 4, 0])
+    # Fallback inserts bloco hint ANTES de `let ALLIN`
+    allin_pos = out.find("let ALLIN = 9999;")
+    agg_pos = out.find("let REAL_AGGRESSOR_POS")
+    ds_pos = out.find("let DOWNSTREAM_POSITIONS")
+    assert allin_pos > 0
+    assert 0 < agg_pos < allin_pos
+    assert 0 < ds_pos < allin_pos
+    # 1 occurrence cada
+    assert out.count("let REAL_AGGRESSOR_POS") == 1
+    assert out.count("let DOWNSTREAM_POSITIONS") == 1
+    # Comment fallback adicionado (legacy não tinha)
+    assert "pt25 prune-in-gap-downstream hints" in out
+    # Conteúdo original preservado
+    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" in out
 
 
 # ── build_queue_zip ───────────────────────────────────────────────────────────
