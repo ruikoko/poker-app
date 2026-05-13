@@ -29,13 +29,15 @@ from app.services.derive_max_players import derive_max_players
 
 logger = logging.getLogger("queue_export")
 
-# pt25: caminho canónico do JS template usado por generate_hrc_script.
-# Resolve-se relativo a este ficheiro (backend/app/services/queue_export.py)
-# → <repo>/tools/hrc_scripts/...bvb.js. Mudar nome do template aqui se a
-# variante canónica mudar.
+# pt25c: caminho canónico do JS template usado por generate_hrc_script.
+# Movido em pt25c de `tools/hrc_scripts/` (repo root) para
+# `backend/app/services/hrc_scripts/` — necessário porque Railway deploya
+# apenas `backend/` (nixpacks). O path antigo (`../../../tools/...`) saía
+# do container e levantava FileNotFoundError silenciado, manifestando-se
+# como `has_prune_script=false` no manifest mesmo com downstream populated.
 _PRUNE_JS_TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "..", "tools", "hrc_scripts",
+    "hrc_scripts",
     "mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js",
 )
 
@@ -580,13 +582,18 @@ def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
 
 
 def _try_build_prune_script(hand: dict, hh_text: str, hints: dict, payout_blob):
-    """pt25 — devolve (aggressor_pos, downstream, js_string|None).
+    """pt25 — devolve `(aggressor, downstream, js_string|None, error|None)`.
 
     Não tem side-effects; o caller (build_queue_zip) decide se escreve no
-    zip + actualiza `hints['script_path']`. None no js_string significa "não
-    há prune para esta mão" (SB-aberto, FT phase, players_left missing,
-    parsing falha, etc.) — caller mantém comportamento default (sem JS no
-    zip, script_path mantém valor pre-existente).
+    zip + actualiza `hints['script_path']`. `js_string=None` significa "não
+    há prune para esta mão" — caller mantém comportamento default (sem JS,
+    script_path pre-existente).
+
+    pt25c: 4º elemento do tuple `error: str|None`. Não-None **apenas** se
+    `downstream` é não-vazio mas a geração do JS falhou (e.g., template
+    file missing em Railway prod). None quando `downstream=[]` (SB-aberto,
+    FT phase, parsing falha — casos não-erro). Propagado ao manifest
+    `prune_script_error` para observabilidade (vs silent warning anterior).
 
     pt25b: passa `seated_hrc_indices` derivado de `derive_seats_in_preflop_order`
     para `derive_prune_downstream`. Suporta mesas com seats vazios (e.g.
@@ -602,13 +609,21 @@ def _try_build_prune_script(hand: dict, hh_text: str, hints: dict, payout_blob):
         seated_hrc_indices=seated_indices,
     )
     if not downstream:
-        return aggressor, [], None
+        # Não-erro: caso degenerate ou condição não satisfeita
+        return aggressor, [], None, None
     try:
         js = generate_hrc_script(_PRUNE_JS_TEMPLATE_PATH, aggressor, downstream)
     except OSError as e:
-        logger.warning("generate_hrc_script falhou (template I/O): %s", e)
-        return aggressor, downstream, None
-    return aggressor, downstream, js
+        # pt25c: ERROR-level (era warning pré-pt25c), com propagação ao
+        # manifest via campo `prune_script_error`. Catch original (silent)
+        # mascarou o bug Railway deploy missing template até smoke real.
+        err = f"{type(e).__name__}: {e}"
+        logger.error(
+            "generate_hrc_script falhou (template I/O) hand_id=%s template=%s err=%s",
+            hand.get("hand_id"), _PRUNE_JS_TEMPLATE_PATH, err,
+        )
+        return aggressor, downstream, None, err
+    return aggressor, downstream, js, None
 
 
 def build_queue_zip(
@@ -682,12 +697,15 @@ def build_queue_zip(
             # path relativo "script.js" (adapter no Beelink reescreve para
             # absoluto antes do watcher ler).
             try:
-                prune_aggressor, prune_downstream, prune_script = _try_build_prune_script(
+                (prune_aggressor, prune_downstream,
+                 prune_script, prune_error) = _try_build_prune_script(
                     h, hh_text, hints, payout_blob,
                 )
-            except Exception:
+            except Exception as _e:
                 logger.exception("prune-in-gap build falhou hand_id=%s", hand_id)
-                prune_aggressor, prune_downstream, prune_script = None, [], None
+                prune_aggressor, prune_downstream = None, []
+                prune_script = None
+                prune_error = f"unhandled: {type(_e).__name__}: {_e}"
             if prune_script is not None:
                 zf.writestr(f"{hand_id}/script.js", prune_script)
                 hints["script_path"] = "script.js"
@@ -713,6 +731,10 @@ def build_queue_zip(
                 "prune_aggressor": prune_aggressor,
                 "prune_downstream": prune_downstream,
                 "has_prune_script": prune_script is not None,
+                # pt25c: prune_script_error capturado quando downstream tem
+                # entries mas geração JS falhou. None significa OK ou
+                # condição-não-satisfeita (downstream vazio).
+                "prune_script_error": prune_error,
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"
                 ),

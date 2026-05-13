@@ -750,8 +750,8 @@ def test_prune_missing_threshold_returns_empty():
 # ── generate_hrc_script ─────────────────────────────────────────────────────
 
 _TEMPLATE_PATH = _os.path.join(
-    _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))),
-    "tools", "hrc_scripts",
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "app", "services", "hrc_scripts",
     "mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js",
 )
 
@@ -1134,6 +1134,62 @@ def test_build_queue_zip_excludes_script_js_when_FT_phase():
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
     assert entry["has_prune_script"] is False
+
+
+# ── pt25c: manifest field prune_script_error + escalation OSError ─────────
+
+def test_build_queue_zip_prune_script_error_None_when_downstream_empty():
+    """pt25c: caso normal (FT phase, downstream=[]) → `prune_script_error=None`
+    no manifest. Condição-não-satisfeita, não-erro."""
+    hand = {
+        "id": 1, "hand_id": "GG-FT2", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 18,  # FT phase
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["has_prune_script"] is False
+    assert entry["prune_script_error"] is None  # not-applicable, not-error
+
+
+def test_build_queue_zip_prune_script_error_populated_on_template_io_failure(monkeypatch):
+    """pt25c: força OSError em generate_hrc_script (template inexistente)
+    via monkeypatch ao path module-level. `downstream` é populated mas
+    `js` falha → `prune_script_error` capta o erro no manifest."""
+    from app.services import queue_export as qe
+    monkeypatch.setattr(
+        qe, "_PRUNE_JS_TEMPLATE_PATH",
+        "/nonexistent/path/to/template.js",
+    )
+
+    hand = {
+        "id": 1, "hand_id": "GG-PRUNE-FAIL", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 200,  # > 3*6=18 → prune fires
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    names = set(zf.namelist())
+    # script.js NÃO escrito (porque generate_hrc_script falhou)
+    assert "GG-PRUNE-FAIL/script.js" not in names
+
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    # Mas downstream está populated (mostra que prune lógica correu)
+    assert entry["prune_aggressor"] == 2
+    assert entry["prune_downstream"] == [3, 4, 5, 6, 7, 0]
+    assert entry["has_prune_script"] is False
+    # E o erro é capturado no manifest (vs silent warning anterior)
+    assert entry["prune_script_error"] is not None
+    err = entry["prune_script_error"]
+    assert "FileNotFoundError" in err
+    assert "/nonexistent/path" in err
 
 
 # ── pt25-revisado: _resolve_players_left via lobby_processing_log ───────────
