@@ -294,10 +294,20 @@ def _persist_manifest(payload: dict) -> None:
 # detect resultados do watcher
 # ============================================================
 def detect_done_zips(queue_dir: Path) -> list[Path]:
+    """Watcher Baltazar (Apr19) grava em `done/Exports/<hand>.zip` —
+    descoberto no smoke real pt23 (zip órfão GG-5914506215). Mantemos também
+    busca em `done/<hand>.zip` directo para compat com versões futuras ou
+    qualquer caller que use o layout flat. Sem `rglob` (defensive: evita
+    captura de zips em subpastas inesperadas tipo `done/archived/`)."""
     done_dir = queue_dir / DONE_SUBDIR
     if not done_dir.is_dir():
         return []
-    return sorted(done_dir.glob("*.zip"))
+    zips: list[Path] = []
+    zips.extend(done_dir.glob("*.zip"))
+    exports_dir = done_dir / "Exports"
+    if exports_dir.is_dir():
+        zips.extend(exports_dir.glob("*.zip"))
+    return sorted(zips)
 
 
 def detect_failed_markers(queue_dir: Path) -> list[tuple[str, Path, str]]:
@@ -355,30 +365,77 @@ def _read_motivo_from_folder(folder: Path) -> str:
 # ============================================================
 # POST results
 # ============================================================
+def _ensure_meta_in_zip(zip_path: Path, hand_id: str) -> bytes:
+    """pt23 fix: o watcher Baltazar Apr19 NÃO injecta `meta.json` directamente
+    no export do HRC — confiava num "bot externo" que movia o zip para
+    `done/replied/` e depois `inject_meta_into_zip` corria no main loop. Esse
+    bot não existe na pipeline poker-app→adapter→watcher; logo o adapter
+    assume essa responsabilidade aqui.
+
+    Se o zip já contém `meta.json`, devolve os bytes intactos. Caso contrário,
+    repacka o zip adicionando um `meta.json` minimal `{hand_id, exported_at,
+    source, watcher_built_meta=False}`. Backend augmenta server-side com
+    `received_at` + `received_from`.
+
+    Tech debt: #WATCHER-META-INJECTION-BYPASSED — quando refactorizarmos o
+    watcher (pt24+) o `inject_meta_into_zip` + `replied/` ficam mortos.
+    """
+    raw = zip_path.read_bytes()
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        if "meta.json" in zf.namelist():
+            return raw
+        entries = [(n, zf.read(n)) for n in zf.namelist()]
+
+    meta = {
+        "hand_id": hand_id,
+        "exported_at": now_iso(),
+        "source": "hrc_adapter_inject",
+        "watcher_built_meta": False,
+    }
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf_out:
+        for name, data in entries:
+            zf_out.writestr(name, data)
+        zf_out.writestr("meta.json", json.dumps(meta, ensure_ascii=False))
+    return out.getvalue()
+
+
 def post_done(session: requests.Session, api_base: str, hand_id: str,
               zip_path: Path) -> bool:
     url = f"{api_base.rstrip('/')}/api/queue/hrc/results"
     try:
-        size = zip_path.stat().st_size
+        disk_size = zip_path.stat().st_size
     except OSError as e:
         logger.warning("post %s done: stat falhou: %s", hand_id, e)
         return False
+
     try:
-        with zip_path.open("rb") as fp:
-            resp = session.post(
-                url,
-                params={"hand_id": hand_id, "status": "done"},
-                files={"file": (zip_path.name, fp, "application/zip")},
-                timeout=POST_DONE_TIMEOUT,
-            )
+        zip_bytes = _ensure_meta_in_zip(zip_path, hand_id)
+    except (zipfile.BadZipFile, OSError) as e:
+        logger.warning("post %s done: zip prep (meta inject) falhou: %s",
+                       hand_id, e)
+        return False
+
+    upload_size = len(zip_bytes)
+    meta_injected = upload_size != disk_size  # heurística simples; suficiente p/ log
+
+    try:
+        resp = session.post(
+            url,
+            params={"hand_id": hand_id, "status": "done"},
+            files={"file": (zip_path.name, zip_bytes, "application/zip")},
+            timeout=POST_DONE_TIMEOUT,
+        )
     except requests.RequestException as e:
         logger.warning("post %s done: network error: %s", hand_id, e)
         return False
 
     if resp.status_code == 200:
         action = _safe_json(resp).get("action", "?")
-        logger.info("post %s done OK size=%d action=%s",
-                    hand_id, size, action)
+        logger.info(
+            "post %s done OK disk_size=%d upload_size=%d meta_injected=%s action=%s",
+            hand_id, disk_size, upload_size, meta_injected, action,
+        )
         return True
 
     logger.error("post %s done HTTP %d body=%r",

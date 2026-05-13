@@ -51,3 +51,6 @@ backfill_*_snapshot_*.csv
 # Documentos pessoais que NÃO devem ir para o repo público
 docs/auditoria-*.pdf
 docs/*.pdf
+
+# Pasta local para artefactos que nunca devem ir ao repo
+_local_only/
