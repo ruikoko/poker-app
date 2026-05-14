@@ -86,6 +86,77 @@ def setup_scripting(wpos, script_path):
     paste_path(script_path or SCRIPT_FILE)
 
 
+# pt25e Bug F (#WATCHER-BUG-F-CI-TARGET-2ND-RUN): coords do campo CI Target
+# no main UI HRC pós-finish do wizard.
+#
+# IMPORTANTE — coords NÃO são herdadas de pt25d:
+# Em pt25d, `start_calculation` (Baltazar original, não-patched) fazia set CI
+# DENTRO da Nash dialog popup — coords computadas relativas ao `rect` do
+# popup (`rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)`), não no
+# main UI. Os helpers novos abaixo apontam para conceito diferente: campo
+# CI Target no main UI antes de clicar Calculate. Nunca houve coords
+# calibrados para este campo — daí placeholder (0,0) + early-return
+# defensivo. Bloco 2 calibra com smoke devagar do Rui.
+#
+# `start_calculation` original continua a correr depois e ainda lida com a
+# Nash dialog que aparece (seu próprio set CI no popup). Os 2 sets podem
+# coexistir até que o Bloco 2 decida se mantém só um.
+CI_TARGET_FIELD_X = 0  # TODO pt25e Bloco 2: calibrar (não-herdado de pt25d)
+CI_TARGET_FIELD_Y = 0  # TODO pt25e Bloco 2: calibrar (não-herdado de pt25d)
+
+
+def _set_ci_target_common(wpos, value, label):
+    """Helper privado partilhado por `set_ci_target_initial` /
+    `set_ci_target_refine`: estrutura click+wait idêntica, diferindo apenas
+    no valor e no label de log.
+
+    Defensiva: se coords ainda não foram calibrados (ambos == 0), faz
+    early-return com WARN em vez de clicar (0, 0) — evita race conditions
+    com outras janelas e mantém o flow seguro até Bloco 2 calibrar.
+    """
+    if CI_TARGET_FIELD_X == 0 and CI_TARGET_FIELD_Y == 0:
+        print(f'   [WARN] CI Target {label}: coords não calibrados '
+              f'(pt25e Bloco 2 pendente) — set ignorado, value={value}')
+        return
+    click_rel(wpos, CI_TARGET_FIELD_X, CI_TARGET_FIELD_Y)
+    time.sleep(0.3)
+    pyautogui.hotkey('ctrl', 'a')
+    time.sleep(0.1)
+    pyperclip.copy(str(float(value)))
+    pyautogui.hotkey('ctrl', 'v')
+    time.sleep(0.2)
+    pyautogui.press('tab')  # commit edit + leave focus
+    time.sleep(0.3)
+    print(f'   CI Target {label}: {value}')
+
+
+def set_ci_target_initial(wpos, value=5.0):
+    """pt25e Bug F — set do CI Target no main UI HRC para a 1ª run.
+
+    Default 5.0 = exploração rápida da árvore (configuração canónica do
+    flow do Baltazar). Será chamado em `setup_hand` antes do 1º Calculate
+    a partir do commit Bug H (re-order do flow).
+
+    Era parte do flow monolítico de `start_calculation`; split aqui para
+    permitir 2 sets distintos (initial pre-1ª run, refine pre-2ª run após
+    Prune Action manual + Scope=Selected Subtree). Ver Bug F em
+    `docs/TECH_DEBTS_INVENTARIO.md`.
+    """
+    _set_ci_target_common(wpos, value, 'initial')
+
+
+def set_ci_target_refine(wpos, value=10.0):
+    """pt25e Bug F — set do CI Target para a 2ª run em Selected Subtree.
+
+    Default 10.0 = refinamento de precisão útil (vs 5.0 da 1ª run que é
+    para exploração rápida). Chamado em Bloco 2 entre Prune Action + Scope
+    selection e o 2º Calculate.
+
+    Não é chamado em Bloco 1 — fica disponível para a wiring de Bloco 2.
+    """
+    _set_ci_target_common(wpos, value, 'refine')
+
+
 def setup_hand(hand_name, hand_path):
     """Fase 1 do watcher: wizard → calcular → queue export.
 
