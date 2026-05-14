@@ -134,8 +134,7 @@ def set_ci_target_initial(wpos, value=5.0):
     """pt25e Bug F — set do CI Target no main UI HRC para a 1ª run.
 
     Default 5.0 = exploração rápida da árvore (configuração canónica do
-    flow do Baltazar). Será chamado em `setup_hand` antes do 1º Calculate
-    a partir do commit Bug H (re-order do flow).
+    flow do Baltazar). Chamado em `setup_hand` antes do 1º Calculate.
 
     Era parte do flow monolítico de `start_calculation`; split aqui para
     permitir 2 sets distintos (initial pre-1ª run, refine pre-2ª run após
@@ -152,9 +151,49 @@ def set_ci_target_refine(wpos, value=10.0):
     para exploração rápida). Chamado em Bloco 2 entre Prune Action + Scope
     selection e o 2º Calculate.
 
-    Não é chamado em Bloco 1 — fica disponível para a wiring de Bloco 2.
+    Não é chamado em Bloco 1 — fica disponível para a wiring de Bloco 2
+    (ver stubs em `setup_hand`).
     """
     _set_ci_target_common(wpos, value, 'refine')
+
+
+# pt25e Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): stub para Prune Action
+# linha-a-linha no context menu HRC. Coords + ordem das entradas no menu
+# pendentes de calibração em smoke devagar pt25e Bloco 2. Não chamado neste
+# bloco; existe para receber wiring + tests downstream.
+def prune_action_on_line(wpos, line_coords):
+    """pt25e Bug J — Prune Action manual sobre uma linha downstream da tree.
+
+    Plano (Bloco 2):
+    1. right-click em `line_coords` (posição da linha do sizing na tree visual)
+    2. esperar context menu aparecer
+    3. seleccionar a entrada *exacta* "Prune Action" (NÃO o Prune global —
+       há 2 entradas com "Prune" no menu; armadilha conhecida).
+    4. esperar refresh da tree.
+
+    Body intencionalmente vazio em Bloco 1. Calibração de coords das entradas
+    do menu + texto exacto é trabalho de Bloco 2 (Rui faz smoke devagar e
+    regista). Estrutura template = `setup_scripting` (mesma anatomia
+    click+wait, alvo diferente).
+    """
+    # TODO pt25e Bloco 2: implementar (right-click + select "Prune Action")
+    pass
+
+
+def finalize_after_second_run(wpos, export_zip):
+    """pt25e Bug H — fecho do flow após 2ª run completa.
+
+    Faz `export_strategies(export_zip)` que era o último passo do `setup_hand`
+    original. Movido para função separada porque deve correr APÓS Prune
+    Action + Scope=Selected Subtree + set_ci_target_refine + 2º Calculate
+    (ver ordem em Bug H, `docs/TECH_DEBTS_INVENTARIO.md`).
+
+    Não é chamado em Bloco 1 — `setup_hand` retorna export_zip sem ter
+    feito export. O watcher fica pendurado em `wait_for_export` por design
+    (Bloco 1 valida arquitectura; `.exe` em produção continua pt25d).
+    """
+    print('   A fazer queue do export (finalize após 2ª run)...')
+    export_strategies(export_zip)
 
 
 def setup_hand(hand_name, hand_path):
@@ -311,14 +350,60 @@ def setup_hand(hand_name, hand_path):
     print('   A aguardar carregamento da mão (30s)...')
     time.sleep(30)
 
-    print('   A calcular...')
+    # pt25e Bug F: set CI Target inicial (5.0) ANTES do 1º Calculate.
+    # Split do flow monolítico antigo (start_calculation fazia tudo numa
+    # call: click Calculate + Nash dialog + set CI + OK). Agora o set CI
+    # acontece primeiro no main UI, e `start_calculation` continua a
+    # dispatch o 1º cálculo (Nash dialog ainda aparece + confirma via Enter
+    # se nash_found, ou fallback Enter).
+    print('   Set CI Target inicial...')
+    set_ci_target_initial(wpos, value=ci_target)
+
+    print('   A calcular (1ª run)...')
     start_calculation(ci_target)
 
     exports_dir = os.path.join(DONE_DIR, 'Exports')
     os.makedirs(exports_dir, exist_ok=True)
     export_zip = os.path.join(exports_dir, hand_name + '.zip')
-    print('   A fazer queue do export...')
-    export_strategies(export_zip)
 
-    print(f'   [QUEUED] {hand_name} → {os.path.basename(export_zip)}')
+    # === pt25e Bloco 2 STUBS — Bug G + J + Bug F refine + 2ª run ===
+    # Sequência completa após 1ª run, pendente de calibração de coords +
+    # wiring em Bloco 2. Em Bloco 1 o setup_hand para aqui (não chama
+    # finalize_after_second_run), por design — watcher fica pendurado em
+    # `wait_for_export` se alguém arrancar este source recompilado. O
+    # `.exe` em produção (Beelink) continua pt25d.
+    #
+    # aggressor_real_action = _payouts.get('aggressor_real_action')
+    # if aggressor_real_action is not None:
+    #     # Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): Prune Action
+    #     # manual em cada linha downstream da tree. DOWNSTREAM_POSITIONS
+    #     # vem do script.js injectado pelo backend (pt25d) — watcher
+    #     # itera a tree visual e aplica Prune Action em cada.
+    #     for line_coords in _enumerate_downstream_lines(wpos):
+    #         prune_action_on_line(wpos, line_coords)
+    #
+    #     # Bug G passo 1 (#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE): mudar
+    #     # Scope do painel da 2ª run para "Selected Subtree".
+    #     _set_scope_selected_subtree(wpos)
+    #
+    #     # Bug G passo 3: seleccionar a linha do sizing real do raiser
+    #     # inicial na tree visual. `aggressor_real_action` (pt25e backend)
+    #     # diz qual sizing clicar — e.g., {type:"raise", size_bb: 2.0} →
+    #     # clicar linha do open 2bb na tree.
+    #     _select_subtree_root_by_action(wpos, aggressor_real_action)
+    #
+    #     # Bug F refine: set CI Target 10.0 (vs 5.0 da 1ª run) para
+    #     # refinamento de precisão útil na subtree.
+    #     set_ci_target_refine(wpos, value=10.0)
+    #
+    #     # 2ª run em Selected Subtree.
+    #     print('   A calcular (2ª run, Selected Subtree)...')
+    #     start_calculation(10.0)
+    #
+    # # Bug H: finalize APÓS 2ª run, não a meio do setup_hand.
+    # finalize_after_second_run(wpos, export_zip)
+    # === FIM STUBS Bloco 2 ===
+
+    print(f'   [QUEUED] {hand_name} → {os.path.basename(export_zip)} '
+          f'(Bloco 1 — finalize Bloco 2)')
     return export_zip
