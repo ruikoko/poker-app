@@ -6,6 +6,50 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (14 Maio 2026 pós-pt25d — smoke real parcial: 5 bugs novos do watcher F-J + 1 re-arquitectura K)
+
+Sessão pt25d fechada com commit `3347fcf` deployed. Smoke real pós-deploy correu no Beelink: zip do `/api/queue/hrc` chega com `script.js` correcto, `REAL_AGGRESSOR_POS=0` e `DOWNSTREAM_POSITIONS=[1,2,3]` para INTERSTELLAR (UTG=0 docs canonical confirmado). **Mas o prune real não foi validável** — o watcher faz só a 1ª run e salta direct para save_strategies, sem 2ª run em Scope=Selected Subtree, sem Prune Action manual por linha downstream, sem CI bump 10.0. Sem a 2ª run, o solver nunca avalia a subtree refinada.
+
+**Status do gatekeeper `#HRC-PRUNE-IN-GAP-DOWNSTREAM`:** **ainda OPEN, em hold até pt25e fechar.** Backend está 100% (pt25/b/c/d, indices confirmados certos no script.js entregue ao watcher). O bloqueio é exclusivamente downstream — fluxo do watcher + dependência meta.json com action real do raiser.
+
+### Tech debts pt25e abertos — `#WATCHER-COMPLETE-FLOW` (HIGH gatekeeper) (6)
+
+Smoke real devagar de 14 Maio expôs 5 bugs no fluxo watcher pós-extract + 1 dependência backend nova:
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#WATCHER-BUG-F-CI-TARGET-2ND-RUN** | 🔴 HIGH | A 1ª run do solver usa CI Target 5.0 (default, exploração rápida). A 2ª run — após Prune Action manual + Scope=Selected Subtree — precisa de CI Target **10.0** para refinar a subtree até precisão útil. Watcher patched (pt23) só set CI Target uma vez no setup. Fix: split em `set_ci_target_initial(wpos, 5.0)` (pre-1ª run, antes do Calculate) + `set_ci_target_refine(wpos, 10.0)` (pre-2ª run, após Prune Action e antes do 2º Calculate). |
+| **#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE** | 🔴 HIGH | A 2ª run tem de correr em Scope=`Selected Subtree`, não em `Full Tree` (default da 1ª). Passos: (1) clicar dropdown Scope no painel da segunda run, (2) seleccionar `Selected Subtree`, (3) **seleccionar a linha do sizing real do raiser inicial** na tree visual (essa linha é a raiz da subtree a refinar). Para (3) o watcher precisa de saber qual sizing o raiser fez na HH real (e.g., `raises 8000 to 16000` → 2bb open). Sem esse dado vindo do backend o watcher não sabe que linha clicar. Depende de **#META-AGGRESSOR-REAL-ACTION** (ver baixo). |
+| **#WATCHER-BUG-H-FLOW-ORDER-SAVE-LAST** | 🔴 HIGH | Fluxo actual: Setup → 1ª run → **save_strategies imediato** → done. O save_strategies deve ser **último**, após a 2ª run. Ordem correcta: Setup → 1ª run → Prune Action (linha a linha downstream) → Selecção subtree + Scope=Selected Subtree + CI bump 10.0 → 2ª run → **save_strategies**. Mover o passo save_strategies da `setup_hand` para função `finalize_after_second_run`. Implementação: reaproveitar rotina actual do save_strategies para criar a similar do Prune Action (mesma estrutura click+wait, alvo diferente). Sem este re-order, mesmo com F+G+J corrigidos a árvore guardada continua a ser a da 1ª run sem prune avaliado. |
+| **#WATCHER-BUG-I-FIRST-PANEL-WRONG-BUTTON** | 🟡 MED | Smoke devagar 14 Maio: Rui detectou que **o watcher clica num botão errado no 1º painel pós-extract** (Basic Hand Data). Repro confirmado visualmente mas sem screenshot/log estruturado ainda. Possíveis causas: deslocamento de coords pós-refresh HRC UI (5.0.X), race condition (botão clicked antes de habilitar), ou rotina chama wrong helper entre `select_bounty_mode` e `setup_scripting`. Identificar exactamente qual botão em smoke devagar dedicado pt25e (Rui executa step-by-step e regista). |
+| **#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE** | 🔴 HIGH | Após 1ª run, o watcher faz Prune Action **linha a linha** para cada player em `DOWNSTREAM_POSITIONS`, percorrendo a tree visual. **CUIDADO armadilha UX HRC:** o context menu tem **2 entradas com "Prune"** — uma é **"Prune Action"** (queremos esta, prune da sizing específica clicada), outra é um Prune global mais agressivo (NÃO esta). Watcher tem de seleccionar o texto exacto **"Prune Action"**. Coords + ordem das entradas no menu a confirmar em smoke devagar pt25e. **Não confundir com o guard `getSizingsOpening` injectado pelo script.js** — esse é prune **scripted** (afecta árvore inicial pre-1ª run); este é prune **manual** sobre nós da subtree pré-2ª run. Os dois complementam-se. |
+| **#META-AGGRESSOR-REAL-ACTION** | 🔴 HIGH | Dependência backend: `meta.json` (ou `payouts.json`) tem de ganhar campo novo `aggressor_real_action` com forma tipo `{type: "raise"\|"bet", size_bb: float}` extraído da HH parseada. Permite ao watcher (Bug G passo 3) clicar a linha exacta do sizing real do raiser inicial na tree HRC para a 2ª run em Selected Subtree. Implementação: helper `derive_aggressor_real_action(hh_text, level_sb, level_bb) -> dict\|None` em `services/queue_export.py` — parseia primeira raise/bet preflop, converte chips → bb units relativos ao level da mão, devolve dict. Injecção no manifest entry + payouts.json em `build_queue_zip`. Tests pytest (`5h` UTG raise 2bb, raise 2.5bb, 3bb open, all-in shove, limp completion). |
+
+### Tech debts pt25f abertos — re-arquitectura template script.js (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND** | 🟡 MED (pt25f+) | Bug K — Re-arquitectura. Template `mtt_advanced_20211029...bvb.js` actualmente declara sizings fixos top-of-file: `SIZES_OPEN_OTHERS = [2, ALLIN]`, `SIZES_3BET_IP = [7.5, 12, ALLIN]`, `SIZES_3BET_BB_VS_SB = [7, ALLIN]`, etc. Estes sizings genéricos inflam a árvore HRC porque o solver explora cada um (e.g., 1ª open: 2bb + ALLIN; 3-bet IP: 7.5bb + 12bb + ALLIN). Para que a árvore contenha apenas o sizing **real** da mão, o backend tem de **injectar dinamicamente** `SIZES_*` per-hand baseados na action sequence parseada da HH. Cada raise/bet preflop é extraído e injectado no slot correspondente (e.g., UTG raise 2.1bb da HH → injectar `SIZES_OPEN_OTHERS = [2.1, ALLIN]`; HJ 3-bet 8bb IP → `SIZES_3BET_IP = [8, ALLIN]`). Reduz a tree drasticamente by design — pode tornar o prune via `getSizingsOpening` (pt25) redundante na prática, mas mantemos como defense-in-depth. Implementação: generalizar `generate_hrc_script` para 2 substituições — (a) bloco prune existente (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS), (b) cada SIZES_* var top-of-file via regex. Helper novo `derive_preflop_sizings(hh_text, level_sb, level_bb) -> dict[str, list[float]]` em `services/queue_export.py` faz parsing completo (5+ raises sequenciais) e mapeia bet_count + position → SIZES_* key. Trabalhoso; depende implicitamente de **#META-AGGRESSOR-REAL-ACTION** (parsing comum). |
+
+### Smoke real pt25d — observações operacionais (14 Maio)
+
+- ✅ Zip `/api/queue/hrc` chega ao Beelink com `script.js` per-hand correcto.
+- ✅ `REAL_AGGRESSOR_POS=0` + `DOWNSTREAM_POSITIONS=[1,2,3]` em convenção docs UTG=0 — validado por Rui visual no `.js` desempacotado para INTERSTELLAR (`WN-4699459877053923331-277-1778535900`).
+- ✅ Manifest entry com `prune_index_convention="hrc_docs_v1"` (traceability pt25d).
+- ❌ Watcher salta 2ª run e exporta directo → tree guardada é a da 1ª run sem prune avaliado em subtree.
+- ❌ Bug I (botão errado no 1º painel) detectado mas sem screenshot — pendente repro pt25e.
+- **Conclusão:** pipeline backend → adapter → HRC engine está OK; o gap está no fluxo do watcher pós-extract.
+
+### Commits pt25b/c/d em main (cronológico)
+
+```
+f32ed28  pt25b: robustez backend cross-site (markers WN/WPN + duplicate let fix + table_format detection + seats vazios) + 22 tests
+77ff496  pt25c: mover hrc_scripts/ para backend/ (fix Railway deploy) + escalar silent OSError para logger.error + manifest field prune_script_error
+3347fcf  pt25d: fix convention indices HRC scripting (UTG=0 docs canonical)
+```
+
+---
+
 ## Estado actual (14 Maio 2026 — pt25d fix convenção indices HRC)
 
 Sessão pt25d. Web descobriu via investigação dos docs oficiais HRC scripting que a convenção de índices oficial é **UTG=0 (first-to-act preflop), SB=N-2, BB=N-1** — não a convenção `SB=0, BB=1, UTG=2, ..., BTN=N-1` que `derive_seats_in_preflop_order` usava desde pt25. Bug silencioso: `script.js` injectado correctamente, template tinha o guard `DOWNSTREAM_POSITIONS.indexOf(player) !== -1`, mas `ctx.getActivePlayer()` retorna índices na convenção docs e o nosso array vivia na convenção SB=0 — `indexOf` nunca match → prune nunca disparava → tree continuava a explodir mesmo com pt25/pt25b deployed. **Não detectado em pt25b smoke** porque o smoke real bloqueou no fix script.js missing (pt25c). Confirmação por Web pediu cat do template original + output `generate_hrc_script` para INTERSTELLAR; comparação revelou que `getSizingsOpening` compara `player == ctx.getPlayerIndexButton/SmallBlind/BigBlind()` (API-vs-API, agnóstica) mas o nosso `indexOf` é API-vs-Python-emitted (precisa da mesma convenção).
