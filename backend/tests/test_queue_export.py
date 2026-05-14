@@ -1358,3 +1358,202 @@ def test_lobby_vision_players_left_optional():
     parsed = parse_and_validate_lobby_json(raw)
     assert parsed is not None
     assert parsed.get("players_left") is None
+
+
+# ── pt25e #META-AGGRESSOR-REAL-ACTION ───────────────────────────────────────
+
+from app.services.queue_export import (
+    derive_aggressor_real_action,
+    _extract_blinds_from_header,
+)
+
+
+# Cross-site real samples — reaproveita _HH_*_REAL definidos acima.
+
+def test_aggressor_real_action_PS_sample():
+    """PS-260299428000: Level XXVI (12500/25000), Votsarrr raises 605201 to
+    630201 and is all-in → size_bb = 630201/25000 ≈ 25.21."""
+    blinds = _extract_blinds_from_header(_HH_PS_REAL)
+    assert blinds == (12500, 25000)
+    out = derive_aggressor_real_action(_HH_PS_REAL, 12500, 25000)
+    assert out is not None
+    assert out["type"] == "raise"
+    assert out["size_bb"] == round(630201 / 25000, 2)
+
+
+def test_aggressor_real_action_GG_sample():
+    """GG-5939385803: Level3(150/300(45)), 221ebf0d raises 300 to 600 →
+    size_bb = 600/300 = 2.0 (canónico UTG open 2bb)."""
+    blinds = _extract_blinds_from_header(_HH_GG_REAL)
+    assert blinds == (150, 300)
+    out = derive_aggressor_real_action(_HH_GG_REAL, 150, 300)
+    assert out == {"type": "raise", "size_bb": 2.0}
+
+
+def test_aggressor_real_action_WN_sample_INTERSTELLAR():
+    """Winamax INTERSTELLAR: Holdem no limit (1000/4000/8000) — ante/sb/bb;
+    blueballs67 raises 8000 to 16000 → size_bb = 16000/8000 = 2.0."""
+    blinds = _extract_blinds_from_header(_HH_WN_REAL)
+    assert blinds == (4000, 8000)
+    out = derive_aggressor_real_action(_HH_WN_REAL, 4000, 8000)
+    assert out == {"type": "raise", "size_bb": 2.0}
+
+
+def test_aggressor_real_action_WPN_sample():
+    """WPN: Level 4 (800.00/1600.00); DAVIDSBAGOFICE raises 1600.00 to 3200.00
+    → size_bb = 3200/1600 = 2.0 (decimais WPN tolerados)."""
+    blinds = _extract_blinds_from_header(_HH_WPN_REAL)
+    assert blinds == (800, 1600)
+    out = derive_aggressor_real_action(_HH_WPN_REAL, 800, 1600)
+    assert out == {"type": "raise", "size_bb": 2.0}
+
+
+# Sintéticos cobrindo cenários canónicos do plano.
+
+def test_aggressor_real_action_UTG_raise_2bb():
+    """8-max UTG raise to 800 com BB=400 → 2.0bb (open canónico)."""
+    hh = _hh_8max_btn4(["UTGplayer: raises 400 to 800"])
+    out = derive_aggressor_real_action(hh, 200, 400)
+    assert out == {"type": "raise", "size_bb": 2.0}
+
+
+def test_aggressor_real_action_raise_2_5bb():
+    """UTG raise to 1000 com BB=400 → 2.5bb open."""
+    hh = _hh_8max_btn4(["UTGplayer: raises 600 to 1000"])
+    out = derive_aggressor_real_action(hh, 200, 400)
+    assert out == {"type": "raise", "size_bb": 2.5}
+
+
+def test_aggressor_real_action_raise_3bb():
+    """UTG raise to 1200 com BB=400 → 3.0bb open."""
+    hh = _hh_8max_btn4(["UTGplayer: raises 800 to 1200"])
+    out = derive_aggressor_real_action(hh, 200, 400)
+    assert out == {"type": "raise", "size_bb": 3.0}
+
+
+def test_aggressor_real_action_all_in_shove():
+    """UTG raise to 10000 and is all-in com BB=400 → 25bb shove."""
+    hh = _hh_8max_btn4(["UTGplayer: raises 9600 to 10000 and is all-in"])
+    out = derive_aggressor_real_action(hh, 200, 400)
+    assert out == {"type": "raise", "size_bb": 25.0}
+
+
+def test_aggressor_real_action_limp_completion_returns_None():
+    """Limp pot: todos foldam até SB, SB completa, BB checks — sem raise/bet
+    → None (consistente com derive_real_aggressor_position)."""
+    hh = _hh_8max_btn4([
+        "UTGplayer: folds",
+        "EPplayer: folds",
+        "MPplayer: folds",
+        "HJplayer: folds",
+        "COplayer: folds",
+        "Hero: folds",
+        "SBplayer: calls 200",
+        "BBplayer: checks",
+    ])
+    out = derive_aggressor_real_action(hh, 200, 400)
+    assert out is None
+
+
+def test_aggressor_real_action_HU_SB_raise():
+    """HU 2-handed: SB age primeiro preflop. SB raise to 800 com BB=400
+    → 2.0bb open."""
+    hu_hh = (
+        "Poker Hand #TM2: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00\n"
+        "Table 'HU' 2-max Seat #1 is the button\n"
+        "Seat 1: SBplayer (10000 in chips)\n"
+        "Seat 2: BBplayer (10000 in chips)\n"
+        "SBplayer: posts small blind 200\n"
+        "BBplayer: posts big blind 400\n"
+        "*** HOLE CARDS ***\n"
+        "Dealt to Hero [As Kd]\n"
+        "SBplayer: raises 600 to 800\n"
+        "*** SUMMARY ***\n"
+    )
+    out = derive_aggressor_real_action(hu_hh, 200, 400)
+    assert out == {"type": "raise", "size_bb": 2.0}
+
+
+def test_aggressor_real_action_no_preflop_marker_returns_None():
+    """HH sem marker preflop (`*** HOLE CARDS ***` ou `*** PRE-FLOP ***`) →
+    None (graceful, mão truncada / cancelled)."""
+    truncated = "Some header\nSeat 1: X (100 in chips)\n(no hole cards section)\n"
+    out = derive_aggressor_real_action(truncated, 200, 400)
+    assert out is None
+
+
+def test_aggressor_real_action_invalid_bb_returns_None():
+    """level_bb 0 ou None → None (defensivo, evita ZeroDivisionError)."""
+    hh = _hh_8max_btn4(["UTGplayer: raises 400 to 800"])
+    assert derive_aggressor_real_action(hh, 200, 0) is None
+    assert derive_aggressor_real_action(hh, 200, None) is None  # type: ignore[arg-type]
+
+
+def test_aggressor_real_action_empty_hh_returns_None():
+    """Defensivo: hh_text vazio/None → None."""
+    assert derive_aggressor_real_action("", 200, 400) is None
+    assert derive_aggressor_real_action(None, 200, 400) is None  # type: ignore[arg-type]
+
+
+def test_extract_blinds_unknown_header_returns_None():
+    """Header sem padrão reconhecível → None (caller cai em aggressor=None)."""
+    assert _extract_blinds_from_header("just a plain text line") is None
+    assert _extract_blinds_from_header("") is None
+    assert _extract_blinds_from_header(None) is None  # type: ignore[arg-type]
+
+
+# Integração build_queue_zip: aggressor_real_action no manifest + payouts.json.
+
+def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_payouts():
+    """pt25e: hand com raise preflop → manifest entry + payouts.json têm
+    `aggressor_real_action={type, size_bb}`. _HH_UTG_OPEN_8MAX usa Level5
+    (200/400) e UTGopener raises 800 to 1200 → 3.0bb."""
+    hand = {
+        "id": 1, "hand_id": "GG-AGG", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 200,
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["aggressor_real_action"] == {"type": "raise", "size_bb": 3.0}
+    payouts = _json.loads(zf.read("GG-AGG/payouts.json"))
+    assert payouts["aggressor_real_action"] == {"type": "raise", "size_bb": 3.0}
+
+
+def test_build_queue_zip_aggressor_real_action_None_for_limp_pot():
+    """pt25e: hand sem raise/bet preflop (limp pot) → entry e payouts.json
+    com `aggressor_real_action=None` (campo presente, valor null)."""
+    limp_hh = """Poker Hand #TM3: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00
+Table 'X' 8-max Seat #4 is the button
+Seat 1: P1 (10000 in chips)
+Seat 4: Hero (10000 in chips)
+Seat 5: SBplayer (10000 in chips)
+Seat 6: BBplayer (10000 in chips)
+SBplayer: posts small blind 200
+BBplayer: posts big blind 400
+*** HOLE CARDS ***
+Dealt to Hero [As Kd]
+P1: folds
+Hero: folds
+SBplayer: calls 200
+BBplayer: checks
+*** SUMMARY ***
+"""
+    hand = {
+        "id": 1, "hand_id": "GG-LIMP", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": limp_hh,
+        "player_names": {},
+        "players_left": 200,
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["aggressor_real_action"] is None
+    payouts = _json.loads(zf.read("GG-LIMP/payouts.json"))
+    assert payouts["aggressor_real_action"] is None

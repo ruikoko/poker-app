@@ -303,6 +303,138 @@ def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
     return idx
 
 
+# pt25e #META-AGGRESSOR-REAL-ACTION: regex em cadeia para extrair (SB, BB)
+# do header da HH, cobrindo os 4 sites. Tenta os padrões mais específicos
+# primeiro para evitar falsos positivos (e.g., WN tem 3 números nas parens
+# do header — ante/sb/bb — e a regex genérica `(sb/bb)` apanharia ante/sb).
+_BLINDS_WN_RE = re.compile(r"\((\d[\d,]*)/(\d[\d,]*)/(\d[\d,]*)\)")
+_BLINDS_GG_PRECONVERT_RE = re.compile(
+    r"\bLevel\d+\(([\d,]+)/([\d,]+)\([\d,]+\)\)"
+)
+_BLINDS_GENERIC_RE = re.compile(
+    r"\(([\d,]+(?:\.\d+)?)/([\d,]+(?:\.\d+)?)\)"
+)
+
+
+def _extract_blinds_from_header(hh_text: str) -> Optional[tuple]:
+    """pt25e — heurística cross-site para extrair (SB, BB) em chips do
+    header da HH (primeira linha).
+
+    Cobertura:
+    - WN: `Holdem no limit (ante/sb/bb)` — 3 números separados por `/`
+    - GG pre-convert: `LevelN(SB/BB(ante))` — ante embutido em 2ª parens
+    - PS / GG post-convert / WPN: `(SB/BB)` genérico, com ou sem decimais
+
+    Devolve `(sb, bb)` ints (decimais truncados via int(float(...))) ou
+    `None` se nenhum padrão match — caller (`derive_aggressor_real_action`)
+    devolve None nesse caso (graceful, prune off para essa mão).
+    """
+    if not hh_text:
+        return None
+    header = hh_text.split("\n", 1)[0]
+    m = _BLINDS_WN_RE.search(header)
+    if m:
+        try:
+            sb = int(float(m.group(2).replace(",", "")))
+            bb = int(float(m.group(3).replace(",", "")))
+            if bb > 0:
+                return sb, bb
+        except ValueError:
+            pass
+    m = _BLINDS_GG_PRECONVERT_RE.search(header)
+    if m:
+        try:
+            sb = int(m.group(1).replace(",", ""))
+            bb = int(m.group(2).replace(",", ""))
+            if bb > 0:
+                return sb, bb
+        except ValueError:
+            pass
+    m = _BLINDS_GENERIC_RE.search(header)
+    if m:
+        try:
+            sb = int(float(m.group(1).replace(",", "")))
+            bb = int(float(m.group(2).replace(",", "")))
+            if bb > 0:
+                return sb, bb
+        except ValueError:
+            pass
+    return None
+
+
+# pt25e #META-AGGRESSOR-REAL-ACTION: regex para parsear o sizing dentro da
+# linha do primeiro raise/bet preflop. Tolera comma-thousands e decimais
+# (WPN) e o "and is all-in" suffix (PS/GG quando shove).
+_RAISE_TO_AMOUNT_RE = re.compile(r"raises\s+[\d,.]+\s+to\s+([\d,.]+)")
+_BET_AMOUNT_RE = re.compile(r"bets\s+([\d,.]+)")
+
+
+def derive_aggressor_real_action(
+    hh_text: str,
+    level_sb: int,
+    level_bb: int,
+) -> Optional[dict]:
+    """pt25e #META-AGGRESSOR-REAL-ACTION — devolve `{type, size_bb}` do
+    primeiro raise/bet preflop voluntário, agnóstico de site (PS/GG/WN/WPN).
+
+    O watcher precisa deste dado para Bug G passo 3 (selecionar a linha do
+    sizing real do raiser inicial na tree HRC para a 2ª run em Selected
+    Subtree). Sem isto, o watcher não sabe que sizing clicar na tree visual.
+
+    Argumentos:
+    - hh_text: HH raw text (pode estar pré ou pós-conversão PS-compat).
+    - level_sb, level_bb: blinds do level da mão em chips.
+
+    Devolve:
+    - `{"type": "raise", "size_bb": float}` quando primeira accção é
+      `raises X to Y` → size_bb = Y / level_bb (arredondado a 2 decimais).
+    - `{"type": "bet", "size_bb": float}` para `bets X` → size_bb = X / BB.
+    - `None` quando: mão sem raise/bet preflop (limps+folds, walk-to-BB),
+      marker preflop ausente, level_bb inválido, parsing do sizing falha.
+
+    Reaproveita `find_preflop_marker` (pt25b cross-site) e `_PREFLOP_OPEN_RE`
+    (pt25b colon-opcional) para localizar o primeiro accionamento.
+    """
+    if not hh_text:
+        return None
+    if not isinstance(level_bb, int) or level_bb <= 0:
+        return None
+    start = find_preflop_marker(hh_text)
+    if start is None:
+        return None
+    end_flop = hh_text.find("*** FLOP ***", start)
+    end_summary = hh_text.find("*** SUMMARY ***", start)
+    ends = [e for e in (end_flop, end_summary) if e > 0]
+    end = min(ends) if ends else len(hh_text)
+    preflop = hh_text[start:end]
+    m = _PREFLOP_OPEN_RE.search(preflop)
+    if not m:
+        return None
+    action_type = m.group(2)
+    line_start = preflop.rfind("\n", 0, m.start()) + 1
+    line_end = preflop.find("\n", m.end())
+    if line_end < 0:
+        line_end = len(preflop)
+    line = preflop[line_start:line_end]
+    if action_type == "raises":
+        sm = _RAISE_TO_AMOUNT_RE.search(line)
+        if not sm:
+            return None
+        try:
+            chips = float(sm.group(1).replace(",", ""))
+        except ValueError:
+            return None
+        return {"type": "raise", "size_bb": round(chips / level_bb, 2)}
+    sm = _BET_AMOUNT_RE.search(line)
+    if not sm:
+        return None
+    try:
+        chips = float(sm.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    return {"type": "bet", "size_bb": round(chips / level_bb, 2)}
+
+
 def derive_prune_downstream(
     aggressor_pos: Optional[int],
     max_players: Optional[int],
@@ -749,6 +881,20 @@ def build_queue_zip(
                 zf.writestr(f"{hand_id}/script.js", prune_script)
                 hints["script_path"] = "script.js"
 
+            # pt25e #META-AGGRESSOR-REAL-ACTION: parsear primeira raise/bet
+            # preflop + size_bb e expor em hints (vai para payouts.json) e no
+            # manifest entry. Watcher (Bloco 2 G3) lê isto para clicar a linha
+            # do sizing real na tree visual antes da 2ª run em Selected Subtree.
+            blinds = _extract_blinds_from_header(hh_text)
+            if blinds is not None:
+                _sb, _bb = blinds
+                aggressor_real_action = derive_aggressor_real_action(
+                    hh_text, _sb, _bb,
+                )
+            else:
+                aggressor_real_action = None
+            hints["aggressor_real_action"] = aggressor_real_action
+
             if payout_blob is not None:
                 merged: dict = dict(payout_blob) if isinstance(payout_blob, dict) else {"_blob": payout_blob}
                 merged.update(hints)
@@ -781,6 +927,8 @@ def build_queue_zip(
                 "prune_index_convention": (
                     "hrc_docs_v1" if prune_script is not None else None
                 ),
+                # pt25e #META-AGGRESSOR-REAL-ACTION
+                "aggressor_real_action": aggressor_real_action,
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"
                 ),
