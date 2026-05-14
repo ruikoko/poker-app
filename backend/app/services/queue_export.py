@@ -100,9 +100,17 @@ def _coerce_player_names(pn) -> dict:
 _SEAT_RE = re.compile(r"^(Seat \d+: )(.+?)( \([\d,]+ in chips)\)", re.MULTILINE)
 
 
-# pt25: helpers para #HRC-PRUNE-IN-GAP-DOWNSTREAM
-# HRC scripting convention: índices 0..N-1 onde SB=0, BB=1, UTG=2, ..., BTN=N-1.
-# Preflop turn order = [UTG, UTG+1, ..., BTN, SB, BB] = [2, 3, ..., N-1, 0, 1].
+# pt25d: helpers para #HRC-PRUNE-IN-GAP-DOWNSTREAM
+# HRC scripting convention oficial (docs): índices 0..N-1 onde
+# 0 = first-to-act preflop (UTG em N>=3; BU/SB em HU), N-2 = SB, N-1 = BB.
+# Compatível com `ctx.getPlayerIndex*()` e `ctx.getActivePlayer()` do HRC
+# engine — o template é convenção-agnóstico (compara API vs API), mas o
+# nosso `DOWNSTREAM_POSITIONS` injectado tem de viver na mesma convenção
+# que `getActivePlayer()` retorna para o `.indexOf()` matchar.
+# Preflop turn order = [0, 1, ..., N-1] sequencial (BB sempre último).
+# Histórico: pt25/pt25b usaram SB=0 rotativo — bug confirmado em pt25d
+# (indexOf nunca match → prune nunca dispara → tree explodia mesmo com
+# script.js correctamente injectado).
 _SEAT_ALL_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
 _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
 # pt25b: regex tolera ambos os formatos de action line:
@@ -132,30 +140,34 @@ def find_preflop_marker(hh_text: str) -> Optional[int]:
     return min(candidates) if candidates else None
 
 
-# pt25b: labels canónicos por número de jogadores sentados na mão. HRC convention
-# SB=0, BB=1, UTG=2, ... — labels post-UTG variam consoante o N (mesa "regular"
-# de N-max). Para tables com seats vazios (e.g. 6-max com 5 sentados após
+# pt25d: labels canónicos por número de jogadores sentados na mão. HRC docs
+# convention: idx 0 = first-to-act preflop (UTG em N>=3, BU/SB em HU), idx
+# N-2 = SB, idx N-1 = BB. Labels variam consoante o N (mesa "regular" de
+# N-max). Para tables com seats vazios (e.g. 6-max com 5 sentados após
 # eliminação), tratamos como N-handed (CO desaparece em 5-handed).
 _POSITION_LABELS_BY_N: dict = {
-    2: ["BTN/SB", "BB"],
-    3: ["SB", "BB", "BTN"],
-    4: ["SB", "BB", "UTG", "BTN"],
-    5: ["SB", "BB", "UTG", "HJ", "BTN"],
-    6: ["SB", "BB", "UTG", "HJ", "CO", "BTN"],
-    7: ["SB", "BB", "UTG", "EP", "MP", "CO", "BTN"],
-    8: ["SB", "BB", "UTG", "EP", "MP", "HJ", "CO", "BTN"],
-    9: ["SB", "BB", "UTG", "EP1", "EP2", "MP", "HJ", "CO", "BTN"],
+    2: ["BU/SB", "BB"],
+    3: ["BTN", "SB", "BB"],
+    4: ["UTG", "BTN", "SB", "BB"],
+    5: ["UTG", "HJ", "BTN", "SB", "BB"],
+    6: ["UTG", "HJ", "CO", "BTN", "SB", "BB"],
+    7: ["UTG", "EP", "MP", "CO", "BTN", "SB", "BB"],
+    8: ["UTG", "EP", "MP", "HJ", "CO", "BTN", "SB", "BB"],
+    9: ["UTG", "EP1", "EP2", "MP", "HJ", "CO", "BTN", "SB", "BB"],
 }
 
 
 def derive_seats_in_preflop_order(hh_text: str) -> list:
-    """pt25b — fonte canónica do mapping seat ↔ HRC player index ↔ position
-    label ↔ nick, ordenado pre-flop (SB primeiro = hrc_idx 0).
+    """pt25d — fonte canónica do mapping seat ↔ HRC player index ↔ position
+    label ↔ nick, ordenado pre-flop por convenção HRC docs (UTG primeiro =
+    hrc_idx 0; BB último = hrc_idx N-1).
 
     Parsing:
     - Header (pre `find_preflop_marker`): Seat lines com nick + chip stack
     - Button: `Seat #N is the button` (universal nos 4 sites)
-    - SB = seat imediatamente clockwise após button
+    - First-to-act preflop:
+        * N >= 3 (incl. 3-handed onde BTN é first-to-act): button + 3 wraps mod N
+        * N == 2 (HU): button (BU/SB age primeiro preflop)
 
     Posições labelled por convenção `_POSITION_LABELS_BY_N[N]` onde N é o
     nº de jogadores sentados na mão (não o table_format). Mesa 6-max com
@@ -163,6 +175,13 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
 
     Devolve `[]` se parsing falhar (sem button, sem seats, button fora do
     seat list). Cada entry: `{seat: int, position: str, hrc_idx: int, nick: str}`.
+
+    Sample 5-handed INTERSTELLAR (button=Seat 2 imbagosu):
+        idx 0 = UTG (Seat 5, blueballs67)
+        idx 1 = HJ  (Seat 1, yousnouf75)
+        idx 2 = BTN (Seat 2, imbagosu)
+        idx 3 = SB  (Seat 3, Beu_Teu)
+        idx 4 = BB  (Seat 4, thinvalium)
     """
     if not hh_text:
         return []
@@ -185,13 +204,16 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
 
     btn_idx_in_list = seat_list.index(btn_seat)
     n = len(seat_list)
-    sb_idx_in_list = (btn_idx_in_list + 1) % n
+    # First-to-act preflop offset relativo ao button (no seat_list ordenado):
+    # N==2 (HU): BU/SB (botão) age primeiro → offset 0.
+    # N>=3: UTG = botão + 3 (wraps mod N para 3/4-handed, onde BTN/UTG colapsam).
+    first_to_act_offset = 0 if n == 2 else 3
 
     labels = _POSITION_LABELS_BY_N.get(n) or [f"POS{i}" for i in range(n)]
 
     out: list = []
     for hrc_idx in range(n):
-        seat_in_list = (sb_idx_in_list + hrc_idx) % n
+        seat_in_list = (btn_idx_in_list + first_to_act_offset + hrc_idx) % n
         seat_num = seat_list[seat_in_list]
         out.append({
             "seat": seat_num,
@@ -235,13 +257,19 @@ def _build_nick_to_hrc_index(hh_text: str) -> dict:
 
 
 def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
-    """pt25 — devolve o HRC player index do primeiro a abrir o pot preflop
-    com raise/bet voluntário.
+    """pt25d — devolve o HRC player index (convenção docs: UTG=0 first-to-act
+    preflop, SB=N-2, BB=N-1) do primeiro a abrir o pot preflop com raise/bet
+    voluntário.
 
-    Excepções (devolvem None per regra pt23):
+    Excepções (devolvem None):
     - Nenhum raise/bet preflop (limp pot, walk-to-BB)
-    - Primeiro raiser é SB (HRC idx 0) — "SB-aberto", excepção da regra
     - Parsing falha (sem button, sem marker preflop, etc.)
+    - Nick do primeiro raiser não está nos seats parseados (HH inválido)
+
+    SB-aggressor NÃO é early-return None desde pt25d. Em pt25/pt25b SB=idx 0
+    fazia o aggressor parecer "primeiro a agir preflop" sem ser, e a regra
+    mascarava o caso. Em convenção HRC docs SB=N-2 e `derive_prune_downstream`
+    devolve [] naturalmente para esse caso (degenerate: só BB sobra).
 
     Calls preflop (incluindo SB-completes) NÃO contam como abertura.
 
@@ -272,8 +300,6 @@ def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
     idx = nick_to_idx.get(nick)
     if idx is None:
         return None  # nick não está em seats (HH inválido)
-    if idx == 0:
-        return None  # SB-aberto excepção
     return idx
 
 
@@ -281,56 +307,67 @@ def derive_prune_downstream(
     aggressor_pos: Optional[int],
     max_players: Optional[int],
     players_left: Optional[int],
-    seated_hrc_indices: Optional[list] = None,
-    table_format: int = 8,
+    n_seated: int,
 ) -> list:
-    """pt25 — devolve lista de HRC player indexes a prune (opens-in-gap downstream).
+    """pt25d — devolve lista de HRC player indexes a prune (opens-in-gap
+    downstream) na convenção HRC docs (UTG=0 first-to-act preflop, BB=N-1).
 
-    Regra Rui pt23:
-    - aggressor_pos None ou SB (idx 0) → [] (excepção, nada a prune)
-    - players_left <= 3 * max_players → [] (FT phase, prune não vale a pena)
-    - max_players None → [] (defensivo, sem threshold)
-    - Senão → posições downstream do aggressor em ordem preflop, até SB
-      inclusive (BB excluído porque é tipicamente o respondedor/hero).
+    Regra (mantida de pt25):
+    - aggressor_pos None → []
+    - max_players None ou players_left None → [] (defensivo)
+    - players_left <= 3 * max_players → [] (FT phase: prune não vale a pena)
+    - aggressor_pos fora de [0, n_seated) → [] (defensivo: index inválido)
+    - aggressor é SB (idx N-2) ou BB (idx N-1) → [] (degenerate: nada
+      counterfactual a prune downstream da SB; BB nunca abre in-gap)
+    - Senão → [aggressor+1, aggressor+2, ..., N-2] (todos os índices
+      sequenciais após o aggressor em ordem preflop, excepto BB)
 
-    pt25b: `seated_hrc_indices` (list[int]) é a fonte canónica do tamanho da
-    mesa em uso na mão (N-handed). Vem de `derive_seats_in_preflop_order`.
-    Se fornecido, walk pelos sentados em ordem preflop. Caso contrário cai
-    em `table_format` (default 8) — usado pelos tests sintéticos pt25 e por
-    callers legacy.
+    Argumentos:
+    - aggressor_pos: HRC idx (0..N-1) do primeiro raiser preflop, ou None.
+    - max_players: limite estrutural da mesa (HM3/tournaments_meta). Usado
+      apenas como threshold para FT-cut (3 × max_players).
+    - players_left: nº de players vivos no torneio (Vision pt25 sobre SS
+      lobby mid-tournament). None → return [].
+    - n_seated: nº de seats dealt nesta mão. Tipicamente 2..8. Vem de
+      `len(derive_seats_in_preflop_order(hh_text))` no caller.
 
-    Exemplos:
-    - 8-max full (seated=[0..7]): aggressor UTG (2) → [3, 4, 5, 6, 7, 0]
-    - 6-max 5-sentados (seated=[0..4], e.g. INTERSTELLAR pós-eliminação):
-        aggressor UTG (2) → [3, 4, 0]  (HJ, BTN, SB — sem CO em 5-handed)
-    - 6-max full (seated=[0..5]): aggressor UTG (2) → [3, 4, 5, 0]
+    Mudança vs pt25b:
+    - Drop param `seated_hrc_indices` (redundante: na nova convenção
+      índices são contíguos 0..N-1 por construção).
+    - Drop param `table_format` (redundante: n_seated cobre o caso).
+    - Drop check explícito `aggressor == 0` (era SB-aberto em SB=0 conv;
+      agora idx 0 = UTG, caso legítimo de aggressor com downstream cheio).
+    - Add SB/BB-aggressor early-return: K >= N-2 → [] (degenerate).
+
+    Exemplos (5-handed):
+    - aggressor UTG (idx 0) → [1, 2, 3]  (HJ, BTN, SB; BB=4 excluído)
+    - aggressor HJ (idx 1)  → [2, 3]     (BTN, SB)
+    - aggressor BTN (idx 2) → [3]        (SB)
+    - aggressor SB (idx 3)  → []         (degenerate)
+    - aggressor BB (idx 4)  → []         (degenerate: BB nunca abre in-gap)
+
+    Exemplos (6-max full N=6):
+    - aggressor UTG (idx 0) → [1, 2, 3, 4]  (HJ, CO, BTN, SB)
+
+    Exemplos (8-max full N=8):
+    - aggressor UTG (idx 0) → [1, 2, 3, 4, 5, 6]  (EP..BTN..SB)
+
+    HU (N=2):
+    - aggressor BU/SB (idx 0) → []  (range(1, 1) vazio; BB=1 excluído)
     """
-    if aggressor_pos is None or aggressor_pos == 0:
+    if aggressor_pos is None:
         return []
     if max_players is None or players_left is None:
         return []
     if players_left <= 3 * max_players:
         return []
-
-    # N = número de sentados (canónico) ou table_format (fallback legacy)
-    if seated_hrc_indices is not None:
-        n = len(seated_hrc_indices)
-    else:
-        n = table_format
-
-    # Preflop turn order excluindo BB (idx 1):
-    # [UTG=2, 3, ..., N-1, SB=0]
-    preflop_order: list = []
-    for offset in range(n):
-        idx = (2 + offset) % n
-        if idx == 1:
-            continue
-        preflop_order.append(idx)
-
-    if aggressor_pos not in preflop_order:
+    if n_seated < 2:
         return []
-    i = preflop_order.index(aggressor_pos)
-    return preflop_order[i + 1:]
+    if not (0 <= aggressor_pos < n_seated):
+        return []
+    if aggressor_pos >= n_seated - 2:
+        return []
+    return list(range(aggressor_pos + 1, n_seated - 1))
 
 
 # pt25b: regex que match as 2 linhas do bloco placeholder no template B2.
@@ -595,18 +632,20 @@ def _try_build_prune_script(hand: dict, hh_text: str, hints: dict, payout_blob):
     FT phase, parsing falha — casos não-erro). Propagado ao manifest
     `prune_script_error` para observabilidade (vs silent warning anterior).
 
-    pt25b: passa `seated_hrc_indices` derivado de `derive_seats_in_preflop_order`
-    para `derive_prune_downstream`. Suporta mesas com seats vazios (e.g.
-    6-max com 5 sentados pós-eliminação) cross-site (GG/PS/WN/WPN).
+    pt25d: passa `n_seated` (int) — `derive_prune_downstream` mudou de
+    `seated_hrc_indices` (list) para `n_seated` por mudança de convenção
+    (UTG=0 first-to-act preflop em vez de SB=0 rotativo). Suporta mesas
+    com seats vazios (e.g. 6-max com 5 sentados pós-eliminação) cross-site
+    (GG/PS/WN/WPN) — `derive_seats_in_preflop_order` já normaliza N para
+    "número de sentados", não table_format.
     """
     aggressor = derive_real_aggressor_position(hh_text)
     max_players = hints.get("max_players")
     players_left = _resolve_players_left(hand, payout_blob)
     seats = derive_seats_in_preflop_order(hh_text)
-    seated_indices = [s["hrc_idx"] for s in seats] if seats else None
+    n_seated = len(seats)
     downstream = derive_prune_downstream(
-        aggressor, max_players, players_left,
-        seated_hrc_indices=seated_indices,
+        aggressor, max_players, players_left, n_seated,
     )
     if not downstream:
         # Não-erro: caso degenerate ou condição não satisfeita
@@ -735,6 +774,13 @@ def build_queue_zip(
                 # entries mas geração JS falhou. None significa OK ou
                 # condição-não-satisfeita (downstream vazio).
                 "prune_script_error": prune_error,
+                # pt25d: convention tag para distinguir zips pré-pt25d (SB=0
+                # rotativo, bug indexOf nunca match) vs pós-pt25d (UTG=0
+                # first-to-act, HRC docs canónica). Só populated quando o
+                # script.js é efectivamente escrito; None caso contrário.
+                "prune_index_convention": (
+                    "hrc_docs_v1" if prune_script is not None else None
+                ),
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"
                 ),

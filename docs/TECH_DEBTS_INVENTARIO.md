@@ -6,6 +6,30 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (14 Maio 2026 — pt25d fix convenção indices HRC)
+
+Sessão pt25d. Web descobriu via investigação dos docs oficiais HRC scripting que a convenção de índices oficial é **UTG=0 (first-to-act preflop), SB=N-2, BB=N-1** — não a convenção `SB=0, BB=1, UTG=2, ..., BTN=N-1` que `derive_seats_in_preflop_order` usava desde pt25. Bug silencioso: `script.js` injectado correctamente, template tinha o guard `DOWNSTREAM_POSITIONS.indexOf(player) !== -1`, mas `ctx.getActivePlayer()` retorna índices na convenção docs e o nosso array vivia na convenção SB=0 — `indexOf` nunca match → prune nunca disparava → tree continuava a explodir mesmo com pt25/pt25b deployed. **Não detectado em pt25b smoke** porque o smoke real bloqueou no fix script.js missing (pt25c). Confirmação por Web pediu cat do template original + output `generate_hrc_script` para INTERSTELLAR; comparação revelou que `getSizingsOpening` compara `player == ctx.getPlayerIndexButton/SmallBlind/BigBlind()` (API-vs-API, agnóstica) mas o nosso `indexOf` é API-vs-Python-emitted (precisa da mesma convenção).
+
+Fix backend-only — template e JS patch são convenção-agnósticos. Refactor de 3 helpers (`derive_seats_in_preflop_order`, `derive_real_aggressor_position`, `derive_prune_downstream`) + drop de 2 params (`seated_hrc_indices`, `table_format` em `derive_prune_downstream`) + reescrita de `_POSITION_LABELS_BY_N` (8 entries, agora começa em UTG/BTN/BU consoante N e termina em BB). 28 tests reescritos + 18 sintéticos novos (`5h/6max/8max` series cobrindo todas as posições + HU + degenerate cases). Manifest field novo `prune_index_convention="hrc_docs_v1"` para distinguir zips pré-pt25d (buggy) vs pós-pt25d. Suite **264 PASSED** (era 264). Dry-run INTERSTELLAR confirma: `REAL_AGGRESSOR_POS=0, DOWNSTREAM=[1,2,3]` (UTG=0, downstream HJ/BTN/SB; BB=4 excluído). Smoke real pendente: Rui faz cleanup + re-pull Beelink + reporta tree size.
+
+### Tech debts fechados pt25d (1)
+
+| ID | Como fechou |
+|---|---|
+| **#HRC-INDEX-CONVENTION-MISMATCH** (descoberto pt25d) | `derive_seats_in_preflop_order` mudou a fórmula: `first_to_act_offset = 0 if n == 2 else 3` (HU age primeiro pelo botão; N≥3 age via `button + 3`, wraps mod N). Indices contíguos `0..N-1` por construção, daí drop do param `seated_hrc_indices` em `derive_prune_downstream`. SB-aberto early-return removido em `derive_real_aggressor_position` (era artefacto da convenção velha; com SB=N-2, `derive_prune_downstream` devolve [] naturalmente para esse caso). Commit pt25d ETAPA 3. |
+
+### #HRC-PRUNE-IN-GAP-DOWNSTREAM (gatekeeper)
+
+Continua aberto até smoke real validar tree size pós-pt25d. Pipeline técnico completo:
+- pt25 — helpers + JS template guard + adapter integration + lobby_vision `players_left`
+- pt25b — robustez cross-site (PS/GG/WN/WPN markers, action format, table layout)
+- pt25c — script.js no zip (Railway deploy fix) + manifest `prune_script_error`
+- pt25d — fix convention indices (UTG=0 docs canónica)
+
+Sem confirmação real de redução de tree size, o gatekeeper continua HIGH. Smoke real pt25d: Rui apaga state Beelink, re-pull `/api/queue/hrc`, abre INTERSTELLAR no HRC pos-extract, observa tree size na barra inferior — esperamos drop de ~17h ETA / >20GB para minutos / sub-GB se a optimização disparar como pretendido.
+
+---
+
 ## Estado actual (13 Maio 2026 — pt25b validado, prune-in-gap robusto cross-site)
 
 Sessão pt25 → pt25b. Foco em `#HRC-PRUNE-IN-GAP-DOWNSTREAM` (HIGH gatekeeper, herdado de pt24). **pt25** implementou 4 frentes core: helpers backend (`derive_real_aggressor_position` + `derive_prune_downstream` + `generate_hrc_script`), JS template guard, `build_queue_zip` escreve `script.js` no zip + override `script_path`, adapter reescreve para path absoluto pós-unzip. Plus `lobby_vision` extrai `players_left` mid-tournament + `lobby_processing_log` ganha coluna dedicada + `_resolve_players_left` lookup SQL. **pt25b** adicionou robustez cross-site (GG/PS/Winamax/WPN): helper novo `find_preflop_marker` (aceita `*** HOLE CARDS ***` e `*** PRE-FLOP ***`); `_PREFLOP_OPEN_RE` ganha colon opcional para action lines WN/WPN; `generate_hrc_script` faz substitution idempotente no placeholder em vez de inserir (evita duplicate `let`); helper canónico `derive_seats_in_preflop_order` com labels por N-handed (suporta 5-sentados-6-max INTERSTELLAR); `derive_prune_downstream` aceita `seated_hrc_indices` para downstream baseado nos sentados. Smoke real (PASSO B5) aguarda transferência adapter ao Beelink.

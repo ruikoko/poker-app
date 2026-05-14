@@ -262,10 +262,10 @@ from app.services.queue_export import (
 # ── derive_real_aggressor_position ──────────────────────────────────────────
 
 # Helper builder para HHs de teste. 8-max, button configurável.
-# HRC convention para 8-max com button = Seat #4:
-#   SB=Seat 5 (idx 0), BB=Seat 6 (idx 1), UTG=Seat 7 (idx 2),
-#   UTG+1/EP=Seat 8 (idx 3), MP=Seat 1 (idx 4), HJ=Seat 2 (idx 5),
-#   CO=Seat 3 (idx 6), BTN=Seat 4 (idx 7).
+# pt25d HRC docs convention (UTG=0 first-to-act preflop, BB=N-1) para 8-max
+# com button=Seat #4:
+#   UTG=Seat 7 (idx 0), EP=Seat 8 (idx 1), MP=Seat 1 (idx 2), HJ=Seat 2 (idx 3),
+#   CO=Seat 3 (idx 4), BTN=Seat 4 (idx 5), SB=Seat 5 (idx 6), BB=Seat 6 (idx 7).
 
 def _hh_8max_btn4(preflop_actions: list[str]) -> str:
     """Constrói uma HH 8-max minimal com button Seat #4 e acções preflop
@@ -273,14 +273,14 @@ def _hh_8max_btn4(preflop_actions: list[str]) -> str:
     lines = [
         "Poker Hand #TM1: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00",
         "Table 'A' 8-max Seat #4 is the button",
-        "Seat 1: MPplayer (10000 in chips)",      # MP, HRC idx 4
-        "Seat 2: HJplayer (10000 in chips)",      # HJ, HRC idx 5
-        "Seat 3: COplayer (10000 in chips)",      # CO, HRC idx 6
-        "Seat 4: Hero (10000 in chips)",          # BTN, HRC idx 7
-        "Seat 5: SBplayer (10000 in chips)",      # SB, HRC idx 0
-        "Seat 6: BBplayer (10000 in chips)",      # BB, HRC idx 1
-        "Seat 7: UTGplayer (10000 in chips)",     # UTG, HRC idx 2
-        "Seat 8: EPplayer (10000 in chips)",      # UTG+1/EP, HRC idx 3
+        "Seat 1: MPplayer (10000 in chips)",      # MP, HRC idx 2
+        "Seat 2: HJplayer (10000 in chips)",      # HJ, HRC idx 3
+        "Seat 3: COplayer (10000 in chips)",      # CO, HRC idx 4
+        "Seat 4: Hero (10000 in chips)",          # BTN, HRC idx 5
+        "Seat 5: SBplayer (10000 in chips)",      # SB, HRC idx 6
+        "Seat 6: BBplayer (10000 in chips)",      # BB, HRC idx 7
+        "Seat 7: UTGplayer (10000 in chips)",     # UTG, HRC idx 0
+        "Seat 8: EPplayer (10000 in chips)",      # EP, HRC idx 1
         "SBplayer: posts small blind 200",
         "BBplayer: posts big blind 400",
         "*** HOLE CARDS ***",
@@ -292,43 +292,43 @@ def _hh_8max_btn4(preflop_actions: list[str]) -> str:
 
 
 def test_aggressor_UTG_opens():
-    """8-max, UTG raise first → HRC idx 2."""
+    """8-max, UTG raise first → HRC idx 0 (pt25d convention)."""
     hh = _hh_8max_btn4(["UTGplayer: raises 800 to 1200"])
-    assert derive_real_aggressor_position(hh) == 2
+    assert derive_real_aggressor_position(hh) == 0
 
 
 def test_aggressor_EP_opens():
-    """UTG folds, EP (UTG+1) raises → HRC idx 3."""
+    """UTG folds, EP raises → HRC idx 1."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: raises 800 to 1200",
     ])
-    assert derive_real_aggressor_position(hh) == 3
+    assert derive_real_aggressor_position(hh) == 1
 
 
 def test_aggressor_MP_opens():
-    """UTG/EP fold, MP raises → HRC idx 4."""
+    """UTG/EP fold, MP raises → HRC idx 2."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: folds",
         "MPplayer: raises 800 to 1200",
     ])
-    assert derive_real_aggressor_position(hh) == 4
+    assert derive_real_aggressor_position(hh) == 2
 
 
 def test_aggressor_HJ_opens():
-    """UTG/EP/MP fold, HJ raises → HRC idx 5."""
+    """UTG/EP/MP fold, HJ raises → HRC idx 3."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: folds",
         "MPplayer: folds",
         "HJplayer: raises 800 to 1200",
     ])
-    assert derive_real_aggressor_position(hh) == 5
+    assert derive_real_aggressor_position(hh) == 3
 
 
 def test_aggressor_CO_opens():
-    """UTG/EP/MP/HJ fold, CO raises → HRC idx 6."""
+    """UTG/EP/MP/HJ fold, CO raises → HRC idx 4."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: folds",
@@ -336,7 +336,7 @@ def test_aggressor_CO_opens():
         "HJplayer: folds",
         "COplayer: raises 800 to 1200",
     ])
-    assert derive_real_aggressor_position(hh) == 6
+    assert derive_real_aggressor_position(hh) == 4
 
 
 def test_aggressor_SB_completes_returns_None():
@@ -356,9 +356,11 @@ def test_aggressor_SB_completes_returns_None():
     assert derive_real_aggressor_position(hh) is None
 
 
-def test_aggressor_SB_opens_returns_None_per_exception():
-    """Todos foldam até SB, SB faz raise — regra pt23 excepção "SB-aberto"
-    devolve None (sem prune downstream porque ninguém depois excepto BB)."""
+def test_aggressor_SB_opens_returns_idx6():
+    """pt25d: todos foldam até SB, SB raises → SB idx (N-2 = 6 em 8-handed).
+    Não há mais early-return None desde pt25d (era heurística da convenção
+    velha onde SB=0). `derive_prune_downstream` devolve [] naturalmente
+    para esse caso (downstream vazio porque só BB sobra)."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: folds",
@@ -369,12 +371,12 @@ def test_aggressor_SB_opens_returns_None_per_exception():
         "SBplayer: raises 600 to 1200",
         "BBplayer: folds",
     ])
-    assert derive_real_aggressor_position(hh) is None
+    assert derive_real_aggressor_position(hh) == 6
 
 
-def test_aggressor_BU_opens_returns_idx7():
-    """UTG..CO fold, BTN (Hero, idx 7) raises → 7. Test crítico para
-    GG-5914506215 real (Hero=BTN opens, smoke pt23)."""
+def test_aggressor_BU_opens_returns_idx5():
+    """UTG..CO fold, BTN (Hero, idx 5 em 8-handed = N-3) raises → 5.
+    Test crítico para GG-5914506215 real (Hero=BTN opens, smoke pt23)."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: folds",
@@ -383,7 +385,7 @@ def test_aggressor_BU_opens_returns_idx7():
         "COplayer: folds",
         "Hero: raises 800 to 1200",
     ])
-    assert derive_real_aggressor_position(hh) == 7
+    assert derive_real_aggressor_position(hh) == 5
 
 
 # ── pt25b: cross-site marker + action format compat ────────────────────────
@@ -503,59 +505,56 @@ DAVIDSBAGOFICE raises 1600.00 to 3200.00
 
 
 def test_aggressor_PS_real_sample():
-    """PS sample (PS-260299428000, 6-max BTN=Seat 5): preflop UTG-style raiser
-    é Votsarrr@Seat5 — mas espera, Votsarrr=BTN (Seat #5 is the button).
-    HRC index: BTN=Seat 5, SB=Seat 6 (idx 0), BB=Seat 1 (idx 1), UTG=Seat 2
-    (idx 2), HJ=Seat 4 (idx 3), CO/BTN=Seat 5 (idx 4)
-    Mas Votsarrr=Seat 5 = BTN → idx 4 em 5-sentados-6-max."""
+    """PS sample (PS-260299428000, 6-max BTN=Seat 5, 5 sentados):
+    Votsarrr@Seat5=BTN opens → idx 2 (pt25d: BTN em 5-handed = N-3 = 2)."""
     out = derive_real_aggressor_position(_HH_PS_REAL)
-    # Validação: aggressor deve ser identificado (não None) e mapear para
-    # alguém na BTN-side (Votsarrr@Seat5).
     assert out is not None
-    # Compute expected: button=Seat5; seat_list=[1,2,4,5,6] (5 sentados);
-    # btn_idx_in_list=3; sb_idx_in_list=(3+1)%5=4 → Seat 6 (UltraLoubard=SB);
-    # walking: hrc0=Seat6(UltraLoubard,SB), hrc1=Seat1(kokonakueka,BB),
-    #          hrc2=Seat2(carlos8surf,UTG), hrc3=Seat4(QuimDiamond,HJ),
-    #          hrc4=Seat5(Votsarrr,BTN). Votsarrr opens → idx 4. ✓
-    assert out == 4
+    # pt25d: button=Seat5; seat_list=[1,2,4,5,6]; btn_idx_in_list=3; n=5;
+    # first_to_act_offset=3 → hrc0=seat_list[(3+3+0)%5=1]=Seat2(carlos8surf,UTG),
+    # hrc1=Seat4(QuimDiamond,HJ), hrc2=Seat5(Votsarrr,BTN),
+    # hrc3=Seat6(UltraLoubard,SB), hrc4=Seat1(kokonakueka,BB).
+    # Votsarrr opens → idx 2. ✓
+    assert out == 2
 
 
 def test_aggressor_GG_real_sample():
     """GG sample (GG real, 8-max BTN=Seat 1, 5 sentados): 1º raise é
-    221ebf0d@Seat8."""
+    221ebf0d@Seat8 após 8db88342@Seat7 fold. pt25d: HJ em 5-handed = idx 1."""
     out = derive_real_aggressor_position(_HH_GG_REAL)
     assert out is not None
-    # Compute: button=Seat1; seat_list=[1,5,6,7,8]; btn_idx_in_list=0;
-    # sb_idx_in_list=1 → Seat5 (b839c780=SB).
-    # hrc0=Seat5(SB), hrc1=Seat6(BB), hrc2=Seat7(8db88342,UTG),
-    # hrc3=Seat8(221ebf0d,UTG+1 / EP), hrc4=Seat1(Hero,BTN).
-    # 221ebf0d raises = idx 3 (EP).
-    assert out == 3
+    # pt25d: button=Seat1; seat_list=[1,5,6,7,8]; btn_idx_in_list=0; n=5;
+    # first_to_act_offset=3 → hrc0=seat_list[3]=Seat7(8db88342,UTG),
+    # hrc1=Seat8(221ebf0d,HJ), hrc2=Seat1(Hero,BTN),
+    # hrc3=Seat5(b839c780,SB), hrc4=Seat6(3343ebc6,BB).
+    # 8db88342 folds (UTG=0), 221ebf0d raises (HJ=1). Aggressor=1.
+    assert out == 1
 
 
 def test_aggressor_WN_real_sample_INTERSTELLAR():
-    """Winamax sample (INTERSTELLAR target do smoke pt25b): 6-max 5-sentados
-    BTN=Seat 2; blueballs67@Seat5 raises first."""
+    """Winamax INTERSTELLAR (smoke target pt25b+pt25d): 6-max 5-sentados
+    BTN=Seat 2; blueballs67@Seat5=UTG raises first → idx 0 (pt25d)."""
     out = derive_real_aggressor_position(_HH_WN_REAL)
     assert out is not None
-    # Compute: seat_list=[1,2,3,4,5]; btn_idx_in_list=1; sb_idx_in_list=2 → Seat3
-    # hrc0=Seat3(Beu_Teu,SB), hrc1=Seat4(thinvalium,BB), hrc2=Seat5(blueballs67,UTG),
-    # hrc3=Seat1(yousnouf75,HJ?), hrc4=Seat2(imbagosu,BTN).
-    # blueballs67 raises = idx 2 (UTG). ✓ Matches dry-run expectation.
-    assert out == 2
+    # pt25d: seat_list=[1,2,3,4,5]; btn_idx_in_list=1; n=5;
+    # first_to_act_offset=3 → hrc0=seat_list[(1+3+0)%5=4]=Seat5(blueballs67,UTG),
+    # hrc1=Seat1(yousnouf75,HJ), hrc2=Seat2(imbagosu,BTN),
+    # hrc3=Seat3(Beu_Teu,SB), hrc4=Seat4(thinvalium,BB).
+    # blueballs67 raises = idx 0 (UTG). ✓
+    assert out == 0
 
 
 def test_aggressor_WPN_real_sample():
     """WPN sample (8-max BTN=Seat 1, 8 sentados full): DAVIDSBAGOFICE@Seat7
-    raises after 3 folds."""
+    raises após 3 folds. pt25d: HJ em 8-handed = idx 3."""
     out = derive_real_aggressor_position(_HH_WPN_REAL)
     assert out is not None
-    # Compute: 8 sentados, btn=Seat1, sb=Seat2, bb=Seat3, ..., btn-1=Seat8 (idx 7).
-    # btn_idx_in_list=0; sb_idx_in_list=1 → Seat2 (cringemeariver=SB).
-    # hrc0=Seat2(SB), hrc1=Seat3(BB), hrc2=Seat4(UTG), hrc3=Seat5,
-    # hrc4=Seat6, hrc5=Seat7(DAVIDSBAGOFICE), hrc6=Seat8, hrc7=Seat1(BTN).
-    # DAVIDSBAGOFICE raises after Seat4/5/6 fold (idx 2/3/4). DAVIDSBAGOFICE = idx 5 (CO).
-    assert out == 5
+    # pt25d: 8 sentados, seat_list=[1..8], btn_idx_in_list=0, first_offset=3 →
+    # hrc0=Seat4(TuuusTuuuuus,UTG), hrc1=Seat5(egegey1,EP),
+    # hrc2=Seat6(pocahontas94,MP), hrc3=Seat7(DAVIDSBAGOFICE,HJ),
+    # hrc4=Seat8(eagle47,CO), hrc5=Seat1(Jetsies,BTN),
+    # hrc6=Seat2(cringemeariver,SB), hrc7=Seat3(AbamaAbezyana,BB).
+    # TuuusTuuuuus/egegey1/pocahontas94 fold (idx 0/1/2), DAVIDSBAGOFICE raises (idx 3).
+    assert out == 3
 
 
 # ── pt25b ETAPA 3: derive_seats_in_preflop_order + derive_table_format ──────
@@ -567,53 +566,56 @@ from app.services.queue_export import (
 
 
 def test_seats_PS_real_sample():
-    """PS-260299428000: 6-max BTN=Seat 5, 5 sentados (Seat 3 missing)."""
+    """PS-260299428000: 6-max BTN=Seat 5, 5 sentados (Seat 3 missing).
+    pt25d order: UTG, HJ, BTN, SB, BB (UTG=idx 0)."""
     seats = derive_seats_in_preflop_order(_HH_PS_REAL)
     assert len(seats) == 5
-    # SB=Seat 6 (btn+1 wrapping), BB=Seat 1, UTG=Seat 2, HJ=Seat 4, BTN=Seat 5
-    assert seats[0] == {"seat": 6, "position": "SB",  "hrc_idx": 0, "nick": "UltraLoubard"}
-    assert seats[1] == {"seat": 1, "position": "BB",  "hrc_idx": 1, "nick": "kokonakueka"}
-    assert seats[2] == {"seat": 2, "position": "UTG", "hrc_idx": 2, "nick": "carlos8surf"}
-    assert seats[3] == {"seat": 4, "position": "HJ",  "hrc_idx": 3, "nick": "QuimDiamond"}
-    assert seats[4] == {"seat": 5, "position": "BTN", "hrc_idx": 4, "nick": "Votsarrr"}
+    assert seats[0] == {"seat": 2, "position": "UTG", "hrc_idx": 0, "nick": "carlos8surf"}
+    assert seats[1] == {"seat": 4, "position": "HJ",  "hrc_idx": 1, "nick": "QuimDiamond"}
+    assert seats[2] == {"seat": 5, "position": "BTN", "hrc_idx": 2, "nick": "Votsarrr"}
+    assert seats[3] == {"seat": 6, "position": "SB",  "hrc_idx": 3, "nick": "UltraLoubard"}
+    assert seats[4] == {"seat": 1, "position": "BB",  "hrc_idx": 4, "nick": "kokonakueka"}
 
 
 def test_seats_GG_real_sample():
-    """GG-5939385803: 8-max BTN=Seat 1, 5 sentados (Seats 2,3,4 missing)."""
+    """GG-5939385803: 8-max BTN=Seat 1, 5 sentados (Seats 2,3,4 missing).
+    pt25d order: UTG, HJ, BTN, SB, BB."""
     seats = derive_seats_in_preflop_order(_HH_GG_REAL)
     assert len(seats) == 5
-    # btn_idx=0 (Seat 1 first in [1,5,6,7,8]), sb_idx=1 → Seat 5
     nicks = [s["nick"] for s in seats]
-    assert nicks == ["b839c780", "3343ebc6", "8db88342", "221ebf0d", "Hero"]
+    assert nicks == ["8db88342", "221ebf0d", "Hero", "b839c780", "3343ebc6"]
     positions = [s["position"] for s in seats]
-    assert positions == ["SB", "BB", "UTG", "HJ", "BTN"]  # 5-handed labels
+    assert positions == ["UTG", "HJ", "BTN", "SB", "BB"]
 
 
 def test_seats_WN_real_sample_INTERSTELLAR():
-    """WN-INTERSTELLAR: 6-max BTN=Seat 2, 5 sentados (Seat 6 missing).
-    Smoke target pt25b."""
+    """WN-INTERSTELLAR (smoke target pt25b+pt25d): 6-max BTN=Seat 2, 5 sentados.
+    pt25d order: UTG, HJ, BTN, SB, BB. blueballs67=UTG=idx 0 (era idx 2)."""
     seats = derive_seats_in_preflop_order(_HH_WN_REAL)
     assert len(seats) == 5
     nicks = [s["nick"] for s in seats]
-    assert nicks == ["Beu_Teu", "thinvalium", "blueballs67", "yousnouf75", "imbagosu"]
+    assert nicks == ["blueballs67", "yousnouf75", "imbagosu", "Beu_Teu", "thinvalium"]
     positions = [s["position"] for s in seats]
-    assert positions == ["SB", "BB", "UTG", "HJ", "BTN"]
-    # blueballs67 = UTG = hrc_idx 2 (aggressor confirmado por ETAPA 1)
-    assert next(s for s in seats if s["nick"] == "blueballs67")["hrc_idx"] == 2
+    assert positions == ["UTG", "HJ", "BTN", "SB", "BB"]
+    # blueballs67 = UTG = hrc_idx 0 (pt25d aggressor)
+    assert next(s for s in seats if s["nick"] == "blueballs67")["hrc_idx"] == 0
 
 
 def test_seats_WPN_real_sample():
-    """WPN: 8-max BTN=Seat 1, 8 sentados full."""
+    """WPN: 8-max BTN=Seat 1, 8 sentados full.
+    pt25d order: UTG, EP, MP, HJ, CO, BTN, SB, BB."""
     seats = derive_seats_in_preflop_order(_HH_WPN_REAL)
     assert len(seats) == 8
     nicks = [s["nick"] for s in seats]
-    # btn=Seat 1, sb=Seat 2 (cringemeariver), bb=Seat 3, ..., btn=Seat 1 (Jetsies)
-    assert nicks[0] == "cringemeariver"   # SB
-    assert nicks[1] == "AbamaAbezyana"    # BB
-    assert nicks[2] == "TuuusTuuuuus"     # UTG
-    assert nicks[7] == "Jetsies"          # BTN
+    assert nicks[0] == "TuuusTuuuuus"     # UTG
+    assert nicks[1] == "egegey1"           # EP
+    assert nicks[2] == "pocahontas94"      # MP
+    assert nicks[3] == "DAVIDSBAGOFICE"    # HJ (aggressor)
+    assert nicks[5] == "Jetsies"           # BTN
+    assert nicks[6] == "cringemeariver"    # SB
+    assert nicks[7] == "AbamaAbezyana"     # BB
     positions = [s["position"] for s in seats]
-    assert positions == ["SB", "BB", "UTG", "EP", "MP", "HJ", "CO", "BTN"]
+    assert positions == ["UTG", "EP", "MP", "HJ", "CO", "BTN", "SB", "BB"]
 
 
 def test_seats_no_button_returns_empty():
@@ -652,99 +654,130 @@ def test_table_format_no_N_max_fallback_8():
     assert derive_table_format(None) == 8  # type: ignore[arg-type]
 
 
-# ── derive_prune_downstream com seated_hrc_indices (pt25b ETAPA 3 core) ────
+# ── derive_prune_downstream (pt25d convention: UTG=0 first-to-act, BB=N-1) ──
 
-def test_prune_8max_full_seated_uses_8():
-    """seated=[0..7] (8 sentados) — UTG aggressor → 6 downstream (BB excluded)."""
-    assert derive_prune_downstream(2, 6, 200, seated_hrc_indices=[0,1,2,3,4,5,6,7]) == [3,4,5,6,7,0]
-
-
-def test_prune_6max_full_seated_uses_6():
-    """seated=[0..5] (6 sentados full) — UTG aggressor → [HJ=3, CO=4, BTN=5, SB=0]."""
-    assert derive_prune_downstream(2, 6, 200, seated_hrc_indices=[0,1,2,3,4,5]) == [3,4,5,0]
+# 5-handed: posições por idx = [UTG=0, HJ=1, BTN=2, SB=3, BB=4]
+def test_prune_5h_UTG_aggressor():
+    """5h UTG aggressor (idx 0) → downstream [HJ=1, BTN=2, SB=3]; BB=4 excluído."""
+    assert derive_prune_downstream(0, 6, 200, 5) == [1, 2, 3]
 
 
-def test_prune_INTERSTELLAR_5_seated_6max():
-    """SMOKE TARGET pt25b: seated=[0..4] (5 sentados em 6-max table),
-    aggressor UTG (idx 2) = blueballs67 → downstream [HJ=3, BTN=4, SB=0].
-    Note: 5-handed labels têm BTN=hrc_idx 4 (não 5), porque CO desaparece."""
-    out = derive_prune_downstream(2, 6, 36, seated_hrc_indices=[0,1,2,3,4])
-    assert out == [3, 4, 0]
+def test_prune_5h_HJ_aggressor():
+    """5h HJ aggressor (idx 1) → downstream [BTN=2, SB=3]."""
+    assert derive_prune_downstream(1, 6, 200, 5) == [2, 3]
 
 
-def test_prune_5_seated_SB_aggressor_returns_empty():
-    """SB-aberto excepção: aggressor=0 → [] mesmo com seated populated."""
-    assert derive_prune_downstream(0, 5, 200, seated_hrc_indices=[0,1,2,3,4]) == []
+def test_prune_5h_BTN_aggressor():
+    """5h BTN aggressor (idx 2 = N-3) → downstream [SB=3]."""
+    assert derive_prune_downstream(2, 6, 200, 5) == [3]
 
 
-def test_prune_FT_phase_with_seated_returns_empty():
-    """FT phase: players_left <= 3*max_players → [] mesmo com seated populated."""
-    assert derive_prune_downstream(2, 6, 18, seated_hrc_indices=[0,1,2,3,4,5]) == []
+def test_prune_5h_SB_aggressor_returns_empty():
+    """5h SB aggressor (idx 3 = N-2) → [] (degenerate: só BB sobra)."""
+    assert derive_prune_downstream(3, 6, 200, 5) == []
 
 
-def test_prune_BTN_aggressor_5_seated():
-    """5-handed: BTN aggressor (idx 4) → downstream [SB=0]."""
-    assert derive_prune_downstream(4, 6, 200, seated_hrc_indices=[0,1,2,3,4]) == [0]
+def test_prune_5h_BB_aggressor_returns_empty():
+    """5h BB aggressor (idx 4 = N-1) → [] (degenerate: BB nunca abre in-gap)."""
+    assert derive_prune_downstream(4, 6, 200, 5) == []
 
 
-def test_prune_legacy_no_seated_falls_back_to_table_format():
-    """Sem seated_hrc_indices: usa table_format=8 (default). Preserva
-    chamadas pt25 sintéticas."""
-    assert derive_prune_downstream(2, 6, 200) == [3,4,5,6,7,0]
-    # Com table_format override
-    assert derive_prune_downstream(2, 6, 200, table_format=6) == [3,4,5,0]
+# 6-max full: posições = [UTG=0, HJ=1, CO=2, BTN=3, SB=4, BB=5]
+def test_prune_6max_UTG_aggressor():
+    """6m UTG aggressor (idx 0) → downstream [HJ=1, CO=2, BTN=3, SB=4]."""
+    assert derive_prune_downstream(0, 6, 200, 6) == [1, 2, 3, 4]
 
 
-# ── derive_prune_downstream ─────────────────────────────────────────────────
-
-def test_prune_UTG_aggressor_8max():
-    """UTG (idx 2) → [EP=3, MP=4, HJ=5, CO=6, BU=7, SB=0]."""
-    assert derive_prune_downstream(2, 6, 200) == [3, 4, 5, 6, 7, 0]
+def test_prune_6max_BTN_aggressor():
+    """6m BTN aggressor (idx 3 = N-3) → downstream [SB=4]."""
+    assert derive_prune_downstream(3, 6, 200, 6) == [4]
 
 
-def test_prune_EP_aggressor_8max():
-    assert derive_prune_downstream(3, 6, 200) == [4, 5, 6, 7, 0]
+# 8-max full: posições = [UTG=0, EP=1, MP=2, HJ=3, CO=4, BTN=5, SB=6, BB=7]
+def test_prune_8max_UTG_aggressor():
+    """8m UTG aggressor (idx 0) → downstream [EP=1, MP=2, HJ=3, CO=4, BTN=5, SB=6]."""
+    assert derive_prune_downstream(0, 6, 200, 8) == [1, 2, 3, 4, 5, 6]
 
 
-def test_prune_MP_aggressor_8max():
-    assert derive_prune_downstream(4, 6, 200) == [5, 6, 7, 0]
+def test_prune_8max_EP_aggressor():
+    assert derive_prune_downstream(1, 6, 200, 8) == [2, 3, 4, 5, 6]
 
 
-def test_prune_HJ_aggressor_8max():
-    assert derive_prune_downstream(5, 6, 200) == [6, 7, 0]
+def test_prune_8max_MP_aggressor():
+    assert derive_prune_downstream(2, 6, 200, 8) == [3, 4, 5, 6]
 
 
-def test_prune_CO_aggressor_8max():
-    assert derive_prune_downstream(6, 6, 200) == [7, 0]
+def test_prune_8max_HJ_aggressor():
+    assert derive_prune_downstream(3, 6, 200, 8) == [4, 5, 6]
 
 
-def test_prune_BU_aggressor_8max():
-    assert derive_prune_downstream(7, 6, 200) == [0]
+def test_prune_8max_CO_aggressor():
+    assert derive_prune_downstream(4, 6, 200, 8) == [5, 6]
 
 
-def test_prune_SB_aggressor_exception_returns_empty():
-    """SB (idx 0) → [] (excepção regra)."""
-    assert derive_prune_downstream(0, 6, 200) == []
+def test_prune_8max_BTN_aggressor():
+    """8m BTN (idx 5 = N-3) → [SB=6]."""
+    assert derive_prune_downstream(5, 6, 200, 8) == [6]
 
 
-def test_prune_FT_phase_no_prune():
-    """players_left ≤ 3 × max_players → [] (FT phase, não prune)."""
-    # max_players=6, threshold=18
-    assert derive_prune_downstream(2, 6, 18) == []
-    assert derive_prune_downstream(2, 6, 10) == []
-    # = threshold → no prune (≤, não strict)
-    assert derive_prune_downstream(2, 6, 18) == []
+def test_prune_8max_SB_aggressor_returns_empty():
+    """8m SB (idx 6 = N-2) → []."""
+    assert derive_prune_downstream(6, 6, 200, 8) == []
 
 
+def test_prune_8max_BB_aggressor_returns_empty():
+    """8m BB (idx 7 = N-1) → []."""
+    assert derive_prune_downstream(7, 6, 200, 8) == []
+
+
+# HU: posições = [BU/SB=0, BB=1]
+def test_prune_HU_BU_aggressor_returns_empty():
+    """HU BU/SB aggressor (idx 0 = N-2 em N=2) → [] (BB excluído; nada sobra)."""
+    assert derive_prune_downstream(0, 6, 200, 2) == []
+
+
+# FT-phase threshold (players_left ≤ 3 × max_players)
+def test_prune_FT_phase_below_threshold():
+    """5h UTG aggressor + players_left=15 (< 18 = 3*6) → [] (FT)."""
+    assert derive_prune_downstream(0, 6, 15, 5) == []
+
+
+def test_prune_FT_phase_equal_threshold():
+    """= threshold (não strict) → []."""
+    assert derive_prune_downstream(0, 6, 18, 6) == []
+
+
+def test_prune_FT_phase_8max_threshold():
+    """8m UTG + players_left=18 (= 3*6) → []."""
+    assert derive_prune_downstream(0, 6, 18, 8) == []
+
+
+# Defensive None/inválidos
 def test_prune_None_aggressor_returns_empty():
     """aggressor None → [] (defensivo)."""
-    assert derive_prune_downstream(None, 6, 200) == []
+    assert derive_prune_downstream(None, 6, 200, 5) == []
 
 
-def test_prune_missing_threshold_returns_empty():
-    """max_players ou players_left None → [] (defensivo)."""
-    assert derive_prune_downstream(2, None, 200) == []
-    assert derive_prune_downstream(2, 6, None) == []
+def test_prune_missing_max_players_returns_empty():
+    """max_players None → []."""
+    assert derive_prune_downstream(0, None, 200, 5) == []
+
+
+def test_prune_missing_players_left_returns_empty():
+    """players_left None → []."""
+    assert derive_prune_downstream(0, 6, None, 5) == []
+
+
+def test_prune_invalid_aggressor_idx_returns_empty():
+    """aggressor_pos fora de [0, n_seated) → [] (defensivo)."""
+    assert derive_prune_downstream(99, 6, 200, 5) == []
+    assert derive_prune_downstream(-1, 6, 200, 5) == []
+
+
+def test_prune_n_seated_too_small_returns_empty():
+    """n_seated < 2 → [] (não há mesa)."""
+    assert derive_prune_downstream(0, 6, 200, 0) == []
+    assert derive_prune_downstream(0, 6, 200, 1) == []
 
 
 # ── generate_hrc_script ─────────────────────────────────────────────────────
@@ -757,11 +790,12 @@ _TEMPLATE_PATH = _os.path.join(
 
 
 def test_generate_hrc_script_with_hint():
-    """Com hint válido: hint block presente, valores reais injectados."""
-    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
-                              downstream_positions=[3, 4, 5, 6, 7, 0])
-    assert "let REAL_AGGRESSOR_POS = 2;" in out
-    assert "let DOWNSTREAM_POSITIONS = [3, 4, 5, 6, 7, 0];" in out
+    """Com hint válido: hint block presente, valores reais injectados.
+    pt25d: aggressor=0 (UTG em 8-handed) + downstream=[1..6]."""
+    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
+                              downstream_positions=[1, 2, 3, 4, 5, 6])
+    assert "let REAL_AGGRESSOR_POS = 0;" in out
+    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3, 4, 5, 6];" in out
     assert "pt25 prune-in-gap-downstream hints" in out
     # Marker do template ainda existe (não destruímos)
     assert "let ALLIN = 9999;" in out
@@ -777,7 +811,7 @@ def test_generate_hrc_script_without_hint():
     assert "let REAL_AGGRESSOR_POS = null;" in out_none
     assert "let DOWNSTREAM_POSITIONS = [];" in out_none
 
-    out_empty_ds = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
+    out_empty_ds = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
                                        downstream_positions=[])
     assert "let REAL_AGGRESSOR_POS = null;" in out_empty_ds
 
@@ -790,17 +824,17 @@ import tempfile as _tempfile
 def test_generate_hrc_script_no_duplicate_let_with_hint():
     """pt25b core: template real (com placeholder B2) + hint → output tem
     EXACTAMENTE 1 declaração let por variável (sem duplicate que causaria
-    SyntaxError no Nashorn)."""
-    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
-                              downstream_positions=[3, 4, 0])
+    SyntaxError no Nashorn). pt25d values: 5-handed UTG aggressor."""
+    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
+                              downstream_positions=[1, 2, 3])
     # Conta ocorrências EXACTAS — qualquer duplicate aparece >1
     n_agg = out.count("let REAL_AGGRESSOR_POS")
     n_ds = out.count("let DOWNSTREAM_POSITIONS")
     assert n_agg == 1, f"duplicate REAL_AGGRESSOR_POS: {n_agg} occurrences"
     assert n_ds == 1, f"duplicate DOWNSTREAM_POSITIONS: {n_ds} occurrences"
     # Valores reais presentes (não os defaults)
-    assert "let REAL_AGGRESSOR_POS = 2;" in out
-    assert "let DOWNSTREAM_POSITIONS = [3, 4, 0];" in out
+    assert "let REAL_AGGRESSOR_POS = 0;" in out
+    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3];" in out
     # Comment do template B2 preservado
     assert "pt25 prune-in-gap-downstream hints" in out
 
@@ -808,36 +842,34 @@ def test_generate_hrc_script_no_duplicate_let_with_hint():
 def test_generate_hrc_script_idempotent():
     """pt25b: chamar 2× consecutivas com MESMOS args → output byte-idêntico.
     Garante que re-runs do queue_export não corrompem o JS."""
-    out1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=4,
-                               downstream_positions=[5, 6, 7, 0])
+    out1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
+                               downstream_positions=[3, 4])
     # 2ª chamada com os mesmos args — escreve para tmp e re-gera
     tmp_path = _os.path.join(_tempfile.mkdtemp(), "stage1.js")
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(out1)
-    out2 = generate_hrc_script(tmp_path, aggressor_pos=4,
-                               downstream_positions=[5, 6, 7, 0])
+    out2 = generate_hrc_script(tmp_path, aggressor_pos=2,
+                               downstream_positions=[3, 4])
     assert out1 == out2, "non-idempotent: 2nd call produced different output"
 
 
 def test_generate_hrc_script_substitutes_after_prior_injection():
-    """pt25b: template ALREADY com hint (e.g. {REAL=2, DS=[3,4,0]}) + nova
-    chamada com diferentes args (e.g. {REAL=5, DS=[6,7,0]}) → substitui pelos
+    """pt25b: template ALREADY com hint (e.g. {REAL=0, DS=[1,2,3]}) + nova
+    chamada com diferentes args (e.g. {REAL=3, DS=[4,5,6]}) → substitui pelos
     novos, sem duplicate."""
-    # Stage 1: inject {REAL=2, DS=[3,4,0]} no template real
-    stage1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
-                                 downstream_positions=[3, 4, 0])
+    stage1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
+                                 downstream_positions=[1, 2, 3])
     tmp_path = _os.path.join(_tempfile.mkdtemp(), "stage1.js")
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(stage1)
-    # Stage 2: re-inject {REAL=5, DS=[6,7,0]} sobre o output do stage 1
-    stage2 = generate_hrc_script(tmp_path, aggressor_pos=5,
-                                 downstream_positions=[6, 7, 0])
+    stage2 = generate_hrc_script(tmp_path, aggressor_pos=3,
+                                 downstream_positions=[4, 5, 6])
     # Novos valores presentes
-    assert "let REAL_AGGRESSOR_POS = 5;" in stage2
-    assert "let DOWNSTREAM_POSITIONS = [6, 7, 0];" in stage2
+    assert "let REAL_AGGRESSOR_POS = 3;" in stage2
+    assert "let DOWNSTREAM_POSITIONS = [4, 5, 6];" in stage2
     # Stage 1 valores ausentes (substituídos)
-    assert "let REAL_AGGRESSOR_POS = 2;" not in stage2
-    assert "let DOWNSTREAM_POSITIONS = [3, 4, 0];" not in stage2
+    assert "let REAL_AGGRESSOR_POS = 0;" not in stage2
+    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3];" not in stage2
     # Ainda só 1 occurrence cada
     assert stage2.count("let REAL_AGGRESSOR_POS") == 1
     assert stage2.count("let DOWNSTREAM_POSITIONS") == 1
@@ -856,8 +888,8 @@ def test_generate_hrc_script_legacy_template_fallback():
     tmp_path = _os.path.join(_tempfile.mkdtemp(), "legacy.js")
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(legacy)
-    out = generate_hrc_script(tmp_path, aggressor_pos=2,
-                              downstream_positions=[3, 4, 0])
+    out = generate_hrc_script(tmp_path, aggressor_pos=0,
+                              downstream_positions=[1, 2, 3])
     # Fallback inserts bloco hint ANTES de `let ALLIN`
     allin_pos = out.find("let ALLIN = 9999;")
     agg_pos = out.find("let REAL_AGGRESSOR_POS")
@@ -1058,9 +1090,9 @@ Hero: folds
 
 
 def test_build_queue_zip_includes_script_js_when_prune_fires():
-    """pt25: aggressor=UTG (idx 2), max_players=6, players_left=200 (200 > 3*6=18)
-    → script.js no zip + payouts.script_path='script.js' + manifest tem
-    prune_aggressor=2, prune_downstream=[3,4,5,6,7,0]."""
+    """pt25d: aggressor=UTG (idx 0 em 8-handed), max_players=6, players_left=200
+    (> 3*6=18) → script.js no zip + payouts.script_path='script.js' + manifest
+    tem prune_aggressor=0, prune_downstream=[1..6] (BB=7 excluído)."""
     hand = {
         "id": 1, "hand_id": "GG-PRUNE", "site": "GGPoker",
         "tournament_number": "111",
@@ -1078,22 +1110,22 @@ def test_build_queue_zip_includes_script_js_when_prune_fires():
     payouts = _json.loads(zf.read("GG-PRUNE/payouts.json"))
     assert payouts["script_path"] == "script.js"
 
-    # script.js contém hints injectados (não defaults)
+    # script.js contém hints injectados (não defaults), convenção pt25d
     js = zf.read("GG-PRUNE/script.js").decode("utf-8")
-    assert "let REAL_AGGRESSOR_POS = 2;" in js
-    assert "let DOWNSTREAM_POSITIONS = [3, 4, 5, 6, 7, 0];" in js
+    assert "let REAL_AGGRESSOR_POS = 0;" in js
+    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3, 4, 5, 6];" in js
 
     # manifest tem metadata do prune
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    assert entry["prune_aggressor"] == 2
-    assert entry["prune_downstream"] == [3, 4, 5, 6, 7, 0]
+    assert entry["prune_aggressor"] == 0
+    assert entry["prune_downstream"] == [1, 2, 3, 4, 5, 6]
     assert entry["has_prune_script"] is True
 
 
 def test_build_queue_zip_excludes_script_js_when_no_players_left():
-    """pt25: aggressor identificado mas players_left None → derive_prune
-    devolve [] → sem script.js no zip + script_path mantém None."""
+    """pt25d: aggressor identificado (UTG=0) mas players_left None →
+    derive_prune devolve [] → sem script.js no zip + script_path mantém None."""
     hand = {
         "id": 1, "hand_id": "GG-NOPL", "site": "GGPoker",
         "tournament_number": "111",
@@ -1111,8 +1143,8 @@ def test_build_queue_zip_excludes_script_js_when_no_players_left():
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    # aggressor ainda foi computed (UTG=2) mas downstream=[] → no script
-    assert entry["prune_aggressor"] == 2
+    # aggressor ainda foi computed (UTG=0 pt25d) mas downstream=[] → no script
+    assert entry["prune_aggressor"] == 0
     assert entry["prune_downstream"] == []
     assert entry["has_prune_script"] is False
 
@@ -1156,10 +1188,49 @@ def test_build_queue_zip_prune_script_error_None_when_downstream_empty():
     assert entry["prune_script_error"] is None  # not-applicable, not-error
 
 
+# ── pt25d: manifest field prune_index_convention ────────────────────────────
+
+def test_build_queue_zip_manifest_index_convention_populated_when_prune_fires():
+    """pt25d: quando script.js é escrito (downstream populated + template OK),
+    manifest entry tem `prune_index_convention='hrc_docs_v1'`."""
+    hand = {
+        "id": 1, "hand_id": "GG-CONV-OK", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 200,  # > 3*6 → prune fires
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["has_prune_script"] is True
+    assert entry["prune_index_convention"] == "hrc_docs_v1"
+
+
+def test_build_queue_zip_manifest_index_convention_None_when_no_script():
+    """pt25d: quando script.js NÃO é escrito (FT phase, no players_left,
+    downstream vazio), manifest entry tem `prune_index_convention=None`."""
+    hand = {
+        "id": 1, "hand_id": "GG-CONV-FT", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+        "players_left": 18,  # = 3*6 → FT, no prune
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["has_prune_script"] is False
+    assert entry["prune_index_convention"] is None
+
+
 def test_build_queue_zip_prune_script_error_populated_on_template_io_failure(monkeypatch):
     """pt25c: força OSError em generate_hrc_script (template inexistente)
     via monkeypatch ao path module-level. `downstream` é populated mas
-    `js` falha → `prune_script_error` capta o erro no manifest."""
+    `js` falha → `prune_script_error` capta o erro no manifest.
+    pt25d: aggressor=0 (UTG), downstream=[1..6]."""
     from app.services import queue_export as qe
     monkeypatch.setattr(
         qe, "_PRUNE_JS_TEMPLATE_PATH",
@@ -1182,8 +1253,8 @@ def test_build_queue_zip_prune_script_error_populated_on_template_io_failure(mon
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
     # Mas downstream está populated (mostra que prune lógica correu)
-    assert entry["prune_aggressor"] == 2
-    assert entry["prune_downstream"] == [3, 4, 5, 6, 7, 0]
+    assert entry["prune_aggressor"] == 0
+    assert entry["prune_downstream"] == [1, 2, 3, 4, 5, 6]
     assert entry["has_prune_script"] is False
     # E o erro é capturado no manifest (vs silent warning anterior)
     assert entry["prune_script_error"] is not None
