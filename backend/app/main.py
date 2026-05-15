@@ -99,6 +99,16 @@ def ensure_entries_schema():
         ON entries(discord_message_id)
         WHERE discord_message_id IS NOT NULL
         """,
+        # #ORFA-HM3-SYNTHETIC-ENTRIES Peça 1: idempotência hm3_synthetic.
+        # Re-runs do .bat HM3 nao acumulam entries: ON CONFLICT DO NOTHING
+        # em create_entry usa este index. Parcial (apenas WHERE source='hm3_synthetic')
+        # para nao colidir com entries Discord/screenshot reais que podem ter
+        # external_id colisivel.
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uniq_entries_hm3_synthetic_external
+        ON entries(external_id)
+        WHERE source = 'hm3_synthetic' AND external_id IS NOT NULL
+        """,
         """
         ALTER TABLE hands
         ADD COLUMN IF NOT EXISTS entry_id BIGINT

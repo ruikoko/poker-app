@@ -28,23 +28,13 @@ def create_entry(
     # "duplicado, OK".
     # Para entries não-Discord (discord_message_id IS NULL), o partial
     # index não cobre a row → INSERT normal sem inferência de conflict.
-    sql = """
-    INSERT INTO entries (
-        source, entry_type, site, file_name, external_id,
-        raw_text, raw_json, status, notes, import_log_id,
-        discord_server, discord_channel, discord_message_id,
-        discord_message_url, discord_author, discord_posted_at
-    )
-    VALUES (
-        %(source)s, %(entry_type)s, %(site)s, %(file_name)s, %(external_id)s,
-        %(raw_text)s, %(raw_json)s, %(status)s, %(notes)s, %(import_log_id)s,
-        %(discord_server)s, %(discord_channel)s, %(discord_message_id)s,
-        %(discord_message_url)s, %(discord_author)s, %(discord_posted_at)s
-    )
-    ON CONFLICT (discord_message_id) WHERE discord_message_id IS NOT NULL DO NOTHING
-    RETURNING id, source, entry_type, site, file_name, external_id, status, created_at
-    """
-    return execute_returning(sql, {
+    #
+    # #ORFA-HM3-SYNTHETIC-ENTRIES Peça 1: caminho dedicado para entries
+    # 'hm3_synthetic'. Bate o partial unique index
+    # uniq_entries_hm3_synthetic_external (source='hm3_synthetic' AND external_id IS NOT NULL).
+    # Idempotente em re-runs do .bat: ON CONFLICT DO NOTHING + fallback SELECT
+    # para devolver id existente — caller sempre obtem id valido.
+    params = {
         "source": source,
         "entry_type": entry_type,
         "site": site,
@@ -61,7 +51,57 @@ def create_entry(
         "discord_message_url": discord_message_url,
         "discord_author": discord_author,
         "discord_posted_at": discord_posted_at,
-    })
+    }
+
+    if source == "hm3_synthetic" and external_id:
+        sql = """
+        INSERT INTO entries (
+            source, entry_type, site, file_name, external_id,
+            raw_text, raw_json, status, notes, import_log_id,
+            discord_server, discord_channel, discord_message_id,
+            discord_message_url, discord_author, discord_posted_at
+        )
+        VALUES (
+            %(source)s, %(entry_type)s, %(site)s, %(file_name)s, %(external_id)s,
+            %(raw_text)s, %(raw_json)s, %(status)s, %(notes)s, %(import_log_id)s,
+            %(discord_server)s, %(discord_channel)s, %(discord_message_id)s,
+            %(discord_message_url)s, %(discord_author)s, %(discord_posted_at)s
+        )
+        ON CONFLICT (external_id) WHERE source = 'hm3_synthetic' AND external_id IS NOT NULL DO NOTHING
+        RETURNING id, source, entry_type, site, file_name, external_id, status, created_at
+        """
+        row = execute_returning(sql, params)
+        if row is not None:
+            return row
+        # Conflict — entry sintetica ja existia. Devolve a existente para o caller.
+        existing = query(
+            """
+            SELECT id, source, entry_type, site, file_name, external_id, status, created_at
+            FROM entries
+            WHERE source = 'hm3_synthetic' AND external_id = %s
+            LIMIT 1
+            """,
+            (external_id,),
+        )
+        return existing[0] if existing else None
+
+    sql = """
+    INSERT INTO entries (
+        source, entry_type, site, file_name, external_id,
+        raw_text, raw_json, status, notes, import_log_id,
+        discord_server, discord_channel, discord_message_id,
+        discord_message_url, discord_author, discord_posted_at
+    )
+    VALUES (
+        %(source)s, %(entry_type)s, %(site)s, %(file_name)s, %(external_id)s,
+        %(raw_text)s, %(raw_json)s, %(status)s, %(notes)s, %(import_log_id)s,
+        %(discord_server)s, %(discord_channel)s, %(discord_message_id)s,
+        %(discord_message_url)s, %(discord_author)s, %(discord_posted_at)s
+    )
+    ON CONFLICT (discord_message_id) WHERE discord_message_id IS NOT NULL DO NOTHING
+    RETURNING id, source, entry_type, site, file_name, external_id, status, created_at
+    """
+    return execute_returning(sql, params)
 
 
 def list_entries(
