@@ -269,8 +269,24 @@ def ensure_hand_attachments_schema():
         conn.close()
 
 
-# ── Lista das tags reais do HM3 (para migração retroactiva) ─────────────────
-# Obtida via scan directo à BD HM3 (handmarkcategories).
+# ── HM3_REAL_TAGS — FROZEN SNAPSHOT (não authoritative para dados novos) ────
+#
+# Lista das categorias HM3 obtida via scan directo à BD HM3 (handmarkcategories)
+# em meados de 2025. Reflecte o vocabulário HM3 da era pre-2026.
+#
+# Atenção: o Rui renomeou várias tags dentro do HM3 ao longo do tempo (ex.
+# 'PKO pos' → 'pos-pko', 'ICM PKO' → 'icm-pko'). A tag 'GTw' (id 16) está
+# descontinuada — aliased para 'pos-nko' via `apply_hm3_tag_aliases` no
+# importer. Dados reais em prod 2026+ usam lowercase-hyphenated; esta lista
+# não reflecte esse estado.
+#
+# Single source of truth para tags em uso hoje:
+#     SELECT DISTINCT unnest(hm3_tags) FROM hands WHERE played_at >= '2026-01-01';
+#
+# Consumidor live único: `/admin/migrate-hm3-tags` (one-shot retroactiva). Usa
+# `_hm3_tag_names_for_migration()` que une este snapshot com DISTINCT actual de
+# `hands.hm3_tags` — cobre legacy + tags modernas em re-runs.
+#
 # Cada entrada: (category_id, description).
 HM3_REAL_TAGS = [
     (1,  "For Review"),
@@ -352,8 +368,33 @@ HM3_REAL_TAGS = [
     (9999, "pos-nko"),
 ]
 
-# Set de nomes de tags HM3 para match rápido
+# Set derivado do snapshot estático. Mantido por compat — ver
+# `_hm3_tag_names_for_migration()` para o set authoritative (snapshot ∪ DB DISTINCT).
 HM3_REAL_TAG_NAMES = {name for _, name in HM3_REAL_TAGS}
+
+
+def _hm3_tag_names_for_migration() -> set[str]:
+    """Set de nomes de tags considerados HM3-origin pela migração legacy
+    `/admin/migrate-hm3-tags`.
+
+    União de:
+    - `HM3_REAL_TAG_NAMES` (snapshot estático pre-2026, ids da BD HM3).
+    - `DISTINCT unnest(hands.hm3_tags)` actual em prod (cobre renames que o
+      Rui fez no HM3 ao longo do tempo: ex. 'PKO pos' → 'pos-pko').
+
+    Em erro de DB devolve só o snapshot — fallback seguro.
+    """
+    names = set(HM3_REAL_TAG_NAMES)
+    try:
+        rows = query(
+            "SELECT DISTINCT unnest(hm3_tags) AS t FROM hands WHERE hm3_tags IS NOT NULL"
+        )
+        names |= {r["t"] for r in rows if r and r.get("t")}
+    except Exception as e:
+        logger.warning(
+            f"_hm3_tag_names_for_migration: fallback to snapshot ({len(names)}): {e}"
+        )
+    return names
 
 
 class HandCreate(BaseModel):
@@ -1677,7 +1718,7 @@ def admin_delete_gg_no_ss(current_user=Depends(require_auth)):
 def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
     """
     Migração retroactiva: para cada mão, separa em duas colunas:
-    - hm3_tags: tags que batem com HM3_REAL_TAG_NAMES
+    - hm3_tags: tags que batem com `_hm3_tag_names_for_migration()` (snapshot ∪ DB DISTINCT)
     - tags: apenas as que NÃO batem (auto-geradas: showdown, nicks de vilões)
     Corre uma vez depois de aplicar a coluna hm3_tags.
     """
@@ -1691,6 +1732,7 @@ def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
               AND (hm3_tags IS NULL OR array_length(hm3_tags, 1) IS NULL)
             """
         )
+        hm3_names = _hm3_tag_names_for_migration()
         total = len(rows)
         updated = 0
         unchanged = 0
@@ -1698,8 +1740,8 @@ def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
         with conn.cursor() as cur:
             for row in rows:
                 old_tags = row["tags"] or []
-                hm3 = [t for t in old_tags if t in HM3_REAL_TAG_NAMES]
-                auto = [t for t in old_tags if t not in HM3_REAL_TAG_NAMES]
+                hm3 = [t for t in old_tags if t in hm3_names]
+                auto = [t for t in old_tags if t not in hm3_names]
                 if hm3:
                     cur.execute(
                         "UPDATE hands SET hm3_tags = %s, tags = %s WHERE id = %s",
@@ -1715,7 +1757,8 @@ def admin_migrate_hm3_tags(current_user=Depends(require_auth)):
             "total_scanned": total,
             "updated": updated,
             "unchanged_no_hm3_match": unchanged,
-            "hm3_tags_list_size": len(HM3_REAL_TAG_NAMES),
+            "hm3_tags_list_size": len(hm3_names),
+            "snapshot_size": len(HM3_REAL_TAG_NAMES),
         }
     except Exception as e:
         conn.rollback()
