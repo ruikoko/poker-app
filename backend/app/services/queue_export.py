@@ -369,31 +369,62 @@ _RAISE_TO_AMOUNT_RE = re.compile(r"raises\s+[\d,.]+\s+to\s+([\d,.]+)")
 _BET_AMOUNT_RE = re.compile(r"bets\s+([\d,.]+)")
 
 
+def _resolve_position_for_nick(hh_text: str, nick: str) -> Optional[str]:
+    """pt25e #META-AGGRESSOR-POSITION — devolve a position canónica
+    (`_POSITION_LABELS_BY_N`) do `nick` no preflop order, ou `None` se o
+    parsing de seats falhar / o nick não estiver entre os seats sentados.
+
+    Usa `derive_seats_in_preflop_order` (única fonte de verdade do mapping
+    seat ↔ hrc_idx ↔ position label) — qualquer mudança de convenção fica
+    centralizada lá.
+    """
+    if not nick:
+        return None
+    for s in derive_seats_in_preflop_order(hh_text):
+        if s.get("nick") == nick:
+            pos = s.get("position")
+            return pos if isinstance(pos, str) else None
+    return None
+
+
 def derive_aggressor_real_action(
     hh_text: str,
     level_sb: int,
     level_bb: int,
 ) -> Optional[dict]:
-    """pt25e #META-AGGRESSOR-REAL-ACTION — devolve `{type, size_bb}` do
-    primeiro raise/bet preflop voluntário, agnóstico de site (PS/GG/WN/WPN).
+    """pt25e #META-AGGRESSOR-REAL-ACTION — devolve `{type, size_bb, position}`
+    do primeiro raise/bet preflop voluntário, agnóstico de site
+    (PS/GG/WN/WPN).
 
     O watcher precisa deste dado para Bug G passo 3 (selecionar a linha do
     sizing real do raiser inicial na tree HRC para a 2ª run em Selected
-    Subtree). Sem isto, o watcher não sabe que sizing clicar na tree visual.
+    Subtree). pt25e #META-AGGRESSOR-POSITION estendeu o dict com `position`
+    (string maiúsculas — labels de `_POSITION_LABELS_BY_N`): Bloco 2 do
+    watcher faz OCR confinado à coluna Player da Strategy Table HRC e
+    clica a primeira linha onde Player == position. Reduz drasticamente o
+    custo de OCR (vocabulário fechado de ~6 strings curtos vs OCR genérico).
 
     Argumentos:
     - hh_text: HH raw text (pode estar pré ou pós-conversão PS-compat).
     - level_sb, level_bb: blinds do level da mão em chips.
 
     Devolve:
-    - `{"type": "raise", "size_bb": float}` quando primeira accção é
-      `raises X to Y` → size_bb = Y / level_bb (arredondado a 2 decimais).
-    - `{"type": "bet", "size_bb": float}` para `bets X` → size_bb = X / BB.
-    - `None` quando: mão sem raise/bet preflop (limps+folds, walk-to-BB),
-      marker preflop ausente, level_bb inválido, parsing do sizing falha.
+    - `{"type": "raise", "size_bb": float, "position": str|None}` quando
+      primeira accção é `raises X to Y` → size_bb = Y / level_bb
+      (arredondado a 2 decimais).
+    - `{"type": "bet", "size_bb": float, "position": str|None}` para
+      `bets X` → size_bb = X / BB.
+    - `position` segue `_POSITION_LABELS_BY_N`: HU=`BU/SB`/`BB`; 3-handed
+      `BTN`/`SB`/`BB`; 4=`UTG`/`BTN`/`SB`/`BB`; 5=`UTG`/`HJ`/`BTN`/`SB`/`BB`;
+      6=`UTG`/`HJ`/`CO`/`BTN`/`SB`/`BB`; 7..9 includem `EP`/`MP`/`EP1`/`EP2`.
+      `None` quando parsing de seats falha ou nick não está nos seats.
+    - `None` (dict inteiro) quando: mão sem raise/bet preflop (limps+folds,
+      walk-to-BB), marker preflop ausente, level_bb inválido, parsing do
+      sizing falha.
 
     Reaproveita `find_preflop_marker` (pt25b cross-site) e `_PREFLOP_OPEN_RE`
-    (pt25b colon-opcional) para localizar o primeiro accionamento.
+    (pt25b colon-opcional) para localizar o primeiro accionamento; resolve
+    a position via `_resolve_position_for_nick`.
     """
     if not hh_text:
         return None
@@ -410,12 +441,14 @@ def derive_aggressor_real_action(
     m = _PREFLOP_OPEN_RE.search(preflop)
     if not m:
         return None
+    nick = m.group(1).strip()
     action_type = m.group(2)
     line_start = preflop.rfind("\n", 0, m.start()) + 1
     line_end = preflop.find("\n", m.end())
     if line_end < 0:
         line_end = len(preflop)
     line = preflop[line_start:line_end]
+    position = _resolve_position_for_nick(hh_text, nick)
     if action_type == "raises":
         sm = _RAISE_TO_AMOUNT_RE.search(line)
         if not sm:
@@ -424,7 +457,11 @@ def derive_aggressor_real_action(
             chips = float(sm.group(1).replace(",", ""))
         except ValueError:
             return None
-        return {"type": "raise", "size_bb": round(chips / level_bb, 2)}
+        return {
+            "type": "raise",
+            "size_bb": round(chips / level_bb, 2),
+            "position": position,
+        }
     sm = _BET_AMOUNT_RE.search(line)
     if not sm:
         return None
@@ -432,7 +469,11 @@ def derive_aggressor_real_action(
         chips = float(sm.group(1).replace(",", ""))
     except ValueError:
         return None
-    return {"type": "bet", "size_bb": round(chips / level_bb, 2)}
+    return {
+        "type": "bet",
+        "size_bb": round(chips / level_bb, 2),
+        "position": position,
+    }
 
 
 def derive_prune_downstream(
