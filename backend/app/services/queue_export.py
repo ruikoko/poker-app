@@ -25,6 +25,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from app.routers.hands import normalize_tag_key
 from app.services.derive_max_players import derive_max_players
 
 logger = logging.getLogger("queue_export")
@@ -42,11 +43,12 @@ _PRUNE_JS_TEMPLATE_PATH = os.path.join(
 )
 
 
-# pt23 fix Bug A: tags que disparam Malmuth-Harville ICM (FT-style equity).
-# Restantes mãos default → multi_table_icm. HM3 usa nomes capitalizados;
-# Discord usa nomes lowercase hyphenated.
-_EQUITY_FT_HM3 = {"ICM FT", "ICM PKO FT"}
-_EQUITY_FT_DISCORD = {"icm-ft", "icm-pko-ft"}
+# Tags FT-style → equity model `malmuth_harville_icm`. Restantes mãos default →
+# `multi_table_icm`. Comparação via `normalize_tag_key` (#B17): case-insensitive
+# + hyphen→space, daí 'ICM FT' ≡ 'icm-ft' ≡ 'ICM-ft' batem todos a 'icm ft'.
+# Substituiu pt23 os sets `_EQUITY_FT_HM3` / `_EQUITY_FT_DISCORD` (case-sensitive,
+# exigiam manter ambas as formas à mão).
+_EQUITY_FT_NORM_KEYS = {"icm ft", "icm pko ft"}
 
 
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
@@ -700,13 +702,13 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
 def _derive_equity_model(hm3_tags, discord_tags) -> str:
     """pt23 fix Bug A. Decide equity model hint based on tag membership.
 
-    Devolve 'malmuth_harville_icm' se houver tag FT (HM3 ou Discord);
-    caso contrário 'multi_table_icm' (default p/ mid-MTT).
+    Devolve 'malmuth_harville_icm' se houver tag FT (HM3 ou Discord, em
+    qualquer case-variant); caso contrário 'multi_table_icm' (default p/
+    mid-MTT). Comparação cross-source via `normalize_tag_key` (#B17).
     """
-    hm3 = set(hm3_tags or [])
-    disc = set(discord_tags or [])
-    if hm3 & _EQUITY_FT_HM3 or disc & _EQUITY_FT_DISCORD:
-        return "malmuth_harville_icm"
+    for t in list(hm3_tags or []) + list(discord_tags or []):
+        if normalize_tag_key(t) in _EQUITY_FT_NORM_KEYS:
+            return "malmuth_harville_icm"
     return "multi_table_icm"
 
 
