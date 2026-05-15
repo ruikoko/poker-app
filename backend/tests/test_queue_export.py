@@ -265,7 +265,7 @@ from app.services.queue_export import (
 # pt25d HRC docs convention (UTG=0 first-to-act preflop, BB=N-1) para 8-max
 # com button=Seat #4:
 #   UTG=Seat 7 (idx 0), EP=Seat 8 (idx 1), MP=Seat 1 (idx 2), HJ=Seat 2 (idx 3),
-#   CO=Seat 3 (idx 4), BTN=Seat 4 (idx 5), SB=Seat 5 (idx 6), BB=Seat 6 (idx 7).
+#   CO=Seat 3 (idx 4), BU=Seat 4 (idx 5), SB=Seat 5 (idx 6), BB=Seat 6 (idx 7).
 
 def _hh_8max_btn4(preflop_actions: list[str]) -> str:
     """Constrói uma HH 8-max minimal com button Seat #4 e acções preflop
@@ -276,7 +276,7 @@ def _hh_8max_btn4(preflop_actions: list[str]) -> str:
         "Seat 1: MPplayer (10000 in chips)",      # MP, HRC idx 2
         "Seat 2: HJplayer (10000 in chips)",      # HJ, HRC idx 3
         "Seat 3: COplayer (10000 in chips)",      # CO, HRC idx 4
-        "Seat 4: Hero (10000 in chips)",          # BTN, HRC idx 5
+        "Seat 4: Hero (10000 in chips)",          # BU, HRC idx 5
         "Seat 5: SBplayer (10000 in chips)",      # SB, HRC idx 6
         "Seat 6: BBplayer (10000 in chips)",      # BB, HRC idx 7
         "Seat 7: UTGplayer (10000 in chips)",     # UTG, HRC idx 0
@@ -375,8 +375,8 @@ def test_aggressor_SB_opens_returns_idx6():
 
 
 def test_aggressor_BU_opens_returns_idx5():
-    """UTG..CO fold, BTN (Hero, idx 5 em 8-handed = N-3) raises → 5.
-    Test crítico para GG-5914506215 real (Hero=BTN opens, smoke pt23)."""
+    """UTG..CO fold, BU (Hero, idx 5 em 8-handed = N-3) raises → 5.
+    Test crítico para GG-5914506215 real (Hero=BU opens, smoke pt23)."""
     hh = _hh_8max_btn4([
         "UTGplayer: folds",
         "EPplayer: folds",
@@ -505,26 +505,26 @@ DAVIDSBAGOFICE raises 1600.00 to 3200.00
 
 
 def test_aggressor_PS_real_sample():
-    """PS sample (PS-260299428000, 6-max BTN=Seat 5, 5 sentados):
-    Votsarrr@Seat5=BTN opens → idx 2 (pt25d: BTN em 5-handed = N-3 = 2)."""
+    """PS sample (PS-260299428000, 6-max BU=Seat 5, 5 sentados):
+    Votsarrr@Seat5=BU opens → idx 2 (pt25d: BU em 5-handed = N-3 = 2)."""
     out = derive_real_aggressor_position(_HH_PS_REAL)
     assert out is not None
     # pt25d: button=Seat5; seat_list=[1,2,4,5,6]; btn_idx_in_list=3; n=5;
     # first_to_act_offset=3 → hrc0=seat_list[(3+3+0)%5=1]=Seat2(carlos8surf,UTG),
-    # hrc1=Seat4(QuimDiamond,HJ), hrc2=Seat5(Votsarrr,BTN),
+    # hrc1=Seat4(QuimDiamond,HJ), hrc2=Seat5(Votsarrr,BU),
     # hrc3=Seat6(UltraLoubard,SB), hrc4=Seat1(kokonakueka,BB).
     # Votsarrr opens → idx 2. ✓
     assert out == 2
 
 
 def test_aggressor_GG_real_sample():
-    """GG sample (GG real, 8-max BTN=Seat 1, 5 sentados): 1º raise é
+    """GG sample (GG real, 8-max BU=Seat 1, 5 sentados): 1º raise é
     221ebf0d@Seat8 após 8db88342@Seat7 fold. pt25d: HJ em 5-handed = idx 1."""
     out = derive_real_aggressor_position(_HH_GG_REAL)
     assert out is not None
     # pt25d: button=Seat1; seat_list=[1,5,6,7,8]; btn_idx_in_list=0; n=5;
     # first_to_act_offset=3 → hrc0=seat_list[3]=Seat7(8db88342,UTG),
-    # hrc1=Seat8(221ebf0d,HJ), hrc2=Seat1(Hero,BTN),
+    # hrc1=Seat8(221ebf0d,HJ), hrc2=Seat1(Hero,BU),
     # hrc3=Seat5(b839c780,SB), hrc4=Seat6(3343ebc6,BB).
     # 8db88342 folds (UTG=0), 221ebf0d raises (HJ=1). Aggressor=1.
     assert out == 1
@@ -532,26 +532,26 @@ def test_aggressor_GG_real_sample():
 
 def test_aggressor_WN_real_sample_INTERSTELLAR():
     """Winamax INTERSTELLAR (smoke target pt25b+pt25d): 6-max 5-sentados
-    BTN=Seat 2; blueballs67@Seat5=UTG raises first → idx 0 (pt25d)."""
+    BU=Seat 2; blueballs67@Seat5=UTG raises first → idx 0 (pt25d)."""
     out = derive_real_aggressor_position(_HH_WN_REAL)
     assert out is not None
     # pt25d: seat_list=[1,2,3,4,5]; btn_idx_in_list=1; n=5;
     # first_to_act_offset=3 → hrc0=seat_list[(1+3+0)%5=4]=Seat5(blueballs67,UTG),
-    # hrc1=Seat1(yousnouf75,HJ), hrc2=Seat2(imbagosu,BTN),
+    # hrc1=Seat1(yousnouf75,HJ), hrc2=Seat2(imbagosu,BU),
     # hrc3=Seat3(Beu_Teu,SB), hrc4=Seat4(thinvalium,BB).
     # blueballs67 raises = idx 0 (UTG). ✓
     assert out == 0
 
 
 def test_aggressor_WPN_real_sample():
-    """WPN sample (8-max BTN=Seat 1, 8 sentados full): DAVIDSBAGOFICE@Seat7
+    """WPN sample (8-max BU=Seat 1, 8 sentados full): DAVIDSBAGOFICE@Seat7
     raises após 3 folds. pt25d: HJ em 8-handed = idx 3."""
     out = derive_real_aggressor_position(_HH_WPN_REAL)
     assert out is not None
     # pt25d: 8 sentados, seat_list=[1..8], btn_idx_in_list=0, first_offset=3 →
     # hrc0=Seat4(TuuusTuuuuus,UTG), hrc1=Seat5(egegey1,EP),
     # hrc2=Seat6(pocahontas94,MP), hrc3=Seat7(DAVIDSBAGOFICE,HJ),
-    # hrc4=Seat8(eagle47,CO), hrc5=Seat1(Jetsies,BTN),
+    # hrc4=Seat8(eagle47,CO), hrc5=Seat1(Jetsies,BU),
     # hrc6=Seat2(cringemeariver,SB), hrc7=Seat3(AbamaAbezyana,BB).
     # TuuusTuuuuus/egegey1/pocahontas94 fold (idx 0/1/2), DAVIDSBAGOFICE raises (idx 3).
     assert out == 3
@@ -566,44 +566,44 @@ from app.services.queue_export import (
 
 
 def test_seats_PS_real_sample():
-    """PS-260299428000: 6-max BTN=Seat 5, 5 sentados (Seat 3 missing).
-    pt25d order: UTG, HJ, BTN, SB, BB (UTG=idx 0)."""
+    """PS-260299428000: 6-max BU=Seat 5, 5 sentados (Seat 3 missing).
+    pt25d order: UTG, HJ, BU, SB, BB (UTG=idx 0)."""
     seats = derive_seats_in_preflop_order(_HH_PS_REAL)
     assert len(seats) == 5
     assert seats[0] == {"seat": 2, "position": "UTG", "hrc_idx": 0, "nick": "carlos8surf"}
     assert seats[1] == {"seat": 4, "position": "HJ",  "hrc_idx": 1, "nick": "QuimDiamond"}
-    assert seats[2] == {"seat": 5, "position": "BTN", "hrc_idx": 2, "nick": "Votsarrr"}
+    assert seats[2] == {"seat": 5, "position": "BU", "hrc_idx": 2, "nick": "Votsarrr"}
     assert seats[3] == {"seat": 6, "position": "SB",  "hrc_idx": 3, "nick": "UltraLoubard"}
     assert seats[4] == {"seat": 1, "position": "BB",  "hrc_idx": 4, "nick": "kokonakueka"}
 
 
 def test_seats_GG_real_sample():
-    """GG-5939385803: 8-max BTN=Seat 1, 5 sentados (Seats 2,3,4 missing).
-    pt25d order: UTG, HJ, BTN, SB, BB."""
+    """GG-5939385803: 8-max BU=Seat 1, 5 sentados (Seats 2,3,4 missing).
+    pt25d order: UTG, HJ, BU, SB, BB."""
     seats = derive_seats_in_preflop_order(_HH_GG_REAL)
     assert len(seats) == 5
     nicks = [s["nick"] for s in seats]
     assert nicks == ["8db88342", "221ebf0d", "Hero", "b839c780", "3343ebc6"]
     positions = [s["position"] for s in seats]
-    assert positions == ["UTG", "HJ", "BTN", "SB", "BB"]
+    assert positions == ["UTG", "HJ", "BU", "SB", "BB"]
 
 
 def test_seats_WN_real_sample_INTERSTELLAR():
-    """WN-INTERSTELLAR (smoke target pt25b+pt25d): 6-max BTN=Seat 2, 5 sentados.
-    pt25d order: UTG, HJ, BTN, SB, BB. blueballs67=UTG=idx 0 (era idx 2)."""
+    """WN-INTERSTELLAR (smoke target pt25b+pt25d): 6-max BU=Seat 2, 5 sentados.
+    pt25d order: UTG, HJ, BU, SB, BB. blueballs67=UTG=idx 0 (era idx 2)."""
     seats = derive_seats_in_preflop_order(_HH_WN_REAL)
     assert len(seats) == 5
     nicks = [s["nick"] for s in seats]
     assert nicks == ["blueballs67", "yousnouf75", "imbagosu", "Beu_Teu", "thinvalium"]
     positions = [s["position"] for s in seats]
-    assert positions == ["UTG", "HJ", "BTN", "SB", "BB"]
+    assert positions == ["UTG", "HJ", "BU", "SB", "BB"]
     # blueballs67 = UTG = hrc_idx 0 (pt25d aggressor)
     assert next(s for s in seats if s["nick"] == "blueballs67")["hrc_idx"] == 0
 
 
 def test_seats_WPN_real_sample():
-    """WPN: 8-max BTN=Seat 1, 8 sentados full.
-    pt25d order: UTG, EP, MP, HJ, CO, BTN, SB, BB."""
+    """WPN: 8-max BU=Seat 1, 8 sentados full.
+    pt25d order: UTG, EP, MP, HJ, CO, BU, SB, BB."""
     seats = derive_seats_in_preflop_order(_HH_WPN_REAL)
     assert len(seats) == 8
     nicks = [s["nick"] for s in seats]
@@ -611,11 +611,11 @@ def test_seats_WPN_real_sample():
     assert nicks[1] == "egegey1"           # EP
     assert nicks[2] == "pocahontas94"      # MP
     assert nicks[3] == "DAVIDSBAGOFICE"    # HJ (aggressor)
-    assert nicks[5] == "Jetsies"           # BTN
+    assert nicks[5] == "Jetsies"           # BU
     assert nicks[6] == "cringemeariver"    # SB
     assert nicks[7] == "AbamaAbezyana"     # BB
     positions = [s["position"] for s in seats]
-    assert positions == ["UTG", "EP", "MP", "HJ", "CO", "BTN", "SB", "BB"]
+    assert positions == ["UTG", "EP", "MP", "HJ", "CO", "BU", "SB", "BB"]
 
 
 def test_seats_no_button_returns_empty():
@@ -656,19 +656,19 @@ def test_table_format_no_N_max_fallback_8():
 
 # ── derive_prune_downstream (pt25d convention: UTG=0 first-to-act, BB=N-1) ──
 
-# 5-handed: posições por idx = [UTG=0, HJ=1, BTN=2, SB=3, BB=4]
+# 5-handed: posições por idx = [UTG=0, HJ=1, BU=2, SB=3, BB=4]
 def test_prune_5h_UTG_aggressor():
-    """5h UTG aggressor (idx 0) → downstream [HJ=1, BTN=2, SB=3]; BB=4 excluído."""
+    """5h UTG aggressor (idx 0) → downstream [HJ=1, BU=2, SB=3]; BB=4 excluído."""
     assert derive_prune_downstream(0, 6, 200, 5) == [1, 2, 3]
 
 
 def test_prune_5h_HJ_aggressor():
-    """5h HJ aggressor (idx 1) → downstream [BTN=2, SB=3]."""
+    """5h HJ aggressor (idx 1) → downstream [BU=2, SB=3]."""
     assert derive_prune_downstream(1, 6, 200, 5) == [2, 3]
 
 
-def test_prune_5h_BTN_aggressor():
-    """5h BTN aggressor (idx 2 = N-3) → downstream [SB=3]."""
+def test_prune_5h_BU_aggressor():
+    """5h BU aggressor (idx 2 = N-3) → downstream [SB=3]."""
     assert derive_prune_downstream(2, 6, 200, 5) == [3]
 
 
@@ -682,20 +682,20 @@ def test_prune_5h_BB_aggressor_returns_empty():
     assert derive_prune_downstream(4, 6, 200, 5) == []
 
 
-# 6-max full: posições = [UTG=0, HJ=1, CO=2, BTN=3, SB=4, BB=5]
+# 6-max full: posições = [UTG=0, HJ=1, CO=2, BU=3, SB=4, BB=5]
 def test_prune_6max_UTG_aggressor():
-    """6m UTG aggressor (idx 0) → downstream [HJ=1, CO=2, BTN=3, SB=4]."""
+    """6m UTG aggressor (idx 0) → downstream [HJ=1, CO=2, BU=3, SB=4]."""
     assert derive_prune_downstream(0, 6, 200, 6) == [1, 2, 3, 4]
 
 
-def test_prune_6max_BTN_aggressor():
-    """6m BTN aggressor (idx 3 = N-3) → downstream [SB=4]."""
+def test_prune_6max_BU_aggressor():
+    """6m BU aggressor (idx 3 = N-3) → downstream [SB=4]."""
     assert derive_prune_downstream(3, 6, 200, 6) == [4]
 
 
-# 8-max full: posições = [UTG=0, EP=1, MP=2, HJ=3, CO=4, BTN=5, SB=6, BB=7]
+# 8-max full: posições = [UTG=0, EP=1, MP=2, HJ=3, CO=4, BU=5, SB=6, BB=7]
 def test_prune_8max_UTG_aggressor():
-    """8m UTG aggressor (idx 0) → downstream [EP=1, MP=2, HJ=3, CO=4, BTN=5, SB=6]."""
+    """8m UTG aggressor (idx 0) → downstream [EP=1, MP=2, HJ=3, CO=4, BU=5, SB=6]."""
     assert derive_prune_downstream(0, 6, 200, 8) == [1, 2, 3, 4, 5, 6]
 
 
@@ -715,8 +715,8 @@ def test_prune_8max_CO_aggressor():
     assert derive_prune_downstream(4, 6, 200, 8) == [5, 6]
 
 
-def test_prune_8max_BTN_aggressor():
-    """8m BTN (idx 5 = N-3) → [SB=6]."""
+def test_prune_8max_BU_aggressor():
+    """8m BU (idx 5 = N-3) → [SB=6]."""
     assert derive_prune_downstream(5, 6, 200, 8) == [6]
 
 
@@ -1374,22 +1374,22 @@ def test_aggressor_real_action_PS_sample():
     """PS-260299428000: Level XXVI (12500/25000), Votsarrr raises 605201 to
     630201 and is all-in → size_bb = 630201/25000 ≈ 25.21.
 
-    pt25e #META-AGGRESSOR-POSITION: 6-max BTN=Seat 5, 5 sentados; Votsarrr
-    (Seat 5) = BTN no preflop order de 5-handed (hrc_idx=2)."""
+    pt25e #META-AGGRESSOR-POSITION: 6-max BU=Seat 5, 5 sentados; Votsarrr
+    (Seat 5) = BU no preflop order de 5-handed (hrc_idx=2)."""
     blinds = _extract_blinds_from_header(_HH_PS_REAL)
     assert blinds == (12500, 25000)
     out = derive_aggressor_real_action(_HH_PS_REAL, 12500, 25000)
     assert out is not None
     assert out["type"] == "raise"
     assert out["size_bb"] == round(630201 / 25000, 2)
-    assert out["position"] == "BTN"
+    assert out["position"] == "BU"
 
 
 def test_aggressor_real_action_GG_sample():
     """GG-5939385803: Level3(150/300(45)), 221ebf0d raises 300 to 600 →
     size_bb = 600/300 = 2.0 (canónico UTG open 2bb).
 
-    pt25e #META-AGGRESSOR-POSITION: 8-max BTN=Seat 1, 5 sentados (Seats
+    pt25e #META-AGGRESSOR-POSITION: 8-max BU=Seat 1, 5 sentados (Seats
     2/3/4 missing); 221ebf0d (Seat 8) = HJ em 5-handed (hrc_idx=1)."""
     blinds = _extract_blinds_from_header(_HH_GG_REAL)
     assert blinds == (150, 300)
@@ -1401,7 +1401,7 @@ def test_aggressor_real_action_WN_sample_INTERSTELLAR():
     """Winamax INTERSTELLAR: Holdem no limit (1000/4000/8000) — ante/sb/bb;
     blueballs67 raises 8000 to 16000 → size_bb = 16000/8000 = 2.0.
 
-    pt25e #META-AGGRESSOR-POSITION: 6-max BTN=Seat 2, 5 sentados; blueballs67
+    pt25e #META-AGGRESSOR-POSITION: 6-max BU=Seat 2, 5 sentados; blueballs67
     (Seat 5) = UTG em 5-handed (hrc_idx=0)."""
     blinds = _extract_blinds_from_header(_HH_WN_REAL)
     assert blinds == (4000, 8000)
@@ -1413,7 +1413,7 @@ def test_aggressor_real_action_WPN_sample():
     """WPN: Level 4 (800.00/1600.00); DAVIDSBAGOFICE raises 1600.00 to 3200.00
     → size_bb = 3200/1600 = 2.0 (decimais WPN tolerados).
 
-    pt25e #META-AGGRESSOR-POSITION: 8-max BTN=Seat 1, 8 sentados full;
+    pt25e #META-AGGRESSOR-POSITION: 8-max BU=Seat 1, 8 sentados full;
     DAVIDSBAGOFICE (Seat 7) = HJ em 8-handed (hrc_idx=3)."""
     blinds = _extract_blinds_from_header(_HH_WPN_REAL)
     assert blinds == (800, 1600)
@@ -1473,12 +1473,12 @@ def test_aggressor_real_action_limp_completion_returns_None():
 # coberto pelo bloco _hh_8max_btn4 acima (UTG, HJ, ..., BU/SB labels).
 
 def _hh_5max_btn1(preflop_actions: list[str]) -> str:
-    """5-handed minimal HH: BTN=Seat 1; pt25d preflop order:
-    UTG=Seat 4, HJ=Seat 5, BTN=Seat 1, SB=Seat 2, BB=Seat 3."""
+    """5-handed minimal HH: BU=Seat 1; pt25d preflop order:
+    UTG=Seat 4, HJ=Seat 5, BU=Seat 1, SB=Seat 2, BB=Seat 3."""
     lines = [
         "Poker Hand #TM5: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00",
         "Table '5max' 6-max Seat #1 is the button",
-        "Seat 1: BTNplayer (10000 in chips)",
+        "Seat 1: BUplayer (10000 in chips)",
         "Seat 2: SBplayer (10000 in chips)",
         "Seat 3: BBplayer (10000 in chips)",
         "Seat 4: UTGplayer (10000 in chips)",
@@ -1494,14 +1494,14 @@ def _hh_5max_btn1(preflop_actions: list[str]) -> str:
 
 
 def _hh_4max_btn1(preflop_actions: list[str]) -> str:
-    """4-handed minimal HH: BTN=Seat 1; pt25d preflop order:
-    UTG=Seat 3, BTN=Seat 1, SB=Seat 2; wait — n=4, first_offset=3,
+    """4-handed minimal HH: BU=Seat 1; pt25d preflop order:
+    UTG=Seat 3, BU=Seat 1, SB=Seat 2; wait — n=4, first_offset=3,
     btn_idx=0, n=4 → hrc0=seat_list[3]=Seat 4, hrc1=Seat 1, hrc2=Seat 2, hrc3=Seat 3.
-    Labels: UTG, BTN, SB, BB → UTGplayer@Seat 4, BTN@Seat 1, SB@Seat 2, BB@Seat 3."""
+    Labels: UTG, BU, SB, BB → UTGplayer@Seat 4, BU@Seat 1, SB@Seat 2, BB@Seat 3."""
     lines = [
         "Poker Hand #TM4: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00",
         "Table '4max' 6-max Seat #1 is the button",
-        "Seat 1: BTNplayer (10000 in chips)",
+        "Seat 1: BUplayer (10000 in chips)",
         "Seat 2: SBplayer (10000 in chips)",
         "Seat 3: BBplayer (10000 in chips)",
         "Seat 4: UTGplayer (10000 in chips)",
@@ -1516,7 +1516,7 @@ def _hh_4max_btn1(preflop_actions: list[str]) -> str:
 
 
 def _hh_hu(preflop_actions: list[str]) -> str:
-    """HU 2-handed minimal: BTN=Seat 1 (BU/SB age primeiro preflop)."""
+    """HU 2-handed minimal: BU=Seat 1 (BU/SB age primeiro preflop)."""
     lines = [
         "Poker Hand #TMHU: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00",
         "Table 'HU' 2-max Seat #1 is the button",
@@ -1533,7 +1533,7 @@ def _hh_hu(preflop_actions: list[str]) -> str:
 
 
 def test_aggressor_real_action_5handed_UTG_open():
-    """5-handed UTG open → position UTG (hrc_idx 0; labels UTG/HJ/BTN/SB/BB)."""
+    """5-handed UTG open → position UTG (hrc_idx 0; labels UTG/HJ/BU/SB/BB)."""
     hh = _hh_5max_btn1(["UTGplayer: raises 400 to 800"])
     out = derive_aggressor_real_action(hh, 200, 400)
     assert out == {"type": "raise", "size_bb": 2.0, "position": "UTG"}
@@ -1549,15 +1549,15 @@ def test_aggressor_real_action_5handed_HJ_open():
     assert out == {"type": "raise", "size_bb": 2.0, "position": "HJ"}
 
 
-def test_aggressor_real_action_5handed_BTN_open():
-    """5-handed UTG+HJ fold, BTN raises → position BTN (hrc_idx 2)."""
+def test_aggressor_real_action_5handed_BU_open():
+    """5-handed UTG+HJ fold, BU raises → position BU (hrc_idx 2)."""
     hh = _hh_5max_btn1([
         "UTGplayer: folds",
         "HJplayer: folds",
-        "BTNplayer: raises 600 to 1000",
+        "BUplayer: raises 600 to 1000",
     ])
     out = derive_aggressor_real_action(hh, 200, 400)
-    assert out == {"type": "raise", "size_bb": 2.5, "position": "BTN"}
+    assert out == {"type": "raise", "size_bb": 2.5, "position": "BU"}
 
 
 def test_aggressor_real_action_5handed_SB_open():
@@ -1565,7 +1565,7 @@ def test_aggressor_real_action_5handed_SB_open():
     hh = _hh_5max_btn1([
         "UTGplayer: folds",
         "HJplayer: folds",
-        "BTNplayer: folds",
+        "BUplayer: folds",
         "SBplayer: raises 600 to 1000",
     ])
     out = derive_aggressor_real_action(hh, 200, 400)
@@ -1573,28 +1573,28 @@ def test_aggressor_real_action_5handed_SB_open():
 
 
 def test_aggressor_real_action_4handed_UTG_open():
-    """4-handed UTG raises → position UTG (hrc_idx 0; labels UTG/BTN/SB/BB).
+    """4-handed UTG raises → position UTG (hrc_idx 0; labels UTG/BU/SB/BB).
     Pt25d convention: first_offset=3, btn_idx=0, n=4 → UTG=seat_list[3]=Seat 4."""
     hh = _hh_4max_btn1(["UTGplayer: raises 400 to 800"])
     out = derive_aggressor_real_action(hh, 200, 400)
     assert out == {"type": "raise", "size_bb": 2.0, "position": "UTG"}
 
 
-def test_aggressor_real_action_4handed_BTN_open():
-    """4-handed UTG folds, BTN raises → position BTN (hrc_idx 1)."""
+def test_aggressor_real_action_4handed_BU_open():
+    """4-handed UTG folds, BU raises → position BU (hrc_idx 1)."""
     hh = _hh_4max_btn1([
         "UTGplayer: folds",
-        "BTNplayer: raises 400 to 800",
+        "BUplayer: raises 400 to 800",
     ])
     out = derive_aggressor_real_action(hh, 200, 400)
-    assert out == {"type": "raise", "size_bb": 2.0, "position": "BTN"}
+    assert out == {"type": "raise", "size_bb": 2.0, "position": "BU"}
 
 
 def test_aggressor_real_action_4handed_SB_open():
-    """4-handed UTG/BTN fold, SB raises → position SB (hrc_idx N-2=2)."""
+    """4-handed UTG/BU fold, SB raises → position SB (hrc_idx N-2=2)."""
     hh = _hh_4max_btn1([
         "UTGplayer: folds",
-        "BTNplayer: folds",
+        "BUplayer: folds",
         "SBplayer: raises 600 to 1000",
     ])
     out = derive_aggressor_real_action(hh, 200, 400)
@@ -1615,7 +1615,7 @@ def test_aggressor_real_action_HU_BB_3bet_after_SB_call():
 
 def test_aggressor_real_action_HU_SB_raise_synthetic():
     """HU SB raise (BU/SB age primeiro). Cobre o caso degenerate onde o
-    label canónico é 'BU/SB' (não 'SB' nem 'BTN')."""
+    label canónico é 'BU/SB' (não 'SB' nem 'BU')."""
     hh = _hh_hu(["SBplayer: raises 600 to 800"])
     out = derive_aggressor_real_action(hh, 200, 400)
     assert out == {"type": "raise", "size_bb": 2.0, "position": "BU/SB"}
@@ -1674,7 +1674,7 @@ def test_extract_blinds_unknown_header_returns_None():
 def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_payouts():
     """pt25e: hand com raise preflop → manifest entry + payouts.json têm
     `aggressor_real_action={type, size_bb, position}`. _HH_UTG_OPEN_8MAX usa
-    Level5 (200/400) e UTGopener (Seat 7, BTN=Seat 4 → UTG em 8-handed)
+    Level5 (200/400) e UTGopener (Seat 7, BU=Seat 4 → UTG em 8-handed)
     raises 800 to 1200 → 3.0bb + position UTG."""
     hand = {
         "id": 1, "hand_id": "GG-AGG", "site": "GGPoker",

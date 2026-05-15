@@ -147,13 +147,13 @@ def find_preflop_marker(hh_text: str) -> Optional[int]:
 # eliminação), tratamos como N-handed (CO desaparece em 5-handed).
 _POSITION_LABELS_BY_N: dict = {
     2: ["BU/SB", "BB"],
-    3: ["BTN", "SB", "BB"],
-    4: ["UTG", "BTN", "SB", "BB"],
-    5: ["UTG", "HJ", "BTN", "SB", "BB"],
-    6: ["UTG", "HJ", "CO", "BTN", "SB", "BB"],
-    7: ["UTG", "EP", "MP", "CO", "BTN", "SB", "BB"],
-    8: ["UTG", "EP", "MP", "HJ", "CO", "BTN", "SB", "BB"],
-    9: ["UTG", "EP1", "EP2", "MP", "HJ", "CO", "BTN", "SB", "BB"],
+    3: ["BU", "SB", "BB"],
+    4: ["UTG", "BU", "SB", "BB"],
+    5: ["UTG", "HJ", "BU", "SB", "BB"],
+    6: ["UTG", "HJ", "CO", "BU", "SB", "BB"],
+    7: ["UTG", "EP", "MP", "CO", "BU", "SB", "BB"],
+    8: ["UTG", "EP", "MP", "HJ", "CO", "BU", "SB", "BB"],
+    9: ["UTG", "EP1", "EP2", "MP", "HJ", "CO", "BU", "SB", "BB"],
 }
 
 
@@ -166,12 +166,14 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
     - Header (pre `find_preflop_marker`): Seat lines com nick + chip stack
     - Button: `Seat #N is the button` (universal nos 4 sites)
     - First-to-act preflop:
-        * N >= 3 (incl. 3-handed onde BTN é first-to-act): button + 3 wraps mod N
+        * N >= 3 (incl. 3-handed onde BU é first-to-act): button + 3 wraps mod N
         * N == 2 (HU): button (BU/SB age primeiro preflop)
 
     Posições labelled por convenção `_POSITION_LABELS_BY_N[N]` onde N é o
     nº de jogadores sentados na mão (não o table_format). Mesa 6-max com
-    5 sentados → tratada como 5-handed (CO desaparece).
+    5 sentados → tratada como 5-handed (CO desaparece). Label "BU" alinhado
+    com vocab da Strategy Table HRC (pt25e Bloco 2 follow-up; era "BTN" em
+    pt25d/Bloco 1).
 
     Devolve `[]` se parsing falhar (sem button, sem seats, button fora do
     seat list). Cada entry: `{seat: int, position: str, hrc_idx: int, nick: str}`.
@@ -179,7 +181,7 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
     Sample 5-handed INTERSTELLAR (button=Seat 2 imbagosu):
         idx 0 = UTG (Seat 5, blueballs67)
         idx 1 = HJ  (Seat 1, yousnouf75)
-        idx 2 = BTN (Seat 2, imbagosu)
+        idx 2 = BU  (Seat 2, imbagosu)
         idx 3 = SB  (Seat 3, Beu_Teu)
         idx 4 = BB  (Seat 4, thinvalium)
     """
@@ -206,7 +208,7 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
     n = len(seat_list)
     # First-to-act preflop offset relativo ao button (no seat_list ordenado):
     # N==2 (HU): BU/SB (botão) age primeiro → offset 0.
-    # N>=3: UTG = botão + 3 (wraps mod N para 3/4-handed, onde BTN/UTG colapsam).
+    # N>=3: UTG = botão + 3 (wraps mod N para 3/4-handed, onde BU/UTG colapsam).
     first_to_act_offset = 0 if n == 2 else 3
 
     labels = _POSITION_LABELS_BY_N.get(n) or [f"POS{i}" for i in range(n)]
@@ -415,8 +417,10 @@ def derive_aggressor_real_action(
     - `{"type": "bet", "size_bb": float, "position": str|None}` para
       `bets X` → size_bb = X / BB.
     - `position` segue `_POSITION_LABELS_BY_N`: HU=`BU/SB`/`BB`; 3-handed
-      `BTN`/`SB`/`BB`; 4=`UTG`/`BTN`/`SB`/`BB`; 5=`UTG`/`HJ`/`BTN`/`SB`/`BB`;
-      6=`UTG`/`HJ`/`CO`/`BTN`/`SB`/`BB`; 7..9 includem `EP`/`MP`/`EP1`/`EP2`.
+      `BU`/`SB`/`BB`; 4=`UTG`/`BU`/`SB`/`BB`; 5=`UTG`/`HJ`/`BU`/`SB`/`BB`;
+      6=`UTG`/`HJ`/`CO`/`BU`/`SB`/`BB`; 7..9 includem `EP`/`MP`/`EP1`/`EP2`.
+      Label "BU" alinhado com vocab Strategy Table HRC (pt25e Bloco 2
+      follow-up; era "BTN" em pt25d/Bloco 1).
       `None` quando parsing de seats falha ou nick não está nos seats.
     - `None` (dict inteiro) quando: mão sem raise/bet preflop (limps+folds,
       walk-to-BB), marker preflop ausente, level_bb inválido, parsing do
@@ -513,17 +517,17 @@ def derive_prune_downstream(
     - Add SB/BB-aggressor early-return: K >= N-2 → [] (degenerate).
 
     Exemplos (5-handed):
-    - aggressor UTG (idx 0) → [1, 2, 3]  (HJ, BTN, SB; BB=4 excluído)
-    - aggressor HJ (idx 1)  → [2, 3]     (BTN, SB)
-    - aggressor BTN (idx 2) → [3]        (SB)
+    - aggressor UTG (idx 0) → [1, 2, 3]  (HJ, BU, SB; BB=4 excluído)
+    - aggressor HJ (idx 1)  → [2, 3]     (BU, SB)
+    - aggressor BU (idx 2)  → [3]        (SB)
     - aggressor SB (idx 3)  → []         (degenerate)
     - aggressor BB (idx 4)  → []         (degenerate: BB nunca abre in-gap)
 
     Exemplos (6-max full N=6):
-    - aggressor UTG (idx 0) → [1, 2, 3, 4]  (HJ, CO, BTN, SB)
+    - aggressor UTG (idx 0) → [1, 2, 3, 4]  (HJ, CO, BU, SB)
 
     Exemplos (8-max full N=8):
-    - aggressor UTG (idx 0) → [1, 2, 3, 4, 5, 6]  (EP..BTN..SB)
+    - aggressor UTG (idx 0) → [1, 2, 3, 4, 5, 6]  (EP..BU..SB)
 
     HU (N=2):
     - aggressor BU/SB (idx 0) → []  (range(1, 1) vazio; BB=1 excluído)
