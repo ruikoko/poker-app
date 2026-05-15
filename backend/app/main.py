@@ -109,6 +109,22 @@ def ensure_entries_schema():
         ON entries(external_id)
         WHERE source = 'hm3_synthetic' AND external_id IS NOT NULL
         """,
+        # #ORFA-HM3-SYNTHETIC-ENTRIES fix retroactivo: permitir 'hm3_synthetic'
+        # no CHECK entries_source_check. Peça 1 introduziu o source mas o CHECK
+        # ficou stale em prod — importer HM3 e backfill batiam em CheckViolation.
+        # Preserva a lista actual de prod (inclui 'discord_bot', 'import',
+        # 'screenshot' adicionados por migrações anteriores) + 'hm3_synthetic'.
+        """
+        ALTER TABLE entries DROP CONSTRAINT IF EXISTS entries_source_check
+        """,
+        """
+        ALTER TABLE entries ADD CONSTRAINT entries_source_check
+            CHECK (source IN (
+                'discord', 'discord_bot', 'hm', 'gg_backoffice', 'hh_text',
+                'summary', 'report', 'manual', 'import', 'screenshot',
+                'hm3_synthetic'
+            ))
+        """,
         """
         ALTER TABLE hands
         ADD COLUMN IF NOT EXISTS entry_id BIGINT
