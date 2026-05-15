@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from app.auth import require_auth_or_api_key
 from app.db import query
+from app.routers.hands import normalize_tag_key
 from app.services.hrc_jobs import (
     extract_meta_from_result_zip,
     upsert_hrc_job_result,
@@ -23,16 +24,19 @@ router = APIRouter(prefix="/api/queue", tags=["queue"])
 logger = logging.getLogger("queue")
 
 
-# ICM aparece como tag HM3 (capitalizada) E como canal Discord (lowercase).
-# _expand_icm_case (abaixo) garante que pedir uma forma traz a outra,
-# sem afectar outras tags (escopo cirurgico, sem mudar SQL).
-# pt23: ICM FT + ICM PKO FT (HM3) e icm-ft + icm-pko-ft (Discord channels) entram
-# no basket por defeito — alvo dos hints `equity_model="malmuth_harville_icm"`
-# escritos por `queue_export._build_watcher_hints`.
+# Basket por defeito do export. Cada entrada é uma string arbitrária — passa
+# por `normalize_tag_key` (#B17) antes de bater contra `hm3_tags`/`discord_tags`.
+# Normalização: case-insensitive + hyphen→space, daí "icm-pko" ≡ "ICM PKO" ≡
+# "ICM-pko". Adicionar case-variants à lista é redundante.
+# pt23: ICM FT + ICM PKO FT entram no basket — alvo dos hints
+# `equity_model="malmuth_harville_icm"` escritos por `queue_export._build_watcher_hints`.
 _DEFAULT_TAGS = [
-    "icm-pko", "PKO SS", "sqz-pko", "ICM",
-    "ICM FT", "ICM PKO FT",
-    "icm-ft", "icm-pko-ft",
+    "icm-pko",
+    "PKO SS",
+    "sqz-pko",
+    "ICM",
+    "ICM FT",
+    "ICM PKO FT",
 ]
 _DEFAULT_STUDY_STATES = ["new"]
 _ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
@@ -50,18 +54,18 @@ def _csv(value: Optional[str], default: list[str]) -> list[str]:
     return parts or default
 
 
-def _expand_icm_case(tags: list[str]) -> list[str]:
-    """Expande tag `ICM` (HM3) <-> `icm` (Discord channel) — referem-se ao
-    mesmo conceito mas vivem em sistemas com case diferente.
-    Outras tags ficam tal e qual (case-sensitive). Dedup preservando ordem."""
-    out = []
+def _normalize_tags_basket(tags: list[str]) -> list[str]:
+    """Aplica `normalize_tag_key` ao basket + dedup. Vazios caem fora.
+
+    Substituiu `_expand_icm_case` (que só apanhava ICM↔icm). Cobre agora
+    qualquer case-variant futuro sem precisar editar listas.
+    """
+    seen: list[str] = []
     for t in tags:
-        out.append(t)
-        if t == "ICM":
-            out.append("icm")
-        elif t == "icm":
-            out.append("ICM")
-    return list(dict.fromkeys(out))
+        nk = normalize_tag_key(t)
+        if nk and nk not in seen:
+            seen.append(nk)
+    return seen
 
 
 @router.get("/hrc")
@@ -73,7 +77,8 @@ def export_queue(
     include_no_payout: bool = Query(False),
     current_user=Depends(require_auth_or_api_key),
 ):
-    tags_list = _expand_icm_case(_csv(tags, _DEFAULT_TAGS))
+    raw_tags = _csv(tags, _DEFAULT_TAGS)
+    tags_norm = _normalize_tags_basket(raw_tags)
     states_list = _csv(study_state, _DEFAULT_STUDY_STATES)
     now = datetime.now(timezone.utc)
     after_str = played_after or (now - timedelta(days=30)).date().isoformat()
@@ -87,8 +92,11 @@ def export_queue(
     except ValueError:
         raise HTTPException(400, "played_after/played_before devem ser ISO date")
 
+    # SQL aplica `normalize_tag_key` a cada elemento de hm3_tags/discord_tags
+    # antes de comparar com o basket. Mesmo idiom que `unified_tag` em /api/hands.
+    _NORM_SQL = "lower(regexp_replace(replace(t, '-', ' '), '\\s+', ' ', 'g'))"
     rows = query(
-        """
+        f"""
         SELECT id, hand_id, site, tournament_number, raw, player_names,
                played_at, hm3_tags, discord_tags
           FROM hands
@@ -98,14 +106,14 @@ def export_queue(
            AND played_at < %s
            AND study_state = ANY(%s)
            AND (
-                 EXISTS (SELECT 1 FROM unnest(COALESCE(hm3_tags, '{}'::text[]))
-                                AS t WHERE t = ANY(%s))
-              OR EXISTS (SELECT 1 FROM unnest(COALESCE(discord_tags, '{}'::text[]))
-                                AS t WHERE t = ANY(%s))
+                 EXISTS (SELECT 1 FROM unnest(COALESCE(hm3_tags, '{{}}'::text[]))
+                                AS t WHERE {_NORM_SQL} = ANY(%s))
+              OR EXISTS (SELECT 1 FROM unnest(COALESCE(discord_tags, '{{}}'::text[]))
+                                AS t WHERE {_NORM_SQL} = ANY(%s))
                )
          ORDER BY played_at ASC
         """,
-        (_ALLOWED_SITES, after_dt, before_dt, states_list, tags_list, tags_list),
+        (_ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm),
     )
     hands = [dict(r) for r in rows]
 
@@ -124,7 +132,8 @@ def export_queue(
         }
 
     filters_meta = {
-        "tags": tags_list,
+        "tags": raw_tags,
+        "tags_normalized": tags_norm,
         "study_state": states_list,
         "played_after": after_str,
         "played_before": before_str,
