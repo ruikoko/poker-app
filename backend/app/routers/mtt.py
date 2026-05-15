@@ -1908,9 +1908,15 @@ async def rematch_screenshots(
         # Apanha o caso reverso da fase 1: HH chegou primeiro (via HM3 .bat ou
         # import ZIP), SS Discord chegou depois mas o rematch SS→HH nao tinha
         # candidata porque a entry ainda nao existia. Disjunto das fases 1+2:
-        # aqui itera hands (nao entries). Filtro entry_id IS NULL isola hands
-        # que nunca tiveram SS associada (exclui placeholders GGDiscord, que
-        # tem entry_id preenchido).
+        # aqui itera hands (nao entries).
+        #
+        # #ORFA-HM3-SYNTHETIC-ENTRIES Peca 2 (15 Maio): filtro original era
+        # `entry_id IS NULL` para isolar HM3 hands. Apos Peca 5, HM3 hands
+        # passam a ter entry_id sintetico → filtro original deixaria de as
+        # capturar. Trocado para `origin = 'hm3'` que e a propriedade
+        # semanticamente correcta (independente de entry_id ter sido ou nao
+        # populado por entry sintetica). Placeholders GGDiscord tem
+        # origin='discord', portanto continuam excluidos como antes.
         hh_to_ss_matched = 0
         hh_to_ss_villains = 0
         hh_to_ss_no_ss = 0
@@ -1920,7 +1926,7 @@ async def rematch_screenshots(
             FROM hands
             WHERE played_at >= '2026-01-01'
               AND site = 'GGPoker'
-              AND entry_id IS NULL
+              AND origin = 'hm3'
               AND (player_names IS NULL OR player_names ->> 'match_method' IS NULL)
               AND hand_id LIKE 'GG-%'
             ORDER BY played_at DESC
