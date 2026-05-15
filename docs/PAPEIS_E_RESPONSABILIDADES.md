@@ -134,7 +134,12 @@ Continuam a exigir aprovação prévia:
 
 - **Schema BD, migrations** — qualquer `ALTER TABLE`, `CREATE
   TABLE`, índice, ou mudança em `ensure_*_schema()`.
-- **Deploys** — `git push origin main` (auto-deploy Railway).
+- **Deploys** — `git push origin main` (auto-deploy Railway). Aprovação
+  prévia ao push, sim; **redundante** listar "redeploy" como passo
+  separado no report final, **não** — o Railway auto-deploya e os
+  `ensure_*_schema()` aplicam-se sozinhos no boot. Só destacar quando
+  houver env var nova, manual restart obrigatório, ou outra acção fora
+  do padrão habitual.
 - **Mudanças de comportamento user-facing** — UI, copy, regras
   de filtro/visibilidade.
 - **Decisões de produto / UX** — escolha entre 2+ abordagens com
