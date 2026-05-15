@@ -155,7 +155,12 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
   const playedDate = hand.played_at
     ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '—'
-  const imgUrl = hand.entry_id ? screenshots.imageUrl(hand.entry_id) : null
+  // #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4: guard has_screenshot_image — evita
+  // broken image icon quando entry_id aponta para entry sintetica HM3
+  // (entry_type != 'screenshot' → endpoint devolve 404). Fallback `?? true`
+  // para backend antigo durante deploy staged.
+  const imgUrl = (hand.entry_id && (hand.has_screenshot_image ?? true))
+    ? screenshots.imageUrl(hand.entry_id) : null
 
   return (
     <div style={{ maxWidth: 880, margin: '0 auto', padding: '28px 24px' }}>

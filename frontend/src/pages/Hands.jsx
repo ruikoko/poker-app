@@ -442,10 +442,15 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
   }
 
   // Carregar screenshot se a mão tem entry_id (screenshot associado)
+  // #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4: guard has_screenshot_image — skipa
+  // o request quando entry_id aponta para entry sintetica HM3 (que devolve
+  // 404 no endpoint /screenshots/image). Fallback `?? true` para backend
+  // antigo durante deploy staged.
   useEffect(() => {
     if (screenshotUrl) return
     const entryId = hand.entry_id || hand.player_names?.screenshot_entry_id
     if (!entryId) return
+    if ((hand.has_screenshot_image ?? true) === false) return
     setSsLoading(true)
     hands.screenshot(hand.id)
       .then(data => {
@@ -1262,8 +1267,11 @@ function PlaceholderHandRow({ hand, onDelete }) {
     : null
   const heroStack = heroPlayer?.stack ?? null
   // SS source: prioriza screenshot_url (CDN GG), fallback para imageUrl(entry_id)
+  // #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4: guard has_screenshot_image — evita
+  // broken image quando entry_id aponta para entry sintetica HM3.
   const imgSrc = hand.screenshot_url
-    || (hand.entry_id ? screenshots.imageUrl(hand.entry_id) : null)
+    || ((hand.entry_id && (hand.has_screenshot_image ?? true))
+          ? screenshots.imageUrl(hand.entry_id) : null)
   // Bucket 1 Tech Debt #1: anexos imagem inline. Até 3 thumbs + "+N" overflow.
   const attachments = hand.attachments || []
   const attachmentCount = hand.attachment_count || 0

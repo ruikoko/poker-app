@@ -625,6 +625,13 @@ def list_hands(
                    WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
                    ELSE 'matched'
                END AS match_state,
+               -- #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4: flag que sinaliza ao
+               -- frontend se vale a pena tentar carregar imagem via
+               -- /api/screenshots/image/<entry_id>. Quando hand.entry_id
+               -- aponta para uma entry sintetica HM3 (entry_type !=
+               -- 'screenshot'), o endpoint devolve 404 e o navegador
+               -- mostra icone broken — guard previne isso.
+               COALESCE(e.entry_type = 'screenshot', false) AS has_screenshot_image,
                e.discord_channel, e.discord_posted_at,
                d.channel_name AS discord_channel_name,
                (SELECT COUNT(*) FROM hand_attachments WHERE hand_db_id = h.id)::int AS attachment_count,
@@ -1235,7 +1242,9 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
                    WHEN h.raw IS NULL OR h.raw = '' THEN 'pending'
                    WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
                    ELSE 'matched'
-               END AS match_state
+               END AS match_state,
+               -- #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4 (ver comment no /api/hands list)
+               COALESCE(e.entry_type = 'screenshot', false) AS has_screenshot_image
         FROM hands h
         LEFT JOIN entries e ON h.entry_id = e.id
         LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
