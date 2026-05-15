@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from app.auth import require_auth
 from app.db import query, execute, execute_returning, get_conn
@@ -1323,7 +1323,7 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
             "UPDATE hands SET viewed_at = NOW() WHERE id = %s",
             (hand_pk,)
         )
-        hand["viewed_at"] = datetime.utcnow().isoformat()
+        hand["viewed_at"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
     # IRE v2 (GG-only, ratio 25%) — mesma logica do list_hands.
     from app.services.ire import compute_ire
@@ -1368,7 +1368,7 @@ def update_hand(hand_pk: int, body: HandUpdate, current_user=Depends(require_aut
 
     # Se mudar para 'resolved', registar studied_at
     if updates.get("study_state") == "resolved":
-        updates["studied_at"] = datetime.utcnow()
+        updates["studied_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
     set_clause = ", ".join(f"{k} = %({k})s" for k in updates)
     updates["hand_pk"] = hand_pk

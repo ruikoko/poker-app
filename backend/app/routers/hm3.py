@@ -16,7 +16,7 @@ import re
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from app.utils.tournament_format import detect_tournament_format
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
@@ -753,7 +753,7 @@ async def import_hm3(
     cutoff_date = None
     if days_back and days_back > 0:
         from datetime import timedelta
-        cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+        cutoff_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_back)
         logger.info(f"Import filter: only hands after {cutoff_date.isoformat()}")
 
     hands_map = {}
