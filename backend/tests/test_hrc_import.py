@@ -371,3 +371,85 @@ def test_import_no_auth():
         files={"file": ("mko.zip", b"x", "application/zip")},
     )
     assert r.status_code == 401
+
+
+# ── DELETE /api/hrc/sessions/{id} ────────────────────────────────────────
+
+
+class _DeleteCursor:
+    def __init__(self, store: dict):
+        self.store = store
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, sql, params=None):
+        self.store["sql"] = sql
+        self.store["params"] = params
+        # store["found"] controla se devolvemos row ou None
+        if self.store.get("found", True):
+            self.store["row"] = {"id": params[0], "name": "mko"}
+        else:
+            self.store["row"] = None
+
+    def fetchone(self):
+        return self.store.get("row")
+
+
+class _DeleteConn:
+    def __init__(self, store: dict):
+        self.store = store
+        self.committed = False
+        self.rolled_back = False
+
+    def cursor(self):
+        return _DeleteCursor(self.store)
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        pass
+
+
+def test_delete_session_happy_path():
+    app = _make_app()
+    client = TestClient(app)
+    store: dict = {"found": True}
+    fake_conn = _DeleteConn(store)
+    with patch("app.routers.hrc.get_conn", return_value=fake_conn):
+        r = client.delete("/api/hrc/sessions/42")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"deleted": True, "session_id": 42, "name": "mko"}
+    assert fake_conn.committed
+    assert not fake_conn.rolled_back
+    assert "DELETE FROM hrc_sessions" in store["sql"]
+    assert store["params"] == (42,)
+
+
+def test_delete_session_not_found_returns_404():
+    app = _make_app()
+    client = TestClient(app)
+    store: dict = {"found": False}
+    fake_conn = _DeleteConn(store)
+    with patch("app.routers.hrc.get_conn", return_value=fake_conn):
+        r = client.delete("/api/hrc/sessions/999")
+    assert r.status_code == 404
+    assert fake_conn.rolled_back
+    assert not fake_conn.committed
+
+
+def test_delete_session_no_auth():
+    app = FastAPI()
+    app.include_router(hrc_router)
+    # SEM override
+    client = TestClient(app)
+    r = client.delete("/api/hrc/sessions/1")
+    assert r.status_code == 401

@@ -329,6 +329,7 @@ export const hrc = {
   sessions: () => req('GET', '/hrc/sessions'),
   session:  (id) => req('GET', `/hrc/sessions/${id}`),
   node:     (id, idx) => req('GET', `/hrc/sessions/${id}/nodes/${idx}`),
+  delete:   (id) => req('DELETE', `/hrc/sessions/${id}`),
 }
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────

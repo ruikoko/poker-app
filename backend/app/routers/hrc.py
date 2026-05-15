@@ -317,3 +317,24 @@ def get_node(session_id: int, node_index: int, _user=Depends(require_auth)):
     if not row:
         raise HTTPException(404, "node nao encontrado")
     return dict(row)
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: int, _user=Depends(require_auth)):
+    """Apaga a session. hrc_nodes faz cascade via ON DELETE CASCADE."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM hrc_sessions WHERE id = %s RETURNING id, name",
+                (session_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            raise HTTPException(404, "session nao encontrada")
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("[hrc-delete] session_id=%s name=%s", row["id"], row["name"])
+    return {"deleted": True, "session_id": row["id"], "name": row["name"]}

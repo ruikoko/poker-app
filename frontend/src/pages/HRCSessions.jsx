@@ -9,6 +9,8 @@ export default function HRCSessionsPage() {
   const [uploading, setUploading] = useState(false)
   const [uploadInfo, setUploadInfo] = useState(null)
   const [dragOver, setDragOver] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(null)  // {id, name} ou null
+  const [deleting, setDeleting] = useState(false)
   const inputRef = useRef(null)
 
   async function refresh() {
@@ -51,6 +53,21 @@ export default function HRCSessionsPage() {
       setError(String(e.message || e))
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await hrc.delete(confirmDelete.id)
+      setSessions((prev) => prev.filter((s) => s.id !== confirmDelete.id))
+      setConfirmDelete(null)
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -147,7 +164,7 @@ export default function HRCSessionsPage() {
               <th style={th}>Source</th>
               <th style={th}>Importado</th>
               <th style={th}>Hand</th>
-              <th style={{ ...th, width: 100 }}></th>
+              <th style={{ ...th, width: 160 }}>Acções</th>
             </tr>
           </thead>
           <tbody>
@@ -186,13 +203,73 @@ export default function HRCSessionsPage() {
                   {s.related_hand_id ?? '—'}
                 </td>
                 <td style={td}>
-                  <Link to={`/hrc-sessions/${s.id}`} className="btn btn-ghost btn-sm">Abrir</Link>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Link to={`/hrc-sessions/${s.id}`} className="btn btn-ghost btn-sm">Abrir</Link>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: '#f87171' }}
+                      onClick={() => setConfirmDelete({ id: s.id, name: s.name })}
+                      title="Apagar sessão"
+                    >Apagar</button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {confirmDelete && (
+        <div
+          onClick={() => !deleting && setConfirmDelete(null)}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: 24,
+              maxWidth: 460,
+              width: '90%',
+            }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+              Apagar sessão {confirmDelete.name}?
+            </div>
+            <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>
+              Esta acção não pode ser desfeita. Todos os nodes da sessão também são apagados.
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmDelete(null)}
+                disabled={deleting}
+              >Cancelar</button>
+              <button
+                className="btn btn-sm"
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{
+                  background: 'var(--red)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '6px 14px',
+                  borderRadius: 'var(--radius)',
+                  cursor: deleting ? 'wait' : 'pointer',
+                  opacity: deleting ? 0.6 : 1,
+                }}
+              >{deleting ? 'A apagar…' : 'Apagar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
