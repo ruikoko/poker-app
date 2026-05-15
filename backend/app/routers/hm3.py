@@ -26,6 +26,7 @@ from app.hero_names import HERO_NAMES_ALL, detect_site_from_hh
 from app.routers.screenshot import _enrich_hand_from_orphan_entry
 from app.ingest_filters import is_pre_2026
 from app.services.hm3_tag_aliases import apply_hm3_tag_aliases
+from app.services.entry_service import create_entry
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
 logger = logging.getLogger("hm3")
@@ -971,17 +972,34 @@ async def import_hm3(
                     if name != "_meta"
                 )
 
+                # #ORFA-HM3-SYNTHETIC-ENTRIES Peca 5: criar entry sintetica
+                # antes do INSERT. Idempotente via Peca 1 (ON CONFLICT external_id
+                # WHERE source='hm3_synthetic' DO NOTHING + fallback SELECT).
+                # Re-runs do .bat para o mesmo hand_id devolvem sempre a mesma
+                # entry id — sem acumular entries duplicadas.
+                synthetic_entry = create_entry(
+                    source="hm3_synthetic",
+                    entry_type="hand_history",
+                    site=parsed["site"],
+                    file_name="hm3_bat",
+                    external_id=parsed["hand_id"],
+                    status="resolved",
+                )
+                synthetic_entry_id = (
+                    synthetic_entry["id"] if synthetic_entry else None
+                )
+
                 cur.execute(
                     """INSERT INTO hands
                        (site, hand_id, played_at, stakes, position,
                         hero_cards, board, result, currency,
                         notes, tags, hm3_tags, raw, study_state, all_players_actions, has_showdown, position_parse_failed,
-                        tournament_format, tournament_name, tournament_number, buy_in, origin)
+                        tournament_format, tournament_name, tournament_number, buy_in, origin, entry_id)
                     VALUES
                        (%s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, 'new', %s, %s, %s,
-                        %s, %s, %s, %s, 'hm3')
+                        %s, %s, %s, %s, 'hm3', %s)
                     ON CONFLICT (hand_id) DO UPDATE SET
                         tags = EXCLUDED.tags,
                         hm3_tags = EXCLUDED.hm3_tags,
@@ -1026,6 +1044,7 @@ async def import_hm3(
                         parsed.get("tournament_name"),
                         parsed.get("tournament_number"),
                         parsed.get("buy_in"),
+                        synthetic_entry_id,
                     )
                 )
                 hand_db_id = cur.fetchone()["id"]
