@@ -13,6 +13,8 @@ import StatsPage from './pages/Stats'
 import ReplayerPage from './pages/ReplayerPage'
 import HandDetailPage from './pages/HandDetailPage'
 import GTOBrainPage from './pages/GTOBrain'
+import HRCSessionsPage from './pages/HRCSessions'
+import HRCSessionDetailPage from './pages/HRCSessionDetail'
 import { StudyTimerProvider } from './contexts/StudyTimerContext'
 
 function RequireAuth({ children }) {
@@ -55,6 +57,8 @@ export default function App() {
           <Route path="discord" element={<DiscordPage />} />
           <Route path="tournaments" element={<TournamentsPage />} />
           <Route path="gto" element={<GTOBrainPage />} />
+          <Route path="hrc-sessions" element={<HRCSessionsPage />} />
+          <Route path="hrc-sessions/:id" element={<HRCSessionDetailPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

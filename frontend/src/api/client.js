@@ -308,6 +308,29 @@ export const study = {
   week:  ()              => req('GET',  '/study/week'),
 }
 
+// ── HRC Sessions (Complete Export import) ───────────────────────────────────
+export const hrc = {
+  upload: (file, opts = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts.name) form.append('name', opts.name)
+    if (opts.source) form.append('source', opts.source)
+    if (opts.related_hand_id != null) form.append('related_hand_id', opts.related_hand_id)
+    return fetch(`${BASE}/hrc/import`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(async (r) => {
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.detail || `Erro ${r.status}`)
+      return data
+    })
+  },
+  sessions: () => req('GET', '/hrc/sessions'),
+  session:  (id) => req('GET', `/hrc/sessions/${id}`),
+  node:     (id, idx) => req('GET', `/hrc/sessions/${id}/nodes/${idx}`),
+}
+
 // ── GTO Brain ──────────────────────────────────────────────────────────────
 export const gto = {
   match: (params) => {

@@ -40,6 +40,7 @@ from app.routers.lobbys import router as lobbys_router
 from app.services.lobby_sync import ensure_lobby_processing_log_schema
 from app.services.hrc_jobs import ensure_hrc_jobs_schema
 from app.routers.tournament_results import router as tournament_results_router
+from app.routers.hrc import router as hrc_router, ensure_hrc_schema
 
 load_dotenv()
 
@@ -242,6 +243,7 @@ async def lifespan(app: FastAPI):
     ensure_tournament_summaries_schema()
     ensure_lobby_processing_log_schema()
     ensure_hrc_jobs_schema()
+    ensure_hrc_schema()
     ensure_study_state_check_constraint()
 
     # Arrancar bot Discord em background
@@ -296,6 +298,7 @@ app.include_router(tournament_summaries_router)
 app.include_router(queue_router)
 app.include_router(lobbys_router)
 app.include_router(tournament_results_router)
+app.include_router(hrc_router)
 
 # Serve uploaded screenshots as static files
 import os

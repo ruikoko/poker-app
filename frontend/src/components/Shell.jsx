@@ -12,6 +12,7 @@ const NAV = [
   { to: '/hm3',         label: 'HM3' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
+  { to: '/hrc-sessions', label: 'HRC' },
 ]
 
 function fmt(s) {
