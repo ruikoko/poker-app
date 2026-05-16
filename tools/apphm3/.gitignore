@@ -1,0 +1,10 @@
+# Credenciais + caminho local — NUNCA commitar.
+config_local.py
+
+# Outputs de runs anteriores.
+debug_raw/
+*.csv
+
+# Cache Python.
+__pycache__/
+*.pyc
