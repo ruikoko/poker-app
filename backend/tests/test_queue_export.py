@@ -254,8 +254,6 @@ def test_inject_bounties_currency_EUR_from_euro_in_header():
 import os as _os
 from app.services.queue_export import (
     derive_real_aggressor_position,
-    derive_prune_downstream,
-    generate_hrc_script,
 )
 
 
@@ -654,256 +652,536 @@ def test_table_format_no_N_max_fallback_8():
     assert derive_table_format(None) == 8  # type: ignore[arg-type]
 
 
-# ── derive_prune_downstream (pt25d convention: UTG=0 first-to-act, BB=N-1) ──
+# ── hrc_script_gen: gerador novo per-hand (Maio 2026) ───────────────────────
+# Substitui os antigos tests de derive_prune_downstream + generate_hrc_script
+# (mecanismo de prune via JS removido — migra para Bloco 2 do watcher).
 
-# 5-handed: posições por idx = [UTG=0, HJ=1, BU=2, SB=3, BB=4]
-def test_prune_5h_UTG_aggressor():
-    """5h UTG aggressor (idx 0) → downstream [HJ=1, BU=2, SB=3]; BB=4 excluído."""
-    assert derive_prune_downstream(0, 6, 200, 5) == [1, 2, 3]
-
-
-def test_prune_5h_HJ_aggressor():
-    """5h HJ aggressor (idx 1) → downstream [BU=2, SB=3]."""
-    assert derive_prune_downstream(1, 6, 200, 5) == [2, 3]
-
-
-def test_prune_5h_BU_aggressor():
-    """5h BU aggressor (idx 2 = N-3) → downstream [SB=3]."""
-    assert derive_prune_downstream(2, 6, 200, 5) == [3]
-
-
-def test_prune_5h_SB_aggressor_returns_empty():
-    """5h SB aggressor (idx 3 = N-2) → [] (degenerate: só BB sobra)."""
-    assert derive_prune_downstream(3, 6, 200, 5) == []
-
-
-def test_prune_5h_BB_aggressor_returns_empty():
-    """5h BB aggressor (idx 4 = N-1) → [] (degenerate: BB nunca abre in-gap)."""
-    assert derive_prune_downstream(4, 6, 200, 5) == []
+from app.services.hrc_script_gen import (
+    apply_sizings_overrides,
+    build_sizings_overrides,
+    compute_effective_stack_bb,
+    generate_hrc_script_for_hand,
+    _OPEN_ALLIN_THRESHOLD_BB,
+    _bucket_3bet,
+    _bucket_4bet5bet,
+    _bucket_open,
+    _format_sizing_array,
+    _parse_preflop_actions,
+    _parse_seat_stacks,
+    _position_bucket_open,
+    _postflop_rank,
+)
+from app.services.queue_export import derive_seats_in_preflop_order
 
 
-# 6-max full: posições = [UTG=0, HJ=1, CO=2, BU=3, SB=4, BB=5]
-def test_prune_6max_UTG_aggressor():
-    """6m UTG aggressor (idx 0) → downstream [HJ=1, CO=2, BU=3, SB=4]."""
-    assert derive_prune_downstream(0, 6, 200, 6) == [1, 2, 3, 4]
+# ── _parse_seat_stacks + compute_effective_stack_bb (cross-site) ────────────
+
+def test_parse_seat_stacks_PS_real():
+    """PS: chips com vírgula opcional + ' in chips'."""
+    out = _parse_seat_stacks(_HH_PS_REAL)
+    assert out["Votsarrr"] == 633451.0
+    assert out["UltraLoubard"] == 391164.0
 
 
-def test_prune_6max_BU_aggressor():
-    """6m BU aggressor (idx 3 = N-3) → downstream [SB=4]."""
-    assert derive_prune_downstream(3, 6, 200, 6) == [4]
+def test_parse_seat_stacks_GG_real():
+    out = _parse_seat_stacks(_HH_GG_REAL)
+    assert out["Hero"] == 40000.0
+    assert out["221ebf0d"] == 42483.0
 
 
-# 8-max full: posições = [UTG=0, EP=1, MP=2, HJ=3, CO=4, BU=5, SB=6, BB=7]
-def test_prune_8max_UTG_aggressor():
-    """8m UTG aggressor (idx 0) → downstream [EP=1, MP=2, HJ=3, CO=4, BU=5, SB=6]."""
-    assert derive_prune_downstream(0, 6, 200, 8) == [1, 2, 3, 4, 5, 6]
+def test_parse_seat_stacks_WN_real():
+    """WN: chips sem ' in chips', com bounty depois — regex pára em ')'."""
+    out = _parse_seat_stacks(_HH_WN_REAL)
+    assert out["blueballs67"] == 354758.0
+    assert out["imbagosu"] == 615675.0
 
 
-def test_prune_8max_EP_aggressor():
-    assert derive_prune_downstream(1, 6, 200, 8) == [2, 3, 4, 5, 6]
+def test_parse_seat_stacks_WPN_real():
+    """WPN: chips com 2 decimais."""
+    out = _parse_seat_stacks(_HH_WPN_REAL)
+    assert out["Jetsies"] == 448465.0
+    assert out["eagle47"] == 34502.0
 
 
-def test_prune_8max_MP_aggressor():
-    assert derive_prune_downstream(2, 6, 200, 8) == [3, 4, 5, 6]
+def test_compute_effective_stack_bb_PS():
+    """PS sample: BB=25000; min stack = UltraLoubard 391164 → 391164/25000 = 15.65 BB."""
+    eff = compute_effective_stack_bb(_HH_PS_REAL, level_bb=25000)
+    assert eff == 15.65
 
 
-def test_prune_8max_HJ_aggressor():
-    assert derive_prune_downstream(3, 6, 200, 8) == [4, 5, 6]
+def test_compute_effective_stack_bb_GG():
+    """GG sample: BB=300; min stack = Hero 40000 → 40000/300 ≈ 133.33 BB."""
+    eff = compute_effective_stack_bb(_HH_GG_REAL, level_bb=300)
+    assert eff == 133.33
 
 
-def test_prune_8max_CO_aggressor():
-    assert derive_prune_downstream(4, 6, 200, 8) == [5, 6]
+def test_compute_effective_stack_bb_no_seats_returns_None():
+    assert compute_effective_stack_bb("nope nothing", level_bb=100) is None
 
 
-def test_prune_8max_BU_aggressor():
-    """8m BU (idx 5 = N-3) → [SB=6]."""
-    assert derive_prune_downstream(5, 6, 200, 8) == [6]
+def test_compute_effective_stack_bb_invalid_bb_returns_None():
+    assert compute_effective_stack_bb(_HH_GG_REAL, level_bb=0) is None
+    assert compute_effective_stack_bb(_HH_GG_REAL, level_bb=None) is None
 
 
-def test_prune_8max_SB_aggressor_returns_empty():
-    """8m SB (idx 6 = N-2) → []."""
-    assert derive_prune_downstream(6, 6, 200, 8) == []
+# ── _position_bucket_open ─────────────────────────────────────────────────
+
+def test_position_bucket_open_returns_BU_for_BU_BTN_HU():
+    assert _position_bucket_open("BU") == "BU"
+    assert _position_bucket_open("BTN") == "BU"
+    assert _position_bucket_open("BU/SB") == "BU"
 
 
-def test_prune_8max_BB_aggressor_returns_empty():
-    """8m BB (idx 7 = N-1) → []."""
-    assert derive_prune_downstream(7, 6, 200, 8) == []
+def test_position_bucket_open_returns_SB_BB():
+    assert _position_bucket_open("SB") == "SB"
+    assert _position_bucket_open("BB") == "BB"
 
 
-# HU: posições = [BU/SB=0, BB=1]
-def test_prune_HU_BU_aggressor_returns_empty():
-    """HU BU/SB aggressor (idx 0 = N-2 em N=2) → [] (BB excluído; nada sobra)."""
-    assert derive_prune_downstream(0, 6, 200, 2) == []
+def test_position_bucket_open_returns_OTHERS_for_everything_else():
+    for pos in ("UTG", "EP", "MP", "EP1", "EP2", "HJ", "CO"):
+        assert _position_bucket_open(pos) == "OTHERS"
 
 
-# FT-phase threshold (players_left ≤ 3 × max_players)
-def test_prune_FT_phase_below_threshold():
-    """5h UTG aggressor + players_left=15 (< 18 = 3*6) → [] (FT)."""
-    assert derive_prune_downstream(0, 6, 15, 5) == []
+def test_position_bucket_open_None_or_empty_returns_OTHERS():
+    assert _position_bucket_open(None) == "OTHERS"
+    assert _position_bucket_open("") == "OTHERS"
 
 
-def test_prune_FT_phase_equal_threshold():
-    """= threshold (não strict) → []."""
-    assert derive_prune_downstream(0, 6, 18, 6) == []
+# ── _postflop_rank — IP/OOP lookup ─────────────────────────────────────────
+
+def test_postflop_rank_5handed():
+    """5-handed (UTG=0, HJ=1, BU=2, SB=3, BB=4): postflop order = SB=0, BB=1,
+    UTG=2, HJ=3, BU=4 (BU most IP)."""
+    assert _postflop_rank(0, 5) == 2   # UTG
+    assert _postflop_rank(1, 5) == 3   # HJ
+    assert _postflop_rank(2, 5) == 4   # BU
+    assert _postflop_rank(3, 5) == 0   # SB
+    assert _postflop_rank(4, 5) == 1   # BB
 
 
-def test_prune_FT_phase_8max_threshold():
-    """8m UTG + players_left=18 (= 3*6) → []."""
-    assert derive_prune_downstream(0, 6, 18, 8) == []
+def test_postflop_rank_6handed():
+    """6-handed: BU=3 → rank 5 (most IP)."""
+    assert _postflop_rank(3, 6) == 5
+    assert _postflop_rank(4, 6) == 0   # SB
+    assert _postflop_rank(5, 6) == 1   # BB
 
 
-# Defensive None/inválidos
-def test_prune_None_aggressor_returns_empty():
-    """aggressor None → [] (defensivo)."""
-    assert derive_prune_downstream(None, 6, 200, 5) == []
+# ── _parse_preflop_actions ─────────────────────────────────────────────────
+
+def test_parse_preflop_actions_GG_HJ_open():
+    """GG sample: 221ebf0d (HJ, idx 1) opens to 600. Stack 42483 / BB 300 → eff
+    ~141 BB. Cobre bet_count=1 + position resolution."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    actions = _parse_preflop_actions(_HH_GG_REAL, seats, level_sb=150, level_bb=300)
+    assert len(actions) == 1
+    a = actions[0]
+    assert a["bet_count"] == 1
+    assert a["nick"] == "221ebf0d"
+    assert a["hrc_idx"] == 1
+    assert a["position"] == "HJ"
+    assert a["to_amount_bb"] == 2.0
+    assert a["callers_before"] == 0
 
 
-def test_prune_missing_max_players_returns_empty():
-    """max_players None → []."""
-    assert derive_prune_downstream(0, None, 200, 5) == []
+def test_parse_preflop_actions_PS_BU_jam():
+    """PS sample: Votsarrr (BU, idx 2 em 5-handed) raises 605201 to 630201
+    (jam). BB 25000 → 630201/25000 ≈ 25.21 BB."""
+    seats = derive_seats_in_preflop_order(_HH_PS_REAL)
+    actions = _parse_preflop_actions(_HH_PS_REAL, seats, level_sb=12500, level_bb=25000)
+    assert len(actions) == 1
+    a = actions[0]
+    assert a["bet_count"] == 1
+    assert a["nick"] == "Votsarrr"
+    assert a["position"] == "BU"
+    assert a["to_amount_bb"] == 25.21
 
 
-def test_prune_missing_players_left_returns_empty():
-    """players_left None → []."""
-    assert derive_prune_downstream(0, 6, None, 5) == []
+def test_parse_preflop_actions_WN_squeeze():
+    """WN INTERSTELLAR: blueballs67 (UTG) raises to 16000, yousnouf75 calls,
+    imbagosu folds, Beu_Teu (SB) 3-bets to 64000. SB 3-bet com 1 caller
+    inbetween → callers_before=1 (squeeze)."""
+    seats = derive_seats_in_preflop_order(_HH_WN_REAL)
+    actions = _parse_preflop_actions(_HH_WN_REAL, seats, level_sb=4000, level_bb=8000)
+    assert len(actions) == 2
+    open_action = actions[0]
+    sqz_action = actions[1]
+    assert open_action["bet_count"] == 1
+    assert open_action["nick"] == "blueballs67"
+    assert open_action["position"] == "UTG"
+    assert open_action["to_amount_bb"] == 2.0
+    assert sqz_action["bet_count"] == 2
+    assert sqz_action["nick"] == "Beu_Teu"
+    assert sqz_action["position"] == "SB"
+    assert sqz_action["to_amount_bb"] == 8.0
+    assert sqz_action["callers_before"] == 1
 
 
-def test_prune_invalid_aggressor_idx_returns_empty():
-    """aggressor_pos fora de [0, n_seated) → [] (defensivo)."""
-    assert derive_prune_downstream(99, 6, 200, 5) == []
-    assert derive_prune_downstream(-1, 6, 200, 5) == []
+def test_parse_preflop_actions_walk_to_BB_returns_empty():
+    """HH sem nenhum raise → list vazio."""
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "B: posts small blind 50\n"
+        "A: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "B: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    actions = _parse_preflop_actions(hh, seats, level_sb=50, level_bb=100)
+    assert actions == []
 
 
-def test_prune_n_seated_too_small_returns_empty():
-    """n_seated < 2 → [] (não há mesa)."""
-    assert derive_prune_downstream(0, 6, 200, 0) == []
-    assert derive_prune_downstream(0, 6, 200, 1) == []
+# ── _bucket_open / _bucket_3bet / _bucket_4bet5bet ─────────────────────────
+
+def test_bucket_open_mapping():
+    assert _bucket_open({"bet_count": 1, "position": "UTG"}) == "SIZES_OPEN_OTHERS"
+    assert _bucket_open({"bet_count": 1, "position": "BU"}) == "SIZES_OPEN_BU"
+    assert _bucket_open({"bet_count": 1, "position": "SB"}) == "SIZES_OPEN_SB"
+    assert _bucket_open({"bet_count": 1, "position": "BB"}) == "SIZES_OPEN_BB"
 
 
-# ── generate_hrc_script ─────────────────────────────────────────────────────
+def test_bucket_open_returns_None_for_non_open():
+    assert _bucket_open({"bet_count": 2, "position": "BU"}) is None
 
-_TEMPLATE_PATH = _os.path.join(
+
+def test_bucket_3bet_squeeze_buckets():
+    # Squeeze IP (HJ 3-bets after open + 1 caller)
+    a = {"bet_count": 2, "position": "HJ", "callers_before": 1}
+    assert _bucket_3bet(a, opener_position="UTG") == "SIZES_3BET_SQUEEZE_IP"
+    # Squeeze SB
+    a = {"bet_count": 2, "position": "SB", "callers_before": 1}
+    assert _bucket_3bet(a, opener_position="UTG") == "SIZES_3BET_SQUEEZE_SB"
+    # Squeeze BB
+    a = {"bet_count": 2, "position": "BB", "callers_before": 1}
+    assert _bucket_3bet(a, opener_position="UTG") == "SIZES_3BET_SQUEEZE_BB"
+
+
+def test_bucket_3bet_non_squeeze_buckets():
+    # SB 3-bets BB
+    a = {"bet_count": 2, "position": "SB", "callers_before": 0}
+    assert _bucket_3bet(a, opener_position="BB") == "SIZES_3BET_SB_VS_BB"
+    # SB 3-bets other
+    a = {"bet_count": 2, "position": "SB", "callers_before": 0}
+    assert _bucket_3bet(a, opener_position="UTG") == "SIZES_3BET_SB_VS_OTHER"
+    # BB 3-bets SB
+    a = {"bet_count": 2, "position": "BB", "callers_before": 0}
+    assert _bucket_3bet(a, opener_position="SB") == "SIZES_3BET_BB_VS_SB"
+    # BB 3-bets other
+    a = {"bet_count": 2, "position": "BB", "callers_before": 0}
+    assert _bucket_3bet(a, opener_position="UTG") == "SIZES_3BET_BB_VS_OTHER"
+    # Other 3-bets (IP)
+    a = {"bet_count": 2, "position": "HJ", "callers_before": 0}
+    assert _bucket_3bet(a, opener_position="UTG") == "SIZES_3BET_IP"
+
+
+def test_bucket_4bet5bet_IP_OOP():
+    # 4-bet by BU (idx 5) vs 3-better SB (idx 6) em 8-handed → BU postflop
+    # rank 7 > SB rank 0 → IP.
+    a = {"bet_count": 3, "hrc_idx": 5, "previous_raiser_idx": 6}
+    assert _bucket_4bet5bet(a, n_seated=8) == "SIZES_POT_4BET_IP"
+    # 5-bet by SB (idx 6) vs 4-better BU (idx 5) → SB rank 0 < BU rank 7 → OOP.
+    a = {"bet_count": 4, "hrc_idx": 6, "previous_raiser_idx": 5}
+    assert _bucket_4bet5bet(a, n_seated=8) == "SIZES_POT_5BET_OOP"
+
+
+def test_bucket_4bet5bet_returns_None_for_non_4bet5bet():
+    assert _bucket_4bet5bet({"bet_count": 1, "hrc_idx": 0, "previous_raiser_idx": None}, n_seated=6) is None
+    assert _bucket_4bet5bet({"bet_count": 2, "hrc_idx": 0, "previous_raiser_idx": 0}, n_seated=6) is None
+
+
+# ── _format_sizing_array — JS literal ───────────────────────────────────────
+
+def test_format_sizing_array_ints_and_ALLIN():
+    assert _format_sizing_array([2, "ALLIN"]) == "[2, ALLIN]"
+
+
+def test_format_sizing_array_floats():
+    assert _format_sizing_array([2.5, "ALLIN"]) == "[2.5, ALLIN]"
+    # 2.0 → "2" (drop trailing zero)
+    assert _format_sizing_array([2.0, "ALLIN"]) == "[2, ALLIN]"
+
+
+def test_format_sizing_array_single_value():
+    assert _format_sizing_array([3.5]) == "[3.5]"
+
+
+# ── apply_sizings_overrides — substituição no template ─────────────────────
+
+_CANONICAL_TEMPLATE_PATH = _os.path.join(
     _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-    "app", "services", "hrc_scripts",
-    "mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js",
+    "app", "services", "hrc_scripts", "mtt_advanced_canonical_2026.js",
 )
 
 
-def test_generate_hrc_script_with_hint():
-    """Com hint válido: hint block presente, valores reais injectados.
-    pt25d: aggressor=0 (UTG em 8-handed) + downstream=[1..6]."""
-    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
-                              downstream_positions=[1, 2, 3, 4, 5, 6])
-    assert "let REAL_AGGRESSOR_POS = 0;" in out
-    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3, 4, 5, 6];" in out
-    assert "pt25 prune-in-gap-downstream hints" in out
-    # Marker do template ainda existe (não destruímos)
-    assert "let ALLIN = 9999;" in out
-    # Template original preservado (procurar uma const conhecida)
-    assert "SIZES_OPEN_OTHERS" in out
+def _read_template():
+    with open(_CANONICAL_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        return f.read()
 
 
-def test_generate_hrc_script_without_hint():
-    """Sem hint (aggressor None ou downstream empty): defaults null/[]
-    inseridos → no-op behavior (JS comporta-se idêntico ao original)."""
-    out_none = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=None,
-                                   downstream_positions=[])
-    assert "let REAL_AGGRESSOR_POS = null;" in out_none
-    assert "let DOWNSTREAM_POSITIONS = [];" in out_none
-
-    out_empty_ds = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
-                                       downstream_positions=[])
-    assert "let REAL_AGGRESSOR_POS = null;" in out_empty_ds
+def test_apply_overrides_substitutes_SIZES_OPEN_OTHERS():
+    tpl = _read_template()
+    out = apply_sizings_overrides(tpl, {"SIZES_OPEN_OTHERS": [2.5, "ALLIN"]})
+    assert "let SIZES_OPEN_OTHERS = [2.5, ALLIN];" in out
+    # Default original do template foi substituído
+    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" not in out
+    # 1 ocorrência apenas
+    assert out.count("let SIZES_OPEN_OTHERS") == 1
 
 
-# ── pt25b: generate_hrc_script — anti-duplicate-let + idempotência ─────────
-
-import tempfile as _tempfile
-
-
-def test_generate_hrc_script_no_duplicate_let_with_hint():
-    """pt25b core: template real (com placeholder B2) + hint → output tem
-    EXACTAMENTE 1 declaração let por variável (sem duplicate que causaria
-    SyntaxError no Nashorn). pt25d values: 5-handed UTG aggressor."""
-    out = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
-                              downstream_positions=[1, 2, 3])
-    # Conta ocorrências EXACTAS — qualquer duplicate aparece >1
-    n_agg = out.count("let REAL_AGGRESSOR_POS")
-    n_ds = out.count("let DOWNSTREAM_POSITIONS")
-    assert n_agg == 1, f"duplicate REAL_AGGRESSOR_POS: {n_agg} occurrences"
-    assert n_ds == 1, f"duplicate DOWNSTREAM_POSITIONS: {n_ds} occurrences"
-    # Valores reais presentes (não os defaults)
-    assert "let REAL_AGGRESSOR_POS = 0;" in out
-    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3];" in out
-    # Comment do template B2 preservado
-    assert "pt25 prune-in-gap-downstream hints" in out
+def test_apply_overrides_leaves_untouched_vars_alone():
+    tpl = _read_template()
+    out = apply_sizings_overrides(tpl, {"SIZES_OPEN_OTHERS": [2.5, "ALLIN"]})
+    # SIZES_OPEN_BU não foi tocado → fica no default do template
+    assert "let SIZES_OPEN_BU = [2, ALLIN];" in out
 
 
-def test_generate_hrc_script_idempotent():
-    """pt25b: chamar 2× consecutivas com MESMOS args → output byte-idêntico.
-    Garante que re-runs do queue_export não corrompem o JS."""
-    out1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=2,
-                               downstream_positions=[3, 4])
-    # 2ª chamada com os mesmos args — escreve para tmp e re-gera
-    tmp_path = _os.path.join(_tempfile.mkdtemp(), "stage1.js")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(out1)
-    out2 = generate_hrc_script(tmp_path, aggressor_pos=2,
-                               downstream_positions=[3, 4])
-    assert out1 == out2, "non-idempotent: 2nd call produced different output"
+def test_apply_overrides_handles_multiple():
+    tpl = _read_template()
+    out = apply_sizings_overrides(tpl, {
+        "SIZES_OPEN_OTHERS": [2.5, "ALLIN"],
+        "SIZES_3BET_BB_VS_OTHER": [9, "ALLIN"],
+        "SIZES_POT_4BET_OOP": [0.45, "ALLIN"],
+    })
+    assert "let SIZES_OPEN_OTHERS = [2.5, ALLIN];" in out
+    assert "let SIZES_3BET_BB_VS_OTHER = [9, ALLIN];" in out
+    assert "let SIZES_POT_4BET_OOP = [0.45, ALLIN];" in out
 
 
-def test_generate_hrc_script_substitutes_after_prior_injection():
-    """pt25b: template ALREADY com hint (e.g. {REAL=0, DS=[1,2,3]}) + nova
-    chamada com diferentes args (e.g. {REAL=3, DS=[4,5,6]}) → substitui pelos
-    novos, sem duplicate."""
-    stage1 = generate_hrc_script(_TEMPLATE_PATH, aggressor_pos=0,
-                                 downstream_positions=[1, 2, 3])
-    tmp_path = _os.path.join(_tempfile.mkdtemp(), "stage1.js")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(stage1)
-    stage2 = generate_hrc_script(tmp_path, aggressor_pos=3,
-                                 downstream_positions=[4, 5, 6])
-    # Novos valores presentes
-    assert "let REAL_AGGRESSOR_POS = 3;" in stage2
-    assert "let DOWNSTREAM_POSITIONS = [4, 5, 6];" in stage2
-    # Stage 1 valores ausentes (substituídos)
-    assert "let REAL_AGGRESSOR_POS = 0;" not in stage2
-    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3];" not in stage2
-    # Ainda só 1 occurrence cada
-    assert stage2.count("let REAL_AGGRESSOR_POS") == 1
-    assert stage2.count("let DOWNSTREAM_POSITIONS") == 1
+def test_apply_overrides_unknown_var_logs_and_skips():
+    tpl = _read_template()
+    # Var inexistente → log warning, output igual ao input
+    out = apply_sizings_overrides(tpl, {"SIZES_NONEXISTENT": [1, "ALLIN"]})
+    assert out == tpl
 
 
-def test_generate_hrc_script_legacy_template_fallback():
-    """pt25b: template legacy (sem placeholder B2) + hint → fallback insere
-    bloco hint antes de `let ALLIN = 9999;` (mantém compat com templates
-    antigos ou variantes que não passaram pela edit B2)."""
-    legacy = (
-        "// legacy template — sem hints declarados\n"
-        "let ALLIN = 9999;\n"
-        "let SIZES_OPEN_OTHERS = [2, ALLIN];\n"
-        "function getSizingsPreflop(ctx) { return SIZES_OPEN_OTHERS; }\n"
+# ── build_sizings_overrides — end-to-end ──────────────────────────────────
+
+def test_build_sizings_overrides_GG_HJ_open_deep():
+    """GG sample: HJ opens 2bb, eff stack ~141bb (>25) → SIZES_OPEN_OTHERS=[2]
+    (sem ALLIN porque deep)."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    eff = compute_effective_stack_bb(_HH_GG_REAL, level_bb=300)
+    out = build_sizings_overrides(
+        _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
+        effective_stack_bb=eff,
     )
-    tmp_path = _os.path.join(_tempfile.mkdtemp(), "legacy.js")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(legacy)
-    out = generate_hrc_script(tmp_path, aggressor_pos=0,
-                              downstream_positions=[1, 2, 3])
-    # Fallback inserts bloco hint ANTES de `let ALLIN`
-    allin_pos = out.find("let ALLIN = 9999;")
-    agg_pos = out.find("let REAL_AGGRESSOR_POS")
-    ds_pos = out.find("let DOWNSTREAM_POSITIONS")
-    assert allin_pos > 0
-    assert 0 < agg_pos < allin_pos
-    assert 0 < ds_pos < allin_pos
-    # 1 occurrence cada
-    assert out.count("let REAL_AGGRESSOR_POS") == 1
-    assert out.count("let DOWNSTREAM_POSITIONS") == 1
-    # Comment fallback adicionado (legacy não tinha)
-    assert "pt25 prune-in-gap-downstream hints" in out
-    # Conteúdo original preservado
-    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" in out
+    assert "SIZES_OPEN_OTHERS" in out
+    assert out["SIZES_OPEN_OTHERS"] == [2.0]  # sem ALLIN — eff > 25
+    # Nenhum 3-bet/4-bet na mão
+    assert "SIZES_3BET_IP" not in out
+
+
+def test_build_sizings_overrides_PS_BU_jam_shallow():
+    """PS sample: BU jam (~25.21 BB to). Eff stack = UltraLoubard 391164/25000
+    ≈ 15.65 BB (≤25) → SIZES_OPEN_BU = [25.21, ALLIN]."""
+    seats = derive_seats_in_preflop_order(_HH_PS_REAL)
+    eff = compute_effective_stack_bb(_HH_PS_REAL, level_bb=25000)
+    out = build_sizings_overrides(
+        _HH_PS_REAL, level_sb=12500, level_bb=25000, seats=seats,
+        effective_stack_bb=eff,
+    )
+    assert out["SIZES_OPEN_BU"] == [25.21, "ALLIN"]
+
+
+def test_build_sizings_overrides_WN_squeeze_3bet():
+    """WN: UTG opens 2bb + SB squeeze 3-bet 8bb. eff stack = min(stacks)/BB.
+    yousnouf75 163754 / 8000 ≈ 20.47 BB → ≤25 → ALLIN nos opens fica.
+    Espera: SIZES_OPEN_OTHERS=[2, ALLIN], SIZES_3BET_SQUEEZE_SB=[8, ALLIN]."""
+    seats = derive_seats_in_preflop_order(_HH_WN_REAL)
+    eff = compute_effective_stack_bb(_HH_WN_REAL, level_bb=8000)
+    out = build_sizings_overrides(
+        _HH_WN_REAL, level_sb=4000, level_bb=8000, seats=seats,
+        effective_stack_bb=eff,
+    )
+    assert out["SIZES_OPEN_OTHERS"] == [2.0, "ALLIN"]
+    assert out["SIZES_3BET_SQUEEZE_SB"] == [8.0, "ALLIN"]
+
+
+def test_build_sizings_overrides_WPN_HJ_open_deep():
+    """WPN sample: DAVIDSBAGOFICE@Seat7=HJ opens 1600→3200. BB=1600 → 2 BB.
+    Min stack eagle47 34502 / 1600 ≈ 21.56 BB → ≤25 → ALLIN fica."""
+    seats = derive_seats_in_preflop_order(_HH_WPN_REAL)
+    eff = compute_effective_stack_bb(_HH_WPN_REAL, level_bb=1600)
+    out = build_sizings_overrides(
+        _HH_WPN_REAL, level_sb=800, level_bb=1600, seats=seats,
+        effective_stack_bb=eff,
+    )
+    assert out["SIZES_OPEN_OTHERS"] == [2.0, "ALLIN"]
+
+
+def test_build_sizings_overrides_no_raises_returns_empty():
+    """Walk-to-BB → dict vazio (template inalterado)."""
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "B: posts small blind 50\n"
+        "A: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "B: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=100.0)
+    assert out == {}
+
+
+def test_build_sizings_overrides_drops_ALLIN_when_effective_above_threshold():
+    """Eff stack 26 BB > 25 → ALLIN sai dos opens. Mesma HH GG, mas força
+    effective via param."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    out_below = build_sizings_overrides(
+        _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
+        effective_stack_bb=25.0,
+    )
+    out_above = build_sizings_overrides(
+        _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
+        effective_stack_bb=25.5,
+    )
+    # No threshold (==25), ALLIN inclui-se.
+    assert out_below["SIZES_OPEN_OTHERS"] == [2.0, "ALLIN"]
+    # > threshold (25.5), ALLIN sai.
+    assert out_above["SIZES_OPEN_OTHERS"] == [2.0]
+
+
+def test_build_sizings_overrides_3bet_keeps_ALLIN_even_when_deep():
+    """SIZES_3BET_* mantém sempre ALLIN, independente do eff stack.
+    HU sample com SB 3-bet (deep).
+
+    Build HH sintética: BB opens, SB 3-bets, eff 100 BB.
+    """
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #5 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "Seat 3: C (10000 in chips)\n"
+        "Seat 4: D (10000 in chips)\n"
+        "Seat 5: E (10000 in chips)\n"
+        "A: posts small blind 50\n"
+        "B: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "C: folds\n"
+        "D: folds\n"
+        "E: raises 200 to 300\n"
+        "A: raises 700 to 1000\n"
+        "B: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=100.0)
+    # E=BU opens 3 BB, A=SB 3-bets 10 BB vs BU. eff > 25 → SIZES_OPEN_BU sem ALLIN
+    assert out["SIZES_OPEN_BU"] == [3.0]
+    # SB 3-bet vs non-BB opener → SIZES_3BET_SB_VS_OTHER. ALLIN fica SEMPRE.
+    assert out["SIZES_3BET_SB_VS_OTHER"] == [10.0, "ALLIN"]
+
+
+def test_build_sizings_overrides_4bet_with_ratio():
+    """4-bet OOP. HH sintética: SB opens, BB 3-bets, SB 4-bets. SB OOP.
+
+    Pot tracking esperado:
+      Start: SB=50, BB=100 (pot 150, call=100)
+      SB raises to 250 → SB=250, pot=300, call=250
+      BB raises to 700 → pot before BB action = 300, pot after BB hipotético
+        call = 300+(250-100)=450; BB raise inc = 700-250 = 450; fraction =
+        450/450 = 1.0 — mas SB's contribution already at 250 fica.
+      Actually let me think more carefully:
+        Pot before BB 3-bet action: 50+250 = 300.
+        BB needs to call: 250 - 100 = 150 to match. After call: pot=450.
+        BB raise inc: 700 - 250 = 450. Fraction: 450/450 = 1.0.
+      SB 4-bets to ALLIN-shove? Let's do SB raises to 1300:
+        Pot before SB action: 250+700 = 950.
+        SB needs to call: 700-250 = 450 to match. After call: pot=1400.
+        SB raise inc: 1300-700 = 600. Fraction: 600/1400 = 0.43.
+    """
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #5 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "Seat 3: C (10000 in chips)\n"
+        "Seat 4: D (10000 in chips)\n"
+        "Seat 5: E (10000 in chips)\n"
+        "A: posts small blind 50\n"
+        "B: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "C: folds\n"
+        "D: folds\n"
+        "E: folds\n"
+        "A: raises 200 to 250\n"
+        "B: raises 450 to 700\n"
+        "A: raises 600 to 1300\n"
+        "*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=100.0)
+    # SB opens BU=? No — em 5-handed, btn=Seat5, seat_list=[1,2,3,4,5],
+    # btn_idx=4, first_to_act_offset=3 → hrc0=Seat[(4+3+0)%5=2]=Seat3(C, UTG),
+    # hrc1=Seat4(D, HJ), hrc2=Seat5(E, BU), hrc3=Seat1(A, SB), hrc4=Seat2(B, BB)
+    # Open by SB (A) → SIZES_OPEN_SB.
+    assert out["SIZES_OPEN_SB"] == [2.5]  # 250/100 = 2.5
+    # 3-bet by BB (B) vs SB opener → SIZES_3BET_BB_VS_SB.
+    assert out["SIZES_3BET_BB_VS_SB"] == [7.0, "ALLIN"]  # 700/100 = 7
+    # 4-bet by SB (A) vs BB 3-better. Postflop rank: SB=0, BB=1 → 4-better OOP.
+    assert out["SIZES_POT_4BET_OOP"] == [0.43, "ALLIN"]
+
+
+# ── generate_hrc_script_for_hand — pipeline completo ──────────────────────
+
+def test_generate_hrc_script_for_hand_GG_HJ_open():
+    """Pipeline completo GG sample. Eff ~133 BB → opens sem ALLIN."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    js, overrides, eff, err = generate_hrc_script_for_hand(
+        _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
+    )
+    assert err is None
+    assert eff == 133.33
+    assert overrides["SIZES_OPEN_OTHERS"] == [2.0]
+    assert "let SIZES_OPEN_OTHERS = [2];" in js
+    # Outras vars não tocadas
+    assert "let SIZES_OPEN_BU = [2, ALLIN];" in js
+
+
+def test_generate_hrc_script_for_hand_walk_to_BB_returns_template_intact():
+    """Sem raises → template devolvido cru, overrides={}."""
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "B: posts small blind 50\n"
+        "A: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "B: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    js, overrides, eff, err = generate_hrc_script_for_hand(
+        hh, level_sb=50, level_bb=100, seats=seats,
+    )
+    assert err is None
+    assert overrides == {}
+    # Template tem o default original em SIZES_OPEN_OTHERS
+    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" in js
+
+
+def test_generate_hrc_script_for_hand_template_io_failure_returns_error():
+    """Path inexistente → js=None, error populated."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    js, overrides, eff, err = generate_hrc_script_for_hand(
+        _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
+        template_path="/nonexistent/template.js",
+    )
+    assert js is None
+    assert err is not None
+    assert "FileNotFoundError" in err
 
 
 # ── build_queue_zip ───────────────────────────────────────────────────────────
@@ -984,7 +1262,8 @@ def test_build_queue_zip_includes_no_payout_when_flag_set():
     # hints presentes, sem dados de payout
     assert payouts["equity_model"] in ("malmuth_harville_icm", "multi_table_icm")
     assert isinstance(payouts["max_players"], int)
-    assert payouts["script_path"] is None
+    # script_path apontará para script.js (gerado sempre em Maio 2026+)
+    assert payouts["script_path"] == "script.js"
     assert "CompletedTournament" not in payouts  # sem blob, só hints
     manifest = _json.loads(zf.read("manifest.json"))
     assert manifest["total_in_zip"] == 1
@@ -1011,7 +1290,8 @@ def test_build_queue_zip_hints_merged_with_payouts():
     # hints presentes
     assert payouts["equity_model"] == "malmuth_harville_icm"
     assert isinstance(payouts["max_players"], int)
-    assert payouts["script_path"] is None
+    # script.js gerado sempre (Maio 2026+) — script_path relativo "script.js"
+    assert payouts["script_path"] == "script.js"
 
 
 def test_build_queue_zip_default_equity_when_no_FT_tags():
@@ -1058,11 +1338,10 @@ def test_build_queue_zip_manifest_filters_echo():
     assert manifest["hands_included"] == []
 
 
-# ── pt25: prune-in-gap-downstream integration nos zips ─────────────────────
+# ── Integration: script.js per-hand no zip (gerador novo Maio 2026) ────────
 
-# HH UTG-open com 8 seats, 6 voluntários (UTG raise + 5 calls), hero=BB FT-ish.
-# 6 players relevantes na mão (max_players=6, derive_max_players). Para
-# o prune disparar: players_left > 3 × 6 = 18 → usar 200.
+# HH UTG-open com 8 seats, 6 voluntários (UTG raise + 5 calls), hero=BB.
+# Eff ~25 BB (stacks 10000 / BB 400). Cobre opens com ALLIN.
 _HH_UTG_OPEN_8MAX = """Poker Hand #TM999: Tournament #99999, Test Tournament $100 - Level5 (200/400) - 2026/05/01 00:00:00
 Table 'X' 8-max Seat #4 is the button
 Seat 1: P1 (10000 in chips)
@@ -1089,178 +1368,100 @@ Hero: folds
 """
 
 
-def test_build_queue_zip_includes_script_js_when_prune_fires():
-    """pt25d: aggressor=UTG (idx 0 em 8-handed), max_players=6, players_left=200
-    (> 3*6=18) → script.js no zip + payouts.script_path='script.js' + manifest
-    tem prune_aggressor=0, prune_downstream=[1..6] (BB=7 excluído)."""
+def test_build_queue_zip_writes_script_js_for_hand_with_open():
+    """Mão com pelo menos 1 raise preflop → script.js escrito + payouts.json
+    script_path='script.js'. Manifest tem `has_script=True` e
+    `script_overrides` populated."""
     hand = {
-        "id": 1, "hand_id": "GG-PRUNE", "site": "GGPoker",
+        "id": 1, "hand_id": "GG-OPEN", "site": "GGPoker",
         "tournament_number": "111",
         "raw": _HH_UTG_OPEN_8MAX,
         "player_names": {},
-        "players_left": 200,  # > 3*6 → prune fires
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     names = set(zf.namelist())
-    assert "GG-PRUNE/script.js" in names
-    assert "GG-PRUNE/payouts.json" in names
+    assert "GG-OPEN/script.js" in names
 
-    # payouts.json contém script_path apontando para "script.js" (relativo)
-    payouts = _json.loads(zf.read("GG-PRUNE/payouts.json"))
+    payouts = _json.loads(zf.read("GG-OPEN/payouts.json"))
     assert payouts["script_path"] == "script.js"
 
-    # script.js contém hints injectados (não defaults), convenção pt25d
-    js = zf.read("GG-PRUNE/script.js").decode("utf-8")
-    assert "let REAL_AGGRESSOR_POS = 0;" in js
-    assert "let DOWNSTREAM_POSITIONS = [1, 2, 3, 4, 5, 6];" in js
+    js = zf.read("GG-OPEN/script.js").decode("utf-8")
+    # UTGopener é UTG (idx 0 em 8-handed) → SIZES_OPEN_OTHERS substituído.
+    # Open size = 1200/400 = 3 BB. Eff stack = 10000/400 = 25 → ALLIN fica.
+    assert "let SIZES_OPEN_OTHERS = [3, ALLIN];" in js
+    # Outras vars intactas
+    assert "let SIZES_OPEN_BU = [2, ALLIN];" in js
 
-    # manifest tem metadata do prune
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    assert entry["prune_aggressor"] == 0
-    assert entry["prune_downstream"] == [1, 2, 3, 4, 5, 6]
-    assert entry["has_prune_script"] is True
+    assert entry["has_script"] is True
+    assert entry["script_overrides"]["SIZES_OPEN_OTHERS"] == [3.0, "ALLIN"]
+    assert entry["effective_stack_bb"] == 25.0
+    assert entry["aggressor_position"] == 0  # UTG=0 em 8-handed (HRC docs conv)
+    assert entry["script_generation_error"] is None
 
 
-def test_build_queue_zip_excludes_script_js_when_no_players_left():
-    """pt25d: aggressor identificado (UTG=0) mas players_left None →
-    derive_prune devolve [] → sem script.js no zip + script_path mantém None."""
+def test_build_queue_zip_writes_script_js_for_walk_to_BB():
+    """Mão sem raises (walk-to-BB) → script.js ainda é escrito com template
+    intacto. Decisão: consistência > optimização. Overrides vazio."""
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "B: posts small blind 50\n"
+        "A: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "B: folds\n"
+        "*** SUMMARY ***\n"
+    )
     hand = {
-        "id": 1, "hand_id": "GG-NOPL", "site": "GGPoker",
+        "id": 1, "hand_id": "GG-WALK", "site": "GGPoker",
         "tournament_number": "111",
-        "raw": _HH_UTG_OPEN_8MAX,
+        "raw": hh,
         "player_names": {},
-        # SEM players_left → fallback None
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     names = set(zf.namelist())
-    assert "GG-NOPL/script.js" not in names
+    assert "GG-WALK/script.js" in names
 
-    payouts = _json.loads(zf.read("GG-NOPL/payouts.json"))
-    assert payouts["script_path"] is None  # hint default mantém
-
-    manifest = _json.loads(zf.read("manifest.json"))
-    entry = manifest["hands_included"][0]
-    # aggressor ainda foi computed (UTG=0 pt25d) mas downstream=[] → no script
-    assert entry["prune_aggressor"] == 0
-    assert entry["prune_downstream"] == []
-    assert entry["has_prune_script"] is False
-
-
-def test_build_queue_zip_excludes_script_js_when_FT_phase():
-    """pt25: aggressor=UTG, max_players=6, players_left=18 (= threshold 3*6=18,
-    não strict-greater) → [] → sem script.js."""
-    hand = {
-        "id": 1, "hand_id": "GG-FT", "site": "GGPoker",
-        "tournament_number": "111",
-        "raw": _HH_UTG_OPEN_8MAX,
-        "player_names": {},
-        "players_left": 18,  # = threshold → não dispara
-    }
-    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
-    zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    assert "GG-FT/script.js" not in set(zf.namelist())
+    js = zf.read("GG-WALK/script.js").decode("utf-8")
+    # Template intacto — defaults canónicos.
+    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" in js
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    assert entry["has_prune_script"] is False
+    assert entry["has_script"] is True
+    assert entry["script_overrides"] == {}
+    assert entry["aggressor_position"] is None
 
 
-# ── pt25c: manifest field prune_script_error + escalation OSError ─────────
-
-def test_build_queue_zip_prune_script_error_None_when_downstream_empty():
-    """pt25c: caso normal (FT phase, downstream=[]) → `prune_script_error=None`
-    no manifest. Condição-não-satisfeita, não-erro."""
-    hand = {
-        "id": 1, "hand_id": "GG-FT2", "site": "GGPoker",
-        "tournament_number": "111",
-        "raw": _HH_UTG_OPEN_8MAX,
-        "player_names": {},
-        "players_left": 18,  # FT phase
-    }
-    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
-    zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    manifest = _json.loads(zf.read("manifest.json"))
-    entry = manifest["hands_included"][0]
-    assert entry["has_prune_script"] is False
-    assert entry["prune_script_error"] is None  # not-applicable, not-error
-
-
-# ── pt25d: manifest field prune_index_convention ────────────────────────────
-
-def test_build_queue_zip_manifest_index_convention_populated_when_prune_fires():
-    """pt25d: quando script.js é escrito (downstream populated + template OK),
-    manifest entry tem `prune_index_convention='hrc_docs_v1'`."""
-    hand = {
-        "id": 1, "hand_id": "GG-CONV-OK", "site": "GGPoker",
-        "tournament_number": "111",
-        "raw": _HH_UTG_OPEN_8MAX,
-        "player_names": {},
-        "players_left": 200,  # > 3*6 → prune fires
-    }
-    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
-    zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    manifest = _json.loads(zf.read("manifest.json"))
-    entry = manifest["hands_included"][0]
-    assert entry["has_prune_script"] is True
-    assert entry["prune_index_convention"] == "hrc_docs_v1"
-
-
-def test_build_queue_zip_manifest_index_convention_None_when_no_script():
-    """pt25d: quando script.js NÃO é escrito (FT phase, no players_left,
-    downstream vazio), manifest entry tem `prune_index_convention=None`."""
-    hand = {
-        "id": 1, "hand_id": "GG-CONV-FT", "site": "GGPoker",
-        "tournament_number": "111",
-        "raw": _HH_UTG_OPEN_8MAX,
-        "player_names": {},
-        "players_left": 18,  # = 3*6 → FT, no prune
-    }
-    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
-    zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    manifest = _json.loads(zf.read("manifest.json"))
-    entry = manifest["hands_included"][0]
-    assert entry["has_prune_script"] is False
-    assert entry["prune_index_convention"] is None
-
-
-def test_build_queue_zip_prune_script_error_populated_on_template_io_failure(monkeypatch):
-    """pt25c: força OSError em generate_hrc_script (template inexistente)
-    via monkeypatch ao path module-level. `downstream` é populated mas
-    `js` falha → `prune_script_error` capta o erro no manifest.
-    pt25d: aggressor=0 (UTG), downstream=[1..6]."""
-    from app.services import queue_export as qe
+def test_build_queue_zip_script_generation_error_on_template_io_failure(monkeypatch):
+    """Força OSError no read do template → manifest captura `script_generation_error`
+    e `has_script=False`."""
+    from app.services import hrc_script_gen as gen
     monkeypatch.setattr(
-        qe, "_PRUNE_JS_TEMPLATE_PATH",
-        "/nonexistent/path/to/template.js",
+        gen, "_HRC_TEMPLATE_PATH", "/nonexistent/path/to/template.js",
     )
 
     hand = {
-        "id": 1, "hand_id": "GG-PRUNE-FAIL", "site": "GGPoker",
+        "id": 1, "hand_id": "GG-FAIL", "site": "GGPoker",
         "tournament_number": "111",
         "raw": _HH_UTG_OPEN_8MAX,
         "player_names": {},
-        "players_left": 200,  # > 3*6=18 → prune fires
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     names = set(zf.namelist())
-    # script.js NÃO escrito (porque generate_hrc_script falhou)
-    assert "GG-PRUNE-FAIL/script.js" not in names
+    assert "GG-FAIL/script.js" not in names
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    # Mas downstream está populated (mostra que prune lógica correu)
-    assert entry["prune_aggressor"] == 0
-    assert entry["prune_downstream"] == [1, 2, 3, 4, 5, 6]
-    assert entry["has_prune_script"] is False
-    # E o erro é capturado no manifest (vs silent warning anterior)
-    assert entry["prune_script_error"] is not None
-    err = entry["prune_script_error"]
-    assert "FileNotFoundError" in err
-    assert "/nonexistent/path" in err
+    assert entry["has_script"] is False
+    assert entry["script_generation_error"] is not None
+    assert "FileNotFoundError" in entry["script_generation_error"]
 
 
 # ── pt25-revisado: _resolve_players_left via lobby_processing_log ───────────

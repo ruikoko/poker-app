@@ -1,0 +1,251 @@
+/*
+ * Advanced MTT script suitable for deeper stacks
+ *
+ * Only SB can complete/limp
+ *
+ * Canonical template versionado em 2026 — substitui as 8 variantes legacy.
+ * Os arrays SIZES_* são overridden per-hand pelo gerador Python do backend
+ * (services/hrc_script_gen.py) consoante o sizing real da HH. Arrays não
+ * tocados pelo override mantêm os defaults aqui.
+ */
+
+let ALLIN = 9999;
+
+// =====================================================================
+// Start of Preflop configuration
+// =====================================================================
+
+// Preflop open sizing in big blinds
+let SIZES_OPEN_OTHERS = [2, ALLIN];
+let SIZES_OPEN_BU = [2, ALLIN];
+let SIZES_OPEN_SB = [3.5, ALLIN];
+let SIZES_OPEN_BB = [4, ALLIN];
+
+// general 3-bet sizing in big blinds
+let SIZES_3BET_IP = [6, ALLIN];
+let SIZES_3BET_BB_VS_SB = [10, ALLIN];
+let SIZES_3BET_BB_VS_OTHER = [8, ALLIN];
+let SIZES_3BET_SB_VS_BB = [11, ALLIN];
+let SIZES_3BET_SB_VS_OTHER = [8, ALLIN];
+
+// special sizing for squeezes in big blinds
+let SIZES_3BET_SQUEEZE_IP = [8, ALLIN];
+let SIZES_3BET_SQUEEZE_SB = [11, ALLIN];
+let SIZES_3BET_SQUEEZE_BB = [11, ALLIN];
+let SQUEEZE_INCREASE_PER_CALL = 1.0;
+
+// general 4-bet rules, sized in relation to pot
+let SIZES_POT_4BET_IP = [0.5, ALLIN];
+let SIZES_POT_4BET_OOP = [0.4, ALLIN];
+
+// general 5-bet rules, sized in relation to pot
+let SIZES_POT_5BET_IP = [0.4, ALLIN];
+let SIZES_POT_5BET_OOP = [0.5, ALLIN];
+
+// All-In threshold, works like the UI version
+let PREFLOP_ALLIN_THRESHOLD = 1;
+
+// Add all-in as an option if SPR is below this value
+let PREFLOP_ADD_ALLIN_SPR = 7;
+
+// Flatting rules: betcount → allowed flats
+let ALLOWED_FLATS_PER_RAISE = {
+	2: 3,
+	3: 2,
+	4: 1,
+	5: 0,
+	6: 0
+};
+
+let ALLOW_COLD_CALLS = true;
+let ALLOW_FLATS_CLOSING_ACTION = true;
+
+
+// =====================================================================
+// Start of Postflop configuration
+// =====================================================================
+
+let POSTFLOP_PRIMARY_HINT = 0.75;
+let POSTFLOP_ADD_FLOP_BET_POT = [0.20];
+let POSTFLOP_ADD_FLOP_CBET_POT = [];
+let POSTFLOP_ADD_ALLIN_SPR = 5;
+let POSTFLOP_ALLOW_DONK = false;
+let POSTFLOP_ALLOW_DONK_PREV_AGGRESSION = true;
+
+let POSTFLOP_FORCE_CHECKDOWN_AFTER = {
+	2: RIVER,
+	3: RIVER,
+	4: TURN,
+	5: FLOP
+}
+
+
+// =====================================================================
+// ACTUAL SCRIPT STARTS HERE
+// =====================================================================
+
+function getSizingsPreflop(ctx) {
+	let bets = 1 + ctx.getBetCount();
+	let sizings = [];
+	switch (bets) {
+		case 2: //opening
+			sizings = getSizingsOpening(ctx); break;
+		case 3: //3-bets
+			sizings = getSizings3Bets(ctx); break;
+		case 4: //4-bets
+			sizings = getSizings4Bets(ctx); break;
+		case 5: //5-bets
+			sizings = getSizings5Bets(ctx); break;
+		default: //6-bets+
+			return ctx.sizingAllIn();
+	}
+
+	if (ctx.getStackPotRatio() <= PREFLOP_ADD_ALLIN_SPR)
+		sizings.push(ctx.sizingAllIn());
+
+	return applyAllinThreshold(ctx, sizings);
+}
+
+function applyAllinThreshold(ctx, sizings) {
+	let sizeallin = ctx.sizingAllIn();
+	let activechips = ctx.getPotState().getChipsActive(ctx.getActivePlayer());
+	let thresholdchips = activechips +
+		(sizeallin - activechips) * PREFLOP_ALLIN_THRESHOLD;
+	return sizings.map(s => s >= thresholdchips ? sizeallin : s);
+}
+
+function getSizingsOpening(ctx) {
+	let player = ctx.getActivePlayer();
+
+	if (player == ctx.getPlayerIndexButton()) //BU
+		return SIZES_OPEN_BU.map(s => ctx.sizingBigBlinds(s));
+	if (player == ctx.getPlayerIndexSmallBlind()) //SB
+		return SIZES_OPEN_SB.map(s => ctx.sizingBigBlinds(s));
+	if (player == ctx.getPlayerIndexBigBlind()) //BB
+		return SIZES_OPEN_BB.map(s => ctx.sizingBigBlinds(s));
+
+	return SIZES_OPEN_OTHERS.map(s => ctx.sizingBigBlinds(s));
+}
+
+function getSizings3Bets(ctx) {
+	let player = ctx.getActivePlayer();
+	let raiser = ctx.getLastRaiseAction().getPlayer();
+	let callers = ctx.getFlatCallCount();
+
+	if (callers > 0)
+		return getSizingsSqueeze(ctx, player, callers);
+	if (player == ctx.getPlayerIndexSmallBlind()) { //Special rules for SB
+		if (raiser == ctx.getPlayerIndexBigBlind())
+			return SIZES_3BET_SB_VS_BB.map(s => ctx.sizingBigBlinds(s));
+		return SIZES_3BET_SB_VS_OTHER.map(s => ctx.sizingBigBlinds(s));
+	}
+	if (player == ctx.getPlayerIndexBigBlind()) { //Special rules for BB
+		if (raiser == ctx.getPlayerIndexSmallBlind())
+			return SIZES_3BET_BB_VS_SB.map(s => ctx.sizingBigBlinds(s));
+		return SIZES_3BET_BB_VS_OTHER.map(s => ctx.sizingBigBlinds(s));
+	}
+
+	return SIZES_3BET_IP.map(s => ctx.sizingBigBlinds(s));
+}
+
+function getSizings4Bets(ctx) {
+	let player = ctx.getActivePlayer();
+	let inposition = ctx.isPlayerInPosition(player, ctx.getLastRaiseAction().getPlayer());
+
+	return inposition ?
+		SIZES_POT_4BET_IP.map(s => ctx.sizingPot(s)) :
+		SIZES_POT_4BET_OOP.map(s => ctx.sizingPot(s));
+}
+
+function getSizings5Bets(ctx) {
+	let player = ctx.getActivePlayer();
+	let inposition = ctx.isPlayerInPosition(player, ctx.getLastRaiseAction().getPlayer());
+
+	return inposition ?
+		SIZES_POT_5BET_IP.map(s => ctx.sizingPot(s)) :
+		SIZES_POT_5BET_OOP.map(s => ctx.sizingPot(s));
+}
+
+function getSizingsSqueeze(ctx, player, callers) {
+	let sizings = SIZES_3BET_SQUEEZE_IP;
+	if (player == ctx.getPlayerIndexSmallBlind())
+		sizings = SIZES_3BET_SQUEEZE_SB;
+	if (player == ctx.getPlayerIndexBigBlind())
+		sizings = SIZES_3BET_SQUEEZE_BB;
+	return sizings.map(s => ctx.sizingBigBlinds(s + SQUEEZE_INCREASE_PER_CALL * (callers - 1)));
+}
+
+function getSizingsPostflop(ctx) {
+	let player = ctx.getActivePlayer();
+	if (!POSTFLOP_ALLOW_DONK && ctx.isDonkBet()) {
+		if (!POSTFLOP_ALLOW_DONK_PREV_AGGRESSION ||
+			Array.from(ctx.getActionSequenceFull())
+				.findIndex(pa => pa.getPlayer() == player && pa.getActionType() == RAISE) < 0)
+			return [];
+	}
+
+	let sizings = [ctx.sizingGeometricHint(POSTFLOP_PRIMARY_HINT)];
+
+	if (ctx.getStreet() == FLOP && ctx.getBetCount() == 0) {
+		sizings.push(...POSTFLOP_ADD_FLOP_BET_POT.map(s => ctx.sizingPot(s)));
+		let raise = ctx.getLastRaiseAction();
+		if (raise != null && raise.getPlayer() == player)
+			sizings.push(...POSTFLOP_ADD_FLOP_CBET_POT.map(s => ctx.sizingPot(s)));
+	}
+
+	if (ctx.getStackPotRatio() <= POSTFLOP_ADD_ALLIN_SPR)
+		sizings.push(ctx.sizingAllIn());
+
+	return sizings;
+}
+
+function canFlatCallPreflop(ctx) {
+	let bets = ctx.getBetCount();
+	if (bets == 1) //only SB is allowed to complete
+		return ctx.getActivePlayer() == ctx.getPlayerIndexSmallBlind();
+	if (ALLOW_FLATS_CLOSING_ACTION && isClosingActionPreflop(ctx))
+		return true;
+	if (!ALLOW_COLD_CALLS && isColdCall(ctx, ctx.getActivePlayer()))
+		return false;
+	if (ALLOWED_FLATS_PER_RAISE[bets] == undefined)
+		return false;
+	return ctx.getFlatCallCount() < ALLOWED_FLATS_PER_RAISE[bets];
+}
+
+function isClosingActionPreflop(ctx) {
+	let player = ctx.getActivePlayer();
+
+	if (ctx.getBetCount() == 1)
+		return player == ctx.getPlayerIndexBigBlind();
+
+	let maxactive = 0;
+	let state = ctx.getPotState();
+	let otherplayers = []
+	for (p = 0; p < ctx.getNumberOfPlayers(); p++)
+		if (!state.hasPlayerFolded(p) && p != player) {
+			otherplayers.push(p);
+			maxactive = Math.max(maxactive, state.getChipsActive(p));
+		}
+
+	for (p of otherplayers)
+		if (!state.isPlayerAllIn(p) && state.getChipsActive(p) < maxactive)
+			return false;
+
+	return true;
+}
+
+function hasNextStreetBetting(ctx) {
+	let live = ctx.getPotState().countPlayersLive();
+	if (POSTFLOP_FORCE_CHECKDOWN_AFTER[live] == undefined)
+		return false;
+	return ctx.getStreet() < POSTFLOP_FORCE_CHECKDOWN_AFTER[live];
+}
+
+function isColdCall(ctx) {
+	if (ctx.getBetCount() <= 2)
+		return false;
+	for (action of ctx.getActionSequence())
+		if (action.getPlayer() == ctx.getActivePlayer())
+			return false;
+	return true;
+}

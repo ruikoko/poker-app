@@ -30,19 +30,6 @@ from app.services.derive_max_players import derive_max_players
 
 logger = logging.getLogger("queue_export")
 
-# pt25c: caminho canónico do JS template usado por generate_hrc_script.
-# Movido em pt25c de `tools/hrc_scripts/` (repo root) para
-# `backend/app/services/hrc_scripts/` — necessário porque Railway deploya
-# apenas `backend/` (nixpacks). O path antigo (`../../../tools/...`) saía
-# do container e levantava FileNotFoundError silenciado, manifestando-se
-# como `has_prune_script=false` no manifest mesmo com downstream populated.
-_PRUNE_JS_TEMPLATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "hrc_scripts",
-    "mtt_advanced_20211029 - 2 flats + bb close action size open 2x - 3x bvb.js",
-)
-
-
 # Tags FT-style → equity model `malmuth_harville_icm`. Restantes mãos default →
 # `multi_table_icm`. Comparação via `normalize_tag_key` (#B17): case-insensitive
 # + hyphen→space, daí 'ICM FT' ≡ 'icm-ft' ≡ 'ICM-ft' batem todos a 'icm ft'.
@@ -102,17 +89,11 @@ def _coerce_player_names(pn) -> dict:
 _SEAT_RE = re.compile(r"^(Seat \d+: )(.+?)( \([\d,]+ in chips)\)", re.MULTILINE)
 
 
-# pt25d: helpers para #HRC-PRUNE-IN-GAP-DOWNSTREAM
+# pt25d: helpers para seat ↔ HRC player index ↔ position label.
 # HRC scripting convention oficial (docs): índices 0..N-1 onde
 # 0 = first-to-act preflop (UTG em N>=3; BU/SB em HU), N-2 = SB, N-1 = BB.
 # Compatível com `ctx.getPlayerIndex*()` e `ctx.getActivePlayer()` do HRC
-# engine — o template é convenção-agnóstico (compara API vs API), mas o
-# nosso `DOWNSTREAM_POSITIONS` injectado tem de viver na mesma convenção
-# que `getActivePlayer()` retorna para o `.indexOf()` matchar.
-# Preflop turn order = [0, 1, ..., N-1] sequencial (BB sempre último).
-# Histórico: pt25/pt25b usaram SB=0 rotativo — bug confirmado em pt25d
-# (indexOf nunca match → prune nunca dispara → tree explodia mesmo com
-# script.js correctamente injectado).
+# engine. Preflop turn order = [0, 1, ..., N-1] sequencial (BB sempre último).
 _SEAT_ALL_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
 _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
 # pt25b: regex tolera ambos os formatos de action line:
@@ -271,9 +252,8 @@ def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
     - Nick do primeiro raiser não está nos seats parseados (HH inválido)
 
     SB-aggressor NÃO é early-return None desde pt25d. Em pt25/pt25b SB=idx 0
-    fazia o aggressor parecer "primeiro a agir preflop" sem ser, e a regra
-    mascarava o caso. Em convenção HRC docs SB=N-2 e `derive_prune_downstream`
-    devolve [] naturalmente para esse caso (degenerate: só BB sobra).
+    fazia o aggressor parecer "primeiro a agir preflop" sem ser; em convenção
+    HRC docs SB=N-2 e a função devolve o índice correcto.
 
     Calls preflop (incluindo SB-completes) NÃO contam como abertura.
 
@@ -482,139 +462,6 @@ def derive_aggressor_real_action(
     }
 
 
-def derive_prune_downstream(
-    aggressor_pos: Optional[int],
-    max_players: Optional[int],
-    players_left: Optional[int],
-    n_seated: int,
-) -> list:
-    """pt25d — devolve lista de HRC player indexes a prune (opens-in-gap
-    downstream) na convenção HRC docs (UTG=0 first-to-act preflop, BB=N-1).
-
-    Regra (mantida de pt25):
-    - aggressor_pos None → []
-    - max_players None ou players_left None → [] (defensivo)
-    - players_left <= 3 * max_players → [] (FT phase: prune não vale a pena)
-    - aggressor_pos fora de [0, n_seated) → [] (defensivo: index inválido)
-    - aggressor é SB (idx N-2) ou BB (idx N-1) → [] (degenerate: nada
-      counterfactual a prune downstream da SB; BB nunca abre in-gap)
-    - Senão → [aggressor+1, aggressor+2, ..., N-2] (todos os índices
-      sequenciais após o aggressor em ordem preflop, excepto BB)
-
-    Argumentos:
-    - aggressor_pos: HRC idx (0..N-1) do primeiro raiser preflop, ou None.
-    - max_players: limite estrutural da mesa (HM3/tournaments_meta). Usado
-      apenas como threshold para FT-cut (3 × max_players).
-    - players_left: nº de players vivos no torneio (Vision pt25 sobre SS
-      lobby mid-tournament). None → return [].
-    - n_seated: nº de seats dealt nesta mão. Tipicamente 2..8. Vem de
-      `len(derive_seats_in_preflop_order(hh_text))` no caller.
-
-    Mudança vs pt25b:
-    - Drop param `seated_hrc_indices` (redundante: na nova convenção
-      índices são contíguos 0..N-1 por construção).
-    - Drop param `table_format` (redundante: n_seated cobre o caso).
-    - Drop check explícito `aggressor == 0` (era SB-aberto em SB=0 conv;
-      agora idx 0 = UTG, caso legítimo de aggressor com downstream cheio).
-    - Add SB/BB-aggressor early-return: K >= N-2 → [] (degenerate).
-
-    Exemplos (5-handed):
-    - aggressor UTG (idx 0) → [1, 2, 3]  (HJ, BU, SB; BB=4 excluído)
-    - aggressor HJ (idx 1)  → [2, 3]     (BU, SB)
-    - aggressor BU (idx 2)  → [3]        (SB)
-    - aggressor SB (idx 3)  → []         (degenerate)
-    - aggressor BB (idx 4)  → []         (degenerate: BB nunca abre in-gap)
-
-    Exemplos (6-max full N=6):
-    - aggressor UTG (idx 0) → [1, 2, 3, 4]  (HJ, CO, BU, SB)
-
-    Exemplos (8-max full N=8):
-    - aggressor UTG (idx 0) → [1, 2, 3, 4, 5, 6]  (EP..BU..SB)
-
-    HU (N=2):
-    - aggressor BU/SB (idx 0) → []  (range(1, 1) vazio; BB=1 excluído)
-    """
-    if aggressor_pos is None:
-        return []
-    if max_players is None or players_left is None:
-        return []
-    if players_left <= 3 * max_players:
-        return []
-    if n_seated < 2:
-        return []
-    if not (0 <= aggressor_pos < n_seated):
-        return []
-    if aggressor_pos >= n_seated - 2:
-        return []
-    return list(range(aggressor_pos + 1, n_seated - 1))
-
-
-# pt25b: regex que match as 2 linhas do bloco placeholder no template B2.
-# `[^;\\n]+` captura qualquer valor entre `=` e `;` (null/int para AGGRESSOR;
-# []/lista para DOWNSTREAM). Permite re-substituir após injecção prévia →
-# idempotência ao rodar `generate_hrc_script` 2× com mesmos args.
-_PRUNE_PLACEHOLDER_RE = re.compile(
-    r"^let REAL_AGGRESSOR_POS = [^;\n]+;[\t ]*\n"
-    r"let DOWNSTREAM_POSITIONS = [^;\n]+;",
-    re.MULTILINE,
-)
-
-
-def generate_hrc_script(
-    template_path: str,
-    aggressor_pos: Optional[int],
-    downstream_positions: list,
-) -> str:
-    """pt25 — gera JS HRC com hint REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
-    para a mão actual.
-
-    Se aggressor_pos é None ou downstream_positions é empty (SB-aberto, FT
-    phase, parsing falha): injecta defaults null/[] → JS comporta-se idêntico
-    ao original (no-op, sem prune).
-
-    pt25b: usa `_PRUNE_PLACEHOLDER_RE.subn` para SUBSTITUIR o bloco placeholder
-    existente do template (introduzido em B2 com defaults null/[]). Evita
-    duplicate `let` declarations que causariam JS SyntaxError no Nashorn/HRC.
-    **Idempotente**: chamar 2× consecutivas com mesmos args produz output
-    byte-idêntico.
-
-    Fallback legacy: se template não tem o placeholder (versão antiga ou
-    template alternativo), insere bloco hint antes de `let ALLIN = 9999;`.
-    Se nem o marker ALLIN existir, prepend no topo (degrade gracioso).
-    """
-    with open(template_path, "r", encoding="utf-8") as f:
-        template = f.read()
-
-    if aggressor_pos is None or not downstream_positions:
-        agg_val = "null"
-        ds_val = "[]"
-    else:
-        agg_val = str(aggressor_pos)
-        ds_val = "[" + ", ".join(str(p) for p in downstream_positions) + "]"
-
-    replacement = (
-        f"let REAL_AGGRESSOR_POS = {agg_val};\n"
-        f"let DOWNSTREAM_POSITIONS = {ds_val};"
-    )
-
-    new_template, n_subs = _PRUNE_PLACEHOLDER_RE.subn(
-        replacement, template, count=1,
-    )
-    if n_subs > 0:
-        return new_template
-
-    # Fallback: template sem placeholder. Insere bloco hint (com header
-    # comment próprio) antes de `let ALLIN = 9999;`. Sem ALLIN → prepend.
-    hint = (
-        "// pt25 prune-in-gap-downstream hints (injected by backend per-hand)\n"
-        + replacement + "\n\n"
-    )
-    marker = "let ALLIN = 9999;"
-    if marker in template:
-        return template.replace(marker, hint + marker, 1)
-    return hint + template
-
-
 def _detect_currency_symbol(hh_text: str) -> str:
     """Detecta currency a partir do tournament header (1ª linha).
 
@@ -750,8 +597,8 @@ def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
        e `players_left IS NOT NULL`. Valor extraído pelo Vision pt25 sobre
        SSs de lobby mid-tournament postadas em `#lobbys`.
 
-    Devolve None quando nenhuma fonte fornece valor — `derive_prune_downstream`
-    com `None` → [] → prune off para a mão (graceful).
+    Devolve None quando nenhuma fonte fornece valor — caller deve tratar
+    como "informação ausente" (graceful).
 
     NOTA: `payout_blob` mantém-se na assinatura por compatibilidade com o
     caller; não é mais consultado (pt25 diagnóstico confirmou que
@@ -797,51 +644,29 @@ def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
     return val if isinstance(val, int) else None
 
 
-def _try_build_prune_script(hand: dict, hh_text: str, hints: dict, payout_blob):
-    """pt25 — devolve `(aggressor, downstream, js_string|None, error|None)`.
+def _build_hrc_script_for_hand(hh_text: str, level_sb: int, level_bb: int):
+    """Pipeline novo (Maio 2026): gera `.js` per-hand com SIZES_* substituídos
+    pela acção real da HH.
 
-    Não tem side-effects; o caller (build_queue_zip) decide se escreve no
-    zip + actualiza `hints['script_path']`. `js_string=None` significa "não
-    há prune para esta mão" — caller mantém comportamento default (sem JS,
-    script_path pre-existente).
+    Substitui o antigo `_try_build_prune_script` — o mecanismo de prune via
+    JS (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS) foi removido; o equivalente
+    migra para o Bloco 2 do watcher (Selected Subtree + Prune Action manual).
 
-    pt25c: 4º elemento do tuple `error: str|None`. Não-None **apenas** se
-    `downstream` é não-vazio mas a geração do JS falhou (e.g., template
-    file missing em Railway prod). None quando `downstream=[]` (SB-aberto,
-    FT phase, parsing falha — casos não-erro). Propagado ao manifest
-    `prune_script_error` para observabilidade (vs silent warning anterior).
+    Devolve `(js_string|None, overrides_dict, effective_stack_bb, error)`:
+      - `js_string`: conteúdo final do .js (sempre o template completo;
+        `None` apenas se template I/O falhou).
+      - `overrides_dict`: `{var_name: [sizings]}` aplicados — vazio quando
+        a mão não teve raises preflop (walk-to-BB / limp pot).
+      - `effective_stack_bb`: min(stacks_iniciais)/level_bb. None se parse
+        falhou.
+      - `error`: string descrevendo template I/O failure, ou None.
 
-    pt25d: passa `n_seated` (int) — `derive_prune_downstream` mudou de
-    `seated_hrc_indices` (list) para `n_seated` por mudança de convenção
-    (UTG=0 first-to-act preflop em vez de SB=0 rotativo). Suporta mesas
-    com seats vazios (e.g. 6-max com 5 sentados pós-eliminação) cross-site
-    (GG/PS/WN/WPN) — `derive_seats_in_preflop_order` já normaliza N para
-    "número de sentados", não table_format.
+    A mão sem raises preflop devolve o template intacto — caller decide se
+    o escreve no zip (preferimos escrever sempre para consistência).
     """
-    aggressor = derive_real_aggressor_position(hh_text)
-    max_players = hints.get("max_players")
-    players_left = _resolve_players_left(hand, payout_blob)
+    from app.services.hrc_script_gen import generate_hrc_script_for_hand
     seats = derive_seats_in_preflop_order(hh_text)
-    n_seated = len(seats)
-    downstream = derive_prune_downstream(
-        aggressor, max_players, players_left, n_seated,
-    )
-    if not downstream:
-        # Não-erro: caso degenerate ou condição não satisfeita
-        return aggressor, [], None, None
-    try:
-        js = generate_hrc_script(_PRUNE_JS_TEMPLATE_PATH, aggressor, downstream)
-    except OSError as e:
-        # pt25c: ERROR-level (era warning pré-pt25c), com propagação ao
-        # manifest via campo `prune_script_error`. Catch original (silent)
-        # mascarou o bug Railway deploy missing template até smoke real.
-        err = f"{type(e).__name__}: {e}"
-        logger.error(
-            "generate_hrc_script falhou (template I/O) hand_id=%s template=%s err=%s",
-            hand.get("hand_id"), _PRUNE_JS_TEMPLATE_PATH, err,
-        )
-        return aggressor, downstream, None, err
-    return aggressor, downstream, js, None
+    return generate_hrc_script_for_hand(hh_text, level_sb, level_bb, seats)
 
 
 def build_queue_zip(
@@ -908,33 +733,39 @@ def build_queue_zip(
             # payouts.json só com hints para o watcher os ler.
             hints = _build_watcher_hints(h, hh_text)
 
-            # pt25 prune-in-gap-downstream: se há aggressor identificado e
-            # condições da regra batem (players_left > 3 × max_players, etc.),
-            # gera JS dinâmico com hints REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
-            # injectados; escreve no zip + override do hint script_path para
-            # path relativo "script.js" (adapter no Beelink reescreve para
-            # absoluto antes do watcher ler).
-            try:
-                (prune_aggressor, prune_downstream,
-                 prune_script, prune_error) = _try_build_prune_script(
-                    h, hh_text, hints, payout_blob,
-                )
-            except Exception as _e:
-                logger.exception("prune-in-gap build falhou hand_id=%s", hand_id)
-                prune_aggressor, prune_downstream = None, []
-                prune_script = None
-                prune_error = f"unhandled: {type(_e).__name__}: {_e}"
-            if prune_script is not None:
-                zf.writestr(f"{hand_id}/script.js", prune_script)
-                hints["script_path"] = "script.js"
-
-            # pt25e #META-AGGRESSOR-REAL-ACTION: parsear primeira raise/bet
-            # preflop + size_bb e expor em hints (vai para payouts.json) e no
-            # manifest entry. Watcher (Bloco 2 G3) lê isto para clicar a linha
-            # do sizing real na tree visual antes da 2ª run em Selected Subtree.
+            # Maio 2026: gera .js per-hand com SIZES_* substituídos pela
+            # acção real da HH (open/3-bet/squeeze/4-bet/5-bet). O template
+            # canónico é único; o gerador (services/hrc_script_gen.py)
+            # decide quais variáveis substituir.
             blinds = _extract_blinds_from_header(hh_text)
             if blinds is not None:
                 _sb, _bb = blinds
+            else:
+                _sb, _bb = None, None
+
+            script_js = None
+            script_overrides: dict = {}
+            effective_stack_bb = None
+            script_error = None
+            if _bb is not None:
+                try:
+                    (script_js, script_overrides,
+                     effective_stack_bb, script_error) = _build_hrc_script_for_hand(
+                        hh_text, _sb, _bb,
+                    )
+                except Exception as _e:
+                    logger.exception("hrc_script_gen falhou hand_id=%s", hand_id)
+                    script_js = None
+                    script_overrides = {}
+                    script_error = f"unhandled: {type(_e).__name__}: {_e}"
+
+            if script_js is not None:
+                zf.writestr(f"{hand_id}/script.js", script_js)
+                hints["script_path"] = "script.js"
+
+            # #META-AGGRESSOR-REAL-ACTION mantém-se em payouts.json para o
+            # Bloco 2 do watcher (Selected Subtree + click por position match).
+            if _bb is not None:
                 aggressor_real_action = derive_aggressor_real_action(
                     hh_text, _sb, _bb,
                 )
@@ -960,21 +791,11 @@ def build_queue_zip(
                 "tournament_number": tnum,
                 "site": site,
                 "has_payouts": payout_blob is not None,
-                "prune_aggressor": prune_aggressor,
-                "prune_downstream": prune_downstream,
-                "has_prune_script": prune_script is not None,
-                # pt25c: prune_script_error capturado quando downstream tem
-                # entries mas geração JS falhou. None significa OK ou
-                # condição-não-satisfeita (downstream vazio).
-                "prune_script_error": prune_error,
-                # pt25d: convention tag para distinguir zips pré-pt25d (SB=0
-                # rotativo, bug indexOf nunca match) vs pós-pt25d (UTG=0
-                # first-to-act, HRC docs canónica). Só populated quando o
-                # script.js é efectivamente escrito; None caso contrário.
-                "prune_index_convention": (
-                    "hrc_docs_v1" if prune_script is not None else None
-                ),
-                # pt25e #META-AGGRESSOR-REAL-ACTION
+                "has_script": script_js is not None,
+                "script_overrides": script_overrides,
+                "script_generation_error": script_error,
+                "effective_stack_bb": effective_stack_bb,
+                "aggressor_position": derive_real_aggressor_position(hh_text),
                 "aggressor_real_action": aggressor_real_action,
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"
