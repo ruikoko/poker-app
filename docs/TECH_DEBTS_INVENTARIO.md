@@ -6,6 +6,46 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (15-16 Maio 2026 pós-pt25f closeout)
+
+Sessão pt25f fechada com 6 commits feature em main (`76e2ea7` / `0444cf2` /
+`11c2dea` / `e18c8ff` / `cde29f4` / `9b6e839`) + commit docs. Suite 340 → 375
+PASSED (+35 líquidos). Foco em limpezas cross-case + deprecation fix +
+versionamento bridge HM3 + rotação operacional de password + **Trabalho A:
+refactor do gerador `.js` HRC** com sizings substituídos pela acção real da
+HH e prune via JS removido completamente.
+
+**Estado do gatekeeper `#HRC-PRUNE-IN-GAP-DOWNSTREAM`:** **RECONFIGURADO em
+pt25f.** O mecanismo de prune via JS (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
++ guard no template) foi removido em `9b6e839`. A redução de tree explosion
+passa agora a vir por outro caminho: (a) sizings literais substituídos no `.js`
+pela acção real da HH (`9b6e839` — fecha `#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND`)
++ (b) Bloco 2 do watcher (Scope=Selected Subtree + 2ª run em subtree). O
+gatekeeper continua aberto até validação empírica do Trabalho A no Beelink +
+fecho do Bloco 2.
+
+**Falha de governance herdada de pt25:** o prune via JS foi implementado sem
+aprovação product explícita do Rui em pt25/b/c/d (decisão user-facing tratada
+como optimização técnica). Remediada em pt25f via Trabalho A. Próxima
+instância: interpretar a rule de aprovação prévia em
+`PAPEIS_E_RESPONSABILIDADES.md` de forma rigorosa para mudanças que afectam o
+que o Rui vê quando usa a app/HRC.
+
+### Tech debts fechados em pt25f (4)
+
+| ID | Como fechou |
+|---|---|
+| **#HRC-PRUNE-IN-GAP-DOWNSTREAM (mecanismo)** | Removido em `9b6e839`. Active code já não tem referências a `REAL_AGGRESSOR_POS` / `DOWNSTREAM_POSITIONS` / `derive_prune_downstream`. Pasta `hrc_scripts/archive/` retém os ficheiros legacy para histórico. O gatekeeper continua aberto na sua intenção (redução de tree explosion), mas o caminho é agora via sizings literais + Bloco 2 do watcher. |
+| **#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND** | Implementado em `9b6e839` exactamente como a tech debt descrevia (per-hand `SIZES_*` substituídos pela acção real da HH via regex sub) — só com semântica de prune via JS removida (não é defense-in-depth como a tech debt sugeria; é substituto). Módulo novo `backend/app/services/hrc_script_gen.py`. |
+| **#APPHM3-NOT-VERSIONED** (descoberto pt25f) | Migrado para `tools/apphm3/` em `cde29f4`. `config_local.py` gitignored, template `.example` versionado, README PT-PT, fix `datetime.utcnow` aplicado, `.bat`s usam `%~dp0`. Rui migrou localmente. |
+| **#DATETIME-UTCNOW-DEPRECATED** (descoberto pt25f) | Substituído em 3 sítios (`routers/hands.py:1326`, `routers/hands.py:1371`, `routers/hm3.py:756`) por `datetime.now(timezone.utc).replace(tzinfo=None)` em `e18c8ff`. Bit-for-bit preservado. Same fix aplicado em `tools/apphm3/hm3_export.py` no commit `cde29f4`. |
+
+### Tech debts novos abertos em pt25f (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#CHANGE-PASSWORD-FEATURE** | 🟡 MED | App não tem endpoint nem UI para change-password. Rotação de password do user `rui@pokerapp.com` em pt25f (15 Maio, post-exposure da `MudaEsta123!` em scripts/zips/briefings) foi single-shot via `UPDATE users SET password_hash = ...` na DB Railway com Code com acesso. Próxima rotação volta a depender de DB direct. Fix: implementar `POST /api/auth/change-password` (validar old + bcrypt-hash new + invalidate session opcional) + UI em SettingsPage / Profile dropdown. Pré-requisitos: nenhum. Esforço: ~2h (1 endpoint + 1 form). |
+
 ## Estado actual (15 Maio 2026 pós-pt25e Bloco 1 + smoke devagar manual em curso)
 
 Sessão pt25e Bloco 1 fechada (commits `8eb9d87` / `f7c8833` / `bad2c51`). Source watcher (`tools/watcher_src/patched_funcs.py`) ganhou stubs para Bugs F/G/H/J, todos atrás de defensive flags (coords não calibrados → early-return WARN; finalize ainda não wired no Bloco 1). `.exe` em produção (Beelink) continua pt25d intacto — Bloco 1 valida arquitectura, não muda comportamento operacional. Suite **266→282 PASSED** após Bloco 1.
@@ -47,7 +87,7 @@ Ordem actualizada pelo Rui em 15 Maio: Bug G antes de Bug J.
 
 | ID | Severidade | Resumo |
 |---|---|---|
-| **#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND** | 🟡 MED (pt25f+) | Bug K — Re-arquitectura. Template `mtt_advanced_20211029...bvb.js` actualmente declara sizings fixos top-of-file: `SIZES_OPEN_OTHERS = [2, ALLIN]`, `SIZES_3BET_IP = [7.5, 12, ALLIN]`, `SIZES_3BET_BB_VS_SB = [7, ALLIN]`, etc. Estes sizings genéricos inflam a árvore HRC porque o solver explora cada um (e.g., 1ª open: 2bb + ALLIN; 3-bet IP: 7.5bb + 12bb + ALLIN). Para que a árvore contenha apenas o sizing **real** da mão, o backend tem de **injectar dinamicamente** `SIZES_*` per-hand baseados na action sequence parseada da HH. Cada raise/bet preflop é extraído e injectado no slot correspondente (e.g., UTG raise 2.1bb da HH → injectar `SIZES_OPEN_OTHERS = [2.1, ALLIN]`; HJ 3-bet 8bb IP → `SIZES_3BET_IP = [8, ALLIN]`). Reduz a tree drasticamente by design — pode tornar o prune via `getSizingsOpening` (pt25) redundante na prática, mas mantemos como defense-in-depth. Implementação: generalizar `generate_hrc_script` para 2 substituições — (a) bloco prune existente (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS), (b) cada SIZES_* var top-of-file via regex. Helper novo `derive_preflop_sizings(hh_text, level_sb, level_bb) -> dict[str, list[float]]` em `services/queue_export.py` faz parsing completo (5+ raises sequenciais) e mapeia bet_count + position → SIZES_* key. Trabalhoso; depende implicitamente de **#META-AGGRESSOR-REAL-ACTION** (parsing comum). |
+| **#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND** | 🟢 FECHADO em pt25f (`9b6e839`) — ver "Tech debts fechados em pt25f" no topo do ficheiro. Restante texto abaixo preservado por contexto histórico. | Bug K — Re-arquitectura. Template `mtt_advanced_20211029...bvb.js` actualmente declara sizings fixos top-of-file: `SIZES_OPEN_OTHERS = [2, ALLIN]`, `SIZES_3BET_IP = [7.5, 12, ALLIN]`, `SIZES_3BET_BB_VS_SB = [7, ALLIN]`, etc. Estes sizings genéricos inflam a árvore HRC porque o solver explora cada um (e.g., 1ª open: 2bb + ALLIN; 3-bet IP: 7.5bb + 12bb + ALLIN). Para que a árvore contenha apenas o sizing **real** da mão, o backend tem de **injectar dinamicamente** `SIZES_*` per-hand baseados na action sequence parseada da HH. Cada raise/bet preflop é extraído e injectado no slot correspondente (e.g., UTG raise 2.1bb da HH → injectar `SIZES_OPEN_OTHERS = [2.1, ALLIN]`; HJ 3-bet 8bb IP → `SIZES_3BET_IP = [8, ALLIN]`). Reduz a tree drasticamente by design — pode tornar o prune via `getSizingsOpening` (pt25) redundante na prática, mas mantemos como defense-in-depth. Implementação: generalizar `generate_hrc_script` para 2 substituições — (a) bloco prune existente (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS), (b) cada SIZES_* var top-of-file via regex. Helper novo `derive_preflop_sizings(hh_text, level_sb, level_bb) -> dict[str, list[float]]` em `services/queue_export.py` faz parsing completo (5+ raises sequenciais) e mapeia bet_count + position → SIZES_* key. Trabalhoso; depende implicitamente de **#META-AGGRESSOR-REAL-ACTION** (parsing comum). |
 
 ### Smoke real pt25d — observações operacionais (14 Maio)
 
@@ -84,6 +124,12 @@ Fix backend-only — template e JS patch são convenção-agnósticos. Refactor 
 | **#HRC-INDEX-CONVENTION-MISMATCH** (descoberto pt25d) | `derive_seats_in_preflop_order` mudou a fórmula: `first_to_act_offset = 0 if n == 2 else 3` (HU age primeiro pelo botão; N≥3 age via `button + 3`, wraps mod N). Indices contíguos `0..N-1` por construção, daí drop do param `seated_hrc_indices` em `derive_prune_downstream`. SB-aberto early-return removido em `derive_real_aggressor_position` (era artefacto da convenção velha; com SB=N-2, `derive_prune_downstream` devolve [] naturalmente para esse caso). Commit pt25d ETAPA 3. |
 
 ### #HRC-PRUNE-IN-GAP-DOWNSTREAM (gatekeeper)
+
+**Nota pt25f (16 Maio):** o mecanismo descrito abaixo (REAL_AGGRESSOR_POS +
+DOWNSTREAM_POSITIONS + guard JS) foi **removido em `9b6e839`**. A redução de
+tree passa agora pelo Trabalho A (sizings literais substituídos no `.js`) +
+Bloco 2 do watcher. Ver "Estado actual (15-16 Maio 2026 pós-pt25f closeout)"
+no topo do ficheiro. O texto abaixo é histórico (pt25 → pt25d).
 
 Continua aberto até smoke real validar tree size pós-pt25d. Pipeline técnico completo:
 - pt25 — helpers + JS template guard + adapter integration + lobby_vision `players_left`
