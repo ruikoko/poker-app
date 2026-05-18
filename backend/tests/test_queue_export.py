@@ -661,10 +661,13 @@ from app.services.hrc_script_gen import (
     build_sizings_overrides,
     compute_effective_stack_bb,
     generate_hrc_script_for_hand,
+    _CLASSIC_3BET_DEFAULTS,
     _OPEN_ALLIN_THRESHOLD_BB,
     _bucket_3bet,
     _bucket_4bet5bet,
     _bucket_open,
+    _classic_3bet_band,
+    _compute_classic_3bet_overrides,
     _format_sizing_array,
     _parse_preflop_actions,
     _parse_seat_stacks,
@@ -1049,11 +1052,12 @@ def test_build_sizings_overrides_drops_ALLIN_when_effective_above_threshold():
     assert out_above["SIZES_OPEN_OTHERS"] == [2.0]
 
 
-def test_build_sizings_overrides_3bet_keeps_ALLIN_even_when_deep():
-    """SIZES_3BET_* mantém sempre ALLIN, independente do eff stack.
-    HU sample com SB 3-bet (deep).
+def test_build_sizings_overrides_classic_3bet_ignores_real_sizing_when_deep():
+    """Pós-extensão Maio 2026: classic 3-bet ignora sizing real da HH.
+    Para eff >= 35 BB, NÃO há override de classic 3-bet — defaults do
+    template ficam (já incluem ALLIN como 2ª entrada).
 
-    Build HH sintética: BB opens, SB 3-bets, eff 100 BB.
+    Build HH sintética: BU opens, SB 3-bets, eff 100 BB.
     """
     hh = (
         "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
@@ -1078,8 +1082,13 @@ def test_build_sizings_overrides_3bet_keeps_ALLIN_even_when_deep():
                                   effective_stack_bb=100.0)
     # E=BU opens 3 BB, A=SB 3-bets 10 BB vs BU. eff > 25 → SIZES_OPEN_BU sem ALLIN
     assert out["SIZES_OPEN_BU"] == [3.0]
-    # SB 3-bet vs non-BB opener → SIZES_3BET_SB_VS_OTHER. ALLIN fica SEMPRE.
-    assert out["SIZES_3BET_SB_VS_OTHER"] == [10.0, "ALLIN"]
+    # Classic 3-bet bucket (SB vs BU = SIZES_3BET_SB_VS_OTHER) NÃO é tocado
+    # com eff=100 (>=35). O sizing real (10 BB) é ignorado, defaults intactos.
+    assert "SIZES_3BET_SB_VS_OTHER" not in out
+    # Nem qualquer outro classic 3-bet bucket.
+    for var in ("SIZES_3BET_IP", "SIZES_3BET_BB_VS_SB",
+                "SIZES_3BET_BB_VS_OTHER", "SIZES_3BET_SB_VS_BB"):
+        assert var not in out
 
 
 def test_build_sizings_overrides_4bet_with_ratio():
@@ -1127,10 +1136,214 @@ def test_build_sizings_overrides_4bet_with_ratio():
     # hrc1=Seat4(D, HJ), hrc2=Seat5(E, BU), hrc3=Seat1(A, SB), hrc4=Seat2(B, BB)
     # Open by SB (A) → SIZES_OPEN_SB.
     assert out["SIZES_OPEN_SB"] == [2.5]  # 250/100 = 2.5
-    # 3-bet by BB (B) vs SB opener → SIZES_3BET_BB_VS_SB.
-    assert out["SIZES_3BET_BB_VS_SB"] == [7.0, "ALLIN"]  # 700/100 = 7
+    # eff=100 >= 35 → classic 3-bet bucket SIZES_3BET_BB_VS_SB NÃO é tocado
+    # (default do template `[10, ALLIN]` fica). O sizing real do 3-bet é
+    # ignorado pela regra do multiplicador.
+    assert "SIZES_3BET_BB_VS_SB" not in out
     # 4-bet by SB (A) vs BB 3-better. Postflop rank: SB=0, BB=1 → 4-better OOP.
     assert out["SIZES_POT_4BET_OOP"] == [0.43, "ALLIN"]
+
+
+# ── Classic 3-bet multiplier rule (Maio 2026, extensão pós-9b6e839) ─────
+# Os 5 buckets de 3-bet clássico ignoram o sizing real da HH. Em vez disso,
+# aplica-se um multiplicador ao default do template em função da stack
+# efectiva. Squeezes mantêm sizing real. Convenção dos limiares:
+# lower-inclusive, upper-exclusive (`eff >= threshold`).
+
+def test_classic_3bet_band_above_35_returns_none_mult():
+    """eff >= 35 → defaults intactos, sem override."""
+    assert _classic_3bet_band(35) == (None, False)
+    assert _classic_3bet_band(40) == (None, False)
+    assert _classic_3bet_band(100.0) == (None, False)
+
+
+def test_classic_3bet_band_30_band_x0_90():
+    """[30, 35) → ×0.90."""
+    assert _classic_3bet_band(30) == (0.90, False)
+    assert _classic_3bet_band(32.5) == (0.90, False)
+    assert _classic_3bet_band(34.99) == (0.90, False)
+
+
+def test_classic_3bet_band_25_band_x0_80():
+    """[25, 30) → ×0.80. 25 cai aqui (boundary inferior inclusivo)."""
+    assert _classic_3bet_band(25) == (0.80, False)
+    assert _classic_3bet_band(27) == (0.80, False)
+    assert _classic_3bet_band(29.99) == (0.80, False)
+
+
+def test_classic_3bet_band_18_band_x0_70():
+    """[18, 25) → ×0.70. 18 cai aqui (boundary inferior inclusivo)."""
+    assert _classic_3bet_band(18) == (0.70, False)
+    assert _classic_3bet_band(22.5) == (0.70, False)
+    assert _classic_3bet_band(24.99) == (0.70, False)
+
+
+def test_classic_3bet_band_below_18_shove_only():
+    """eff < 18 → ['ALLIN'] só (jam-or-fold)."""
+    assert _classic_3bet_band(17.99) == (None, True)
+    assert _classic_3bet_band(15) == (None, True)
+    assert _classic_3bet_band(5) == (None, True)
+
+
+def test_classic_3bet_band_none_returns_none_mult():
+    """eff=None → defensivo, sem override."""
+    assert _classic_3bet_band(None) == (None, False)
+
+
+def test_compute_classic_3bet_overrides_x0_90_all_5_buckets():
+    """eff=30 → ×0.90 a todos os 5 buckets. 10×0.9=9.0, 6×0.9=5.4, 8×0.9=7.2, 11×0.9=9.9."""
+    out = _compute_classic_3bet_overrides(30)
+    assert out == {
+        "SIZES_3BET_IP": [5.4, "ALLIN"],
+        "SIZES_3BET_BB_VS_SB": [9.0, "ALLIN"],
+        "SIZES_3BET_BB_VS_OTHER": [7.2, "ALLIN"],
+        "SIZES_3BET_SB_VS_BB": [9.9, "ALLIN"],
+        "SIZES_3BET_SB_VS_OTHER": [7.2, "ALLIN"],
+    }
+
+
+def test_compute_classic_3bet_overrides_x0_80_boundary_25():
+    """eff=25 → ×0.80 (boundary inferior inclusivo)."""
+    out = _compute_classic_3bet_overrides(25)
+    assert out == {
+        "SIZES_3BET_IP": [4.8, "ALLIN"],
+        "SIZES_3BET_BB_VS_SB": [8.0, "ALLIN"],
+        "SIZES_3BET_BB_VS_OTHER": [6.4, "ALLIN"],
+        "SIZES_3BET_SB_VS_BB": [8.8, "ALLIN"],
+        "SIZES_3BET_SB_VS_OTHER": [6.4, "ALLIN"],
+    }
+
+
+def test_compute_classic_3bet_overrides_x0_70_boundary_18():
+    """eff=18 → ×0.70 (boundary inferior inclusivo)."""
+    out = _compute_classic_3bet_overrides(18)
+    assert out == {
+        "SIZES_3BET_IP": [4.2, "ALLIN"],
+        "SIZES_3BET_BB_VS_SB": [7.0, "ALLIN"],
+        "SIZES_3BET_BB_VS_OTHER": [5.6, "ALLIN"],
+        "SIZES_3BET_SB_VS_BB": [7.7, "ALLIN"],
+        "SIZES_3BET_SB_VS_OTHER": [5.6, "ALLIN"],
+    }
+
+
+def test_compute_classic_3bet_overrides_shove_only_below_18():
+    """eff=15 (<18) → array ['ALLIN'] só nos 5 buckets."""
+    out = _compute_classic_3bet_overrides(15)
+    expected_keys = set(_CLASSIC_3BET_DEFAULTS)
+    assert set(out.keys()) == expected_keys
+    for var in expected_keys:
+        assert out[var] == ["ALLIN"]
+
+
+def test_compute_classic_3bet_overrides_above_35_empty():
+    """eff >= 35 → {} (defaults intactos)."""
+    assert _compute_classic_3bet_overrides(35) == {}
+    assert _compute_classic_3bet_overrides(40) == {}
+    assert _compute_classic_3bet_overrides(None) == {}
+
+
+# ── build_sizings_overrides com classic 3-bet multiplier ────────────────
+
+def _synthetic_hh(eff_bb_target: float, with_3bet: bool = True,
+                  with_squeeze: bool = False) -> tuple:
+    """Constrói HH sintética com stacks tunados para a efectiva desejada.
+    BB=100, SB=50. Player A=SB, B=BB, C/D=UTG/HJ, E=BU em 5-handed.
+    """
+    chips_per_player = int(eff_bb_target * 100)
+    raises_block = "C: folds\n"
+    if with_squeeze:
+        # UTG opens 2.5bb, HJ flats, BU 3-bet squeeze (8bb).
+        raises_block += (
+            "D: raises 200 to 250\n"
+            "E: calls 250\n"
+            "A: folds\n"
+            "B: raises 550 to 800\n"
+        )
+    elif with_3bet:
+        # BU opens 3bb, SB 3-bets 10bb (classic, no callers).
+        raises_block += (
+            "D: folds\n"
+            "E: raises 200 to 300\n"
+            "A: raises 700 to 1000\n"
+            "B: folds\n"
+        )
+    else:
+        raises_block += "D: folds\nE: folds\nA: folds\n"
+    hh = (
+        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #5 is the button\n"
+        f"Seat 1: A ({chips_per_player} in chips)\n"
+        f"Seat 2: B ({chips_per_player} in chips)\n"
+        f"Seat 3: C ({chips_per_player} in chips)\n"
+        f"Seat 4: D ({chips_per_player} in chips)\n"
+        f"Seat 5: E ({chips_per_player} in chips)\n"
+        "A: posts small blind 50\n"
+        "B: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        + raises_block +
+        "*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    return hh, seats
+
+
+def test_build_overrides_applies_multiplier_for_classic_3bet_at_27bb():
+    """eff=27 BB → ×0.80 nos 5 buckets, mesmo com 3-bet real na HH (10bb)."""
+    hh, seats = _synthetic_hh(27.0, with_3bet=True)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=27.0)
+    # Sizing real do 3-bet (10 BB) é IGNORADO. Multiplier ×0.80 nos defaults:
+    assert out["SIZES_3BET_IP"] == [4.8, "ALLIN"]
+    assert out["SIZES_3BET_BB_VS_SB"] == [8.0, "ALLIN"]
+    assert out["SIZES_3BET_BB_VS_OTHER"] == [6.4, "ALLIN"]
+    assert out["SIZES_3BET_SB_VS_BB"] == [8.8, "ALLIN"]
+    assert out["SIZES_3BET_SB_VS_OTHER"] == [6.4, "ALLIN"]
+
+
+def test_build_overrides_applies_multiplier_without_3bet_in_hh():
+    """eff=22 BB + HH só com fold/open → multiplier ainda se aplica aos 5 buckets."""
+    hh, seats = _synthetic_hh(22.0, with_3bet=False)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=22.0)
+    # ×0.70 nos defaults independentemente da HH ter 3-bet ou não.
+    assert out["SIZES_3BET_IP"] == [4.2, "ALLIN"]
+    assert out["SIZES_3BET_BB_VS_SB"] == [7.0, "ALLIN"]
+    assert out["SIZES_3BET_BB_VS_OTHER"] == [5.6, "ALLIN"]
+    assert out["SIZES_3BET_SB_VS_BB"] == [7.7, "ALLIN"]
+    assert out["SIZES_3BET_SB_VS_OTHER"] == [5.6, "ALLIN"]
+
+
+def test_build_overrides_squeeze_keeps_real_sizing_when_classic_3bet_rule_applies():
+    """eff=22 + squeeze na HH → SIZES_3BET_SQUEEZE_* mantém sizing real;
+    classic 3-bet buckets recebem ×0.70."""
+    hh, seats = _synthetic_hh(22.0, with_3bet=False, with_squeeze=True)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=22.0)
+    # Squeeze sizing real (8 BB) — sem multiplicador. O squeezer no _synthetic_hh
+    # é B (BB, hrc_idx 4 em 5-handed: SB=3, BB=4, UTG=0, HJ=1, BU=2).
+    # Squeeze por BB → SIZES_3BET_SQUEEZE_BB.
+    assert out["SIZES_3BET_SQUEEZE_BB"] == [8.0, "ALLIN"]
+    # Classic 3-bet buckets ainda recebem ×0.70.
+    assert out["SIZES_3BET_IP"] == [4.2, "ALLIN"]
+    assert out["SIZES_3BET_BB_VS_SB"] == [7.0, "ALLIN"]
+
+
+def test_build_overrides_shove_only_below_18bb_in_classic_3bet():
+    """eff=12 BB (<18) → classic 3-bet buckets = ['ALLIN'] só."""
+    hh, seats = _synthetic_hh(12.0, with_3bet=True)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=12.0)
+    for var in _CLASSIC_3BET_DEFAULTS:
+        assert out[var] == ["ALLIN"]
+
+
+def test_build_overrides_no_classic_3bet_override_above_35bb():
+    """eff=40 BB → nenhum classic 3-bet bucket nos overrides (defaults intactos)."""
+    hh, seats = _synthetic_hh(40.0, with_3bet=True)
+    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
+                                  effective_stack_bb=40.0)
+    for var in _CLASSIC_3BET_DEFAULTS:
+        assert var not in out
 
 
 # ── generate_hrc_script_for_hand — pipeline completo ──────────────────────

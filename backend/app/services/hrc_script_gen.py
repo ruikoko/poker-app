@@ -43,6 +43,29 @@ _HRC_TEMPLATE_PATH = os.path.join(
 _OPEN_ALLIN_THRESHOLD_BB = 25
 
 
+# ── Regra do multiplicador para 3-bets clássicos ──────────────────────
+# Decisão product (Maio 2026, extensão pós-9b6e839): para os 5 buckets
+# de 3-bet clássico, o sizing real da HH é ignorado. Em vez disso,
+# aplica-se um multiplicador ao default do template em função da stack
+# efectiva. Squeezes mantêm sizing real.
+#
+# Convenção dos limiares: lower bound inclusivo, upper bound exclusivo
+# (`eff_bb >= threshold` em cascata). Isso resolve as duas perguntas de
+# fronteira:
+#   - eff_bb == 25  → cai em [25,30), multiplicador ×0.80
+#   - eff_bb == 18  → cai em [18,25), multiplicador ×0.70
+# Justificação: uma cadeia única `eff_bb >= 35/30/25/18` sem casos
+# especiais, lê do mais profundo para o mais raso, e cada tier é
+# mutuamente exclusivo sem ambiguidade no ponto-fronteira.
+_CLASSIC_3BET_DEFAULTS = {
+    "SIZES_3BET_IP": 6,
+    "SIZES_3BET_BB_VS_SB": 10,
+    "SIZES_3BET_BB_VS_OTHER": 8,
+    "SIZES_3BET_SB_VS_BB": 11,
+    "SIZES_3BET_SB_VS_OTHER": 8,
+}
+
+
 # ── Regex parsing ───────────────────────────────────────────────────────
 
 # Seat header line: "Seat 1: Hero (40,000 in chips)" (PS/GG/WN) ou
@@ -433,6 +456,51 @@ def _bucket_4bet5bet(action: dict, n_seated: int) -> Optional[str]:
     return f"SIZES_POT_5BET_{suffix}"
 
 
+def _classic_3bet_band(
+    effective_stack_bb: Optional[float],
+) -> tuple:
+    """Devolve `(mult, shove_only)` para os 5 buckets de 3-bet clássico.
+
+    - `eff >= 35`  → `(None, False)` — defaults intactos, sem override.
+    - `[30, 35)`   → `(0.90, False)`
+    - `[25, 30)`   → `(0.80, False)`
+    - `[18, 25)`   → `(0.70, False)`
+    - `eff < 18`   → `(None, True)`  — array `[ALLIN]` só (jam-or-fold).
+    - `None`       → `(None, False)` — defensivo, sem override.
+    """
+    if effective_stack_bb is None:
+        return None, False
+    if effective_stack_bb >= 35:
+        return None, False
+    if effective_stack_bb >= 30:
+        return 0.90, False
+    if effective_stack_bb >= 25:
+        return 0.80, False
+    if effective_stack_bb >= 18:
+        return 0.70, False
+    return None, True
+
+
+def _compute_classic_3bet_overrides(
+    effective_stack_bb: Optional[float],
+) -> dict:
+    """Compõe `{var: sizings}` para os 5 buckets de 3-bet clássico.
+
+    - eff >= 35 ou None → `{}` (defaults do template ficam).
+    - eff < 18           → `{var: ["ALLIN"]}` para os 5 buckets.
+    - Bandas intermédias → `{var: [round(default * mult, 2), "ALLIN"]}`.
+    """
+    mult, shove_only = _classic_3bet_band(effective_stack_bb)
+    if shove_only:
+        return {var: ["ALLIN"] for var in _CLASSIC_3BET_DEFAULTS}
+    if mult is None:
+        return {}
+    return {
+        var: [round(default * mult, 2), "ALLIN"]
+        for var, default in _CLASSIC_3BET_DEFAULTS.items()
+    }
+
+
 def build_sizings_overrides(
     hh_text: str,
     level_sb: int,
@@ -465,21 +533,23 @@ def build_sizings_overrides(
 
     Acções não-realizadas → sem entry no dict → defaults do template ficam.
     Múltiplas acções no mesmo bucket → primeira ganha (rare em real life).
+
+    Excepção: os 5 buckets de 3-bet clássico (SIZES_3BET_IP / _BB_VS_SB /
+    _BB_VS_OTHER / _SB_VS_BB / _SB_VS_OTHER) **ignoram o sizing real da HH**
+    — recebem sempre o sizing derivado de `_compute_classic_3bet_overrides`
+    (regra do multiplicador por efectiva). Squeezes não estão nesta excepção
+    e continuam a usar o sizing real da HH.
     """
     if not hh_text or not seats:
         return {}
 
+    overrides: dict = {}
     actions = _parse_preflop_actions(hh_text, seats, level_sb, level_bb)
-    if not actions:
-        return {}
-
     opener_position: Optional[str] = None
     n_seated = len(seats)
     keep_open_allin = (
         effective_stack_bb is None or effective_stack_bb <= _OPEN_ALLIN_THRESHOLD_BB
     )
-
-    overrides: dict = {}
 
     for a in actions:
         bc = a["bet_count"]
@@ -497,7 +567,10 @@ def build_sizings_overrides(
 
         if bc == 2:
             var = _bucket_3bet(a, opener_position)
-            if var and var not in overrides:
+            # Squeezes mantêm sizing real da HH. Classic 3-bets ignoram —
+            # a regra do multiplicador aplica-se post-loop.
+            if (var and var.startswith("SIZES_3BET_SQUEEZE_")
+                    and var not in overrides):
                 overrides[var] = [a["to_amount_bb"], "ALLIN"]
             continue
 
@@ -508,6 +581,11 @@ def build_sizings_overrides(
             continue
 
         # bc >= 5: skip (template runtime shove-or-fold).
+
+    # Regra do multiplicador para os 5 buckets de 3-bet clássico.
+    # Aplica-se sempre, independentemente de a HH ter (ou não) um 3-bet
+    # clássico. Vazio se eff >= 35 BB (defaults do template ficam).
+    overrides.update(_compute_classic_3bet_overrides(effective_stack_bb))
 
     return overrides
 
