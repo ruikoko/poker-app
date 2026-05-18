@@ -174,43 +174,64 @@ def set_ci_target_refine(wpos, value=10.0):
 # Calculate. Default do HRC é "Full Tree"; queremos "Selected Subtree" para
 # a 2ª run após Prune Action ter ficado aplicado nas linhas downstream.
 #
-# Coords NÃO calibrados — pendente smoke devagar com Rui no Beelink (peça 2
-# do Bloco 2). Constantes a 0 → `_set_scope_in_popup` faz early-return
-# defensivo. Quando calibrados, todas as 4 ficam não-zero juntas; é o
-# critério usado pela função para distinguir "calibrado" de "placeholder".
-SCOPE_DROPDOWN_X = 0  # TODO Bloco 2 piece 2: calibrar (centro do dropdown
-                     # "Scope" no popup Nash; à esquerda do botão OK)
-SCOPE_DROPDOWN_Y = 0  # TODO Bloco 2 piece 2: calibrar
-SCOPE_OPTION_SELECTED_SUBTREE_X = 0  # TODO Bloco 2 piece 2: calibrar
-                                     # (entrada "Selected Subtree" na lista
-                                     # que abre debaixo do dropdown — 2ª
-                                     # entrada, abaixo de "Full Tree")
-SCOPE_OPTION_SELECTED_SUBTREE_Y = 0  # TODO Bloco 2 piece 2: calibrar
+# Coords como FRACÇÕES do popup rect (`left + int(w * frac_x)` no click
+# time) — mesmo padrão usado pelo `start_calculation` legacy do Baltazar
+# para o CI Target dentro do mesmo popup (`rect.left + int(w * 0.65)`,
+# `rect.top + int(h * 0.51)`, em pt25d). Calibradas em smoke devagar
+# 2026-05-18 com Rui no Beelink contra um popup Nash real (rect 416×214):
+#   - Dropdown abs (944, 439); rel (278, 67); frac (0.668, 0.313).
+#   - "Selected Subtree" opção abs (940, 480); rel (274, 108); frac
+#     (0.659, 0.505) — highlight visualmente confirmado pelo Rui.
+#   - Popup tinha exactamente 2 opções no menu (Full Tree / Selected Subtree).
+#
+# Defensive return continua: se alguma fracção for 0.0 OU se o
+# `popup_rect` for None (caller ainda não detecta o popup — wiring de
+# detecção fica para peça 2 do Bloco 2). Pós-calibração, ambos os
+# defensivos ficam dormant em produção mas regridem-se via tests.
+SCOPE_DROPDOWN_FRAC_X = 0.668
+SCOPE_DROPDOWN_FRAC_Y = 0.313
+SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X = 0.659
+SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y = 0.505
 
 
-def _set_scope_in_popup(wpos):
+def _set_scope_in_popup(popup_rect):
     """Muda o dropdown Scope no popup Nash de "Full Tree" → "Selected Subtree".
 
     Pré-condição: popup Nash já aberto + CI Target preenchido. Pós-condição:
     Scope = "Selected Subtree", pronto a clicar OK.
 
-    Defensiva: se qualquer um dos 4 coords ainda for placeholder (== 0),
-    log WARN e early-return SEM clicar — evita clicks errantes a (0,0) que
-    poderiam disparar foco em coisas inesperadas (race com main UI / outras
-    janelas). Calibração dos 4 acontece junta na peça 2.
+    `popup_rect` é `(left, top, width, height)` do popup Nash; caller é
+    responsável pela detecção do rect (wiring de detecção fica para piece 2
+    do Bloco 2). Coord absoluta de cada click é
+    `(left + int(width * FRAC_X), top + int(height * FRAC_Y))` — mesmo
+    padrão pt25d `start_calculation`.
 
-    Implementação: 2 clicks sequenciais (dropdown abre menu, opção fecha
-    menu) com pequenos sleeps idênticos ao padrão de `set_equity_model`.
+    Defensivos:
+      - Qualquer fracção == 0.0 → coords não-calibrados → early-return WARN.
+      - popup_rect is None → caller ainda não detecta popup → early-return WARN.
+
+    Implementação: 2 clicks sequenciais com `pyautogui.click(abs_x, abs_y)`
+    (NÃO `click_rel`, porque as fracções aplicam-se ao popup_rect, não ao
+    main HRC window — diferente do padrão de `set_equity_model` etc).
     """
-    if (SCOPE_DROPDOWN_X == 0 or SCOPE_DROPDOWN_Y == 0
-            or SCOPE_OPTION_SELECTED_SUBTREE_X == 0
-            or SCOPE_OPTION_SELECTED_SUBTREE_Y == 0):
-        print('   [WARN] _set_scope_in_popup: coords não calibrados '
-              '(Bloco 2 piece 2 pendente) — set ignorado, scope fica Full Tree')
+    if (SCOPE_DROPDOWN_FRAC_X == 0.0 or SCOPE_DROPDOWN_FRAC_Y == 0.0
+            or SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X == 0.0
+            or SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y == 0.0):
+        print('   [WARN] _set_scope_in_popup: fracções não calibradas '
+              '— set ignorado, scope fica Full Tree')
         return
-    click_rel(wpos, SCOPE_DROPDOWN_X, SCOPE_DROPDOWN_Y)
+    if popup_rect is None:
+        print('   [WARN] _set_scope_in_popup: popup_rect não fornecido '
+              '(peça 2 wiring pendente) — set ignorado, scope fica Full Tree')
+        return
+    left, top, width, height = popup_rect
+    dropdown_x = left + int(width * SCOPE_DROPDOWN_FRAC_X)
+    dropdown_y = top + int(height * SCOPE_DROPDOWN_FRAC_Y)
+    pyautogui.click(dropdown_x, dropdown_y)
     time.sleep(0.3)
-    click_rel(wpos, SCOPE_OPTION_SELECTED_SUBTREE_X, SCOPE_OPTION_SELECTED_SUBTREE_Y)
+    option_x = left + int(width * SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X)
+    option_y = top + int(height * SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y)
+    pyautogui.click(option_x, option_y)
     time.sleep(0.3)
     print('   Scope: Selected Subtree')
 
@@ -245,17 +266,25 @@ def start_calculation_selected_subtree(wpos, ci_target):
     `wpos` é o win_pos do main HRC window (mesmo objecto que
     `start_calculation` recebe via globals). `ci_target` é o CI a usar na
     2ª run (default product: 10.0; ver `set_ci_target_refine`).
+
+    Popup rect detection é trabalho de piece 2 (passo 1 inclui `find_window`
+    sobre o popup Nash após click Calculate). Piece 1 com coords:
+    `_set_scope_in_popup` é invocada com `popup_rect=None` daqui — faz
+    early-return defensivo, mas os tests passam um `popup_rect` real
+    directamente à função para validar o flow de clicks. Quando piece 2
+    detectar o popup, passamos o rect detectado em vez de None.
     """
-    # TODO Bloco 2 piece 2: implementar passos 1, 2, 4.
-    # _click_calculate_button(wpos)                  # passo 1
-    # _wait_for_nash_popup()                          # passo 1 (timeout +
+    # TODO Bloco 2 piece 2: implementar passos 1, 2, 4 + popup detection.
+    # _click_calculate_button(wpos)                  # passo 1a
+    # popup_rect = _wait_for_nash_popup()             # passo 1b (timeout +
     #                                                 # rect detection)
-    # _fill_ci_target_in_popup(wpos, ci_target)       # passo 2
-    _set_scope_in_popup(wpos)                          # passo 3 — piece 1
-    # _click_ok_in_popup(wpos)                         # passo 4
+    # _fill_ci_target_in_popup(popup_rect, ci_target) # passo 2
+    popup_rect = None  # ← piece 2 substitui pelo rect detectado
+    _set_scope_in_popup(popup_rect)                     # passo 3 — piece 1
+    # _click_ok_in_popup(popup_rect)                   # passo 4
 
     print(f'   [Bloco 2 piece 1] start_calculation_selected_subtree(ci={ci_target}) — '
-          'scope set only; click flow pending piece 2')
+          'scope set only; popup detection + click flow pending piece 2')
 
 
 # pt25e Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): stub para Prune Action
