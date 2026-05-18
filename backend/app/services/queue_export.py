@@ -559,6 +559,59 @@ def _derive_equity_model(hm3_tags, discord_tags) -> str:
     return "multi_table_icm"
 
 
+# Mapping equity_model → stage para o watcher (pt25e Bloco 2 piece 2).
+# Stage FT bypassa a página MTT Stacks no wizard HRC; MTT entra nela.
+_STAGE_BY_EQUITY_MODEL = {
+    "malmuth_harville_icm": "FT",
+    "multi_table_icm": "MTT",
+}
+
+# Default CI Target da 1ª run (semântica legacy do `setup_hand`).
+_DEFAULT_CI_TARGET_FIRST_RUN = 5.0
+
+
+def _derive_stage_from_equity_model(equity_model) -> str:
+    """`malmuth_harville_icm` → `FT`; `multi_table_icm` → `MTT`; outros → `FT`
+    (defensive default, mesmo que `setup_hand` legacy)."""
+    return _STAGE_BY_EQUITY_MODEL.get(equity_model, "FT")
+
+
+def _build_hand_meta(
+    hand: dict,
+    hh_text: str,
+    equity_model,
+    payout_blob,
+    target_node_offset,
+) -> dict:
+    """Compõe o `meta.json` per-hand: 4 legacy fields + target_node_offset.
+
+    Legacy schema (consumido pelo `setup_hand` do watcher antes de pt25e
+    Bloco 2):
+      - `stage`           : "FT" ou "MTT" (deriva de equity_model).
+      - `players_left`    : int | None (lookup em lobby_processing_log).
+      - `total_chips`     : int | None (legacy: input manual do Rui na
+                            página MTT Stacks; auto-derivação per-hand
+                            não-fidedigna → None).
+      - `ci`              : float (default 5.0, CI Target da 1ª run).
+
+    Extensão pt25e Bloco 2 piece 2:
+      - `target_node_offset`: int | None — nº de seta-para-baixo presses
+                              que o watcher faz na Strategy Table HRC após
+                              a 1ª run, para pousar na linha do raiser
+                              real antes da 2ª run em Selected Subtree.
+
+    Defensivo: campos individuais que falham na derivação caem para None
+    (graceful — `setup_hand` legacy tem fallbacks para cada um).
+    """
+    return {
+        "stage": _derive_stage_from_equity_model(equity_model),
+        "players_left": _resolve_players_left(hand, payout_blob),
+        "total_chips": None,
+        "ci": _DEFAULT_CI_TARGET_FIRST_RUN,
+        "target_node_offset": target_node_offset,
+    }
+
+
 def _build_watcher_hints(hand: dict, hh_text: str) -> dict:
     """pt23 fix A/B/C — 3 hints que o watcher patched lê em setup_hand.
 
@@ -773,6 +826,28 @@ def build_queue_zip(
                 aggressor_real_action = None
             hints["aggressor_real_action"] = aggressor_real_action
 
+            # pt25e Bloco 2 piece 2: target_node_offset para o watcher
+            # premer seta-para-baixo até pousar na linha do raiser real
+            # antes da 2ª run em Selected Subtree.
+            target_node_offset = None
+            if aggressor_real_action is not None and _bb is not None:
+                try:
+                    from app.services.hrc_node_offset import (
+                        compute_target_node_offset, derive_aggressor_stack_bb,
+                    )
+                    raiser_stack_bb = derive_aggressor_stack_bb(hh_text, _bb)
+                    target_node_offset = compute_target_node_offset(
+                        aggressor_real_action,
+                        hints.get("max_players"),
+                        script_overrides,
+                        raiser_stack_bb,
+                    )
+                except Exception:
+                    logger.exception(
+                        "compute_target_node_offset falhou hand_id=%s", hand_id,
+                    )
+                    target_node_offset = None
+
             if payout_blob is not None:
                 merged: dict = dict(payout_blob) if isinstance(payout_blob, dict) else {"_blob": payout_blob}
                 merged.update(hints)
@@ -786,6 +861,20 @@ def build_queue_zip(
                     json.dumps(hints, indent=2, ensure_ascii=False),
                 )
 
+            # pt25e Bloco 2 piece 2: meta.json passa a ser produzido pelo
+            # backend (em vez de input manual do Rui). 4 legacy fields
+            # preservados + target_node_offset novo.
+            hand_meta = _build_hand_meta(
+                h, hh_text,
+                equity_model=hints.get("equity_model"),
+                payout_blob=payout_blob,
+                target_node_offset=target_node_offset,
+            )
+            zf.writestr(
+                f"{hand_id}/meta.json",
+                json.dumps(hand_meta, indent=2, ensure_ascii=False),
+            )
+
             hands_included.append({
                 "hand_id": hand_id,
                 "tournament_number": tnum,
@@ -797,6 +886,8 @@ def build_queue_zip(
                 "effective_stack_bb": effective_stack_bb,
                 "aggressor_position": derive_real_aggressor_position(hh_text),
                 "aggressor_real_action": aggressor_real_action,
+                "target_node_offset": target_node_offset,
+                "hand_meta": hand_meta,
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"
                 ),

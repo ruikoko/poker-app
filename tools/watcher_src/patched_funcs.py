@@ -194,6 +194,131 @@ SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X = 0.659
 SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y = 0.505
 
 
+# pt25e Bloco 2 piece 2 — CI Target dentro do popup Nash.
+# Fracções REAPROVEITADAS do `start_calculation` legacy (Baltazar pt25d):
+# o comentário do source patched_funcs.py (Bug F) regista
+# `rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)` como a posição
+# do campo CI Target dentro do mesmo popup. Não precisa de smoke novo.
+CI_TARGET_POPUP_FRAC_X = 0.65
+CI_TARGET_POPUP_FRAC_Y = 0.51
+
+
+# pt25e Bloco 2 piece 2 — Botão verde Calculate no main UI HRC.
+# NÃO há referência no source patched_funcs.py nem no comentário do Bug F.
+# `start_calculation` legacy chama-o internamente e o source perdeu-se.
+# Placeholder a 0 + early-return defensivo até smoke devagar com Rui.
+CALCULATE_BUTTON_X = 0  # TODO smoke piece 2: calibrar (botão verde Calculate
+                       # no main UI HRC, à direita do painel da Strategy
+                       # Table; visualmente o único botão "go" verde grande)
+CALCULATE_BUTTON_Y = 0  # TODO smoke piece 2: calibrar
+
+
+# pt25e Bloco 2 piece 2 — heurística de título para identificar a Nash
+# dialog. Set vazio → função tenta todos os hints comuns; smoke deve
+# refinar.
+_NASH_POPUP_TITLE_HINTS = ("Nash", "Calculate")
+_NASH_POPUP_WAIT_TIMEOUT_S = 5.0
+_NASH_POPUP_WAIT_POLL_S = 0.2
+
+
+def _wait_for_nash_popup(timeout=_NASH_POPUP_WAIT_TIMEOUT_S,
+                         poll_interval=_NASH_POPUP_WAIT_POLL_S):
+    """Polls pela janela do popup Nash (separado do main HRC window) e
+    devolve `(left, top, width, height)` ou `None` em timeout.
+
+    Estratégia: substring case-insensitive contra `_NASH_POPUP_TITLE_HINTS`
+    sobre os títulos de janelas top-level via `pyautogui.getAllWindows()`.
+    Em caso de match com width × height válido (popup é dialog modal, não
+    minimizada), devolve o rect. Caso contrário polla a cada
+    `poll_interval` segundos até `timeout`.
+
+    Robustez:
+      - Janelas com title vazio ignoradas (compositor, system).
+      - Janelas com width <= 0 ou height <= 0 ignoradas (minimizadas).
+      - Falhas ao chamar getAllWindows → log WARN e tenta de novo na
+        próxima iteração (pode acontecer em race condition de janela a
+        abrir).
+
+    Falsos positivos teóricos: outras dialogs HRC com "Nash" ou
+    "Calculate" no título. Em prática, no flow pós-1ª-run, o único popup
+    aberto é o Nash dialog que aparece ao clicar Calculate.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            windows = pyautogui.getAllWindows()
+        except Exception as _e:
+            print(f'   [WARN] _wait_for_nash_popup: getAllWindows falhou ({_e}); retry')
+            time.sleep(poll_interval)
+            continue
+        for w in windows:
+            title = (getattr(w, 'title', '') or '').strip()
+            if not title:
+                continue
+            width = getattr(w, 'width', 0) or 0
+            height = getattr(w, 'height', 0) or 0
+            if width <= 0 or height <= 0:
+                continue
+            title_lower = title.lower()
+            for hint in _NASH_POPUP_TITLE_HINTS:
+                if hint.lower() in title_lower:
+                    left = getattr(w, 'left', 0) or 0
+                    top = getattr(w, 'top', 0) or 0
+                    print(f'   _wait_for_nash_popup: matched title={title!r} '
+                          f'rect=({left},{top},{width},{height})')
+                    return (left, top, width, height)
+        time.sleep(poll_interval)
+    print(f'   [WARN] _wait_for_nash_popup: timeout {timeout}s — '
+          'popup não detectado')
+    return None
+
+
+def _click_calculate_button(wpos):
+    """Click no botão verde Calculate no main UI HRC. Defensive se coords
+    a 0 (placeholder até smoke piece 2)."""
+    if CALCULATE_BUTTON_X == 0 and CALCULATE_BUTTON_Y == 0:
+        print('   [WARN] _click_calculate_button: coords não calibrados '
+              '(smoke piece 2 pendente) — click ignorado')
+        return
+    click_rel(wpos, CALCULATE_BUTTON_X, CALCULATE_BUTTON_Y)
+    time.sleep(0.3)
+
+
+def _fill_ci_target_in_popup(popup_rect, ci_target):
+    """Preenche CI Target dentro do popup Nash. Fracções reaproveitadas
+    do `start_calculation` legacy (Baltazar pt25d) — não precisa de smoke.
+
+    Defensive: `popup_rect=None` → early-return.
+    """
+    if popup_rect is None:
+        print('   [WARN] _fill_ci_target_in_popup: popup_rect ausente — fill ignorado')
+        return
+    left, top, width, height = popup_rect
+    abs_x = left + int(width * CI_TARGET_POPUP_FRAC_X)
+    abs_y = top + int(height * CI_TARGET_POPUP_FRAC_Y)
+    pyautogui.click(abs_x, abs_y)
+    time.sleep(0.3)
+    pyautogui.hotkey('ctrl', 'a')
+    time.sleep(0.1)
+    pyperclip.copy(str(float(ci_target)))
+    pyautogui.hotkey('ctrl', 'v')
+    time.sleep(0.2)
+    print(f'   CI Target (popup): {ci_target}')
+
+
+def _click_ok_in_popup(popup_rect):
+    """Confirma o popup Nash. Usa Enter — convenção universal Qt para
+    dialog modal default-button=OK. Evita calibração de coord do botão
+    OK em específico.
+
+    `popup_rect` aceito por consistência de assinatura com o resto do
+    flow; não usado (Enter é global).
+    """
+    pyautogui.press('enter')
+    time.sleep(0.3)
+    print('   OK (popup Nash)')
+
+
 def _set_scope_in_popup(popup_rect):
     """Muda o dropdown Scope no popup Nash de "Full Tree" → "Selected Subtree".
 
@@ -257,34 +382,27 @@ def start_calculation_selected_subtree(wpos, ci_target):
       3. _set_scope_in_popup(wpos)                 [piece 1 — esta função]
       4. Click OK / Enter.                          [piece 2 — calibração]
 
-    Piece 1 (este commit): apenas o passo 3 tem implementação concreta — e
-    mesmo essa é defensive-noop até peça 2 calibrar coords. Passos 1/2/4
-    ficam comentados como TODO; quando calibrados, o body fica completo e
-    `start_calculation_selected_subtree` substitui a 2ª chamada a
-    `start_calculation` em `setup_hand` (ver bloco STUBS pt25e Bloco 2).
-
     `wpos` é o win_pos do main HRC window (mesmo objecto que
     `start_calculation` recebe via globals). `ci_target` é o CI a usar na
-    2ª run (default product: 10.0; ver `set_ci_target_refine`).
+    2ª run (default product: 10.0).
 
-    Popup rect detection é trabalho de piece 2 (passo 1 inclui `find_window`
-    sobre o popup Nash após click Calculate). Piece 1 com coords:
-    `_set_scope_in_popup` é invocada com `popup_rect=None` daqui — faz
-    early-return defensivo, mas os tests passam um `popup_rect` real
-    directamente à função para validar o flow de clicks. Quando piece 2
-    detectar o popup, passamos o rect detectado em vez de None.
+    Defensive em cada passo: se `_click_calculate_button` não tem coords
+    (placeholder), `_wait_for_nash_popup` devolve None por timeout, e os
+    helpers downstream (fill CI / scope / OK) fazem early-return. O flow
+    inteiro degrada para no-op com WARN logs em vez de cliques errantes.
     """
-    # TODO Bloco 2 piece 2: implementar passos 1, 2, 4 + popup detection.
-    # _click_calculate_button(wpos)                  # passo 1a
-    # popup_rect = _wait_for_nash_popup()             # passo 1b (timeout +
-    #                                                 # rect detection)
-    # _fill_ci_target_in_popup(popup_rect, ci_target) # passo 2
-    popup_rect = None  # ← piece 2 substitui pelo rect detectado
-    _set_scope_in_popup(popup_rect)                     # passo 3 — piece 1
-    # _click_ok_in_popup(popup_rect)                   # passo 4
+    _click_calculate_button(wpos)                         # passo 1a
+    popup_rect = _wait_for_nash_popup()                   # passo 1b
+    if popup_rect is None:
+        print(f'   [WARN] start_calculation_selected_subtree(ci={ci_target}): '
+              'popup não detectado; flow degrada para no-op')
+        return
+    _fill_ci_target_in_popup(popup_rect, ci_target)       # passo 2
+    _set_scope_in_popup(popup_rect)                        # passo 3
+    _click_ok_in_popup(popup_rect)                         # passo 4
 
-    print(f'   [Bloco 2 piece 1] start_calculation_selected_subtree(ci={ci_target}) — '
-          'scope set only; popup detection + click flow pending piece 2')
+    print(f'   start_calculation_selected_subtree(ci={ci_target}) — '
+          '2ª run em Selected Subtree disparada')
 
 
 # pt25e Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): stub para Prune Action
@@ -308,6 +426,67 @@ def prune_action_on_line(wpos, line_coords):
     """
     # TODO pt25e Bloco 2: implementar (right-click + select "Prune Action")
     pass
+
+
+# pt25e Bloco 2 piece 2 (#WATCHER-BUG-G-NAV-TO-RAISER-NODE): foco na
+# Strategy Table HRC para receber as seta-down presses. Click numa coord
+# neutra DENTRO da tabela (qualquer linha) garante o foco; ESC-style
+# pyautogui.click no main wpos+offset assumido seguro.
+#
+# Coord escolhida: (50, 200) relativos ao main HRC window — área da
+# 1ª linha da Strategy Table, à esquerda do scroll bar e longe dos botões.
+# Não muda o cursor da Strategy Table (a 1ª linha já está seleccionada
+# por default após 1ª run; click sobre ela é no-op de seleção e dá foco
+# ao widget). Coord pode precisar refinement em smoke piece 2 — early-
+# return defensivo se algum dia esta heurística falhar.
+STRATEGY_TABLE_FOCUS_X = 50
+STRATEGY_TABLE_FOCUS_Y = 200
+
+
+def _focus_strategy_table(wpos):
+    """Click na área da Strategy Table para garantir foco do keyboard input.
+    Cursor mantém-se na 1ª linha (default pós-1ª-run)."""
+    click_rel(wpos, STRATEGY_TABLE_FOCUS_X, STRATEGY_TABLE_FOCUS_Y)
+    time.sleep(0.2)
+
+
+def navigate_to_target_node(wpos, target_node_offset):
+    """pt25e Bloco 2 piece 2 — preme seta-para-baixo `target_node_offset`
+    vezes para mover o cursor da Strategy Table HRC do default (1ª linha)
+    até à linha do raiser real.
+
+    `target_node_offset` é o campo `meta.json.target_node_offset` calculado
+    pelo backend (`hrc_node_offset.compute_target_node_offset`).
+
+    Defensive:
+      - `None` ou `0` → skip (cursor fica na 1ª linha; sem foco set
+        para evitar interacções desnecessárias).
+      - Inteiro negativo → log WARN, skip.
+      - Inteiro > 100 → log WARN, skip (sanity; tabela com 100+ linhas
+        é improvável e indica bug no compute).
+
+    Comportamento empírico da Strategy Table (validado em smoke):
+      - Cursor por defeito na 1ª linha após 1ª run.
+      - Seta-baixo move 1 linha (não cycles no fim).
+      - Pequeno delay entre presses evita key drops em ambientes
+        com input throttling.
+    """
+    if target_node_offset is None or target_node_offset == 0:
+        print('   navigate_to_target_node: offset is None/0 — skip')
+        return
+    if not isinstance(target_node_offset, int):
+        print(f'   [WARN] navigate_to_target_node: offset não-int '
+              f'({type(target_node_offset).__name__}) — skip')
+        return
+    if target_node_offset < 0 or target_node_offset > 100:
+        print(f'   [WARN] navigate_to_target_node: offset {target_node_offset} '
+              'fora de [1, 100] — skip')
+        return
+    _focus_strategy_table(wpos)
+    for _ in range(target_node_offset):
+        pyautogui.press('down')
+        time.sleep(0.05)
+    print(f'   navigate_to_target_node: {target_node_offset} ↓ presses')
 
 
 def finalize_after_second_run(wpos, export_zip):
@@ -496,51 +675,39 @@ def setup_hand(hand_name, hand_path):
     os.makedirs(exports_dir, exist_ok=True)
     export_zip = os.path.join(exports_dir, hand_name + '.zip')
 
-    # === pt25e Bloco 2 STUBS — Bug G + J + Bug F refine + 2ª run ===
-    # Sequência completa após 1ª run, pendente de calibração de coords +
-    # wiring em Bloco 2. Em Bloco 1 o setup_hand para aqui (não chama
-    # finalize_after_second_run), por design — watcher fica pendurado em
-    # `wait_for_export` se alguém arrancar este source recompilado. O
-    # `.exe` em produção (Beelink) continua pt25d.
+    # === pt25e Bloco 2 piece 2 — flow Selected Subtree end-to-end ===
+    # Sequência completa após a 1ª run:
+    #   1. (Bug J) Prune Action linha-a-linha downstream — pendente
+    #      calibração de coords do context menu (smoke devagar futura).
+    #      Por agora `prune_action_on_line` é stub (pass); chamada
+    #      comentada até calibração.
+    #   2. Navegar Strategy Table até linha do raiser real via seta-down
+    #      × `target_node_offset` (calculado pelo backend e injectado em
+    #      meta.json) — `navigate_to_target_node`.
+    #   3. 2ª run em Selected Subtree — `start_calculation_selected_subtree`
+    #      abre o popup Nash, fill CI, set Scope, click OK.
+    #   4. (Bug H) Finalize → export zip.
     #
-    # Bloco 2 piece 1 (este commit): `_set_scope_in_popup` +
-    # `start_calculation_selected_subtree` já existem como source (defensive,
-    # placeholder coords). Wiring abaixo ainda comentado — só fica activo
-    # quando piece 2 calibrar coords e implementar passos 1/2/4 do flow
-    # in-popup. Trocas relativas a Bloco 1 original:
-    #   - `_set_scope_selected_subtree` (nome antigo, planeado pré-piece-1
-    #     quando Scope se assumia no main UI) → REMOVIDO; o Scope vive
-    #     dentro do popup Nash e é tratado por `_set_scope_in_popup`
-    #     chamado de dentro de `start_calculation_selected_subtree`.
-    #   - `set_ci_target_refine(wpos, value=10.0)` → DEPRECATED (set CI
-    #     passa a viver dentro do popup, gerido por
-    #     `start_calculation_selected_subtree`).
-    #   - 2ª chamada `start_calculation(10.0)` → trocada por
-    #     `start_calculation_selected_subtree(wpos, 10.0)`.
-    #
-    # aggressor_real_action = _payouts.get('aggressor_real_action')
-    # if aggressor_real_action is not None:
-    #     # Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): Prune Action
-    #     # manual em cada linha downstream da tree. DOWNSTREAM_POSITIONS
-    #     # vem do script.js injectado pelo backend (pt25d) — watcher
-    #     # itera a tree visual e aplica Prune Action em cada.
-    #     for line_coords in _enumerate_downstream_lines(wpos):
-    #         prune_action_on_line(wpos, line_coords)
-    #
-    #     # Bug G passo (Bloco 2 piece 2): seleccionar a linha do sizing
-    #     # real do raiser inicial na tree visual. `aggressor_real_action`
-    #     # (pt25e backend) diz qual sizing clicar — e.g.,
-    #     # {type:"raise", size_bb: 2.0} → clicar linha do open 2bb na tree.
-    #     _select_subtree_root_by_action(wpos, aggressor_real_action)
-    #
-    #     # 2ª run em Selected Subtree. O CI refine + scope set acontecem
-    #     # ambos dentro do popup que esta função abre.
-    #     print('   A calcular (2ª run, Selected Subtree)...')
-    #     start_calculation_selected_subtree(wpos, 10.0)
-    #
-    # # Bug H: finalize APÓS 2ª run, não a meio do setup_hand.
-    # finalize_after_second_run(wpos, export_zip)
-    # === FIM STUBS Bloco 2 ===
+    # Defensive completo: cada passo tem fallback se algum coord ainda
+    # estiver placeholder ou se popup detection falhar. O watcher degrada
+    # para no-op com WARN logs em vez de cliques errantes.
+    aggressor_real_action = _payouts.get('aggressor_real_action')
+    target_node_offset = hand_meta.get('target_node_offset')
+    if aggressor_real_action is not None:
+        # Bug J — Prune Action downstream. CALIBRAÇÃO PENDENTE → comentado.
+        # for line_coords in _enumerate_downstream_lines(wpos):
+        #     prune_action_on_line(wpos, line_coords)
+
+        # Navegação até linha do raiser real (#WATCHER-BUG-G-NAV).
+        navigate_to_target_node(wpos, target_node_offset)
+
+        # 2ª run em Selected Subtree (popup Nash gere fill CI + scope + OK).
+        print('   A calcular (2ª run, Selected Subtree)...')
+        start_calculation_selected_subtree(wpos, 10.0)
+
+    # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor).
+    finalize_after_second_run(wpos, export_zip)
+    # === FIM Bloco 2 piece 2 ===
 
     print(f'   [QUEUED] {hand_name} → {os.path.basename(export_zip)} '
           f'(Bloco 1 — finalize Bloco 2)')

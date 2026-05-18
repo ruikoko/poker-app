@@ -14,7 +14,9 @@ Tests validam o flow real (sem cair no defensive return) usando o
 popup_rect literal capturado nessa smoke.
 """
 import sys
+import time as _real_time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -46,8 +48,12 @@ def pf():
     _pf.click_rel = MagicMock(name="click_rel")
     _pf.pyautogui = MagicMock(name="pyautogui")
     _pf.pyperclip = MagicMock(name="pyperclip")
-    # Anular sleeps reais — os bodies usam time.sleep e queremos suite fast.
-    _pf.time = MagicMock(name="time")
+    # Manter `time.time()` real (necessário para timeout loops em
+    # `_wait_for_nash_popup`); apenas `time.sleep` é no-op (suite rápida).
+    _pf.time = SimpleNamespace(
+        time=_real_time.time,
+        sleep=MagicMock(name="time.sleep"),
+    )
     yield _pf
 
 
@@ -160,30 +166,218 @@ def test_set_scope_in_popup_logs_success_after_clicks(pf, capsys):
 
 # ── start_calculation_selected_subtree (wiring) ─────────────────────────
 
-def test_start_calculation_selected_subtree_invokes_set_scope_in_popup(pf):
-    """Wiring piece 1: a função paralela invoca `_set_scope_in_popup` uma
-    vez. Em piece 1, `popup_rect` passado é None (peça 2 substitui pelo rect
-    detectado)."""
-    pf._set_scope_in_popup = MagicMock(name="_set_scope_in_popup")
+def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
+    """Piece 2 end-to-end: com popup detectado, todos os passos disparam na
+    ordem: Calculate → wait popup → fill CI → set scope → OK Enter."""
+    # Mock _wait_for_nash_popup to return a fake rect (popup detected).
+    fake_rect = (666, 372, 416, 214)
+    pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
+    # Calibrar Calculate button (assume smoke já corrido).
+    pf.CALCULATE_BUTTON_X = 700
+    pf.CALCULATE_BUTTON_Y = 600
     wpos = (10, 10, 1024, 768)
 
     pf.start_calculation_selected_subtree(wpos, ci_target=10.0)
 
-    pf._set_scope_in_popup.assert_called_once_with(None)
+    # Calculate button clicked via click_rel.
+    pf.click_rel.assert_called_with(wpos, 700, 600)
+    # Popup detection invoked.
+    pf._wait_for_nash_popup.assert_called_once()
+    # Pyautogui clicks: 1 fill CI + 2 scope = 3 clicks total.
+    assert pf.pyautogui.click.call_count == 3
+    # Enter pressed for OK.
+    pf.pyautogui.press.assert_any_call('enter')
 
 
-def test_start_calculation_selected_subtree_does_not_call_click_rel_or_pyautogui(pf):
-    """Piece 1 com popup_rect=None: a função paralela invoca o helper, que
-    faz defensive return. Nenhum click chega ao pyautogui."""
+def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, capsys):
+    """Popup detection devolve None (timeout) → early-return WARN, sem
+    fill CI / scope / OK."""
+    pf._wait_for_nash_popup = MagicMock(return_value=None)
+    pf.CALCULATE_BUTTON_X = 700
+    pf.CALCULATE_BUTTON_Y = 600
+
     pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
+
+    # Calculate foi clicado mas nada mais.
+    pf.click_rel.assert_called_once()  # apenas Calculate
     pf.pyautogui.click.assert_not_called()
-    pf.click_rel.assert_not_called()
-
-
-def test_start_calculation_selected_subtree_logs_piece1_marker(pf, capsys):
-    """Print final confirma que estamos no estado piece 1 (sem o click flow
-    full do popup)."""
-    pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
+    pf.pyautogui.press.assert_not_called()
     out = capsys.readouterr().out
-    assert "Bloco 2 piece 1" in out
-    assert "scope set only" in out
+    assert "popup não detectado" in out
+
+
+def test_start_calculation_selected_subtree_skips_calculate_when_placeholder(pf, capsys):
+    """Calculate button coord ainda em 0 (placeholder smoke) → WARN, sem
+    click_rel. Popup detection ainda corre mas devolve None por timeout."""
+    pf._wait_for_nash_popup = MagicMock(return_value=None)
+    # Constants ficam a 0 (default do source pós-piece 2)
+    assert pf.CALCULATE_BUTTON_X == 0
+    assert pf.CALCULATE_BUTTON_Y == 0
+
+    pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
+
+    pf.click_rel.assert_not_called()  # placeholder → defensive
+    out = capsys.readouterr().out
+    assert "_click_calculate_button" in out
+    assert "não calibrados" in out
+
+
+# ── _wait_for_nash_popup ────────────────────────────────────────────────
+
+def test_wait_for_nash_popup_returns_rect_when_title_matches(pf):
+    """Janela com 'Nash' no título e dimensões válidas → devolve rect."""
+    fake_win = MagicMock()
+    fake_win.title = "Nash Equilibrium"
+    fake_win.left = 666
+    fake_win.top = 372
+    fake_win.width = 416
+    fake_win.height = 214
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[fake_win])
+
+    rect = pf._wait_for_nash_popup(timeout=0.5, poll_interval=0.05)
+    assert rect == (666, 372, 416, 214)
+
+
+def test_wait_for_nash_popup_returns_none_on_timeout(pf):
+    """Nenhuma janela com hint match → None após timeout."""
+    other_win = MagicMock()
+    other_win.title = "Some Other Window"
+    other_win.left = 0
+    other_win.top = 0
+    other_win.width = 800
+    other_win.height = 600
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[other_win])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect is None
+
+
+def test_wait_for_nash_popup_skips_minimized_windows(pf):
+    """Janela com width/height 0 (minimizada) é ignorada mesmo com title
+    match."""
+    minimized = MagicMock()
+    minimized.title = "Nash"
+    minimized.left = 0
+    minimized.top = 0
+    minimized.width = 0
+    minimized.height = 0
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[minimized])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect is None
+
+
+def test_wait_for_nash_popup_skips_empty_title(pf):
+    """Janela sem título (compositor/system) é ignorada."""
+    empty_title = MagicMock()
+    empty_title.title = ""
+    empty_title.left = 100
+    empty_title.top = 100
+    empty_title.width = 500
+    empty_title.height = 300
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[empty_title])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect is None
+
+
+def test_wait_for_nash_popup_calculate_hint_also_matches(pf):
+    """Hint alternativa: title contendo 'Calculate'."""
+    win = MagicMock()
+    win.title = "Calculate Strategy"
+    win.left = 100
+    win.top = 200
+    win.width = 400
+    win.height = 250
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[win])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect == (100, 200, 400, 250)
+
+
+def test_wait_for_nash_popup_survives_getAllWindows_exception(pf):
+    """`getAllWindows` raises (race condition) → log + retry; eventual None."""
+    pf.pyautogui.getAllWindows = MagicMock(side_effect=RuntimeError("race"))
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect is None
+
+
+# ── _fill_ci_target_in_popup ────────────────────────────────────────────
+
+def test_fill_ci_target_in_popup_clicks_then_pastes_value(pf):
+    """popup_rect=(666,372,416,214) + fracções (0.65, 0.51) → click em
+    (666+270, 372+109)=(936, 481). Depois ctrl+a + paste + ctrl+v."""
+    pf._fill_ci_target_in_popup(popup_rect=(666, 372, 416, 214), ci_target=10.0)
+
+    # 1 click + 2 hotkeys (ctrl+a, ctrl+v) + 1 pyperclip.copy
+    assert pf.pyautogui.click.call_count == 1
+    assert pf.pyautogui.hotkey.call_args_list == [
+        call('ctrl', 'a'), call('ctrl', 'v'),
+    ]
+    pf.pyperclip.copy.assert_called_once_with("10.0")
+
+
+def test_fill_ci_target_in_popup_defensive_on_none_rect(pf, capsys):
+    pf._fill_ci_target_in_popup(popup_rect=None, ci_target=10.0)
+    pf.pyautogui.click.assert_not_called()
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+
+
+# ── _click_ok_in_popup ─────────────────────────────────────────────────
+
+def test_click_ok_in_popup_presses_enter(pf):
+    """OK do popup Nash via Enter (convenção universal Qt default-button)."""
+    pf._click_ok_in_popup(popup_rect=(666, 372, 416, 214))
+    pf.pyautogui.press.assert_called_once_with('enter')
+
+
+# ── navigate_to_target_node (B1) ───────────────────────────────────────
+
+def test_navigate_to_target_node_none_skips(pf, capsys):
+    """`target_node_offset=None` → 0 presses, log skip."""
+    pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=None)
+    pf.pyautogui.press.assert_not_called()
+    pf.click_rel.assert_not_called()  # sem focus click
+    assert "skip" in capsys.readouterr().out.lower()
+
+
+def test_navigate_to_target_node_zero_skips(pf):
+    """`target_node_offset=0` → 0 presses (cursor já na 1ª linha)."""
+    pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=0)
+    pf.pyautogui.press.assert_not_called()
+
+
+def test_navigate_to_target_node_presses_down_N_times(pf):
+    """`target_node_offset=5` → 5 ↓ presses + 1 focus click."""
+    pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=5)
+    pf.click_rel.assert_called_once()  # focus click
+    assert pf.pyautogui.press.call_count == 5
+    for call_args in pf.pyautogui.press.call_args_list:
+        assert call_args == call('down')
+
+
+def test_navigate_to_target_node_negative_skips_with_warn(pf, capsys):
+    """Negativo é bug no compute → log WARN, skip."""
+    pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=-3)
+    pf.pyautogui.press.assert_not_called()
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+
+
+def test_navigate_to_target_node_huge_offset_skips(pf, capsys):
+    """Sanity: offset > 100 é improvável e indica bug → skip."""
+    pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=150)
+    pf.pyautogui.press.assert_not_called()
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+
+
+def test_navigate_to_target_node_non_int_skips_with_warn(pf, capsys):
+    """Tipo errado (e.g., float) → WARN, skip. (bool é subclass de int em
+    Python — esses passam silenciosamente, mas o backend nunca devolve
+    bool.)"""
+    pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=3.5)
+    pf.pyautogui.press.assert_not_called()
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
