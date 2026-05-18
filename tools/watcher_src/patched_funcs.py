@@ -140,6 +140,13 @@ def set_ci_target_initial(wpos, value=5.0):
     permitir 2 sets distintos (initial pre-1ª run, refine pre-2ª run após
     Prune Action manual + Scope=Selected Subtree). Ver Bug F em
     `docs/TECH_DEBTS_INVENTARIO.md`.
+
+    DEPRECATED (Bloco 2 piece 1): o popup Nash gere o CI internamente
+    (`start_calculation` original do Baltazar faz set CI relativo ao rect
+    do popup). Esta função era um experimento de mover o set para o main UI
+    antes de Calculate. Não calibrada (coords = 0). Mantida no source
+    apenas para preservar a slot do marshal swap até peça 2 confirmar
+    in-popup CI suficiente; remoção planeada após validação.
     """
     _set_ci_target_common(wpos, value, 'initial')
 
@@ -153,8 +160,102 @@ def set_ci_target_refine(wpos, value=10.0):
 
     Não é chamado em Bloco 1 — fica disponível para a wiring de Bloco 2
     (ver stubs em `setup_hand`).
+
+    DEPRECATED (Bloco 2 piece 1): mesma razão que `set_ci_target_initial`.
+    O refinamento de CI para a 2ª run deve passar a ser feito dentro do
+    popup Nash pela própria `start_calculation_selected_subtree`. Mantida
+    até peça 2 confirmar.
     """
     _set_ci_target_common(wpos, value, 'refine')
+
+
+# pt25e Bloco 2 piece 1 (#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE):
+# Dropdown "Scope" dentro do popup Nash que abre quando o watcher clica
+# Calculate. Default do HRC é "Full Tree"; queremos "Selected Subtree" para
+# a 2ª run após Prune Action ter ficado aplicado nas linhas downstream.
+#
+# Coords NÃO calibrados — pendente smoke devagar com Rui no Beelink (peça 2
+# do Bloco 2). Constantes a 0 → `_set_scope_in_popup` faz early-return
+# defensivo. Quando calibrados, todas as 4 ficam não-zero juntas; é o
+# critério usado pela função para distinguir "calibrado" de "placeholder".
+SCOPE_DROPDOWN_X = 0  # TODO Bloco 2 piece 2: calibrar (centro do dropdown
+                     # "Scope" no popup Nash; à esquerda do botão OK)
+SCOPE_DROPDOWN_Y = 0  # TODO Bloco 2 piece 2: calibrar
+SCOPE_OPTION_SELECTED_SUBTREE_X = 0  # TODO Bloco 2 piece 2: calibrar
+                                     # (entrada "Selected Subtree" na lista
+                                     # que abre debaixo do dropdown — 2ª
+                                     # entrada, abaixo de "Full Tree")
+SCOPE_OPTION_SELECTED_SUBTREE_Y = 0  # TODO Bloco 2 piece 2: calibrar
+
+
+def _set_scope_in_popup(wpos):
+    """Muda o dropdown Scope no popup Nash de "Full Tree" → "Selected Subtree".
+
+    Pré-condição: popup Nash já aberto + CI Target preenchido. Pós-condição:
+    Scope = "Selected Subtree", pronto a clicar OK.
+
+    Defensiva: se qualquer um dos 4 coords ainda for placeholder (== 0),
+    log WARN e early-return SEM clicar — evita clicks errantes a (0,0) que
+    poderiam disparar foco em coisas inesperadas (race com main UI / outras
+    janelas). Calibração dos 4 acontece junta na peça 2.
+
+    Implementação: 2 clicks sequenciais (dropdown abre menu, opção fecha
+    menu) com pequenos sleeps idênticos ao padrão de `set_equity_model`.
+    """
+    if (SCOPE_DROPDOWN_X == 0 or SCOPE_DROPDOWN_Y == 0
+            or SCOPE_OPTION_SELECTED_SUBTREE_X == 0
+            or SCOPE_OPTION_SELECTED_SUBTREE_Y == 0):
+        print('   [WARN] _set_scope_in_popup: coords não calibrados '
+              '(Bloco 2 piece 2 pendente) — set ignorado, scope fica Full Tree')
+        return
+    click_rel(wpos, SCOPE_DROPDOWN_X, SCOPE_DROPDOWN_Y)
+    time.sleep(0.3)
+    click_rel(wpos, SCOPE_OPTION_SELECTED_SUBTREE_X, SCOPE_OPTION_SELECTED_SUBTREE_Y)
+    time.sleep(0.3)
+    print('   Scope: Selected Subtree')
+
+
+def start_calculation_selected_subtree(wpos, ci_target):
+    """Parallel a `start_calculation` para o flow Scope=Selected Subtree.
+
+    Decisão arquitectural pt25e Bloco 2 piece 1: abordagem (b) — manter o
+    `start_calculation` original (Baltazar, dentro do .pyc) intacto para o
+    flow Full Tree, e construir esta função paralela para o flow Selected
+    Subtree. Justificação: não temos source de `start_calculation`; uma
+    decomposição cirúrgica em peças (`_click_calculate_button` /
+    `_fill_ci_target_in_popup` / `_click_ok_in_popup`) exigiria recuperar
+    timing constants + popup-rect logic do bytecode — o `pycdc` já provou
+    falhar em pelo menos um sítio importante (ver nota em
+    `get_player_count_from_hh` linha 60-61). Função paralela isola o risco:
+    se peça 2 tiver bugs nos passos 1/2/5, o Full Tree path original
+    continua a funcionar.
+
+    Sequência alvo dentro do popup Nash:
+      1. Click Calculate (abre popup).             [piece 2 — calibração]
+      2. Fill CI Target no popup.                  [piece 2 — calibração]
+      3. _set_scope_in_popup(wpos)                 [piece 1 — esta função]
+      4. Click OK / Enter.                          [piece 2 — calibração]
+
+    Piece 1 (este commit): apenas o passo 3 tem implementação concreta — e
+    mesmo essa é defensive-noop até peça 2 calibrar coords. Passos 1/2/4
+    ficam comentados como TODO; quando calibrados, o body fica completo e
+    `start_calculation_selected_subtree` substitui a 2ª chamada a
+    `start_calculation` em `setup_hand` (ver bloco STUBS pt25e Bloco 2).
+
+    `wpos` é o win_pos do main HRC window (mesmo objecto que
+    `start_calculation` recebe via globals). `ci_target` é o CI a usar na
+    2ª run (default product: 10.0; ver `set_ci_target_refine`).
+    """
+    # TODO Bloco 2 piece 2: implementar passos 1, 2, 4.
+    # _click_calculate_button(wpos)                  # passo 1
+    # _wait_for_nash_popup()                          # passo 1 (timeout +
+    #                                                 # rect detection)
+    # _fill_ci_target_in_popup(wpos, ci_target)       # passo 2
+    _set_scope_in_popup(wpos)                          # passo 3 — piece 1
+    # _click_ok_in_popup(wpos)                         # passo 4
+
+    print(f'   [Bloco 2 piece 1] start_calculation_selected_subtree(ci={ci_target}) — '
+          'scope set only; click flow pending piece 2')
 
 
 # pt25e Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): stub para Prune Action
@@ -373,6 +474,21 @@ def setup_hand(hand_name, hand_path):
     # `wait_for_export` se alguém arrancar este source recompilado. O
     # `.exe` em produção (Beelink) continua pt25d.
     #
+    # Bloco 2 piece 1 (este commit): `_set_scope_in_popup` +
+    # `start_calculation_selected_subtree` já existem como source (defensive,
+    # placeholder coords). Wiring abaixo ainda comentado — só fica activo
+    # quando piece 2 calibrar coords e implementar passos 1/2/4 do flow
+    # in-popup. Trocas relativas a Bloco 1 original:
+    #   - `_set_scope_selected_subtree` (nome antigo, planeado pré-piece-1
+    #     quando Scope se assumia no main UI) → REMOVIDO; o Scope vive
+    #     dentro do popup Nash e é tratado por `_set_scope_in_popup`
+    #     chamado de dentro de `start_calculation_selected_subtree`.
+    #   - `set_ci_target_refine(wpos, value=10.0)` → DEPRECATED (set CI
+    #     passa a viver dentro do popup, gerido por
+    #     `start_calculation_selected_subtree`).
+    #   - 2ª chamada `start_calculation(10.0)` → trocada por
+    #     `start_calculation_selected_subtree(wpos, 10.0)`.
+    #
     # aggressor_real_action = _payouts.get('aggressor_real_action')
     # if aggressor_real_action is not None:
     #     # Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): Prune Action
@@ -382,23 +498,16 @@ def setup_hand(hand_name, hand_path):
     #     for line_coords in _enumerate_downstream_lines(wpos):
     #         prune_action_on_line(wpos, line_coords)
     #
-    #     # Bug G passo 1 (#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE): mudar
-    #     # Scope do painel da 2ª run para "Selected Subtree".
-    #     _set_scope_selected_subtree(wpos)
-    #
-    #     # Bug G passo 3: seleccionar a linha do sizing real do raiser
-    #     # inicial na tree visual. `aggressor_real_action` (pt25e backend)
-    #     # diz qual sizing clicar — e.g., {type:"raise", size_bb: 2.0} →
-    #     # clicar linha do open 2bb na tree.
+    #     # Bug G passo (Bloco 2 piece 2): seleccionar a linha do sizing
+    #     # real do raiser inicial na tree visual. `aggressor_real_action`
+    #     # (pt25e backend) diz qual sizing clicar — e.g.,
+    #     # {type:"raise", size_bb: 2.0} → clicar linha do open 2bb na tree.
     #     _select_subtree_root_by_action(wpos, aggressor_real_action)
     #
-    #     # Bug F refine: set CI Target 10.0 (vs 5.0 da 1ª run) para
-    #     # refinamento de precisão útil na subtree.
-    #     set_ci_target_refine(wpos, value=10.0)
-    #
-    #     # 2ª run em Selected Subtree.
+    #     # 2ª run em Selected Subtree. O CI refine + scope set acontecem
+    #     # ambos dentro do popup que esta função abre.
     #     print('   A calcular (2ª run, Selected Subtree)...')
-    #     start_calculation(10.0)
+    #     start_calculation_selected_subtree(wpos, 10.0)
     #
     # # Bug H: finalize APÓS 2ª run, não a meio do setup_hand.
     # finalize_after_second_run(wpos, export_zip)
