@@ -9,9 +9,10 @@ relevantes no namespace do módulo antes de invocar as funções.
 
 Mesmo padrão de path-injection que `test_hrc_adapter_helpers.py`.
 
-Coords (fracções) calibradas em smoke 2026-05-18 com Rui no Beelink.
-Tests validam o flow real (sem cair no defensive return) usando o
-popup_rect literal capturado nessa smoke.
+Coords (pixels-rel ao popup top-left) derivadas da medição absoluta do
+smoke 2026-05-18 com Rui no Beelink. Convenção migrou de fracções para
+pixels-rel em pt26 (smoke 19 Maio detectou popup com tamanho diferente:
+416×214 → 436×230). Justificação no bloco de constantes de patched_funcs.
 """
 import sys
 import time as _real_time
@@ -69,26 +70,26 @@ def test_set_scope_in_popup_early_returns_when_popup_rect_is_none(pf, capsys):
     assert "popup_rect" in out
 
 
-def test_set_scope_in_popup_early_returns_when_all_fractions_zero(pf, capsys):
-    """Regressão: se um dia voltarmos a 0.0 (rollback de calibração),
+def test_set_scope_in_popup_early_returns_when_all_rels_zero(pf, capsys):
+    """Regressão: se um dia voltarmos a 0 (rollback de calibração),
     defensive return continua a disparar."""
-    pf.SCOPE_DROPDOWN_FRAC_X = 0.0
-    pf.SCOPE_DROPDOWN_FRAC_Y = 0.0
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X = 0.0
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y = 0.0
+    pf.SCOPE_DROPDOWN_REL_X = 0
+    pf.SCOPE_DROPDOWN_REL_Y = 0
+    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 0
+    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 0
 
     pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
 
     pf.pyautogui.click.assert_not_called()
     out = capsys.readouterr().out
     assert "[WARN]" in out
-    assert "fracções não calibradas" in out
+    assert "pixels-rel não calibrados" in out
 
 
-def test_set_scope_in_popup_early_returns_when_single_fraction_zero(pf):
-    """Regressão: qualquer 1 das 4 fracções a 0.0 → defensive (não calibrar
+def test_set_scope_in_popup_early_returns_when_single_rel_zero(pf):
+    """Regressão: qualquer 1 dos 4 RELs a 0 → defensive (não calibrar
     parcial)."""
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y = 0.0  # rollback parcial
+    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 0  # rollback parcial
     pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
     pf.pyautogui.click.assert_not_called()
 
@@ -96,18 +97,22 @@ def test_set_scope_in_popup_early_returns_when_single_fraction_zero(pf):
 # ── _set_scope_in_popup: click flow real ────────────────────────────────
 
 def test_set_scope_in_popup_constants_are_calibrated_after_smoke(pf):
-    """Sanity: depois do smoke 2026-05-18, as 4 fracções estão != 0.0."""
-    assert 0.0 < pf.SCOPE_DROPDOWN_FRAC_X < 1.0
-    assert 0.0 < pf.SCOPE_DROPDOWN_FRAC_Y < 1.0
-    assert 0.0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X < 1.0
-    assert 0.0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y < 1.0
+    """Sanity: depois do smoke 2026-05-18, os 4 RELs estão != 0 e dentro de
+    bounds plausíveis para um popup Nash típico (popup width/height
+    observados nos smokes ficam entre ~400 e ~450 px; valores acima de 400
+    seriam suspeitos)."""
+    assert 0 < pf.SCOPE_DROPDOWN_REL_X < 400
+    assert 0 < pf.SCOPE_DROPDOWN_REL_Y < 400
+    assert 0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X < 400
+    assert 0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y < 400
 
 
 def test_set_scope_in_popup_clicks_at_smoke_absolute_coords(pf):
-    """Com `popup_rect` real do smoke (666, 372, 416, 214), as fracções
-    calibradas produzem clicks dentro de ±1 px dos valores medidos pelo Rui
-    (944, 439) e (940, 480). Sem fallback ao defensive return — exercita o
-    flow de clicks completo."""
+    """Com `popup_rect` real do smoke 18 Maio (666, 372, 416, 214), os
+    pixels-rel calibrados produzem clicks dentro de ±2 px dos valores
+    absolutos medidos pelo Rui (944, 439) e (940, 480). Por construção
+    pixels-rel não introduzem rounding; tolerância ±2 px é folga para
+    variação inter-render do Qt no smoke."""
     pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
 
     # Deve haver exactamente 2 clicks, na ordem dropdown → opção.
@@ -115,8 +120,6 @@ def test_set_scope_in_popup_clicks_at_smoke_absolute_coords(pf):
     (drop_x, drop_y), _ = pf.pyautogui.click.call_args_list[0]
     (opt_x, opt_y), _ = pf.pyautogui.click.call_args_list[1]
 
-    # Tolerância ±2 px sobre as medições do smoke (int() do float introduz
-    # ~1 px de rounding; 2px é folga para variação inter-render do Qt).
     assert abs(drop_x - _SMOKE_DROPDOWN_ABS[0]) <= 2
     assert abs(drop_y - _SMOKE_DROPDOWN_ABS[1]) <= 2
     assert abs(opt_x - _SMOKE_OPTION_SELECTED_SUBTREE_ABS[0]) <= 2
@@ -132,21 +135,42 @@ def test_set_scope_in_popup_uses_pyautogui_click_not_click_rel(pf):
     assert pf.pyautogui.click.call_count == 2
 
 
-def test_set_scope_in_popup_computes_coords_from_popup_rect_with_fractions(pf):
-    """Confirmação algébrica: `abs = left + int(w * frac), top + int(h * frac)`.
-    Usa popup rect sintético com tamanhos round para o cálculo ser óbvio."""
-    pf.SCOPE_DROPDOWN_FRAC_X = 0.5
-    pf.SCOPE_DROPDOWN_FRAC_Y = 0.25
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X = 0.5
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y = 0.75
+def test_set_scope_in_popup_computes_coords_from_popup_rect_with_rels(pf):
+    """Confirmação algébrica: `abs = left + REL_X, top + REL_Y`. Pixels-rel
+    são invariantes a `width`/`height` do popup — propriedade chave que
+    motivou a migração de fracções em pt26."""
+    pf.SCOPE_DROPDOWN_REL_X = 200
+    pf.SCOPE_DROPDOWN_REL_Y = 50
+    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 200
+    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 150
 
     pf._set_scope_in_popup(popup_rect=(100, 200, 400, 200))
-    # Dropdown: (100 + int(400*0.5), 200 + int(200*0.25)) = (300, 250)
-    # Opção:    (100 + int(400*0.5), 200 + int(200*0.75)) = (300, 350)
+    # Dropdown: (100 + 200, 200 + 50)  = (300, 250)
+    # Opção:    (100 + 200, 200 + 150) = (300, 350)
     assert pf.pyautogui.click.call_args_list == [
         call(300, 250),
         call(300, 350),
     ]
+
+
+def test_set_scope_in_popup_invariant_to_popup_size(pf):
+    """Propriedade chave da convenção pt26: o mesmo REL produz o mesmo
+    OFFSET ao top-left, independente de o popup crescer (416×214 → 436×230
+    em smokes consecutivos). Fracções driftavam ~13px X neste cenário."""
+    rects = [
+        (666, 372, 416, 214),   # smoke 18 Maio
+        (590, 337, 436, 230),   # smoke 19 Maio
+        (100, 100, 600, 400),   # sintético maior ainda
+    ]
+    for rect in rects:
+        pf.pyautogui.click.reset_mock()
+        pf._set_scope_in_popup(popup_rect=rect)
+        left, top, _w, _h = rect
+        (drop_x, drop_y), _ = pf.pyautogui.click.call_args_list[0]
+        assert (drop_x, drop_y) == (
+            left + pf.SCOPE_DROPDOWN_REL_X,
+            top + pf.SCOPE_DROPDOWN_REL_Y,
+        )
 
 
 def test_set_scope_in_popup_sleeps_between_clicks(pf):
@@ -172,15 +196,12 @@ def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
     # Mock _wait_for_nash_popup to return a fake rect (popup detected).
     fake_rect = (666, 372, 416, 214)
     pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
-    # Calibrar Calculate button (assume smoke já corrido).
-    pf.CALCULATE_BUTTON_X = 700
-    pf.CALCULATE_BUTTON_Y = 600
     wpos = (10, 10, 1024, 768)
 
     pf.start_calculation_selected_subtree(wpos, ci_target=10.0)
 
-    # Calculate button clicked via click_rel.
-    pf.click_rel.assert_called_with(wpos, 700, 600)
+    # Calculate button clicked via click_rel with calibrated pt26 coords.
+    pf.click_rel.assert_called_with(wpos, pf.CALCULATE_BUTTON_X, pf.CALCULATE_BUTTON_Y)
     # Popup detection invoked.
     pf._wait_for_nash_popup.assert_called_once()
     # Pyautogui clicks: 1 fill CI + 2 scope = 3 clicks total.
@@ -193,8 +214,6 @@ def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, cap
     """Popup detection devolve None (timeout) → early-return WARN, sem
     fill CI / scope / OK."""
     pf._wait_for_nash_popup = MagicMock(return_value=None)
-    pf.CALCULATE_BUTTON_X = 700
-    pf.CALCULATE_BUTTON_Y = 600
 
     pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
 
@@ -207,12 +226,11 @@ def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, cap
 
 
 def test_start_calculation_selected_subtree_skips_calculate_when_placeholder(pf, capsys):
-    """Calculate button coord ainda em 0 (placeholder smoke) → WARN, sem
-    click_rel. Popup detection ainda corre mas devolve None por timeout."""
+    """Regressão: se Calculate button coord um dia voltar a 0 (rollback de
+    calibração pt26), early-return WARN sem click_rel."""
     pf._wait_for_nash_popup = MagicMock(return_value=None)
-    # Constants ficam a 0 (default do source pós-piece 2)
-    assert pf.CALCULATE_BUTTON_X == 0
-    assert pf.CALCULATE_BUTTON_Y == 0
+    pf.CALCULATE_BUTTON_X = 0
+    pf.CALCULATE_BUTTON_Y = 0
 
     pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
 
@@ -222,20 +240,74 @@ def test_start_calculation_selected_subtree_skips_calculate_when_placeholder(pf,
     assert "não calibrados" in out
 
 
+def test_calculate_button_constants_calibrated_after_pt26_smoke(pf):
+    """Sanity: pt26 smoke 19 Maio calibrou (204, 59) rel à wpos."""
+    assert pf.CALCULATE_BUTTON_X > 0
+    assert pf.CALCULATE_BUTTON_Y > 0
+
+
 # ── _wait_for_nash_popup ────────────────────────────────────────────────
 
 def test_wait_for_nash_popup_returns_rect_when_title_matches(pf):
-    """Janela com 'Nash' no título e dimensões válidas → devolve rect."""
+    """Janela com título exacto "Nash Calculation" (capturado em smoke
+    19 Maio via `pyautogui.getAllWindows()`) e dimensões válidas → devolve
+    rect."""
     fake_win = MagicMock()
-    fake_win.title = "Nash Equilibrium"
-    fake_win.left = 666
-    fake_win.top = 372
-    fake_win.width = 416
-    fake_win.height = 214
+    fake_win.title = "Nash Calculation"
+    fake_win.left = 590
+    fake_win.top = 337
+    fake_win.width = 436
+    fake_win.height = 230
     pf.pyautogui.getAllWindows = MagicMock(return_value=[fake_win])
 
     rect = pf._wait_for_nash_popup(timeout=0.5, poll_interval=0.05)
-    assert rect == (666, 372, 416, 214)
+    assert rect == (590, 337, 436, 230)
+
+
+def test_wait_for_nash_popup_matches_case_insensitively(pf):
+    """Substring match é case-insensitive — robustez face a casing
+    inesperado do título Qt."""
+    fake_win = MagicMock()
+    fake_win.title = "nash calculation"
+    fake_win.left = 100
+    fake_win.top = 200
+    fake_win.width = 400
+    fake_win.height = 250
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[fake_win])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect == (100, 200, 400, 250)
+
+
+def test_wait_for_nash_popup_rejects_unrelated_calculate_window(pf):
+    """Título contendo só "Calculate" (sem "Nash Calculation") já NÃO
+    matcha em pt26 — hint refinado reduz falsos positivos vs pt25e
+    (que matchava "Calculate" sozinho)."""
+    win = MagicMock()
+    win.title = "Calculate Strategy"
+    win.left = 100
+    win.top = 200
+    win.width = 400
+    win.height = 250
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[win])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect is None
+
+
+def test_wait_for_nash_popup_rejects_partial_nash_window(pf):
+    """"Nash Equilibrium" (substring "Nash" sozinho) já NÃO matcha em
+    pt26 — exige "Nash Calculation" completo."""
+    win = MagicMock()
+    win.title = "Nash Equilibrium"
+    win.left = 0
+    win.top = 0
+    win.width = 400
+    win.height = 200
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[win])
+
+    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
+    assert rect is None
 
 
 def test_wait_for_nash_popup_returns_none_on_timeout(pf):
@@ -256,7 +328,7 @@ def test_wait_for_nash_popup_skips_minimized_windows(pf):
     """Janela com width/height 0 (minimizada) é ignorada mesmo com title
     match."""
     minimized = MagicMock()
-    minimized.title = "Nash"
+    minimized.title = "Nash Calculation"
     minimized.left = 0
     minimized.top = 0
     minimized.width = 0
@@ -281,20 +353,6 @@ def test_wait_for_nash_popup_skips_empty_title(pf):
     assert rect is None
 
 
-def test_wait_for_nash_popup_calculate_hint_also_matches(pf):
-    """Hint alternativa: title contendo 'Calculate'."""
-    win = MagicMock()
-    win.title = "Calculate Strategy"
-    win.left = 100
-    win.top = 200
-    win.width = 400
-    win.height = 250
-    pf.pyautogui.getAllWindows = MagicMock(return_value=[win])
-
-    rect = pf._wait_for_nash_popup(timeout=0.3, poll_interval=0.05)
-    assert rect == (100, 200, 400, 250)
-
-
 def test_wait_for_nash_popup_survives_getAllWindows_exception(pf):
     """`getAllWindows` raises (race condition) → log + retry; eventual None."""
     pf.pyautogui.getAllWindows = MagicMock(side_effect=RuntimeError("race"))
@@ -305,12 +363,15 @@ def test_wait_for_nash_popup_survives_getAllWindows_exception(pf):
 # ── _fill_ci_target_in_popup ────────────────────────────────────────────
 
 def test_fill_ci_target_in_popup_clicks_then_pastes_value(pf):
-    """popup_rect=(666,372,416,214) + fracções (0.65, 0.51) → click em
+    """popup_rect=(666,372,416,214) + pixels-rel (270, 109) → click em
     (666+270, 372+109)=(936, 481). Depois ctrl+a + paste + ctrl+v."""
     pf._fill_ci_target_in_popup(popup_rect=(666, 372, 416, 214), ci_target=10.0)
 
     # 1 click + 2 hotkeys (ctrl+a, ctrl+v) + 1 pyperclip.copy
     assert pf.pyautogui.click.call_count == 1
+    (click_x, click_y), _ = pf.pyautogui.click.call_args
+    assert (click_x, click_y) == (666 + pf.CI_TARGET_POPUP_REL_X,
+                                   372 + pf.CI_TARGET_POPUP_REL_Y)
     assert pf.pyautogui.hotkey.call_args_list == [
         call('ctrl', 'a'), call('ctrl', 'v'),
     ]

@@ -174,49 +174,59 @@ def set_ci_target_refine(wpos, value=10.0):
 # Calculate. Default do HRC é "Full Tree"; queremos "Selected Subtree" para
 # a 2ª run após Prune Action ter ficado aplicado nas linhas downstream.
 #
-# Coords como FRACÇÕES do popup rect (`left + int(w * frac_x)` no click
-# time) — mesmo padrão usado pelo `start_calculation` legacy do Baltazar
-# para o CI Target dentro do mesmo popup (`rect.left + int(w * 0.65)`,
-# `rect.top + int(h * 0.51)`, em pt25d). Calibradas em smoke devagar
-# 2026-05-18 com Rui no Beelink contra um popup Nash real (rect 416×214):
-#   - Dropdown abs (944, 439); rel (278, 67); frac (0.668, 0.313).
-#   - "Selected Subtree" opção abs (940, 480); rel (274, 108); frac
-#     (0.659, 0.505) — highlight visualmente confirmado pelo Rui.
+# CONVENÇÃO: pixels relativos ao TOP-LEFT do popup rect
+# (`left + REL_X`, `top + REL_Y` no click time).
+#
+# Mudança em pt26 (19 Maio 2026): convenção migrou de fracções para
+# pixels-rel. Razão: smoke 19 Maio capturou popup rect 436×230, vs popup
+# 416×214 do smoke 18 Maio — variação +4.8% width / +7.5% height.
+# Dialogs Qt anchoram widgets em posição fixa em pixels ao top-left
+# (resize adiciona margem, não escala widgets), pelo que fracções drift
+# ~13px X quando o popup cresce. Pixels-rel preservam directamente a
+# medição empírica do smoke 18 Maio.
+#
+# Smoke devagar 2026-05-18 com Rui no Beelink contra popup Nash 416×214:
+#   - Dropdown abs (944, 439); top-left popup (666, 372) → rel (278, 67).
+#   - "Selected Subtree" opção abs (940, 480); rel (274, 108) — highlight
+#     visualmente confirmado pelo Rui.
 #   - Popup tinha exactamente 2 opções no menu (Full Tree / Selected Subtree).
 #
-# Defensive return continua: se alguma fracção for 0.0 OU se o
-# `popup_rect` for None (caller ainda não detecta o popup — wiring de
-# detecção fica para peça 2 do Bloco 2). Pós-calibração, ambos os
-# defensivos ficam dormant em produção mas regridem-se via tests.
-SCOPE_DROPDOWN_FRAC_X = 0.668
-SCOPE_DROPDOWN_FRAC_Y = 0.313
-SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X = 0.659
-SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y = 0.505
+# Defensive return: se algum REL for 0 OU se `popup_rect` for None.
+# Pós-calibração os defensivos ficam dormant em produção mas regridem-se
+# via tests.
+SCOPE_DROPDOWN_REL_X = 278
+SCOPE_DROPDOWN_REL_Y = 67
+SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 274
+SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 108
 
 
 # pt25e Bloco 2 piece 2 — CI Target dentro do popup Nash.
-# Fracções REAPROVEITADAS do `start_calculation` legacy (Baltazar pt25d):
-# o comentário do source patched_funcs.py (Bug F) regista
-# `rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)` como a posição
-# do campo CI Target dentro do mesmo popup. Não precisa de smoke novo.
-CI_TARGET_POPUP_FRAC_X = 0.65
-CI_TARGET_POPUP_FRAC_Y = 0.51
+# Pixels-rel derivados das fracções legacy `start_calculation` (Baltazar
+# pt25d): `rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)` ×
+# popup 416×214 = (270, 109). Migrado para REL em pt26 pelo mesmo motivo
+# do dropdown Scope acima (popup com tamanho variável).
+CI_TARGET_POPUP_REL_X = 270
+CI_TARGET_POPUP_REL_Y = 109
 
 
-# pt25e Bloco 2 piece 2 — Botão verde Calculate no main UI HRC.
-# NÃO há referência no source patched_funcs.py nem no comentário do Bug F.
-# `start_calculation` legacy chama-o internamente e o source perdeu-se.
-# Placeholder a 0 + early-return defensivo até smoke devagar com Rui.
-CALCULATE_BUTTON_X = 0  # TODO smoke piece 2: calibrar (botão verde Calculate
-                       # no main UI HRC, à direita do painel da Strategy
-                       # Table; visualmente o único botão "go" verde grande)
-CALCULATE_BUTTON_Y = 0  # TODO smoke piece 2: calibrar
+# pt26 Bloco 2 piece 2 — Botão verde Calculate no main UI HRC.
+# Calibrado em smoke 2026-05-19 com Rui no Beelink: posição absoluta
+# (487, 124), main HRC window wpos (left=283, top=65, w=1050, h=850) →
+# rel (204, 59). Convenção: pixels relativos à wpos, mesma de
+# `EQUITY_MODEL_X/Y`, `STRATEGY_TABLE_FOCUS_X/Y`, e usada por `click_rel`.
+# Fracções ficam reservadas para o popup Nash (rect variável); o main
+# HRC window é fixo durante uma sessão (wpos capturado uma vez no wizard).
+CALCULATE_BUTTON_X = 204
+CALCULATE_BUTTON_Y = 59
 
 
-# pt25e Bloco 2 piece 2 — heurística de título para identificar a Nash
-# dialog. Set vazio → função tenta todos os hints comuns; smoke deve
-# refinar.
-_NASH_POPUP_TITLE_HINTS = ("Nash", "Calculate")
+# pt26 Bloco 2 piece 2 — heurística de título para identificar a Nash
+# dialog. Smoke 19 Maio capturou o título exacto "Nash Calculation"
+# (via `pyautogui.getAllWindows()`). Substring case-insensitive sobre
+# este token reduz falsos positivos vs hints provisórios pt25e
+# `("Nash", "Calculate")` — "Calculate" sozinho podia colidir com outras
+# dialogs HRC genéricas.
+_NASH_POPUP_TITLE_HINTS = ("Nash Calculation",)
 _NASH_POPUP_WAIT_TIMEOUT_S = 5.0
 _NASH_POPUP_WAIT_POLL_S = 0.2
 
@@ -274,28 +284,34 @@ def _wait_for_nash_popup(timeout=_NASH_POPUP_WAIT_TIMEOUT_S,
 
 
 def _click_calculate_button(wpos):
-    """Click no botão verde Calculate no main UI HRC. Defensive se coords
-    a 0 (placeholder até smoke piece 2)."""
+    """Click no botão verde Calculate no main UI HRC. Coords em pixels
+    relativos à wpos (mesma convenção que `EQUITY_MODEL_X/Y`, usada por
+    `click_rel`). Calibrado em smoke pt26 — ver bloco de constantes.
+
+    Defensive: ambos a 0 (regressão de calibração) → early-return WARN.
+    """
     if CALCULATE_BUTTON_X == 0 and CALCULATE_BUTTON_Y == 0:
         print('   [WARN] _click_calculate_button: coords não calibrados '
-              '(smoke piece 2 pendente) — click ignorado')
+              '— click ignorado')
         return
     click_rel(wpos, CALCULATE_BUTTON_X, CALCULATE_BUTTON_Y)
     time.sleep(0.3)
 
 
 def _fill_ci_target_in_popup(popup_rect, ci_target):
-    """Preenche CI Target dentro do popup Nash. Fracções reaproveitadas
-    do `start_calculation` legacy (Baltazar pt25d) — não precisa de smoke.
+    """Preenche CI Target dentro do popup Nash. Pixels-rel ao top-left do
+    popup (convenção pt26; bloco de constantes acima). Valores derivados
+    das fracções legacy `start_calculation` (Baltazar pt25d) sobre o popup
+    416×214 do smoke 18 Maio.
 
     Defensive: `popup_rect=None` → early-return.
     """
     if popup_rect is None:
         print('   [WARN] _fill_ci_target_in_popup: popup_rect ausente — fill ignorado')
         return
-    left, top, width, height = popup_rect
-    abs_x = left + int(width * CI_TARGET_POPUP_FRAC_X)
-    abs_y = top + int(height * CI_TARGET_POPUP_FRAC_Y)
+    left, top, _width, _height = popup_rect
+    abs_x = left + CI_TARGET_POPUP_REL_X
+    abs_y = top + CI_TARGET_POPUP_REL_Y
     pyautogui.click(abs_x, abs_y)
     time.sleep(0.3)
     pyautogui.hotkey('ctrl', 'a')
@@ -326,36 +342,35 @@ def _set_scope_in_popup(popup_rect):
     Scope = "Selected Subtree", pronto a clicar OK.
 
     `popup_rect` é `(left, top, width, height)` do popup Nash; caller é
-    responsável pela detecção do rect (wiring de detecção fica para piece 2
-    do Bloco 2). Coord absoluta de cada click é
-    `(left + int(width * FRAC_X), top + int(height * FRAC_Y))` — mesmo
-    padrão pt25d `start_calculation`.
+    responsável pela detecção do rect. Coord absoluta de cada click é
+    `(left + REL_X, top + REL_Y)` — pixels-rel ao top-left do popup
+    (convenção pt26; ver bloco de constantes acima).
 
     Defensivos:
-      - Qualquer fracção == 0.0 → coords não-calibrados → early-return WARN.
+      - Qualquer REL == 0 → coords não-calibrados → early-return WARN.
       - popup_rect is None → caller ainda não detecta popup → early-return WARN.
 
     Implementação: 2 clicks sequenciais com `pyautogui.click(abs_x, abs_y)`
-    (NÃO `click_rel`, porque as fracções aplicam-se ao popup_rect, não ao
-    main HRC window — diferente do padrão de `set_equity_model` etc).
+    (NÃO `click_rel`, porque os REL aplicam-se ao popup_rect, não ao main
+    HRC window).
     """
-    if (SCOPE_DROPDOWN_FRAC_X == 0.0 or SCOPE_DROPDOWN_FRAC_Y == 0.0
-            or SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X == 0.0
-            or SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y == 0.0):
-        print('   [WARN] _set_scope_in_popup: fracções não calibradas '
+    if (SCOPE_DROPDOWN_REL_X == 0 or SCOPE_DROPDOWN_REL_Y == 0
+            or SCOPE_OPTION_SELECTED_SUBTREE_REL_X == 0
+            or SCOPE_OPTION_SELECTED_SUBTREE_REL_Y == 0):
+        print('   [WARN] _set_scope_in_popup: pixels-rel não calibrados '
               '— set ignorado, scope fica Full Tree')
         return
     if popup_rect is None:
         print('   [WARN] _set_scope_in_popup: popup_rect não fornecido '
-              '(peça 2 wiring pendente) — set ignorado, scope fica Full Tree')
+              '— set ignorado, scope fica Full Tree')
         return
-    left, top, width, height = popup_rect
-    dropdown_x = left + int(width * SCOPE_DROPDOWN_FRAC_X)
-    dropdown_y = top + int(height * SCOPE_DROPDOWN_FRAC_Y)
+    left, top, _width, _height = popup_rect
+    dropdown_x = left + SCOPE_DROPDOWN_REL_X
+    dropdown_y = top + SCOPE_DROPDOWN_REL_Y
     pyautogui.click(dropdown_x, dropdown_y)
     time.sleep(0.3)
-    option_x = left + int(width * SCOPE_OPTION_SELECTED_SUBTREE_FRAC_X)
-    option_y = top + int(height * SCOPE_OPTION_SELECTED_SUBTREE_FRAC_Y)
+    option_x = left + SCOPE_OPTION_SELECTED_SUBTREE_REL_X
+    option_y = top + SCOPE_OPTION_SELECTED_SUBTREE_REL_Y
     pyautogui.click(option_x, option_y)
     time.sleep(0.3)
     print('   Scope: Selected Subtree')
