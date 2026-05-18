@@ -6,23 +6,31 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (15-16 Maio 2026 pós-pt25f closeout)
+## Estado actual (15-18 Maio 2026 pós-pt25f closeout estendido)
 
-Sessão pt25f fechada com 6 commits feature em main (`76e2ea7` / `0444cf2` /
-`11c2dea` / `e18c8ff` / `cde29f4` / `9b6e839`) + commit docs. Suite 340 → 375
-PASSED (+35 líquidos). Foco em limpezas cross-case + deprecation fix +
-versionamento bridge HM3 + rotação operacional de password + **Trabalho A:
-refactor do gerador `.js` HRC** com sizings substituídos pela acção real da
-HH e prune via JS removido completamente.
+Sessão pt25f fechada com **10 commits feature em main** + 2 commits docs.
+Núcleo 15-16 Maio: `76e2ea7` / `0444cf2` / `11c2dea` / `e18c8ff` / `cde29f4` /
+`9b6e839`. Extensão 18 Maio (não-prevista no scope original): `7e38d89` /
+`f99e994` / `fa4f21a` / `92778bd`. Suite **340 → 449 PASSED (+109 líquidos)**.
 
-**Estado do gatekeeper `#HRC-PRUNE-IN-GAP-DOWNSTREAM`:** **RECONFIGURADO em
-pt25f.** O mecanismo de prune via JS (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
-+ guard no template) foi removido em `9b6e839`. A redução de tree explosion
-passa agora a vir por outro caminho: (a) sizings literais substituídos no `.js`
-pela acção real da HH (`9b6e839` — fecha `#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND`)
-+ (b) Bloco 2 do watcher (Scope=Selected Subtree + 2ª run em subtree). O
-gatekeeper continua aberto até validação empírica do Trabalho A no Beelink +
-fecho do Bloco 2.
+Focos:
+- Núcleo: limpezas cross-case + deprecation fix + versionamento bridge HM3 +
+  rotação operacional de password + Trabalho A (refactor gerador `.js` HRC
+  com sizings da HH real e prune via JS removido).
+- Extensão: regra de multiplicador de efetiva nos 3-bet clássicos (5 buckets)
+  + **Bloco 2 do watcher completo source-side** (peça 1 calibrada via
+  smoke 2026-05-18 + peça 2 end-to-end com meta.json automático +
+  `target_node_offset` + navegação por setas).
+
+**Estado do gatekeeper `#HRC-PRUNE-IN-GAP-DOWNSTREAM`:** **substituído**
+em pt25f. Mecanismo original (REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS +
+guard JS) removido em `9b6e839`. Caminho novo: (a) sizings literais
+substituídos no `.js` pela acção real da HH + regra multiplicador para
+classic 3-bet (`9b6e839` + `7e38d89`) + (b) Bloco 2 do watcher
+(Scope=Selected Subtree + navegação até nó do raiser + 2ª run em subtree —
+source-side completo em `92778bd`, recompilação `.exe` pendente pt26).
+Gatekeeper continua aberto **apenas** até smoke real end-to-end no Beelink
+pós-recompilação. Backend está 100% pronto.
 
 **Falha de governance herdada de pt25:** o prune via JS foi implementado sem
 aprovação product explícita do Rui em pt25/b/c/d (decisão user-facing tratada
@@ -31,20 +39,25 @@ instância: interpretar a rule de aprovação prévia em
 `PAPEIS_E_RESPONSABILIDADES.md` de forma rigorosa para mudanças que afectam o
 que o Rui vê quando usa a app/HRC.
 
-### Tech debts fechados em pt25f (4)
+### Tech debts fechados em pt25f (8)
 
 | ID | Como fechou |
 |---|---|
-| **#HRC-PRUNE-IN-GAP-DOWNSTREAM (mecanismo)** | Removido em `9b6e839`. Active code já não tem referências a `REAL_AGGRESSOR_POS` / `DOWNSTREAM_POSITIONS` / `derive_prune_downstream`. Pasta `hrc_scripts/archive/` retém os ficheiros legacy para histórico. O gatekeeper continua aberto na sua intenção (redução de tree explosion), mas o caminho é agora via sizings literais + Bloco 2 do watcher. |
-| **#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND** | Implementado em `9b6e839` exactamente como a tech debt descrevia (per-hand `SIZES_*` substituídos pela acção real da HH via regex sub) — só com semântica de prune via JS removida (não é defense-in-depth como a tech debt sugeria; é substituto). Módulo novo `backend/app/services/hrc_script_gen.py`. |
+| **#HRC-PRUNE-IN-GAP-DOWNSTREAM (mecanismo)** | Removido em `9b6e839`. Active code já não tem referências a `REAL_AGGRESSOR_POS` / `DOWNSTREAM_POSITIONS` / `derive_prune_downstream`. Pasta `hrc_scripts/archive/` retém os ficheiros legacy para histórico. O gatekeeper continua aberto na sua intenção (redução de tree explosion), mas o caminho é agora via sizings literais + Bloco 2 do watcher (source-side completo em `92778bd`). |
+| **#TEMPLATE-DYNAMIC-SIZINGS-PER-HAND** | Implementado em `9b6e839` exactamente como a tech debt descrevia (per-hand `SIZES_*` substituídos pela acção real da HH via regex sub) — só com semântica de prune via JS removida (não é defense-in-depth como a tech debt sugeria; é substituto). Módulo novo `backend/app/services/hrc_script_gen.py`. Estendido em `7e38d89` com regra de multiplicador para os 5 buckets de 3-bet clássico (sizing real da HH ignorado nesses; opens/squeezes/4-bets/5-bets mantêm sizing real). |
 | **#APPHM3-NOT-VERSIONED** (descoberto pt25f) | Migrado para `tools/apphm3/` em `cde29f4`. `config_local.py` gitignored, template `.example` versionado, README PT-PT, fix `datetime.utcnow` aplicado, `.bat`s usam `%~dp0`. Rui migrou localmente. |
 | **#DATETIME-UTCNOW-DEPRECATED** (descoberto pt25f) | Substituído em 3 sítios (`routers/hands.py:1326`, `routers/hands.py:1371`, `routers/hm3.py:756`) por `datetime.now(timezone.utc).replace(tzinfo=None)` em `e18c8ff`. Bit-for-bit preservado. Same fix aplicado em `tools/apphm3/hm3_export.py` no commit `cde29f4`. |
+| **#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE** | Source-side completo em `f99e994` (função paralela `start_calculation_selected_subtree` + `_set_scope_in_popup` + defensive returns; opção (b) escolhida vs decompor `start_calculation` legacy — justificação no journal). Coords reais calibradas em `fa4f21a` (smoke 2026-05-18, fracções `SCOPE_DROPDOWN_FRAC = (0.668, 0.313)` + `SCOPE_OPTION_SELECTED_SUBTREE_FRAC = (0.659, 0.505)`; convenção de fracções alinhada com pt25d CI Target). Wiring end-to-end em `92778bd` (passos 1/2/4 do popup flow: `_wait_for_nash_popup` + `_fill_ci_target_in_popup` + `_click_ok_in_popup` via Enter). |
+| **#WATCHER-BUG-H-FLOW-ORDER-SAVE-LAST** | Wiring resolvido em `92778bd`. `setup_hand` block "STUBS Bloco 2" descomentado e refeito: `navigate_to_target_node` + `start_calculation_selected_subtree` + `finalize_after_second_run` na ordem correcta após a 1ª run. `export_strategies` continua dentro de `finalize_after_second_run` (stub source-side de pt25e Bloco 1), agora chamado no fim — não no meio. |
+| **#WATCHER-BUG-F-CI-TARGET-2ND-RUN** | Confirmado **DEPRECATED**. Popup Nash gere o CI internamente — não é necessário set no main UI antes de Calculate. Stubs `set_ci_target_initial` / `set_ci_target_refine` mantidos no source (`patched_funcs.py`) com docstrings DEPRECATED. Razão para manter: o marshal swap do bundle .pyc pareia cada função patched com slot específica; remover desalinha o slot map já documentado em pt25e Bloco 1. Eliminação fica acoplada ao smoke real pós-recompilação (quando confirmamos que o `_fill_ci_target_in_popup` dentro de `start_calculation_selected_subtree` cobre todos os casos). |
+| **#META-AGGRESSOR-REAL-ACTION** (re-confirmado) | Já estava fechado em pt25e Bloco 2 fix urgente; em pt25f passou a alimentar `compute_target_node_offset` no backend (`92778bd`). O campo `position` (BTN→BU follow-up) é input directo do cálculo de offset. |
 
-### Tech debts novos abertos em pt25f (1)
+### Tech debts novos abertos em pt25f (2)
 
 | ID | Severidade | Resumo |
 |---|---|---|
 | **#CHANGE-PASSWORD-FEATURE** | 🟡 MED | App não tem endpoint nem UI para change-password. Rotação de password do user `rui@pokerapp.com` em pt25f (15 Maio, post-exposure da `MudaEsta123!` em scripts/zips/briefings) foi single-shot via `UPDATE users SET password_hash = ...` na DB Railway com Code com acesso. Próxima rotação volta a depender de DB direct. Fix: implementar `POST /api/auth/change-password` (validar old + bcrypt-hash new + invalidate session opcional) + UI em SettingsPage / Profile dropdown. Pré-requisitos: nenhum. Esforço: ~2h (1 endpoint + 1 form). |
+| **#CALCULATE-BUTTON-COORD-PENDING** | 🟡 MED (gatekeeper recompilação) | `CALCULATE_BUTTON_X/Y` em `tools/watcher_src/patched_funcs.py:317` ainda a 0 (placeholder) + early-return defensivo no `_click_calculate_button`. Botão verde Calculate no main UI HRC, à direita do painel da Strategy Table — visualmente o único botão "go" verde grande no estado pós-1ª-run. Não documentado no source legacy do Baltazar; `start_calculation` legacy clica-o internamente sem expor coords. Calibração: smoke pequeno comigo no Beelink (Rui usa `pyautogui.position()`, 1 click) — `_local_only/get_calibrate_coords.py` se ainda existir, ou substituto inline. **Bloqueia recompilação do `.exe`**: sem este coord, o `start_calculation_selected_subtree` recompilado faz early-return defensivo do passo 1 e o flow Selected Subtree não dispara. Ao mesmo tempo confirmar o título exacto da janela do popup Nash (hints provisórios `("Nash", "Calculate")` em `_NASH_POPUP_TITLE_HINTS`) — Rui copia o título visível na barra do popup. |
 
 ## Estado actual (15 Maio 2026 pós-pt25e Bloco 1 + smoke devagar manual em curso)
 
@@ -69,11 +82,11 @@ Ordem actualizada pelo Rui em 15 Maio: Bug G antes de Bug J.
 
 | ID | Severidade | Resumo |
 |---|---|---|
-| **#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE** | 🔴 HIGHEST | A 2ª run tem de correr em Scope=`Selected Subtree`, não em `Full Tree` (default da 1ª). Spec final pt25e Bloco 2 (15 Maio, simplificada): (1) OCR confinado à **coluna Player** da Strategy Table HRC (vocabulário fechado: UTG/HJ/CO/BU/SB/BB/EP/MP/EP1/EP2/`BU/SB`), (2) clicar a primeira linha onde `Player == aggressor_real_action.position` (vinda do payouts.json — este commit fecha a dependência), (3) clicar botão play (coords pt25d já calibrados), (4) no popup Nash que abre: dropdown Scope → seleccionar "Selected Subtree", (5) CI=10 (lido do meta.json), (6) OK. Coords pendentes calibração: column Player, dropdown Scope no popup, opção "Selected Subtree" no dropdown. Re-priorização pelo Rui em 15 Maio: corta 2ª run para fracção do tempo; mais crítico que Bug J. |
-| **#WATCHER-BUG-H-FLOW-ORDER-SAVE-LAST** | 🔴 HIGH | Fluxo actual: Setup → 1ª run → **save_strategies imediato** → done. O save_strategies deve ser **último**, após a 2ª run. Ordem correcta: Setup → 1ª run → (G: Selected Subtree + CI=10) → 2ª run → **save_strategies**. Mover o passo save_strategies da `setup_hand` para função `finalize_after_second_run`. Stub source-side já existe (pt25e Bloco 1, `tools/watcher_src/patched_funcs.py:finalize_after_second_run`); wiring + recompile do `.exe` é trabalho do Bloco 2 após G+J calibrados. |
+| **#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE** | 🟢 FECHADO em pt25f (`f99e994` + `fa4f21a` + `92778bd`) — ver "Tech debts fechados em pt25f" no topo. Recompilação `.exe` pendente pt26. | A 2ª run tem de correr em Scope=`Selected Subtree`, não em `Full Tree` (default da 1ª). Spec final pt25e Bloco 2 (15 Maio, simplificada): (1) OCR confinado à **coluna Player** da Strategy Table HRC (vocabulário fechado: UTG/HJ/CO/BU/SB/BB/EP/MP/EP1/EP2/`BU/SB`), (2) clicar a primeira linha onde `Player == aggressor_real_action.position` (vinda do payouts.json — este commit fecha a dependência), (3) clicar botão play (coords pt25d já calibrados), (4) no popup Nash que abre: dropdown Scope → seleccionar "Selected Subtree", (5) CI=10 (lido do meta.json), (6) OK. Coords pendentes calibração: column Player, dropdown Scope no popup, opção "Selected Subtree" no dropdown. Re-priorização pelo Rui em 15 Maio: corta 2ª run para fracção do tempo; mais crítico que Bug J. |
+| **#WATCHER-BUG-H-FLOW-ORDER-SAVE-LAST** | 🟢 FECHADO em pt25f (`92778bd`) — `setup_hand` STUBS block descomentado, ordem correcta `navigate_to_target_node` → `start_calculation_selected_subtree` → `finalize_after_second_run` no fim. Recompilação `.exe` pendente pt26. | Fluxo actual: Setup → 1ª run → **save_strategies imediato** → done. O save_strategies deve ser **último**, após a 2ª run. Ordem correcta: Setup → 1ª run → (G: Selected Subtree + CI=10) → 2ª run → **save_strategies**. Mover o passo save_strategies da `setup_hand` para função `finalize_after_second_run`. Stub source-side já existe (pt25e Bloco 1, `tools/watcher_src/patched_funcs.py:finalize_after_second_run`); wiring + recompile do `.exe` é trabalho do Bloco 2 após G+J calibrados. |
 | **#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE** | 🔴 HIGH | Após 1ª run, o watcher faz Prune Action **linha a linha** para cada player em `DOWNSTREAM_POSITIONS`, percorrendo a tree visual. **CUIDADO armadilha UX HRC:** o context menu tem **2 entradas com "Prune"** — uma é **"Prune Action"** (queremos esta, prune da sizing específica clicada), outra é um Prune global mais agressivo (NÃO esta). Watcher tem de seleccionar o texto exacto **"Prune Action"**. Coords + ordem das entradas no menu a confirmar em smoke devagar pt25e Bloco 2. **Não confundir com o guard `getSizingsOpening` injectado pelo script.js** — esse é prune **scripted** (afecta árvore inicial pre-1ª run); este é prune **manual** sobre nós da subtree pré-2ª run. Os dois complementam-se. Re-priorização 15 Maio: abaixo de Bug G (optimização adicional, menos crítica). **Caminho preferido descoberto 15 Maio (manhã):** atalho de teclado **`Ctrl+D` = Prune Action** na Strategy Table HRC. Permite ao watcher fazer prune via keystroke após seleccionar a linha — sem coords de context menu, sem risco da armadilha das 2 entradas "Prune". Outros atalhos relevantes descobertos na mesma corrida: `Ctrl+Shift+D` (Prune Children — NÃO usar), `Ctrl+Shift+A` (Add Action), `Alt+L` (Lock/Unlock Range), `Ctrl+C` / `Ctrl+Shift+C` (Copy Range / Strategy), `Ctrl+V` / `Ctrl+Shift+V` (Paste Range / Strategy). Wiring de Bloco 2 deve seguir o caminho `Ctrl+D` via `pyautogui.hotkey('ctrl','d')` (ou equivalente), com fallback context menu apenas se `Ctrl+D` falhar em smoke. |
 | **#WATCHER-BUG-I-FIRST-PANEL-WRONG-BUTTON** | 🟡 MED | Smoke devagar 14 Maio: Rui detectou que **o watcher clica num botão errado no 1º painel pós-extract** (Basic Hand Data). Repro confirmado visualmente mas sem screenshot/log estruturado ainda. Possíveis causas: deslocamento de coords pós-refresh HRC UI (5.0.X), race condition (botão clicked antes de habilitar), ou rotina chama wrong helper entre `select_bounty_mode` e `setup_scripting`. Identificar exactamente qual botão em smoke devagar dedicado pt25e Bloco 2 (Rui executa step-by-step e regista, planeado para 15-16 Maio). |
-| **#WATCHER-BUG-F-CI-TARGET-2ND-RUN** | 🟢 MOSTLY DEPRECATED | Hipótese inicial pt25e: set CI Target no main UI HRC antes do Calculate, com initial=5.0 + refine=10.0. Smoke devagar 15 Maio revelou que CI value é controlado via `meta.json` campo `ci` que `start_calculation(ci_target)` lê, e o popup Nash que aparece pós-Calculate já tem o campo CI calibrado pt25d (`rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)`). Set CI no main UI antes do Calculate revela-se **desnecessário**. Helpers `set_ci_target_initial` / `set_ci_target_refine` continuam no source (`patched_funcs.py`) mas **não wired** em `setup_hand` e o early-return defensivo evita clicks falsos. Resolução: manter source-side para histórico mas remover stubs comentados em `setup_hand` quando Bloco 2 fechar; alternativa de fechar formal — limpar em pt25f. |
+| **#WATCHER-BUG-F-CI-TARGET-2ND-RUN** | 🟢 FECHADO em pt25f (DEPRECATED confirmado em `f99e994` docstrings; CI passa a viver dentro do popup via `_fill_ci_target_in_popup` em `92778bd`). Stubs mantidos no source por razão de slot map do marshal swap. | Hipótese inicial pt25e: set CI Target no main UI HRC antes do Calculate, com initial=5.0 + refine=10.0. Smoke devagar 15 Maio revelou que CI value é controlado via `meta.json` campo `ci` que `start_calculation(ci_target)` lê, e o popup Nash que aparece pós-Calculate já tem o campo CI calibrado pt25d (`rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)`). Set CI no main UI antes do Calculate revela-se **desnecessário**. Helpers `set_ci_target_initial` / `set_ci_target_refine` continuam no source (`patched_funcs.py`) mas **não wired** em `setup_hand` e o early-return defensivo evita clicks falsos. Resolução: manter source-side para histórico mas remover stubs comentados em `setup_hand` quando Bloco 2 fechar; alternativa de fechar formal — limpar em pt25f. |
 | **#META-AGGRESSOR-REAL-ACTION** | 🔴 HIGH | Dependência backend: `meta.json` (ou `payouts.json`) tem de ganhar campo novo `aggressor_real_action` com forma `{type: "raise"\|"bet", size_bb: float, position: str\|None}` extraído da HH parseada. Permite ao watcher (Bug G passo 3, simplificado em 15 Maio) clicar a linha exacta na coluna Player da Strategy Table HRC via OCR + position match. Implementação: helper `derive_aggressor_real_action(hh_text, level_sb, level_bb) -> dict\|None` em `services/queue_export.py` — parseia primeira raise/bet preflop, converte chips → bb units relativos ao level da mão, resolve position via `derive_seats_in_preflop_order`, devolve dict. Injecção no manifest entry + payouts.json em `build_queue_zip`. Status: campo `type/size_bb` deployed em pt25e Bloco 1 (commit `8eb9d87`); campo `position` deployed neste commit pt25e Bloco 2 fix urgente (ver `#META-AGGRESSOR-POSITION` abaixo). |
 | **#META-AGGRESSOR-POSITION** | 🟢 FECHADO (pt25e Bloco 2 fix urgente, 15 Maio + follow-up BTN→BU mesmo dia) | Extensão de `derive_aggressor_real_action` com campo `position` (string maiúsculas — labels canónicos de `_POSITION_LABELS_BY_N`: UTG/HJ/CO/BU/SB/BB/EP/MP/EP1/EP2 + `BU/SB` para HU). Mapping nick → position via `derive_seats_in_preflop_order` (única fonte de verdade do preflop order pt25d). Schema final: `{type, size_bb, position}`. Schema injection: manifest entry + payouts.json (sítios onde `type/size_bb` já viviam). Tests pytest: 4 samples reais cross-site (PS Votsarrr=BU, GG 221ebf0d=HJ, WN INTERSTELLAR blueballs67=UTG, WPN DAVIDSBAGOFICE=HJ) + sintéticos N=5/N=4/HU cobrindo UTG/HJ/CO/BU/SB/BB/`BU/SB`. Justificação da urgência: destranca Bloco 2 do watcher — OCR confinado à coluna Player com vocabulário fechado de ~6 strings (vs OCR genérico sobre toda a tabela). Follow-up BTN→BU: confirmação empírica do Rui que Strategy Table HRC mostra "BU" não "BTN"; `_POSITION_LABELS_BY_N` realinhado nos índices 3-9 (HU mantém "BU/SB"). |
 
