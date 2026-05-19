@@ -134,3 +134,53 @@ def test_clamp_under_2_floors_at_2():
     seats = ["Hero"]
     hh = _hh(seats, "Hero", [])
     assert derive_max_players(hh) == 2
+
+
+def test_gg_pos_convert_multiple_dealt_lines_picks_real_hero():
+    """pt27 regressão: HH GG após `_replace_hashes` tem `Dealt to <nick>` em
+    todos os seats (não só Hero). Antes do fix, `_HERO_RE` apanhava o
+    primeiro `Dealt to` (Seat 1) em vez do Hero real, gerando
+    `max_players=4` em vez de 6 para `GG-5944816316`.
+
+    Reproduz a forma exacta do HH PS-compat para essa mão: 8-handed, 2
+    folds, MP open, Hero (HJ) 3-bet jam, depois 3 folds pós-Hero.
+    """
+    hh = (
+        "Poker Hand #TM5944816316: Tournament #283300918, "
+        "97-H: $525 Bounty Hunters Daily Main [Deepstack] Hold'em No Limit"
+        " - Level14 (1750/3500) - 2026/05/12 21:26:48\n"
+        "Table '20' 8-max Seat #8 is the button\n"
+        "Seat 1: P3054-5760 (63483 in chips, $250.00 bounty)\n"
+        "Seat 2: malamirca (103130 in chips, $125.00 bounty)\n"
+        "Seat 3: Qyl_SH (182677 in chips, $250.00 bounty)\n"
+        "Seat 4: Vermejo20 (109824 in chips, $250.00 bounty)\n"
+        "Seat 5: Pinduca77 (359522 in chips, $328.12 bounty)\n"
+        "Seat 6: Hero (76360 in chips)\n"
+        "Seat 7: Andrii Novak (130336 in chips, $250.00 bounty)\n"
+        "Seat 8: l3_3l (412314 in chips, $515.62 bounty)\n"
+        "P3054-5760: posts small blind 1750\n"
+        "malamirca: posts big blind 3500\n"
+        "*** HOLE CARDS ***\n"
+        "Dealt to P3054-5760\n"
+        "Dealt to malamirca\n"
+        "Dealt to Qyl_SH\n"
+        "Dealt to Vermejo20\n"
+        "Dealt to Pinduca77\n"
+        "Dealt to Hero [Th Ah]\n"
+        "Dealt to Andrii Novak\n"
+        "Dealt to l3_3l\n"
+        "Qyl_SH: folds\n"
+        "Vermejo20: folds\n"
+        "Pinduca77: raises 3500 to 7000\n"
+        "Hero: raises 68860 to 75860 and is all-in\n"
+        "Andrii Novak: folds\n"
+        "l3_3l: folds\n"
+        "P3054-5760: folds\n"
+        "malamirca: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    # Pre-Hero: 2 folds + 1 voluntary (Pinduca77). Hero=BB? Não — Hero=HJ no
+    # seat 6, button=8 → ordem preflop UTG=Seat 3 ... HJ=Seat 6. Hero é o 4º
+    # a agir. voluntary_before={Pinduca77}, still_to_act={CO,BU,SB,BB}=4.
+    # Resultado esperado: 1 + 1 + 4 = 6.
+    assert derive_max_players(hh) == 6

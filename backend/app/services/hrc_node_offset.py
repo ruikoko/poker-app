@@ -55,12 +55,17 @@ _TEMPLATE_DEFAULT_OPEN_COUNT = 2
 _SB_COMPLETE_LINES = 1
 
 
-def strategy_table_positions(max_players: int) -> list:
+def strategy_table_positions(seats_at_table: int) -> list:
     """Lista de positions que aparecem na Strategy Table preflop, na ordem
     de cima para baixo. BB nunca aparece (não abre preflop).
 
-    Devolve `[]` se `max_players` inválido (não em 2..9)."""
-    labels = _POSITION_LABELS_BY_N.get(max_players)
+    `seats_at_table` é o nº de jogadores sentados na mesa real quando a mão
+    começou (não a redução `max_players` para ICM). A Strategy Table HRC
+    mostra uma linha por jogador real sentado, independentemente da
+    redução ICM aplicada na página Edit Settings.
+
+    Devolve `[]` se `seats_at_table` inválido (não em 2..9)."""
+    labels = _POSITION_LABELS_BY_N.get(seats_at_table)
     if not labels:
         return []
     return [p for p in labels if p != "BB"]
@@ -186,17 +191,26 @@ def derive_aggressor_stack_bb(
 
 def compute_target_node_offset(
     aggressor_real_action: Optional[dict],
-    max_players: Optional[int],
+    seats_at_table: Optional[int],
     script_overrides: Optional[dict],
     raiser_stack_bb: Optional[float],
 ) -> Optional[int]:
     """Posição (0-indexed) da linha do raiser real na Strategy Table HRC.
 
+    `seats_at_table` é o nº de jogadores sentados na mesa real (não a
+    redução `max_players` ICM). A Strategy Table HRC tem 1 linha-base por
+    jogador sentado, expandida pelos sizes do script. pt27 fix: antes
+    desta versão a função usava `max_players` (redução ICM), o que
+    truncava `strategy_table_positions` e fazia o lookup da position do
+    raiser falhar quando a redução escondia a posição real do agressor
+    (e.g., 8-handed MP raise com max_players=6 → MP não está em
+    strategy_table_positions(6)=[UTG,HJ,CO,BU,SB]).
+
     Devolve `None` em qualquer caso onde a navegação não faz sentido:
       - `aggressor_real_action is None` (walk-to-BB / limp-only).
       - `aggressor.position is None` (parsing de seats falhou).
       - `position == "BB"` (BB não aparece na Strategy Table de opens).
-      - `max_players` ausente ou fora de 2..9.
+      - `seats_at_table` ausente ou fora de 2..9.
 
     Default `None` (vs `0`) escolhido para o watcher distinguir
     "não computei" de "computei e dá 0". Comportamento do watcher: skip
@@ -219,16 +233,22 @@ def compute_target_node_offset(
             "not on Strategy Table opens view; returning None"
         )
         return None
-    if not isinstance(max_players, int) or max_players < 2 or max_players > 9:
+    if (
+        not isinstance(seats_at_table, int)
+        or seats_at_table < 2
+        or seats_at_table > 9
+    ):
         logger.warning(
-            "compute_target_node_offset: invalid max_players=%s", max_players
+            "compute_target_node_offset: invalid seats_at_table=%s",
+            seats_at_table,
         )
         return None
-    positions = strategy_table_positions(max_players)
+    positions = strategy_table_positions(seats_at_table)
     if position not in positions:
         logger.warning(
-            "compute_target_node_offset: position %r not in strategy_table_positions(%d)=%s",
-            position, max_players, positions,
+            "compute_target_node_offset: position %r not in "
+            "strategy_table_positions(%d)=%s",
+            position, seats_at_table, positions,
         )
         return None
 

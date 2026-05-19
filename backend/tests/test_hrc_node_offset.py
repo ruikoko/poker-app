@@ -249,12 +249,31 @@ def test_compute_target_node_offset_position_none_returns_none():
     ) is None
 
 
-def test_compute_target_node_offset_invalid_max_players_returns_none():
-    """max_players fora de [2,9] ou tipo errado → None com WARN."""
+def test_compute_target_node_offset_invalid_seats_at_table_returns_none():
+    """seats_at_table fora de [2,9] ou tipo errado → None com WARN."""
     action = {"type": "raise", "size_bb": 2.0, "position": "UTG"}
     assert compute_target_node_offset(action, 12, {}, 50.0) is None
     assert compute_target_node_offset(action, None, {}, 50.0) is None
     assert compute_target_node_offset(action, "5", {}, 50.0) is None
+
+
+def test_compute_target_node_offset_gg5944816316_8handed_MP_open():
+    """pt27 regressão: GG-5944816316 — 8-handed, Pinduca77 (MP) raises 2.0bb,
+    Hero (HJ) 3-bet jam. Antes do Fix 2, `max_players=6` (redução ICM via
+    `derive_max_players`) era passado para `compute_target_node_offset`, e
+    MP não estava em `strategy_table_positions(6)=[UTG,HJ,CO,BU,SB]` →
+    devolvia None. Pós-fix passa-se `seats_at_table=8`, MP é a 3ª posição
+    (UTG, EP, MP, …), opens default = 2 entries → offset = 2*2 + 0 = 4.
+
+    Eff stack do raiser: Pinduca77 359522 chips / BB 3500 = 102.72 BB
+    → `is_all_in(2.0, 102.72) = False` → offset_within_bucket = 0.
+    """
+    overrides = {"SIZES_OPEN_OTHERS": [2.0, "ALLIN"]}
+    action = {"type": "raise", "size_bb": 2.0, "position": "MP"}
+    assert compute_target_node_offset(
+        action, seats_at_table=8, script_overrides=overrides,
+        raiser_stack_bb=102.72,
+    ) == 4
 
 
 def test_compute_target_node_offset_aggressor_not_a_dict_returns_none():

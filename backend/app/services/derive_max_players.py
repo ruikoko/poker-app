@@ -20,13 +20,22 @@ import re
 from typing import Optional
 
 
-# Seat: NICK (X in chips), with X possibly comma-grouped.
-_SEAT_RE = re.compile(r"^Seat (\d+): (\S+) \(\d", re.MULTILINE)
-_HERO_RE = re.compile(r"^Dealt to (\S+)", re.MULTILINE)
+# Seat: `Seat N: NICK (X in chips...)`. NICK pode conter espaços (GG nicks
+# tipo "Andrii Novak") — usamos lazy `.+?` até " (" + digit, em vez de `\S+`
+# que truncava em nicks com espaços.
+_SEAT_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
+# Hero é identificado pela linha `Dealt to <nick> [<cards>]` — só o Hero
+# tem hole cards visíveis em PS HH standard. Em GG HH pós-`_replace_hashes`
+# todos os seats têm `Dealt to <nick>` (sem brackets), por isso exigimos
+# os brackets para apanhar o Hero verdadeiro e não o primeiro seat.
+# `.+?` em vez de `\S+` para tolerar nicks com espaços (consistente com
+# `_SEAT_RE`).
+_HERO_RE = re.compile(r"^Dealt to (.+?) \[", re.MULTILINE)
 # Action lines: "<nick>: folds" / "calls X" / "raises X to Y" / "bets X" / "checks".
 # `\b` after the verb evita capturar "raised" no SUMMARY.
+# `.+?` em vez de `\S+` para tolerar nicks com espaços.
 _ACTION_RE = re.compile(
-    r"^(\S+): (folds|calls|raises|bets|checks)\b",
+    r"^(.+?): (folds|calls|raises|bets|checks)\b",
     re.MULTILINE,
 )
 
@@ -44,9 +53,13 @@ def derive_max_players(hh_text: Optional[str]) -> int:
     if not hh_text:
         return 2
 
-    # 1. parse seats
+    # 1. parse seats — restringido ao header (antes de `*** HOLE CARDS ***`)
+    # para evitar match em linhas SUMMARY tipo `Seat 6: Hero collected (X)`
+    # que sobrescrevem o nick do seat com "Hero collected".
+    hole_cards_pos = hh_text.find("*** HOLE CARDS ***")
+    header = hh_text[:hole_cards_pos] if hole_cards_pos > 0 else hh_text
     seats: dict[int, str] = {}
-    for m in _SEAT_RE.finditer(hh_text):
+    for m in _SEAT_RE.finditer(header):
         seats[int(m.group(1))] = m.group(2)
     if len(seats) < 2:
         return 2

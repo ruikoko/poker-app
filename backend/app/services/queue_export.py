@@ -566,8 +566,11 @@ _STAGE_BY_EQUITY_MODEL = {
     "multi_table_icm": "MTT",
 }
 
-# Default CI Target da 1ª run (semântica legacy do `setup_hand`).
-_DEFAULT_CI_TARGET_FIRST_RUN = 5.0
+# Default CI Target. pt27: alinhado em 10.0 para ambas as runs.
+# Antes era 5.0 (legacy setup_hand) mas o watcher já hardcode passa 10.0
+# para `start_calculation_selected_subtree` na 2ª run — Rui confirmou que
+# quer 10.0 em ambas (#CI-DEFAULT-MISMATCH fechado pt27).
+_DEFAULT_CI_TARGET = 10.0
 
 
 def _derive_stage_from_equity_model(equity_model) -> str:
@@ -592,7 +595,9 @@ def _build_hand_meta(
       - `total_chips`     : int | None (legacy: input manual do Rui na
                             página MTT Stacks; auto-derivação per-hand
                             não-fidedigna → None).
-      - `ci`              : float (default 5.0, CI Target da 1ª run).
+      - `ci`              : float (default 10.0, CI Target aplicado a
+                            ambas as runs — alinhado pt27 com o watcher
+                            que já hardcode 10.0 na 2ª run).
 
     Extensão pt25e Bloco 2 piece 2:
       - `target_node_offset`: int | None — nº de seta-para-baixo presses
@@ -607,7 +612,7 @@ def _build_hand_meta(
         "stage": _derive_stage_from_equity_model(equity_model),
         "players_left": _resolve_players_left(hand, payout_blob),
         "total_chips": None,
-        "ci": _DEFAULT_CI_TARGET_FIRST_RUN,
+        "ci": _DEFAULT_CI_TARGET,
         "target_node_offset": target_node_offset,
     }
 
@@ -829,6 +834,10 @@ def build_queue_zip(
             # pt25e Bloco 2 piece 2: target_node_offset para o watcher
             # premer seta-para-baixo até pousar na linha do raiser real
             # antes da 2ª run em Selected Subtree.
+            # pt27: passa `seats_at_table` (nº real de jogadores sentados)
+            # em vez de `max_players` (redução ICM). A Strategy Table HRC
+            # renderiza uma linha-base por seat real, independentemente da
+            # redução ICM aplicada em Edit Settings.
             target_node_offset = None
             if aggressor_real_action is not None and _bb is not None:
                 try:
@@ -836,9 +845,10 @@ def build_queue_zip(
                         compute_target_node_offset, derive_aggressor_stack_bb,
                     )
                     raiser_stack_bb = derive_aggressor_stack_bb(hh_text, _bb)
+                    seats_at_table = len(derive_seats_in_preflop_order(hh_text))
                     target_node_offset = compute_target_node_offset(
                         aggressor_real_action,
-                        hints.get("max_players"),
+                        seats_at_table,
                         script_overrides,
                         raiser_stack_bb,
                     )
