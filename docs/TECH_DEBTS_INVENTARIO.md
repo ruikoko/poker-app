@@ -6,6 +6,37 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (19-20 Maio 2026 pós-pt27 closeout)
+
+Sessão pt27 fechada com **1 commit feature em main** (`7de8df6`, 3 fixes
+backend HRC) + commit docs (este). Bloco A (read-only) descobriu 1
+regressão antiga não-fixada (`study_state` desde 18 Abr). Bloco B (etapa
+2) entregou 3 fixes ao pipeline `/api/queue/hrc`. Bloco C (fix funcional
+do `.exe`) **não atacado** — fica para pt28. Suite **449 → 455 PASSED
+(+6 líquidos)**.
+
+Re-classificação operacional: smoke A (rollback `.exe` pt25d) confirmou
+fragilidade da baseline anterior (40 de 41 mãos pulled em 14 Maio nunca
+chegaram a `done`). O caminho não é restaurar pt25d — é fixar
+`#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN` em pt28.
+
+### Tech debts fechados em pt27 (3)
+
+| ID | Como fechou |
+|---|---|
+| **#CI-DEFAULT-MISMATCH** | Backend `_DEFAULT_CI_TARGET_FIRST_RUN = 5.0` → `_DEFAULT_CI_TARGET = 10.0` em `services/queue_export.py` (`7de8df6`). Watcher já hardcode-passa 10.0 na 2ª run → 1ª e 2ª agora alinhadas. Decisão product Rui: opção (ii) "alinhar ambos em 10". |
+| **#DERIVE-MAX-PLAYERS-HERO-REGEX-GG** | Aberto + fechado em pt27. 3 sub-bugs em `services/derive_max_players.py`: (a) `_HERO_RE = ^Dealt to (\S+)` apanhava 1º "Dealt to" (em GG pós-`_replace_hashes` todos os 8 seats têm essa linha); (b) `_SEAT_RE`/`_ACTION_RE` com `\S+` truncavam nicks com espaços tipo "Andrii Novak"; (c) `_SEAT_RE` matchava SUMMARY `Seat 6: Hero collected (X)` sobrescrevendo seats[6]. Fix: `_HERO_RE` exige ` \[`; `\S+` → `.+?`; parsing restrito ao header pré-`*** HOLE CARDS ***`. Mão real `GG-5944816316`: `max_players` 4 → 6. +1 test. Commit `7de8df6`. |
+| **#COMPUTE-TARGET-NODE-OFFSET-USES-WRONG-PLAYER-COUNT** | Aberto + fechado em pt27. `compute_target_node_offset` usava `max_players` (redução ICM) como input para `strategy_table_positions`. Errado — Strategy Table HRC tem 1 linha-base por jogador real sentado. Para `GG-5944816316`: `max_players=6` fazia `MP` cair fora de `strategy_table_positions(6)=[UTG,HJ,CO,BU,SB]` → offset=None. Fix: param renomeado para `seats_at_table`; caller passa `len(derive_seats_in_preflop_order(hh_text))` em vez de `hints.get("max_players")`. Mão real: offset null → 4. Tests renomeados + 1 test novo. Commit `7de8df6`. |
+
+### Tech debts novos abertos em pt27 (4)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#STUDY-STATE-REGRESSION-HH-IMPORT** | 🟡 MED | Regressão silenciosa desde commit `15cb9b3` (2026-04-18, "feat: consolidate update v8.5"). Antes, `_insert_hand` tinha default `study_state='mtt_archive'` e `import_.py` não passava o arg → bulk HH imports iam para `mtt_archive` (conforme spec CLAUDE.md §"MODELO DE DADOS E FLUXO v2"). Pós-`15cb9b3`, `import_.py:311` e `:335` passam explicitamente `study_state='new'`, anulando o default. Pt13 (5 Maio) notou "1172 hands all in new" no journal mas adoptou-o como facto consumado em vez de fixar. Auditoria pt27 confirmou: 4258/4258 hh_import 7d em `new`, 0 em `mtt_archive`. UI sobreviveu por filtrar por tags em vez de `study_state`. Dashboard counter "mãos por estudar" inflacionado. **Fix conceptual:** remover `, study_state='new'` das 2 linhas em `import_.py:311/335` (default `mtt_archive` toma conta) + migration one-shot `UPDATE hands SET study_state='mtt_archive' WHERE origin='hh_import' AND study_state='new' AND entry_id IS NULL AND screenshot_url IS NULL`. Volume estimado ~25k mãos. **Decisão product pendente** antes de fix: Rui ainda quer a spec original "bulk imports invisíveis na página Mãos"? Se mudou de ideia (querer ver tudo na página Mãos), regressão vira feature pelo silêncio e a tech debt fecha por declaração. |
+| **#WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE** | 🟡 MED | Pipeline `tournament_summaries` é **GG-only**. Parser em `routers/tournament_summaries.py` reconhece header GG `Tournament #<tn>`; endpoint `/api/tournament-summaries/import` aceita `.txt`/`.zip`; UI em `Tournaments.jsx` faz upload. Para Winamax, workflow normal de Rui é upload manual de SS lobby (sem TS). Confirmado por Rui em pt27. **Impacto:** `tournament_resolver` TIER 0 (autoritativo, sem janela) só dispara para mãos GG. Mãos Winamax dependem 100% de TIER 1 (`tournaments_meta`) ou TIER 2 (`hands` fallback) — janela temporal apertada. Auditoria pt27 mostrou que 4/10 lobby failures 7d eram Winamax com `start_time` fora da janela `[posted_at-12h, posted_at-30min]`. **Fix conceptual:** espelhar pipeline GG para Winamax — parser dedicado para formato Winamax Summary (header `Winamax Poker Tournament Summary :`), reutilizar endpoint + UI com discriminação por `site`. Resolve parte do gap G1 (Winamax sempre falha no resolver). **Decisão pendente:** vale o esforço dado o volume Winamax (~5% das mãos 7d)? |
+| **#AUTH-SCHEME-MIGRATION-UNDOCUMENTED** | 🟢 LOW | Tentativa pt27 de pull `/api/queue/hrc` com header `X-API-Key:` devolveu 401. Diagnóstico revelou que o auth-handler é `require_auth_or_api_key` (G4 pt21) que aceita `Authorization: Bearer <HRC_WATCHER_API_KEY>` mas não `X-API-Key`. Documentação `JOURNAL_2026-05-12-pt21.md` confere — sempre foi Bearer; nunca houve X-API-Key. Atribuir ruído a documentação intermédia esquecida no chat (não no repo). **Acção:** verificar se algum doc (README, ONBOARDING, MAPA) menciona X-API-Key e corrigir. Tempo estimado: 5 min de grep. |
+| **#PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE** | 🟢 LOW | Smoke A pt27 (rollback `.exe` pt25d para validar baseline antes de atacar fix popup) revelou: watcher arrancou mas não conseguiu processar `GG-5944816316`. Causa exacta não isolada — 3 hipóteses: (a) auto-restore HRC da última "Hand 1" persistida cria race condition com paste do watcher; (b) clipboard interference (Windows clipboard history ou script paralelo); (c) state.json pt25d mostra **40 de 41 mãos pulled em 14 Maio nunca chegaram a `done`** — fragilidade conhecida da baseline, não regressão nova. **Decisão pt27:** não investigar mais — o caminho é fixar `#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN` em pt28, não restaurar pt25d. Tech debt mantém-se como recordatório histórico se algum dia for necessário voltar ao pt25d como fallback. |
+
 ## Estado actual (19 Maio 2026 pós-pt26 closeout)
 
 Sessão pt26 fechada com **1 commit feature em main** (`a735053`, pt26 smoke
