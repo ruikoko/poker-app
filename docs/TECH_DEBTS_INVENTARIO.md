@@ -6,6 +6,45 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (19 Maio 2026 pós-pt26 closeout)
+
+Sessão pt26 fechada com **1 commit feature em main** (`a735053`, pt26 smoke
+calibração) + commit docs. Trabalho substancial em `_local_only/`
+(gitignored): trampoline strategy do `swap_and_smoke.py` (4 SWAP + 13
+APPEND + 15 consts), PyInstaller bundle do `.exe` pt26 (12.86 MB, sha256
+`2213aa19...a4a7`). Suite **449 → 453 PASSED** (+4 líquidos para tests
+de pixels-rel + Nash hint + Calculate calibration).
+
+Re-classificação do problema reportado pelo Rui no smoke real: o sintoma
+de "equity_model errado" **não é regressão FT/MTT** (design tag-based é
+canónico desde pt23, confirmado nesta sessão) — é cadeia
+`#VISION-LOBBY-API-FAILURE → #HRC-CONTEXT-MISMATCH-PLAYERS-LEFT`
+mascarada pelo workaround `#HRC-MTT-OTHER-TABLES-INFO` aceite em pt23.
+Erro do Web auto-registado no journal pt26: interpretação literal antes
+de pattern-matching.
+
+**Estado do gatekeeper `#HRC-PRUNE-IN-GAP-DOWNSTREAM`:** continua
+**substituído** pelo flow Bloco 2; recompilação validada mecanicamente
+no smoke harness do `swap_and_smoke.py` (14/14 PASS), mas
+**funcionalmente bloqueada** por `#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN`
+(CRIT novo, descoberto no smoke real 19 Maio).
+
+### Tech debts fechados em pt26 (1)
+
+| ID | Como fechou |
+|---|---|
+| **#CALCULATE-BUTTON-COORD-PENDING** | `a735053` aplicou `CALCULATE_BUTTON_X=204`, `CALCULATE_BUTTON_Y=59` (pixels-rel à wpos, convenção alinhada com `EQUITY_MODEL_X/Y` e `STRATEGY_TABLE_FOCUS_X/Y`). Título Nash refinado para `("Nash Calculation",)` (drop hint permissivo `"Calculate"`). Migração das fracções do popup para pixels-rel (`SCOPE_DROPDOWN_REL = (278, 67)`, etc.) — robustez contra variação de tamanho do popup observada entre smokes 18 e 19 Maio (416×214 → 436×230). Tests 27→31 em `test_watcher_set_scope.py`. Detalhe completo em `docs/JOURNAL_2026-05-19-pt26.md`. |
+
+### Tech debts novos abertos em pt26 (5)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#VISION-LOBBY-API-FAILURE** | 🔴 CRIT (gatekeeper smoke real útil) | Vision API do lobby falhou em processar o SS do torneio para mão `WN-4690815078549684227-208-1778279040`. Investigação pendente: (a) SS estava associado à mão no canal Discord da tag HM3? (b) `lobby_processing_log` tem entrada para esta mão / este `tournament_number`? Erro registado? (c) Vision call site em `backend/app/services/lobby_vision.py` só faz `logger.error/warning` + `return None` em todas as failure paths — não há retry nem propagação de erro além de None. (d) Quotas/limits API Anthropic — auditoria 19 Maio mostrou só 5 dias de uso em Maio (plenty de quota); investigar outros factores (timeouts, rate limits, lobby SS malformado, JSON dict não-parseable). Fix conceptual: tornar Vision API failure observable (não silenciosa) + populate `lobby_processing_log` com `failure_reason` mesmo em erro. |
+| **#HRC-CONTEXT-MISMATCH-PLAYERS-LEFT** | 🔴 CRIT (sintoma do `#VISION-LOBBY-API-FAILURE`) | HRC calcula como N-handed quando torneio tem K-left (N << K). Para `WN-4690815078549684227-208-1778279040`: 13-left em 6-max, HRC viu 4 jogadores no torneio totais → ICM strategies não confiáveis. Vinculado a `#VISION-LOBBY-API-FAILURE` (causa upstream) e `#HRC-MTT-OTHER-TABLES-INFO` (workaround aceite em pt23 Bloco 7 que mascara este sintoma). Fix em 2 frentes paralelas: (1) garantir `players_left` no meta.json (depende de `#VISION-LOBBY-API-FAILURE`); (2) watcher escreve Other Tables = `ceil((players_left - max_players) / max_players)` quando `players_left` está populado — source-side em `handle_mtt_stacks_page` ou função paralela. Coords + Generate button + sequência de teclas pendentes de calibração smoke. |
+| **#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN** | 🔴 CRIT | Smoke real 19 Maio com `.exe` pt26 mostrou que `start_calculation_selected_subtree` não dispara o popup Nash. `_wait_for_nash_popup` devolve `None` por timeout (5s). Cadeia cai no early-return defensivo de `_set_scope_in_popup`. Hipóteses: (a) `_click_calculate_button` clicou mas popup não abriu por algum estado do HRC; (b) timing — popup demora >5s, `_NASH_POPUP_WAIT_TIMEOUT_S=5.0` curto demais; (c) Calculate button coord `(204, 59)` errado para estado pós-1ª-run; (d) `start_calculation` legacy (não-patched) já abre e fecha popup Nash da 1ª run, o segundo Calculate vai a outro lado. Diagnóstico exige smoke devagar dedicada. **Bloqueia smoke real funcional do `.exe` pt26.** |
+| **#FINALIZE-NEVER-FIRES-ON-NO-OP** | 🟡 MED | Quando `start_calculation_selected_subtree` faz early-return por popup não detectado (`#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN`), `finalize_after_second_run` é chamado na mesma mas a 2ª run não correu. Zip exportado pode conter só a 1ª run (Full Tree) ou estar vazio/parcial. Fix: `start_calculation_selected_subtree` devolve bool de sucesso; `setup_hand` só chama `finalize` se Selected Subtree completou. Senão `finalize` da 1ª run com warning explícito. |
+| **#CI-DEFAULT-MISMATCH** | 🟡 MED | Smoke real 19 Maio expôs inconsistência: `meta.json.ci` defaulta `5.0` em `_build_hand_meta` ([`queue_export.py:570`](backend/app/services/queue_export.py)); `start_calculation_selected_subtree` chamado em `setup_hand` com hardcoded `10.0`; docstrings DEPRECATED de `set_ci_target_initial/refine` falam de 5.0/10.0. Risk: tree explora em CI=5 na 1ª run mas user pode esperar CI=10 coerente em ambas. Decisão product pendente: (i) split 5/10 explícito; (ii) alinhar ambos em 10; (iii) parametrizar via meta.json. |
+
 ## Estado actual (15-18 Maio 2026 pós-pt25f closeout estendido)
 
 Sessão pt25f fechada com **10 commits feature em main** + 2 commits docs.
@@ -57,7 +96,7 @@ que o Rui vê quando usa a app/HRC.
 | ID | Severidade | Resumo |
 |---|---|---|
 | **#CHANGE-PASSWORD-FEATURE** | 🟡 MED | App não tem endpoint nem UI para change-password. Rotação de password do user `rui@pokerapp.com` em pt25f (15 Maio, post-exposure da `MudaEsta123!` em scripts/zips/briefings) foi single-shot via `UPDATE users SET password_hash = ...` na DB Railway com Code com acesso. Próxima rotação volta a depender de DB direct. Fix: implementar `POST /api/auth/change-password` (validar old + bcrypt-hash new + invalidate session opcional) + UI em SettingsPage / Profile dropdown. Pré-requisitos: nenhum. Esforço: ~2h (1 endpoint + 1 form). |
-| **#CALCULATE-BUTTON-COORD-PENDING** | 🟡 MED (gatekeeper recompilação) | `CALCULATE_BUTTON_X/Y` em `tools/watcher_src/patched_funcs.py:317` ainda a 0 (placeholder) + early-return defensivo no `_click_calculate_button`. Botão verde Calculate no main UI HRC, à direita do painel da Strategy Table — visualmente o único botão "go" verde grande no estado pós-1ª-run. Não documentado no source legacy do Baltazar; `start_calculation` legacy clica-o internamente sem expor coords. Calibração: smoke pequeno comigo no Beelink (Rui usa `pyautogui.position()`, 1 click) — `_local_only/get_calibrate_coords.py` se ainda existir, ou substituto inline. **Bloqueia recompilação do `.exe`**: sem este coord, o `start_calculation_selected_subtree` recompilado faz early-return defensivo do passo 1 e o flow Selected Subtree não dispara. Ao mesmo tempo confirmar o título exacto da janela do popup Nash (hints provisórios `("Nash", "Calculate")` em `_NASH_POPUP_TITLE_HINTS`) — Rui copia o título visível na barra do popup. |
+| **#CALCULATE-BUTTON-COORD-PENDING** | 🟢 FECHADO em pt26 (`a735053`) — ver §"Tech debts fechados em pt26" no topo. Texto pt25f preservado abaixo por contexto histórico. | `CALCULATE_BUTTON_X/Y` em `tools/watcher_src/patched_funcs.py:317` ainda a 0 (placeholder) + early-return defensivo no `_click_calculate_button`. Botão verde Calculate no main UI HRC, à direita do painel da Strategy Table — visualmente o único botão "go" verde grande no estado pós-1ª-run. Não documentado no source legacy do Baltazar; `start_calculation` legacy clica-o internamente sem expor coords. Calibração: smoke pequeno comigo no Beelink (Rui usa `pyautogui.position()`, 1 click) — `_local_only/get_calibrate_coords.py` se ainda existir, ou substituto inline. **Bloqueia recompilação do `.exe`**: sem este coord, o `start_calculation_selected_subtree` recompilado faz early-return defensivo do passo 1 e o flow Selected Subtree não dispara. Ao mesmo tempo confirmar o título exacto da janela do popup Nash (hints provisórios `("Nash", "Calculate")` em `_NASH_POPUP_TITLE_HINTS`) — Rui copia o título visível na barra do popup. |
 
 ## Estado actual (15 Maio 2026 pós-pt25e Bloco 1 + smoke devagar manual em curso)
 
