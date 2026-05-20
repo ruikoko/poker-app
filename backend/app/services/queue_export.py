@@ -459,6 +459,190 @@ def derive_aggressor_real_action(
     }
 
 
+# ---------------------------------------------------------------------------
+# pt29 Fase 2 — converter GG -> PokerStars-compat (8 transformacoes)
+#
+# Smoke pt28-v3 (20 Maio) + testes A/B manuais do Rui isolaram que o HRC
+# parser rejeita HH GG com varias diferencas vs formato PokerStars autentico.
+# Esta seccao implementa as 8 transformacoes que tornam a HH aceitavel pelo
+# HRC, validadas empiricamente:
+#   1. Header `Poker Hand #TM<id>` -> `PokerStars Hand #<id>`
+#   2. Level spacing: `Level14 (1750/3500)` -> `Level 14 (1750/3500)`
+#   3. Bounty PS format inline `(<chips> in chips, €<X> bounty)`. Hero TEM
+#      bounty (HRC rejeita se nao). Sem decimais quando inteiro. €.
+#   4. Remover `*** SHOWDOWN ***` quando nao houver `<player>: shows` entre
+#      SHOWDOWN e SUMMARY.
+#   5. Adicionar `<player>: doesn't show hand` apos `collected ... from pot`
+#      se nao existir.
+#   6. Remover linhas `Dealt to <player>` sem cartas (manter so Hero).
+#   7. Total pot trim: descartar trailing `| Jackpot 0 | Bingo 0 | ...`.
+#   8. Remover virgulas de TODOS os amounts numericos (passada final).
+#
+# Tech debt aceite (briefing Rui): Hero bounty hardcoded para $250 (= bounty
+# base do torneio Bounty Hunters Big Game $525). Para mãos depois de KOs o
+# Hero bounty real é maior; para outros torneios é diferente. Calculo PKO
+# equity HRC sera ligeiramente off mas funcional. Derivacao real fica para
+# futura sessao via TournamentSummaries -- `#HERO-BOUNTY-FROM-TS-DERIVATION`.
+# ---------------------------------------------------------------------------
+
+_HERO_BOUNTY_DEFAULT_USD = 250.0
+
+
+_HEADER_TM_RE = re.compile(r"^Poker Hand #TM(\d+):", re.MULTILINE)
+
+
+def _rewrite_header_to_pokerstars(text: str) -> str:
+    """Passo 1: `Poker Hand #TM<id>` -> `PokerStars Hand #<id>` (1a linha)."""
+    return _HEADER_TM_RE.sub(r"PokerStars Hand #\1:", text, count=1)
+
+
+_LEVEL_SPACING_RE = re.compile(r"\bLevel(\d+)\b")
+
+
+def _normalize_level_spacing(text: str) -> str:
+    """Passo 2: `Level14` -> `Level 14`."""
+    return _LEVEL_SPACING_RE.sub(r"Level \1", text)
+
+
+# Regex para Seat lines pos-_replace_hashes (nicks reais + Hero literal).
+# `)` final fora dos grupos para podermos injectar antes do fecho.
+_SEAT_LINE_RE = re.compile(
+    r"^(Seat \d+: )(.+?)( \([\d,]+ in chips)\)", re.MULTILINE
+)
+
+
+def _format_bounty_amount(value: float) -> str:
+    """`250.0` -> `'250'`; `112.5` -> `'112.50'`. Sem decimais quando inteiro."""
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.2f}"
+
+
+def _inject_bounties_ps_format(
+    text: str, players_list: list, anon_map: dict
+) -> str:
+    """Passo 3: injecta `, €<X> bounty)` em cada Seat line do HH.
+
+    Hero: lookup pelo real nick (via anon_map["Hero"]) no players_list;
+    se nao encontrado OU valor < default, usa `_HERO_BOUNTY_DEFAULT_USD`
+    ($250 = bounty base do torneio Bounty Hunters Big Game $525). HRC
+    rejeita HH sem bounty no Hero (briefing Rui: "Hero TEM de ter bounty").
+
+    Outros seats: lookup pelo nick no players_list (`bounty_value_usd`).
+    Se nao encontrado, fallback para 0 -- HRC ainda assim aceita o seat
+    com bounty €0 (testado empiricamente).
+
+    Currency hardcoded €: validado pelo Rui que HRC aceita € e rejeita $.
+    """
+    if not text:
+        return text
+
+    bounty_by_name: dict = {}
+    if players_list:
+        for p in players_list:
+            name = (p.get("name") or "").strip()
+            bv = p.get("bounty_value_usd")
+            if name and isinstance(bv, (int, float)) and bv > 0:
+                bounty_by_name[name] = float(bv)
+
+    hero_real = (anon_map or {}).get("Hero")
+
+    def _repl(m: re.Match) -> str:
+        prefix, nick, mid = m.group(1), m.group(2), m.group(3)
+        if nick == "Hero":
+            # Hero: prefer Vision value (post-KOs accumulator) if >= default,
+            # else fallback to default base (tech debt #HERO-BOUNTY-FROM-TS-
+            # DERIVATION). Garante HRC nunca ve Hero sem bounty.
+            vision_value = bounty_by_name.get(hero_real, 0.0) if hero_real else 0.0
+            value = max(vision_value, _HERO_BOUNTY_DEFAULT_USD)
+        else:
+            value = bounty_by_name.get(nick, 0.0)
+        formatted = _format_bounty_amount(value)
+        return f"{prefix}{nick}{mid}, €{formatted} bounty)"
+
+    return _SEAT_LINE_RE.sub(_repl, text)
+
+
+_SHOWDOWN_MARK = "*** SHOWDOWN ***"
+_SUMMARY_MARK = "*** SUMMARY ***"
+
+
+def _drop_showdown_if_no_show(text: str) -> str:
+    """Passo 4: remove `*** SHOWDOWN ***` se nao houver `<player>: shows`
+    entre SHOWDOWN e SUMMARY. Mãos fold-to (raise + folds) tem o marker
+    SHOWDOWN spurio do GG raw — HRC rejeita."""
+    sd_idx = text.find(_SHOWDOWN_MARK)
+    if sd_idx == -1:
+        return text
+    sm_idx = text.find(_SUMMARY_MARK, sd_idx)
+    middle = text[sd_idx:sm_idx] if sm_idx != -1 else text[sd_idx:]
+    if ": shows" in middle:
+        return text
+    # Remover a linha SHOWDOWN inteira (com trailing \n)
+    line_end = text.find("\n", sd_idx)
+    if line_end == -1:
+        return text[:sd_idx].rstrip()
+    return text[:sd_idx] + text[line_end + 1:]
+
+
+_COLLECTED_FROM_POT_RE = re.compile(r"^(.+?)\s+collected\s+\S+\s+from pot")
+
+
+def _add_doesnt_show_after_collected(text: str) -> str:
+    """Passo 5: apos cada `<player> collected X from pot` (fora do SUMMARY),
+    se nao existir ja `<player>: doesn't show hand`, adicionar."""
+    lines = text.split("\n")
+    out: list = []
+    in_summary = False
+    for i, line in enumerate(lines):
+        if line.startswith(_SUMMARY_MARK):
+            in_summary = True
+        out.append(line)
+        if in_summary:
+            continue
+        m = _COLLECTED_FROM_POT_RE.match(line)
+        if not m:
+            continue
+        player = m.group(1).strip()
+        next_line = lines[i + 1] if i + 1 < len(lines) else ""
+        marker = f"{player}: doesn't show hand"
+        if marker not in next_line:
+            out.append(marker)
+    return "\n".join(out)
+
+
+def _drop_dealt_to_non_hero(text: str) -> str:
+    """Passo 6: remove linhas `Dealt to <player>` sem cartas (sem `[`).
+    Manter `Dealt to Hero [...]`. GG raw mete `Dealt to <hash>` para todos
+    os seats; HRC so quer o Hero."""
+    out: list = []
+    for line in text.split("\n"):
+        if line.startswith("Dealt to ") and "[" not in line:
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+_TOTAL_POT_TRIM_RE = re.compile(
+    r"(Total pot \S+ \| Rake \S+) \| Jackpot \S+ \| Bingo \S+ \| Fortune \S+ \| Tax \S+"
+)
+
+
+def _trim_total_pot_trailing_fields(text: str) -> str:
+    """Passo 7: `Total pot X | Rake 0 | Jackpot 0 | Bingo 0 | Fortune 0 | Tax 0`
+    -> `Total pot X | Rake 0`. GG raw mete metricas extra que HRC nao quer."""
+    return _TOTAL_POT_TRIM_RE.sub(r"\1", text)
+
+
+_THOUSANDS_COMMA_RE = re.compile(r"\d{1,3}(?:,\d{3})+")
+
+
+def _strip_commas_from_amounts(text: str) -> str:
+    """Passo 8 (passada final): `40,492` -> `40492`. Aplica a chips em
+    Seats, raises, blinds, collected, etc."""
+    return _THOUSANDS_COMMA_RE.sub(lambda m: m.group(0).replace(",", ""), text)
+
+
 def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
     """Converte raw HH GG para formato compativel com HRC.
 
@@ -467,10 +651,19 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
 
     Hands com `raw` vazio devolvem string vazia (caller deve filtrar).
 
-    pt28-v3 smoke 20 Maio revelou que o HRC parser rejeita HH com bounty
-    inline ", $X.XX bounty)" nas Seat lines. A revisao pt24 que adicionava
-    isso (`_inject_bounties_into_seat_lines`) foi removida. HRC le bounties
-    do payouts.json separado; nicks resolvidos via `_replace_hashes` ficam.
+    Pipeline pt29 Fase 2 (ver bloco de helpers acima para detalhe das 8
+    transformacoes):
+
+      _format_level_line   -> drop ante + virgulas no Level header
+      _replace_hashes      -> substitui hashes por nicks reais
+      passo 1              -> Poker Hand #TM<id>  ->  PokerStars Hand #<id>
+      passo 2              -> Level14             ->  Level 14
+      passo 3              -> injecta `, €<X> bounty)` em cada Seat
+      passo 4              -> drop SHOWDOWN spurio
+      passo 5              -> add "doesn't show hand" pos-collected
+      passo 6              -> drop "Dealt to" non-Hero
+      passo 7              -> trim Total pot trailing
+      passo 8 (final)      -> remove virgulas de amounts
     """
     raw = (hand.get("raw") or "").strip()
     if not raw:
@@ -480,9 +673,18 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
 
     pn = _coerce_player_names(hand.get("player_names"))
     anon_map = pn.get("anon_map") or {}
+    players_list = pn.get("players_list") or []
 
     out = _format_level_line(raw)
     out = _replace_hashes(out, anon_map)
+    out = _rewrite_header_to_pokerstars(out)                       # 1
+    out = _normalize_level_spacing(out)                            # 2
+    out = _inject_bounties_ps_format(out, players_list, anon_map)  # 3
+    out = _drop_showdown_if_no_show(out)                           # 4
+    out = _add_doesnt_show_after_collected(out)                    # 5
+    out = _drop_dealt_to_non_hero(out)                             # 6
+    out = _trim_total_pot_trailing_fields(out)                     # 7
+    out = _strip_commas_from_amounts(out)                          # 8 (final)
     return out
 
 

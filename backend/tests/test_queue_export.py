@@ -1,8 +1,19 @@
-"""Unit tests para services/queue_export.py — FASE 1 conversor HH."""
+"""Unit tests para services/queue_export.py — FASE 1 + FASE 2 (pt29) conversor HH."""
 from app.services.queue_export import (
     convert_gg_hh_to_pokerstars_compatible,
     _format_level_line,
     _replace_hashes,
+    # pt29 Fase 2: 8 transformacoes PS-compat
+    _rewrite_header_to_pokerstars,
+    _normalize_level_spacing,
+    _inject_bounties_ps_format,
+    _format_bounty_amount,
+    _drop_showdown_if_no_show,
+    _add_doesnt_show_after_collected,
+    _drop_dealt_to_non_hero,
+    _trim_total_pot_trailing_fields,
+    _strip_commas_from_amounts,
+    _HERO_BOUNTY_DEFAULT_USD,
 )
 
 
@@ -78,8 +89,12 @@ def test_convert_gg_full_pipeline():
     }
     out = convert_gg_hh_to_pokerstars_compatible(hand)
 
-    # Level reformatado.
-    assert "Level7 (350/700)" in out
+    # pt29 Fase 2 passo 1: header PokerStars.
+    assert "PokerStars Hand #5891642943:" in out
+    assert "Poker Hand #TM5891642943:" not in out
+
+    # pt29 Fase 2 passo 2: Level com espaco.
+    assert "Level 7 (350/700)" in out
     assert "Level7(350/700(100))" not in out
 
     # Hashes substituidos.
@@ -90,8 +105,11 @@ def test_convert_gg_full_pipeline():
     assert "d2ca5b9a" not in out
     assert "e0627537" not in out
 
-    # Hero + estrutura preservados.
-    assert "Seat 1: Hero" in out
+    # pt29 Fase 2 passo 3: Hero com bounty default; outros sem bounty na
+    # fixture (players_list ausente) ficam com €0.
+    assert "Seat 1: Hero (40492 in chips, €250 bounty)" in out
+
+    # Estrutura preservada.
     assert "*** HOLE CARDS ***" in out
     assert "*** SUMMARY ***" in out
 
@@ -103,8 +121,8 @@ def test_convert_gg_without_anon_map_keeps_hashes():
         "player_names": {},  # sem anon_map
     }
     out = convert_gg_hh_to_pokerstars_compatible(hand)
-    # Level ainda reformata.
-    assert "Level7 (350/700)" in out
+    # Level ainda reformata com espaco.
+    assert "Level 7 (350/700)" in out
     # Hashes intactos (degrade graceful).
     assert "96c226b8" in out
     assert "d2ca5b9a" in out
@@ -139,6 +157,364 @@ def test_player_names_as_string_is_parsed():
 # Smoke 20 Maio: HRC parser rejeita HH com ", $X.XX bounty)" nas Seat lines.
 # `_inject_bounties_into_seat_lines` foi apagada. Bounties continuam em
 # payouts.json paralelo (HRC le por essa via). Tests pt24 abaixo removidos.
+
+
+# ── pt29 Fase 2: 8 transformacoes PS-compat para HRC aceitar HH GG ──────────
+
+# Passo 1: header
+def test_rewrite_header_to_pokerstars_replaces_tm_prefix():
+    assert _rewrite_header_to_pokerstars(
+        "Poker Hand #TM5944816316: Tournament #999, ..."
+    ) == "PokerStars Hand #5944816316: Tournament #999, ..."
+
+
+def test_rewrite_header_to_pokerstars_only_first_line():
+    """Replace count=1 — so a 1a linha."""
+    s = "Poker Hand #TM123: a\nPoker Hand #TM456: b"
+    out = _rewrite_header_to_pokerstars(s)
+    assert "PokerStars Hand #123:" in out
+    assert "Poker Hand #TM456:" in out  # 2a linha intacta
+
+
+def test_rewrite_header_no_match_passthrough():
+    s = "PokerStars Hand #999: ja convertida"
+    assert _rewrite_header_to_pokerstars(s) == s
+
+
+# Passo 2: Level spacing
+def test_normalize_level_spacing_inserts_space():
+    assert _normalize_level_spacing("Level14 (1750/3500)") == "Level 14 (1750/3500)"
+
+
+def test_normalize_level_spacing_idempotent_with_existing_space():
+    """`Level 14` ja tem espaco -> nao muda (regex pede `Level<digit>` directo)."""
+    s = "Level 14 (1750/3500)"
+    assert _normalize_level_spacing(s) == s
+
+
+# Passo 3: bounty PS format
+def test_format_bounty_amount_integer_drops_decimals():
+    assert _format_bounty_amount(250.0) == "250"
+    assert _format_bounty_amount(100) == "100"
+
+
+def test_format_bounty_amount_fractional_keeps_two_decimals():
+    assert _format_bounty_amount(112.5) == "112.50"
+    assert _format_bounty_amount(75.25) == "75.25"
+
+
+def test_inject_bounties_hero_gets_default_when_not_in_players_list():
+    """Hero TEM bounty (HRC rejeita sem). Default _HERO_BOUNTY_DEFAULT_USD."""
+    hh = "Seat 1: Hero (40,492 in chips)\n"
+    out = _inject_bounties_ps_format(hh, [], {"Hero": "Lauro Dermio"})
+    assert "Seat 1: Hero (40,492 in chips, €250 bounty)" in out
+
+
+def test_inject_bounties_hero_keeps_default_when_vision_below():
+    """Vision deu Hero bounty < 250 -> usa default (max). Tech debt aceite
+    porque bounty acumulado real fica para futura sessao."""
+    hh = "Seat 1: Hero (40,492 in chips)\n"
+    out = _inject_bounties_ps_format(
+        hh, [{"name": "Lauro Dermio", "bounty_value_usd": 75}],
+        {"Hero": "Lauro Dermio"},
+    )
+    assert "Seat 1: Hero (40,492 in chips, €250 bounty)" in out
+
+
+def test_inject_bounties_hero_keeps_vision_when_above_default():
+    """Se Vision viu Hero com bounty > default (post-KOs), usa Vision."""
+    hh = "Seat 1: Hero (40,492 in chips)\n"
+    out = _inject_bounties_ps_format(
+        hh, [{"name": "Lauro Dermio", "bounty_value_usd": 500}],
+        {"Hero": "Lauro Dermio"},
+    )
+    assert "Seat 1: Hero (40,492 in chips, €500 bounty)" in out
+
+
+def test_inject_bounties_non_hero_uses_players_list_value():
+    """Outros seats: lookup pelo nick em players_list. Sem decimais se inteiro."""
+    hh = "Seat 2: msthtb66 (26,167 in chips)\n"
+    out = _inject_bounties_ps_format(
+        hh,
+        [{"name": "msthtb66", "bounty_value_usd": 50}],
+        {},
+    )
+    assert "Seat 2: msthtb66 (26,167 in chips, €50 bounty)" in out
+
+
+def test_inject_bounties_non_hero_decimal_value():
+    hh = "Seat 8: Dennis (272,264 in chips)\n"
+    out = _inject_bounties_ps_format(
+        hh,
+        [{"name": "Dennis", "bounty_value_usd": 112.5}],
+        {},
+    )
+    assert "Seat 8: Dennis (272,264 in chips, €112.50 bounty)" in out
+
+
+def test_inject_bounties_non_hero_missing_falls_back_to_zero():
+    """Sem bounty no players_list -> 0. HRC aceita seats com bounty €0."""
+    hh = "Seat 7: Unknown (50,000 in chips)\n"
+    out = _inject_bounties_ps_format(hh, [], {})
+    assert "Seat 7: Unknown (50,000 in chips, €0 bounty)" in out
+
+
+def test_inject_bounties_currency_is_always_euro():
+    """Validado empiricamente pelo Rui: HRC aceita € e rejeita $."""
+    hh = "Seat 1: Hero (1000 in chips)\n"
+    out = _inject_bounties_ps_format(hh, [], {"Hero": "X"})
+    assert "€" in out
+    assert "$" not in out
+
+
+# Passo 4: drop SHOWDOWN sem shows
+def test_drop_showdown_when_no_shows_between_markers():
+    hh = (
+        "Hero: folds\n"
+        "*** SHOWDOWN ***\n"
+        "*** SUMMARY ***\n"
+        "Total pot 100 | Rake 0\n"
+    )
+    out = _drop_showdown_if_no_show(hh)
+    assert "*** SHOWDOWN ***" not in out
+    assert "*** SUMMARY ***" in out
+
+
+def test_keep_showdown_when_player_shows():
+    hh = (
+        "*** SHOWDOWN ***\n"
+        "Hero: shows [Ah Kh] (high card Ace)\n"
+        "*** SUMMARY ***\n"
+    )
+    out = _drop_showdown_if_no_show(hh)
+    assert "*** SHOWDOWN ***" in out
+
+
+def test_drop_showdown_no_op_when_marker_absent():
+    hh = "Hero: folds\n*** SUMMARY ***\n"
+    assert _drop_showdown_if_no_show(hh) == hh
+
+
+# Passo 5: add "doesn't show hand"
+def test_add_doesnt_show_after_collected_from_pot():
+    hh = (
+        "msthtb66: folds\n"
+        "Hero collected 3500 from pot\n"
+        "*** SUMMARY ***\n"
+    )
+    out = _add_doesnt_show_after_collected(hh)
+    assert "Hero: doesn't show hand" in out
+    # Linha "doesn't show" vem DEPOIS do collected
+    lines = out.split("\n")
+    collected_idx = next(i for i, l in enumerate(lines) if "collected 3500" in l)
+    doesnt_idx = next(i for i, l in enumerate(lines) if "doesn't show" in l)
+    assert doesnt_idx == collected_idx + 1
+
+
+def test_add_doesnt_show_skips_when_already_present():
+    """Se ja existe 'doesn't show hand' a seguir, nao duplica."""
+    hh = (
+        "Hero collected 3500 from pot\n"
+        "Hero: doesn't show hand\n"
+        "*** SUMMARY ***\n"
+    )
+    out = _add_doesnt_show_after_collected(hh)
+    assert out.count("Hero: doesn't show hand") == 1
+
+
+def test_add_doesnt_show_skips_inside_summary():
+    """`Seat N: <player> collected (X)` dentro do SUMMARY usa formato diferente
+    e nao deve disparar a injeccao."""
+    hh = (
+        "*** SUMMARY ***\n"
+        "Seat 3: msthtb66 collected (3500)\n"
+    )
+    out = _add_doesnt_show_after_collected(hh)
+    assert "doesn't show" not in out
+
+
+# Passo 6: drop "Dealt to" non-Hero
+def test_drop_dealt_to_non_hero_removes_no_cards_lines():
+    hh = (
+        "*** HOLE CARDS ***\n"
+        "Dealt to Hero [3h 8d]\n"
+        "Dealt to msthtb66 \n"
+        "Dealt to EitAAn \n"
+        "msthtb66: folds\n"
+    )
+    out = _drop_dealt_to_non_hero(hh)
+    assert "Dealt to Hero [3h 8d]" in out
+    assert "Dealt to msthtb66" not in out
+    assert "Dealt to EitAAn" not in out
+    assert "msthtb66: folds" in out  # outras linhas intactas
+
+
+def test_drop_dealt_to_keeps_non_hero_with_cards():
+    """Se por acaso houver `Dealt to <player> [cards]` non-Hero (raro mas
+    possivel em showdown HHs), mantemos."""
+    hh = "Dealt to msthtb66 [As Kh]\n"
+    out = _drop_dealt_to_non_hero(hh)
+    assert "Dealt to msthtb66 [As Kh]" in out
+
+
+# Passo 7: total pot trim
+def test_trim_total_pot_drops_jackpot_bingo_fortune_tax():
+    hh = "Total pot 3500 | Rake 0 | Jackpot 0 | Bingo 0 | Fortune 0 | Tax 0\n"
+    out = _trim_total_pot_trailing_fields(hh)
+    assert "Total pot 3500 | Rake 0\n" in out
+    assert "Jackpot" not in out
+    assert "Bingo" not in out
+    assert "Fortune" not in out
+    assert "Tax" not in out
+
+
+def test_trim_total_pot_no_op_when_already_trimmed():
+    hh = "Total pot 3500 | Rake 0\n"
+    assert _trim_total_pot_trailing_fields(hh) == hh
+
+
+# Passo 8: strip commas from amounts
+def test_strip_commas_from_thousands():
+    assert _strip_commas_from_amounts("40,492 in chips") == "40492 in chips"
+    assert _strip_commas_from_amounts("raises 1,400 to 2,100") == "raises 1400 to 2100"
+
+
+def test_strip_commas_handles_millions():
+    """`1,234,567` -> `1234567` (3+ grupos de virgulas)."""
+    assert _strip_commas_from_amounts("1,234,567 chips") == "1234567 chips"
+
+
+def test_strip_commas_keeps_single_comma_in_natural_text():
+    """`Hold em No Limit, Level 7` — virgula natural (sem digits a seguir) nao
+    e tocada."""
+    s = "Hold em No Limit, Level 7"
+    assert _strip_commas_from_amounts(s) == s
+
+
+def test_strip_commas_idempotent():
+    s = "40492 in chips"
+    assert _strip_commas_from_amounts(s) == s
+
+
+# End-to-end: mao GG-5944816316 (baseline do briefing pt27-pt29)
+_HH_GG_5944816316_RAW = """Poker Hand #TM5944816316: Tournament #283300918, Bounty Hunters Big Game $525 Hold em No Limit - Level13(1,500/3,000(400)) - 2026/05/12 21:26:18
+Table '97-H' 8-max Seat #5 is the button
+Seat 1: aaaa1111 (45,123 in chips)
+Seat 2: bbbb2222 (52,400 in chips)
+Seat 3: cccc3333 (38,800 in chips)
+Seat 4: Hero (44,250 in chips)
+Seat 5: dddd4444 (60,000 in chips)
+Seat 6: eeee5555 (28,500 in chips)
+Seat 7: ffff6666 (33,900 in chips)
+Seat 8: gggg7777 (41,200 in chips)
+aaaa1111: posts the ante 400
+bbbb2222: posts the ante 400
+cccc3333: posts the ante 400
+Hero: posts the ante 400
+dddd4444: posts the ante 400
+eeee5555: posts the ante 400
+ffff6666: posts the ante 400
+gggg7777: posts the ante 400
+eeee5555: posts small blind 1,500
+ffff6666: posts big blind 3,000
+*** HOLE CARDS ***
+Dealt to aaaa1111
+Dealt to bbbb2222
+Dealt to cccc3333
+Dealt to Hero [Ah Kc]
+Dealt to dddd4444
+Dealt to eeee5555
+Dealt to ffff6666
+Dealt to gggg7777
+gggg7777: folds
+aaaa1111: folds
+bbbb2222: raises 6,000 to 6,000
+cccc3333: folds
+Hero: raises 38,250 to 44,250 and is all-in
+dddd4444: folds
+eeee5555: folds
+ffff6666: folds
+bbbb2222: folds
+Uncalled bet (38,250) returned to Hero
+Hero collected 21,200 from pot
+*** SHOWDOWN ***
+*** SUMMARY ***
+Total pot 21,200 | Rake 0 | Jackpot 0 | Bingo 0 | Fortune 0 | Tax 0
+Seat 4: Hero collected (21,200)
+"""
+
+
+def test_end_to_end_gg_5944816316_passes_all_8_transformations():
+    """Mao baseline pt27-pt29 (GG-5944816316, 97-H Bounty Hunters Daily Main,
+    Hero HJ 3-bet jam, eff 6.64BB). Confirma que o output do exporter passa
+    todas as 8 transformacoes em ordem correcta — o que o HRC parser engole
+    pos-pt29 Fase 2."""
+    hand = {
+        "site": "GGPoker",
+        "raw": _HH_GG_5944816316_RAW,
+        "player_names": {
+            "anon_map": {
+                "Hero": "Lauro Dermio",
+                "aaaa1111": "playerA",
+                "bbbb2222": "playerB",
+                "cccc3333": "playerC",
+                "dddd4444": "playerD",
+                "eeee5555": "playerE",
+                "ffff6666": "playerF",
+                "gggg7777": "playerG",
+            },
+            "players_list": [
+                {"name": "playerA", "bounty_value_usd": 50},
+                {"name": "playerB", "bounty_value_usd": 75},
+                {"name": "playerD", "bounty_value_usd": 100},
+            ],
+        },
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(hand)
+
+    # 1. Header PS
+    assert "PokerStars Hand #5944816316:" in out
+    assert "Poker Hand #TM5944816316:" not in out
+
+    # 2. Level com espaco
+    assert "Level 13 (1500/3000)" in out
+
+    # 3. Bounty: Hero default €250, outros do players_list, restantes €0
+    assert "Seat 4: Hero (44250 in chips, €250 bounty)" in out
+    assert "Seat 1: playerA (45123 in chips, €50 bounty)" in out
+    assert "Seat 2: playerB (52400 in chips, €75 bounty)" in out
+    assert "Seat 5: playerD (60000 in chips, €100 bounty)" in out
+    # Players sem bounty no players_list -> €0
+    assert "Seat 3: playerC (38800 in chips, €0 bounty)" in out
+
+    # 4. SHOWDOWN removido (Hero ganhou por uncalled bet, sem shows)
+    assert "*** SHOWDOWN ***" not in out
+
+    # 5. doesn't show adicionado apos collected from pot
+    assert "Hero: doesn't show hand" in out
+
+    # 6. Dealt to non-Hero removido; Hero mantido
+    assert "Dealt to Hero [Ah Kc]" in out
+    for hash_id in ("aaaa1111", "bbbb2222", "cccc3333", "dddd4444",
+                     "eeee5555", "ffff6666", "gggg7777"):
+        assert f"Dealt to {hash_id}" not in out
+    # Tambem nao deve haver "Dealt to playerA" etc (sem cartas)
+    for nick in ("playerA", "playerB", "playerC", "playerD",
+                 "playerE", "playerF", "playerG"):
+        assert f"Dealt to {nick}" not in out
+
+    # 7. Total pot trim
+    assert "Total pot 21200 | Rake 0" in out
+    assert "Jackpot" not in out
+    assert "Bingo" not in out
+    assert "Fortune" not in out
+    assert "Tax" not in out
+
+    # 8. Virgulas removidas em todos os amounts
+    assert "1,500" not in out
+    assert "44,250" not in out
+    assert "21,200" not in out
+    assert "38,250" not in out
 
 
 # ── pt25: #HRC-PRUNE-IN-GAP-DOWNSTREAM helpers ─────────────────────────────
