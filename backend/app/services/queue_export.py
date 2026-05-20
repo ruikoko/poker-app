@@ -11,9 +11,13 @@ Decisoes (D1-D4 do plano FASE 1):
   D3: hashes 7-8 hex sao substituidos por nicks reais via player_names.anon_map
       quando este existir. Sem anon_map -> hashes ficam (degrade graceful).
   D4: bounty inline em seats NAO e adicionado em FASE 1. HRC le do payouts.json.
-      (pt24: REVISTO — `_inject_bounties_into_seat_lines` injecta bounty $
-      em cada Seat line quando `players_list[].bounty_value_usd` existe.
-      Fecha `#HRC-GG-KOS-EXTRACTION` para mãos GG com Vision pt24+ ingestion.)
+      (pt24 revisao revertida pt28-v3 smoke 20 Maio: HRC parser rejeita HH
+      com ", $X.XX bounty)" nas Seat lines com popup "Hand Import: No valid
+      hand-history found in the Clipboard". Testes A/B do Rui isolaram
+      bounty inline como causa raiz. Nicks resolvidos via `_replace_hashes`
+      continuam OK. Bounties continuam disponiveis no payouts.json paralelo
+      — o HRC le bounties por essa via, nao via Seat lines. Tech debt
+      `#HRC-GG-KOS-EXTRACTION` reabre.)
 """
 from __future__ import annotations
 import io
@@ -80,13 +84,6 @@ def _coerce_player_names(pn) -> dict:
         except (ValueError, TypeError):
             return {}
     return pn if isinstance(pn, dict) else {}
-
-
-# pt24: regex para Seat lines no HH GG. Captura prefix + nick (lazy, tolera
-# espaços em nomes pós-_replace_hashes, ex: "Vlad Martyn.." ou "R Aziz Alves")
-# + " (CHIPS in chips" — o `)` final fica fora dos grupos para podermos
-# injectar conteúdo antes de o fechar.
-_SEAT_RE = re.compile(r"^(Seat \d+: )(.+?)( \([\d,]+ in chips)\)", re.MULTILINE)
 
 
 # pt25d: helpers para seat ↔ HRC player index ↔ position label.
@@ -462,64 +459,6 @@ def derive_aggressor_real_action(
     }
 
 
-def _detect_currency_symbol(hh_text: str) -> str:
-    """Detecta currency a partir do tournament header (1ª linha).
-
-    GG headers tipicamente: '... Bounty Hunters Big Game $215 ...' → USD;
-    PS/WN-style adaptado: '€45+€45+€10 EUR' → EUR. Default $: a maioria
-    dos GG PKO em prod é USD."""
-    first_line = hh_text.split("\n", 1)[0] if hh_text else ""
-    return "€" if "€" in first_line else "$"
-
-
-def _inject_bounties_into_seat_lines(
-    hh_text: str, players_list, anon_map: dict
-) -> str:
-    """pt24 fix `#HRC-GG-KOS-EXTRACTION`.
-
-    Injecta `, $X.XX bounty` em cada Seat line do HH PS-compat quando o player
-    correspondente tem `bounty_value_usd > 0` em `players_list` (extraído por
-    Vision pt24 da coroa dourada na SS).
-
-    Resolução de nomes:
-    - Pós-`_replace_hashes`, Seat lines têm nicks reais excepto `Hero` (que fica
-      literal). Para a linha do Hero, resolvemos via `anon_map["Hero"]`.
-    - Lookup em players_list é case-sensitive, name-exact match. Nomes sem
-      match em bounty_by_name → linha intacta (graceful: GG players ainda
-      em jogo às vezes não têm crown visível na SS, ou Vision falhou crown
-      para esse seat).
-
-    Currency: $ por defeito (GG USD); € se header contém '€'.
-
-    No-op se `players_list` vazio ou todos os bounty_value_usd <= 0.
-    """
-    if not hh_text or not players_list:
-        return hh_text
-
-    bounty_by_name: dict = {}
-    for p in players_list:
-        name = (p.get("name") or "").strip()
-        bv = p.get("bounty_value_usd")
-        if name and isinstance(bv, (int, float)) and bv > 0:
-            bounty_by_name[name] = float(bv)
-
-    if not bounty_by_name:
-        return hh_text
-
-    hero_real = (anon_map or {}).get("Hero")
-    currency = _detect_currency_symbol(hh_text)
-
-    def _repl(m: re.Match) -> str:
-        prefix, nick, mid = m.group(1), m.group(2), m.group(3)
-        lookup = hero_real if (nick == "Hero" and hero_real) else nick
-        bounty = bounty_by_name.get(lookup)
-        if bounty is None:
-            return m.group(0)
-        return f"{prefix}{nick}{mid}, {currency}{bounty:.2f} bounty)"
-
-    return _SEAT_RE.sub(_repl, hh_text)
-
-
 def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
     """Converte raw HH GG para formato compativel com HRC.
 
@@ -528,8 +467,11 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
 
     Hands com `raw` vazio devolvem string vazia (caller deve filtrar).
 
-    pt24: adicionada injecção de bounty_value_usd nas Seat lines pós-replace
-    via `_inject_bounties_into_seat_lines` (fecha `#HRC-GG-KOS-EXTRACTION`)."""
+    pt28-v3 smoke 20 Maio revelou que o HRC parser rejeita HH com bounty
+    inline ", $X.XX bounty)" nas Seat lines. A revisao pt24 que adicionava
+    isso (`_inject_bounties_into_seat_lines`) foi removida. HRC le bounties
+    do payouts.json separado; nicks resolvidos via `_replace_hashes` ficam.
+    """
     raw = (hand.get("raw") or "").strip()
     if not raw:
         return ""
@@ -538,11 +480,9 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
 
     pn = _coerce_player_names(hand.get("player_names"))
     anon_map = pn.get("anon_map") or {}
-    players_list = pn.get("players_list") or []
 
     out = _format_level_line(raw)
     out = _replace_hashes(out, anon_map)
-    out = _inject_bounties_into_seat_lines(out, players_list, anon_map)
     return out
 
 
