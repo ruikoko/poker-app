@@ -42,13 +42,28 @@ _SMOKE_OPTION_SELECTED_SUBTREE_ABS = (940, 480)
 @pytest.fixture
 def pf():
     """Carrega `patched_funcs` fresh + injecta mocks de globais que o body
-    das funções resolve via LOAD_GLOBAL contra o module namespace."""
+    das funções resolve via LOAD_GLOBAL contra o module namespace.
+
+    pt29 (#PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE): `pyperclip` precisa
+    de ser stateful (paste devolve o último copy) porque
+    `_fill_ci_target_in_popup` e `_set_ci_target_common` passaram a usar
+    `clipboard_safe_paste`, que faz set + read-back de verificação. Com
+    `pyperclip` como `MagicMock` puro, `paste()` devolve outro MagicMock
+    (!= target) → mismatch → n_retries → RuntimeError. Stateful mock evita
+    isto sem perder a capacidade de `pyperclip.copy.assert_called_once_with(...)`.
+    """
     if "patched_funcs" in sys.modules:
         del sys.modules["patched_funcs"]
     import patched_funcs as _pf  # noqa: E402
     _pf.click_rel = MagicMock(name="click_rel")
     _pf.pyautogui = MagicMock(name="pyautogui")
-    _pf.pyperclip = MagicMock(name="pyperclip")
+
+    _clipboard_state = {"value": ""}
+    _pp = MagicMock(name="pyperclip")
+    _pp.copy.side_effect = lambda text: _clipboard_state.__setitem__("value", text)
+    _pp.paste.side_effect = lambda: _clipboard_state["value"]
+    _pf.pyperclip = _pp
+
     # Manter `time.time()` real (necessário para timeout loops em
     # `_wait_for_nash_popup`); apenas `time.sleep` é no-op (suite rápida).
     _pf.time = SimpleNamespace(
@@ -192,7 +207,12 @@ def test_set_scope_in_popup_logs_success_after_clicks(pf, capsys):
 
 def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
     """Piece 2 end-to-end: com popup detectado, todos os passos disparam na
-    ordem: Calculate → wait popup → fill CI → set scope → OK Enter."""
+    ordem pt28-v1: Calculate → wait popup → set scope → fill CI → OK Enter.
+
+    A ordem scope-antes-de-CI é validada com mais rigor em
+    `test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1`.
+    Aqui só validamos o sumário (3 clicks + Enter).
+    """
     # Mock _wait_for_nash_popup to return a fake rect (popup detected).
     fake_rect = (666, 372, 416, 214)
     pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
@@ -204,10 +224,94 @@ def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
     pf.click_rel.assert_called_with(wpos, pf.CALCULATE_BUTTON_X, pf.CALCULATE_BUTTON_Y)
     # Popup detection invoked.
     pf._wait_for_nash_popup.assert_called_once()
-    # Pyautogui clicks: 1 fill CI + 2 scope = 3 clicks total.
+    # Pyautogui clicks: 2 scope + 1 fill CI = 3 clicks total.
     assert pf.pyautogui.click.call_count == 3
     # Enter pressed for OK.
     pf.pyautogui.press.assert_any_call('enter')
+
+
+def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf):
+    """pt28-v1: regressão para a nova ordem Scope → CI → OK.
+
+    Em pt27 a ordem era CI → Scope → OK. Mudar Scope DEPOIS do CI pode
+    causar re-render do popup ao seleccionar "Selected Subtree" e
+    resetar o campo CI para o default do scope novo. pt28-v1 inverte
+    para Scope PRIMEIRO; o re-render acontece antes do CI ser escrito.
+
+    Verifica a ordem via spies em `_set_scope_in_popup` +
+    `_fill_ci_target_in_popup` + `_click_ok_in_popup`. A primeira call
+    a `_set_scope_in_popup` deve preceder a primeira a
+    `_fill_ci_target_in_popup`, que deve preceder a primeira a
+    `_click_ok_in_popup`.
+    """
+    fake_rect = (666, 372, 416, 214)
+    pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
+
+    call_order = []
+    pf._set_scope_in_popup = MagicMock(
+        side_effect=lambda *a, **kw: call_order.append("scope")
+    )
+    pf._fill_ci_target_in_popup = MagicMock(
+        side_effect=lambda *a, **kw: call_order.append("ci")
+    )
+    pf._click_ok_in_popup = MagicMock(
+        side_effect=lambda *a, **kw: call_order.append("ok")
+    )
+
+    pf.start_calculation_selected_subtree((10, 10, 1024, 768), ci_target=10.0)
+
+    assert call_order == ["scope", "ci", "ok"], (
+        f"pt28-v1 requer ordem Scope→CI→OK; got {call_order}"
+    )
+
+
+def test_set_scope_in_popup_logs_absolute_dropdown_coords_pt28v1(pf, capsys):
+    """pt28-v1: logging defensivo regista coord absoluta do dropdown click
+    antes do click. Permite diagnóstico cruzado com screenshot pós-smoke
+    sem re-calibrar especulativamente as REL."""
+    pf._set_scope_in_popup(popup_rect=(666, 372, 416, 214))
+    out = capsys.readouterr().out
+
+    # Dropdown abs = 666 + 278 = 944, 372 + 67 = 439 (REL pt26)
+    expected_dropdown_x = 666 + pf.SCOPE_DROPDOWN_REL_X
+    expected_dropdown_y = 372 + pf.SCOPE_DROPDOWN_REL_Y
+    assert "dropdown click @" in out
+    assert f"({expected_dropdown_x},{expected_dropdown_y})" in out
+
+
+def test_set_scope_in_popup_logs_absolute_option_coords_pt28v1(pf, capsys):
+    """pt28-v1: logging da option (Selected Subtree) click @ coords absolutas."""
+    pf._set_scope_in_popup(popup_rect=(666, 372, 416, 214))
+    out = capsys.readouterr().out
+
+    expected_option_x = 666 + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X
+    expected_option_y = 372 + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y
+    assert "option click @" in out
+    assert f"({expected_option_x},{expected_option_y})" in out
+
+
+def test_set_scope_in_popup_logs_include_popup_rect_for_diagnostics(pf, capsys):
+    """pt28-v1: log inclui o popup_rect completo + as REL aplicadas.
+    Permite reproduzir a aritmética sem assumir o rect do smoke."""
+    pf._set_scope_in_popup(popup_rect=(100, 200, 416, 214))
+    out = capsys.readouterr().out
+
+    # popup_rect aparece em formato legível
+    assert "popup_rect=(100,200,416,214)" in out
+    # REL aparecem para cruzar com constantes
+    assert (f"rel=({pf.SCOPE_DROPDOWN_REL_X},{pf.SCOPE_DROPDOWN_REL_Y})") in out
+
+
+def test_fill_ci_target_in_popup_logs_absolute_field_coord_pt28v1(pf, capsys):
+    """pt28-v1: `_fill_ci_target_in_popup` regista coord absoluta do field
+    click antes do click. Mesma razão que `_set_scope_in_popup`."""
+    pf._fill_ci_target_in_popup(popup_rect=(666, 372, 416, 214), ci_target=10.0)
+    out = capsys.readouterr().out
+
+    expected_x = 666 + pf.CI_TARGET_POPUP_REL_X
+    expected_y = 372 + pf.CI_TARGET_POPUP_REL_Y
+    assert "field click @" in out
+    assert f"({expected_x},{expected_y})" in out
 
 
 def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, capsys):

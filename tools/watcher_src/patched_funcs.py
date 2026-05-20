@@ -12,6 +12,145 @@ import re
 import time
 
 
+# ---------------------------------------------------------------------------
+# pt29 (#PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE) — clipboard race fix
+#
+# Vector observado em smoke real 14 Maio 2026: o Rui usa RDP/sync entre PC
+# principal e Beelink. Qualquer Ctrl+C em qualquer dos PCs (incluindo
+# comandos PowerShell colados durante arranque) compete com o clipboard que
+# o watcher escreveu para o paste no HRC. Janela vulnerável: entre
+# SetClipboardData e Ctrl+V. Sintoma: paste chega ao HRC vazio, watcher
+# continua silenciosamente, corrida fica corrupta. Mapeado para 40 de 41
+# mãos perdidas em 14 Maio.
+#
+# Mitigação: `clipboard_safe_paste` faz set + read-back imediato. Se
+# mismatch, sleep 50ms + retry. Sucesso → sleep 10ms + Ctrl+V + sanity
+# pós-paste. n_retries esgotados → WARN explícito + raise (failure
+# explícito é estritamente melhor que paste silencioso → corrupção da
+# corrida).
+#
+# Call sites cobertos por este patch: `paste_hh`, `paste_path` (swap dos
+# legacy do Baltazar), `_set_ci_target_common`, `_fill_ci_target_in_popup`
+# (já em patched_funcs). O `start_calculation` legacy (1ª run, dentro do
+# .pyc Baltazar, fora do nosso source-side) também tem o vector mas fica
+# como tech debt residual sob #PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE
+# — a 1ª run tem funcionado consistentemente em produção pelo que o swap
+# completo da função não vale o risco.
+# ---------------------------------------------------------------------------
+
+
+def clipboard_safe_paste(target_text, n_retries=5):
+    """Set clipboard + verify + Ctrl+V atomicamente, blindando contra a
+    race RDP/sync descrita no header desta secção.
+
+    Sequência:
+      1. pyperclip.copy(target_text)
+      2. pyperclip.paste() — read-back imediato
+      3. Mismatch ⇒ sleep 50ms ⇒ retry (até n_retries)
+      4. Sucesso ⇒ sleep 10ms ⇒ Ctrl+V via pyautogui.hotkey
+      5. Sleep 50ms ⇒ read-back de sanity (apenas WARN se mudou,
+         não raise — o Ctrl+V já aconteceu)
+
+    n_retries esgotados ⇒ RuntimeError com WARN explícito. Por design,
+    failure explícito > corrupção silenciosa: o caller (e o log) ficam a
+    saber que algo correu mal em vez de o HRC processar paste vazio.
+
+    Logging: print do preview (primeiros 30 chars do target) + número de
+    tentativas necessárias. Em recuperação (attempt > 1) o log diz
+    "locked after N attempt(s)" para facilitar a contagem de races em
+    produção.
+    """
+    preview = target_text[:30].replace('\n', ' ').replace('\r', ' ')
+    if len(target_text) > 30:
+        preview = preview + '...'
+
+    actual = None
+    last_error = None
+    for attempt in range(1, n_retries + 1):
+        try:
+            pyperclip.copy(target_text)
+        except Exception as _e:
+            last_error = _e
+            print(f'   [WARN] clipboard_safe_paste copy raised ({_e}); '
+                  f'attempt {attempt}/{n_retries}')
+            time.sleep(0.05)
+            continue
+        try:
+            actual = pyperclip.paste()
+        except Exception as _e:
+            last_error = _e
+            print(f'   [WARN] clipboard_safe_paste read-back raised '
+                  f'({_e}); attempt {attempt}/{n_retries}')
+            actual = None
+        if actual == target_text:
+            if attempt > 1:
+                print(f'   [clipboard] locked after {attempt} attempt(s) '
+                      f'(len={len(target_text)}): {preview!r}')
+            break
+        time.sleep(0.05)
+    else:
+        print(f'   [WARN] clipboard_safe_paste: failed to lock clipboard '
+              f'after {n_retries} attempts; last actual={actual!r}, '
+              f'target={preview!r}, last_error={last_error!r}')
+        raise RuntimeError(
+            f'clipboard race unresolved after {n_retries} attempts '
+            f'(target preview={preview!r})'
+        )
+
+    time.sleep(0.01)
+    pyautogui.hotkey('ctrl', 'v')
+    time.sleep(0.05)
+    try:
+        post = pyperclip.paste()
+    except Exception:
+        post = None
+    if post != target_text:
+        print(f'   [WARN] clipboard_safe_paste: clipboard mutated '
+              f'post-paste (actual={post!r}, target={preview!r}) — paste '
+              f'may have been raced')
+
+
+def paste_hh(wpos, hh_text):
+    """Cola a hand history no `TEXT_AREA` do wizard HRC.
+
+    pt29 swap do legacy Baltazar: trocado o pyperclip.copy + send_key Ctrl+V
+    por `clipboard_safe_paste`. Restante sequência (3-click para focus,
+    select-all via send_key Win32) preservada — esses passos são
+    independentes do vector clipboard race.
+
+    Nota: o legacy usava send_key Win32 também para o Ctrl+V; aqui passamos
+    a pyautogui.hotkey (dentro de clipboard_safe_paste). Diferença
+    funcionalmente equivalente — `paste_path` legacy já usava
+    pyautogui.hotkey e nunca houve regressão registada.
+    """
+    pyautogui.click(wpos[0] + TEXT_AREA[0], wpos[1] + TEXT_AREA[1], clicks=3)
+    time.sleep(1)
+    send_key(VK_CONTROL, True)
+    time.sleep(0.05)
+    send_key(VK_A, True)
+    time.sleep(0.05)
+    send_key(VK_A, False)
+    time.sleep(0.05)
+    send_key(VK_CONTROL, False)
+    time.sleep(0.5)
+    clipboard_safe_paste(hh_text)
+    time.sleep(2)
+
+
+def paste_path(path):
+    """Type file path into Open/Save dialog.
+
+    pt29 swap do legacy Baltazar: trocado o pyperclip.copy + hotkey por
+    `clipboard_safe_paste`. Restante (sleep inicial + press Enter final)
+    preservado.
+    """
+    time.sleep(1)
+    clipboard_safe_paste(path)
+    time.sleep(1)
+    pyautogui.press('enter')
+    time.sleep(2)
+
+
 def set_equity_model(wpos, equity_model):
     """Seleciona o Equity Model no HRC via typeahead no campo dropdown.
 
@@ -122,9 +261,8 @@ def _set_ci_target_common(wpos, value, label):
     time.sleep(0.3)
     pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.1)
-    pyperclip.copy(str(float(value)))
-    pyautogui.hotkey('ctrl', 'v')
-    time.sleep(0.2)
+    clipboard_safe_paste(str(float(value)))  # pt29: set+verify+Ctrl+V atómico
+    time.sleep(0.2)                          # preserva timing legacy pós-paste
     pyautogui.press('tab')  # commit edit + leave focus
     time.sleep(0.3)
     print(f'   CI Target {label}: {value}')
@@ -304,7 +442,15 @@ def _fill_ci_target_in_popup(popup_rect, ci_target):
     das fracções legacy `start_calculation` (Baltazar pt25d) sobre o popup
     416×214 do smoke 18 Maio.
 
+    pt28-v1 reordering: agora **passo 3** do flow (após `_set_scope_in_popup`).
+    Pré-condição: popup Nash aberto + Scope já = "Selected Subtree". Pôr CI
+    depois do Scope garante que se o popup re-renderiza ao mudar Scope, o CI
+    é escrito sobre o estado já estabilizado.
+
     Defensive: `popup_rect=None` → early-return.
+
+    Logging defensivo (pt28-v1): coord absoluta do click registada antes
+    para permitir diagnóstico cruzado com screenshot pós-smoke.
     """
     if popup_rect is None:
         print('   [WARN] _fill_ci_target_in_popup: popup_rect ausente — fill ignorado')
@@ -312,13 +458,15 @@ def _fill_ci_target_in_popup(popup_rect, ci_target):
     left, top, _width, _height = popup_rect
     abs_x = left + CI_TARGET_POPUP_REL_X
     abs_y = top + CI_TARGET_POPUP_REL_Y
+    print(f'   _fill_ci_target_in_popup: field click @ ({abs_x},{abs_y}) '
+          f'[popup_rect=({left},{top},{_width},{_height}), '
+          f'rel=({CI_TARGET_POPUP_REL_X},{CI_TARGET_POPUP_REL_Y})]')
     pyautogui.click(abs_x, abs_y)
     time.sleep(0.3)
     pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.1)
-    pyperclip.copy(str(float(ci_target)))
-    pyautogui.hotkey('ctrl', 'v')
-    time.sleep(0.2)
+    clipboard_safe_paste(str(float(ci_target)))  # pt29: set+verify+Ctrl+V atómico
+    time.sleep(0.2)                              # preserva timing legacy pós-paste
     print(f'   CI Target (popup): {ci_target}')
 
 
@@ -338,8 +486,24 @@ def _click_ok_in_popup(popup_rect):
 def _set_scope_in_popup(popup_rect):
     """Muda o dropdown Scope no popup Nash de "Full Tree" → "Selected Subtree".
 
-    Pré-condição: popup Nash já aberto + CI Target preenchido. Pós-condição:
-    Scope = "Selected Subtree", pronto a clicar OK.
+    Layout do popup Nash (validado por Rui em smokes pt25e/pt26):
+      6 campos editáveis: CFR Algorithm, Scope, Run Sampling, CI Target,
+      Reset Regret, Reset Strategies. 2 botões: OK | Cancel.
+    O robot interage com apenas 2 campos (Scope, CI Target) + 1 botão (OK).
+    Os outros 4 campos ficam nos defaults do HRC, que são apropriados para
+    o nosso flow (CFR Algorithm = default; Run Sampling = default; Reset
+    Regret/Strategies não-marcados — preservam estado da 1ª run para
+    refinement em Selected Subtree).
+
+    pt28-v1 reordering: esta função passa a ser o **passo 2** do flow
+    (`start_calculation_selected_subtree`), ANTES de
+    `_fill_ci_target_in_popup`. Razão: ao mudar Scope o popup pode
+    re-renderizar e resetar campos editáveis ao default do scope novo;
+    com Scope primeiro, qualquer reset acontece antes de escrevermos o
+    CI Target.
+
+    Pré-condição: popup Nash já aberto. Pós-condição: Scope = "Selected
+    Subtree", pronto para fill CI + OK.
 
     `popup_rect` é `(left, top, width, height)` do popup Nash; caller é
     responsável pela detecção do rect. Coord absoluta de cada click é
@@ -349,6 +513,11 @@ def _set_scope_in_popup(popup_rect):
     Defensivos:
       - Qualquer REL == 0 → coords não-calibrados → early-return WARN.
       - popup_rect is None → caller ainda não detecta popup → early-return WARN.
+
+    Logging defensivo (pt28-v1): regista coords absolutas de cada click
+    no stdout. Permite diagnóstico cirúrgico em smoke real sem precisar
+    de re-calibrar especulativamente as REL — basta cruzar as coords
+    com screenshot do popup pós-smoke.
 
     Implementação: 2 clicks sequenciais com `pyautogui.click(abs_x, abs_y)`
     (NÃO `click_rel`, porque os REL aplicam-se ao popup_rect, não ao main
@@ -367,10 +536,16 @@ def _set_scope_in_popup(popup_rect):
     left, top, _width, _height = popup_rect
     dropdown_x = left + SCOPE_DROPDOWN_REL_X
     dropdown_y = top + SCOPE_DROPDOWN_REL_Y
+    print(f'   _set_scope_in_popup: dropdown click @ ({dropdown_x},{dropdown_y}) '
+          f'[popup_rect=({left},{top},{_width},{_height}), '
+          f'rel=({SCOPE_DROPDOWN_REL_X},{SCOPE_DROPDOWN_REL_Y})]')
     pyautogui.click(dropdown_x, dropdown_y)
     time.sleep(0.3)
     option_x = left + SCOPE_OPTION_SELECTED_SUBTREE_REL_X
     option_y = top + SCOPE_OPTION_SELECTED_SUBTREE_REL_Y
+    print(f'   _set_scope_in_popup: option click @ ({option_x},{option_y}) '
+          f'[rel=({SCOPE_OPTION_SELECTED_SUBTREE_REL_X},'
+          f'{SCOPE_OPTION_SELECTED_SUBTREE_REL_Y})]')
     pyautogui.click(option_x, option_y)
     time.sleep(0.3)
     print('   Scope: Selected Subtree')
@@ -392,10 +567,19 @@ def start_calculation_selected_subtree(wpos, ci_target):
     continua a funcionar.
 
     Sequência alvo dentro do popup Nash:
-      1. Click Calculate (abre popup).             [piece 2 — calibração]
-      2. Fill CI Target no popup.                  [piece 2 — calibração]
-      3. _set_scope_in_popup(wpos)                 [piece 1 — esta função]
-      4. Click OK / Enter.                          [piece 2 — calibração]
+      1. Click Calculate (abre popup).
+      2. _set_scope_in_popup(popup_rect)            [pt28-v1: Scope PRIMEIRO]
+      3. Fill CI Target no popup.                   [pt28-v1: CI DEPOIS]
+      4. Click OK / Enter.
+
+    pt28-v1 reordering: Scope → CI → OK (era CI → Scope → OK). Razão:
+    suspeita de que ao mudar Scope DEPOIS de fill CI, o re-render do
+    popup ao seleccionar "Selected Subtree" pode resetar o CI Target
+    para o default do scope novo (10.0 vs 5.0). Pôr Scope primeiro
+    garante que o re-render acontece antes do CI ser escrito, eliminando
+    o vector. Sem mexer em coords — fix puramente de ordem. O smoke
+    real seguinte valida; logging defensivo em `_set_scope_in_popup`
+    regista coords absolutas para diagnóstico se ainda falhar.
 
     `wpos` é o win_pos do main HRC window (mesmo objecto que
     `start_calculation` recebe via globals). `ci_target` é o CI a usar na
@@ -403,12 +587,12 @@ def start_calculation_selected_subtree(wpos, ci_target):
 
     Defensive em cada passo: se `_click_calculate_button` não tem coords
     (placeholder), `_wait_for_nash_popup` devolve None por timeout, e os
-    helpers downstream (fill CI / scope / OK) fazem early-return. O flow
+    helpers downstream (scope / fill CI / OK) fazem early-return. O flow
     inteiro degrada para no-op com WARN logs em vez de cliques errantes.
 
     pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): devolve `bool`:
-      - `True` se passos 1-4 completaram (popup detectado + fill CI + set
-        scope + OK Enter). Caller (`setup_hand`) interpreta como "2ª run
+      - `True` se passos 1-4 completaram (popup detectado + set scope +
+        fill CI + OK Enter). Caller (`setup_hand`) interpreta como "2ª run
         em curso — finalize exporta zip pós-2ª-run".
       - `False` se popup_rect é None (timeout do `_wait_for_nash_popup`).
         Caller deve fazer finalize com WARN explícito em vez de exportar
@@ -420,9 +604,9 @@ def start_calculation_selected_subtree(wpos, ci_target):
         print(f'   [WARN] start_calculation_selected_subtree(ci={ci_target}): '
               'popup não detectado; flow degrada para no-op')
         return False
-    _fill_ci_target_in_popup(popup_rect, ci_target)       # passo 2
-    _set_scope_in_popup(popup_rect)                        # passo 3
-    _click_ok_in_popup(popup_rect)                         # passo 4
+    _set_scope_in_popup(popup_rect)                       # passo 2 (pt28-v1: era passo 3)
+    _fill_ci_target_in_popup(popup_rect, ci_target)       # passo 3 (pt28-v1: era passo 2)
+    _click_ok_in_popup(popup_rect)                        # passo 4
 
     print(f'   start_calculation_selected_subtree(ci={ci_target}) — '
           '2ª run em Selected Subtree disparada')
