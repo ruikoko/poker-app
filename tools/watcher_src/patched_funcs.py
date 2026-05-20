@@ -24,9 +24,9 @@ import time
 # mãos perdidas em 14 Maio.
 #
 # Mitigação: `clipboard_safe_paste` faz set + read-back imediato. Se
-# mismatch, sleep 50ms + retry. Sucesso → sleep 10ms + Ctrl+V + sanity
-# pós-paste. n_retries esgotados → WARN explícito + raise (failure
-# explícito é estritamente melhor que paste silencioso → corrupção da
+# mismatch, sleep 50ms + retry. Sucesso -> sleep 10ms + Ctrl+V + sanity
+# pós-paste. n_retries esgotados -> WARN explícito + raise (failure
+# explícito é estritamente melhor que paste silencioso -> corrupção da
 # corrida).
 #
 # Call sites cobertos por este patch: `paste_hh`, `paste_path` (swap dos
@@ -46,12 +46,12 @@ def clipboard_safe_paste(target_text, n_retries=5):
     Sequência:
       1. pyperclip.copy(target_text)
       2. pyperclip.paste() — read-back imediato
-      3. Mismatch ⇒ sleep 50ms ⇒ retry (até n_retries)
-      4. Sucesso ⇒ sleep 10ms ⇒ Ctrl+V via pyautogui.hotkey
-      5. Sleep 50ms ⇒ read-back de sanity (apenas WARN se mudou,
+      3. Mismatch => sleep 50ms => retry (até n_retries)
+      4. Sucesso => sleep 10ms => Ctrl+V via pyautogui.hotkey
+      5. Sleep 50ms => read-back de sanity (apenas WARN se mudou,
          não raise — o Ctrl+V já aconteceu)
 
-    n_retries esgotados ⇒ RuntimeError com WARN explícito. Por design,
+    n_retries esgotados => RuntimeError com WARN explícito. Por design,
     failure explícito > corrupção silenciosa: o caller (e o log) ficam a
     saber que algo correu mal em vez de o HRC processar paste vazio.
 
@@ -110,18 +110,141 @@ def clipboard_safe_paste(target_text, n_retries=5):
               f'may have been raced')
 
 
-def paste_hh(wpos, hh_text):
-    """Cola a hand history no `TEXT_AREA` do wizard HRC.
+# ---------------------------------------------------------------------------
+# pt28-v2 (#PASTE-FAILED-HRC-REJECTED-CLIPBOARD) — HRC paste rejection detection
+#
+# Smoke pt28-v1 (20 Maio 2026) expôs falha grave: robot fez paste_hh + log
+# "A colar HH..." normalmente, mas HRC mostrou popup azul:
+#   "Hand Import: No valid hand-history found in the Clipboard."
+# Robot ignorou-o (provavelmente fechou-o automaticamente com Enter que
+# chegou por outra via), continuou a configurar Equity Model / Bounty Mode /
+# MTT Stacks / Scripting sobre dados FANTASMA da ultima mao em memoria do
+# HRC (4 jogadores, stacks 38801/105180/96368/171654 da mao anterior do
+# smoke, em vez dos 8 jogadores da GG-5944816316). 1a corrida arrancou
+# sobre essa mao errada.
+#
+# Causa do Ctrl+V nao chegar ao campo nao isolada (foco fora, race, silent
+# fail no pyperclip). Causa raiz fica como tech debt; o que NAO pode
+# acontecer e o robot continuar em silencio.
+#
+# Mitigacao pt28-v2: apos paste_hh, polla 800ms pelo popup "Hand Import".
+# Se encontrado:
+#   1. log defensivo (clipboard length/preview, foreground window)
+#   2. fecha popup via Enter
+#   3. retry 1x (re-click TEXT_AREA + select-all + paste)
+#   4. se popup persistir: raise RuntimeError("PASTE_FAILED_HRC_REJECTED_CLIPBOARD")
+#      -> watcher marca .failed em vez de processar sobre lixo
+# ---------------------------------------------------------------------------
 
-    pt29 swap do legacy Baltazar: trocado o pyperclip.copy + send_key Ctrl+V
-    por `clipboard_safe_paste`. Restante sequência (3-click para focus,
-    select-all via send_key Win32) preservada — esses passos são
-    independentes do vector clipboard race.
+_HAND_IMPORT_ERROR_POPUP_TITLE_HINTS = ("Hand Import",)
+_HAND_IMPORT_POPUP_WAIT_S = 0.8
+_HAND_IMPORT_POPUP_POLL_S = 0.15
 
-    Nota: o legacy usava send_key Win32 também para o Ctrl+V; aqui passamos
-    a pyautogui.hotkey (dentro de clipboard_safe_paste). Diferença
-    funcionalmente equivalente — `paste_path` legacy já usava
-    pyautogui.hotkey e nunca houve regressão registada.
+
+def _log_paste_diagnostics(wpos, hh_text, label):
+    """pt28-v2: logging defensivo imediatamente antes do Ctrl+V em paste_hh.
+
+    Regista no stdout (a) wpos do main HRC window onde achamos que estamos
+    a colar, (b) titulo + hwnd da janela em foreground neste momento (se
+    nao for HRC, paste vai para sitio errado), (c) clipboard length +
+    preview dos primeiros 80 chars para confirmar que o clipboard tem o
+    que esperamos.
+
+    Tolerante a falhas dos getters: cada bloco em try/except devolvendo
+    placeholder em vez de propagar; o log nao deve ser uma fonte de
+    crashes.
+    """
+    try:
+        active = pyautogui.getActiveWindow()
+        if active is not None:
+            active_title = getattr(active, 'title', '?') or '?'
+            active_hwnd = getattr(active, '_hWnd', None)
+            if active_hwnd is None:
+                active_hwnd = getattr(active, 'hwnd', '?')
+        else:
+            active_title = '<none>'
+            active_hwnd = '<none>'
+    except Exception as _e:
+        active_title = f'<err: {_e}>'
+        active_hwnd = '?'
+    try:
+        cb_now = pyperclip.paste()
+        cb_len = len(cb_now) if cb_now else 0
+        cb_preview = (cb_now[:80].replace('\n', ' ').replace('\r', ' ')
+                      if cb_now else '<empty>')
+    except Exception as _e:
+        cb_len = -1
+        cb_preview = f'<err: {_e}>'
+    print(f'   [paste-diag {label}] wpos={wpos} '
+          f'foreground=hwnd={active_hwnd} title={active_title!r}')
+    print(f'   [paste-diag {label}] clipboard len={cb_len} '
+          f'expected_len={len(hh_text)} preview={cb_preview!r}')
+
+
+def _detect_hand_import_error_popup(timeout=_HAND_IMPORT_POPUP_WAIT_S):
+    """pt28-v2: deteta o popup "Hand Import: No valid hand-history found"
+    que o HRC mostra quando o clipboard nao tem HH parseable no momento
+    do paste.
+
+    Polla `pyautogui.getAllWindows()` ate `timeout` segundos por uma
+    janela cujo titulo case-insensitive contem qualquer dos hints em
+    `_HAND_IMPORT_ERROR_POPUP_TITLE_HINTS`. Mesma estrategia que
+    `_wait_for_nash_popup` (provada robusta no flow Scope).
+
+    Robustez:
+      - Janelas com title vazio ignoradas (compositor, system).
+      - Janelas com width/height <= 0 ignoradas (minimizadas).
+      - getAllWindows pode levantar race condition; log WARN + retry.
+
+    Devolve `(left, top, width, height, title)` se encontrou, `None`
+    em timeout.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            windows = pyautogui.getAllWindows()
+        except Exception as _e:
+            print(f'   [WARN] _detect_hand_import_error_popup: '
+                  f'getAllWindows falhou ({_e}); retry')
+            time.sleep(_HAND_IMPORT_POPUP_POLL_S)
+            continue
+        for w in windows:
+            title = (getattr(w, 'title', '') or '').strip()
+            if not title:
+                continue
+            width = getattr(w, 'width', 0) or 0
+            height = getattr(w, 'height', 0) or 0
+            if width <= 0 or height <= 0:
+                continue
+            title_lower = title.lower()
+            for hint in _HAND_IMPORT_ERROR_POPUP_TITLE_HINTS:
+                if hint.lower() in title_lower:
+                    left = getattr(w, 'left', 0) or 0
+                    top = getattr(w, 'top', 0) or 0
+                    return (left, top, width, height, title)
+        time.sleep(_HAND_IMPORT_POPUP_POLL_S)
+    return None
+
+
+def _close_hand_import_error_popup(popup):
+    """Fecha o popup "Hand Import" via press Enter (default-button OK em
+    dialogos Qt modais). `popup` so e usado para log; nenhuma coord
+    necessaria para o Enter global.
+    """
+    if popup is None:
+        return
+    print(f'   _close_hand_import_error_popup: closing popup title={popup[4]!r} '
+          f'rect=({popup[0]},{popup[1]},{popup[2]},{popup[3]})')
+    pyautogui.press('enter')
+    time.sleep(0.4)
+
+
+def _do_paste_hh_attempt(wpos, hh_text, label):
+    """Helper interno: 1 tentativa completa de paste do HH no TEXT_AREA.
+    Extraido para permitir retry limpo em `paste_hh` sem duplicar logica.
+
+    Sequencia: 3-click no TEXT_AREA (focus) -> Ctrl+A via send_key Win32
+    (select-all do que la estiver) -> log diagnostico -> clipboard_safe_paste.
     """
     pyautogui.click(wpos[0] + TEXT_AREA[0], wpos[1] + TEXT_AREA[1], clicks=3)
     time.sleep(1)
@@ -133,8 +256,48 @@ def paste_hh(wpos, hh_text):
     time.sleep(0.05)
     send_key(VK_CONTROL, False)
     time.sleep(0.5)
+    _log_paste_diagnostics(wpos, hh_text, label)
     clipboard_safe_paste(hh_text)
     time.sleep(2)
+
+
+def paste_hh(wpos, hh_text):
+    """Cola a hand history no `TEXT_AREA` do wizard HRC.
+
+    pt29 swap do legacy Baltazar: trocado o pyperclip.copy + send_key Ctrl+V
+    por `clipboard_safe_paste`. Restante sequencia (3-click para focus,
+    select-all via send_key Win32) preservada -- esses passos sao
+    independentes do vector clipboard race.
+
+    pt28-v2 (#PASTE-FAILED-HRC-REJECTED-CLIPBOARD): apos o paste verifica
+    se HRC mostrou o popup azul "Hand Import: No valid hand-history found".
+    Se sim, fecha + retry 1x. Se 2a tentativa tambem dispara popup:
+    raise RuntimeError("PASTE_FAILED_HRC_REJECTED_CLIPBOARD") para o
+    watcher marcar a mao como .failed em vez de processar sobre dados
+    fantasma. Logging defensivo em cada tentativa regista wpos, foreground
+    window, e clipboard preview para diagnostico no smoke seguinte.
+    """
+    _do_paste_hh_attempt(wpos, hh_text, label='attempt-1')
+
+    popup = _detect_hand_import_error_popup()
+    if popup is None:
+        return  # OK, paste aceite pelo HRC
+
+    print(f'   [WARN] paste_hh: HRC rejected clipboard -- popup detected '
+          f'title={popup[4]!r}. Retrying once.')
+    _close_hand_import_error_popup(popup)
+
+    _do_paste_hh_attempt(wpos, hh_text, label='attempt-2-retry')
+
+    popup2 = _detect_hand_import_error_popup()
+    if popup2 is None:
+        print('   paste_hh: retry succeeded -- clipboard accepted on attempt 2')
+        return
+
+    print(f'   [ERROR] paste_hh: HRC rejected clipboard on retry too -- '
+          f'popup={popup2[4]!r}. Raising loud to prevent processing fantasma data.')
+    _close_hand_import_error_popup(popup2)
+    raise RuntimeError('PASTE_FAILED_HRC_REJECTED_CLIPBOARD')
 
 
 def paste_path(path):
@@ -162,9 +325,9 @@ def set_equity_model(wpos, equity_model):
     pipeline; FGS fica fora do scope pt23.
 
     Valores aceites:
-      - 'malmuth_harville_icm' → typeahead 'ma' → Malmuth-Harville ICM
-      - 'multi_table_icm'      → typeahead 'mu' → Multi Table ICM (default p/ mid-MTT)
-      - outro                  → fallback Multi Table ICM + print WARN
+      - 'malmuth_harville_icm' -> typeahead 'ma' -> Malmuth-Harville ICM
+      - 'multi_table_icm'      -> typeahead 'mu' -> Multi Table ICM (default p/ mid-MTT)
+      - outro                  -> fallback Multi Table ICM + print WARN
     """
     EQUITY_MODEL_X = 446
     EQUITY_MODEL_Y = 561
@@ -324,7 +487,7 @@ def set_ci_target_refine(wpos, value=10.0):
 # medição empírica do smoke 18 Maio.
 #
 # Smoke devagar 2026-05-18 com Rui no Beelink contra popup Nash 416×214:
-#   - Dropdown abs (944, 439); top-left popup (666, 372) → rel (278, 67).
+#   - Dropdown abs (944, 439); top-left popup (666, 372) -> rel (278, 67).
 #   - "Selected Subtree" opção abs (940, 480); rel (274, 108) — highlight
 #     visualmente confirmado pelo Rui.
 #   - Popup tinha exactamente 2 opções no menu (Full Tree / Selected Subtree).
@@ -349,7 +512,7 @@ CI_TARGET_POPUP_REL_Y = 109
 
 # pt26 Bloco 2 piece 2 — Botão verde Calculate no main UI HRC.
 # Calibrado em smoke 2026-05-19 com Rui no Beelink: posição absoluta
-# (487, 124), main HRC window wpos (left=283, top=65, w=1050, h=850) →
+# (487, 124), main HRC window wpos (left=283, top=65, w=1050, h=850) ->
 # rel (204, 59). Convenção: pixels relativos à wpos, mesma de
 # `EQUITY_MODEL_X/Y`, `STRATEGY_TABLE_FOCUS_X/Y`, e usada por `click_rel`.
 # Fracções ficam reservadas para o popup Nash (rect variável); o main
@@ -383,7 +546,7 @@ def _wait_for_nash_popup(timeout=_NASH_POPUP_WAIT_TIMEOUT_S,
     Robustez:
       - Janelas com title vazio ignoradas (compositor, system).
       - Janelas com width <= 0 ou height <= 0 ignoradas (minimizadas).
-      - Falhas ao chamar getAllWindows → log WARN e tenta de novo na
+      - Falhas ao chamar getAllWindows -> log WARN e tenta de novo na
         próxima iteração (pode acontecer em race condition de janela a
         abrir).
 
@@ -426,7 +589,7 @@ def _click_calculate_button(wpos):
     relativos à wpos (mesma convenção que `EQUITY_MODEL_X/Y`, usada por
     `click_rel`). Calibrado em smoke pt26 — ver bloco de constantes.
 
-    Defensive: ambos a 0 (regressão de calibração) → early-return WARN.
+    Defensive: ambos a 0 (regressão de calibração) -> early-return WARN.
     """
     if CALCULATE_BUTTON_X == 0 and CALCULATE_BUTTON_Y == 0:
         print('   [WARN] _click_calculate_button: coords não calibrados '
@@ -447,7 +610,7 @@ def _fill_ci_target_in_popup(popup_rect, ci_target):
     depois do Scope garante que se o popup re-renderiza ao mudar Scope, o CI
     é escrito sobre o estado já estabilizado.
 
-    Defensive: `popup_rect=None` → early-return.
+    Defensive: `popup_rect=None` -> early-return.
 
     Logging defensivo (pt28-v1): coord absoluta do click registada antes
     para permitir diagnóstico cruzado com screenshot pós-smoke.
@@ -484,7 +647,7 @@ def _click_ok_in_popup(popup_rect):
 
 
 def _set_scope_in_popup(popup_rect):
-    """Muda o dropdown Scope no popup Nash de "Full Tree" → "Selected Subtree".
+    """Muda o dropdown Scope no popup Nash de "Full Tree" -> "Selected Subtree".
 
     Layout do popup Nash (validado por Rui em smokes pt25e/pt26):
       6 campos editáveis: CFR Algorithm, Scope, Run Sampling, CI Target,
@@ -511,8 +674,8 @@ def _set_scope_in_popup(popup_rect):
     (convenção pt26; ver bloco de constantes acima).
 
     Defensivos:
-      - Qualquer REL == 0 → coords não-calibrados → early-return WARN.
-      - popup_rect is None → caller ainda não detecta popup → early-return WARN.
+      - Qualquer REL == 0 -> coords não-calibrados -> early-return WARN.
+      - popup_rect is None -> caller ainda não detecta popup -> early-return WARN.
 
     Logging defensivo (pt28-v1): regista coords absolutas de cada click
     no stdout. Permite diagnóstico cirúrgico em smoke real sem precisar
@@ -572,7 +735,7 @@ def start_calculation_selected_subtree(wpos, ci_target):
       3. Fill CI Target no popup.                   [pt28-v1: CI DEPOIS]
       4. Click OK / Enter.
 
-    pt28-v1 reordering: Scope → CI → OK (era CI → Scope → OK). Razão:
+    pt28-v1 reordering: Scope -> CI -> OK (era CI -> Scope -> OK). Razão:
     suspeita de que ao mudar Scope DEPOIS de fill CI, o re-render do
     popup ao seleccionar "Selected Subtree" pode resetar o CI Target
     para o default do scope novo (10.0 vs 5.0). Pôr Scope primeiro
@@ -664,7 +827,7 @@ def _focus_strategy_table(wpos):
     — o click acertava em coords não-validadas, tirava o foco que estava
     bom, as 4 setas-down a seguir iam para sítio nenhum, cursor não descia
     até à linha do raiser, 2º Calculate clicava sobre selecção inválida e
-    o popup Nash não abria → `_wait_for_nash_popup` timeout silencioso.
+    o popup Nash não abria -> `_wait_for_nash_popup` timeout silencioso.
 
     `navigate_to_target_node` deixou de chamar esta função em pt28. A
     definição fica no source para o marshal swap não regredir; chamadores
@@ -686,10 +849,10 @@ def navigate_to_target_node(wpos, target_node_offset):
     pelo backend (`hrc_node_offset.compute_target_node_offset`).
 
     Defensive:
-      - `None` ou `0` → skip (cursor fica na 1ª linha; sem foco set
+      - `None` ou `0` -> skip (cursor fica na 1ª linha; sem foco set
         para evitar interacções desnecessárias).
-      - Inteiro negativo → log WARN, skip.
-      - Inteiro > 100 → log WARN, skip (sanity; tabela com 100+ linhas
+      - Inteiro negativo -> log WARN, skip.
+      - Inteiro > 100 -> log WARN, skip (sanity; tabela com 100+ linhas
         é improvável e indica bug no compute).
 
     Comportamento empírico da Strategy Table (validado em smoke):
@@ -715,7 +878,7 @@ def navigate_to_target_node(wpos, target_node_offset):
     for _ in range(target_node_offset):
         pyautogui.press('down')
         time.sleep(0.05)
-    print(f'   navigate_to_target_node: {target_node_offset} ↓ presses')
+    print(f'   navigate_to_target_node: {target_node_offset} (down) presses')
 
 
 def finalize_after_second_run(wpos, export_zip):
@@ -735,7 +898,7 @@ def finalize_after_second_run(wpos, export_zip):
 
 
 def setup_hand(hand_name, hand_path):
-    """Fase 1 do watcher: wizard → calcular → queue export.
+    """Fase 1 do watcher: wizard -> calcular -> queue export.
 
     Retorna o path do `export_zip` se chegou ao fim do wizard, ou False se
     bailou cedo (HH ausente / HRC não iniciou / wizard não encontrado).
@@ -915,7 +1078,7 @@ def setup_hand(hand_name, hand_path):
     #      meta.json) — `navigate_to_target_node`.
     #   3. 2ª run em Selected Subtree — `start_calculation_selected_subtree`
     #      abre o popup Nash, fill CI, set Scope, click OK.
-    #   4. (Bug H) Finalize → export zip.
+    #   4. (Bug H) Finalize -> export zip.
     #
     # Defensive completo: cada passo tem fallback se algum coord ainda
     # estiver placeholder ou se popup detection falhar. O watcher degrada
@@ -924,7 +1087,7 @@ def setup_hand(hand_name, hand_path):
     target_node_offset = hand_meta.get('target_node_offset')
     second_run_dispatched = None  # None = não tentada; True/False = resultado
     if aggressor_real_action is not None:
-        # Bug J — Prune Action downstream. CALIBRAÇÃO PENDENTE → comentado.
+        # Bug J — Prune Action downstream. CALIBRAÇÃO PENDENTE -> comentado.
         # for line_coords in _enumerate_downstream_lines(wpos):
         #     prune_action_on_line(wpos, line_coords)
 
@@ -949,6 +1112,6 @@ def setup_hand(hand_name, hand_path):
     finalize_after_second_run(wpos, export_zip)
     # === FIM Bloco 2 piece 2 ===
 
-    print(f'   [QUEUED] {hand_name} → {os.path.basename(export_zip)} '
+    print(f'   [QUEUED] {hand_name} -> {os.path.basename(export_zip)} '
           f'(Bloco 1 — finalize Bloco 2)')
     return export_zip
