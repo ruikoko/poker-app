@@ -15,11 +15,18 @@ let ALLIN = 9999;
 // Start of Preflop configuration
 // =====================================================================
 
-// Preflop open sizing in big blinds
-let SIZES_OPEN_OTHERS = [2, ALLIN];
-let SIZES_OPEN_BU = [2, ALLIN];
-let SIZES_OPEN_SB = [3.5, ALLIN];
-let SIZES_OPEN_BB = [4, ALLIN];
+// Preflop open sizing in big blinds.
+// pt29 tree-size control: ALLIN removido dos arrays OPEN — agora controlado
+// exclusivamente por shouldAddPreflopAllIn (filtro por stack BB individual
+// vs STACK_BB_FOR_OPEN_ALLIN_OPTION). Sem isto, ALLIN=9999 entrava sempre
+// via applyAllinThreshold e causava explosao da tree em mesas com mistura
+// de short + deep stacks (smoke pt29 GG-5944816316: 26.9 GB > limite 20.4
+// GB). 3-bet/4-bet/5-bet arrays mantem o ALLIN literal (lógica SPR-efectivo
+// continua valida em pots ja levantados).
+let SIZES_OPEN_OTHERS = [2];
+let SIZES_OPEN_BU = [2];
+let SIZES_OPEN_SB = [3.5];
+let SIZES_OPEN_BB = [4];
 
 // general 3-bet sizing in big blinds
 let SIZES_3BET_IP = [6, ALLIN];
@@ -45,8 +52,16 @@ let SIZES_POT_5BET_OOP = [0.5, ALLIN];
 // All-In threshold, works like the UI version
 let PREFLOP_ALLIN_THRESHOLD = 1;
 
-// Add all-in as an option if SPR is below this value
+// Add all-in as an option if SPR is below this value (3-bet+ only post-pt29).
 let PREFLOP_ADD_ALLIN_SPR = 7;
+
+// pt29 tree-size control: threshold para ALLIN em opens (primeira raise
+// voluntaria preflop). SPR efectivo nao funciona para opens porque um short
+// na mesa puxa effective stacks para baixo e adiciona ALLIN como opcao a
+// TODOS os jogadores (incluindo deep stacks 100+BB). Filtro individual por
+// stack BB do jogador activo evita a explosao multiway. Threshold 30 BB
+// definido em despacho pt29 (Rui). Reduzir para 25 se 30 nao chegar.
+const STACK_BB_FOR_OPEN_ALLIN_OPTION = 30;
 
 // Flatting rules: betcount → allowed flats
 let ALLOWED_FLATS_PER_RAISE = {
@@ -100,7 +115,7 @@ function getSizingsPreflop(ctx) {
 			return ctx.sizingAllIn();
 	}
 
-	if (ctx.getStackPotRatio() <= PREFLOP_ADD_ALLIN_SPR)
+	if (shouldAddPreflopAllIn(ctx))
 		sizings.push(ctx.sizingAllIn());
 
 	return applyAllinThreshold(ctx, sizings);
@@ -112,6 +127,32 @@ function applyAllinThreshold(ctx, sizings) {
 	let thresholdchips = activechips +
 		(sizeallin - activechips) * PREFLOP_ALLIN_THRESHOLD;
 	return sizings.map(s => s >= thresholdchips ? sizeallin : s);
+}
+
+// pt29 tree-size control helpers (despacho Rui).
+// Em opens (primeira raise voluntaria preflop) a decisao "adicionar ALLIN
+// como opcao" passa a depender da stack INDIVIDUAL do jogador activo (BB
+// equivalent) em vez do SPR efectivo. Em pots ja levantados (3-bet+) a
+// logica SPR-efectivo original mantem-se via PREFLOP_ADD_ALLIN_SPR.
+
+function getActivePlayerStackBB(ctx) {
+	let pot = ctx.getPotState();
+	let player = ctx.getActivePlayer();
+	return pot.getChipsRemaining(player) / ctx.getSizeBigBlind();
+}
+
+function isPreflopFirstVoluntaryRaise(ctx) {
+	// Blinds contam como bet 1 preflop. betCount === 1 = ainda nenhuma raise voluntaria.
+	return ctx.getStreet() == PREFLOP && ctx.getBetCount() == 1;
+}
+
+function shouldAddPreflopAllIn(ctx) {
+	if (isPreflopFirstVoluntaryRaise(ctx)) {
+		// Opens: filtra por stack individual do jogador activo.
+		return getActivePlayerStackBB(ctx) <= STACK_BB_FOR_OPEN_ALLIN_OPTION;
+	}
+	// 3-bet+: mantem logica original SPR-efectivo.
+	return ctx.getStackPotRatio() <= PREFLOP_ADD_ALLIN_SPR;
 }
 
 function getSizingsOpening(ctx) {
