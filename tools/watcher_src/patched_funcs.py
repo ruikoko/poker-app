@@ -405,19 +405,28 @@ def start_calculation_selected_subtree(wpos, ci_target):
     (placeholder), `_wait_for_nash_popup` devolve None por timeout, e os
     helpers downstream (fill CI / scope / OK) fazem early-return. O flow
     inteiro degrada para no-op com WARN logs em vez de cliques errantes.
+
+    pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): devolve `bool`:
+      - `True` se passos 1-4 completaram (popup detectado + fill CI + set
+        scope + OK Enter). Caller (`setup_hand`) interpreta como "2ª run
+        em curso — finalize exporta zip pós-2ª-run".
+      - `False` se popup_rect é None (timeout do `_wait_for_nash_popup`).
+        Caller deve fazer finalize com WARN explícito em vez de exportar
+        zip parcial silenciosamente (cenário pt27 GG-5944816316).
     """
     _click_calculate_button(wpos)                         # passo 1a
     popup_rect = _wait_for_nash_popup()                   # passo 1b
     if popup_rect is None:
         print(f'   [WARN] start_calculation_selected_subtree(ci={ci_target}): '
               'popup não detectado; flow degrada para no-op')
-        return
+        return False
     _fill_ci_target_in_popup(popup_rect, ci_target)       # passo 2
     _set_scope_in_popup(popup_rect)                        # passo 3
     _click_ok_in_popup(popup_rect)                         # passo 4
 
     print(f'   start_calculation_selected_subtree(ci={ci_target}) — '
           '2ª run em Selected Subtree disparada')
+    return True
 
 
 # pt25e Bug J (#WATCHER-BUG-J-PRUNE-ACTION-PER-LINE): stub para Prune Action
@@ -459,8 +468,27 @@ STRATEGY_TABLE_FOCUS_Y = 200
 
 
 def _focus_strategy_table(wpos):
-    """Click na área da Strategy Table para garantir foco do keyboard input.
-    Cursor mantém-se na 1ª linha (default pós-1ª-run)."""
+    """DEPRECATED (pt28): NÃO CHAMAR. Mantido apenas para preservar o slot
+    do marshal swap em hrc_watcher_apr19.pyc (a posição da função no module
+    table não pode ser removida sem partir o swap).
+
+    Razão da desactivação: em pt27 (smoke real GG-5944816316) o popup Nash
+    da 2ª run nunca abria. Causa raiz isolada por colaboração Web+Rui: pt26
+    `.exe` corre Strategy Table que **já tem foco do teclado por default
+    pós-1ª-run**; as setas funcionam directamente. Este click intermédio
+    cai em STRATEGY_TABLE_FOCUS_X/Y que **nunca foram calibrados em smoke**
+    — o click acertava em coords não-validadas, tirava o foco que estava
+    bom, as 4 setas-down a seguir iam para sítio nenhum, cursor não descia
+    até à linha do raiser, 2º Calculate clicava sobre selecção inválida e
+    o popup Nash não abria → `_wait_for_nash_popup` timeout silencioso.
+
+    `navigate_to_target_node` deixou de chamar esta função em pt28. A
+    definição fica no source para o marshal swap não regredir; chamadores
+    foram removidos. Se algum dia houver evidência de que o foco da
+    Strategy Table NÃO é default, abrir tech debt nova com smoke calibrado
+    e re-wirar (não basta descomentar — STRATEGY_TABLE_FOCUS_X/Y continuam
+    sem calibração validada).
+    """
     click_rel(wpos, STRATEGY_TABLE_FOCUS_X, STRATEGY_TABLE_FOCUS_Y)
     time.sleep(0.2)
 
@@ -497,7 +525,9 @@ def navigate_to_target_node(wpos, target_node_offset):
         print(f'   [WARN] navigate_to_target_node: offset {target_node_offset} '
               'fora de [1, 100] — skip')
         return
-    _focus_strategy_table(wpos)
+    # pt28: SEM call a _focus_strategy_table — Strategy Table já tem foco
+    # por default pós-1ª-run (validado por Rui no .exe pt26). Ver docstring
+    # DEPRECATED em `_focus_strategy_table`.
     for _ in range(target_node_offset):
         pyautogui.press('down')
         time.sleep(0.05)
@@ -708,6 +738,7 @@ def setup_hand(hand_name, hand_path):
     # para no-op com WARN logs em vez de cliques errantes.
     aggressor_real_action = _payouts.get('aggressor_real_action')
     target_node_offset = hand_meta.get('target_node_offset')
+    second_run_dispatched = None  # None = não tentada; True/False = resultado
     if aggressor_real_action is not None:
         # Bug J — Prune Action downstream. CALIBRAÇÃO PENDENTE → comentado.
         # for line_coords in _enumerate_downstream_lines(wpos):
@@ -718,9 +749,19 @@ def setup_hand(hand_name, hand_path):
 
         # 2ª run em Selected Subtree (popup Nash gere fill CI + scope + OK).
         print('   A calcular (2ª run, Selected Subtree)...')
-        start_calculation_selected_subtree(wpos, 10.0)
+        second_run_dispatched = start_calculation_selected_subtree(wpos, 10.0)
 
-    # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor).
+    # pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): se a 2ª run foi tentada mas
+    # falhou (popup Nash não detectado), avisar antes do finalize — o zip
+    # exportado será da 1ª run apenas, não da 2ª run em Selected Subtree.
+    # Sem este WARN o failure era silencioso (cenário pt27 GG-5944816316:
+    # `finalize_after_second_run` corria sempre e exportava o que estivesse).
+    if second_run_dispatched is False:
+        print(f'   [WARN] {hand_name}: 2ª run não disparou (popup Nash '
+              'não abriu); finalize vai exportar zip da 1ª run apenas')
+
+    # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor,
+    # ou após WARN se 2ª run falhou em pt28).
     finalize_after_second_run(wpos, export_zip)
     # === FIM Bloco 2 piece 2 ===
 

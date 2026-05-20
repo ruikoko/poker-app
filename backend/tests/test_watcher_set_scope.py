@@ -410,9 +410,11 @@ def test_navigate_to_target_node_zero_skips(pf):
 
 
 def test_navigate_to_target_node_presses_down_N_times(pf):
-    """`target_node_offset=5` → 5 ↓ presses + 1 focus click."""
+    """pt28 (#FOCUS-CLICK-REMOVAL): `target_node_offset=5` → 5 ↓ presses,
+    SEM focus click (Strategy Table tem foco por default pós-1ª-run no
+    .exe pt26; ver docstring DEPRECATED em `_focus_strategy_table`)."""
     pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=5)
-    pf.click_rel.assert_called_once()  # focus click
+    pf.click_rel.assert_not_called()  # pt28: SEM focus click
     assert pf.pyautogui.press.call_count == 5
     for call_args in pf.pyautogui.press.call_args_list:
         assert call_args == call('down')
@@ -442,3 +444,71 @@ def test_navigate_to_target_node_non_int_skips_with_warn(pf, capsys):
     pf.pyautogui.press.assert_not_called()
     out = capsys.readouterr().out
     assert "[WARN]" in out
+
+
+# ── pt28 fixes (#FOCUS-CLICK-REMOVAL + #FINALIZE-NEVER-FIRES-ON-NO-OP) ─
+
+def test_navigate_to_target_node_never_calls_focus_strategy_table_after_pt28(pf):
+    """Regressão para causa raiz pt27 GG-5944816316.
+
+    Antes de pt28, `navigate_to_target_node` chamava `_focus_strategy_table`
+    como passo intermédio (click em STRATEGY_TABLE_FOCUS_X/Y, coords nunca
+    calibradas em smoke). Este click tirava o foco que estava bom no .exe
+    pt26 (Strategy Table tem foco por default pós-1ª-run), as 4 setas-down
+    iam para sítio nenhum, cursor não descia até à linha do raiser real,
+    2º Calculate clicava sobre selecção inválida → popup Nash nunca abria
+    → `_wait_for_nash_popup` timeout silencioso → finalize exportava zip
+    da 1ª run sem WARN.
+
+    Pós-pt28 o focus click foi removido. Esta regressão garante que
+    qualquer offset válido (testados 1, 3, 7, 42 — cobre boundaries baixo,
+    típico mid-MTT, alto-mas-plausível, sanity acima do típico) chega às
+    setas-down SEM passar por focus click.
+    """
+    for offset in (1, 3, 7, 42):
+        pf.click_rel.reset_mock()
+        pf.pyautogui.press.reset_mock()
+
+        pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=offset)
+
+        pf.click_rel.assert_not_called()
+        assert pf.pyautogui.press.call_count == offset
+        for c in pf.pyautogui.press.call_args_list:
+            assert c == call('down')
+
+
+def test_start_calculation_selected_subtree_returns_true_when_popup_detected(pf):
+    """pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): retorno bool.
+
+    Popup detectado (passos 1-4 completam) → `True`. Caller (`setup_hand`)
+    interpreta como "2ª run em curso — finalize exporta zip pós-2ª-run".
+    """
+    pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
+
+    result = pf.start_calculation_selected_subtree(
+        wpos=(10, 10, 1024, 768), ci_target=10.0
+    )
+
+    assert result is True
+
+
+def test_start_calculation_selected_subtree_returns_false_when_popup_timeout(pf, capsys):
+    """pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): retorno bool — caminho de
+    falha.
+
+    Popup não detectado (`_wait_for_nash_popup` devolve None) → `False`,
+    sem fill CI / scope / OK. Caller (`setup_hand`) interpreta como "2ª run
+    falhou — finalize vai exportar zip da 1ª run apenas, com WARN explícito"
+    (vs comportamento pré-pt28 onde o falhanço era silencioso e
+    `finalize_after_second_run` corria sempre).
+    """
+    pf._wait_for_nash_popup = MagicMock(return_value=None)
+
+    result = pf.start_calculation_selected_subtree(
+        wpos=(10, 10, 1024, 768), ci_target=10.0
+    )
+
+    assert result is False
+    pf.pyautogui.click.assert_not_called()  # sem fill CI / scope clicks
+    pf.pyautogui.press.assert_not_called()  # sem OK Enter
+    assert "popup não detectado" in capsys.readouterr().out
