@@ -39,6 +39,70 @@ import time
 # ---------------------------------------------------------------------------
 
 
+def _set_clipboard_with_verify(target_text, n_retries=5):
+    """pt28-v3 (#PASTE-FAILED-HRC-REJECTED-CLIPBOARD root cause):
+    set + read-back verify do clipboard, SEM Ctrl+V.
+
+    Mesma blindagem que `clipboard_safe_paste` contra o bug CheckedCall
+    do pyperclip 1.11.0 (silent fail Win32 com errno=0) e race RDP/sync,
+    mas para casos onde o consumer eh outra app (e.g., HRC auto-import
+    no abrir do wizard "New Hand"), nao o Ctrl+V do robot.
+
+    Smoke pt28-v2 (20 Maio) provou que o HRC le o clipboard
+    automaticamente ao abrir o wizard. Se nesse momento o clipboard
+    ainda tem lixo (e.g. comando PowerShell que o Rui colou para
+    arrancar o robot), o HRC mostra popup azul "Hand Import: No valid
+    hand-history found" e o paste manual subsequente nao recupera
+    (foreground passa a ser o popup). Solucao: preparar clipboard com
+    HH valido ANTES de chamar `open_wizard()`.
+
+    Sequencia (igual ao set+verify de `clipboard_safe_paste`):
+      1. pyperclip.copy(target_text)
+      2. pyperclip.paste() -- read-back imediato
+      3. Mismatch => sleep 50ms => retry (ate n_retries)
+      4. Sucesso => return (caller decide o que fazer com o clipboard)
+
+    n_retries esgotados => RuntimeError com WARN explicito (failure
+    explicito > corrupcao silenciosa).
+    """
+    preview = target_text[:30].replace('\n', ' ').replace('\r', ' ')
+    if len(target_text) > 30:
+        preview = preview + '...'
+
+    actual = None
+    last_error = None
+    for attempt in range(1, n_retries + 1):
+        try:
+            pyperclip.copy(target_text)
+        except Exception as _e:
+            last_error = _e
+            print(f'   [WARN] _set_clipboard_with_verify copy raised ({_e}); '
+                  f'attempt {attempt}/{n_retries}')
+            time.sleep(0.05)
+            continue
+        try:
+            actual = pyperclip.paste()
+        except Exception as _e:
+            last_error = _e
+            print(f'   [WARN] _set_clipboard_with_verify read-back raised '
+                  f'({_e}); attempt {attempt}/{n_retries}')
+            actual = None
+        if actual == target_text:
+            if attempt > 1:
+                print(f'   [clipboard] _set_clipboard_with_verify locked after '
+                      f'{attempt} attempt(s) (len={len(target_text)}): {preview!r}')
+            return
+        time.sleep(0.05)
+
+    print(f'   [WARN] _set_clipboard_with_verify: failed to lock clipboard '
+          f'after {n_retries} attempts; last actual={actual!r}, '
+          f'target={preview!r}, last_error={last_error!r}')
+    raise RuntimeError(
+        f'clipboard race unresolved after {n_retries} attempts '
+        f'(target preview={preview!r})'
+    )
+
+
 def clipboard_safe_paste(target_text, n_retries=5):
     """Set clipboard + verify + Ctrl+V atomicamente, blindando contra a
     race RDP/sync descrita no header desta secção.
@@ -206,6 +270,11 @@ def _detect_hand_import_error_popup(timeout=_HAND_IMPORT_POPUP_WAIT_S):
         except Exception as _e:
             print(f'   [WARN] _detect_hand_import_error_popup: '
                   f'getAllWindows falhou ({_e}); retry')
+            time.sleep(_HAND_IMPORT_POPUP_POLL_S)
+            continue
+        # pt28-v3 defensive: alguns mock environments (e.g. smoke harness do
+        # swap_and_smoke.py com CallRec) devolvem None de getAllWindows.
+        if windows is None:
             time.sleep(_HAND_IMPORT_POPUP_POLL_S)
             continue
         for w in windows:
@@ -989,6 +1058,19 @@ def setup_hand(hand_name, hand_path):
         print('   ERRO: HRC Pro não iniciou!')
         return False
 
+    # pt28-v3 (#PASTE-FAILED-HRC-REJECTED-CLIPBOARD root cause):
+    # Smoke pt28-v2 expos que o HRC le o clipboard automaticamente quando
+    # `open_wizard()` abre o wizard "New Hand". Se nesse momento o
+    # clipboard tem lixo (e.g. comando PowerShell que o Rui colou para
+    # arrancar o robot), o HRC dispara popup azul "Hand Import: No valid
+    # hand-history found" -- foreground passa a ser o popup e o paste
+    # manual subsequente nao recupera (Ctrl+V vai para o popup, nao para
+    # o campo HH).
+    # Mitigacao: preparar clipboard com HH valido ANTES de abrir o
+    # wizard. HRC auto-importa o clipboard limpo e o popup nunca aparece.
+    print('   A preparar clipboard com HH (pre-open-wizard)...')
+    _set_clipboard_with_verify(hh_text)
+
     print('   A abrir wizard...')
     win = open_wizard()
     if not win:
@@ -996,6 +1078,17 @@ def setup_hand(hand_name, hand_path):
         return False
 
     wpos = get_win_pos(win)
+
+    # pt28-v3 guard: se o HRC ainda assim disparou popup azul (clipboard
+    # estava preparado mas HRC rejeitou na mesma -- HH realmente
+    # invalido, ou bug HRC), bail loud antes de paste_hh tocar em foco.
+    popup_after_open = _detect_hand_import_error_popup()
+    if popup_after_open is not None:
+        print(f'   [ERROR] setup_hand: HRC rejected prepared clipboard '
+              f'(post-open-wizard popup detected title={popup_after_open[4]!r}). '
+              f'Raising loud.')
+        _close_hand_import_error_popup(popup_after_open)
+        raise RuntimeError('PASTE_FAILED_HRC_REJECTED_CLIPBOARD')
 
     print('   A colar HH...')
     paste_hh(wpos, hh_text)

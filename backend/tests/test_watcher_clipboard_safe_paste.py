@@ -268,3 +268,85 @@ def test_clipboard_safe_paste_does_not_invoke_hotkey_until_set_verified(pf):
     assert len(hotkey_call_times) == 1
     # Ctrl+V só após o copy bem-sucedido (attempt 3): copy.call_count == 3.
     assert hotkey_call_times[0] == 3
+
+
+# ── pt28-v3: _set_clipboard_with_verify (set + verify, sem Ctrl+V) ──────
+
+def test_set_clipboard_with_verify_succeeds_on_first_attempt(pf):
+    """Caminho feliz: 1 copy + 1 paste (read-back). SEM Ctrl+V (consumer
+    eh outra app, e.g. HRC auto-import)."""
+    _wire_clipboard(pf, "hh_text", mismatch_returns=[])
+
+    pf._set_clipboard_with_verify("hh_text")
+
+    pf.pyperclip.copy.assert_called_once_with("hh_text")
+    assert pf.pyperclip.paste.call_count == 1
+    pf.pyautogui.hotkey.assert_not_called()  # CHAVE: sem ctrl+v
+
+
+def test_set_clipboard_with_verify_retries_on_mismatch(pf):
+    """Mismatch -> sleep 50ms -> retry. Sucesso na 2a tentativa."""
+    _wire_clipboard(pf, "target", mismatch_returns=["WRONG"])
+
+    pf._set_clipboard_with_verify("target")
+
+    # 2 copies (1 mismatch + 1 success), 2 paste calls
+    assert pf.pyperclip.copy.call_count == 2
+    assert pf.pyperclip.paste.call_count == 2
+    pf.pyautogui.hotkey.assert_not_called()
+
+
+def test_set_clipboard_with_verify_raises_after_n_retries(pf, capsys):
+    """n_retries mismatches consecutivos -> WARN + RuntimeError (mesmo
+    failure mode que clipboard_safe_paste)."""
+    _wire_clipboard(pf, "target", mismatch_returns=["x"] * 5)
+
+    with pytest.raises(RuntimeError, match="clipboard race"):
+        pf._set_clipboard_with_verify("target", n_retries=5)
+
+    assert pf.pyperclip.copy.call_count == 5
+    pf.pyautogui.hotkey.assert_not_called()
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+    assert "failed to lock clipboard" in out
+
+
+def test_set_clipboard_with_verify_default_n_retries_is_5(pf):
+    """Signature `_set_clipboard_with_verify(target, n_retries=5)`: default 5."""
+    _wire_clipboard(pf, "target", mismatch_returns=["x"] * 10)
+
+    with pytest.raises(RuntimeError):
+        pf._set_clipboard_with_verify("target")
+
+    assert pf.pyperclip.copy.call_count == 5
+
+
+def test_set_clipboard_with_verify_handles_copy_raising_exception(pf, capsys):
+    """pyperclip.copy raises -> WARN + retry. 2 raises + sucesso na 3a -> 3 attempts."""
+    copy_counter = {"n": 0}
+
+    def _copy(text):
+        copy_counter["n"] += 1
+        if copy_counter["n"] <= 2:
+            raise RuntimeError("clipboard locked by another app")
+
+    pf.pyperclip.copy.side_effect = _copy
+    pf.pyperclip.paste.side_effect = lambda: "hh_text"
+
+    pf._set_clipboard_with_verify("hh_text", n_retries=5)
+
+    assert copy_counter["n"] == 3
+    out = capsys.readouterr().out
+    assert "copy raised" in out
+
+
+def test_set_clipboard_with_verify_never_invokes_ctrl_v(pf):
+    """Regressao: garantia que _set_clipboard_with_verify NUNCA chama
+    pyautogui.hotkey('ctrl', 'v'). Se algum dia for refactorado a partir
+    de clipboard_safe_paste, esta protecao apanha."""
+    _wire_clipboard(pf, "target", mismatch_returns=["x", "y"])
+
+    pf._set_clipboard_with_verify("target", n_retries=5)
+
+    pf.pyautogui.hotkey.assert_not_called()
+    pf.pyautogui.press.assert_not_called()

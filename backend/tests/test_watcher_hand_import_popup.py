@@ -297,3 +297,104 @@ def test_log_paste_diagnostics_truncates_clipboard_preview_to_80_chars(pf, capsy
     assert "A" * 80 in out
     # mas nao 81 (truncado)
     assert "A" * 81 not in out
+
+
+# == pt28-v3: setup_hand wiring (clipboard prep + popup guard) ==========
+
+def _make_minimal_hand_dir(tmp_path, name="GG-TEST-99999",
+                            hh_body="PokerStars Hand #demo\n*** SUMMARY ***\n"):
+    """Cria a estrutura minima de hand_path que setup_hand consegue ler:
+    .txt + payouts.json opcional. Devolve hand_path como string."""
+    hand_path = tmp_path / name
+    hand_path.mkdir()
+    (hand_path / f"{name}.txt").write_text(hh_body, encoding="utf-8")
+    return str(hand_path)
+
+
+def _stub_setup_hand_globals(pf, tmp_root_str):
+    """Substitui todos os globais que setup_hand chama por stubs/spies.
+    Reutilizado nos 2 tests pt28-v3 abaixo."""
+    pf.ensure_hrc = MagicMock(return_value=True)
+    pf.open_wizard = MagicMock(return_value="mock_win")
+    pf.get_win_pos = MagicMock(return_value=(0, 0, 800, 600))
+    pf.paste_hh = MagicMock()
+    pf.set_hand_mode_players = MagicMock()
+    pf.set_equity_model = MagicMock()
+    pf.import_prizes = MagicMock()
+    pf.is_ko_tournament = MagicMock(return_value=False)
+    pf.select_bounty_mode = MagicMock()
+    pf.handle_mtt_stacks_page = MagicMock()
+    pf.setup_scripting = MagicMock()
+    pf.start_calculation = MagicMock()
+    pf.export_strategies = MagicMock()
+    pf.SCRIPT_FILE = "fake_script.js"
+    pf.BTN_NEXT = (1, 2)
+    pf.BTN_FINISH = (3, 4)
+    pf.DONE_DIR = tmp_root_str + "/OUT"
+
+
+def test_setup_hand_prepares_clipboard_before_open_wizard_pt28v3(pf, tmp_path):
+    """pt28-v3 root-cause fix: _set_clipboard_with_verify(hh_text) DEVE
+    correr ANTES de open_wizard(). HRC le clipboard ao abrir o wizard;
+    se ainda tem lixo, popup azul abre. Preparar clipboard primeiro
+    elimina o vector."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+
+    call_order = []
+    pf._set_clipboard_with_verify = MagicMock(
+        side_effect=lambda *a, **kw: call_order.append("set_clipboard")
+    )
+    pf.open_wizard = MagicMock(
+        side_effect=lambda *a, **kw: (call_order.append("open_wizard"), "mock_win")[1]
+    )
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+    pf.setup_hand("GG-TEST-99999", hand_path)
+
+    # _set_clipboard_with_verify chamado uma vez, ANTES de open_wizard
+    assert "set_clipboard" in call_order
+    assert "open_wizard" in call_order
+    assert call_order.index("set_clipboard") < call_order.index("open_wizard"), (
+        f"pt28-v3: clipboard deve ser preparado ANTES de open_wizard; got {call_order}"
+    )
+    # _set_clipboard_with_verify chamado com o hh_text completo
+    pf._set_clipboard_with_verify.assert_called_once()
+    (args, _kw) = pf._set_clipboard_with_verify.call_args
+    assert "PokerStars Hand" in args[0]
+
+
+def test_setup_hand_raises_when_popup_after_open_wizard_pt28v3(pf, tmp_path):
+    """pt28-v3 guard: se o HRC ainda dispara popup azul mesmo com
+    clipboard preparado (HH realmente invalido OU bug HRC), bail loud
+    com PASTE_FAILED_HRC_REJECTED_CLIPBOARD ANTES de paste_hh tocar em foco."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(
+        return_value=(100, 100, 400, 200, "Hand Import")
+    )
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="PASTE_FAILED_HRC_REJECTED_CLIPBOARD"):
+        pf.setup_hand("GG-TEST-99999", hand_path)
+
+    # paste_hh NAO deve ter sido chamado (raise antes)
+    pf.paste_hh.assert_not_called()
+    # Popup fechado antes do raise (Enter)
+    pf.pyautogui.press.assert_called_with('enter')
+
+
+def test_setup_hand_proceeds_to_paste_hh_when_no_popup_pt28v3(pf, tmp_path):
+    """Caminho feliz pt28-v3: clipboard preparado + open_wizard + sem
+    popup azul -> setup_hand continua a paste_hh normalmente."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+    pf.setup_hand("GG-TEST-99999", hand_path)
+
+    pf.paste_hh.assert_called_once()  # continua a correr como rede de seguranca
