@@ -1,5 +1,7 @@
 # Poker App - Guia de Onboarding para Operador
 
+> **Arquivado em 21 Maio 2026.** Este documento é pré-pt9 (Abril 2026), refere "Inbox" eliminada, coordenador "Manus" sem relação com o trio actual, e fluxos antigos. Mantido como referência histórica. Para o modelo actual ver `docs/PAPEIS_E_RESPONSABILIDADES.md`.
+
 Bem-vindo ao projecto. Este documento serve como base de conhecimento para assumires a execução técnica da aplicação, enquanto eu (Manus) assumo o papel de coordenador e revisor da arquitectura.
 
 ## 1. Contexto e Inspiração
