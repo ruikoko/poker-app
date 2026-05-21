@@ -331,6 +331,8 @@ def _stub_setup_hand_globals(pf, tmp_root_str):
     pf.setup_scripting = MagicMock()
     pf.start_calculation = MagicMock()
     pf.wait_for_calculation = MagicMock()  # pt29-v3: espera fim de cada run
+    pf._resolve_wizard_hwnd = MagicMock(return_value=12345)  # pt30
+    pf._wait_for_finish_ready = MagicMock()  # pt30
     pf.export_strategies = MagicMock()
     pf.SCRIPT_FILE = "fake_script.js"
     pf.BTN_NEXT = (1, 2)
@@ -492,3 +494,85 @@ def test_setup_hand_finish_uses_slow_click_pt29v2(pf, tmp_path):
     pf.pyautogui.mouseUp.assert_called_with(button='left')
     # moveTo posiciona no botao antes do press.
     assert pf.pyautogui.moveTo.called
+
+
+# == pt30 (#WIZARD-FINISH-DISABLED-DURING-TREE-CALC): polling do Finish ====
+
+def test_wait_for_finish_ready_normal_transition(pf):
+    """Sequencia normal enabled->disabled->enabled: fase 1 ve disabled,
+    fase 2 ve enabled. Sem raise."""
+    pf._find_finish_button = MagicMock(return_value=999)
+    state = {"n": 0}
+
+    def _en(hwnd):
+        state["n"] += 1
+        if state["n"] == 1:
+            return True   # stale enabled (HRC ainda nao reagiu)
+        if state["n"] == 2:
+            return False  # disabled -> fase 1 break (calc arrancou)
+        return True       # enabled -> fase 2 return (calc terminou)
+
+    pf._is_enabled = MagicMock(side_effect=_en)
+    pf._wait_for_finish_ready(999)  # nao deve raise
+    assert state["n"] == 3
+
+
+def test_wait_for_finish_ready_phase1_timeout_warns_continues(pf, capsys):
+    """Finish nunca fica disabled (calc instantaneo / tree=0) -> WARN, sem raise."""
+    pf._find_finish_button = MagicMock(return_value=999)
+    pf._is_enabled = MagicMock(return_value=True)  # sempre enabled
+    pf._FINISH_WAIT_PHASE1_TIMEOUT_S = 0.2
+    pf._FINISH_WAIT_POLL_S = 0.01
+
+    pf._wait_for_finish_ready(999)  # nao deve raise
+
+    out = capsys.readouterr().out
+    assert "nunca ficou disabled" in out
+
+
+def test_wait_for_finish_ready_phase2_timeout_raises(pf):
+    """Finish fica disabled mas nunca re-enabled (calc preso) -> raise."""
+    pf._find_finish_button = MagicMock(return_value=999)
+    pf._is_enabled = MagicMock(return_value=False)  # disabled imediato, nunca volta
+    pf._FINISH_WAIT_PHASE1_TIMEOUT_S = 0.2
+    pf._FINISH_WAIT_PHASE2_TIMEOUT_S = 0.2
+    pf._FINISH_WAIT_POLL_S = 0.01
+
+    with pytest.raises(RuntimeError, match="WIZARD_FINISH_NEVER_RE_ENABLED"):
+        pf._wait_for_finish_ready(999)
+
+
+def test_wait_for_finish_ready_button_not_found_degrades(pf, capsys):
+    """Botao Finish nao encontrado via Win32 -> WARN, sem raise, sem polling
+    de IsWindowEnabled (degrada para slow-click cego)."""
+    pf._find_finish_button = MagicMock(return_value=None)
+    pf._is_enabled = MagicMock()
+
+    pf._wait_for_finish_ready(12345)  # nao deve raise
+
+    pf._is_enabled.assert_not_called()
+    out = capsys.readouterr().out
+    assert "nao encontrado" in out
+
+
+def test_find_finish_button_none_for_falsy_wizard(pf):
+    """hwnd_wizard None/0 -> None sem enumerar."""
+    assert pf._find_finish_button(None) is None
+    assert pf._find_finish_button(0) is None
+
+
+def test_setup_hand_calls_wait_for_finish_ready_pt30(pf, tmp_path):
+    """Wiring: setup_hand chama _wait_for_finish_ready (com hwnd resolvido)
+    entre setup_scripting e o slow-click do Finish."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+    pf._wizard_window_present = MagicMock(return_value=False)
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+    pf.setup_hand("GG-TEST-99999", hand_path)
+
+    pf._wait_for_finish_ready.assert_called_once()
+    # hwnd resolvido via _resolve_wizard_hwnd (win mock nao tem _hWnd)
+    (args, _kw) = pf._wait_for_finish_ready.call_args
+    assert args[0] == 12345

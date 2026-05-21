@@ -10,6 +10,48 @@ import json
 import os
 import re
 import time
+import ctypes
+from ctypes import wintypes
+
+
+# ---------------------------------------------------------------------------
+# pt30 (#WIZARD-FINISH-DISABLED-DURING-TREE-CALC): bloco Win32 para polling do
+# estado do botao Finish do wizard "Hand Setup".
+#
+# IMPORTANTE — instancia WinDLL PROPRIA, nao `ctypes.windll.user32`:
+# o launcher Baltazar (hrc_watcher_apr19_launcher.pyc) ja usa
+# `EnumChildWindows` com um callback de assinatura DIFERENTE
+# (`WINFUNCTYPE(c_bool, c_int, POINTER(c_int))`). `ctypes.windll.user32` e um
+# singleton cached partilhado por todo o processo — configurar `.argtypes`
+# nele afectaria as chamadas do launcher e podia parti-las (mismatch de tipo
+# do callback). Uma instancia `ctypes.WinDLL("user32")` separada tem os seus
+# proprios objectos-funcao, isolando os nossos argtypes do resto do processo.
+#
+# argtypes/restype explicitos sao obrigatorios em Windows 64-bit: HANDLE/HWND
+# e LPARAM sao 64-bit; sem isto o ctypes assume int de 32-bit e trunca os
+# handles, devolvendo lixo.
+# ---------------------------------------------------------------------------
+_pt30_user32 = ctypes.WinDLL("user32")
+_PT30_WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+_pt30_user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+_pt30_user32.FindWindowW.restype = wintypes.HWND
+_pt30_user32.EnumWindows.argtypes = [_PT30_WNDENUMPROC, wintypes.LPARAM]
+_pt30_user32.EnumWindows.restype = wintypes.BOOL
+_pt30_user32.EnumChildWindows.argtypes = [wintypes.HWND, _PT30_WNDENUMPROC, wintypes.LPARAM]
+_pt30_user32.EnumChildWindows.restype = wintypes.BOOL
+_pt30_user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+_pt30_user32.GetClassNameW.restype = ctypes.c_int
+_pt30_user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+_pt30_user32.GetWindowTextW.restype = ctypes.c_int
+_pt30_user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+_pt30_user32.GetWindowTextLengthW.restype = ctypes.c_int
+_pt30_user32.IsWindowEnabled.argtypes = [wintypes.HWND]
+_pt30_user32.IsWindowEnabled.restype = wintypes.BOOL
+
+_FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou)
+_FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
+_FINISH_WAIT_POLL_S = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +372,116 @@ def _wizard_window_present():
         if 'Hand Setup' in title:
             return True
     return False
+
+
+def _is_enabled(hwnd):
+    """pt30: wrapper read-only sobre IsWindowEnabled (instancia WinDLL isolada)."""
+    return bool(_pt30_user32.IsWindowEnabled(hwnd))
+
+
+def _resolve_wizard_hwnd():
+    """pt30: hwnd da janela 'Hand Setup' via FindWindowW (match exacto) com
+    fallback substring via EnumWindows (titulo pode ter prefixo/sufixo).
+    None se nao houver. Auto-contido — nao depende do objecto pygetwindow.
+    """
+    h = _pt30_user32.FindWindowW(None, "Hand Setup")
+    if h:
+        return h
+    matches = []
+
+    def _enum_top(hwnd, lparam):
+        n = _pt30_user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
+            if "hand setup" in buf.value.lower():
+                matches.append(hwnd)
+                return False
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum_top), 0)
+    return matches[0] if matches else None
+
+
+def _find_finish_button(hwnd_wizard):
+    """pt30: enumera child windows do wizard e devolve o hwnd do botao Finish
+    (class 'Button', texto contem 'finish' case-insensitive, ignora o
+    accelerator '&'). None se nao encontrar. Read-only.
+
+    Diagnostico SWT pt30 (check_wizard_children_polling) confirmou que o HRC
+    usa SWT e expoe os widgets como child windows nativas: o Finish aparece
+    como class 'Button', text '&Finish'.
+    """
+    if not hwnd_wizard:
+        return None
+    found = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value == "Button":
+            n = _pt30_user32.GetWindowTextLengthW(ch)
+            if n > 0:
+                txt_buf = ctypes.create_unicode_buffer(n + 1)
+                _pt30_user32.GetWindowTextW(ch, txt_buf, n + 1)
+                if "finish" in txt_buf.value.lower():
+                    found.append(ch)
+                    return False  # encontrado — para a enumeracao
+        return True
+
+    _pt30_user32.EnumChildWindows(hwnd_wizard, _PT30_WNDENUMPROC(_enum), 0)
+    return found[0] if found else None
+
+
+def _wait_for_finish_ready(hwnd_wizard):
+    """pt30 (#WIZARD-FINISH-DISABLED-DURING-TREE-CALC): aguarda a transicao
+    enabled->disabled->enabled do botao Finish, para confirmar que o HRC
+    reagiu ao paste do script (arrancou o calculo do tree size) e que o
+    calculo terminou — antes do slow-click.
+
+    Fase 1 (timeout 5s): pollar ate Finish DISABLED — confirma que o calc
+      arrancou. Timeout = calc provavelmente instantaneo (tree=0) ou botao
+      nao encontrado; WARN e continua (nao bloqueia).
+    Fase 2 (timeout 60s): pollar ate Finish ENABLED — confirma fim do calc.
+      Timeout = calc preso; raise RuntimeError (melhor parar a mao do que
+      clicar num Finish disabled).
+
+    Defensivo: botao Finish nao encontrado -> WARN e devolve sem bloquear
+    (cai no comportamento legado, slow-click cego com os sleeps existentes).
+    """
+    btn = _find_finish_button(hwnd_wizard)
+    if not btn:
+        print('   [WARN] [finish-wait] botao Finish nao encontrado via Win32 '
+              '(hwnd_wizard=%r); polling saltado, slow-click segue cego'
+              % (hwnd_wizard,))
+        return
+
+    deadline = time.time() + _FINISH_WAIT_PHASE1_TIMEOUT_S
+    saw_disabled = False
+    while time.time() < deadline:
+        if not _is_enabled(btn):
+            saw_disabled = True
+            break
+        time.sleep(_FINISH_WAIT_POLL_S)
+    if not saw_disabled:
+        print('   [WARN] [finish-wait] Finish nunca ficou disabled em %.0fs — '
+              'calculo provavelmente instantaneo (tree=0); a continuar'
+              % _FINISH_WAIT_PHASE1_TIMEOUT_S)
+        return
+    print('   [finish-wait] calculo do tree size comecou (Finish disabled)')
+
+    f2_start = time.time()
+    deadline = f2_start + _FINISH_WAIT_PHASE2_TIMEOUT_S
+    while time.time() < deadline:
+        if _is_enabled(btn):
+            print('   [finish-wait] tree estavel em %.1fs (Finish enabled)'
+                  % (time.time() - f2_start))
+            return
+        time.sleep(_FINISH_WAIT_POLL_S)
+    raise RuntimeError(
+        'WIZARD_FINISH_NEVER_RE_ENABLED: calculo do tree size nao terminou '
+        'em %.0fs (Finish ficou disabled)' % _FINISH_WAIT_PHASE2_TIMEOUT_S
+    )
 
 
 def _do_paste_hh_attempt(wpos, hh_text, label):
@@ -1160,6 +1312,14 @@ def setup_hand(hand_name, hand_path):
     # (via idiom `script_path or SCRIPT_FILE` dentro de setup_scripting)
     print(f'   Scripting: {os.path.basename(script_path or SCRIPT_FILE)}')
     setup_scripting(wpos, script_path)              # original: custom_script
+
+    # pt30 (#WIZARD-FINISH-DISABLED-DURING-TREE-CALC): apos carregar o script,
+    # o HRC dispara o calculo do tree size e DESABILITA o botao Finish ate
+    # terminar. Aguardar a transicao enabled->disabled->enabled antes do
+    # slow-click, senao o click cai num botao disabled (causa do smoke pt29-v3
+    # falhar). Diagnostico SWT pt30 confirmou que o Win32 ve o Finish.
+    _hwnd_wizard = getattr(win, '_hWnd', None) or _resolve_wizard_hwnd()
+    _wait_for_finish_ready(_hwnd_wizard)
 
     # pt29 (#WIZARD-FINISH-NO-STATE-CHECK): forcar foco no wizard antes do
     # click Finish. Observacao visual no smoke pt29: rato na posicao correcta
