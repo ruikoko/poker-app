@@ -1189,8 +1189,21 @@ def setup_hand(hand_name, hand_path):
         fg_info = f'getActiveWindow falhou ({_e})'
     print(f'   [finish-diag pre-click] foreground={fg_info}')
 
+    # pt29-v2: HRC (Java) perde eventos de click instantaneo (foreground OK
+    # no momento do click via pt29-v1 activate, mas wizard nao fechou; botao
+    # visualmente normal + tree estavel, descartando Finish-greyed).
+    # Substituir click_rel (mouse-down+up em <50ms) por slow-click:
+    # moveTo + mouseDown + sleep + mouseUp, dando tempo a janela Java para
+    # registar o press.
+    abs_x = wpos[0] + BTN_FINISH[0]
+    abs_y = wpos[1] + BTN_FINISH[1]
+
     print('   Finish...')
-    click_rel(wpos, *BTN_FINISH)
+    pyautogui.moveTo(abs_x, abs_y, duration=0.1)
+    time.sleep(0.1)
+    pyautogui.mouseDown(button='left')
+    time.sleep(0.15)  # janela Java tem tempo para registar o press
+    pyautogui.mouseUp(button='left')
     time.sleep(5)
 
     # WARN-only state check pos-click (pt29). Sem raise nesta versao: o smoke

@@ -473,3 +473,21 @@ def test_setup_hand_warns_when_wizard_persists_after_finish_pt29(pf, tmp_path):
 
     # Confirma que chegou ao fim (paste_hh correu apos o check WARN-only).
     pf.paste_hh.assert_called_once()
+
+
+def test_setup_hand_finish_uses_slow_click_pt29v2(pf, tmp_path):
+    """pt29-v2: o click do Finish usa slow-click (mouseDown + mouseUp) em vez
+    do click instantaneo, para a janela Java do HRC registar o press."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+    pf._wizard_window_present = MagicMock(return_value=False)
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+    pf.setup_hand("GG-TEST-99999", hand_path)
+
+    # slow-click: mouseDown + mouseUp ambos chamados (button left).
+    pf.pyautogui.mouseDown.assert_called_with(button='left')
+    pf.pyautogui.mouseUp.assert_called_with(button='left')
+    # moveTo posiciona no botao antes do press.
+    assert pf.pyautogui.moveTo.called
