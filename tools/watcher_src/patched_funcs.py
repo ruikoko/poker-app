@@ -484,6 +484,72 @@ def _wait_for_finish_ready(hwnd_wizard):
     )
 
 
+_RUN_WAIT_POLL_S = 0.5
+_RUN_WAIT_PROGRESS_LOG_S = 60.0
+
+
+def _wait_for_run_completion(timeout_appear_s=30, timeout_total_s=7200,
+                             run_label="run"):
+    """pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE-MEMORY-HEURISTIC): aguarda
+    uma run do HRC terminar via polling Win32 da janela top-level 'Hand Setup'
+    de PROGRESSO (a que o HRC mostra durante o calculo). Sinal binario, sem
+    heuristica — substitui `wait_for_calculation` (memoria), que dava falso
+    positivo (smoke pt30: declarou fim aos 48s mas a run ainda corria).
+
+    IMPORTANTE — assume que o wizard 'Hand Setup' de CONFIGURACAO ja fechou
+    (chamada apos `start_calculation`). A janela de progresso reutiliza o
+    mesmo titulo 'Hand Setup' do wizard; se esta funcao for chamada com o
+    wizard ainda aberto, o polling detecta-o falsamente como janela de
+    progresso. Sequencia correcta:
+        Finish -> wizard fecha -> Sleep(30) -> set_ci_initial ->
+        start_calculation -> _wait_for_run_completion AQUI.
+
+    Fase 1 (timeout_appear_s, default 30s): aguardar a janela aparecer
+      (run arrancou). Se nao aparecer = run trivial ou erro; WARN e devolve
+      graceful (mesmo padrao do pt30).
+    Fase 2 (timeout_total_s): pollar enquanto a janela existir; quando
+      desaparecer = run terminou. Log periodico de minuto-a-minuto. Timeout
+      = run preso; raise RuntimeError.
+    """
+    # Fase 1: aguardar a janela de progresso aparecer.
+    appear_deadline = time.time() + timeout_appear_s
+    appeared = False
+    while time.time() < appear_deadline:
+        if _pt30_user32.FindWindowW(None, "Hand Setup"):
+            appeared = True
+            break
+        time.sleep(_RUN_WAIT_POLL_S)
+    if not appeared:
+        print('   [WARN] [run-wait] %s: janela de progresso nao apareceu em '
+              '%ds — run trivial ou erro; a continuar'
+              % (run_label, timeout_appear_s))
+        return
+    print('   [run-wait] %s: janela de progresso detectada, run a correr'
+          % run_label)
+
+    # Fase 2: aguardar a janela desaparecer (run terminou).
+    f2_start = time.time()
+    deadline = f2_start + timeout_total_s
+    next_log = f2_start + _RUN_WAIT_PROGRESS_LOG_S
+    while time.time() < deadline:
+        if not _pt30_user32.FindWindowW(None, "Hand Setup"):
+            elapsed = time.time() - f2_start
+            print('   [run-wait] %s: run terminou em %.0fs (%.1f min)'
+                  % (run_label, elapsed, elapsed / 60.0))
+            return
+        now = time.time()
+        if now >= next_log:
+            mins = int((now - f2_start) / 60.0)
+            print('   [run-wait] %s: ainda a correr ha %d minutos'
+                  % (run_label, mins))
+            next_log = now + _RUN_WAIT_PROGRESS_LOG_S
+        time.sleep(_RUN_WAIT_POLL_S)
+    raise RuntimeError(
+        'RUN_NEVER_COMPLETED: %s nao terminou em %ds'
+        % (run_label, timeout_total_s)
+    )
+
+
 def _do_paste_hh_attempt(wpos, hh_text, label):
     """Helper interno: 1 tentativa completa de paste do HH no TEXT_AREA.
     Extraido para permitir retry limpo em `paste_hh` sem duplicar logica.
@@ -1390,12 +1456,13 @@ def setup_hand(hand_name, hand_path):
     print('   A calcular (1ª run)...')
     start_calculation(ci_target)
 
-    # pt29-v3: esperar a 1a run terminar de verdade antes de montar a 2a.
-    # start_calculation apenas DISPARA; nao bloqueia. wait_for_calculation
-    # (Baltazar OG) polla memoria do HRC ate estabilizar, timeout 300s.
-    # Sem isto o robot montava navigate + 2a run ~0.2s apos disparar a 1a.
+    # pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE-MEMORY-HEURISTIC): esperar a
+    # 1a run terminar via polling da janela 'Hand Setup' de progresso (sinal
+    # binario), em vez de wait_for_calculation (memoria, falso positivo no
+    # smoke pt30). start_calculation apenas DISPARA; nao bloqueia. Timeout 2h
+    # (1a run = ~10M iteracoes + preparacao).
     print('   A aguardar fim da 1ª run...')
-    wait_for_calculation()
+    _wait_for_run_completion(timeout_total_s=7200, run_label="1ª run")
     print('   1ª run terminou.')
 
     exports_dir = os.path.join(DONE_DIR, 'Exports')
@@ -1442,14 +1509,15 @@ def setup_hand(hand_name, hand_path):
         print(f'   [WARN] {hand_name}: 2ª run não disparou (popup Nash '
               'não abriu); finalize vai exportar zip da 1ª run apenas')
     elif second_run_dispatched is True:
-        # pt29-v3 follow-up: a 2a run tambem so DISPARA (start_calculation_
-        # selected_subtree nao bloqueia). Esperar a 2a run terminar antes do
-        # export, senao o zip sai com resultados parciais. Mesmo padrao da
-        # 1a run. Só quando a 2a run foi de facto disparada (True) — em False
-        # (popup nao abriu) ou None (sem aggressor) o estado vigente e o da
-        # 1a run, ja estabilizada pelo wait acima.
+        # pt29-v3 follow-up + pt31: a 2a run tambem so DISPARA
+        # (start_calculation_selected_subtree nao bloqueia). Esperar a 2a run
+        # terminar antes do export, senao o zip sai com resultados parciais.
+        # Mesmo padrao da 1a run (janela de progresso 'Hand Setup'). Só quando
+        # a 2a run foi de facto disparada (True) — em False (popup nao abriu)
+        # ou None (sem aggressor) o estado vigente e o da 1a run, ja terminada
+        # pelo wait acima. Timeout 8h (Selected Subtree pode demorar horas).
         print('   A aguardar fim da 2ª run...')
-        wait_for_calculation()
+        _wait_for_run_completion(timeout_total_s=28800, run_label="2ª run")
         print('   2ª run terminou.')
 
     # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor,

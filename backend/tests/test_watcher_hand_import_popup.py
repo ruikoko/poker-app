@@ -330,7 +330,8 @@ def _stub_setup_hand_globals(pf, tmp_root_str):
     pf.handle_mtt_stacks_page = MagicMock()
     pf.setup_scripting = MagicMock()
     pf.start_calculation = MagicMock()
-    pf.wait_for_calculation = MagicMock()  # pt29-v3: espera fim de cada run
+    pf.wait_for_calculation = MagicMock()  # pt29-v3 legacy (ja nao chamado)
+    pf._wait_for_run_completion = MagicMock()  # pt31: espera fim de cada run
     pf._resolve_wizard_hwnd = MagicMock(return_value=12345)  # pt30
     pf._wait_for_finish_ready = MagicMock()  # pt30
     pf.export_strategies = MagicMock()
@@ -576,3 +577,64 @@ def test_setup_hand_calls_wait_for_finish_ready_pt30(pf, tmp_path):
     # hwnd resolvido via _resolve_wizard_hwnd (win mock nao tem _hWnd)
     (args, _kw) = pf._wait_for_finish_ready.call_args
     assert args[0] == 12345
+
+
+# == pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE): _wait_for_run_completion ==
+
+def test_wait_for_run_completion_normal(pf):
+    """Janela de progresso aparece (fase 1) e depois desaparece (fase 2) ->
+    return sem raise."""
+    state = {"n": 0}
+
+    def _fw(cls, title):
+        state["n"] += 1
+        if state["n"] == 1:
+            return 12345   # fase 1: apareceu
+        if state["n"] <= 3:
+            return 12345   # fase 2: ainda existe
+        return 0           # fase 2: desapareceu (run terminou)
+
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.FindWindowW.side_effect = _fw
+
+    pf._wait_for_run_completion(timeout_appear_s=5, timeout_total_s=10,
+                                run_label="1ª run")
+    assert state["n"] >= 4
+
+
+def test_wait_for_run_completion_never_appears_graceful(pf, capsys):
+    """Janela nunca aparece (run trivial / erro) -> WARN, sem raise."""
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.FindWindowW.return_value = 0  # nunca aparece
+
+    pf._wait_for_run_completion(timeout_appear_s=0.2, timeout_total_s=10,
+                                run_label="1ª run")
+    out = capsys.readouterr().out
+    assert "nao apareceu" in out
+
+
+def test_wait_for_run_completion_never_disappears_raises(pf):
+    """Janela aparece mas nunca desaparece (run preso) -> raise."""
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.FindWindowW.return_value = 12345  # sempre presente
+
+    with pytest.raises(RuntimeError, match="RUN_NEVER_COMPLETED"):
+        pf._wait_for_run_completion(timeout_appear_s=5, timeout_total_s=0.2,
+                                    run_label="2ª run")
+
+
+def test_setup_hand_calls_wait_for_run_completion_pt31(pf, tmp_path):
+    """Wiring: setup_hand chama _wait_for_run_completion para a 1ª run (em vez
+    do wait_for_calculation legacy)."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+    pf._wizard_window_present = MagicMock(return_value=False)
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+    pf.setup_hand("GG-TEST-99999", hand_path)
+
+    # 1ª run aguardada via _wait_for_run_completion; wait_for_calculation
+    # legacy nao e chamado.
+    assert pf._wait_for_run_completion.called
+    pf.wait_for_calculation.assert_not_called()
