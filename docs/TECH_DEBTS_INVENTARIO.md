@@ -6,6 +6,31 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (21 Maio 2026 — pt29)
+
+Sessão pt29 (cascata de fixes do robot HRC, smoke real com `GG-5944816316`).
+Detalhe completo em `docs/JOURNAL_2026-05-21-pt29.md` e
+`docs/HRC_ANATOMIA_OPERACIONAL.md` v4. Watcher recompilado pt29-v1/v2/v3.
+
+### Tech debt novo aberto em pt29 (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#HRC-BOUNTY-HARDCODED-50PCT** | 🟡 MED | O robot Baltazar OG tem o Bounty Mode hardcoded em PKO 50% na heurística "KO detetado → selecionar Bounty Mode PKO 50%". Para suportar PKO 25% e Mystery KO temos de ler o valor real do `tournament_format` parsed do TS e selecionar a opção correspondente no dropdown do HRC. Impacto: cálculos para torneios não-PKO-50% têm Bounty Mode errado. |
+
+### Bugs do robot resolvidos em pt29 (nunca foram tech debts formais)
+
+Descobertos e fechados na mesma sessão pt29 via smoke real — registados
+aqui para histórico (não tinham entry própria no inventário):
+
+| Bug | Como fechou |
+|---|---|
+| Finish click silenciosamente ignorado (HRC Java perde click instantâneo) | **pt29-v2** (`cb4c520`): slow-click `mouseDown → sleep(0.15) → mouseUp` + activate pré-click + state check pós-click via título "Hand Setup". |
+| 2ª run começava antes da 1ª terminar (e Save As antes da 2ª) | **pt29-v3** (`3b9d72c`): `wait_for_calculation()` (Baltazar OG, já existia inutilizada) chamada após 1ª run e após 2ª run (esta condicionada a `second_run_dispatched is True`). Heurística: memória HRC estável >100 MB / variação <20 MB por 3 ciclos de 10s. |
+| "Save As dialog não aparece em 20s" | Provavelmente resolvido em cascata pelo wait da 2ª run (pt29-v3) — **a confirmar com o resultado do smoke pt29-v3** (por arrancar à hora deste closeout). |
+
+---
+
 ## Estado actual (19-20 Maio 2026 pós-pt27 closeout)
 
 Sessão pt27 fechada com **1 commit feature em main** (`7de8df6`, 3 fixes
