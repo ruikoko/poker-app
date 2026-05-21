@@ -308,6 +308,30 @@ def _close_hand_import_error_popup(popup):
     time.sleep(0.4)
 
 
+def _wizard_window_present():
+    """pt29 (#WIZARD-FINISH-NO-STATE-CHECK): True se ainda existe janela
+    top-level com 'Hand Setup' no titulo (mesmo sinal que open_wizard usa
+    para detectar o wizard). Usado como state check pos-click do Finish:
+    se o wizard ainda esta presente, o click Finish nao teve efeito.
+
+    getAllWindows falha OU None -> trata como 'nao presente' (return False)
+    para nao gerar WARN espurio em erro de enumeracao — o caller so grita
+    quando ha certeza de que o wizard persiste.
+    """
+    try:
+        windows = pyautogui.getAllWindows()
+    except Exception as _e:
+        print(f'   [WARN] _wizard_window_present: getAllWindows falhou ({_e})')
+        return False
+    if windows is None:
+        return False
+    for w in windows:
+        title = (getattr(w, 'title', '') or '')
+        if 'Hand Setup' in title:
+            return True
+    return False
+
+
 def _do_paste_hh_attempt(wpos, hh_text, label):
     """Helper interno: 1 tentativa completa de paste do HH no TEXT_AREA.
     Extraido para permitir retry limpo em `paste_hh` sem duplicar logica.
@@ -1137,9 +1161,46 @@ def setup_hand(hand_name, hand_path):
     print(f'   Scripting: {os.path.basename(script_path or SCRIPT_FILE)}')
     setup_scripting(wpos, script_path)              # original: custom_script
 
+    # pt29 (#WIZARD-FINISH-NO-STATE-CHECK): forcar foco no wizard antes do
+    # click Finish. Observacao visual no smoke pt29: rato na posicao correcta
+    # do botao mas click sem efeito — comportamento classico do Windows com
+    # janela inactiva (primeiro click activa, nao acciona controlo).
+    # setup_scripting que vem antes fecha um Open dialog e pode deixar foco
+    # fora do wizard.
+    try:
+        activated = False
+        for w in pyautogui.getAllWindows():
+            if 'Hand Setup' in (getattr(w, 'title', '') or ''):
+                w.activate()
+                activated = True
+                time.sleep(0.3)  # dar tempo ao Windows para processar o focus change
+                break
+        if not activated:
+            print('   [WARN] pre-Finish: janela "Hand Setup" nao encontrada para activate')
+    except Exception as _e:
+        print(f'   [WARN] activate wizard pre-Finish falhou ({_e})')
+
+    # Logging defensivo do estado pre-click
+    print(f'   [finish-diag pre-click] wpos={wpos}')
+    try:
+        fg = pyautogui.getActiveWindow()
+        fg_info = f'hwnd={fg._hWnd} title={fg.title!r}' if fg else 'none'
+    except Exception as _e:
+        fg_info = f'getActiveWindow falhou ({_e})'
+    print(f'   [finish-diag pre-click] foreground={fg_info}')
+
     print('   Finish...')
     click_rel(wpos, *BTN_FINISH)
     time.sleep(5)
+
+    # WARN-only state check pos-click (pt29). Sem raise nesta versao: o smoke
+    # mostra no log se o activate resolveu (sem WARN) ou se Finish ainda falha
+    # (WARN -> hipotese de foco descartada, investigar greyed/timing).
+    if _wizard_window_present():
+        print('   [WARN] verify_wizard_finished: janela "Hand Setup" ainda presente '
+              'apos click + activate — Finish ainda falhou. Hipotese de foco descartada.')
+    else:
+        print('   [finish-diag pos-click] OK — wizard fechou.')
 
     print('   A aguardar carregamento da mão (30s)...')
     time.sleep(30)

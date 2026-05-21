@@ -47,6 +47,10 @@ def pf():
     import patched_funcs as _pf  # noqa: E402
     _pf.click_rel = MagicMock(name="click_rel")
     _pf.pyautogui = MagicMock(name="pyautogui")
+    # Default iteravel para getAllWindows — o bloco activate (pt29) e
+    # _wizard_window_present iteram o resultado. Tests fazem override quando
+    # precisam de janelas especificas.
+    _pf.pyautogui.getAllWindows = MagicMock(return_value=[])
 
     _clipboard_state = {"value": ""}
     _pp = MagicMock(name="pyperclip")
@@ -398,3 +402,74 @@ def test_setup_hand_proceeds_to_paste_hh_when_no_popup_pt28v3(pf, tmp_path):
     pf.setup_hand("GG-TEST-99999", hand_path)
 
     pf.paste_hh.assert_called_once()  # continua a correr como rede de seguranca
+
+
+# == pt29 (#WIZARD-FINISH-NO-STATE-CHECK): _wizard_window_present ==========
+
+def _fake_window(title="Hand Setup", width=741, height=673):
+    win = MagicMock()
+    win.title = title
+    win.width = width
+    win.height = height
+    return win
+
+
+def test_wizard_window_present_true_when_hand_setup_exists(pf):
+    """Janela com 'Hand Setup' no titulo -> True (wizard ainda aberto)."""
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[_fake_window()])
+    assert pf._wizard_window_present() is True
+
+
+def test_wizard_window_present_substring_match(pf):
+    """Match por substring (titulo pode ter sufixo/prefixo)."""
+    pf.pyautogui.getAllWindows = MagicMock(
+        return_value=[_fake_window(title="HRC Pro - Hand Setup Wizard")]
+    )
+    assert pf._wizard_window_present() is True
+
+
+def test_wizard_window_present_false_when_no_hand_setup(pf):
+    """Sem janela 'Hand Setup' -> False (wizard fechou / avancou)."""
+    pf.pyautogui.getAllWindows = MagicMock(
+        return_value=[_fake_window(title="HRC Pro - Solver")]
+    )
+    assert pf._wizard_window_present() is False
+
+
+def test_wizard_window_present_false_on_getallwindows_none(pf):
+    """getAllWindows devolve None (mock env) -> False (sem WARN espurio)."""
+    pf.pyautogui.getAllWindows = MagicMock(return_value=None)
+    assert pf._wizard_window_present() is False
+
+
+def test_wizard_window_present_false_on_getallwindows_exception(pf, capsys):
+    """getAllWindows raises -> WARN + False (nao queremos gritar 'wizard
+    presente' por erro de enumeracao)."""
+    pf.pyautogui.getAllWindows = MagicMock(side_effect=RuntimeError("boom"))
+    assert pf._wizard_window_present() is False
+    assert "[WARN]" in capsys.readouterr().out
+
+
+def test_wizard_window_present_tolerates_empty_titles(pf):
+    """Janelas sem titulo (compositor) ignoradas; so a 'Hand Setup' conta."""
+    blank = _fake_window(title="")
+    setup = _fake_window(title="Hand Setup")
+    pf.pyautogui.getAllWindows = MagicMock(return_value=[blank, setup])
+    assert pf._wizard_window_present() is True
+
+
+def test_setup_hand_warns_when_wizard_persists_after_finish_pt29(pf, tmp_path):
+    """pt29 WARN-only: se 'Hand Setup' persiste apos click Finish, loga WARN
+    mas NAO faz raise (1a versao). setup_hand continua ate ao fim."""
+    _stub_setup_hand_globals(pf, str(tmp_path))
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+    # Wizard SEMPRE presente -> simula Finish que falhou.
+    pf._wizard_window_present = MagicMock(return_value=True)
+
+    hand_path = _make_minimal_hand_dir(tmp_path)
+    # NAO deve raise (WARN-only nesta versao).
+    pf.setup_hand("GG-TEST-99999", hand_path)
+
+    # Confirma que chegou ao fim (paste_hh correu apos o check WARN-only).
+    pf.paste_hh.assert_called_once()

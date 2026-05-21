@@ -1205,8 +1205,9 @@ def test_apply_overrides_substitutes_SIZES_OPEN_OTHERS():
 def test_apply_overrides_leaves_untouched_vars_alone():
     tpl = _read_template()
     out = apply_sizings_overrides(tpl, {"SIZES_OPEN_OTHERS": [2.5, "ALLIN"]})
-    # SIZES_OPEN_BU não foi tocado → fica no default do template
-    assert "let SIZES_OPEN_BU = [2, ALLIN];" in out
+    # SIZES_OPEN_BU não foi tocado → fica no default do template.
+    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
+    assert "let SIZES_OPEN_BU = [2];" in out
 
 
 def test_apply_overrides_handles_multiple():
@@ -1626,8 +1627,9 @@ def test_generate_hrc_script_for_hand_GG_HJ_open():
     assert eff == 133.33
     assert overrides["SIZES_OPEN_OTHERS"] == [2.0]
     assert "let SIZES_OPEN_OTHERS = [2];" in js
-    # Outras vars não tocadas
-    assert "let SIZES_OPEN_BU = [2, ALLIN];" in js
+    # Outras vars não tocadas → default do template.
+    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
+    assert "let SIZES_OPEN_BU = [2];" in js
 
 
 def test_generate_hrc_script_for_hand_walk_to_BB_returns_template_intact():
@@ -1649,8 +1651,9 @@ def test_generate_hrc_script_for_hand_walk_to_BB_returns_template_intact():
     )
     assert err is None
     assert overrides == {}
-    # Template tem o default original em SIZES_OPEN_OTHERS
-    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" in js
+    # Template default em SIZES_OPEN_OTHERS.
+    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
+    assert "let SIZES_OPEN_OTHERS = [2];" in js
 
 
 def test_generate_hrc_script_for_hand_template_io_failure_returns_error():
@@ -1869,10 +1872,12 @@ def test_build_queue_zip_writes_script_js_for_hand_with_open():
 
     js = zf.read("GG-OPEN/script.js").decode("utf-8")
     # UTGopener é UTG (idx 0 em 8-handed) → SIZES_OPEN_OTHERS substituído.
-    # Open size = 1200/400 = 3 BB. Eff stack = 10000/400 = 25 → ALLIN fica.
+    # Open size = 1200/400 = 3 BB. Eff stack = 10000/400 = 25 → override do
+    # gerador inclui ALLIN (eff ≤ 25). ALLIN aqui vem do override, não do default.
     assert "let SIZES_OPEN_OTHERS = [3, ALLIN];" in js
-    # Outras vars intactas
-    assert "let SIZES_OPEN_BU = [2, ALLIN];" in js
+    # Outras vars intactas → default do template.
+    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
+    assert "let SIZES_OPEN_BU = [2];" in js
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
@@ -1910,7 +1915,8 @@ def test_build_queue_zip_writes_script_js_for_walk_to_BB():
 
     js = zf.read("GG-WALK/script.js").decode("utf-8")
     # Template intacto — defaults canónicos.
-    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" in js
+    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
+    assert "let SIZES_OPEN_OTHERS = [2];" in js
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
