@@ -1230,6 +1230,14 @@ def setup_hand(hand_name, hand_path):
     print('   A calcular (1ª run)...')
     start_calculation(ci_target)
 
+    # pt29-v3: esperar a 1a run terminar de verdade antes de montar a 2a.
+    # start_calculation apenas DISPARA; nao bloqueia. wait_for_calculation
+    # (Baltazar OG) polla memoria do HRC ate estabilizar, timeout 300s.
+    # Sem isto o robot montava navigate + 2a run ~0.2s apos disparar a 1a.
+    print('   A aguardar fim da 1ª run...')
+    wait_for_calculation()
+    print('   1ª run terminou.')
+
     exports_dir = os.path.join(DONE_DIR, 'Exports')
     os.makedirs(exports_dir, exist_ok=True)
     export_zip = os.path.join(exports_dir, hand_name + '.zip')
@@ -1273,6 +1281,16 @@ def setup_hand(hand_name, hand_path):
     if second_run_dispatched is False:
         print(f'   [WARN] {hand_name}: 2ª run não disparou (popup Nash '
               'não abriu); finalize vai exportar zip da 1ª run apenas')
+    elif second_run_dispatched is True:
+        # pt29-v3 follow-up: a 2a run tambem so DISPARA (start_calculation_
+        # selected_subtree nao bloqueia). Esperar a 2a run terminar antes do
+        # export, senao o zip sai com resultados parciais. Mesmo padrao da
+        # 1a run. Só quando a 2a run foi de facto disparada (True) — em False
+        # (popup nao abriu) ou None (sem aggressor) o estado vigente e o da
+        # 1a run, ja estabilizada pelo wait acima.
+        print('   A aguardar fim da 2ª run...')
+        wait_for_calculation()
+        print('   2ª run terminou.')
 
     # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor,
     # ou após WARN se 2ª run falhou em pt28).

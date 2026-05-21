@@ -330,6 +330,7 @@ def _stub_setup_hand_globals(pf, tmp_root_str):
     pf.handle_mtt_stacks_page = MagicMock()
     pf.setup_scripting = MagicMock()
     pf.start_calculation = MagicMock()
+    pf.wait_for_calculation = MagicMock()  # pt29-v3: espera fim de cada run
     pf.export_strategies = MagicMock()
     pf.SCRIPT_FILE = "fake_script.js"
     pf.BTN_NEXT = (1, 2)
