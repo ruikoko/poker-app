@@ -1,5 +1,7 @@
 # Próxima sessão (pt7) — plano detalhado
 
+> **Arquivado em 21 Maio 2026.** Este documento é o plano detalhado da sessão pt7 (29-30 Abril 2026), centrado no Tech Debt #21. pt7 foi executada com sucesso (ver `docs/JOURNAL_2026-04-29-pt7.md`). Mantido como referência histórica de como se planeava trabalho nessa altura.
+
 **Data planeada:** 29-Abr 2026 noite ou 30-Abr
 **Predecessor:** sessão pt6 (`docs/JOURNAL_2026-04-29-pt6.md`) — Wipe TOTAL + Pipelines 1/2/3 OK + Tech Debts #16/#17/#20 fechados + Tech Debt #21 detectado
 **Objectivo:** fechar Tech Debt #21 + completar Pipelines 4-5 (Upload SS manual + Bucket 1 standalone) + audit final
