@@ -11,8 +11,9 @@ Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro este
 3. **`docs/REGRAS_NEGOCIO.md`** — regras operacionais (entrada, processamento, distribuição, casos canónicos, regras duras).
 4. **`docs/MAPA_ACOPLAMENTO.md`** — mapa técnico de conceitos (`match_method`, `study_state`, `origin`, etc).
 5. **`docs/TECH_DEBTS_INVENTARIO.md`** — backlog actualizado de tech debts.
+6. **`docs/HRC_ANATOMIA_OPERACIONAL.md`** — anatomia do HRC consolidada (wizard, Strategy Table, popup Nash, clipboard, coords, formato HH aceite). **Obrigatório se o trabalho toca o robot ou a pipeline HRC.** Lê antes de propor mudanças em `tools/watcher_src/` ou `backend/app/services/queue_export.py`.
 
-Sem ler estes 5 documentos, NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
+Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
 
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
@@ -399,6 +400,106 @@ Todos os 3 exigem fonte Python do watcher. Baltazar emigrou, sem contacto. **Dec
 
 Repo passa a ter `tools/` para utilities locais não-backend não-frontend. Fica fora do dev server / build. Conteúdo source-controlled (audit + review via PR); cópia manual para o Beelink.
 
-Última sessão fechada: pt22 (13 Maio 2026 — Adapter G1 deployed, 3 bugs watcher tracked, decisão de descompilar para pt23. 2 commits feature + commit docs. Suite 172 PASSED inalterada).
+## pt23 — Descompilar watcher + fixes A/B/C/E (13 Maio 2026)
 
-Próxima sessão: **pt23 — Descompilar watcher + tag-based equity model.** Plano detalhado em `docs/PLAN_PT23.md`: 6 passos ordenados (rotação token → `pyinstxtractor`+`pycdc` → fixes A/B/C → recompilar PyInstaller → smoke pós-recompilação → tag-based equity end-to-end). Sessão mais longa projectada até agora (~10-15h, possivelmente split em 2 dias).
+Descompilação do `hrc_watcher.exe` (PyInstaller 6.x, Python 3.12) via build local de `pycdc` (Visual Studio 2022 Build Tools + CMake 4.3 instalados from-scratch). Recuperação ~72% das funções limpas; restantes 28% via disassembly manual `dis` no host 3.12. Material persistido em `_local_only/watcher_decompile/decompiled/`.
+
+**Marshal swap surgical** — `tools/watcher_src/patched_funcs.py` (~212 linhas) com 4 funções compiladas no host 3.12 e swapped no `co_consts` do module code original. Re-bundle via trampoline `wrapper.py` minimal (gitignored em `_local_only/`). Fecha Bugs A/B/C/E.
+
+**Backend hints** — `derive_max_players(hh_text)` + `_derive_equity_model` baseado em tags `ICM FT`/`ICM PKO FT` (HM3) ou `icm-ft`/`icm-pko-ft` (Discord). Hints injectados no `payouts.json` de cada mão. Suite 172 → 184 PASSED.
+
+**Adapter fixes** — `detect_done_zips` apanha `done/Exports/<hand>.zip` (layout Baltazar) além do directo; `_ensure_meta_in_zip` injecta meta minimal quando o zip HRC nativo não traz `meta.json`.
+
+**Ciclo mecânico ponta-a-ponta validado em prod** com mão real `GG-5914506215` (`hrc_jobs.id=1, status=done, result_zip_size=3586`).
+
+5 tech debts pt23 abertos, incluindo o **gatekeeper de produção** `#HRC-PRUNE-IN-GAP-DOWNSTREAM` (HIGH) — sem prune, smoke real produz trees com ETA ~17h.
+
+2 commits feature em main: `c3cc66b` backend hints + `b3968ee` watcher/adapter consolidados.
+
+## pt25b/c/d — Robustez backend + fix Railway + indices canónicos (14 Maio 2026)
+
+Três pontas sobre o gatekeeper `#HRC-PRUNE-IN-GAP-DOWNSTREAM`. Backend acabou completo.
+
+| pt | Foco | Commit | Suite |
+|---|---|---|---|
+| **pt25b** | Robustez cross-site (PS/GG/WN/WPN) — Winamax markers, duplicate `let` fix, table format detection | `f32ed28` | 264 PASSED |
+| **pt25c** | `hrc_scripts/` move de `tools/` para `backend/app/services/` (Railway nixpacks só ship `backend/`) + manifest `prune_script_error` defensivo | `77ff496` | 264 PASSED |
+| **pt25d** | Convention indices fix — `UTG=0` (docs canónica HRC) substitui rotativa `SB=0`. Manifest field `prune_index_convention='hrc_docs_v1'` distingue zips pré/pós | `3347fcf` | 266 PASSED |
+
+Smoke real pós-pt25d: indices certos chegam ao Beelink no `script.js` (validado visual). Watcher só faz 1ª run + save directo — sem 2ª run em Selected Subtree.
+
+**5 bugs novos do watcher** (F-J) + 1 feature de re-arquitectura (K) abertos para pt25e/pt25f.
+
+## pt25e — Bloco 1 fechado + ★ Pipeline HRC → app v1 (14-15 Maio 2026)
+
+**Bloco 1** (14 Mai, 3 commits `8eb9d87`/`f7c8833`/`bad2c51`): helper backend `derive_aggressor_real_action` + stubs defensivos no source watcher para Bugs F/G/H/J. `setup_hand` ganha encapsulamento `finalize_after_second_run` separado do export. `.exe` em produção intacto pt25d — Bloco 1 valida arquitectura, não muda comportamento operacional.
+
+**Bloco 2 manhã 15 Mai**: smoke devagar manual com mão GALACTICA (`WN-4706316461629505541-158-1778795596`, Winamax). Fix urgente `#META-AGGRESSOR-POSITION` (`c6d6c40`) + follow-up BU canónico (`BTN → BU` em `_POSITION_LABELS_BY_N`).
+
+**★ HRC Import Pipeline v1** (`4fa09be`) — primeiro ciclo fechado `mão → HRC → resultado importado na app`. Schema novo + 4 endpoints + UI `/hrc-sessions`. DELETE endpoint (`e45e507`). Marco simbólico.
+
+**`#ORFA-HM3-SYNTHETIC-ENTRIES`** — 1117 mãos retroactivamente linkadas via backfill em 6+1 commits sequenciais. Suite 282 → 340.
+
+## pt25f — Trabalho A + Bloco 2 watcher peças 1+2 (15-18 Maio 2026)
+
+Sessão longa. Cobre dois sub-arcos:
+
+**15-16 Mai (núcleo):** 3 fixes case-sensitivity (`76e2ea7`/`0444cf2`/`11c2dea`) via `normalize_tag_key`. Deprecation fix `datetime.utcnow()` → `datetime.now(timezone.utc)`. Versionamento `tools/apphm3/` + config externo. Rotação password Postgres. **★ Trabalho A** (`9b6e839`) — refactor do gerador `.js` HRC: sizings per-hand a partir do action log preflop real, drop prune via JS (gerador trabalha em arrays numéricos overridable).
+
+**18 Mai (extensão):** multiplicador 3-bet clássico em 5 buckets (`7e38d89`). Bloco 2 watcher peças 1+2 (`f99e994`/`fa4f21a`/`92778bd`) — `_set_scope_in_popup` + `start_calculation_selected_subtree` paralela ao legacy + smoke calibração + flow Selected Subtree end-to-end + meta.json automático + navegação por setas.
+
+Suite 340 → 449 PASSED (+109 líquidos). 10 commits em main.
+
+## pt26 — Recompilação `.exe` + re-classificação do sintoma (19 Maio 2026)
+
+Recompilação do `.exe` watcher pós-pt25f source-side completo. 1 commit feature em main (`a735053` pt26 smoke calibração); trabalho substancial em `_local_only/` (gitignored): trampoline `swap_and_smoke.py` (4 SWAP + 13 APPEND + 15 consts), bundle PyInstaller (sha256 `2213aa19...a4a7`, 12.86 MB), smoke harness 14/14 PASS.
+
+**Coord Calculate validada** `(487, 124)` absoluta / `(204, 59)` rel à wpos. Título popup refinado para `"Nash Calculation"` exacto. Migração das fracções do popup para pixels-rel (rect do popup varia ~5-7% entre sessões).
+
+**Re-classificação do sintoma do equity_model.** O que se via como FT/MTT mismatch é cadeia `#VISION-LOBBY-API-FAILURE` → `#HRC-CONTEXT-MISMATCH-PLAYERS-LEFT` mascarada pelo workaround `#HRC-MTT-OTHER-TABLES-INFO` aceite em pt23. Design tag-based é canónico desde pt23 — não é regressão.
+
+5 tech debts novos incluindo o CRIT `#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN` (peça 1 do Bloco 2 falha em runtime — popup Nash não abre na 2ª run).
+
+## pt27 — 3 fixes backend HRC + auditoria 7 dias (19-20 Maio 2026)
+
+Bloco A (auditoria 7 dias, read-only): 4602 mãos, 4 categorias diagnosticadas, regressão antiga `study_state` descoberta (`#STUDY-STATE-REGRESSION-HH-IMPORT`, desde 18 Abr — decisão product pendente sobre fix vs aceitar). Vision API failure ~34% (10/29).
+
+Bloco B (3 fixes backend num só commit `7de8df6`):
+
+| Tech debt | Como fechou |
+|---|---|
+| `#CI-DEFAULT-MISMATCH` | Backend `_DEFAULT_CI_TARGET_FIRST_RUN = 5.0` → `_DEFAULT_CI_TARGET = 10.0`. Alinha 1ª e 2ª runs em 10. |
+| `#DERIVE-MAX-PLAYERS-HERO-REGEX-GG` | 3 sub-bugs em `derive_max_players.py`: `_HERO_RE` apanhava 1º "Dealt to" (em GG pós-`_replace_hashes` todos os seats têm essa linha); `\S+` truncava nicks com espaços; `_SEAT_RE` matchava SUMMARY. Mão real `GG-5944816316`: `max_players` 4 → 6. |
+| `#COMPUTE-TARGET-NODE-OFFSET-USES-WRONG-PLAYER-COUNT` | Param renomeado `max_players` → `seats_at_table`. Strategy Table HRC tem 1 linha-base por jogador real sentado, não pela redução ICM. Mão real: offset null → 4. |
+
+Bloco C (fix funcional `.exe` watcher) fica para pt28. Suite 449 → 455 PASSED (+6 líquidos).
+
+## pt28 — Clipboard race + descoberta do formato HH PokerStars (20 Maio 2026)
+
+Sessão sem journal separado (absorvido no pt29 quando o chat encheu). Trabalho coberto pelo `HRC_ANATOMIA_OPERACIONAL.md` v1→v3 e por tech debts.
+
+**pt28-v2/v3 clipboard race fix.** Causa raiz: bug do `pyperclip 1.11.0` em `CheckedCall.__call__` que esconde falhas Win32 silenciosas (errno do CRT não actualizado por chamadas user32). Combinado com várias apps a competir pelo clipboard ownership no Beelink (HM3, Win+V cloud sync, RDP) levou a 40 de 41 mãos perdidas em 14 Maio. Fix: `clipboard_safe_paste` faz set + read-back verify + retry com pausa antes de mandar Ctrl+V.
+
+**Descoberta crítica do formato HH aceite pelo HRC.** O parser GG do HRC **rejeita** qualquer tentativa de embutir bounty na linha Seat. Para o HRC processar a info de bounty é obrigatório converter a HH GG inteira para formato PokerStars (11 transformações: prefixo header, level format, chips sem vírgulas, bounty na seat com símbolo da moeda, `Dealt to` filtrado a Hero, SHOWDOWN só se houver showdown real, etc.). Implementado em `convert_gg_hh_to_pokerstars_compatible` em `backend/app/services/queue_export.py`.
+
+Documento `HRC_ANATOMIA_OPERACIONAL.md` criado e iterado nesta sessão (v1 manhã → v2 tarde → v3 fim do dia).
+
+## pt29 — Cascata de 3 fixes ao robot HRC (20-21 Maio 2026)
+
+Cascata de 3 fixes ao robot watcher, smoke real com mão `GG-5944816316`:
+
+| Versão | Commit | Fix |
+|---|---|---|
+| pt29-v1 | `1b5b388` | State check pós-Finish via título "Hand Setup" + activate pré-click + logging defensivo. WARN-only no state check. Resultado: hipótese de foco descartada. |
+| pt29-v2 | `cb4c520` | **Slow-click no Finish** (`mouseDown → sleep(0.15) → mouseUp`). Causa raiz: HRC Java perde eventos de click instantâneo. **Validado** — wizard fecha. |
+| pt29-v3 | `3b9d72c` | `wait_for_calculation()` (Baltazar OG, já no namespace mas inutilizada) em 2 pontos: após 1ª run incondicional; após 2ª run condicionado a `second_run_dispatched is True`. Heurística: memória estável >100 MB e variação <20 MB durante 3 ciclos de 10s. **Instalado no Beelink, smoke por arrancar à hora do fecho.** |
+
+Documento `HRC_ANATOMIA_OPERACIONAL.md` atualizado para v4 com 3 factos novos descobertos: slow-click obrigatório no Finish, ausência de sinal explícito de "calculation done" (única inferência via memória), Hand Mode Max 6 para mesas 8-handed deep PKO.
+
+1 tech debt novo: `#HRC-BOUNTY-HARDCODED-50PCT` (robot tem PKO 50% hardcoded; precisa de ler do `tournament_format` parsed do TS para suportar PKO 25% e Mystery KO).
+
+**Mecânica de entrega de exes ao Rui:** Code constrói exe em `_local_only/watcher_decompile/build_pyi/dist/hrc_watcher.exe` no PC principal; Rui transfere para Beelink por qualquer canal; Web fornece `instala_ptXX.bat` via outputs; duplo-clique no .bat faz SHA-check + backup do exe antigo + instalação automática.
+
+Última sessão fechada: **pt29** (20-21 Maio 2026 — cascata de 3 fixes ao robot HRC, smoke pt29-v3 instalado no Beelink à hora do fecho). 7 sessões de trabalho substancial entre pt23 e pt29; detalhes nos journals respectivos em `docs/JOURNAL_*-pt*.md`.
+
+Próxima sessão: **smoke pt29-v3** — validar a cadeia completa do robot fim-a-fim no Beelink com a mão `GG-5944816316`. Se passar, fechar `#HRC-SAVE-AS-TIMEOUT` em cascata e atacar `#HRC-BOUNTY-HARDCODED-50PCT`.
