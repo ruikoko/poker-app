@@ -218,11 +218,13 @@ def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
 
     A ordem scope-antes-de-CI é validada com mais rigor em
     `test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1`.
-    Aqui só validamos o sumário (3 clicks + Enter).
+    Aqui só validamos o sumário (Calculate + 3 popup clicks + OK invocado).
     """
     # Mock _wait_for_nash_popup to return a fake rect (popup detected).
     fake_rect = (666, 372, 416, 214)
     pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
+    # pt33 v1: OK via BM_CLICK (coberto em teste dedicado) — aqui mockado.
+    pf._click_ok_in_popup = MagicMock()
     wpos = (10, 10, 1024, 768)  # pt32 v2: ignorado por _click_calculate_button
 
     pf.start_calculation_selected_subtree(wpos, ci_target=10.0)
@@ -235,8 +237,8 @@ def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
     pf._wait_for_nash_popup.assert_called_once()
     # Pyautogui clicks: 1 Calculate + 2 scope + 1 fill CI = 4 clicks total.
     assert pf.pyautogui.click.call_count == 4
-    # Enter pressed for OK.
-    pf.pyautogui.press.assert_any_call('enter')
+    # pt33 v1: OK confirmado via _click_ok_in_popup (BM_CLICK no teste dedicado).
+    pf._click_ok_in_popup.assert_called_once()
 
 
 def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf):
@@ -557,12 +559,54 @@ def test_fill_ci_target_in_popup_defensive_on_none_rect(pf, capsys):
     assert "[WARN]" in out
 
 
-# ── _click_ok_in_popup ─────────────────────────────────────────────────
+# ── _click_ok_in_popup (pt33 v1: BM_CLICK Win32) ───────────────────────
 
-def test_click_ok_in_popup_presses_enter(pf):
-    """OK do popup Nash via Enter (convenção universal Qt default-button)."""
+def test_click_ok_popup_nash_uses_bm_click_pt33(pf):
+    """pt33 v1: OK do popup Nash via enumeração Win32 + BM_CLICK no hwnd do
+    Button OK (não Enter, que não funciona no popup — smoke pt32 v2)."""
+    pf._pt30_user32 = MagicMock()
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_ok_button = MagicMock(return_value=8484)
+
     pf._click_ok_in_popup(popup_rect=(666, 372, 416, 214))
-    pf.pyautogui.press.assert_called_once_with('enter')
+
+    pf._find_ok_button.assert_called_once_with(4242)
+    pf._pt30_user32.SendMessageW.assert_called_once_with(8484, pf.BM_CLICK, 0, 0)
+    pf.pyautogui.press.assert_not_called()  # pt33: já não usa Enter
+
+
+def test_click_ok_in_popup_warns_when_popup_hwnd_not_found_pt33(pf, capsys):
+    """find_nash_popup_hwnd None -> WARN, sem SendMessage (failure explícito)."""
+    pf._pt30_user32 = MagicMock()
+    pf._find_nash_popup_hwnd = MagicMock(return_value=None)
+
+    pf._click_ok_in_popup(popup_rect=(0, 0, 1, 1))
+
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+    assert "[ok-click]" in out
+    pf._pt30_user32.SendMessageW.assert_not_called()
+
+
+def test_click_ok_in_popup_warns_when_ok_button_not_found_pt33(pf, capsys):
+    """Popup encontrado mas sem Button OK -> WARN, sem SendMessage."""
+    pf._pt30_user32 = MagicMock()
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_ok_button = MagicMock(return_value=None)
+
+    pf._click_ok_in_popup(popup_rect=(0, 0, 1, 1))
+
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+    assert "Button OK" in out
+    pf._pt30_user32.SendMessageW.assert_not_called()
+
+
+def test_find_ok_button_none_for_falsy_popup_pt33(pf):
+    """Guard: hwnd_popup falsy -> None (sem enumeração). Mesma anatomia que
+    `_find_finish_button(None)`."""
+    assert pf._find_ok_button(None) is None
+    assert pf._find_ok_button(0) is None
 
 
 # ── navigate_to_target_node (B1) ───────────────────────────────────────

@@ -50,6 +50,15 @@ _pt30_user32.IsWindowEnabled.argtypes = [wintypes.HWND]
 _pt30_user32.IsWindowEnabled.restype = wintypes.BOOL
 _pt30_user32.GetForegroundWindow.argtypes = []
 _pt30_user32.GetForegroundWindow.restype = wintypes.HWND
+# pt33 v1: SendMessageW para BM_CLICK no Button OK do popup Nash (análogo ao
+# Save btn do export). LRESULT == LONG_PTR; `wintypes` não expõe LRESULT, por
+# isso usa-se LPARAM como restype (mesmo width/signedness em 64-bit).
+_pt30_user32.SendMessageW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+]
+_pt30_user32.SendMessageW.restype = wintypes.LPARAM
+
+BM_CLICK = 0x00F5  # mensagem Win32 que simula um click num Button nativo
 
 _FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou)
 _FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
@@ -992,17 +1001,93 @@ def _fill_ci_target_in_popup(popup_rect, ci_target):
     print(f'   CI Target (popup): {ci_target}')
 
 
-def _click_ok_in_popup(popup_rect):
-    """Confirma o popup Nash. Usa Enter — convenção universal Qt para
-    dialog modal default-button=OK. Evita calibração de coord do botão
-    OK em específico.
+def _find_nash_popup_hwnd():
+    """pt33 v1: hwnd do popup Nash via FindWindowW (match exacto) com fallback
+    substring via EnumWindows (mesma detecção que `_wait_for_nash_popup`, mas
+    devolve o hwnd em vez do rect). None se não houver. Auto-contido.
 
-    `popup_rect` aceito por consistência de assinatura com o resto do
-    flow; não usado (Enter é global).
+    Snapshot Win32 pt33 (check_nash_popup_children) confirmou que o popup é um
+    dialog #32770 top-level com os widgets expostos como child windows nativas
+    (Button OK incluído), à imagem do wizard "Hand Setup" descoberto em pt30.
     """
-    pyautogui.press('enter')
+    h = _pt30_user32.FindWindowW(None, "Nash Calculation")
+    if h:
+        return h
+    matches = []
+
+    def _enum_top(hwnd, lparam):
+        n = _pt30_user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
+            if "nash calculation" in buf.value.lower():
+                matches.append(hwnd)
+                return False
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum_top), 0)
+    return matches[0] if matches else None
+
+
+def _find_ok_button(hwnd_popup):
+    """pt33 v1: enumera child windows do popup Nash e devolve o hwnd do Button
+    OK (class 'Button', texto normalizado == 'ok', ignora accelerator '&').
+    None se não encontrar. Read-only. Mesma anatomia que `_find_finish_button`.
+
+    Snapshot pt33 mostrou o Button OK como class='Button' text='OK'. Match
+    exacto (normalizado) evita colidir com 'Cancel' ou outros botões.
+    """
+    if not hwnd_popup:
+        return None
+    found = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value == "Button":
+            n = _pt30_user32.GetWindowTextLengthW(ch)
+            if n > 0:
+                txt_buf = ctypes.create_unicode_buffer(n + 1)
+                _pt30_user32.GetWindowTextW(ch, txt_buf, n + 1)
+                if txt_buf.value.replace("&", "").strip().lower() == "ok":
+                    found.append(ch)
+                    return False  # encontrado — para a enumeração
+        return True
+
+    _pt30_user32.EnumChildWindows(hwnd_popup, _PT30_WNDENUMPROC(_enum), 0)
+    return found[0] if found else None
+
+
+def _click_ok_in_popup(popup_rect=None):
+    """Confirma o popup Nash.
+
+    pt33 v1 (#START-CALC-SELECTED-SUBTREE-OK-CLICK-FAILS): substitui o
+    `pyautogui.press('enter')` por enumeração Win32 + BM_CLICK no hwnd do
+    Button OK. Smoke pt32 v2 mostrou que o popup abre e os cliques intra-popup
+    (scope, option Selected Subtree, field CI + escrita) funcionam, mas o OK
+    por Enter NÃO é registado pelo HRC (Tab/Enter não funcionam no popup) ->
+    popup fica aberto e parado, 2ª run não dispara. BM_CLICK directo no hwnd é
+    determinístico (sem coord, sem foco), análogo ao Save btn do export.
+
+    `popup_rect` aceito por consistência de assinatura com o resto do flow;
+    não usado (o hwnd é resolvido via `_find_nash_popup_hwnd`).
+
+    Defensive: popup hwnd ou Button OK não encontrados -> WARN, sem fallback
+    (failure explícito > Enter silencioso, que já provou não funcionar).
+    """
+    hwnd_popup = _find_nash_popup_hwnd()
+    if not hwnd_popup:
+        print('   [WARN] [ok-click] popup Nash hwnd não encontrado '
+              '— OK não clicado')
+        return
+    btn = _find_ok_button(hwnd_popup)
+    if not btn:
+        print('   [WARN] [ok-click] Button OK não encontrado no popup '
+              '(hwnd_popup=%r) — OK não clicado' % (hwnd_popup,))
+        return
+    _pt30_user32.SendMessageW(btn, BM_CLICK, 0, 0)
+    print('   [ok-click] hwnd=%d result=BM_CLICK_sent' % btn)
     time.sleep(0.3)
-    print('   OK (popup Nash)')
 
 
 def _set_scope_in_popup(popup_rect):
