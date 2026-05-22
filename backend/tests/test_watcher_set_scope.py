@@ -345,9 +345,42 @@ def test_start_calculation_selected_subtree_skips_calculate_when_placeholder(pf,
 
 
 def test_calculate_button_constants_calibrated_after_pt26_smoke(pf):
-    """Sanity: pt26 smoke 19 Maio calibrou (204, 59) rel à wpos."""
-    assert pf.CALCULATE_BUTTON_X > 0
-    assert pf.CALCULATE_BUTTON_Y > 0
+    """Sanity: pt26 calibrou X=204; pt32 v1 alinhou Y=64 com o Baltazar OG
+    (a 1a run usa hrc.top+64 e funciona; a 2a usava 59 e falhava)."""
+    assert pf.CALCULATE_BUTTON_X == 204
+    assert pf.CALCULATE_BUTTON_Y == 64
+
+
+def test_click_calculate_button_logs_calc_diag_pt32(pf, capsys):
+    """pt32 v1: _click_calculate_button regista [calc-diag pre-click] com a
+    coord absoluta calculada + foreground window, antes do click_rel."""
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.GetForegroundWindow.return_value = 7777
+    pf._pt30_user32.GetWindowTextLengthW.return_value = 0  # titulo vazio: simplifica
+
+    pf._click_calculate_button((10, 20, 1024, 768))
+
+    out = capsys.readouterr().out
+    assert "[calc-diag pre-click]" in out
+    # coord absoluta = (10+204, 20+64) = (214, 84)
+    assert "coord=(214,84)" in out
+    assert "hwnd=7777" in out
+    # click cego mantido, com a coord nova (204, 64)
+    pf.click_rel.assert_called_with((10, 20, 1024, 768), 204, 64)
+
+
+def test_click_calculate_button_tolerates_foreground_exception_pt32(pf, capsys):
+    """Logging defensivo: se GetForegroundWindow falhar, WARN inline mas o
+    click acontece na mesma (nao bloqueia o flow)."""
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.GetForegroundWindow.side_effect = RuntimeError("boom")
+
+    pf._click_calculate_button((0, 0, 800, 600))
+
+    out = capsys.readouterr().out
+    assert "[calc-diag pre-click]" in out
+    assert "falhou" in out
+    pf.click_rel.assert_called_with((0, 0, 800, 600), 204, 64)
 
 
 # ── _wait_for_nash_popup ────────────────────────────────────────────────

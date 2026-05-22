@@ -48,6 +48,8 @@ _pt30_user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
 _pt30_user32.GetWindowTextLengthW.restype = ctypes.c_int
 _pt30_user32.IsWindowEnabled.argtypes = [wintypes.HWND]
 _pt30_user32.IsWindowEnabled.restype = wintypes.BOOL
+_pt30_user32.GetForegroundWindow.argtypes = []
+_pt30_user32.GetForegroundWindow.restype = wintypes.HWND
 
 _FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou)
 _FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
@@ -821,15 +823,20 @@ CI_TARGET_POPUP_REL_X = 270
 CI_TARGET_POPUP_REL_Y = 109
 
 
-# pt26 Bloco 2 piece 2 — Botão verde Calculate no main UI HRC.
+# pt26 Bloco 2 piece 2 — Botão verde Calculate (Play) no main UI HRC.
 # Calibrado em smoke 2026-05-19 com Rui no Beelink: posição absoluta
 # (487, 124), main HRC window wpos (left=283, top=65, w=1050, h=850) ->
 # rel (204, 59). Convenção: pixels relativos à wpos, mesma de
 # `EQUITY_MODEL_X/Y`, `STRATEGY_TABLE_FOCUS_X/Y`, e usada por `click_rel`.
 # Fracções ficam reservadas para o popup Nash (rect variável); o main
 # HRC window é fixo durante uma sessão (wpos capturado uma vez no wizard).
+#
+# pt32 v1: Y 59 -> 64. A 1a run (Baltazar OG `start_calculation`) usa
+# `pyautogui.click(hrc.left + 204, hrc.top + 64)` no MESMO botao Play e
+# FUNCIONA; a 2a run usava (204, 59) (5px off) e o popup Nash nunca abria
+# (#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN). Alinhar com o Baltazar OG.
 CALCULATE_BUTTON_X = 204
-CALCULATE_BUTTON_Y = 59
+CALCULATE_BUTTON_Y = 64
 
 
 # pt26 Bloco 2 piece 2 — heurística de título para identificar a Nash
@@ -900,12 +907,33 @@ def _click_calculate_button(wpos):
     relativos à wpos (mesma convenção que `EQUITY_MODEL_X/Y`, usada por
     `click_rel`). Calibrado em smoke pt26 — ver bloco de constantes.
 
+    pt32 v1: logging diagnostico pre-click (coord absoluta + foreground
+    window), paralelo ao [finish-diag pre-click] do pt30. Permite ver no
+    smoke onde o robot clicou e qual a janela em foco no momento — o click
+    da 2a run nunca tinha instrumentacao (#START-CALC-...).
+
     Defensive: ambos a 0 (regressão de calibração) -> early-return WARN.
     """
     if CALCULATE_BUTTON_X == 0 and CALCULATE_BUTTON_Y == 0:
         print('   [WARN] _click_calculate_button: coords não calibrados '
               '— click ignorado')
         return
+    abs_x = wpos[0] + CALCULATE_BUTTON_X
+    abs_y = wpos[1] + CALCULATE_BUTTON_Y
+    try:
+        fg = _pt30_user32.GetForegroundWindow()
+        n = _pt30_user32.GetWindowTextLengthW(fg)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.GetWindowTextW(fg, buf, n + 1)
+            fg_title = buf.value
+        else:
+            fg_title = ''
+        fg_info = 'hwnd=%s title=%r' % (fg, fg_title)
+    except Exception as _e:
+        fg_info = 'GetForegroundWindow falhou (%s)' % (_e,)
+    print('   [calc-diag pre-click] coord=(%d,%d) foreground=%s'
+          % (abs_x, abs_y, fg_info))
     click_rel(wpos, CALCULATE_BUTTON_X, CALCULATE_BUTTON_Y)
     time.sleep(0.3)
 
