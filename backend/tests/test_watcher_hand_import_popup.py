@@ -623,6 +623,73 @@ def test_wait_for_run_completion_never_disappears_raises(pf):
                                     run_label="2ª run")
 
 
+# == pt34 v1 (#START-CALC...-2A-RUN-PROGRESS-TITLE): substring match ==
+
+def test_find_progress_window_title_substring_match_pt34(pf):
+    """pt34 v1: match por substring (case-insensitive) sobre titulos top-level
+    via EnumWindows. So a janela com 'Monte Carlo Sampling' casa; devolve o
+    titulo completo."""
+    pf._pt30_user32 = MagicMock()
+    windows = {
+        101: "Some Other App",
+        102: "H-GG-5944816316: Monte Carlo Sampling",
+        103: "Desktop",
+    }
+
+    def _enum_windows(cb, lparam):
+        for hwnd in windows:
+            if cb(hwnd, lparam) == 0:  # callback devolveu False -> parar
+                break
+        return True
+
+    pf._pt30_user32.EnumWindows.side_effect = _enum_windows
+    pf._pt30_user32.GetWindowTextLengthW.side_effect = lambda h: len(windows[h])
+
+    def _get_text(h, buf, cch):
+        buf.value = windows[h]
+        return len(windows[h])
+
+    pf._pt30_user32.GetWindowTextW.side_effect = _get_text
+
+    title = pf._find_progress_window_title(match_substring="monte carlo sampling")
+    assert title == "H-GG-5944816316: Monte Carlo Sampling"
+    # FindWindowW NAO usado no caminho substring
+    pf._pt30_user32.FindWindowW.assert_not_called()
+
+
+def test_find_progress_window_title_exact_match_pt34(pf):
+    """pt34 v1: match_substring=None -> FindWindowW exacto 'Hand Setup' (path
+    da 1a run, inalterado). 'Hand Setup' se presente, None senao."""
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.FindWindowW.return_value = 12345
+    assert pf._find_progress_window_title() == "Hand Setup"
+    pf._pt30_user32.FindWindowW.assert_called_once_with(None, "Hand Setup")
+    pf._pt30_user32.EnumWindows.assert_not_called()
+
+    pf._pt30_user32.FindWindowW.return_value = 0
+    assert pf._find_progress_window_title() is None
+
+
+def test_wait_for_run_completion_uses_substring_match_pt34(pf):
+    """pt34 v1: a 2a run delega em _find_progress_window_title com o substring
+    'Monte Carlo Sampling' (aparece -> desaparece), sem timeout."""
+    titles = iter([
+        "H-GG-123: Monte Carlo Sampling",  # fase 1: detectada
+        "H-GG-123: Monte Carlo Sampling",  # fase 2: ainda a correr
+        None,                               # fase 2: terminou
+    ])
+    pf._find_progress_window_title = MagicMock(side_effect=lambda ms: next(titles))
+
+    pf._wait_for_run_completion(
+        timeout_appear_s=30, timeout_total_s=28800,
+        run_label="2ª run", match_substring="Monte Carlo Sampling",
+    )
+
+    assert pf._find_progress_window_title.call_count == 3
+    for c in pf._find_progress_window_title.call_args_list:
+        assert c.args == ("Monte Carlo Sampling",)
+
+
 def test_setup_hand_calls_wait_for_run_completion_pt31(pf, tmp_path):
     """Wiring: setup_hand chama _wait_for_run_completion para a 1ª run (em vez
     do wait_for_calculation legacy)."""

@@ -499,19 +499,60 @@ _RUN_WAIT_POLL_S = 0.5
 _RUN_WAIT_PROGRESS_LOG_S = 60.0
 
 
+def _find_progress_window_title(match_substring=None):
+    """pt34 v1: devolve o titulo COMPLETO da janela de progresso do HRC, ou
+    None se nao existir.
+
+    - `match_substring=None` -> match exacto "Hand Setup" via FindWindowW
+      (comportamento pt31, usado pela 1a run cujo titulo de progresso e'
+      "Hand Setup").
+    - `match_substring` preenchido -> substring case-insensitive sobre os
+      titulos top-level via EnumWindows (2a run: o HRC mostra
+      "H-<hand_id>: Monte Carlo Sampling", nao "Hand Setup").
+
+    Devolve o titulo (str) em vez de bool para logging diagnostico (o titulo
+    pode mudar entre versoes do HRC).
+    """
+    if match_substring is None:
+        if _pt30_user32.FindWindowW(None, "Hand Setup"):
+            return "Hand Setup"
+        return None
+    needle = match_substring.lower()
+    found = []
+
+    def _enum_top(hwnd, lparam):
+        n = _pt30_user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
+            if needle in buf.value.lower():
+                found.append(buf.value)
+                return False  # encontrado — para a enumeracao
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum_top), 0)
+    return found[0] if found else None
+
+
 def _wait_for_run_completion(timeout_appear_s=30, timeout_total_s=7200,
-                             run_label="run"):
+                             run_label="run", match_substring=None):
     """pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE-MEMORY-HEURISTIC): aguarda
-    uma run do HRC terminar via polling Win32 da janela top-level 'Hand Setup'
-    de PROGRESSO (a que o HRC mostra durante o calculo). Sinal binario, sem
-    heuristica — substitui `wait_for_calculation` (memoria), que dava falso
-    positivo (smoke pt30: declarou fim aos 48s mas a run ainda corria).
+    uma run do HRC terminar via polling Win32 da janela top-level de PROGRESSO
+    (a que o HRC mostra durante o calculo). Sinal binario, sem heuristica —
+    substitui `wait_for_calculation` (memoria), que dava falso positivo (smoke
+    pt30: declarou fim aos 48s mas a run ainda corria).
+
+    pt34 v1: `match_substring` distingue 1a vs 2a run. A 1a run usa o titulo
+    exacto "Hand Setup" (match_substring=None); a 2a run usa substring
+    "Monte Carlo Sampling" porque a janela de progresso da 2a run tem titulo
+    "H-<hand_id>: Monte Carlo Sampling", nao "Hand Setup" (confirmado visual
+    no Beelink, smoke pt33 v1: sem isto a fase 1 dava falso negativo aos 30s e
+    o robot avancava para o Save As com a 2a run ainda a correr).
 
     IMPORTANTE — assume que o wizard 'Hand Setup' de CONFIGURACAO ja fechou
-    (chamada apos `start_calculation`). A janela de progresso reutiliza o
-    mesmo titulo 'Hand Setup' do wizard; se esta funcao for chamada com o
-    wizard ainda aberto, o polling detecta-o falsamente como janela de
-    progresso. Sequencia correcta:
+    (chamada apos `start_calculation`). Para a 1a run, a janela de progresso
+    reutiliza o titulo 'Hand Setup' do wizard; se esta funcao for chamada com
+    o wizard ainda aberto, o polling detecta-o falsamente. Sequencia correcta:
         Finish -> wizard fecha -> Sleep(30) -> set_ci_initial ->
         start_calculation -> _wait_for_run_completion AQUI.
 
@@ -524,26 +565,26 @@ def _wait_for_run_completion(timeout_appear_s=30, timeout_total_s=7200,
     """
     # Fase 1: aguardar a janela de progresso aparecer.
     appear_deadline = time.time() + timeout_appear_s
-    appeared = False
+    appeared_title = None
     while time.time() < appear_deadline:
-        if _pt30_user32.FindWindowW(None, "Hand Setup"):
-            appeared = True
+        appeared_title = _find_progress_window_title(match_substring)
+        if appeared_title is not None:
             break
         time.sleep(_RUN_WAIT_POLL_S)
-    if not appeared:
+    if appeared_title is None:
         print('   [WARN] [run-wait] %s: janela de progresso nao apareceu em '
               '%ds — run trivial ou erro; a continuar'
               % (run_label, timeout_appear_s))
         return
-    print('   [run-wait] %s: janela de progresso detectada, run a correr'
-          % run_label)
+    print('   [run-wait] %s: janela detectada title=%r'
+          % (run_label, appeared_title))
 
     # Fase 2: aguardar a janela desaparecer (run terminou).
     f2_start = time.time()
     deadline = f2_start + timeout_total_s
     next_log = f2_start + _RUN_WAIT_PROGRESS_LOG_S
     while time.time() < deadline:
-        if not _pt30_user32.FindWindowW(None, "Hand Setup"):
+        if _find_progress_window_title(match_substring) is None:
             elapsed = time.time() - f2_start
             print('   [run-wait] %s: run terminou em %.0fs (%.1f min)'
                   % (run_label, elapsed, elapsed / 60.0))
@@ -1650,7 +1691,12 @@ def setup_hand(hand_name, hand_path):
         # ou None (sem aggressor) o estado vigente e o da 1a run, ja terminada
         # pelo wait acima. Timeout 8h (Selected Subtree pode demorar horas).
         print('   A aguardar fim da 2ª run...')
-        _wait_for_run_completion(timeout_total_s=28800, run_label="2ª run")
+        # pt34 v1: a 2a run tem janela de progresso "H-<hand_id>: Monte Carlo
+        # Sampling" (nao "Hand Setup"); match por substring.
+        _wait_for_run_completion(
+            timeout_total_s=28800, run_label="2ª run",
+            match_substring="Monte Carlo Sampling",
+        )
         print('   2ª run terminou.')
 
     # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor,
