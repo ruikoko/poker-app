@@ -265,7 +265,7 @@ Campos opcionais que faltam no TS resultam em `NULL`/`None`. Apenas `tournament_
 
 - Análise post-estudo (evolução das mãos estudadas).
 - Estudo de população (mãos GG sem tag — Caso 7/8).
-- GTO Brain (documentado separadamente).
+- GTO Brain (ver `docs/GTO_BRAIN.md`).
 - Integração GTOWizard / HRC.
 
 ---

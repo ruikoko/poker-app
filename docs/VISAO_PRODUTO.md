@@ -95,7 +95,7 @@ Se uma mão é cross-postada em N canais, `discord_tags` deve conter os N nomes.
 
 - **Análise post-estudo** — secção dedicada com evolução das mãos estudadas.
 - **Estudo de população** — explorar mãos GG sem tag (Caso 7/8) para tendências do field.
-- **GTO Brain** — documentado separadamente.
+- **GTO Brain** — ver `docs/GTO_BRAIN.md`.
 - **Integração GTOWizard / HRC** — futura, não próxima.
 
 ## O que a app NUNCA deve fazer
