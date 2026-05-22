@@ -6,6 +6,55 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (22 Maio 2026 — pt30-pt34)
+
+Sessão pt30-pt34 (madrugada). **Fecho de toda a cadeia da 2ª run do HRC**
+(Selected Subtree), ponta-a-ponta no Beelink, com `.zip` final de ~23 000
+nós (equivalente ao Save As manual). 6 commits feature em main, todos no
+robot watcher (`tools/watcher_src/patched_funcs.py` + 2 ficheiros de teste);
+`.exe` **não recompilado** (passo separado). Suite **550 → 569 PASSED**.
+Detalhe em `docs/JOURNAL_2026-05-22-pt30-pt34.md` e
+`docs/HRC_ANATOMIA_OPERACIONAL.md` v5.
+
+Discovery transversal: **o HRC usa SWT, não Swing** — widgets expostos como
+child windows nativas ao Win32 (`BM_CLICK`, `IsWindowEnabled`,
+`GetWindowText`). Toda a sessão assenta nisto.
+
+### Tech debts fechados em pt30-pt34 (6)
+
+| ID | Como fechou |
+|---|---|
+| **#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN** (CRIT, aberto pt26) | **pt32 v1 + v2** (`61dfa5f`/`c9c8818`). Causa raiz isolada por smoke + logging `[calc-diag pre-click]`: `_click_calculate_button` usava a `wpos` do wizard "Hand Setup" — **já fechado** no Finish da 1ª run — como origem do click do Play. Log: `coord=(1174,64)` com `wpos=(970,0,...)` → 1174=970+204, click em zona vazia. Fix: (a) coord Y 59→64 (a 1ª run usa 64 e funciona); (b) origem `wpos` → `find_hrc()`, igual à 1ª run do Baltazar OG (`hrc.left+204, hrc.top+64`). `find_hrc()` None → WARN + raise. Resultado: **popup Nash abre.** |
+| **#START-CALC-SELECTED-SUBTREE-OK-CLICK-FAILS** (aberto+fechado pt33) | **pt33 v1** (`867460c`). Smoke pt32 v2 mostrou que o popup abre e os cliques intra-popup (scope, Selected Subtree, CI) funcionam, mas o OK por `Enter` não era registado → popup ficava aberto e parado, 2ª run não disparava. Snapshot Win32 (`check_nash_popup_children`) mostrou o popup como dialog `#32770` com Button OK **exposto** (`class='Button' text='OK'`). Fix: substituir Enter por `EnumChildWindows` + `BM_CLICK` no hwnd (`_find_nash_popup_hwnd` + `_find_ok_button` + `_click_ok_in_popup`), sem fallback Enter. Resultado: **popup fecha, 2ª run dispara.** |
+| **#WAIT-FOR-RUN-COMPLETION-2A-RUN-FALSE-NEGATIVE** (aberto+fechado pt34) | **pt34 v1** (`e58c517`). A 2ª run disparava mas `_wait_for_run_completion` dava timeout 30s a "esperar a janela aparecer", porque procurava título exacto "Hand Setup" e a janela de progresso da 2ª run chama-se **"H-\<hand_id\>: Monte Carlo Sampling"**. Fix: param `match_substring` + helper `_find_progress_window_title` (None → FindWindowW exacto; preenchido → EnumWindows substring case-insensitive). 1ª run inalterada. Resultado: 2ª run esperada até ao fim real (~14 min). |
+| **#WAIT-FOR-CALCULATION-FALSE-POSITIVE-MEMORY-HEURISTIC** (aberto+fechado pt31) | **pt31** (`0f159bc`). A heurística de memória do `wait_for_calculation` (Baltazar OG, instalada pt29-v3) deu falso positivo no smoke pt30 (declarou fim da 1ª run aos 48s = 15s+3×10s, com a run ainda a correr). Substituída por `_wait_for_run_completion`, que polla a janela de progresso top-level (sinal **binário**). `wait_for_calculation` fica no namespace mas já não chamada. |
+| **#WIZARD-FINISH-DISABLED-DURING-TREE-CALC** (aberto+fechado pt30) | **pt30** (`52aef9c`). Diagnóstico SWT (`check_wizard_children_polling`) provou que ao carregar o script o HRC desabilita o Finish enquanto calcula o tree size (~1.7s); o slow-click pt29-v2 caía num botão **disabled** (causa do smoke pt29-v3 falhar). Fix: `_wait_for_finish_ready` espera a transição enabled→disabled→enabled via Win32 (`IsWindowEnabled`) antes do slow-click. Instância isolada `_pt30_user32` para não colidir argtypes com o launcher Baltazar. |
+| **#FINALIZE-NEVER-FIRES-ON-NO-OP** (MED, aberto pt26) | Coberto pelo wiring do `second_run_dispatched` em `setup_hand`: `start_calculation_selected_subtree` devolve bool; `False` (popup não abriu) → WARN explícito antes do finalize; `True` → espera a 2ª run terminar antes do export. Com a cadeia pt32-pt34 a funcionar, o caminho `True` é o normal. |
+
+### Tech debts novos abertos em pt30-pt34 (2)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#CURSOR-ANOMALY-POST-SAVE-AS** | 🟢 LOW | Observação visual do Rui no smoke pt34: após o Save As, o cursor da Strategy Table fica na **2ª linha (EP)**. Origem desconhecida. Não bloqueia o flow actual (export já aconteceu), mas pode afectar uma futura 3ª run ou navegação encadeada. Investigar origem (efeito secundário do Save As? do export patch?). |
+| **#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK** | 🟢 LOW | `verify_wizard_finished` (state-check WARN-only pós-Finish, pt29-v1) verifica **cedo demais** — a janela "Hand Setup" ainda está presente no instante da verificação, gera WARN espúrio (`janela "Hand Setup" ainda presente apos click + activate`), mas a 1ª run efectivamente arranca. Fix: pequeno settle/poll antes de verificar, ou retirar o WARN. Não-bloqueante. |
+
+### Tech debts confirmados abertos (3)
+
+| ID | Severidade | Estado |
+|---|---|---|
+| **#HRC-BOUNTY-HARDCODED-50PCT** | 🟡 MED | **Continua aberto.** O watcher mete sempre `Bounty Mode PKO 50%` (via `select_bounty_mode` legacy + print "KO detetado — a selecionar Bounty Mode PKO 50%"). Nuance: o `progressiveFactor` no `payouts.json` **é** data-driven (lobby vision: 0.5/0.33/0.25/0.0); o que está hardcoded é o **dropdown do watcher**, que ignora esse valor. Fix: ler `progressiveFactor`/`tournament_format` e seleccionar a opção certa. Alta prioridade (ver `docs/PENDENTES.md`). |
+| **#HRC-TOTAL-CHIPS-MISSING** | 🟡 MED | **Continua aberto.** `chips: null` no `payouts.json` (ainda visível no log: `Total chips: None`). É o total de fichas em jogo; o HRC precisa dele para o chip average / ICM. Fonte: `Average Stack × Players Left` do lobby. Ver `HRC_ANATOMIA_OPERACIONAL.md` §12.8. |
+| **#CI-TARGET-INITIAL-NOT-CALIBRATED** (= antigo Bug F, pt25e Bloco 2) | 🟢 LOW | **Continua aberto.** Coords do CI Target inicial da 1ª run no main UI nunca calibradas (`CI_TARGET_FIELD_X/Y = 0`) → `_set_ci_target_common` degrada para Enter (funciona). Log: `[WARN] CI Target initial: coords não calibrados`. Calibrar em smoke devagar; não-bloqueante. |
+
+### Estado da Fase 3 HRC pós-pt34
+
+- Cadeia da 2ª run (Selected Subtree) **funcional ponta-a-ponta** ✓
+- Smoke real **mecânico** ✓ + **funcional** ✓ (`.zip` ~23 000 nós)
+- Pendente: **validação formal** dos nós vs Save As manual (alta prioridade,
+  `docs/PENDENTES.md`) + `#HRC-BOUNTY-HARDCODED-50PCT`.
+
+---
+
 ## Estado actual (21 Maio 2026 — pt29)
 
 Sessão pt29 (cascata de fixes do robot HRC, smoke real com `GG-5944816316`).

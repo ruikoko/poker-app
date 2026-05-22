@@ -500,6 +500,21 @@ Documento `HRC_ANATOMIA_OPERACIONAL.md` atualizado para v4 com 3 factos novos de
 
 **Mecânica de entrega de exes ao Rui:** Code constrói exe em `_local_only/watcher_decompile/build_pyi/dist/hrc_watcher.exe` no PC principal; Rui transfere para Beelink por qualquer canal; Web fornece `instala_ptXX.bat` via outputs; duplo-clique no .bat faz SHA-check + backup do exe antigo + instalação automática.
 
-Última sessão fechada: **pt29** (20-21 Maio 2026 — cascata de 3 fixes ao robot HRC, smoke pt29-v3 instalado no Beelink à hora do fecho). 7 sessões de trabalho substancial entre pt23 e pt29; detalhes nos journals respectivos em `docs/JOURNAL_*-pt*.md`.
+## pt30-pt34 — Fecho da cadeia da 2ª run do HRC (22 Maio 2026)
 
-Próxima sessão: **smoke pt29-v3** — validar a cadeia completa do robot fim-a-fim no Beelink com a mão `GG-5944816316`. Se passar, fechar `#HRC-SAVE-AS-TIMEOUT` em cascata e atacar `#HRC-BOUNTY-HARDCODED-50PCT`.
+Madrugada. **Toda a cadeia da 2ª run (Selected Subtree) ficou funcional ponta-a-ponta** no Beelink, com `.zip` final de ~23 000 nós (equivalente ao Save As manual). 6 commits feature em main, todos no robot watcher (`tools/watcher_src/patched_funcs.py` + 2 ficheiros de teste); `.exe` **não recompilado** (passo separado). Suite **550 → 569 PASSED**.
+
+| Etapa | Commit | Fix |
+|---|---|---|
+| pt30 | `52aef9c` | Polling Win32 do estado do botão Finish (enabled→disabled→enabled) antes do slow-click. **Discovery: o HRC usa SWT, não Swing** — widgets expostos como child windows nativas ao Win32. |
+| pt31 | `0f159bc` | `_wait_for_run_completion` via janela de progresso "Hand Setup" (sinal binário) substitui a heurística de memória do `wait_for_calculation` (que dava falso positivo). |
+| pt32 v1 | `61dfa5f` | Coord Y do Play da 2ª run 59→64 + logging `[calc-diag pre-click]`. Falhou no smoke, mas o logging desbloqueou o diagnóstico. |
+| pt32 v2 | `c9c8818` | Origem do click do Play: `wpos` (do wizard já fechado) → `find_hrc()`. **Popup Nash abre.** |
+| pt33 v1 | `867460c` | OK do popup Nash via `BM_CLICK` Win32 (o Enter não funciona no popup). Popup `#32770` com Button OK exposto. **2ª run dispara.** |
+| pt34 v1 | `e58c517` | `_wait_for_run_completion` da 2ª run procura substring "Monte Carlo Sampling" (a janela de progresso da 2ª run não é "Hand Setup"). **Ciclo ponta-a-ponta.** |
+
+Docs desta sessão: `HRC_ANATOMIA_OPERACIONAL.md` v5; `JOURNAL_2026-05-22-pt30-pt34.md` (novo); `RUNBOOK_SMOKE_BEELINK.md` v2; `WORKFLOW_OPERACIONAL.md` (novo); `PENDENTES.md` (novo). 6 tech debts fechados, 2 abertos (`#CURSOR-ANOMALY-POST-SAVE-AS`, `#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`).
+
+Última sessão fechada: **pt30-pt34** (22 Maio 2026 — fecho da cadeia da 2ª run do HRC, smoke real ponta-a-ponta com `.zip` ~23 000 nós). Detalhes em `docs/JOURNAL_2026-05-22-pt30-pt34.md`.
+
+Próxima sessão: **validar formalmente** o `.zip` pt34 v1 (~23 000 nós) vs o Save As manual da sessão anterior; depois atacar `#HRC-BOUNTY-HARDCODED-50PCT` (robot pôr PKO N% conforme o formato detectado). Backlog completo em `docs/PENDENTES.md`.

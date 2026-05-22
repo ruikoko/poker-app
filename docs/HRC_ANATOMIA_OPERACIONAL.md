@@ -1,8 +1,8 @@
 # Anatomia operacional do HRC
 
-**Estado:** rascunho v4, 21 Maio 2026 (pt29 madrugada).
+**Estado:** rascunho v5, 22 Maio 2026 (pt30-pt34 madrugada).
 **Origem:** consolidação dos factos espalhados pelos journals + observações
-directas do Rui durante pt28 + smoke tests pt29.
+directas do Rui durante pt28 + smoke tests pt29 + cadeia da 2ª run pt30-pt34.
 **Responsável de manter actualizado:** quem descobrir um facto novo edita
 este ficheiro antes de fechar o trabalho. Sem isto, o conhecimento perde-se.
 
@@ -34,6 +34,27 @@ este ficheiro antes de fechar o trabalho. Sem isto, o conhecimento perde-se.
   possíveis); Max 4 trunca o cálculo. Foi a causa de discrepâncias de
   tree size entre PC principal (Max 4) e Beelink (Max 6) que se atribuíam
   ao script.
+- v5 (pt30-pt34 madrugada, 22 Maio): **fecho da cadeia da 2ª run
+  (Selected Subtree)** — toda a interacção da 2ª run validada ponta-a-ponta
+  no Beelink. Factos novos:
+  (a) **§1/§6/§9 — o HRC usa SWT, não Swing.** Os widgets são expostos como
+  child windows nativas ao Win32 (descoberto pt30 no botão Finish,
+  confirmado pt33 no popup Nash). Permite `BM_CLICK`, `IsWindowEnabled`,
+  `GetWindowText`. É a base de toda a sessão pt30-pt34.
+  (b) **§6 — anatomia do popup "Nash Calculation" como dialog `#32770`**:
+  6 `SWT_Window0` (containers internos, sem widgets expostos para o
+  dropdown de scope e campo CI) + 2 `Button` nativos expostos (OK, Cancel).
+  Implicação: scope/CI continuam a depender de coord; OK/Cancel via BM_CLICK.
+  (c) **§6.1 nova — janelas de progresso**: a 1ª run mostra janela top-level
+  "Hand Setup"; a 2ª run mostra "H-\<hand_id\>: Monte Carlo Sampling".
+  Detecção do fim de run via aparecer/desaparecer dessa janela (sinal
+  binário) — **substitui a heurística de memória** do `wait_for_calculation`
+  (§7.1), que dava falso positivo.
+  (d) **§4/§5 — sequência manual da 2ª run** (Selected Subtree) documentada.
+  (e) **§3.5/§6 — atalhos de teclado** (`&Finish` Alt+F, `Alt+R` Play) +
+  limitação: **não funcionam dentro do popup Nash**.
+  (f) **§9 — erros conhecidos não-bloqueantes** consolidados, incluindo o
+  cursor anomaly pós-Save-As.
 
 ---
 
@@ -80,7 +101,8 @@ o HRC sem voltar a pedir-lhe o que ele já sabe.
 | Instalador moderno | `C:\Users\<user>\AppData\Local\Programs\HoldemResources\HRC\hrc.exe` |
 | Instalador legacy "Beta" | `C:\Users\Administrator\AppData\Local\HoldemResources\HRC Beta\hrc.exe` |
 | Configuração no Beelink actual | Junction `HRC Beta → HRC` em `Administrator\AppData\Local\HoldemResources\` (resolve mismatch do path interno do robot) |
-| API | Nenhuma. Controlável apenas via simulação de cliques e teclas (pyautogui) |
+| API | Nenhuma. Controlável apenas via simulação de cliques e teclas (pyautogui) **+ Win32 nas janelas/botões nativos (ver toolkit)** |
+| Toolkit da UI (descoberto pt30/pt33) | **SWT** (Standard Widget Toolkit), **não Swing**. Crucial: os widgets (botões do wizard, botões do popup Nash) são expostos como **child windows nativas** ao Win32. Permite enumerá-los (`EnumChildWindows`), ler classe/texto (`GetClassNameW`/`GetWindowTextW`), saber se estão activos (`IsWindowEnabled`) e clicá-los sem coord nem foco (`SendMessageW` + `BM_CLICK`). Toda a cadeia da 2ª run (pt30-pt34) assenta nisto |
 | Scripting interno | JavaScript via Nashorn — usado para configurar sizings e prune actions |
 
 ## 2. Janela e foco do HRC main
@@ -201,8 +223,40 @@ Finish é boa prática.
 
 | Item | Valor |
 |---|---|
-| Botão verde "Calculate" (play) | Coord absoluta `(487, 124)` no Beelink. Coord rel à wpos: `(204, 59)` |
+| Botão verde "Calculate" (play) | Coord rel **`(204, 64)`** — **origem = janela principal do HRC via `find_hrc()`** (`hrc.left + 204`, `hrc.top + 64`), NÃO a wpos do wizard |
+| Atalho de teclado do Calculate | **`Alt+R`** (tooltip oficial confirmado pelo Rui). Só funciona com foco no painel principal das estratégias — **não** dentro do popup Nash |
 | Função do Calculate | Abre o popup "Nash Calculation" |
+
+> **Correcção pt32 (importante).** A coord do Play tinha dois erros que
+> custaram dois smokes:
+> - **pt32 v1:** o Y estava em `59` (herdado de pt26); a 1ª run do Baltazar
+>   OG usa `64` e funciona. Corrigido para `64`.
+> - **pt32 v2:** a **origem** estava errada. `_click_calculate_button` usava
+>   a `wpos` do wizard "Hand Setup" — que já tinha **fechado** no Finish da
+>   1ª run. O log provou-o: `coord=(1174,64)` com `wpos=(970,0,...)` →
+>   1174 = 970 + 204, click em zona vazia, popup Nash nunca abria
+>   (`#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN`). A 1ª run usa `find_hrc()`
+>   como origem; a 2ª passou a usar a mesma. Offsets são relativos a
+>   `hrc.left` / `hrc.top`.
+
+### 4.1 Sequência manual da 2ª run (Selected Subtree)
+
+A 2ª run refina o cálculo na subtree do spot real da mão. Sequência que o
+Rui faz à mão (e que o robot replica em
+`start_calculation_selected_subtree`):
+
+1. A 1ª run acaba; o HRC mostra os resultados com a **1ª linha da Strategy
+   Table seleccionada** (UTG por defeito).
+2. Seleccionar o **1º jogador com VPIP no pote** (a linha do agressor real;
+   o robot navega lá com seta-baixo × `target_node_offset`).
+3. Clicar o botão **Play** no topo do HRC (abre o popup "Nash Calculation").
+4. No popup: pôr **Scope = "Selected Subtree"** e **CI = 10.0**.
+5. **OK** → a 2ª run arranca.
+
+> Os passos 3-5 são exactamente onde a cadeia pt32-pt34 vivia: pt32 fez o
+> Play (passo 3) pegar; pt33 fez o OK (passo 5) pegar via BM_CLICK; pt34 fez
+> a espera do fim da 2ª run usar o título certo. O passo 4 (Scope + CI)
+> continua a depender de coord (ver §6).
 
 ## 5. Strategy Table (a tabela das estratégias, visível após cada corrida)
 
@@ -217,6 +271,21 @@ Finish é boa prática.
 | Estrutura típica observada (4-handed: CO/BU/SB/BB) | 7 linhas — 2 por posição não-blind (CO/BU = 4 linhas) + 3 para SB (Call/Complete + small raise + all-in) |
 | Estrutura típica observada (5-handed: UTG/HJ/BU/SB/BB) | 9 linhas — 2 por não-blind (UTG/HJ/BU = 6 linhas) + 3 para SB |
 | Convenção de índices em scripting | UTG = 0 (first-to-act), SB = N-2, BB = N-1 (segundo docs HRC oficiais) |
+
+### Ordem dos nós e navegação (validado pt30-pt34)
+
+Validado empiricamente pelo Rui na mão `GG-5944816316`:
+
+- **Ordem das linhas, de cima para baixo:** `UTG → EP/MP/HJ → CO → BU → SB`
+  — por ordem de actuação preflop. **A BB nunca aparece** como linha-base
+  (é o defensor; não tem decisão de abertura própria na árvore).
+- Cada posição ocupa **1 ou 2 linhas** conforme haja override de sizes
+  (uma linha por sizing distinto).
+- **Navegação automática:** `navigate_to_target_node(wpos, offset)` preme
+  seta-baixo `N` vezes, com `N` pré-calculado pelo backend
+  (`compute_target_node_offset`) e injectado em `meta.json.target_node_offset`.
+  O cursor parte da 1ª linha (UTG) por defeito após a 1ª run; a seta-baixo
+  move 1 linha e **não cicla** no fim.
 
 ### Atalhos de teclado da Strategy Table
 
@@ -242,6 +311,26 @@ Finish é boa prática.
 | **Estabilidade do rect** | **Variável entre sessões** (~5% em width, ~7.5% em height entre 18 e 19 Maio). Não usar fracções; usar pixels rel ao top-left do popup |
 | Estrutura do popup | 6 campos em layout vertical + 2 botões (OK, Cancel) em baixo |
 
+### Anatomia Win32 do popup (descoberto pt33)
+
+Snapshot via `EnumChildWindows`
+(`_local_only/diag/check_nash_popup_children.py`):
+
+| Elemento | Valor |
+|---|---|
+| Tipo de janela | Dialog **`#32770`** top-level (classe padrão de dialog Win32) |
+| Containers internos | **6 × `SWT_Window0`** — onde vivem o dropdown de scope, o campo CI, os outros campos. **Não expõem widgets Win32 individuais** |
+| Botões nativos expostos | **2 × `Button`**: `OK` e `Cancel` |
+
+**Implicação prática (e por isso a 2ª run mistura duas técnicas):**
+- O **dropdown Scope** e o **campo CI Target** estão dentro dos
+  `SWT_Window0` e **não** têm hwnd próprio acessível → continuam a depender
+  de **coordenadas** (pixels-rel ao top-left do popup).
+- Os botões **OK / Cancel** são `Button` nativos → podem ser clicados por
+  **`BM_CLICK`** (sem coord, sem foco). Foi o fix do pt33: o `Enter` não
+  era registado pelo popup, mas o `BM_CLICK` no hwnd do OK é determinístico
+  (análogo ao Save btn do export).
+
 ### Campos do popup, pela ordem visual (de cima para baixo)
 
 | Posição | Campo | Tipo | Valor por defeito | O robot toca? |
@@ -262,8 +351,8 @@ Finish é boa prática.
 | Dropdown "Scope" | `(278, 67)` | smoke 18 Maio pt25f | Suspeita de desfasamento (~12 pixels em Y baseado em estimativa visual de imagem pt28) |
 | Opção "Selected Subtree" (lista flutuante do dropdown aberto) | `(274, 108)` | smoke 18 Maio pt25f | Idem |
 | Campo "CI Target" | `(270, 109)` | derivado das fracções legacy do Baltazar (0.65×416, 0.51×214) | A funcionar — o robot escreve 10.0 OK |
-| Botão OK | **LACUNA** | observado em pt25e como `(895, 568)` absoluto (popup da 1ª corrida) | Precisa coord rel ao popup |
-| Botão Cancel | **LACUNA** | — | — |
+| Botão OK | **não precisa de coord** | pt33 v1 | `Button` nativo → **`BM_CLICK` no hwnd** (`_find_ok_button` + `SendMessageW`). Coord deixou de ser necessária |
+| Botão Cancel | **não precisa de coord** | pt33 (por analogia) | `Button` nativo exposto; clicável por BM_CLICK se algum dia for preciso |
 
 ### Dropdown Scope — comportamento
 
@@ -274,14 +363,28 @@ Finish é boa prática.
 | Comportamento se não se mudar | A corrida que arranca é Full Tree (igual à 1ª, inútil para refinamento) |
 | Ordem natural do utilizador | "Indiferente" segundo o Rui, mas visualmente Scope aparece em cima e CI em baixo |
 
-### Bug observado em pt28 — robot não muda o scope na 2ª corrida
+### Atalhos de teclado dentro do popup Nash
 
-| Aspecto | Valor |
+| Item | Valor |
 |---|---|
-| Sintoma | Robot abre o popup correctamente; escreve 10.0 no CI Target; clica OK; mas o Scope fica em "Full Tree" (default) em vez de mudar para "Selected Subtree". Resultado: 2ª corrida é Full Tree em vez de Selected Subtree, inútil para refinamento |
-| Observação do Rui | "Foi APENAS directo ao CI" — robot não toca no dropdown do Scope visualmente |
-| Causa provável (em investigação) | (a) ordem invertida no source — `_fill_ci_target_in_popup` corre antes de `_set_scope_in_popup`; (b) ou os 2 clicks de scope acontecem em sítio errado (coords podem ter desfasamento de ~12 pixels desde a calibração de 18 Maio) |
-| Estado actual | Briefing entregue ao Code para inverter ordem + adicionar logging defensivo + smoke real consolidado |
+| Atalhos funcionam? | **Não.** Confirmação visual do Rui: `Tab`/`Enter` e os atalhos do painel principal (`Alt+R`, etc.) **não actuam dentro do popup Nash**. Foi a causa do pt33 (o OK por `Enter` não pegava) |
+| Implicação | OK/Cancel **têm** de ir por BM_CLICK (botões nativos); o dropdown Scope e o CI por coord. Não há caminho de teclado fiável dentro do popup |
+
+### Cadeia da 2ª corrida — resolvida em pt32-pt34
+
+A 2ª corrida (popup Nash → Selected Subtree) ficou funcional na sessão
+pt30-pt34. Sequência de fixes (detalhe em
+`docs/JOURNAL_2026-05-22-pt30-pt34.md`):
+
+| Sintoma original | Fix | Onde |
+|---|---|---|
+| Popup Nash **não abria** (`#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN`) | Play da 2ª run usava `wpos` do wizard já fechado; coord Y 59→64 + origem `wpos`→`find_hrc()` | pt32 v1 + v2 |
+| Popup abria mas **OK não pegava** (`#START-CALC-SELECTED-SUBTREE-OK-CLICK-FAILS`) | `Enter` não funciona no popup → BM_CLICK no hwnd do Button OK | pt33 v1 |
+| 2ª run disparava mas o robot **não esperava o fim** | janela de progresso da 2ª run é "Monte Carlo Sampling", não "Hand Setup" → match por substring | pt34 v1 |
+
+> Reordenação Scope→CI→OK (pt28-v1) e logging defensivo já estavam em vigor;
+> o que faltava era abrir o popup (pt32), confirmá-lo (pt33) e esperar a run
+> (pt34). O Scope é mudado antes do CI para o caso de o popup re-renderizar.
 
 ## 7. Corridas (runs)
 
@@ -307,6 +410,37 @@ Finish é boa prática.
 | **Pontos do fluxo onde aplicar a espera** | (a) Após 1ª run e antes de navegar para a 2ª. (b) Após 2ª run e antes do export. (c) Em qualquer outro ponto futuro em que uma acção HRC assíncrona seja seguida por outra dependente do resultado. |
 | **Modos de falha da heurística** | (i) Memória pode estabilizar transitoriamente cedo demais (improvável mas possível em árvores muito pequenas). (ii) Memória pode continuar a oscilar por GC interno mesmo após o cálculo terminar (improvável). Em qualquer dos casos, afinar os thresholds com dados reais. |
 
+> **Substituída em pt31.** A heurística de memória deu **falso positivo**
+> no smoke pt30 (declarou o fim da 1ª run aos 48s — = 15s sleep + 3×10s —
+> com a run ainda a correr). Foi trocada pelo polling da **janela de
+> progresso** (§7.2), que é um sinal **binário** (existe / não existe), sem
+> thresholds. `wait_for_calculation()` continua no namespace mas já não é
+> chamada.
+
+### 7.2 Janelas de progresso (descoberto pt31/pt34) — sinal binário de fim
+
+Enquanto uma run corre, o HRC mostra uma janela top-level **de progresso**,
+visualmente distinta do wizard e mutuamente exclusiva no tempo. **Aparece
+quando a run arranca e desaparece quando termina** — sinal binário fiável.
+
+| Run | Título da janela de progresso | Detecção |
+|---|---|---|
+| **1ª run** | `"Hand Setup"` (exacto) | `FindWindowW(None, "Hand Setup")` |
+| **2ª run** (Selected Subtree) | `"H-<hand_id>: Monte Carlo Sampling"` | `EnumWindows` + **substring** "Monte Carlo Sampling" (case-insensitive) |
+
+> **Armadilha (pt34).** A 1ª e a 2ª run **não** têm o mesmo título. A 1ª
+> reutiliza "Hand Setup" (o mesmo nome do wizard de configuração — daí ser
+> obrigatório só pollar isto **depois** de o wizard fechar no Finish). A 2ª
+> run mostra "Monte Carlo Sampling". Procurar "Hand Setup" exacto na 2ª run
+> dava timeout 30s e o robot avançava para o Save As com a 2ª run ainda a
+> correr. Helper `_find_progress_window_title(match_substring)` cobre os
+> dois casos.
+
+Implementação: `_wait_for_run_completion(...)` — fase 1 aguarda a janela
+aparecer (run arrancou; WARN graceful se não — run trivial/erro); fase 2
+polla até desaparecer (run terminou; log minuto-a-minuto; raise no
+timeout). Timeouts: 2h (1ª run), 8h (2ª run).
+
 ## 8. Export do resultado
 
 | Item | Valor |
@@ -324,8 +458,21 @@ Finish é boa prática.
 | Tree pode chegar a >20 GB de RAM e crashar | Alta (mãos profundas + scripts largos) | Templates JS tight + prune via Selected Subtree |
 | Caixa do HH no wizard fica com a última mão entre sessões | Baixa | Não interfere — paste sobrescreve sempre |
 | Dialog "Save As" aparece entre runs | Baixa (fluxo previsto) | Launcher Baltazar tem patch para fechar |
-| **HRC Java perde clicks instantâneos em botões críticos** (pt29) | **Alta** (afecta o Finish do wizard e potencialmente outros botões críticos) | Slow-click obrigatório: `mouseDown → sleep ≥100 ms → mouseUp`. Validado em pt29-v2 no Finish |
-| **Ausência de sinal explícito de fim de cálculo** (pt29) | Alta (qualquer automação tem de inferir) | Polling do uso de memória do HRC; `wait_for_calculation()` do Baltazar OG implementa a heurística |
+| **HRC Java perde clicks instantâneos em botões críticos** (pt29) | **Alta** (afecta o Finish do wizard e potencialmente outros botões críticos) | Slow-click obrigatório: `mouseDown → sleep ≥100 ms → mouseUp`. Validado em pt29-v2 no Finish. Em **botões nativos SWT** (OK do popup, ver abaixo) a alternativa é BM_CLICK |
+| **Ausência de sinal explícito de fim de cálculo** (pt29/pt31) | Alta (qualquer automação tem de inferir) | ~~Polling do uso de memória~~ (heurística, falso positivo pt30) → **polling da janela de progresso** (§7.2): sinal binário aparece/desaparece |
+| **Toolkit SWT expõe widgets ao Win32** (pt30/pt33) | — (é uma **vantagem**, não um bug) | Botões nativos (Finish, OK/Cancel do popup) são enumeráveis e clicáveis por `BM_CLICK`; estado por `IsWindowEnabled`; janelas de progresso detectáveis por título. Ver §1, §6, §7.2 |
+
+### 9.1 Erros conhecidos no flow do robot (não-bloqueantes)
+
+Aparecem no log do robot mas **não impedem** o cálculo. Registados para o
+próximo Claude não os confundir com falhas reais:
+
+| Linha no log | O que é | Estado |
+|---|---|---|
+| `[WARN] verify_wizard_finished: janela "Hand Setup" ainda presente apos click + activate` | Falso positivo do state-check pós-Finish (pt29-v1) — verifica **cedo demais**, mas a 1ª run efectivamente arranca | `#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK` (aberto) |
+| `[WARN] CI Target initial: coords não calibrados (pt25e Bloco 2 pendente)` | O set do CI no main UI antes da 1ª run nunca foi calibrado (coords=0) → degrada para Enter, que funciona | `#CI-TARGET-INITIAL-NOT-CALIBRATED` (aberto) |
+| `[WARN] Nash dialog não encontrado — a usar Enter` | Fallback do CI Target da **1ª run** (Baltazar OG); funciona | Aceite (legacy) |
+| **Cursor anomaly após Save As** | Observação visual do Rui: após o Save As o cursor fica na **2ª linha (EP)** da Strategy Table. Origem desconhecida; não bloqueia | `#CURSOR-ANOMALY-POST-SAVE-AS` (novo, aberto) |
 
 ## 10. Clipboard — comportamento e armadilhas
 
@@ -431,9 +578,9 @@ concorrentes). Não é fix da causa raiz, mas evita o sintoma.
 | Coordenada | Valor | Tipo | Origem | Notas |
 |---|---|---|---|---|
 | `EQUITY_MODEL_X/Y` | `(446, 561)` | rel à wpos | herdada do Baltazar | OK |
-| `CALCULATE_BUTTON_X/Y` | `(204, 59)` | rel à wpos | smoke 19 Maio pt26 | OK |
-| `SCOPE_DROPDOWN_REL_X/Y` | `(278, 67)` | rel ao top-left do popup Nash | smoke 18 Maio pt25f | Suspeita de desfasamento ~12px Y; em diagnóstico |
-| `SCOPE_OPTION_SELECTED_SUBTREE_REL_X/Y` | `(274, 108)` | rel ao top-left do popup Nash | smoke 18 Maio pt25f | Idem |
+| `CALCULATE_BUTTON_X/Y` | `(204, 64)` | rel à **janela principal HRC (`find_hrc()`)**, NÃO à wpos | pt32 v1 (Y 59→64) + pt32 v2 (origem `find_hrc()`) | **Corrigido em pt32.** Era `(204,59)` rel à wpos do wizard (já fechado) → click em zona vazia |
+| `SCOPE_DROPDOWN_REL_X/Y` | `(278, 67)` | rel ao top-left do popup Nash | smoke 18 Maio pt25f | A funcionar na 2ª run (pt32 v2+) |
+| `SCOPE_OPTION_SELECTED_SUBTREE_REL_X/Y` | `(274, 108)` | rel ao top-left do popup Nash | smoke 18 Maio pt25f | A funcionar (pt32 v2+) |
 | `CI_TARGET_POPUP_REL_X/Y` | `(270, 109)` | rel ao top-left do popup Nash | derivado das fracções legacy do Baltazar | Funciona (escreve "10.0" correctamente) |
 | `STRATEGY_TABLE_FOCUS_X/Y` | (não calibrada) | rel à wpos | DEPRECATED em pt28 — Strategy Table já tem foco por default |
 | `CI_TARGET_FIELD_X/Y` (main UI) | (não calibrada) | rel à wpos | DEPRECATED em pt25e — set CI no main UI é desnecessário |
@@ -444,7 +591,7 @@ concorrentes). Não é fix da causa raiz, mas evita o sintoma.
 | `SCRIPT_FOLDER` | **LACUNA — idem** | rel à wpos | — | Idem |
 | `BTN_NEXT` | **LACUNA — idem** | rel à wpos | — | Idem |
 | `BTN_FINISH` | `(568, 640)` | rel à wpos do wizard | observada empiricamente em pt29-v1/v2 nos smokes do Beelink | Funciona com slow-click obrigatório (ver §3.5). wpos do wizard observada `(943, 0, 741, 673)` |
-| `OK button no popup Nash` | **LACUNA** | rel ao top-left do popup | pt25e regista `(895, 568)` abs para o popup da 1ª run | Precisa coord rel consolidada |
+| `OK button no popup Nash` | **não usa coord** | — (hwnd via Win32) | pt33 v1 | Resolvido. `Button` nativo SWT → `BM_CLICK` no hwnd (`_find_ok_button` + `SendMessageW`). Ver §6 |
 
 **Nota sobre o Beelink:** A wpos do main HRC é `(left=283, top=65,
 width=1050, height=850)` em janela não-maximizada. Coords absolutas
@@ -715,13 +862,13 @@ Coisas que faltam ao documento, em ordem de prioridade:
 
 | # | Lacuna | Quem responde |
 |---|---|---|
-| 1 | Coords absolutas re-medidas do popup Nash (Scope dropdown, opção Selected Subtree, OK) com cursor sobreposto | Rui durante próximo smoke devagar |
+| ~~1~~ | ~~Coords do popup Nash (Scope, Selected Subtree, OK)~~ **FECHADA pt32-pt34:** Scope/CI por coord (a funcionar); OK por BM_CLICK (sem coord). Ver §6 | — |
 | 2 | Versão exacta do HRC instalado | Rui |
 | 3 | Maximização da janela ao arrancar | Rui |
 | 4 | 4º modelo no dropdown Equity Model | Rui (a foto que mandou em pt23 mostra 4 modelos) |
 | 5 | Coord do campo "Other Tables" na página MTT Stacks | Smoke devagar |
 | 6 | Valores literais de `SCRIPTING_TAB`, `SCRIPT_FOLDER`, `BTN_NEXT`, `BTN_FINISH` | Code (descobre no .pyc Baltazar — read-only) |
-| 7 | Coord rel do botão OK e Cancel dentro do popup Nash | Smoke devagar |
+| ~~7~~ | ~~Coord rel do botão OK e Cancel no popup Nash~~ **FECHADA pt33:** botões nativos SWT → BM_CLICK, não precisam de coord. Ver §6 | — |
 | 8 | Labels EP/MP para N=8 e N=9 | Rui se encontrar mãos reais 8/9-handed |
 | 9 | Bounty para sites USD `.com` — confirmar se `$` é aceite em algum formato | Smoke real com HH PokerStars `.com` |
 | 10 | Cálculo de bounty acumulado real (vs base $250) — fonte: tournament_summaries + KOs | Tech debt `#HRC-GG-KOS-EXTRACTION` |
@@ -749,5 +896,10 @@ Coisas que faltam ao documento, em ordem de prioridade:
 - Journals: pt22 (smoke original Baltazar), pt23 (descompilação + fixes
   A/B/C/E), pt25b-c-d (pré-Bloco 2), pt25e (Bloco 1 source-side),
   pt25f (Bloco 2 source-side), pt26 (smoke real pt26 + bugs descobertos),
-  pt27 (backend fixes), pt28 (este — clipboard race + scope bug
-  + descoberta formato HH PokerStars como conversão obrigatória GG → HRC)
+  pt27 (backend fixes), pt28 (clipboard race + scope bug
+  + descoberta formato HH PokerStars como conversão obrigatória GG → HRC),
+  pt29 (cascata Finish slow-click + wait_for_calculation),
+  **pt30-pt34** (`JOURNAL_2026-05-22-pt30-pt34.md` — fecho da cadeia da 2ª
+  run: SWT, popup `#32770`, janelas de progresso, BM_CLICK no OK)
+- `docs/WORKFLOW_OPERACIONAL.md` (como trabalhar cada tipo de mão / formato)
+- `docs/RUNBOOK_SMOKE_BEELINK.md` (operação do smoke no Beelink)
