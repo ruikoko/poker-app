@@ -216,8 +216,9 @@ Finish é boa prática.
 | Função | Define a percentagem do prize pool atribuída a bounties em PKO |
 | Detecção automática pelo robot | "KO detetado — a selecionar Bounty Mode PKO 50%..." (heurística no source) |
 | Valor habitual | "PKO 50%" |
-| Outros | **LACUNA — listar opções do dropdown** (Vanilla, PKO 25%, PKO 50%, Mystery KO, ...) |
-| Observação | Em GG, a percentagem real depende do `tournament_format` parsed do TS. Hardcoded em 50% no robot Baltazar OG (`#HRC-BOUNTY-HARDCODED-50PCT`, follow-up por fazer) |
+| Ratios mapeados pelo backend | PKO 0.75 (Monster), PKO 0.50 (Bounty Hunters / Bounty Builder / Knockout), PKO 0.40 (Super KO), KO 0.33 (Mystery KO), None 0.0 (Vanilla). Estes são os valores que entram no `payouts.json` — **não confundir** com as opções do dropdown do HRC (lacuna em aberto). |
+| Outros | **LACUNA — listar opções do dropdown do HRC** (Vanilla, PKO 25%, PKO 50%, Mystery KO, ...). Fechar só com print do Rui (dropdown do HRC aberto). |
+| Observação | Em GG a percentagem real depende do `tournament_format` parsed do TS e **chega ao HRC via `payouts.json` data-driven** (`LOBBY_RATIO_LOOKUP` em `backend/app/services/lobby_vision.py`, 5 ratios conhecidos — ver linha acima). O que está hardcoded em 50% é o **dropdown do watcher** (`select_bounty_mode` legacy Baltazar OG), não o `progressiveFactor`. Validação parcial: só PKO 50% confirmado empiricamente (pt34 v1, caso degenerado). Estado e detalhe em `#HRC-BOUNTY-HARDCODED-50PCT` (TECH_DEBTS) |
 
 ## 4. Painel principal da mesa (pós-Finish)
 
