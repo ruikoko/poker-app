@@ -57,6 +57,13 @@ def pf():
     import patched_funcs as _pf  # noqa: E402
     _pf.click_rel = MagicMock(name="click_rel")
     _pf.pyautogui = MagicMock(name="pyautogui")
+    # pt32 v2: `_click_calculate_button` resolve `find_hrc()` (global Baltazar
+    # do .pyc, ausente no import standalone) para a origem da coord. Default:
+    # janela principal HRC fake. Tests de coord/None sobrepõem.
+    _pf.find_hrc = MagicMock(
+        name="find_hrc",
+        return_value=SimpleNamespace(left=300, top=70, width=1050, height=850),
+    )
 
     _clipboard_state = {"value": ""}
     _pp = MagicMock(name="pyperclip")
@@ -216,16 +223,18 @@ def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
     # Mock _wait_for_nash_popup to return a fake rect (popup detected).
     fake_rect = (666, 372, 416, 214)
     pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
-    wpos = (10, 10, 1024, 768)
+    wpos = (10, 10, 1024, 768)  # pt32 v2: ignorado por _click_calculate_button
 
     pf.start_calculation_selected_subtree(wpos, ci_target=10.0)
 
-    # Calculate button clicked via click_rel with calibrated pt26 coords.
-    pf.click_rel.assert_called_with(wpos, pf.CALCULATE_BUTTON_X, pf.CALCULATE_BUTTON_Y)
+    # pt32 v2: Calculate clicado via pyautogui.click na origem find_hrc()
+    # (default da fixture left=300, top=70) -> (300+204, 70+64) = (504, 134).
+    pf.pyautogui.click.assert_any_call(504, 134)
+    pf.click_rel.assert_not_called()  # pt32 v2: Calculate já não usa click_rel
     # Popup detection invoked.
     pf._wait_for_nash_popup.assert_called_once()
-    # Pyautogui clicks: 2 scope + 1 fill CI = 3 clicks total.
-    assert pf.pyautogui.click.call_count == 3
+    # Pyautogui clicks: 1 Calculate + 2 scope + 1 fill CI = 4 clicks total.
+    assert pf.pyautogui.click.call_count == 4
     # Enter pressed for OK.
     pf.pyautogui.press.assert_any_call('enter')
 
@@ -321,9 +330,9 @@ def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, cap
 
     pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
 
-    # Calculate foi clicado mas nada mais.
-    pf.click_rel.assert_called_once()  # apenas Calculate
-    pf.pyautogui.click.assert_not_called()
+    # pt32 v2: Calculate clicado via pyautogui.click (1x) mas nada mais.
+    pf.pyautogui.click.assert_called_once()  # apenas Calculate
+    pf.click_rel.assert_not_called()
     pf.pyautogui.press.assert_not_called()
     out = capsys.readouterr().out
     assert "popup não detectado" in out
@@ -338,40 +347,51 @@ def test_start_calculation_selected_subtree_skips_calculate_when_placeholder(pf,
 
     pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
 
-    pf.click_rel.assert_not_called()  # placeholder → defensive
+    pf.pyautogui.click.assert_not_called()  # placeholder → defensive (pt32 v2)
+    pf.find_hrc.assert_not_called()  # early-return ANTES de find_hrc
     out = capsys.readouterr().out
     assert "_click_calculate_button" in out
     assert "não calibrados" in out
 
 
 def test_calculate_button_constants_calibrated_after_pt26_smoke(pf):
-    """Sanity: pt26 calibrou X=204; pt32 v1 alinhou Y=64 com o Baltazar OG
-    (a 1a run usa hrc.top+64 e funciona; a 2a usava 59 e falhava)."""
+    """Sanity: pt26 calibrou X=204; pt32 v1 alinhou Y=64 com o Baltazar OG.
+    pt32 v2 não mexe nos valores — só a ORIGEM (find_hrc em vez de wpos)."""
     assert pf.CALCULATE_BUTTON_X == 204
     assert pf.CALCULATE_BUTTON_Y == 64
 
 
-def test_click_calculate_button_logs_calc_diag_pt32(pf, capsys):
-    """pt32 v1: _click_calculate_button regista [calc-diag pre-click] com a
-    coord absoluta calculada + foreground window, antes do click_rel."""
+def test_click_calculate_button_uses_find_hrc_origin_and_logs_pt32v2(pf, capsys):
+    """pt32 v2: a coord é calculada a partir de find_hrc() (janela principal),
+    NÃO de wpos (que era o wizard fechado). Regista [calc-diag pre-click] com
+    coord absoluta + hrc_window + foreground; click via pyautogui.click."""
+    pf.find_hrc = MagicMock(
+        return_value=SimpleNamespace(left=283, top=65, width=1050, height=850)
+    )
     pf._pt30_user32 = MagicMock()
     pf._pt30_user32.GetForegroundWindow.return_value = 7777
     pf._pt30_user32.GetWindowTextLengthW.return_value = 0  # titulo vazio: simplifica
 
-    pf._click_calculate_button((10, 20, 1024, 768))
+    # wpos passado mas IGNORADO (pt32 v2): valores propositadamente != find_hrc.
+    pf._click_calculate_button((9999, 8888, 1, 1))
 
     out = capsys.readouterr().out
     assert "[calc-diag pre-click]" in out
-    # coord absoluta = (10+204, 20+64) = (214, 84)
-    assert "coord=(214,84)" in out
+    # coord absoluta = (283+204, 65+64) = (487, 129), origem find_hrc não wpos
+    assert "coord=(487,129)" in out
+    assert "hrc_window=(283,65,1050,850)" in out
     assert "hwnd=7777" in out
-    # click cego mantido, com a coord nova (204, 64)
-    pf.click_rel.assert_called_with((10, 20, 1024, 768), 204, 64)
+    # click cego via pyautogui.click nas coords absolutas; click_rel já não usado
+    pf.pyautogui.click.assert_called_once_with(487, 129)
+    pf.click_rel.assert_not_called()
 
 
 def test_click_calculate_button_tolerates_foreground_exception_pt32(pf, capsys):
     """Logging defensivo: se GetForegroundWindow falhar, WARN inline mas o
-    click acontece na mesma (nao bloqueia o flow)."""
+    click acontece na mesma (nao bloqueia o flow). pt32 v2: coord via find_hrc."""
+    pf.find_hrc = MagicMock(
+        return_value=SimpleNamespace(left=100, top=50, width=1050, height=850)
+    )
     pf._pt30_user32 = MagicMock()
     pf._pt30_user32.GetForegroundWindow.side_effect = RuntimeError("boom")
 
@@ -380,7 +400,22 @@ def test_click_calculate_button_tolerates_foreground_exception_pt32(pf, capsys):
     out = capsys.readouterr().out
     assert "[calc-diag pre-click]" in out
     assert "falhou" in out
-    pf.click_rel.assert_called_with((0, 0, 800, 600), 204, 64)
+    # click acontece nas coords da janela HRC (100+204, 50+64) = (304, 114)
+    pf.pyautogui.click.assert_called_once_with(304, 114)
+
+
+def test_click_calculate_button_raises_when_find_hrc_none_pt32v2(pf, capsys):
+    """pt32 v2: find_hrc() devolve None (janela principal HRC desapareceu) ->
+    WARN + raise, sem click silencioso (queremos saber, não no-op)."""
+    pf.find_hrc = MagicMock(return_value=None)
+
+    with pytest.raises(RuntimeError, match="HRC_MAIN_WINDOW_NOT_FOUND"):
+        pf._click_calculate_button((0, 0, 800, 600))
+
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+    assert "find_hrc() devolveu None" in out
+    pf.pyautogui.click.assert_not_called()
 
 
 # ── _wait_for_nash_popup ────────────────────────────────────────────────
@@ -646,6 +681,7 @@ def test_start_calculation_selected_subtree_returns_false_when_popup_timeout(pf,
     )
 
     assert result is False
-    pf.pyautogui.click.assert_not_called()  # sem fill CI / scope clicks
+    # pt32 v2: Calculate via pyautogui.click (1x); sem fill CI / scope depois.
+    pf.pyautogui.click.assert_called_once()  # apenas Calculate
     pf.pyautogui.press.assert_not_called()  # sem OK Enter
     assert "popup não detectado" in capsys.readouterr().out

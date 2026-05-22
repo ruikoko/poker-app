@@ -825,16 +825,17 @@ CI_TARGET_POPUP_REL_Y = 109
 
 # pt26 Bloco 2 piece 2 — Botão verde Calculate (Play) no main UI HRC.
 # Calibrado em smoke 2026-05-19 com Rui no Beelink: posição absoluta
-# (487, 124), main HRC window wpos (left=283, top=65, w=1050, h=850) ->
-# rel (204, 59). Convenção: pixels relativos à wpos, mesma de
-# `EQUITY_MODEL_X/Y`, `STRATEGY_TABLE_FOCUS_X/Y`, e usada por `click_rel`.
-# Fracções ficam reservadas para o popup Nash (rect variável); o main
-# HRC window é fixo durante uma sessão (wpos capturado uma vez no wizard).
+# (487, 124), main HRC window (left=283, top=65, w=1050, h=850) -> rel
+# (204, 64). Convenção: pixels relativos à **janela principal do HRC**
+# (a que `find_hrc()` devolve), mesma origem que a 1ª run do Baltazar OG.
 #
-# pt32 v1: Y 59 -> 64. A 1a run (Baltazar OG `start_calculation`) usa
-# `pyautogui.click(hrc.left + 204, hrc.top + 64)` no MESMO botao Play e
-# FUNCIONA; a 2a run usava (204, 59) (5px off) e o popup Nash nunca abria
-# (#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN). Alinhar com o Baltazar OG.
+# pt32 v1: Y 59 -> 64 (a 1ª run usa hrc.top+64 e funciona; a 2ª usava 59).
+# pt32 v2: a ORIGEM passa a ser `find_hrc()`, não `wpos`. Smoke pt32 v1
+# provou que `wpos` aqui era a geometria do wizard "Hand Setup" (já fechado
+# no Finish da 1ª run): log coord=(1174,64) com wpos=(970,0,...) -> 1174=
+# 970+204, click em zona vazia, popup Nash nunca abria
+# (#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN). Estes offsets são relativos
+# ao hrc.left/hrc.top de `find_hrc()`, idêntico ao `start_calculation` OG.
 CALCULATE_BUTTON_X = 204
 CALCULATE_BUTTON_Y = 64
 
@@ -902,24 +903,42 @@ def _wait_for_nash_popup(timeout=_NASH_POPUP_WAIT_TIMEOUT_S,
     return None
 
 
-def _click_calculate_button(wpos):
-    """Click no botão verde Calculate no main UI HRC. Coords em pixels
-    relativos à wpos (mesma convenção que `EQUITY_MODEL_X/Y`, usada por
-    `click_rel`). Calibrado em smoke pt26 — ver bloco de constantes.
+def _click_calculate_button(wpos=None):
+    """Click no botão verde Calculate (Play) no main UI HRC.
 
-    pt32 v1: logging diagnostico pre-click (coord absoluta + foreground
-    window), paralelo ao [finish-diag pre-click] do pt30. Permite ver no
-    smoke onde o robot clicou e qual a janela em foco no momento — o click
-    da 2a run nunca tinha instrumentacao (#START-CALC-...).
+    pt32 v2 (#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN): a origem das coords
+    passa a ser `find_hrc()` (janela principal do HRC), NÃO `wpos`. Smoke
+    pt32 v1 no Beelink provou empiricamente que `wpos` aqui era a geometria
+    do wizard "Hand Setup" — que já FECHOU no Finish da 1ª run — logo o click
+    caía em zona vazia (log: coord=(1174,64) com wpos=(970,0,...): 1174=
+    970+204; foreground era o HRC certo, mas o ponto não era o Play). A 1ª
+    run do Baltazar OG (`start_calculation`) usa
+    `pyautogui.click(hrc.left+204, hrc.top+64)` via `find_hrc()` e funciona —
+    esta função alinha-se com esse padrão. Offsets relativos a hrc.left/top.
 
-    Defensive: ambos a 0 (regressão de calibração) -> early-return WARN.
+    `wpos` mantém-se na assinatura (caller `start_calculation_selected_subtree`
+    inalterado) mas é IGNORADO em pt32 v2.
+
+    pt32 v1: logging [calc-diag pre-click] (coord absoluta + foreground), agora
+    (v2) também a janela HRC encontrada (hrc_window), para diagnóstico futuro.
+
+    Defensive:
+      - CALCULATE_BUTTON_X/Y ambos 0 (regressão de calibração) -> WARN +
+        early-return (ANTES do find_hrc, p/ o teste de placeholder).
+      - find_hrc() devolve None -> WARN + raise (não no-op silencioso:
+        queremos saber se a janela principal do HRC desapareceu).
     """
     if CALCULATE_BUTTON_X == 0 and CALCULATE_BUTTON_Y == 0:
         print('   [WARN] _click_calculate_button: coords não calibrados '
               '— click ignorado')
         return
-    abs_x = wpos[0] + CALCULATE_BUTTON_X
-    abs_y = wpos[1] + CALCULATE_BUTTON_Y
+    hrc = find_hrc()
+    if not hrc:
+        print('   [WARN] _click_calculate_button: find_hrc() devolveu None '
+              '— janela principal do HRC não encontrada; click abortado')
+        raise RuntimeError('HRC_MAIN_WINDOW_NOT_FOUND')
+    abs_x = hrc.left + CALCULATE_BUTTON_X
+    abs_y = hrc.top + CALCULATE_BUTTON_Y
     try:
         fg = _pt30_user32.GetForegroundWindow()
         n = _pt30_user32.GetWindowTextLengthW(fg)
@@ -932,9 +951,10 @@ def _click_calculate_button(wpos):
         fg_info = 'hwnd=%s title=%r' % (fg, fg_title)
     except Exception as _e:
         fg_info = 'GetForegroundWindow falhou (%s)' % (_e,)
-    print('   [calc-diag pre-click] coord=(%d,%d) foreground=%s'
-          % (abs_x, abs_y, fg_info))
-    click_rel(wpos, CALCULATE_BUTTON_X, CALCULATE_BUTTON_Y)
+    print('   [calc-diag pre-click] coord=(%d,%d) hrc_window=(%d,%d,%d,%d) '
+          'foreground=%s'
+          % (abs_x, abs_y, hrc.left, hrc.top, hrc.width, hrc.height, fg_info))
+    pyautogui.click(abs_x, abs_y)
     time.sleep(0.3)
 
 
