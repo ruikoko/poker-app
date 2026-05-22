@@ -60,6 +60,28 @@ _pt30_user32.SendMessageW.restype = wintypes.LPARAM
 
 BM_CLICK = 0x00F5  # mensagem Win32 que simula um click num Button nativo
 
+# ── pt35 (GTO Brain Fase 1 — SWAP export_strategies) ──────────────────────
+# Diálogo "Export Strategies": #32770 nativo de título VAZIO, com ComboBox +
+# Buttons nativos (diagnóstico v2 no Beelink). Setamos o modo de export e
+# clicamos OK por Win32 (sem coords), à imagem do BM_CLICK do popup Nash (pt33).
+_pt30_user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+_pt30_user32.SetForegroundWindow.restype = wintypes.BOOL
+_pt30_user32.GetDlgCtrlID.argtypes = [wintypes.HWND]
+_pt30_user32.GetDlgCtrlID.restype = ctypes.c_int
+_pt30_user32.IsWindowVisible.argtypes = [wintypes.HWND]
+_pt30_user32.IsWindowVisible.restype = wintypes.BOOL
+
+CB_GETCURSEL = 0x0147   # lê o índice seleccionado (read-back de verificação)
+CB_SETCURSEL = 0x014E   # selecciona item por índice
+WM_COMMAND = 0x0111
+CBN_SELCHANGE = 1       # notificação ao diálogo após mudar a selecção do combo
+# Diagnóstico v2 (HRC actual no Beelink): combo de modo tem 4 itens —
+#   [0] 'Manual Selection' (default)    [1] 'Complete Export'
+#   [2] 'All Strategies, Limited depth' [3] 'Selected Spot, Limited Depth'
+# Se uma futura versão do HRC reordenar, re-correr diag_export_hrc.bat e
+# actualizar este índice.
+EXPORT_MODE_COMPLETE_INDEX = 1
+
 _FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou)
 _FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
 _FINISH_WAIT_POLL_S = 0.1
@@ -1380,6 +1402,306 @@ def finalize_after_second_run(wpos, export_zip):
     """
     print('   A fazer queue do export (finalize após 2ª run)...')
     export_strategies(export_zip)
+
+
+def _find_export_combo(dialog_hwnd):
+    """pt35: hwnd do ComboBox de modo de export (class 'ComboBox'). Diagnóstico
+    v2: nativo, 4 itens. None se não encontrar. Read-only (não muda selecção)."""
+    if not dialog_hwnd:
+        return None
+    found = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value.lower() == "combobox":
+            found.append(ch)
+            return False
+        return True
+
+    _pt30_user32.EnumChildWindows(dialog_hwnd, _PT30_WNDENUMPROC(_enum), 0)
+    return found[0] if found else None
+
+
+def _find_export_button(dialog_hwnd, label):
+    """pt35: hwnd de um Button do diálogo de export cujo texto normalizado
+    (sem '&') == label.lower(). Mesma anatomia que `_find_ok_button` (pt33).
+    Usado para OK e Cancel. None se não encontrar."""
+    if not dialog_hwnd:
+        return None
+    target = label.strip().lower()
+    found = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value == "Button":
+            n = _pt30_user32.GetWindowTextLengthW(ch)
+            if n > 0:
+                txt_buf = ctypes.create_unicode_buffer(n + 1)
+                _pt30_user32.GetWindowTextW(ch, txt_buf, n + 1)
+                if txt_buf.value.replace("&", "").strip().lower() == target:
+                    found.append(ch)
+                    return False
+        return True
+
+    _pt30_user32.EnumChildWindows(dialog_hwnd, _PT30_WNDENUMPROC(_enum), 0)
+    return found[0] if found else None
+
+
+def _find_export_ok_button(dialog_hwnd):
+    """pt35: hwnd do Button OK do diálogo de export (diagnóstico v2: text='OK')."""
+    return _find_export_button(dialog_hwnd, "ok")
+
+
+def _find_export_dialog():
+    """pt35: hwnd do diálogo Export Strategies.
+
+    O diálogo é um #32770 nativo de TÍTULO VAZIO (diagnóstico v2), por isso o
+    `_find_export_hwnd` da OG NÃO o encontra — esse faz match por TÍTULO
+    (disassembly confirmou: `_find_hwnd_by_keywords._cb` usa GetWindowTextW e
+    salta janelas sem título). Aqui matchamos por CLASSE '#32770' + presença de
+    um ComboBox filho (filtra message boxes genéricas). Em tempo de export o
+    popup Nash já fechou, logo sem colisão. None se não houver.
+    """
+    matches = []
+
+    def _enum_top(hwnd, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(hwnd, cls_buf, 256)
+        if cls_buf.value == "#32770" and _find_export_combo(hwnd):
+            matches.append(hwnd)
+            return False
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum_top), 0)
+    return matches[0] if matches else None
+
+
+def _cancel_export_dialog(dialog_hwnd):
+    """pt35: fecha o diálogo de export via BM_CLICK no Button Cancel — evita
+    deixá-lo aberto a bloquear a mão seguinte quando abortamos por erro.
+    WARN se não encontrar (não silencia)."""
+    btn = _find_export_button(dialog_hwnd, "cancel")
+    if not btn:
+        print('   [WARN] [export] Button Cancel não encontrado — diálogo pode '
+              'ficar aberto (hwnd=%r)' % (dialog_hwnd,))
+        return
+    _pt30_user32.SendMessageW(btn, BM_CLICK, 0, 0)
+    print('   [export] Cancel hwnd=%d BM_CLICK enviado' % btn)
+    time.sleep(0.3)
+
+
+def _find_top_by_substr(*needles):
+    """pt35 (port launcher): 1ª janela top-level VISÍVEL cujo título contém
+    qualquer needle (case-insensitive). Devolve (hwnd, title) ou None.
+    Usa _pt30_user32 (HWND/LPARAM 64-bit-safe, ao contrário do c_int do
+    launcher original)."""
+    needles_lc = [n.lower() for n in needles]
+    found = []
+
+    def _enum(hwnd, lparam):
+        if _pt30_user32.IsWindowVisible(hwnd):
+            n = _pt30_user32.GetWindowTextLengthW(hwnd)
+            if n > 0:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
+                tl = buf.value.lower()
+                if any(needle in tl for needle in needles_lc):
+                    found.append((hwnd, buf.value))
+                    return False
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum), 0)
+    return found[0] if found else None
+
+
+def _find_save_button(dialog_hwnd):
+    """pt35 (port do `_find_ok_button` do launcher, renomeado para não colidir
+    com o nosso `_find_ok_button` pt33, que é do popup Nash): botão Save do
+    file-picker. Match: class contém 'button', visível+enabled, texto (sem '&')
+    em {ok, save, export, guardar}, por ordem de preferência. None se não houver."""
+    if not dialog_hwnd:
+        return None
+    targets = ("ok", "save", "export", "guardar")
+    found = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if "button" not in cls_buf.value.lower():
+            return True
+        if not (_pt30_user32.IsWindowVisible(ch) and _pt30_user32.IsWindowEnabled(ch)):
+            return True
+        n = _pt30_user32.GetWindowTextLengthW(ch)
+        if n > 0:
+            txt_buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.GetWindowTextW(ch, txt_buf, n + 1)
+            txt = txt_buf.value.replace("&", "").strip().lower()
+            if txt in targets:
+                found.append((ch, txt))
+        return True
+
+    _pt30_user32.EnumChildWindows(dialog_hwnd, _PT30_WNDENUMPROC(_enum), 0)
+    for pref in targets:
+        for h, t in found:
+            if t == pref:
+                return h
+    return found[0][0] if found else None
+
+
+def _save_as_set_and_click(target_path):
+    """pt35 (port do `_save_as_set_and_click` do launcher) — trata o file-picker
+    "Save As" do export: aguarda o diálogo (≤20s), cola o path por clipboard
+    (com fallback typewrite), e clica Save via BM_CLICK (fallback Enter).
+    Self-contained (não depende do launcher). Devolve True/False.
+
+    Edge cases preservados do original:
+      - 40 tentativas × 0.5s a achar o diálogo (title 'save as'/'guardar'/
+        'save a copy').
+      - clipboard paste em try/except → fallback typewrite (também em try/except).
+      - Save btn via BM_CLICK; se não achar → Enter (em try/except).
+    """
+    import pyperclip
+    import pyautogui
+
+    save_dlg = None
+    for _ in range(40):
+        time.sleep(0.5)
+        found = _find_top_by_substr("save as", "guardar", "save a copy")
+        if not found:
+            continue
+        save_dlg, t = found
+        print('   [SAVE-AS] dialog "%s" hwnd=%s' % (t, save_dlg))
+        _pt30_user32.SetForegroundWindow(save_dlg)
+        time.sleep(0.4)
+        break
+    if not save_dlg:
+        print('   [SAVE-AS] WARN: dialog nao apareceu em 20s')
+        return False
+
+    try:
+        pyperclip.copy(target_path)
+        time.sleep(0.3)
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.15)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.5)
+        print('   [SAVE-AS] filename pasted via clipboard: %s' % target_path)
+    except Exception as e:
+        print('   [SAVE-AS] WARN: clipboard paste falhou (%s), fallback typewrite' % e)
+        try:
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.1)
+            pyautogui.typewrite(target_path, interval=0.005)
+            time.sleep(0.3)
+        except Exception as e2:
+            print('   [SAVE-AS] typewrite fallback tambem falhou: %s' % e2)
+
+    save_btn = _find_save_button(save_dlg)
+    if save_btn:
+        print('   [SAVE-AS] Save btn hwnd=%s -> BM_CLICK' % save_btn)
+        _pt30_user32.SendMessageW(save_btn, BM_CLICK, 0, 0)
+        time.sleep(1.5)
+        return True
+    print('   [SAVE-AS] Save btn nao encontrado, Enter')
+    try:
+        pyautogui.press("enter")
+        time.sleep(1.5)
+        return True
+    except Exception as e:
+        print('   [SAVE-AS] enter erro: %s' % e)
+        return True
+
+
+def export_strategies(export_path):
+    """pt35 (GTO Brain Fase 1) — SWAP da export_strategies OG.
+
+    Muda o modo de export de 'Manual Selection' (default → exporta 1 nó) para
+    'Complete Export' (exporta a árvore toda; o Depth é IGNORADO neste modo —
+    confirmado por smoke do Rui). Preserva o resto do fluxo OG: abrir o menu
+    Hand → Export Strategies e, no fim, paste_path no file-picker.
+
+    Diferenças vs OG (decompiled/hrc_watcher.py:427):
+      - REMOVE o bloco home/down/tab/ctrl+a/type('10')/enter (era a navegação
+        de Manual Selection + Depth). Já não é usado.
+      - LOCALIZA o diálogo por classe #32770 (título vazio) em vez de
+        `_find_export_hwnd` (match por título, falha aqui).
+      - SETA o ComboBox de modo para 'Complete Export' via CB_SETCURSEL +
+        notificação CBN_SELCHANGE ao diálogo, com read-back de verificação.
+      - OK via BM_CLICK no Button OK (determinístico, padrão pt33) em vez de Enter.
+      - Erro em qualquer passo → WARN + Cancel do diálogo (não silencia).
+    """
+    hrc = find_hrc()
+    if not hrc:
+        print('   [export] ERRO: HRC não encontrado')
+        return None
+
+    # 1) Abrir menu Hand → Export Strategies (sequência OG preservada)
+    pyautogui.click(hrc.left + 300, hrc.top + 154)
+    time.sleep(0.5)
+    pyautogui.press('escape')
+    time.sleep(0.3)
+    pyautogui.click(hrc.left + 60, hrc.top + 43)
+    time.sleep(0.6)
+    for _ in range(4):
+        pyautogui.press('down')
+        time.sleep(0.15)
+    pyautogui.press('enter')
+
+    # 2) Localizar o diálogo #32770 (título vazio → não via _find_export_hwnd)
+    dlg = None
+    for _ in range(16):
+        time.sleep(0.5)
+        dlg = _find_export_dialog()
+        if dlg:
+            break
+    if not dlg:
+        print('   [WARN] [export] diálogo Export Strategies (#32770) não '
+              'encontrado em ~8s — export desta mão abortado')
+        return None
+    print('   [export] diálogo #32770 hwnd=%d' % dlg)
+    _pt30_user32.SetForegroundWindow(dlg)
+    time.sleep(0.4)
+
+    # 3) Setar modo = 'Complete Export'
+    combo = _find_export_combo(dlg)
+    if not combo:
+        print('   [WARN] [export] ComboBox de modo não encontrado — Cancel + abort')
+        _cancel_export_dialog(dlg)
+        return None
+    prev = _pt30_user32.SendMessageW(combo, CB_GETCURSEL, 0, 0)
+    _pt30_user32.SendMessageW(combo, CB_SETCURSEL, EXPORT_MODE_COMPLETE_INDEX, 0)
+    # CB_SETCURSEL não notifica o pai; enviar CBN_SELCHANGE para o diálogo
+    # reagir à selecção programática (senão pode exportar o modo antigo).
+    ctrl_id = _pt30_user32.GetDlgCtrlID(combo)
+    _pt30_user32.SendMessageW(
+        dlg, WM_COMMAND, (CBN_SELCHANGE << 16) | (ctrl_id & 0xFFFF), combo)
+    time.sleep(0.4)
+    now = _pt30_user32.SendMessageW(combo, CB_GETCURSEL, 0, 0)
+    print('   [export] combo modo: prev_idx=%d → now_idx=%d (alvo=%d "Complete Export")'
+          % (prev, now, EXPORT_MODE_COMPLETE_INDEX))
+    if now != EXPORT_MODE_COMPLETE_INDEX:
+        print('   [WARN] [export] CB_SETCURSEL não confirmou (now=%d != %d) — '
+              'Cancel + abort para não exportar o modo errado'
+              % (now, EXPORT_MODE_COMPLETE_INDEX))
+        _cancel_export_dialog(dlg)
+        return None
+
+    # 4) OK via BM_CLICK (determinístico, padrão pt33)
+    ok = _find_export_ok_button(dlg)
+    if not ok:
+        print('   [WARN] [export] Button OK não encontrado — Cancel + abort')
+        _cancel_export_dialog(dlg)
+        return None
+    _pt30_user32.SendMessageW(ok, BM_CLICK, 0, 0)
+    print('   [export] OK hwnd=%d BM_CLICK enviado' % ok)
+    time.sleep(1.5)   # dar tempo ao file-picker para aparecer
+
+    # 5) File-picker: Save As robusto (port self-contained do launcher)
+    _save_as_set_and_click(export_path)
+    print('   [export] _save_as_set_and_click concluído: %s' % export_path)
+    return None
 
 
 def setup_hand(hand_name, hand_path):

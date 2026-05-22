@@ -250,8 +250,8 @@ Construção planeada na Fase 3. Componentes:
 | Tab GTO no replayer | ✓ deployed | `ReplayerPage.jsx` |
 | Match automático ao carregar mão | ✓ deployed | dispara `/api/gto/match` no `useEffect` |
 | Navegação até ao nó do Hero | ✓ deployed | usa `/api/gto/navigate` |
-| Pipeline Watcher HRC → app | ◐ parcial | Mecânico validado em pt23; pós-pt34 ainda não houve ciclo completo `app → adapter → watcher → adapter → app` validado. Ver `docs/JOURNAL_2026-05-22-pt30-pt34.md`. |
-| Watcher exporta Complete Export + Depth útil | ✗ AUSENTE | Hoje exporta default "Manual Selection" Depth 2 sem selecção = 1 nó por árvore. Inviável para o GTO Brain. |
+| Pipeline Watcher HRC → app | ✓ ciclo completo validado (pt35) | Validado ponta-a-ponta no Beelink em pt35 (smoke real `GG-5944816316`): app → adapter → watcher → adapter → app, `.zip` final 44 MB. Antes só mecânico (pt23). |
+| Watcher exporta Complete Export + Depth útil | ✓ deployed (pt35) | `export_strategies` (SWAP em `patched_funcs.py`) muda o combo do diálogo Export Strategies de "Manual Selection" → **"Complete Export"** via Win32 `CB_SETCURSEL` (idx **0→1**, confirmado por read-back) + `CBN_SELCHANGE`; OK por `BM_CLICK`; Save As via `_save_as_set_and_click` portado (clipboard + `BM_CLICK` no Save). Complete Export **ignora o Depth** (smoke do Rui), por isso não se escreve no campo. `.exe` SHA256 `33eae43a…c53c4f`. |
 | Trees importadas em produção | ✗ ~0 | Rui não importou manualmente; pipeline automático ausente |
 | Import automático Watcher → `gto_trees` | ✗ AUSENTE | Zip recebido em `/api/queue/hrc/results` vai só para `hrc_jobs`, não para `gto_trees`+`gto_nodes` |
 | Navegação a nós que não o Hero | ✗ AUSENTE | UI hoje navega só até ao nó do Hero |
@@ -361,7 +361,7 @@ O matching engine v3 actual (§5.3) usa scores por stack absoluto. Em ambos os f
 
 | ID | Severidade | Resumo |
 |---|---|---|
-| `#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2` | 🔴 HIGH | Watcher exporta em "Manual Selection" Depth 2 sem selecção = 1 nó. Inviável. Fix na Fase 1. |
+| `#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2` | ✅ FECHADO (pt35) | ~~Watcher exporta em "Manual Selection" Depth 2 sem selecção = 1 nó.~~ Fechado na Fase 1: `export_strategies` (SWAP) muda o combo para "Complete Export" (idx 0→1, read-back), OK por `BM_CLICK`. Smoke real `GG-5944816316` = 44 MB (era 1 nó / ~6 KB). |
 | `#GTO-IMPORT-AUTOMATICO-AUSENTE` | 🔴 HIGH | Pipeline auto Watcher → `gto_trees` não existe. Sem isto, biblioteca não cresce. Fase 2. |
 | `#GTO-NAVIGATE-SO-HERO-NODE` | 🟡 MED | UI hoje só navega até ao nó do Hero. Para ver decisão de vilões (caso canónico do BTN 3-bettar vs open do MP), precisa de navegação multi-spot. Fase 3. |
 | `#FIELD-PIPELINE-AUSENTE` | 🟡 MED | Lado Field completo por construir. Fase 3. |

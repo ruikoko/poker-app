@@ -6,6 +6,33 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (22 Maio 2026 — pt35, GTO Brain Fase 1)
+
+**Fase 1 do GTO Brain fechada.** O watcher passa a exportar em **Complete
+Export** (antes "Manual Selection" = 1 nó por árvore). Smoke real ponta-a-ponta
+validado no Beelink (`GG-5944816316`, 2 runs, `.zip` final **44 MB** — dentro da
+faixa empírica 40-70 MB). `.exe` recompilado e instalado, SHA256
+`33eae43aa0e4ab0f331b880ee217efe6d52369b4190cc07fb3be7fb647c53c4f`.
+
+Mudança: SWAP de `export_strategies` em `tools/watcher_src/patched_funcs.py`
+(Win32 `CB_SETCURSEL` idx 0→1 + `CBN_SELCHANGE` + read-back; OK por `BM_CLICK`)
+e port self-contained do `_save_as_set_and_click` (Save As via clipboard +
+`BM_CLICK` no Save). Boot via `wrapper.py` **sem** `make_patched_export`.
+
+### Tech debt novo registado em pt35 (1)
+
+| ID | Severidade | Estado |
+|---|---|---|
+| **#DOC-MAKE-PATCHED-EXPORT-OVERRIDES-SWAP** | 🟢 LOW (resolvido pt35) | **Ponto cego documentado para não se repetir.** O launcher Baltazar (`hrc_watcher_apr19_launcher.pyc`), no seu `main()`, corre `g['export_strategies'] = make_patched_export(g)` **depois** do `exec` do trampoline (offsets `main()`: 154 exec → 232-256 override → 260 `g['main']()`). Ou seja, **sobrescreve qualquer `export_strategies` definida via SWAP em `patched_funcs.py`** com a versão do launcher → um SWAP dessa função tem efeito **zero** em produção. Descoberto em pt35 por disassembly do launcher (a 1ª recompilação teria passado o smoke do trampoline mas o `.exe` ignoraria a mudança). **Resolvido em pt35:** o `wrapper.py` passa a bootar o trampoline directamente (`exec` → `MAX_CONCURRENT=1` → `g['main']()`) **sem** chamar `make_patched_export`, tornando canónica a nossa `export_strategies`. **Lição:** antes de assumir que um SWAP aterra, confirmar que o launcher não monkey-patcha a função pós-`exec`. Ver `HRC_ANATOMIA_OPERACIONAL.md §8`. |
+
+### Tech debt do GTO Brain fechado em pt35 (1)
+
+| ID | Como fechou |
+|---|---|
+| **#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2** (🔴 HIGH, era Fase 1; vive em `docs/GTO_BRAIN.md §9`) | `export_strategies` (SWAP) muda o combo do diálogo Export Strategies de "Manual Selection" → "Complete Export" via `CB_SETCURSEL` (idx 0→1, read-back) + `CBN_SELCHANGE`; OK por `BM_CLICK`; Save As robusto via `_save_as_set_and_click` portado. Smoke real `GG-5944816316` = 44 MB (era 1 nó / ~6 KB). |
+
+---
+
 ## Estado actual (22 Maio 2026 — pt30-pt34)
 
 Sessão pt30-pt34 (madrugada). **Fecho de toda a cadeia da 2ª run do HRC**

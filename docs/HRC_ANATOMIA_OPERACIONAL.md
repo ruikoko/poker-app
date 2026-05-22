@@ -446,10 +446,20 @@ timeout). Timeouts: 2h (1ª run), 8h (2ª run).
 
 | Item | Valor |
 |---|---|
-| Mecanismo | O launcher Baltazar tem um patch `make_patched_export` que substitui `export_strategies` por uma versão que usa o clipboard para colar o caminho de saída |
-| Output | Ficheiro `.zip` |
+| Mecanismo | **(pt35)** A `export_strategies` é a do nosso `patched_funcs.py` (SWAP): muda o combo do diálogo Export Strategies de "Manual Selection" para **"Complete Export"** (Win32 `CB_SETCURSEL` idx 0→1 + `CBN_SELCHANGE` + read-back), clica OK por `BM_CLICK`, e trata o Save As via `_save_as_set_and_click` (clipboard + `BM_CLICK` no botão Save). **Até pt34** corria a versão do launcher (`make_patched_export`, modo "Manual Selection" = 1 nó) — ver armadilha abaixo. |
+| Output | Ficheiro `.zip` (Complete Export ≈ 40-70 MB; smoke real pt35 `GG-5944816316` = 44 MB) |
 | Path no Beelink | `C:\Users\Administrator\Documents\Teste completo\done\Exports\<hand_id>.zip` |
-| Patch do launcher | `BM_CLICK + wait save as` — força fluxo de export limpo |
+| Save As | `_save_as_set_and_click` (port pt35 do launcher): espera o file-picker, cola o path por clipboard (fallback typewrite), clica Save via `BM_CLICK` (fallback Enter) |
+
+> **Armadilha (pt35, `#DOC-MAKE-PATCHED-EXPORT-OVERRIDES-SWAP`).** O launcher
+> Baltazar (`hrc_watcher_apr19_launcher.pyc`) faz, no seu `main()`,
+> `g['export_strategies'] = make_patched_export(g)` **depois** do `exec` do
+> trampoline. Logo, **um SWAP de `export_strategies` em `patched_funcs.py` NÃO
+> aterra em produção** — é sobrescrito pela versão do launcher (modo "Manual
+> Selection" = 1 nó). Resolvido em pt35 fazendo o `wrapper.py` bootar o
+> trampoline **sem** chamar `make_patched_export`, tornando canónica a nossa
+> `export_strategies`. **Antes de assumir que um SWAP aterra, confirmar que o
+> launcher não monkey-patcha a função pós-`exec`.**
 
 ## 9. Bugs e limitações observáveis (não nossos)
 
