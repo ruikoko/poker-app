@@ -31,6 +31,12 @@ e port self-contained do `_save_as_set_and_click` (Save As via clipboard +
 |---|---|
 | **#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2** (🔴 HIGH, era Fase 1; vive em `docs/GTO_BRAIN.md §9`) | `export_strategies` (SWAP) muda o combo do diálogo Export Strategies de "Manual Selection" → "Complete Export" via `CB_SETCURSEL` (idx 0→1, read-back) + `CBN_SELCHANGE`; OK por `BM_CLICK`; Save As robusto via `_save_as_set_and_click` portado. Smoke real `GG-5944816316` = 44 MB (era 1 nó / ~6 KB). |
 
+### Tech debt aberto em pt35 — pré-requisito da Fase 2 (1)
+
+| ID | Severidade | Estado |
+|---|---|---|
+| **#PIPELINE-ROBUSTNESS-SMOKE-BATTERY** | 🟡 MED | **Aberto, ainda não fechado.** Validar o pipeline ponta-a-ponta nas **4 combinações site × formato** listadas em `docs/GTO_BRAIN.md §7` ("Fase 1 — smoke battery de robustez pré-Fase 2"): (1) GG NKO Vanilla, (2) PokerStars PKO, (3) Winamax PKO, (4) PokerStars NKO Vanilla. Cada smoke = mão marcada na app → adapter pull → watcher → adapter push → `.zip` em `hrc_jobs` com dezenas de MB / milhares de nós. Ponto de partida validado: pt35 GG PKO 50% (`GG-5944816316`, 44 MB). **Pré-requisito para arrancar a Fase 2** (auto-import `.zip` → `gto_trees`/`gto_nodes`). |
+
 ---
 
 ## Estado actual (22 Maio 2026 — pt30-pt34)

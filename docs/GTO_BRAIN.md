@@ -275,6 +275,31 @@ Construção planeada na Fase 3. Componentes:
 
 **Estado de saída:** cada mão marcada para HRC produz uma árvore consumível pelo GTO Brain.
 
+#### Fase 1 — smoke battery de robustez pré-Fase 2
+
+Antes de avançar para a Fase 2 (auto-import `.zip` → `gto_trees`), validar o
+pipeline ponta-a-ponta em **4 combinações de site × formato**. Cada smoke segue
+o mesmo padrão da pt35 (marcar mão na app → adapter pull → watcher → adapter
+push → `.zip` em `hrc_jobs` com dezenas de MB e milhares de nós).
+
+Combinações alvo:
+
+1. **GG NKO Vanilla** — formato sem KO (MTT regular ICM puro, sem bounty).
+   Mystery KO **NÃO** conta como NKO (é PKO com bounty hidden mas progressive).
+   Valida o pipeline em estrutura não-bounty: `lobby_vision.LOBBY_RATIO_LOOKUP`
+   devolve `None`/`0.0`; `hrc_script_gen` sem bounty config; cálculo HRC
+   vanilla ICM.
+2. **PokerStars PKO** — primeiro site não-GG. Valida hero_aliases
+   (`kokonakueka` / `misterpoker1973`) + parser HH PokerStars.
+3. **Winamax PKO** — valida alias `thinvalium` + parser HH Winamax.
+4. **PokerStars NKO Vanilla** — combinação extra; potencial revelar edge cases
+   na intersecção de site não-GG com formato vanilla.
+
+**Ponto de partida (validado):** smoke pt35 = GG PKO 50% (`GG-5944816316`,
+Bounty Hunters Daily, 44 MB / milhares de nós).
+
+Tracking: `#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` em `docs/TECH_DEBTS_INVENTARIO.md`.
+
 ### Fase 2 — Acumular trees automaticamente no GTO Brain
 
 **Objectivo:** transformar cada `.zip` recebido pelo adapter em entries em `gto_trees`+`gto_nodes` sem intervenção do Rui.
