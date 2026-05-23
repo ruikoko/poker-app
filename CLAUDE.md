@@ -534,6 +534,21 @@ Tech debts: ✅ fechado `#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2`; 🟢 novo/resolvi
 
 Docs desta sessão: `GTO_BRAIN.md` (novo, v1); `HRC_ANATOMIA_OPERACIONAL.md` §8 (v6); `TECH_DEBTS_INVENTARIO.md` (secção pt35); `PENDENTES.md`; `RUNBOOK_SMOKE_BEELINK.md`; `WORKFLOW_OPERACIONAL.md`; `JOURNAL_2026-05-22-pt35.md` (novo).
 
-Última sessão fechada: **pt35** (22 Maio 2026 — GTO Brain Fase 1: watcher exporta Complete Export, smoke real `GG-5944816316` 44 MB, `GTO_BRAIN.md` v1). Detalhes em `docs/JOURNAL_2026-05-22-pt35.md`.
+## pt36 — HRC Run-2 always-dispatch (23 Maio 2026)
 
-Próxima sessão: **smoke battery de robustez** (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`) — validar o pipeline nas 4 combinações site × formato (GG NKO Vanilla, PokerStars PKO, Winamax PKO, PokerStars NKO Vanilla) como porta de entrada da **Fase 2** (auto-import `.zip` → `gto_trees`/`gto_nodes`). Em paralelo continua aberto `#HRC-BOUNTY-HARDCODED-50PCT`. Backlog completo em `docs/PENDENTES.md` e `docs/GTO_BRAIN.md §7`.
+**Backend-only; `.exe` do watcher não tocado.** Garante que **toda mão exportada para o robot tem 2 runs** (Opção D1). Fecha `#HRC-RUN-2-ALWAYS-DISPATCH`, removendo o blocker que fazia algumas mãos exportarem só 1 run (qualidade inconsistente da biblioteca GTO).
+
+**Origem:** investigação read-only do pipeline HRC ponta-a-ponta (sync Discord → fim da 2ª run, secções A-K). Achado disparador: a 2ª run no watcher só dispara se `aggressor_real_action != None` (`tools/watcher_src/patched_funcs.py:1987`); mãos sem raiser (limp/walk) ou com aggressor inutilizável davam `None` → 1 run só. Correcção factual registada na investigação: a Vision do **replayer GG no Discord é OpenAI `gpt-4.1-mini`** (`routers/screenshot.py`), **não** Claude Sonnet (essa é a do #lobbys/backoffice).
+
+Fix em `backend/app/services/queue_export.py:build_queue_zip` (1 commit `33feaad`):
+- `aggressor_real_action` com **fallback unificado**: `real` (dict com position válida) / `fallback_root` (derive devolve `None`) / `fallback_unusable_position` (position `None`/`"BB"`/fora da Strategy Table). Nos 2 fallbacks → sentinela na raiz (`positions[0]`, `target_node_offset=0`); o caso `real` preserva a estrutura legacy (sem chave `source`).
+- `target_node_offset` computado **sempre**; campo novo `aggressor_source` no `manifest.hands_included[*]` para auditoria.
+- Skip novo `no_seats_at_table` (HH sem button / <2 seats = malformada → não vai ao robot).
+
+Suite **573 PASSED**; smoke local validado em 4 cenários (real / fallback_root / fallback_unusable_position / no_seats). Tech debt novo: `#PARSER-SEATS-FAILURES` (🟡 MED) — cada falha do parser de seats passa a custar a **mão inteira** à biblioteca (antes só a 2ª run); robustecer `derive_seats_in_preflop_order`.
+
+Docs desta sessão: `JOURNAL_2026-05-23-pt36.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt36); `PENDENTES.md`.
+
+Última sessão fechada: **pt36** (23 Maio 2026 — `#HRC-RUN-2-ALWAYS-DISPATCH` fechado: toda mão exportada garante 2 runs via fallback do aggressor no backend; `.exe` intacto). Detalhes em `docs/JOURNAL_2026-05-23-pt36.md`.
+
+Próxima sessão: **smoke battery de robustez** (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`, ver `docs/GTO_BRAIN.md §7`) — validar o pipeline nas 4 combinações site × formato (GG NKO Vanilla, PokerStars PKO, Winamax PKO, PokerStars NKO Vanilla) como porta de entrada da **Fase 2** do GTO Brain (auto-import `.zip` → `gto_trees`/`gto_nodes`). Em paralelo continua aberto `#HRC-BOUNTY-HARDCODED-50PCT`. Backlog completo em `docs/PENDENTES.md`.
