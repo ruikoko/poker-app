@@ -926,6 +926,21 @@ def build_queue_zip(
                 })
                 continue
 
+            # pt36 #HRC-RUN-2-ALWAYS-DISPATCH: seats derivados cedo para (a)
+            # decidir o fallback do aggressor e (b) skip de HH cuja mesa não
+            # parseia (sem button / <2 seats = malformada → não vai ao robot).
+            # Import lazy: hrc_node_offset importa de queue_export → evita ciclo.
+            from app.services.hrc_node_offset import (
+                compute_target_node_offset,
+                derive_aggressor_stack_bb,
+                strategy_table_positions,
+            )
+            seats_at_table = len(derive_seats_in_preflop_order(hh_text))
+            positions = strategy_table_positions(seats_at_table)
+            if not positions:
+                skipped.append({"hand_id": hand_id, "reason": "no_seats_at_table"})
+                continue
+
             zf.writestr(f"{hand_id}/hh.txt", hh_text)
 
             # pt23: merge hints (equity_model, max_players, script_path) com
@@ -963,42 +978,54 @@ def build_queue_zip(
                 zf.writestr(f"{hand_id}/script.js", script_js)
                 hints["script_path"] = "script.js"
 
-            # #META-AGGRESSOR-REAL-ACTION mantém-se em payouts.json para o
-            # Bloco 2 do watcher (Selected Subtree + click por position match).
-            if _bb is not None:
-                aggressor_real_action = derive_aggressor_real_action(
-                    hh_text, _sb, _bb,
-                )
+            # #META-AGGRESSOR-REAL-ACTION + pt36 #HRC-RUN-2-ALWAYS-DISPATCH:
+            # garantir 2ª run sempre. derive devolve a acção real; se for None
+            # (limp/walk, sem blinds) ou se a position for inutilizável
+            # (None / "BB" / fora da Strategy Table), aplica sentinela na raiz.
+            real = derive_aggressor_real_action(hh_text, _sb, _bb) if _bb is not None else None
+            if real is None:
+                aggressor_source = "fallback_root"
+            elif not (isinstance(real, dict) and real.get("position") in positions):
+                aggressor_source = "fallback_unusable_position"
             else:
-                aggressor_real_action = None
+                aggressor_source = "real"
+
+            if aggressor_source == "real":
+                aggressor_real_action = real  # estrutura legacy intacta, sem "source"
+            else:
+                aggressor_real_action = {
+                    "type": "fallback_root",
+                    "position": positions[0],   # UTG (>=4-handed), BU (3), BU/SB (HU)
+                    "size_bb": None,
+                    "source": aggressor_source,  # "fallback_root" | "fallback_unusable_position"
+                }
             hints["aggressor_real_action"] = aggressor_real_action
 
-            # pt25e Bloco 2 piece 2: target_node_offset para o watcher
-            # premer seta-para-baixo até pousar na linha do raiser real
-            # antes da 2ª run em Selected Subtree.
-            # pt27: passa `seats_at_table` (nº real de jogadores sentados)
-            # em vez de `max_players` (redução ICM). A Strategy Table HRC
-            # renderiza uma linha-base por seat real, independentemente da
-            # redução ICM aplicada em Edit Settings.
+            # pt25e Bloco 2 piece 2 + pt36: target_node_offset para o watcher
+            # premer seta-para-baixo até pousar na linha do raiser real antes
+            # da 2ª run em Selected Subtree. No caso real, offset = linha do
+            # raiser; no fallback, offset = 0 (raiz da Strategy Table).
+            # aggressor_real_action é sempre dict agora (gate da 2ª run sempre
+            # passa); raiser_stack_bb só faz sentido no caso real.
+            # pt27: `seats_at_table` (nº real de jogadores sentados, não a
+            # redução `max_players` ICM) — derivado na Zona 1 acima.
             target_node_offset = None
-            if aggressor_real_action is not None and _bb is not None:
-                try:
-                    from app.services.hrc_node_offset import (
-                        compute_target_node_offset, derive_aggressor_stack_bb,
-                    )
-                    raiser_stack_bb = derive_aggressor_stack_bb(hh_text, _bb)
-                    seats_at_table = len(derive_seats_in_preflop_order(hh_text))
-                    target_node_offset = compute_target_node_offset(
-                        aggressor_real_action,
-                        seats_at_table,
-                        script_overrides,
-                        raiser_stack_bb,
-                    )
-                except Exception:
-                    logger.exception(
-                        "compute_target_node_offset falhou hand_id=%s", hand_id,
-                    )
-                    target_node_offset = None
+            try:
+                raiser_stack_bb = (
+                    derive_aggressor_stack_bb(hh_text, _bb)
+                    if (aggressor_source == "real" and _bb is not None) else None
+                )
+                target_node_offset = compute_target_node_offset(
+                    aggressor_real_action,
+                    seats_at_table,
+                    script_overrides,
+                    raiser_stack_bb,
+                )
+            except Exception:
+                logger.exception(
+                    "compute_target_node_offset falhou hand_id=%s", hand_id,
+                )
+                target_node_offset = None
 
             if payout_blob is not None:
                 merged: dict = dict(payout_blob) if isinstance(payout_blob, dict) else {"_blob": payout_blob}
@@ -1039,6 +1066,7 @@ def build_queue_zip(
                 "aggressor_position": derive_real_aggressor_position(hh_text),
                 "aggressor_real_action": aggressor_real_action,
                 "target_node_offset": target_node_offset,
+                "aggressor_source": aggressor_source,
                 "hand_meta": hand_meta,
                 "converted_format": (
                     "pokerstars_compat" if site == "GGPoker" else "passthrough"

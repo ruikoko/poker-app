@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 22 Maio 2026 (fim da sessão pt35).
+**Última actualização:** 23 Maio 2026 (fim da sessão pt36).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -28,6 +28,13 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    > **Complete Export** (44 MB, ciclo funcional ponta-a-ponta), pelo que a
    > comparação célula-a-célula contra o Save As manual deixou de fazer
    > sentido.
+   >
+   > **pt36 — blocker removido:** `#HRC-RUN-2-ALWAYS-DISPATCH` ✅ resolvido
+   > (backend). Toda mão que entra no zip tem agora `aggressor_real_action`
+   > não-None → o gate da 2ª run no watcher passa sempre. A smoke battery
+   > deixa de ter o risco de mãos exportadas com 1 run só; mãos limp/walk
+   > passam a refinar a raiz da Strategy Table na 2ª run. (Detalhe +
+   > `#PARSER-SEATS-FAILURES` em `docs/TECH_DEBTS_INVENTARIO.md` pt36.)
 
 2. **`#HRC-BOUNTY-HARDCODED-50PCT`.** O robot mete sempre `Bounty Mode PKO
    50%` (via `select_bounty_mode` legacy). Fazer ler o `progressiveFactor`
@@ -87,20 +94,29 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    Table cai na 2ª linha (EP). Origem desconhecida. Não bloqueia o flow,
    mas investigar (pode afectar uma futura 3ª run ou navegação encadeada).
 
+8. **`#PARSER-SEATS-FAILURES` (🟡 MED, aberto pt36).** `build_queue_zip`
+   passou a skipar mãos cujo `derive_seats_in_preflop_order` devolve `[]`
+   (sem button / <2 seats) com `reason="no_seats_at_table"`. Desde
+   `#HRC-RUN-2-ALWAYS-DISPATCH`, uma falha do parser de seats custa a **mão
+   inteira** à biblioteca (antes só a 2ª run). Robustecer
+   `derive_seats_in_preflop_order` contra edge cases cross-site (PS/GG/WN/WPN;
+   ex.: nicks com espaços, `#DERIVE-MAX-PLAYERS-HERO-REGEX-GG`). Detalhe em
+   `docs/TECH_DEBTS_INVENTARIO.md` (secção pt36).
+
 ---
 
 ## Baixo prazo / qualidade
 
-8. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
+9. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
    BB stack, prompt GTO mais forte.
-9. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
+10. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
    Discord ↔ mão; ver CLAUDE.md "Imagens de contexto Discord").
-10. **Filtros derivados no Estudo.**
-11. **Dashboard — colunas adicionais.**
-12. **Winamax replayer — URL da Vision.**
-13. **`_upload_screenshot_to_storage`** — limpeza do stub.
-14. **Discord entry status** — cosmético.
-15. **Discord page — dual time filters.**
+11. **Filtros derivados no Estudo.**
+12. **Dashboard — colunas adicionais.**
+13. **Winamax replayer — URL da Vision.**
+14. **`_upload_screenshot_to_storage`** — limpeza do stub.
+15. **Discord entry status** — cosmético.
+16. **Discord page — dual time filters.**
 
 ---
 

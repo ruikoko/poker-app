@@ -6,6 +6,31 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (23 Maio 2026 — pt36, HRC Run-2 always-dispatch)
+
+Backend-only. Garante que **toda mão exportada para o robot tem 2 runs**
+(Opção D1). `build_queue_zip` passa a aplicar uma sentinela ao
+`aggressor_real_action` quando o derive devolve `None` ou uma position
+inutilizável, de modo que o gate da 2ª run no watcher
+(`tools/watcher_src/patched_funcs.py:1987`, `if aggressor_real_action is not
+None`) passa sempre. `.exe` **não tocado** — fix puramente backend no payload.
+Suite **573 PASSED**; smoke local validado em 4 cenários (real / fallback_root
+/ fallback_unusable_position / no_seats).
+
+### Tech debt resolvido em pt36 (1)
+
+| ID | Como fechou |
+|---|---|
+| **#HRC-RUN-2-ALWAYS-DISPATCH** | ✅ **Resolvido pt36.** `build_queue_zip` (`backend/app/services/queue_export.py`) aplica fallback unificado ao `aggressor_real_action`: (a) **`real`** quando o derive devolve dict com `position ∈ strategy_table_positions(seats_at_table)`; (b) **`fallback_root`** quando devolve `None` (limp/walk, sem blinds); (c) **`fallback_unusable_position`** quando devolve dict mas position é `None`/`"BB"`/fora da Strategy Table. Nos casos (b)/(c) a sentinela é `{"type":"fallback_root","position":positions[0],"size_bb":None,"source":<b\|c>}` → `target_node_offset=0` (raiz). `manifest.hands_included[*]` ganha o campo `aggressor_source` (`real`/`fallback_root`/`fallback_unusable_position`) para auditoria. O caso `real` preserva a estrutura legacy do derive (sem chave `source`). Tests: 4 novos + 1 renomeado/actualizado (`..._None_for_limp_pot` → `..._fallback_root_for_limp_pot`) + assert reforçado num test existente. |
+
+### Tech debt novo aberto em pt36 (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#PARSER-SEATS-FAILURES** | 🟡 MED | `build_queue_zip` passou a **skipar** mãos cujo `derive_seats_in_preflop_order` devolve `[]` (sem `Seat #N is the button` ou <2 seats) com `reason="no_seats_at_table"` — HH malformada não vai ao robot. **Consequência:** uma falha do parser de seats agora **custa a mão inteira à biblioteca** (antes só perdia a 2ª run). O parser regex já teve bugs em HHs válidas (ex.: `#DERIVE-MAX-PLAYERS-HERO-REGEX-GG`, nicks com espaços). Robustecer `derive_seats_in_preflop_order` (`backend/app/services/queue_export.py:140`) contra edge cases conhecidos cross-site (PS/GG/WN/WPN) é prioridade — cada falha é agora uma mão perdida em silêncio (só rasto em `manifest.skipped`). |
+
+---
+
 ## Estado actual (22 Maio 2026 — pt35, GTO Brain Fase 1)
 
 **Fase 1 do GTO Brain fechada.** O watcher passa a exportar em **Complete

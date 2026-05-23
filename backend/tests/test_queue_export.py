@@ -1885,6 +1885,7 @@ def test_build_queue_zip_writes_script_js_for_hand_with_open():
     assert entry["script_overrides"]["SIZES_OPEN_OTHERS"] == [3.0, "ALLIN"]
     assert entry["effective_stack_bb"] == 25.0
     assert entry["aggressor_position"] == 0  # UTG=0 em 8-handed (HRC docs conv)
+    assert entry["aggressor_source"] == "real"  # pt36: open real → "real"
     assert entry["script_generation_error"] is None
 
 
@@ -1949,6 +1950,127 @@ def test_build_queue_zip_script_generation_error_on_template_io_failure(monkeypa
     assert entry["has_script"] is False
     assert entry["script_generation_error"] is not None
     assert "FileNotFoundError" in entry["script_generation_error"]
+
+
+# ── pt36 #HRC-RUN-2-ALWAYS-DISPATCH: fallback do aggressor + skip no-seats ──
+
+def test_build_queue_zip_fallback_root_on_walk():
+    """Walk-to-BB (sem raiser) → aggressor sentinela fallback_root na raiz.
+    Garante que o robot passa o gate da 2ª run mesmo sem agressão real."""
+    hh = (
+        "Hand #FR1: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "A: posts small blind 50\n"
+        "B: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "A: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    hand = {
+        "id": 1, "hand_id": "GG-FR", "site": "GGPoker",
+        "tournament_number": "111", "raw": hh, "player_names": {},
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    payouts = _json.loads(zf.read("GG-FR/payouts.json"))
+    ara = payouts["aggressor_real_action"]
+    assert ara is not None
+    assert ara["source"] == "fallback_root"
+    assert ara["position"] == "BU/SB"   # positions[0] em HU (2 seated)
+    assert ara["size_bb"] is None
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["aggressor_source"] == "fallback_root"
+    assert entry["target_node_offset"] == 0
+
+
+def test_build_queue_zip_fallback_unusable_position_bb_raise():
+    """1º raiser preflop é o BB (raise sobre limps) → position "BB" não está
+    na Strategy Table de opens → fallback_unusable_position na raiz."""
+    hh = (
+        "Hand #BB1: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: BUp (10000 in chips)\n"
+        "Seat 2: SBp (10000 in chips)\n"
+        "Seat 3: BBp (10000 in chips)\n"
+        "SBp: posts small blind 50\n"
+        "BBp: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "BUp: calls 100\n"
+        "SBp: calls 50\n"
+        "BBp: raises 300 to 400\n"
+        "BUp: folds\n"
+        "SBp: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    hand = {
+        "id": 1, "hand_id": "GG-BB", "site": "GGPoker",
+        "tournament_number": "111", "raw": hh, "player_names": {},
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    payouts = _json.loads(zf.read("GG-BB/payouts.json"))
+    ara = payouts["aggressor_real_action"]
+    assert ara is not None
+    assert ara["source"] == "fallback_unusable_position"
+    assert ara["position"] == "BU"   # positions[0] em 3-handed
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["aggressor_source"] == "fallback_unusable_position"
+    assert entry["target_node_offset"] == 0
+
+
+def test_build_queue_zip_skips_hand_with_no_seats():
+    """HH sem 'is the button' → derive_seats devolve [] →
+    strategy_table_positions [] → mão skipped (não vai ao robot)."""
+    hh = (
+        "Hand #NS1: Test - Level1 (50/100) - 2026/01/01\n"
+        "Table 'T' 6-max\n"   # sem 'Seat #N is the button'
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "A: posts small blind 50\n"
+        "B: posts big blind 100\n"
+        "*** HOLE CARDS ***\n"
+        "A: folds\n"
+        "*** SUMMARY ***\n"
+    )
+    hand = {
+        "id": 1, "hand_id": "GG-NS", "site": "GGPoker",
+        "tournament_number": "111", "raw": hh, "player_names": {},
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    names = set(zf.namelist())
+    assert "GG-NS/hh.txt" not in names
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 0
+    assert any(
+        s["hand_id"] == "GG-NS" and s["reason"] == "no_seats_at_table"
+        for s in manifest["skipped"]
+    )
+
+
+def test_build_queue_zip_aggressor_source_real_on_open():
+    """Open real (UTG) → aggressor_source 'real'; o dict mantém a estrutura
+    legacy de derive_aggressor_real_action (SEM chave 'source')."""
+    hand = {
+        "id": 1, "hand_id": "GG-REAL", "site": "GGPoker",
+        "tournament_number": "111", "raw": _HH_UTG_OPEN_8MAX, "player_names": {},
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    payouts = _json.loads(zf.read("GG-REAL/payouts.json"))
+    ara = payouts["aggressor_real_action"]
+    assert ara is not None
+    assert "source" not in ara          # caso real preserva estrutura legacy
+    assert ara["position"] == "UTG"
+    assert ara["type"] == "raise"
+    manifest = _json.loads(zf.read("manifest.json"))
+    entry = manifest["hands_included"][0]
+    assert entry["aggressor_source"] == "real"
+    assert entry["target_node_offset"] == 0   # UTG = first-to-act → raiz
 
 
 # ── pt25-revisado: _resolve_players_left via lobby_processing_log ───────────
@@ -2381,9 +2503,11 @@ def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_payouts()
     assert payouts["aggressor_real_action"] == expected
 
 
-def test_build_queue_zip_aggressor_real_action_None_for_limp_pot():
-    """pt25e: hand sem raise/bet preflop (limp pot) → entry e payouts.json
-    com `aggressor_real_action=None` (campo presente, valor null)."""
+def test_build_queue_zip_fallback_root_for_limp_pot():
+    """pt36 #HRC-RUN-2-ALWAYS-DISPATCH (substitui o antigo _None_for_limp_pot):
+    limp pot (sem raise/bet preflop) → o derive devolve None, mas
+    build_queue_zip aplica a sentinela fallback_root na raiz para garantir a
+    2ª run. Antes (pt25e) o campo ficava None."""
     limp_hh = """Poker Hand #TM3: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00
 Table 'X' 8-max Seat #4 is the button
 Seat 1: P1 (10000 in chips)
@@ -2411,6 +2535,11 @@ BBplayer: checks
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    assert entry["aggressor_real_action"] is None
+    assert entry["aggressor_source"] == "fallback_root"
+    assert entry["target_node_offset"] == 0
+    ara = entry["aggressor_real_action"]
+    assert ara is not None
+    assert ara["source"] == "fallback_root"
+    assert ara["position"] == "UTG"   # positions[0] em 4 seats (UTG, BU, SB)
     payouts = _json.loads(zf.read("GG-LIMP/payouts.json"))
-    assert payouts["aggressor_real_action"] is None
+    assert payouts["aggressor_real_action"]["source"] == "fallback_root"
