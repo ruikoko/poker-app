@@ -159,6 +159,16 @@ Detalhe completo em `HRC_ANATOMIA_OPERACIONAL.md` §12.
 - No IRE, `Mystery KO` **é** um formato permitido (`ALLOWED_FORMATS =
   {"PKO", "Mystery KO"}`).
 
+### 4.5 Export do resultado — Complete Export (pt35)
+
+Desde pt35, o robot exporta o resultado via **Complete Export** (no diálogo
+"Hand > Export Strategies" do HRC, o combo passa de "Manual Selection" para
+"Complete Export"). Antes corria "Manual Selection" sem selecção, o que dava
+**1 nó** por árvore = resultado inútil. Output: `.zip` de ~40-70 MB (smoke
+real `GG-5944816316` = 44 MB) — é este `.zip` que o GTO Brain consome. O
+campo Depth é ignorado pelo Complete Export. Mecânica completa em
+`HRC_ANATOMIA_OPERACIONAL.md §8`; visão do GTO Brain em `GTO_BRAIN.md`.
+
 ---
 
 ## 5. IRE (Índice de Redução de Equity / Bounty Power)

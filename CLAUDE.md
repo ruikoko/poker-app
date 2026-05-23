@@ -12,8 +12,9 @@ Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro este
 4. **`docs/MAPA_ACOPLAMENTO.md`** — mapa técnico de conceitos (`match_method`, `study_state`, `origin`, etc).
 5. **`docs/TECH_DEBTS_INVENTARIO.md`** — backlog actualizado de tech debts.
 6. **`docs/HRC_ANATOMIA_OPERACIONAL.md`** — anatomia do HRC consolidada (wizard, Strategy Table, popup Nash, clipboard, coords, formato HH aceite). **Obrigatório se o trabalho toca o robot ou a pipeline HRC.** Lê antes de propor mudanças em `tools/watcher_src/` ou `backend/app/services/queue_export.py`.
+7. **`docs/GTO_BRAIN.md`** — visão consolidada do GTO Brain (origem, filosofia, arquitectura `gto_trees`/`gto_nodes` + matching engine, plano em 3 fases). **Obrigatório se o trabalho toca o GTO Brain** (watcher export, `backend/app/routers/gto.py`, tab GTO do replayer, ou o futuro pipeline `.zip` → `gto_trees`).
 
-Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
+Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no GTO Brain), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
 
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
@@ -192,7 +193,7 @@ Depois da consolidação a **Inbox foi eliminada** (redundante com Dashboard + b
 4. **Torneios** — aba GGPoker (Com SS / Sem SS); aba HM3 com Tag.
 5. **Discord** — centro de operações SS↔HH: logs detalhados, associação de gyazos (±90s → mão adjacente). **Sem** listas de SSs/mãos (vivem no Dashboard / Estudo / Vilões).
 6. **HM3** — centro de operações do script `.bat`: logs, listagem de mãos filtrável (tag / data / PKO-NPKO / pré-flop vs pós-flop), edição manual de tags com re-avaliação automática de destinos.
-7. **GTO** — inalterada.
+7. **GTO** — biblioteca de árvores HRC + GTO Brain. A página `/gto` é só gestão da biblioteca; o consumo real é a tab GTO **dentro do replayer** (match automático da árvore + navegação até ao nó do Hero). Fase 1 fechada em pt35 (watcher exporta Complete Export). Detalhe completo em `docs/GTO_BRAIN.md`.
 
 ### 3. Transições entre secções
 
@@ -515,6 +516,24 @@ Madrugada. **Toda a cadeia da 2ª run (Selected Subtree) ficou funcional ponta-a
 
 Docs desta sessão: `HRC_ANATOMIA_OPERACIONAL.md` v5; `JOURNAL_2026-05-22-pt30-pt34.md` (novo); `RUNBOOK_SMOKE_BEELINK.md` v2; `WORKFLOW_OPERACIONAL.md` (novo); `PENDENTES.md` (novo). 6 tech debts fechados, 2 abertos (`#CURSOR-ANOMALY-POST-SAVE-AS`, `#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`).
 
-Última sessão fechada: **pt30-pt34** (22 Maio 2026 — fecho da cadeia da 2ª run do HRC, smoke real ponta-a-ponta com `.zip` ~23 000 nós). Detalhes em `docs/JOURNAL_2026-05-22-pt30-pt34.md`.
+## pt35 — GTO Brain Fase 1 (22 Maio 2026)
 
-Próxima sessão: **validar formalmente** o `.zip` pt34 v1 (~23 000 nós) vs o Save As manual da sessão anterior; depois atacar `#HRC-BOUNTY-HARDCODED-50PCT` (robot pôr PKO N% conforme o formato detectado). Backlog completo em `docs/PENDENTES.md`.
+**Fase 1 do GTO Brain fechada.** O watcher passa a exportar em **Complete Export** — antes corria "Manual Selection" sem selecção = **1 nó por árvore** (inútil). Smoke real ponta-a-ponta **funcional** validado no Beelink (`GG-5944816316`, Bounty Hunters Daily, 2 runs), `.zip` final **44 MB** (faixa empírica 40-70 MB) contra 1 nó / ~6 KB antes. `.exe` recompilado e instalado, SHA256 `33eae43a…c53c4f`. É o primeiro ciclo `app → adapter → watcher → adapter → app` validado de verdade (até pt23 só mecânico).
+
+3 commits em main:
+
+| Commit | O quê |
+|---|---|
+| `7eca782` | docs — novo `GTO_BRAIN.md` (v1): visão consolidada do GTO Brain (origem, filosofia, arquitectura `gto_trees`/`gto_nodes` + matching engine v3, plano em 3 fases). |
+| `94a83b1` | watcher — `export_strategies` (SWAP em `tools/watcher_src/patched_funcs.py`) muda o combo do diálogo Export Strategies de "Manual Selection" → **"Complete Export"** via Win32 `CB_SETCURSEL` (idx 0→1, read-back) + `CBN_SELCHANGE`; OK por `BM_CLICK`; Save As via `_save_as_set_and_click` portado. `wrapper.py` boota o trampoline **sem** `make_patched_export`. |
+| `c22a617` | docs — `GTO_BRAIN.md` regista a smoke battery de robustez (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`) como pré-requisito da Fase 2. |
+
+(+ `135be97` docs — clarificação do `#HRC-BOUNTY-HARDCODED-50PCT`: flow data-driven vs hardcoded, validação parcial só PKO 50%.)
+
+Tech debts: ✅ fechado `#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2`; 🟢 novo/resolvido `#DOC-MAKE-PATCHED-EXPORT-OVERRIDES-SWAP` (o launcher Baltazar sobrescrevia o SWAP de `export_strategies` pós-`exec` via `make_patched_export`; resolvido bootando o trampoline directamente no `wrapper.py`); 🟡 novo **aberto** `#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` (validar 4 combinações site × formato antes da Fase 2). Detalhe em `docs/HRC_ANATOMIA_OPERACIONAL.md §8`, `docs/GTO_BRAIN.md` e `docs/TECH_DEBTS_INVENTARIO.md`.
+
+Docs desta sessão: `GTO_BRAIN.md` (novo, v1); `HRC_ANATOMIA_OPERACIONAL.md` §8 (v6); `TECH_DEBTS_INVENTARIO.md` (secção pt35); `PENDENTES.md`; `RUNBOOK_SMOKE_BEELINK.md`; `WORKFLOW_OPERACIONAL.md`; `JOURNAL_2026-05-22-pt35.md` (novo).
+
+Última sessão fechada: **pt35** (22 Maio 2026 — GTO Brain Fase 1: watcher exporta Complete Export, smoke real `GG-5944816316` 44 MB, `GTO_BRAIN.md` v1). Detalhes em `docs/JOURNAL_2026-05-22-pt35.md`.
+
+Próxima sessão: **smoke battery de robustez** (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`) — validar o pipeline nas 4 combinações site × formato (GG NKO Vanilla, PokerStars PKO, Winamax PKO, PokerStars NKO Vanilla) como porta de entrada da **Fase 2** (auto-import `.zip` → `gto_trees`/`gto_nodes`). Em paralelo continua aberto `#HRC-BOUNTY-HARDCODED-50PCT`. Backlog completo em `docs/PENDENTES.md` e `docs/GTO_BRAIN.md §7`.

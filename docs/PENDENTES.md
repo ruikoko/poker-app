@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 22 Maio 2026 (fim da sessão pt30-pt34).
+**Última actualização:** 22 Maio 2026 (fim da sessão pt35).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,11 +12,22 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-1. **Validar o `.zip` exportado pelo robot pt34 v1 vs Save As manual.**
-   O smoke pt34 v1 saiu com `~23 000 nós`. Confirmar que tem a árvore
-   completa (~23 255 nós) e que bate, célula-a-célula, com o Save As manual
-   da sessão anterior. É a validação formal do marco "2ª run automática =
-   fluxo manual".
+1. **`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` — porta de entrada da Fase 2 do
+   GTO Brain.** Validar o pipeline ponta-a-ponta nas **4 combinações site ×
+   formato**: (1) GG NKO Vanilla, (2) PokerStars PKO, (3) Winamax PKO,
+   (4) PokerStars NKO Vanilla. Cada smoke = mão marcada na app → adapter
+   pull → watcher → adapter push → `.zip` em `hrc_jobs` com dezenas de MB /
+   milhares de nós. Ponto de partida validado: pt35 GG PKO 50%
+   (`GG-5944816316`, Complete Export 44 MB). Só depois das 4 baterem se
+   arranca a Fase 2 (auto-import `.zip` → `gto_trees`/`gto_nodes`). Ver
+   `docs/GTO_BRAIN.md §7` e `docs/TECH_DEBTS_INVENTARIO.md`.
+
+   > **SUPERSEDED (pt35):** o antigo item "validar o `.zip` pt34 v1
+   > (~23 000 nós) vs Save As manual" foi tornado obsoleto pelo smoke real
+   > pt35. O mecanismo de export mudou de Selected-Subtree/Save-As para
+   > **Complete Export** (44 MB, ciclo funcional ponta-a-ponta), pelo que a
+   > comparação célula-a-célula contra o Save As manual deixou de fazer
+   > sentido.
 
 2. **`#HRC-BOUNTY-HARDCODED-50PCT`.** O robot mete sempre `Bounty Mode PKO
    50%` (via `select_bounty_mode` legacy). Fazer ler o `progressiveFactor`
@@ -34,6 +45,27 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    no Estudo (o mesmo conceito aparece com nomes diferentes consoante a
    fonte). 3 opções já levantadas: renomear canais, dict de aliases
    hardcoded, ou UI admin central de tags. Decisão de produto pendente.
+
+---
+
+## GTO Brain — roadmap (depois da smoke battery)
+
+Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
+
+- **Fase 1 — ✅ fechada (pt35).** Watcher exporta Complete Export; ciclo
+  `app → adapter → watcher → adapter → app` validado (`GG-5944816316`, 44 MB).
+- **Fase 2 — auto-import `.zip` → `gto_trees`/`gto_nodes`.** Estender
+  `POST /api/queue/hrc/results` para, depois de gravar em `hrc_jobs`, chamar
+  `parse_hrc_zip()` + insert em `gto_trees`/`gto_nodes`, derivando metadados
+  automaticamente (format, num_players, hero_position, stack, phase) — sem
+  form manual. **Gated por `#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`** (ver Alta
+  prioridade). Tech debts: `#GTO-IMPORT-AUTOMATICO-AUSENTE` (HIGH),
+  `#GTO-METADADOS-DERIVACAO-AUSENTE` (LOW).
+- **Fase 3 — UI rica + tab FIELD.** Navegação interactiva multi-spot (não só
+  o nó do Hero), grelha 13×13 com pesos/EVs, e construção do lado FIELD
+  (schema `field_stats_preflop` + worker de agregação + `/api/field/match` +
+  tab FIELD no replayer). Tech debts: `#GTO-NAVIGATE-SO-HERO-NODE` (MED),
+  `#FIELD-PIPELINE-AUSENTE` (MED), `#GTO-RANGE-VISUAL-VALIDACAO` (LOW).
 
 ---
 
@@ -75,5 +107,7 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 ## Cross-references
 
 - `docs/TECH_DEBTS_INVENTARIO.md` — estado detalhado de cada `#TECH-DEBT`.
+- `docs/GTO_BRAIN.md` — visão e roadmap do GTO Brain (3 fases).
+- `docs/JOURNAL_2026-05-22-pt35.md` — sessão que fechou a Fase 1 do GTO Brain.
 - `docs/JOURNAL_2026-05-22-pt30-pt34.md` — contexto da sessão que fechou a
   cadeia da 2ª run.

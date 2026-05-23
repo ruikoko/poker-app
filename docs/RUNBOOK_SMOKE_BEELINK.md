@@ -96,6 +96,11 @@ HRC (isso está em `docs/HRC_ANATOMIA_OPERACIONAL.md`).
   - Duplo-clique no `instala_ptXX.bat` (no Desktop) → ele compara a SHA,
     faz backup do robot antigo, e instala o novo.
   - Se a SHA não bate, o `.bat` aborta — não instala um ficheiro errado.
+  - **Versão actual (pt35):** SHA256
+    `33eae43aa0e4ab0f331b880ee217efe6d52369b4190cc07fb3be7fb647c53c4f` — é o
+    robot que exporta em **Complete Export** (ver §5). Se a SHA instalada não
+    for esta, estás a correr um robot anterior (ex: pt34, que exportava só
+    1 nó).
 
 ### 2.3 A chave de acesso do entregador
 
@@ -283,7 +288,10 @@ Critérios objectivos, por ordem da cadeia:
 
 1. **Robot:** a consola mostra `[QUEUED] <mão> → <mão>.zip` sem nenhum
    `[WARN]`/`[ERROR]` pelo meio.
-2. **Disco:** aparece `Teste completo\done\Exports\<mão>.zip`.
+2. **Disco:** aparece `Teste completo\done\Exports\<mão>.zip`. Com o robot
+   pt35 (Complete Export) o `.zip` deve ter **dezenas de MB** (faixa empírica
+   **40-70 MB**; smoke `GG-5944816316` = 44 MB). Um `.zip` de poucos KB =
+   robot antigo a exportar 1 nó → falhou.
 3. **Entregador:** o log mostra um `POST .../api/queue/hrc/results` a
    devolver `200` (sucesso) para essa mão, com `status=done`.
 4. **App web:** em `/hrc-sessions` a mão fica `done` (e o resultado fica

@@ -1,8 +1,9 @@
 # Anatomia operacional do HRC
 
-**Estado:** rascunho v5, 22 Maio 2026 (pt30-pt34 madrugada).
+**Estado:** rascunho v6, 22 Maio 2026 (pt35).
 **Origem:** consolidação dos factos espalhados pelos journals + observações
-directas do Rui durante pt28 + smoke tests pt29 + cadeia da 2ª run pt30-pt34.
+directas do Rui durante pt28 + smoke tests pt29 + cadeia da 2ª run pt30-pt34
++ Fase 1 GTO Brain pt35 (Complete Export).
 **Responsável de manter actualizado:** quem descobrir um facto novo edita
 este ficheiro antes de fechar o trabalho. Sem isto, o conhecimento perde-se.
 
@@ -55,6 +56,15 @@ este ficheiro antes de fechar o trabalho. Sem isto, o conhecimento perde-se.
   limitação: **não funcionam dentro do popup Nash**.
   (f) **§9 — erros conhecidos não-bloqueantes** consolidados, incluindo o
   cursor anomaly pós-Save-As.
+- v6 (pt35, 22 Maio): **§8 — export via Complete Export.** A
+  `export_strategies` patched (SWAP em `patched_funcs.py`) muda o combo do
+  diálogo Export Strategies de "Manual Selection" → "Complete Export" (Win32
+  `CB_SETCURSEL` idx 0→1 + `CBN_SELCHANGE` + read-back), OK por `BM_CLICK`,
+  Save As via `_save_as_set_and_click` portado. Armadilha
+  `#DOC-MAKE-PATCHED-EXPORT-OVERRIDES-SWAP`: o launcher Baltazar sobrescrevia
+  o SWAP pós-`exec` via `make_patched_export` — resolvido bootando o
+  trampoline directo no `wrapper.py`. Smoke real `GG-5944816316` = 44 MB
+  (era 1 nó). Fecha `#GTO-WATCHER-EXPORT-DEFAULT-DEPTH-2`.
 
 ---
 
