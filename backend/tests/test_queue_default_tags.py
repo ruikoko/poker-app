@@ -113,7 +113,7 @@ def test_endpoint_passes_normalized_basket_to_sql():
             captured["params"] = params
         return []
 
-    with patch("app.routers.queue.query", side_effect=fake_query):
+    with patch("app.services.hrc_queue.query", side_effect=fake_query):
         r = client.get(
             "/api/queue/hrc?tags=ICM,icm,ICM-PKO,icm-pko,ICM"
         )
@@ -136,7 +136,7 @@ def test_endpoint_default_basket_passes_six_keys_to_sql():
             captured["params"] = params
         return []
 
-    with patch("app.routers.queue.query", side_effect=fake_query):
+    with patch("app.services.hrc_queue.query", side_effect=fake_query):
         r = client.get("/api/queue/hrc")
     assert r.status_code == 200
     tags_arg = captured["params"][4]
@@ -151,7 +151,7 @@ def test_endpoint_filters_meta_echoes_both_raw_and_normalized():
     app = _make_app()
     client = TestClient(app)
 
-    with patch("app.routers.queue.query", return_value=[]):
+    with patch("app.services.hrc_queue.query", return_value=[]):
         r = client.get("/api/queue/hrc?tags=ICM,icm-pko")
     assert r.status_code == 200
     # Zip body com manifest dentro

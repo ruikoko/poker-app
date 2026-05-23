@@ -13,6 +13,7 @@ import StatsPage from './pages/Stats'
 import ReplayerPage from './pages/ReplayerPage'
 import HandDetailPage from './pages/HandDetailPage'
 import GTOBrainPage from './pages/GTOBrain'
+import HRCQueuePage from './pages/HRCQueue'
 import HRCSessionsPage from './pages/HRCSessions'
 import HRCSessionDetailPage from './pages/HRCSessionDetail'
 import { StudyTimerProvider } from './contexts/StudyTimerContext'
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="discord" element={<DiscordPage />} />
           <Route path="tournaments" element={<TournamentsPage />} />
           <Route path="gto" element={<GTOBrainPage />} />
+          <Route path="hrc" element={<HRCQueuePage />} />
           <Route path="hrc-sessions" element={<HRCSessionsPage />} />
           <Route path="hrc-sessions/:id" element={<HRCSessionDetailPage />} />
         </Route>

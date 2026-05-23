@@ -12,7 +12,8 @@ const NAV = [
   { to: '/hm3',         label: 'HM3' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
-  { to: '/hrc-sessions', label: 'HRC' },
+  { to: '/hrc',         label: 'HRC' },
+  { to: '/hrc-sessions', label: 'HRC Sessões' },
 ]
 
 function fmt(s) {

@@ -869,6 +869,28 @@ def _build_hrc_script_for_hand(hh_text: str, level_sb: int, level_bb: int):
     return generate_hrc_script_for_hand(hh_text, level_sb, level_bb, seats)
 
 
+def classify_aggressor_source(real_action: Optional[dict], positions: list) -> str:
+    """pt36 #HRC-RUN-2-ALWAYS-DISPATCH — classifica a fonte do aggressor para
+    decidir o fallback da 2ª run. FONTE ÚNICA usada por `build_queue_zip` e pelo
+    selector do painel HRC (`services/hrc_queue.py`) — não duplicar (anti-drift).
+
+    Args:
+      real_action: saída de `derive_aggressor_real_action` (dict ou None).
+      positions: `strategy_table_positions(seats_at_table)`.
+
+    Devolve:
+      "fallback_root"              — sem raise/bet preflop (limp/walk) ou sem blinds.
+      "fallback_unusable_position" — houve raise mas position None/"BB"/fora da
+                                     Strategy Table.
+      "real"                       — raise com position usável.
+    """
+    if real_action is None:
+        return "fallback_root"
+    if not (isinstance(real_action, dict) and real_action.get("position") in positions):
+        return "fallback_unusable_position"
+    return "real"
+
+
 def build_queue_zip(
     hands: list[dict],
     payouts_by_key: dict[tuple[str, str], Any],
@@ -983,12 +1005,7 @@ def build_queue_zip(
             # (limp/walk, sem blinds) ou se a position for inutilizável
             # (None / "BB" / fora da Strategy Table), aplica sentinela na raiz.
             real = derive_aggressor_real_action(hh_text, _sb, _bb) if _bb is not None else None
-            if real is None:
-                aggressor_source = "fallback_root"
-            elif not (isinstance(real, dict) and real.get("position") in positions):
-                aggressor_source = "fallback_unusable_position"
-            else:
-                aggressor_source = "real"
+            aggressor_source = classify_aggressor_source(real, positions)
 
             if aggressor_source == "real":
                 aggressor_real_action = real  # estrutura legacy intacta, sem "source"

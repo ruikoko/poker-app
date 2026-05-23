@@ -27,6 +27,7 @@ from app.services.hrc_import import (
     read_settings,
     list_node_indices,
 )
+from app.services.hrc_queue import eligible_hands
 
 router = APIRouter(prefix="/api/hrc", tags=["hrc"])
 logger = logging.getLogger("hrc")
@@ -169,6 +170,37 @@ def _bulk_insert_nodes(conn, session_id: int, nodes_iter) -> int:
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
+
+
+@router.get("/eligible")
+def list_eligible(
+    tags: Optional[str] = None,
+    study_state: Optional[str] = None,
+    played_after: Optional[str] = None,
+    played_before: Optional[str] = None,
+    include_no_payout: bool = False,
+    _user=Depends(require_auth),
+):
+    """Lista as mãos actualmente elegíveis para a queue HRC (painel HRC).
+
+    Espelha exactamente os gates de `GET /api/queue/hrc` (mesma SQL Andar 1 +
+    Andar 2 payout/raw/seats, via `services/hrc_queue.eligible_hands`), mas
+    devolve JSON em vez de zip. Sem params usa os mesmos defaults do export —
+    o `count` bate com o que o adapter puxaria agora. Read-only.
+    """
+    from datetime import datetime, timezone
+    try:
+        result = eligible_hands(
+            tags=tags,
+            study_state=study_state,
+            played_after=played_after,
+            played_before=played_before,
+            include_no_payout=include_no_payout,
+        )
+    except ValueError:
+        raise HTTPException(400, "played_after/played_before devem ser ISO date")
+    result["generated_at"] = datetime.now(timezone.utc).isoformat()
+    return result
 
 
 @router.post("/import")

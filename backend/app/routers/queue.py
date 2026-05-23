@@ -1,11 +1,15 @@
 """HRC export queue endpoint — packages hands+payouts num zip para HRC watcher.
 
 GET /api/queue/hrc — query params filtram hands; resposta e application/zip.
+
+A selecção (Andar 1 SQL + defaults do basket) vive em
+`app.services.hrc_queue` — fonte única partilhada com o painel HRC
+(`GET /api/hrc/eligible`). Ver pt37.
 """
 from __future__ import annotations
 import io
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -13,59 +17,37 @@ from fastapi.responses import StreamingResponse
 
 from app.auth import require_auth_or_api_key
 from app.db import query
-from app.routers.hands import normalize_tag_key
 from app.services.hrc_jobs import (
     extract_meta_from_result_zip,
     upsert_hrc_job_result,
 )
 from app.services.queue_export import build_queue_zip
+from app.services.hrc_queue import (
+    resolve_filters,
+    select_andar1_rows,
+    lookup_payouts,
+    DEFAULT_TAGS,
+    DEFAULT_STUDY_STATES,
+    ALLOWED_SITES,
+    normalize_tags_basket,
+)
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
 logger = logging.getLogger("queue")
 
-
-# Basket por defeito do export. Cada entrada é uma string arbitrária — passa
-# por `normalize_tag_key` (#B17) antes de bater contra `hm3_tags`/`discord_tags`.
-# Normalização: case-insensitive + hyphen→space, daí "icm-pko" ≡ "ICM PKO" ≡
-# "ICM-pko". Adicionar case-variants à lista é redundante.
-# pt23: ICM FT + ICM PKO FT entram no basket — alvo dos hints
-# `equity_model="malmuth_harville_icm"` escritos por `queue_export._build_watcher_hints`.
-_DEFAULT_TAGS = [
-    "icm-pko",
-    "PKO SS",
-    "sqz-pko",
-    "ICM",
-    "ICM FT",
-    "ICM PKO FT",
-]
-_DEFAULT_STUDY_STATES = ["new"]
-_ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
+# Re-exports com os nomes privados legados — preservam o import path
+# `from app.routers.queue import _DEFAULT_TAGS, _normalize_tags_basket` usado
+# por backend/tests/test_queue_default_tags.py. Definições canónicas em
+# app.services.hrc_queue (pt37 — single source, anti-drift).
+_DEFAULT_TAGS = DEFAULT_TAGS
+_DEFAULT_STUDY_STATES = DEFAULT_STUDY_STATES
+_ALLOWED_SITES = ALLOWED_SITES
+_normalize_tags_basket = normalize_tags_basket
 
 # Cap de upload do zip de resultados (D-G2-4: 50 MB defensivo). Samples reais
 # do HRC Complete Export ficam tipicamente em KB-MB; cap protege contra
 # accident/abuse sem rejeitar uso legítimo.
 _MAX_RESULT_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB
-
-
-def _csv(value: Optional[str], default: list[str]) -> list[str]:
-    if value is None:
-        return default
-    parts = [p.strip() for p in value.split(",") if p.strip()]
-    return parts or default
-
-
-def _normalize_tags_basket(tags: list[str]) -> list[str]:
-    """Aplica `normalize_tag_key` ao basket + dedup. Vazios caem fora.
-
-    Substituiu `_expand_icm_case` (que só apanhava ICM↔icm). Cobre agora
-    qualquer case-variant futuro sem precisar editar listas.
-    """
-    seen: list[str] = []
-    for t in tags:
-        nk = normalize_tag_key(t)
-        if nk and nk not in seen:
-            seen.append(nk)
-    return seen
 
 
 @router.get("/hrc")
@@ -77,66 +59,22 @@ def export_queue(
     include_no_payout: bool = Query(False),
     current_user=Depends(require_auth_or_api_key),
 ):
-    raw_tags = _csv(tags, _DEFAULT_TAGS)
-    tags_norm = _normalize_tags_basket(raw_tags)
-    states_list = _csv(study_state, _DEFAULT_STUDY_STATES)
-    now = datetime.now(timezone.utc)
-    after_str = played_after or (now - timedelta(days=30)).date().isoformat()
-    before_str = played_before or now.date().isoformat()
     try:
-        after_dt = datetime.fromisoformat(after_str).replace(tzinfo=timezone.utc)
-        before_dt = (
-            datetime.fromisoformat(before_str).replace(tzinfo=timezone.utc)
-            + timedelta(days=1)
-        )
+        f = resolve_filters(tags, study_state, played_after, played_before)
     except ValueError:
         raise HTTPException(400, "played_after/played_before devem ser ISO date")
 
-    # SQL aplica `normalize_tag_key` a cada elemento de hm3_tags/discord_tags
-    # antes de comparar com o basket. Mesmo idiom que `unified_tag` em /api/hands.
-    _NORM_SQL = "lower(regexp_replace(replace(t, '-', ' '), '\\s+', ' ', 'g'))"
-    rows = query(
-        f"""
-        SELECT id, hand_id, site, tournament_number, raw, player_names,
-               played_at, hm3_tags, discord_tags
-          FROM hands
-         WHERE played_at >= '2026-01-01'
-           AND site = ANY(%s)
-           AND played_at >= %s
-           AND played_at < %s
-           AND study_state = ANY(%s)
-           AND (
-                 EXISTS (SELECT 1 FROM unnest(COALESCE(hm3_tags, '{{}}'::text[]))
-                                AS t WHERE {_NORM_SQL} = ANY(%s))
-              OR EXISTS (SELECT 1 FROM unnest(COALESCE(discord_tags, '{{}}'::text[]))
-                                AS t WHERE {_NORM_SQL} = ANY(%s))
-               )
-         ORDER BY played_at ASC
-        """,
-        (_ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm),
-    )
-    hands = [dict(r) for r in rows]
-
-    payouts_by_key: dict = {}
-    sites = list({h["site"] for h in hands if h.get("site")})
-    tnums = list({h["tournament_number"] for h in hands if h.get("tournament_number")})
-    if sites and tnums:
-        prows = query(
-            """SELECT site, tournament_number, payouts_json
-                 FROM tournament_payouts
-                WHERE site = ANY(%s) AND tournament_number = ANY(%s)""",
-            (sites, tnums),
-        )
-        payouts_by_key = {
-            (r["site"], r["tournament_number"]): r["payouts_json"] for r in prows
-        }
+    hands = [dict(r) for r in select_andar1_rows(
+        f["tags_norm"], f["states_list"], f["after_dt"], f["before_dt"],
+    )]
+    payouts_by_key = lookup_payouts(hands)
 
     filters_meta = {
-        "tags": raw_tags,
-        "tags_normalized": tags_norm,
-        "study_state": states_list,
-        "played_after": after_str,
-        "played_before": before_str,
+        "tags": f["raw_tags"],
+        "tags_normalized": f["tags_norm"],
+        "study_state": f["states_list"],
+        "played_after": f["after_str"],
+        "played_before": f["before_str"],
         "include_no_payout": include_no_payout,
     }
 
@@ -145,6 +83,7 @@ def export_queue(
         include_no_payout=include_no_payout,
         filters_meta=filters_meta,
     )
+    now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%dT%H%M%SZ")
     fname = f"queue_{ts}.zip"
     logger.info(

@@ -330,6 +330,12 @@ export const hrc = {
   session:  (id) => req('GET', `/hrc/sessions/${id}`),
   node:     (id, idx) => req('GET', `/hrc/sessions/${id}/nodes/${idx}`),
   delete:   (id) => req('DELETE', `/hrc/sessions/${id}`),
+  eligible: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/hrc/eligible${qs ? `?${qs}` : ''}`)
+  },
 }
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────
