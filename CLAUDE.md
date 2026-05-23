@@ -549,6 +549,20 @@ Suite **573 PASSED**; smoke local validado em 4 cenários (real / fallback_root 
 
 Docs desta sessão: `JOURNAL_2026-05-23-pt36.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt36); `PENDENTES.md`.
 
-Última sessão fechada: **pt36** (23 Maio 2026 — `#HRC-RUN-2-ALWAYS-DISPATCH` fechado: toda mão exportada garante 2 runs via fallback do aggressor no backend; `.exe` intacto). Detalhes em `docs/JOURNAL_2026-05-23-pt36.md`.
+## pt37 — Tech debts do resolver/UX + painel HRC MVP (23 Maio 2026)
 
-Próxima sessão: **smoke battery de robustez** (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`, ver `docs/GTO_BRAIN.md §7`) — validar o pipeline nas 4 combinações site × formato (GG NKO Vanilla, PokerStars PKO, Winamax PKO, PokerStars NKO Vanilla) como porta de entrada da **Fase 2** do GTO Brain (auto-import `.zip` → `gto_trees`/`gto_nodes`). Em paralelo continua aberto `#HRC-BOUNTY-HARDCODED-50PCT`. Backlog completo em `docs/PENDENTES.md`.
+Sessão de simulação de fim-de-sessão (Discord sync + lobby sync + import HH GG + `.bat` HM3) como setup da smoke battery 1, que destapou **6 tech debts** e produziu o **painel HRC MVP**. Smoke 1 **não arrancada** (fica para pt38). 2 commits em main.
+
+**Investigação read-only (BD produção):** 3 SSs de lobby `tm_not_found` (GG Vanilla) analisadas caso-a-caso. Causa raiz dupla do resolver — (1) **TIER 0** compara `prize_pool`/`total_players` por igualdade estrita, mas a Vision lê o lobby em tempo real (garantia anunciada + inscritos parciais) vs `tournament_summaries` pós-jogo (pool real + total final): nunca bate; (2) **TIER 1/2** janela inutilizável quando a Vision não lê `start_time` (consistente) → fallback `[posted_at−12h, posted_at−30min]` exclui o candidato (torneio começa *depois* do post). Achado extra: `tournament_summaries.start_time` vs `tournaments_meta.start_time` diferem ~2h p/ o mesmo TM (bug de timezone). Confirmou-se ainda que o `ImportModal` encaminha qualquer `.zip` para `/api/import` (TS cai no ramo P&L; UI mostra "Importado" enganador).
+
+6 tech debts novos (`docs/TECH_DEBTS_INVENTARIO.md` secção pt37): 🔴 `#RESOLVER-TIER0-STRICT-EQUALITY`, `#RESOLVER-TIER12-WINDOW-NO-START`, `#START-TIME-TIMEZONE-INCONSISTENCY`; 🟠 `#IMPORT-MODAL-MISROUTES-TS-RESULTS` (UX); 🟡 `#LOBBYS-RETRIGGER-NOT-DISCOVERABLE` (UX); 🟢 `#DISCORD-VISION-NO-RECOVERY`. Commit docs `175f502`.
+
+**★ Painel HRC MVP** (`e67f065`) — página `/hrc` lista as mãos **actualmente elegíveis** para a queue HRC, espelhando exactamente os gates de `GET /api/queue/hrc` (Andar 1 SQL + Andar 2 payout/raw/seats). Motivação: descobriu-se que ligar o adapter agora puxaria **~110 mãos** (não 1) — Winamax/GG PKO já marcadas — e não há forma de ver isto sem SQL. Anti-drift: selecção extraída para `backend/app/services/hrc_queue.py` (**fonte única**), consumida por `export_queue` e pelo novo `GET /api/hrc/eligible`; `classify_aggressor_source` extraído em `queue_export.py` (partilhado). Nav: **"HRC" → `/hrc`** (painel, dia-a-dia); **"HRC Sessões" → `/hrc-sessions`** (import, renomeado). 9 ficheiros (+526/−104), **193 testes verdes** + `vite build` OK.
+
+**Acesso BD produção (validado pt37):** após `railway login` interactivo do Rui (shell separado), os comandos `railway` não-interactivos passam a funcionar; query via psycopg2 + proxy público `ballast.proxy.rlwy.net` com a password do `DATABASE_URL` do serviço `poker-app` (as vars do serviço Postgres estão **stale**). Detalhe na memória `reference_railway_cli_auth`.
+
+Docs desta sessão: `JOURNAL_2026-05-23-pt37.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt37); `PENDENTES.md`.
+
+Última sessão fechada: **pt37** (23 Maio 2026 — 6 tech debts mapeados [3 HIGH resolver/timezone + 1 HIGH UX + 1 MED UX + 1 LOW] e **painel HRC MVP** shippado em `/hrc`; smoke battery 1 não arrancada). Detalhes em `docs/JOURNAL_2026-05-23-pt37.md`.
+
+Próxima sessão: **smoke battery 1** (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`, ver `docs/GTO_BRAIN.md §7`) — GG NKO Vanilla, primeira das 4 combinações site × formato, porta de entrada da **Fase 2** do GTO Brain. Visibilidade resolvida via painel `/hrc` (mostra o que o adapter puxaria). **Primeira decisão: mecanismo de isolamento de 1 mão** (o adapter puxaria ~110 sem filtro) — 4 opções identificadas em pt37 (endpoint manual + queue dir / reduzir conjunto elegível na BD / `state.json` dedup / filtro temporário no adapter). Em paralelo continuam abertos `#HRC-BOUNTY-HARDCODED-50PCT` e os 3 HIGH do resolver. Backlog completo em `docs/PENDENTES.md`.
