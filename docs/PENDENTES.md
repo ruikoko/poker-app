@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 23 Maio 2026 (fim da sessão pt36).
+**Última actualização:** 23 Maio 2026 (fim da sessão pt37 — setup smoke battery 1 + tech debts do resolver/import/lobbys).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -53,6 +53,33 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    fonte). 3 opções já levantadas: renomear canais, dict de aliases
    hardcoded, ou UI admin central de tags. Decisão de produto pendente.
 
+5. **`#RESOLVER-TIER0-STRICT-EQUALITY` (🔴 HIGH, aberto pt37).** TIER 0 do
+   resolver compara `prize_pool`/`total_players` por igualdade estrita, mas a
+   Vision lê valores de lobby em tempo real (garantia vs pool real; inscritos
+   parciais vs total final) → nunca bate; torneios presentes em
+   `tournament_summaries` ficam `tm_not_found`. Fix: matching por nome + data
+   de calendário, ou igualdade em `buy_in`. Ver `TECH_DEBTS_INVENTARIO.md` (pt37).
+
+6. **`#RESOLVER-TIER12-WINDOW-NO-START` (🔴 HIGH, aberto pt37).** Janela dos
+   TIER 1/2 inutilizável quando a Vision não lê `start_time` (consistente): o
+   fallback `[posted_at−12h, posted_at−30min]` exclui o candidato (o torneio
+   começa depois do post). Fix: alargar fallback para `+12h`, ou Vision extrair
+   `start_time`. **Depende de `#START-TIME-TIMEZONE-INCONSISTENCY`.** Ver
+   `TECH_DEBTS_INVENTARIO.md` (pt37).
+
+7. **`#START-TIME-TIMEZONE-INCONSISTENCY` (🔴 HIGH, aberto pt37).**
+   `tournament_summaries.start_time` vs `tournaments_meta.start_time` diferem
+   ~2h para o mesmo `tournament_number` (`tn 284491487`: 15:05 vs 17:03) — bug
+   de TZ (UTC vs PT/CEST) num dos parsers. **Bloqueia matching temporal seguro
+   — investigar ANTES do `#RESOLVER-TIER12-WINDOW-NO-START`.** Ver
+   `TECH_DEBTS_INVENTARIO.md` (pt37).
+
+8. **`#IMPORT-MODAL-MISROUTES-TS-RESULTS` (🟠 HIGH UX, aberto pt37).** O
+   `ImportModal` manda qualquer `.zip` para `/api/import`; um TS cai no ramo P&L
+   (degrada), Results dá 400/screenshot, e a UI mostra "Importado" escondendo o
+   resultado real. Fix: detectar o tipo pelo conteúdo e encaminhar, ou avisar
+   quando não é HH. Ver `TECH_DEBTS_INVENTARIO.md` (pt37).
+
 ---
 
 ## GTO Brain — roadmap (depois da smoke battery)
@@ -78,23 +105,23 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 
 ## Médio prazo
 
-5. **`#CI-TARGET-INITIAL-NOT-CALIBRATED` (pt25e Bloco 2).** Calibrar a coord
+9. **`#CI-TARGET-INITIAL-NOT-CALIBRATED` (pt25e Bloco 2).** Calibrar a coord
    do campo CI Target inicial da 1ª run no main UI. Actualmente
    `CI_TARGET_FIELD_X/Y = 0` → `_set_ci_target_common` degrada para Enter
    (funciona, mas é menos limpo). Smoke devagar com o Rui para medir a
    coord.
 
-6. **`#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`.** `verify_wizard_finished`
+10. **`#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`.** `verify_wizard_finished`
    (state check WARN-only pós-Finish, pt29-v1) verifica **cedo demais** — o
    wizard ainda está visível no instante da verificação, gera WARN espúrio,
    mas a 1ª run efectivamente arranca. Adicionar um pequeno settle/poll
    antes de verificar, ou retirar o WARN. Não-bloqueante.
 
-7. **`#CURSOR-ANOMALY-POST-SAVE-AS`.** Após o Save As, o cursor da Strategy
+11. **`#CURSOR-ANOMALY-POST-SAVE-AS`.** Após o Save As, o cursor da Strategy
    Table cai na 2ª linha (EP). Origem desconhecida. Não bloqueia o flow,
    mas investigar (pode afectar uma futura 3ª run ou navegação encadeada).
 
-8. **`#PARSER-SEATS-FAILURES` (🟡 MED, aberto pt36).** `build_queue_zip`
+12. **`#PARSER-SEATS-FAILURES` (🟡 MED, aberto pt36).** `build_queue_zip`
    passou a skipar mãos cujo `derive_seats_in_preflop_order` devolve `[]`
    (sem button / <2 seats) com `reason="no_seats_at_table"`. Desde
    `#HRC-RUN-2-ALWAYS-DISPATCH`, uma falha do parser de seats custa a **mão
@@ -103,20 +130,28 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    ex.: nicks com espaços, `#DERIVE-MAX-PLAYERS-HERO-REGEX-GG`). Detalhe em
    `docs/TECH_DEBTS_INVENTARIO.md` (secção pt36).
 
+13. **`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE` (🟡 MED UX, aberto pt37).** O botão
+   "Sincronizar Lobbys" + Avançado/`tm_not_found` vive só na página Discord,
+   fácil de não notar; não há aviso em Dashboard/Torneios quando há candidatos
+   `tm_not_found` pendentes. O utilizador importa TS+HH e não sabe que precisa
+   de re-disparar os lobbys para fechar o ciclo. Fix: badge/link na
+   Dashboard/Torneios, ou auto-retrigger pós-import. Ver
+   `TECH_DEBTS_INVENTARIO.md` (pt37).
+
 ---
 
 ## Baixo prazo / qualidade
 
-9. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
+14. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
    BB stack, prompt GTO mais forte.
-10. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
+15. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
    Discord ↔ mão; ver CLAUDE.md "Imagens de contexto Discord").
-11. **Filtros derivados no Estudo.**
-12. **Dashboard — colunas adicionais.**
-13. **Winamax replayer — URL da Vision.**
-14. **`_upload_screenshot_to_storage`** — limpeza do stub.
-15. **Discord entry status** — cosmético.
-16. **Discord page — dual time filters.**
+16. **Filtros derivados no Estudo.**
+17. **Dashboard — colunas adicionais.**
+18. **Winamax replayer — URL da Vision.**
+19. **`_upload_screenshot_to_storage`** — limpeza do stub.
+20. **Discord entry status** — cosmético.
+21. **Discord page — dual time filters.**
 
 ---
 

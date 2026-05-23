@@ -6,6 +6,30 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (23 Maio 2026 — pt37, setup da smoke battery 1: investigação read-only lobby→resolver)
+
+Sessão de **investigação read-only** (zero mudanças de código) como setup da
+smoke battery (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`). Análise caso-a-caso de 3
+SSs de lobby presas em `tm_not_found`, validada com **queries directas à BD de
+produção** (message_ids `1505967173032607784`, `1506327372629282879`,
+`1506329968781557890`, todos GGPoker). Confirmou-se que os torneios **existem**
+em `tournament_summaries`/`tournaments_meta`/`hands` — o resolver é que não bate.
+A investigação paralela do `/import` vs endpoints dedicados (TS/Results) e do
+re-trigger de lobbys completou o quadro. **6 tech debts novos.**
+
+### Tech debts novos abertos em pt37 (6)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#RESOLVER-TIER0-STRICT-EQUALITY** | 🔴 HIGH | TIER 0 do resolver compara `prize_pool`/`total_players` por **igualdade estrita (`=`)**, mas a Vision lê do lobby **em tempo real**: `prize_pool` = garantia anunciada (redonda) vs pool real pós-jogo; `entrants` = inscritos a meio da late-reg vs total final. Igualdade nunca bate → torneios que existem em `tournament_summaries` ficam `tm_not_found`. **Evidência BD prod (23-Mai):** `1505967173032607784` "Daily Hyper $80" — Vision pool=5000/players=46 vs TS mesmo-dia `tn 284939855` pool=7580.80/players=103; `1506327372629282879` "Daily Deepstack Special $125" — Vision pool=12500/players=57 vs TS mesmo-dia `tn 284491487` pool=18515/players=161; `1506329968781557890` "Daily Hyper $80" — Vision pool=5000/players=59 vs TS mesmo-dia `tn 284939948` pool=7728/players=105. Em todos, TIER 0 só-nome devolve ≥2 rows (torneio presente). Fix candidato: matching por **nome + data de calendário**, OU igualdade em `buy_in` (campo estável) em vez de pool/players. Refs: `backend/app/services/tournament_resolver.py:_query_summaries:96-115`. |
+| **#RESOLVER-TIER12-WINDOW-NO-START** | 🔴 HIGH | TIER 1/2 dependem do `start_time_iso` da Vision para a janela `[start−2h, start+2h]`. Quando a Vision **não lê** `start_time` (acontece consistentemente — `start_time_iso=None` nos 3 casos), o fallback usa `[posted_at−12h, posted_at−30min]`, que **exclui o candidato real** (o torneio começa *depois* do post, porque o user posta a SS durante o jogo). **Evidência:** start dos candidatos = 16:45–17:16; fim da janela de fallback = 15:37–15:47 (`posted_at−30min`) → TIER 1/2 windowed = 0 rows. Fix candidato: alargar fallback para `[posted_at−12h, posted_at+12h]`, OU prompt Vision mais agressivo para extrair `start_time`. **Depende de `#START-TIME-TIMEZONE-INCONSISTENCY`.** Refs: `backend/app/services/tournament_resolver.py:_decide_window:67-93`; `backend/app/services/lobby_vision.py`. |
+| **#START-TIME-TIMEZONE-INCONSISTENCY** | 🔴 HIGH | `tournament_summaries.start_time` e `tournaments_meta.start_time` para o **mesmo** `tournament_number` diferem ~2h — cheira a bug de timezone (UTC vs local PT/CEST) num dos parsers. **Evidência:** `tn 284491487` ("Daily Deepstack Special $125") — TS guarda **15:05**, `tournaments_meta` guarda **17:03** (~2h, consistente com offset Portugal UTC+1 inverno / UTC+2 verão). **Bloqueia qualquer matching temporal seguro entre tiers** → investigação dedicada necessária **ANTES** de fix ao `#RESOLVER-TIER12-WINDOW-NO-START`. Refs: parser TS escreve via `backend/app/routers/tournament_summaries.py:_parse_start_time_utc:212-223` (trata o header GG literalmente como UTC); writer de `tournaments_meta.start_time` em `backend/app/services/tournament_meta.py` (`upsert_tournament_meta` — confirmar qual a fonte/TZ). |
+| **#IMPORT-MODAL-MISROUTES-TS-RESULTS** | 🟠 HIGH (UX) | O `ImportModal` classifica **qualquer `.zip`** como `hh_zip` → `/api/import`; um TS cai no ramo P&L (`tournaments`, degrada com `tournament_number=""`), Tournament Results dá 400 ou path de screenshot. A UI mostra **"Importado"** via `formatResult('hh_zip')`, que **esconde o resultado real**. Os botões dedicados existem em `/tournaments`, mas o utilizador não-iniciado não sabe que tem de os usar — pode pensar que importou TS quando não importou (**aconteceu nesta sessão** — ZIP 20KB). Fix candidato: `ImportModal` detecta TS/Results pelo conteúdo do `.zip` e encaminha para o endpoint certo, OU mostra erro/aviso explícito quando o tipo não é HH. Refs: `frontend/src/components/ImportModal.jsx:13-18,49-51,83-92`; `backend/app/routers/import_.py:142-150,486-493`. |
+| **#LOBBYS-RETRIGGER-NOT-DISCOVERABLE** | 🟡 MED (UX) | O botão "Sincronizar Lobbys" + Avançado/`tm_not_found` vive **só** na página Discord, fácil de não notar. Não há aviso em Dashboard ou Torneios quando há candidatos `tm_not_found` pendentes. O utilizador importa TS+HH e fica sem saber que precisa de **re-disparar** os lobbys para fechar o ciclo. Fix candidato: badge/link na Dashboard ou Torneios quando há lobbys pendentes, OU automatizar o re-trigger após import TS/HH. Refs: `frontend/src/pages/Discord.jsx:655-682`. |
+| **#DISCORD-VISION-NO-RECOVERY** | 🟢 LOW | Entries `replayer_link` em `has_image_no_vision` (`img_b64` presente, `vision_done=false`) **não são recuperadas** por novo sync — `process_replayer_links` só selecciona `WHERE (raw_json->>'img_b64') IS NULL`. Ficam em limbo. Fix candidato: endpoint `/retry-vision`, OU alargar o WHERE para incluir `vision_done=false`. Refs: `backend/app/routers/discord.py:565,688`. |
+
+---
+
 ## Estado actual (23 Maio 2026 — pt36, HRC Run-2 always-dispatch)
 
 Backend-only. Garante que **toda mão exportada para o robot tem 2 runs**
