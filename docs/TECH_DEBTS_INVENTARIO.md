@@ -29,7 +29,11 @@ uma **guarda de produção**.
 |---|---|---|
 | **#LOBBY-ANCHOR-PRESTART-REGRESSION** | 🔴 HIGH (latente) | O anchor `start_time ≤ posted_at` do TIER 0 (introduzido em pt39 `35286c1`, ramo *anchored* de `_query_summaries`) assume **SS tirada durante o jogo** (verdade p/ **table-ss**), mas falha p/ **lobby SS** — tirada na **fase de inscrição**, com o torneio a começar **~30min DEPOIS** do post. **Simulação pt40** dos 3 lobby `tm_not_found` do pt37: **1 resolve certo** (Deepstack $125, post 1h após start), **1 fica `tm_not_found`** (Daily Hyper $80 18-Mai — instance certo ainda não começou + anterior >24h), **1 mis-resolve para o DIA ANTERIOR** (Daily Hyper $80 19-Mai → tn de 18-Mai; `ORDER BY start DESC LIMIT 1` agarra o instance que já começou). **Latente** (M1=0: nenhum lobby `success` processado pós-deploy) mas **dispara na próxima actividade de lobby** — daí a guarda. **Fix candidato:** janela ~simétrica em torno do `posted_at` + selecção *"start mais PRÓXIMO do posted"* (não "último ≤ posted"), distinguindo lobby de table-ss. **Blast radius:** ~24 `tm_not_found` acumulados (17 de 23-Mai + 7 de 19-Mai). Refs: `tournament_resolver.py:_query_summaries` (ramo anchored); call-site `lobby_sync.py`. **Cross-ref:** distinto de `#RESOLVER-TIER12-WINDOW-NO-START` (janela dos TIER 1/2 ancorada em `meta.start_time`); raiz comum "anchor temporal assume SS-durante-o-jogo". |
 
-*(O feature-request `#HRC-PER-HAND-DOWNLOAD` (🟡 MED) é registado no commit funcional do Track B.)*
+### Feature-request implementado em pt40 (1 — Track B)
+
+| ID | Severidade | Estado |
+|---|---|---|
+| **#HRC-PER-HAND-DOWNLOAD** | 🟡 MED | ✅ **IMPLEMENTED (pt40).** Botão "Download HRC pack" per-mão no painel `/hrc` → `GET /api/queue/hrc/hand/{hand_id}` (reusa `lookup_payouts` + `build_queue_zip([h])`): zip `<hand_id>/hh.txt` + `payouts.json` (+ meta/script/manifest). **404** (mão inexistente) / **409** (sem `tournament_payouts`) / **422** (raw/seats não exportáveis, com `reason` do manifest). `eligible_hands` ganha `has_payout` → o botão só aparece quando há payout. Elimina o "criar estrutura à mão" do workflow manual do Rui para as ~111 mãos payout-ready (cobertura ampla baixa — ver pt40). Refs: `routers/queue.py:export_queue_single_hand`; `services/hrc_queue.py:eligible_hands`; `frontend/src/pages/HRCQueue.jsx` + `client.js:queue.hrcHandDownload`. |
 
 ---
 

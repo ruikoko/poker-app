@@ -233,6 +233,7 @@ def eligible_hands(
             "position_hero": h.get("position"),
             "stack_hero_bb": _hero_stack_bb(hh, bb),
             "aggressor_source": src,
+            "has_payout": blob is not None,
         })
 
     return {

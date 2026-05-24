@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { hrc } from '../api/client'
+import { hrc, queue } from '../api/client'
 
 // Cores por cenário do aggressor (espelha build_queue_zip / classify_aggressor_source).
 const SRC_COLOR = {
@@ -31,6 +31,18 @@ export default function HRCQueuePage() {
   const [error, setError] = useState(null)
   const [site, setSite] = useState('')
   const [format, setFormat] = useState('')
+  const [dl, setDl] = useState({})  // hand_id -> 'busy' | 'err'
+
+  async function downloadPack(handId) {
+    setDl(d => ({ ...d, [handId]: 'busy' }))
+    try {
+      await queue.hrcHandDownload(handId)
+      setDl(d => { const n = { ...d }; delete n[handId]; return n })
+    } catch (e) {
+      setDl(d => ({ ...d, [handId]: 'err' }))
+      console.error('HRC pack download falhou:', e)
+    }
+  }
 
   async function refresh() {
     setLoading(true)
@@ -161,7 +173,24 @@ export default function HRCQueuePage() {
                         </span>
                       </td>
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                        {h.has_payout && (
+                          <button
+                            onClick={() => downloadPack(h.hand_id)}
+                            disabled={dl[h.hand_id] === 'busy'}
+                            title="Download do pack HRC (hh.txt + payouts.json)"
+                            style={{
+                              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              color: 'var(--accent2, #818cf8)', background: 'transparent',
+                              border: '1px solid var(--border)', borderRadius: 4,
+                              padding: '2px 7px', marginRight: 8,
+                              opacity: dl[h.hand_id] === 'busy' ? 0.5 : 1,
+                            }}
+                          >{dl[h.hand_id] === 'busy' ? '…' : '⬇ HRC'}</button>
+                        )}
                         <Link to={`/replayer/${h.id}`} style={{ color: 'var(--accent2, #818cf8)', textDecoration: 'none' }}>ver →</Link>
+                        {dl[h.hand_id] === 'err' && (
+                          <span style={{ color: '#ef4444', marginLeft: 6, fontSize: 11 }}>erro</span>
+                        )}
                       </td>
                     </tr>
                   ))}

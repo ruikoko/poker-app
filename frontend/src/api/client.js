@@ -338,6 +338,32 @@ export const hrc = {
   },
 }
 
+// ── HRC Queue (export p/ watcher + download per-mão) ────────────────────────
+export const queue = {
+  // Download do pack HRC de UMA mão (zip: hh.txt + payouts.json + meta/manifest).
+  // Raw fetch (blob) + trigger de download no browser. Lança Error com o detail
+  // do backend em 404 (mão inexistente) / 409 (sem payout) / 422 (não exportável).
+  hrcHandDownload: async (handId) => {
+    const res = await fetch(`${BASE}/queue/hrc/hand/${encodeURIComponent(handId)}`, {
+      method: 'GET',
+      credentials: 'include',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || `Erro ${res.status}`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `hrc_${handId}.zip`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+}
+
 // ── SS de mesa (contexto players_left p/ HRC) ───────────────────────────────
 export const tableSs = {
   upload: (file, opts = {}) => {

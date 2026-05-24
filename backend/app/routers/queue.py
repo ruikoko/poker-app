@@ -8,7 +8,9 @@ A selecção (Andar 1 SQL + defaults do basket) vive em
 """
 from __future__ import annotations
 import io
+import json
 import logging
+import zipfile
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -89,6 +91,69 @@ def export_queue(
     logger.info(
         "queue/hrc exported: queried=%d filename=%s", len(hands), fname,
     )
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+# Colunas que `build_queue_zip` consome — espelham `select_andar1_rows`
+# (anti-drift: mesma forma de row para a maquinaria per-mão e batch).
+_HAND_COLS = (
+    "id, hand_id, site, tournament_number, tournament_name, "
+    "tournament_format, raw, player_names, played_at, position, "
+    "study_state, hm3_tags, discord_tags, context_table_ss_id"
+)
+
+
+@router.get("/hrc/hand/{hand_id}")
+def export_queue_single_hand(
+    hand_id: str,
+    current_user=Depends(require_auth_or_api_key),
+):
+    """Download do pack HRC de UMA mão (workflow manual do Rui no painel /hrc).
+
+    Reusa a maquinaria batch: `lookup_payouts` + `build_queue_zip([hand])`.
+    Zip: `<hand_id>/hh.txt` + `payouts.json` (+ meta/script/manifest).
+
+    - 404 se `hand_id` não existe.
+    - 409 se o torneio da mão não tem `tournament_payouts` (pack ficaria sem
+      `payouts.json` — exactamente a estrutura que o Rui quer evitar criar à mão).
+    - 422 se a mão tem payout mas não é exportável (raw não convertível / sem
+      seats parseáveis) — devolve o `reason` do `manifest.skipped`.
+    """
+    rows = query(
+        f"SELECT {_HAND_COLS} FROM hands WHERE hand_id = %s LIMIT 1", (hand_id,)
+    )
+    if not rows:
+        raise HTTPException(404, f"hand_id '{hand_id}' não encontrado")
+    h = dict(rows[0])
+
+    payouts_by_key = lookup_payouts([h])
+    if payouts_by_key.get((h["site"], h["tournament_number"])) is None:
+        raise HTTPException(
+            409,
+            f"sem tournament_payouts para o torneio {h['site']}/"
+            f"{h['tournament_number']} desta mão",
+        )
+
+    zip_bytes = build_queue_zip(
+        [h], payouts_by_key,
+        include_no_payout=False,
+        filters_meta={"single_hand": hand_id},
+    )
+
+    # Gate final: se a mão foi saltada (raw/seats), não devolver zip só-manifest.
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+    if manifest.get("total_in_zip", 0) == 0:
+        skipped = manifest.get("skipped") or []
+        reason = skipped[0].get("reason") if skipped else "unknown"
+        raise HTTPException(422, f"mão '{hand_id}' não exportável: {reason}")
+
+    fname = f"hrc_{hand_id}.zip"
+    logger.info("queue/hrc single-hand exported: hand_id=%s filename=%s", hand_id, fname)
     return StreamingResponse(
         io.BytesIO(zip_bytes),
         media_type="application/zip",
