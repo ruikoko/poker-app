@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 24 Maio 2026 (fim da pt38 — pipeline SS de mesa ponta-a-ponta: Fases A+B + trigger re-link + fix mapeamento Vision + reset BD).
+**Última actualização:** 24 Maio 2026 (pt39 — re-diagnose read-only do resolver: `#START-TIME-TIMEZONE-INCONSISTENCY` re-rotulado `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`, **não é TZ**; os outros 3 HIGH confirmados factualmente).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -14,7 +14,11 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 > **Foco recomendado da próxima sessão (pós-pt38):** atacar os **bugs HIGH do
 > resolver** (itens 5–7) + o novo `#TABLE-SS-RESOLVER-COLLISION` (pt38),
-> começando por `#START-TIME-TIMEZONE-INCONSISTENCY` (bloqueia os outros). O
+> começando por `#RESOLVER-TIER0-STRICT-EQUALITY` (o mais isolado; `buy_in`
+> confirmado pt39 como discriminador estável). **Nota pt39:** o
+> ex-`#START-TIME-TIMEZONE-INCONSISTENCY` foi re-rotulado
+> `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (não é TZ) e **deixou de
+> bloquear os outros**. O
 > resolver é a **dependência transversal**: afecta o pipeline lobby→`tournament_payouts`
 > **e** o linking do pipeline SS de mesa (desambiguação de multi-tabling, item 9).
 
@@ -70,15 +74,20 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    TIER 1/2 inutilizável quando a Vision não lê `start_time` (consistente): o
    fallback `[posted_at−12h, posted_at−30min]` exclui o candidato (o torneio
    começa depois do post). Fix: alargar fallback para `+12h`, ou Vision extrair
-   `start_time`. **Depende de `#START-TIME-TIMEZONE-INCONSISTENCY`.** Ver
-   `TECH_DEBTS_INVENTARIO.md` (pt37).
+   `start_time`. **Relacionado: `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`**
+   (ex-`#START-TIME-TIMEZONE-INCONSISTENCY`); a dependência "TZ primeiro"
+   dissolveu-se em pt39 (não é TZ — `meta.start_time` é a 1ª mão, não o arranque).
+   Ver `TECH_DEBTS_INVENTARIO.md` (pt37 + pt39).
 
-7. **`#START-TIME-TIMEZONE-INCONSISTENCY` (🔴 HIGH, aberto pt37).**
-   `tournament_summaries.start_time` vs `tournaments_meta.start_time` diferem
-   ~2h para o mesmo `tournament_number` (`tn 284491487`: 15:05 vs 17:03) — bug
-   de TZ (UTC vs PT/CEST) num dos parsers. **Bloqueia matching temporal seguro
-   — investigar ANTES do `#RESOLVER-TIER12-WINDOW-NO-START`.** Ver
-   `TECH_DEBTS_INVENTARIO.md` (pt37).
+7. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🔴 HIGH, aberto pt37
+   como `#START-TIME-TIMEZONE-INCONSISTENCY`, re-rotulado pt39).** **NÃO é bug de
+   TZ** (re-diagnose pt39, read-only). `tournament_summaries.start_time` =
+   arranque agendado; `tournaments_meta.start_time` = `MIN(played_at)` = 1ª mão
+   importada (horas adiantada quando há late-reg / import parcial). O diff é 0
+   quando a 1ª hand é Level1 e cresce com níveis tardios — semântica, não
+   relógio. **Já não bloqueia os outros** (não há TZ a corrigir); mas continua a
+   contaminar qualquer janela ancorada em `meta.start_time`. Ver
+   `TECH_DEBTS_INVENTARIO.md` (secção pt39).
 
 8. **`#IMPORT-MODAL-MISROUTES-TS-RESULTS` (🟠 HIGH UX, aberto pt37).** O
    `ImportModal` manda qualquer `.zip` para `/api/import`; um TS cai no ramo P&L
