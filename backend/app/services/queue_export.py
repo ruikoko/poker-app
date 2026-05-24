@@ -808,6 +808,27 @@ def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
     if isinstance(hand, dict) and isinstance(hand.get("players_left"), int):
         return hand["players_left"]
 
+    # pt38 — prioridade 2: SS de mesa alinhada a ESTA mão (granular).
+    # hands.context_table_ss_id → table_ss_processing_log.players_left.
+    # Preferida ao lookup por tournament_number (lobby) por ser per-mão.
+    ctx_id = hand.get("context_table_ss_id") if isinstance(hand, dict) else None
+    if isinstance(ctx_id, int):
+        try:
+            from app.db import query
+            rows = query(
+                "SELECT players_left FROM table_ss_processing_log "
+                "WHERE id = %s AND players_left IS NOT NULL",
+                (ctx_id,),
+            )
+            if rows:
+                val = rows[0].get("players_left") if isinstance(rows[0], dict) else None
+                if isinstance(val, int):
+                    return val
+        except Exception:
+            logger.exception(
+                "_resolve_players_left table_ss lookup failed ctx_id=%s", ctx_id,
+            )
+
     tn = hand.get("tournament_number") if isinstance(hand, dict) else None
     if not tn:
         return None

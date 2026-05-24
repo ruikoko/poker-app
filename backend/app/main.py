@@ -12,7 +12,7 @@ from app.routers.hands import (
     ensure_hm3_tags_column, ensure_has_showdown_column, ensure_discord_tags_column,
     ensure_origin_column, ensure_buy_in_column, ensure_tournament_format_column,
     ensure_tournament_name_and_number_columns, ensure_hand_attachments_schema,
-    ensure_study_state_check_constraint,
+    ensure_study_state_check_constraint, ensure_context_table_ss_column,
 )
 from app.routers.entries import router as entries_router
 from app.routers.discord import router as discord_router
@@ -41,6 +41,10 @@ from app.services.lobby_sync import ensure_lobby_processing_log_schema
 from app.services.hrc_jobs import ensure_hrc_jobs_schema
 from app.routers.tournament_results import router as tournament_results_router
 from app.routers.hrc import router as hrc_router, ensure_hrc_schema
+from app.routers.table_ss import (
+    router as table_ss_router,
+    ensure_table_ss_processing_log_schema,
+)
 
 load_dotenv()
 
@@ -268,6 +272,8 @@ async def lifespan(app: FastAPI):
     ensure_tournament_payouts_schema()
     ensure_tournament_summaries_schema()
     ensure_lobby_processing_log_schema()
+    ensure_table_ss_processing_log_schema()
+    ensure_context_table_ss_column()
     ensure_hrc_jobs_schema()
     ensure_hrc_schema()
     ensure_study_state_check_constraint()
@@ -325,6 +331,7 @@ app.include_router(queue_router)
 app.include_router(lobbys_router)
 app.include_router(tournament_results_router)
 app.include_router(hrc_router)
+app.include_router(table_ss_router)
 
 # Serve uploaded screenshots as static files
 import os

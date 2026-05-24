@@ -113,6 +113,32 @@ def ensure_origin_column():
         conn.close()
 
 
+def ensure_context_table_ss_column():
+    """Garante que hands.context_table_ss_id (INTEGER) existe.
+    Soft-FK para table_ss_processing_log.id (pt38) — a SS de mesa cuja Vision
+    deu o `players_left` alinhado a esta mão. Lido por
+    queue_export._resolve_players_left (prioridade > lobby_processing_log).
+    Sem FK rígida (mesma convenção de tournament_id), evita ordering/locking.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE hands
+                ADD COLUMN IF NOT EXISTS context_table_ss_id INTEGER
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hands_context_table_ss
+                ON hands(context_table_ss_id)
+            """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"ensure_context_table_ss_column: {e}")
+    finally:
+        conn.close()
+
+
 def ensure_buy_in_column():
     """
     Garante que hands.buy_in (NUMERIC(10,2)) existe.
