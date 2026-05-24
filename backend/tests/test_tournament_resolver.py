@@ -3,7 +3,9 @@ Mocked DB via patch a app.services.tournament_resolver.query."""
 from unittest.mock import patch
 from datetime import datetime, timezone
 
-from app.services.tournament_resolver import resolve_tournament_number, _tokenize_name
+from app.services.tournament_resolver import (
+    resolve_tournament_number, _tokenize_name, clean_tournament_name,
+)
 
 
 def _row(tn, name, st):
@@ -554,3 +556,72 @@ def test_pt39_tier0_backoffice_pool_players_no_anchor():
     assert sql_args[2] is None                              # buy_in não passado
     assert sql_args[6] == 9420.80 and sql_args[7] == 9420.80  # prize_pool
     assert sql_args[8] == 128 and sql_args[9] == 128         # total_players
+
+
+# ── pt39 parte 1/2: clean_tournament_name (drop trailing #NNN) ───────────────
+# #TABLE-SS-RESOLVER-COLLISION — o sufixo #NNN (nº de mesa Winamax lido na SS de
+# mesa) envenenava o ILIKE ALL. clean_tournament_name apara só o trailing #\d+.
+
+def test_clean_drops_trailing_table_suffix():
+    assert clean_tournament_name("ZENITH #005") == "ZENITH"
+    assert clean_tournament_name("GALACTICA #000") == "GALACTICA"
+
+
+def test_clean_preserves_prefix_hash_w_series():
+    assert clean_tournament_name("#220 - W SERIES - SPACE KO") == "#220 - W SERIES - SPACE KO"
+
+
+def test_clean_preserves_non_digit_hashtag():
+    assert clean_tournament_name("Daily $100,000 #ThanksGG Flipout") == \
+        "Daily $100,000 #ThanksGG Flipout"
+
+
+def test_clean_does_not_touch_dollar_amount():
+    assert clean_tournament_name("Daily Hyper $80") == "Daily Hyper $80"
+
+
+def test_clean_drops_only_trailing_in_compound():
+    assert clean_tournament_name("#220 - W SERIES #007") == "#220 - W SERIES"
+
+
+def test_clean_idempotent_and_edge_inputs():
+    assert clean_tournament_name("ZENITH") == "ZENITH"        # idempotente
+    assert clean_tournament_name("ZENITH #005 ") == "ZENITH"  # trailing space
+    assert clean_tournament_name("") == ""
+    assert clean_tournament_name(None) is None
+
+
+def test_clean_then_tokenize_drops_suffix_token():
+    assert _tokenize_name(clean_tournament_name("ZENITH #005")) == ["zenith"]
+
+
+def test_clean_then_tokenize_keeps_prefix_hash():
+    toks = _tokenize_name(clean_tournament_name("#220 - W SERIES - SPACE KO"))
+    assert "#220" in toks
+
+
+def test_resolve_strips_table_suffix_before_sql():
+    """Winamax 'ZENITH #005': o resolver tokeniza 'ZENITH' (sem '#005') →
+    patterns ['%zenith%'] chegam ao SQL em todos os tiers; '%#005%' NUNCA.
+    (TS/meta Winamax vazios → resolve via TIER 2 hands.)"""
+    rows = [_row("1099830438", "ZENITH", None)]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[[], [], rows]) as m:
+        tn, _ = resolve_tournament_number(
+            "Winamax", "ZENITH #005", None,
+            posted_at_hint=datetime(2026, 5, 23, 17, 46, 58, tzinfo=timezone.utc),
+        )
+    assert tn == "1099830438"
+    patterns_seen = [c[0][1][1] for c in m.call_args_list]  # params[1] = patterns
+    assert ["%zenith%"] in patterns_seen
+    assert all("%#005%" not in p for plist in patterns_seen for p in plist)
+
+
+def test_resolve_w_series_not_over_merged():
+    """'#220 - W SERIES' preserva '%#220%' nos patterns (discriminador do evento
+    — drop global parti-lo-ia)."""
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[[], [], []]) as m:
+        resolve_tournament_number("Winamax", "#220 - W SERIES", "2026-05-23T18:00:00Z")
+    patterns = m.call_args_list[0][0][1][1]
+    assert "%#220%" in patterns

@@ -25,6 +25,7 @@ Cada tier emite logs INFO uniformes:
 """
 from __future__ import annotations
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -45,6 +46,25 @@ def _currency_for_site(site: Optional[str]) -> Optional[str]:
     if site == "Winamax":
         return "EUR"
     return None
+
+
+# pt39 (#TABLE-SS-RESOLVER-COLLISION) — sufixo de nº de mesa do cliente Winamax
+# ("ZENITH #005"), lido pela Vision na SS de mesa, que NÃO existe em
+# hands.tournament_name (lá o nome é bare). Só apara um '#NNN' TRAILING.
+_TABLE_SUFFIX_RE = re.compile(r"\s*#\d+\s*$")
+
+
+def clean_tournament_name(name: Optional[str]) -> Optional[str]:
+    """Remove o sufixo '#NNN' trailing (nº de mesa do cliente) antes de tokenizar.
+
+    Só apara um ``#\\d+`` ancorado no FIM. Preserva '#NNN' em prefixo
+    (W SERIES Winamax, ex.: '#220 - W SERIES ...' — o nº é o discriminador do
+    evento) e hashtags não-numéricas (ex.: 'Daily $100,000 #ThanksGG Flipout').
+    ``$80`` não é tocado (é ``$`` não ``#``). None / '' passam intactos.
+    """
+    if not name:
+        return name
+    return _TABLE_SUFFIX_RE.sub("", name).strip()
 
 
 def _tokenize_name(name: Optional[str]) -> list[str]:
@@ -264,7 +284,7 @@ def resolve_tournament_number(
         (None, [candidates]) se 2+ matches no 1o tier nao-vazio (curto-circuita
             tiers seguintes). (None, []) se todos os tiers vazios.
     """
-    tokens = _tokenize_name(tournament_name)
+    tokens = _tokenize_name(clean_tournament_name(tournament_name))
     if not tokens:
         logger.warning("[tournament_resolver] FAIL name_empty")
         return (None, [])
