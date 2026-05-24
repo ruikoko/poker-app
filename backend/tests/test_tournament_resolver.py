@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.services.tournament_resolver import (
     resolve_tournament_number, _tokenize_name, clean_tournament_name,
+    name_tokens_subset,
 )
 
 
@@ -625,3 +626,30 @@ def test_resolve_w_series_not_over_merged():
         resolve_tournament_number("Winamax", "#220 - W SERIES", "2026-05-23T18:00:00Z")
     patterns = m.call_args_list[0][0][1][1]
     assert "%#220%" in patterns
+
+
+# ── pt39 parte 2/2: name_tokens_subset (validação de nome single_tn) ─────────
+# #TABLE-SS-RESOLVER-COLLISION — usado por table_ss._resolve_match.
+
+def test_name_tokens_subset_basic_match_and_mismatch():
+    assert name_tokens_subset("INTERSTELLAR #005", "INTERSTELLAR") is True
+    assert name_tokens_subset("EXPLORER #010", "INTERSTELLAR") is False
+    assert name_tokens_subset("ODYSSEY #013", "ZENITH") is False
+
+
+def test_name_tokens_subset_tolerates_extra_words_in_full():
+    assert name_tokens_subset("Hyper Special $108",
+                              "Sunday Hyper Special $108") is True
+
+
+def test_name_tokens_subset_empty_short_is_false():
+    assert name_tokens_subset("", "INTERSTELLAR") is False
+    assert name_tokens_subset(None, "INTERSTELLAR") is False
+    assert name_tokens_subset("#000", "ZENITH") is False  # só sufixo → 0 tokens
+
+
+def test_name_tokens_subset_w_series_suffix_and_case():
+    # sufixo de mesa #007 cai; prefixo #220 casa; case-insensitive.
+    assert name_tokens_subset("#220 - W SERIES #007",
+                              "#220 - W SERIES - SPACE KO") is True
+    assert name_tokens_subset("zenith", "ZENITH") is True

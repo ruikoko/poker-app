@@ -35,11 +35,78 @@ def test_resolve_match_no_candidates():
 
 
 def test_resolve_match_single_tn_matches_closest():
+    # pt39 p2: nome da SS bate com o do torneio (ambos 'ODYSSEY #013' via _cand).
     cands = [_cand(10, "T1"), _cand(11, "T1")]
-    m = table_ss._resolve_match(CAP, {"tournament_name": "X"}, "Winamax", cands)
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "ODYSSEY #013"}, "Winamax", cands)
     assert m["matched"]["id"] == 10  # primeira (mais próxima)
     assert m["tn"] == "T1"
     assert m["reason"] == "single_tn"
+
+
+# ── pt39 parte 2/2: validação de nome no single_tn ──────────────────────────
+
+def _candn(hid, tn, name):
+    return {"id": hid, "hand_id": f"WN-{hid}", "tournament_number": tn,
+            "tournament_name": name, "site": "Winamax", "played_at": CAP}
+
+
+def test_resolve_match_single_tn_name_mismatch_rejects():
+    """EXPLORER #010 (SS), janela só com mão de INTERSTELLAR → rejeita
+    (colisão silenciosa do pt38)."""
+    cands = [_candn(1, "1100185162", "INTERSTELLAR")]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "EXPLORER #010"}, "Winamax", cands)
+    assert m["matched"] is None
+    assert m["ambiguous"] is False
+    assert m["reason"].startswith("single_tn_name_mismatch")
+
+
+def test_resolve_match_single_tn_name_mismatch_odyssey_zenith():
+    """ODYSSEY #013 (SS) → mão ZENITH na janela: 2ª colisão silenciosa real."""
+    cands = [_candn(9, "1099830438", "ZENITH")]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "ODYSSEY #013"}, "Winamax", cands)
+    assert m["matched"] is None
+    assert m["reason"].startswith("single_tn_name_mismatch")
+
+
+def test_resolve_match_single_tn_name_match_accepts():
+    """INTERSTELLAR #005 (SS) → mão INTERSTELLAR: nome bate → aceita."""
+    cands = [_candn(2, "1100185162", "INTERSTELLAR")]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "INTERSTELLAR #005"}, "Winamax", cands)
+    assert m["matched"]["id"] == 2
+    assert m["reason"] == "single_tn"
+
+
+def test_resolve_match_single_tn_empty_ss_name_lenient_accepts():
+    """SS sem nome lido (Vision falhou no nome) → leniente: aceita single_tn."""
+    cands = [_candn(10, "T1", "ZENITH")]
+    m = table_ss._resolve_match(CAP, {"tournament_name": None}, "Winamax", cands)
+    assert m["matched"]["id"] == 10
+    assert m["reason"] == "single_tn"
+
+
+@patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
+@patch("app.routers.table_ss.resolve_tournament_number",
+       return_value=("EXPLORER-TN", []))
+@patch("app.routers.table_ss._find_candidate_hands",
+       return_value=[{"id": 1, "hand_id": "WN-1", "tournament_number": "1100185162",
+                      "tournament_name": "INTERSTELLAR", "site": "Winamax",
+                      "played_at": CAP}])
+@patch("app.routers.table_ss.tv.extract_table_ss_json",
+       return_value='{"site":"Winamax","tournament_name":"EXPLORER #010",'
+                    '"players_left":677}')
+@patch("app.routers.table_ss.query", return_value=[])
+def test_process_single_tn_mismatch_no_match_and_stores_tn(_q, _ex, _find, _res, _up):
+    """E2E: SS EXPLORER, janela só com mão INTERSTELLAR → name mismatch →
+    no_match_to_hand + tn real de EXPLORER guardado (limbo p/ re-link)."""
+    out = _run_process()
+    assert out["result"] == "no_match_to_hand"
+    assert out["tournament_number"] == "EXPLORER-TN"
+    assert out["hand_matched"] is None
+    assert _up.call_args.kwargs.get("matched_hand_db_id") is None
 
 
 @patch("app.routers.table_ss.resolve_tournament_number", return_value=("T2", []))

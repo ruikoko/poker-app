@@ -31,7 +31,9 @@ from app.auth import require_auth
 from app.db import get_conn, query
 from app.services.image_utils import detect_image_mime
 from app.services import table_ss_vision as tv
-from app.services.tournament_resolver import resolve_tournament_number
+from app.services.tournament_resolver import (
+    resolve_tournament_number, name_tokens_subset,
+)
 
 router = APIRouter(prefix="/api/table-ss", tags=["table-ss"])
 logger = logging.getLogger("table_ss")
@@ -259,6 +261,16 @@ def _resolve_match(
     tns = {c["tournament_number"] for c in candidates}
     if len(tns) == 1:
         c = candidates[0]
+        # pt39 (parte 2/2): validar o nome antes de aceitar. Em single_tn a
+        # proximidade temporal sozinha já ligou SSs ao torneio errado quando o
+        # da SS não tinha mão na janela (ex.: EXPLORER→INTERSTELLAR,
+        # ODYSSEY→ZENITH). Se a SS tem nome lido e NÃO bate com o do único
+        # torneio na janela → o torneio da SS não tem mão aqui → no match.
+        ss_name = vj.get("tournament_name")
+        if ss_name and not name_tokens_subset(ss_name, c.get("tournament_name")):
+            return {"matched": None, "tn": None, "ambiguous": False,
+                    "reason": f"single_tn_name_mismatch:{ss_name}!={c.get('tournament_name')}"}
+        # SS sem nome lido → leniente (proximidade temporal é o único sinal).
         return {"matched": c, "tn": c["tournament_number"], "ambiguous": False,
                 "reason": "single_tn"}
     # Multi-tabling: desambiguar pelo nome lido nesta SS.

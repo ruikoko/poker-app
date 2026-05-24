@@ -85,6 +85,24 @@ def _tokenize_name(name: Optional[str]) -> list[str]:
     return tokens
 
 
+def name_tokens_subset(short_name: Optional[str], full_name: Optional[str]) -> bool:
+    """pt39 (#TABLE-SS-RESOLVER-COLLISION parte 2) — True sse todos os tokens do
+    ``short_name`` (após clean_tournament_name) estão, como substring, no
+    ``full_name`` (cleaned + lowercased). Mesma semântica do ILIKE ALL do
+    resolver, tolerante a palavras extra do lado longo.
+
+    Usado para validar o nome no fast-path single_tn de
+    ``table_ss._resolve_match`` antes de aceitar a mão. Conservador:
+    ``short_name`` vazio/None / só-sufixo → False (o caller decide a leniência
+    quando não há nome lido).
+    """
+    toks = _tokenize_name(clean_tournament_name(short_name))
+    if not toks:
+        return False
+    full = (clean_tournament_name(full_name) or "").lower()
+    return all(tok in full for tok in toks)
+
+
 def _parse_iso_utc(start_time_iso: Optional[str]) -> Optional[datetime]:
     """Parse ISO 8601 (com/sem 'Z' suffix) -> datetime tz-aware UTC ou None."""
     if not start_time_iso:
