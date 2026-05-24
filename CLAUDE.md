@@ -598,6 +598,22 @@ Investigação read-only dos 4 debts HIGH do resolver/pipelines (queries directa
 
 Docs desta sessão: `JOURNAL_2026-05-24-pt39.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt39); `PENDENTES.md`.
 
-Última sessão fechada: **pt39** (24 Maio 2026 — 4 fixes HIGH do resolver: re-rotular `#START-TIME...` → `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` + `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ (partes 1/2+2/2) + cleanup BD; suite **646 PASSED**). Commits `b76cea7`→`e2c6460` (+ cleanup data-only). Detalhes em `docs/JOURNAL_2026-05-24-pt39.md`.
+## pt40 — Track B (HRC per-mão) + guarda lobby + 2 achados críticos (24 Maio 2026)
 
-Próxima sessão (**pt40**): **passos 5+6 do plano pt39** — `#RESOLVER-TIER12-WINDOW-NO-START` + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (cruzam-se entre si: a janela do TIER 1/2 não pode ancorar em `meta.start_time` porque este é a 1ª mão importada, não o arranque). **+ re-disparar os lobbys `tm_not_found`** (`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE`) para validar o fix do TIER 0 em prod (os 3 GG vanilla pt37 só fecham o ciclo após re-trigger). Continuam em fila a smoke battery 1 (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`), `#HRC-BOUNTY-HARDCODED-50PCT`, e a **Fase C** do pipeline SS de mesa (cliente automático; até lá o upload é manual). Backlog completo em `docs/PENDENTES.md`.
+Investigação read-only dos 2 HIGH temporais (passos 5+6 pt39) + entrega do **Track B** + 2 achados críticos. Suite **646 → 651 PASSED**. Commits: `1915571` (doc/guarda) → `dfc13a5` (Track B) + redeploy `ac26c261` (guarda).
+
+**Re-prioridade aceite:** passo 5 (anchor/janela) **antes** do passo 6; `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` baixado **HIGH → MED** (não-bloqueante: o TIER 0 usa o arranque do TS, não `meta.start_time`).
+
+**🚨 Achado crítico 1 — regressão do anchor (latente):** o anchor `start_time ≤ posted_at` do TIER 0 (introduzido em pt39 `35286c1`) assume **SS durante o jogo** (verdade p/ table-ss), mas os **lobby SS são tirados na inscrição** (torneio começa ~30min **depois** do post). Simulação dos 3 lobby `tm_not_found` pt37: 1 resolve certo, 1 fica `tm_not_found`, **1 mis-resolve para o dia anterior** (escreveria `tournament_payouts` errado). `M1=0` (latente, sem corrupção ainda) mas **blast radius ~24** `tm_not_found` acumulados disparam na próxima actividade de lobby. Novo debt `#LOBBY-ANCHOR-PRESTART-REGRESSION` (🔴 HIGH, `1915571`).
+
+**🛡️ Guarda activa:** `DISCORD_LOBBY_AUTO` estava **`true`** em prod → mudado para **`false`** + redeploy `ac26c261` SUCCESS (handler real-time do `#lobbys` desligado). **Não reverter** (nem correr sync de lobby, nem re-disparar) até o Track A. Reverter para `true` só após Track A + re-disparo OK.
+
+**Track B ✅ `#HRC-PER-HAND-DOWNLOAD` (`dfc13a5`):** botão "⬇ HRC" no painel `/hrc` → `GET /api/queue/hrc/hand/{hand_id}` gera zip per-mão (`hh.txt` + `payouts.json` + manifest) com guards 404/409/422; `has_payout` no `/eligible` controla a visibilidade. Alívio operacional real (Rui usa daqui em diante para o workflow manual).
+
+**🚨 Achado crítico 2 — bounties errados no converter GG→PS** (descoberto pelo Rui ao testar o Track B): `_HERO_BOUNTY_DEFAULT_USD = 250.0` (`queue_export.py:488`, = bounty do **$525** Big Game) aplicado a **todos** os torneios → Hero `€max(Vision,250)`; ex.: Big Game **$215** (bounty real $100) → `€250` (moeda E magnitude erradas). Pior que documentado: **vanilla GG também** (sem gate de formato), **vilões sempre a €0**, afecta **batch + per-mão**. **NÃO é regressão pt40** (vive desde FASE-1/pt28). Moeda `€` é intencional (HRC rejeita `$`). Debt `#HERO-BOUNTY-FROM-TS-DERIVATION` subido a **🔴 HIGH 🚨** — fix desbloqueado (TS tem `buy_in_bounty` por tn). **Foco pt41.**
+
+Docs desta sessão: `JOURNAL_2026-05-24-pt40.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt40); `PENDENTES.md`.
+
+Última sessão fechada: **pt40** (24 Maio 2026 — Track B `#HRC-PER-HAND-DOWNLOAD` ✅ `dfc13a5`; guarda `DISCORD_LOBBY_AUTO=false`; 2 achados críticos: anchor latente `#LOBBY-ANCHOR-PRESTART-REGRESSION` HIGH `1915571` + bounties `#HERO-BOUNTY-FROM-TS-DERIVATION` agravado HIGH 🚨; suite **651 PASSED**). Commits `1915571`→`dfc13a5` + redeploy `ac26c261`. Detalhes em `docs/JOURNAL_2026-05-24-pt40.md`.
+
+Próxima sessão (**pt41**), por ordem: 1) 🚨 **`#HERO-BOUNTY-FROM-TS-DERIVATION` URGENTE** (afecta cada mão GG estudada hoje, batch + per-mão; fix via `tournament_summaries.buy_in_bounty` por tn + gate por formato, manter `€`); 2) **Track A `#LOBBY-ANCHOR-PRESTART-REGRESSION`** (anchor lobby pré-arranque); 3) **re-disparar os ~24 lobby `tm_not_found`** (`sync-recent` `dry_run`→real); 4) **reverter `DISCORD_LOBBY_AUTO=true`**; 5) depois `#RESOLVER-TIER12-WINDOW-NO-START` + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED). Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.

@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 24 Maio 2026 (pt40 em curso — 🛡️ guarda `DISCORD_LOBBY_AUTO=false` em prod; aberto `#LOBBY-ANCHOR-PRESTART-REGRESSION` HIGH; ver TECH_DEBTS secção pt40).
+**Última actualização:** 24 Maio 2026 (fim da pt40 — Track B `#HRC-PER-HAND-DOWNLOAD` ✅ `dfc13a5`; 🛡️ guarda `DISCORD_LOBBY_AUTO=false`; abertos `#LOBBY-ANCHOR-PRESTART-REGRESSION` HIGH + agravado `#HERO-BOUNTY-FROM-TS-DERIVATION` HIGH 🚨).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,20 +12,22 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco pt40 (em curso):** 🛡️ **guarda activa** — `DISCORD_LOBBY_AUTO=false` em
-> prod (deploy `ac26c261`); **não** correr sync de lobby nem re-disparar até o
-> anchor fix. Dois tracks:
-> - **Track A (prod-safety, prioritário): `#LOBBY-ANCHOR-PRESTART-REGRESSION`** —
->   o anchor `start ≤ posted` do TIER 0 (pt39) falha p/ lobby SS (tirada na
->   inscrição → torneio começa depois do post) → mis-resolve p/ o dia anterior.
->   É o que **desbloqueia o re-disparo seguro** dos ~24 `tm_not_found`.
-> - **Track B (alívio operacional, paralelo): `#HRC-PER-HAND-DOWNLOAD`** — botão
->   "Download HRC pack" per-mão no `/hrc` (independente do resolver).
-> **Depois do Track A:** `#RESOLVER-TIER12-WINDOW-NO-START` +
-> `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (passos 5+6, agora MED) +
-> re-disparo (`sync-recent` `dry_run`→real) + **reverter `DISCORD_LOBBY_AUTO=true`**.
-> **Fechados em pt39:** `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ (`35286c1`) e
-> `#TABLE-SS-RESOLVER-COLLISION` ✅ (`36f7f7f`+`e2c6460`+cleanup BD).
+> **Foco pt41 (por ordem):**
+> 1. 🚨 **`#HERO-BOUNTY-FROM-TS-DERIVATION` (HIGH, URGENTE)** — o converter GG→PS
+>    mete Hero bounty `€max(Vision,250)` em **todas** as mãos GG (hardcode do $525;
+>    vanilla também; vilões a €0). **Afecta cada mão estudada hoje** (batch + per-mão)
+>    → não pode esperar. Fix desbloqueado: usar `tournament_summaries.buy_in_bounty`
+>    por tn + gate por formato; manter `€` (workaround HRC).
+> 2. **Track A: `#LOBBY-ANCHOR-PRESTART-REGRESSION` (HIGH)** — anchor `start ≤ posted`
+>    do TIER 0 falha p/ lobby SS (pré-arranque) → mis-resolve. Desbloqueia o re-disparo.
+> 3. **Re-disparo dos ~24 lobby `tm_not_found`** (`sync-recent` `dry_run`→real).
+> 4. **Reverter `DISCORD_LOBBY_AUTO=true`** (a guarda só sai depois do Track A + re-disparo OK).
+> 5. Depois: `#RESOLVER-TIER12-WINDOW-NO-START` + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED).
+>
+> 🛡️ **Guarda activa:** `DISCORD_LOBBY_AUTO=false` (deploy `ac26c261`) — **não**
+> correr sync de lobby nem re-disparar até o Track A.
+> **Fechados:** `#HRC-PER-HAND-DOWNLOAD` ✅ (`dfc13a5`, pt40); `#RESOLVER-TIER0-STRICT-EQUALITY`
+> ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ (pt39).
 
 1. **`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` — porta de entrada da Fase 2 do
    GTO Brain.** Validar o pipeline ponta-a-ponta nas **4 combinações site ×
