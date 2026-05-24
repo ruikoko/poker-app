@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 24 Maio 2026 (fim da pt39 — 4 fixes HIGH do resolver: re-rotular `#START-TIME...` → `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` + `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ partes 1/2+2/2 + cleanup BD; suite 646 PASSED).
+**Última actualização:** 24 Maio 2026 (pt40 em curso — 🛡️ guarda `DISCORD_LOBBY_AUTO=false` em prod; aberto `#LOBBY-ANCHOR-PRESTART-REGRESSION` HIGH; ver TECH_DEBTS secção pt40).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,14 +12,19 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco recomendado da próxima sessão (pt40):** fechar os 2 HIGH temporais do
-> resolver, que **se cruzam** — `#RESOLVER-TIER12-WINDOW-NO-START` (item 6) +
-> `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (item 7): a janela do
-> TIER 1/2 **não pode ancorar em `meta.start_time`** (é a 1ª mão importada, não o
-> arranque do torneio). **+ re-disparar os lobbys `tm_not_found`**
-> (`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE`) para **validar em prod o fix do TIER 0**
-> — os 3 GG vanilla pt37 só fecham o ciclo após re-trigger.
-> **Já fechados em pt39:** `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ (`35286c1`) e
+> **Foco pt40 (em curso):** 🛡️ **guarda activa** — `DISCORD_LOBBY_AUTO=false` em
+> prod (deploy `ac26c261`); **não** correr sync de lobby nem re-disparar até o
+> anchor fix. Dois tracks:
+> - **Track A (prod-safety, prioritário): `#LOBBY-ANCHOR-PRESTART-REGRESSION`** —
+>   o anchor `start ≤ posted` do TIER 0 (pt39) falha p/ lobby SS (tirada na
+>   inscrição → torneio começa depois do post) → mis-resolve p/ o dia anterior.
+>   É o que **desbloqueia o re-disparo seguro** dos ~24 `tm_not_found`.
+> - **Track B (alívio operacional, paralelo): `#HRC-PER-HAND-DOWNLOAD`** — botão
+>   "Download HRC pack" per-mão no `/hrc` (independente do resolver).
+> **Depois do Track A:** `#RESOLVER-TIER12-WINDOW-NO-START` +
+> `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (passos 5+6, agora MED) +
+> re-disparo (`sync-recent` `dry_run`→real) + **reverter `DISCORD_LOBBY_AUTO=true`**.
+> **Fechados em pt39:** `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ (`35286c1`) e
 > `#TABLE-SS-RESOLVER-COLLISION` ✅ (`36f7f7f`+`e2c6460`+cleanup BD).
 
 1. **`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` — porta de entrada da Fase 2 do
