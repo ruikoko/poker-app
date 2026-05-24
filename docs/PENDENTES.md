@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 24 Maio 2026 (pt39 — re-diagnose read-only do resolver: `#START-TIME-TIMEZONE-INCONSISTENCY` re-rotulado `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`, **não é TZ**; os outros 3 HIGH confirmados factualmente).
+**Última actualização:** 24 Maio 2026 (fim da pt39 — 4 fixes HIGH do resolver: re-rotular `#START-TIME...` → `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` + `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ partes 1/2+2/2 + cleanup BD; suite 646 PASSED).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,15 +12,15 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco recomendado da próxima sessão (pós-pt38):** atacar os **bugs HIGH do
-> resolver** (itens 5–7) + o novo `#TABLE-SS-RESOLVER-COLLISION` (pt38),
-> começando por `#RESOLVER-TIER0-STRICT-EQUALITY` (o mais isolado; `buy_in`
-> confirmado pt39 como discriminador estável). **Nota pt39:** o
-> ex-`#START-TIME-TIMEZONE-INCONSISTENCY` foi re-rotulado
-> `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (não é TZ) e **deixou de
-> bloquear os outros**. O
-> resolver é a **dependência transversal**: afecta o pipeline lobby→`tournament_payouts`
-> **e** o linking do pipeline SS de mesa (desambiguação de multi-tabling, item 9).
+> **Foco recomendado da próxima sessão (pt40):** fechar os 2 HIGH temporais do
+> resolver, que **se cruzam** — `#RESOLVER-TIER12-WINDOW-NO-START` (item 6) +
+> `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (item 7): a janela do
+> TIER 1/2 **não pode ancorar em `meta.start_time`** (é a 1ª mão importada, não o
+> arranque do torneio). **+ re-disparar os lobbys `tm_not_found`**
+> (`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE`) para **validar em prod o fix do TIER 0**
+> — os 3 GG vanilla pt37 só fecham o ciclo após re-trigger.
+> **Já fechados em pt39:** `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ (`35286c1`) e
+> `#TABLE-SS-RESOLVER-COLLISION` ✅ (`36f7f7f`+`e2c6460`+cleanup BD).
 
 1. **`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` — porta de entrada da Fase 2 do
    GTO Brain.** Validar o pipeline ponta-a-ponta nas **4 combinações site ×
@@ -63,12 +63,12 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    fonte). 3 opções já levantadas: renomear canais, dict de aliases
    hardcoded, ou UI admin central de tags. Decisão de produto pendente.
 
-5. **`#RESOLVER-TIER0-STRICT-EQUALITY` (🔴 HIGH, aberto pt37).** TIER 0 do
-   resolver compara `prize_pool`/`total_players` por igualdade estrita, mas a
-   Vision lê valores de lobby em tempo real (garantia vs pool real; inscritos
-   parciais vs total final) → nunca bate; torneios presentes em
-   `tournament_summaries` ficam `tm_not_found`. Fix: matching por nome + data
-   de calendário, ou igualdade em `buy_in`. Ver `TECH_DEBTS_INVENTARIO.md` (pt37).
+5. **`#RESOLVER-TIER0-STRICT-EQUALITY` — ✅ FIXED pt39 (`35286c1`).** TIER 0 passa
+   a `buy_in` (igualdade exacta `buy_in_total`+currency) + **janela `start_time`
+   ancorada no `posted_at`** (instância em curso); `prize_pool`/`total_players`
+   mantidos NULL-permissivos para o backoffice (`tournament_results.py`, 5º
+   consumidor). Detalhe em `TECH_DEBTS_INVENTARIO.md` secção pt39.
+   *(Pendente só: re-disparar os lobbys `tm_not_found` para validar em prod — ver foco.)*
 
 6. **`#RESOLVER-TIER12-WINDOW-NO-START` (🔴 HIGH, aberto pt37).** Janela dos
    TIER 1/2 inutilizável quando a Vision não lê `start_time` (consistente): o

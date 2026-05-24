@@ -581,6 +581,23 @@ Sessão grande. **Construído o pipeline de SS de mesa ponta-a-ponta** para dar 
 
 Docs desta sessão: `JOURNAL_2026-05-24-pt38.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt38); `PENDENTES.md`; `VISAO_PRODUTO.md`.
 
-Última sessão fechada: **pt38** (24 Maio 2026 — pipeline SS de mesa ponta-a-ponta: Fases A+B + trigger re-link + fix mapeamento Vision [`hero_rank` vs `players_left`] + reset BD; `#HRC-MTT-OTHER-TABLES-INFO` re-classificado falso positivo; suite **621 PASSED**). 5 commits `6d7a2e0`→`0d0ec30`. Detalhes em `docs/JOURNAL_2026-05-24-pt38.md`.
+## pt39 — Bugs HIGH do resolver: 4 fixes + cleanup BD (24 Maio 2026)
 
-Próxima sessão: **bugs HIGH do resolver** — `#START-TIME-TIMEZONE-INCONSISTENCY` (investigar TZ primeiro, bloqueia os outros), `#RESOLVER-TIER0-STRICT-EQUALITY`, `#RESOLVER-TIER12-WINDOW-NO-START` (pt37) + o novo `#TABLE-SS-RESOLVER-COLLISION` (pt38). O resolver é a dependência transversal: afecta o pipeline lobby→`tournament_payouts` **e** o linking do pipeline SS de mesa (desambiguação de multi-tabling). Continuam em fila a smoke battery 1 (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`), `#HRC-BOUNTY-HARDCODED-50PCT`, e a **Fase C** do pipeline SS de mesa (cliente automático `.bat-like`; até lá o upload é manual). Backlog completo em `docs/PENDENTES.md`.
+Investigação read-only dos 4 debts HIGH do resolver/pipelines (queries directas à BD prod via `_local_only/pt39_probe.py`) seguida de 4 fixes shipped + 1 cleanup de dados. Suite **621 → 646 PASSED**.
+
+**Re-rotulação (`b76cea7`):** `#START-TIME-TIMEZONE-INCONSISTENCY` → **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`**. **Não é bug de TZ:** o diff `tournament_summaries.start_time` (arranque agendado) vs `tournaments_meta.start_time` (`MIN(played_at)` = 1ª mão importada) é **0 quando a 1ª hand é Level1** e **cresce com níveis tardios** (late-reg / import parcial) — semântica, não relógio (um bug de TZ daria offset constante). Mantém-se HIGH, aberto.
+
+**`#RESOLVER-TIER0-STRICT-EQUALITY` ✅ FIXED (`35286c1`):** TIER 0 passa de `prize_pool`/`total_players` estritos (Vision live vs TS final → nunca batiam) para **`buy_in` (igualdade exacta em `buy_in_total` + currency) + janela `start_time` ancorada no `posted_at`/`captured_at`** (instância em curso, `ORDER BY start_time DESC LIMIT 1`). **Reversão parcial da decisão #4:** `prize_pool`/`total_players` ficam NULL-permissivos porque o **5º consumidor do resolver — `routers/tournament_results.py` (backoffice GG, descoberto a meio)** — é pós-jogo e precisa deles. Achado **W4**: **18/101 TS GG são 2×/dia** (mesmo nome+buy_in) → só a hora desempata. Helper `_parse_buy_in_str` em `table_ss.py`; comentário órfão em `table_ss_vision.py:221` corrigido no mesmo commit.
+
+**`#TABLE-SS-RESOLVER-COLLISION` ✅ FIXED (`36f7f7f` + `e2c6460` + cleanup BD):**
+- parte 1/2 (`36f7f7f`) — `clean_tournament_name` apara o sufixo `#NNN` (nº de mesa Winamax) **só no trailing** antes de tokenizar. Achado: W SERIES `#220 - …` é prefixo **legítimo** (discriminador do evento), drop global parti-lo-ia.
+- parte 2/2 (`e2c6460`) — `name_tokens_subset` valida o nome no fast-path `single_tn` de `_resolve_match` antes de aceitar. Achado: **2 colisões** em prod (não 1) — `ODYSSEY→ZENITH` (não estava flagged) além de `EXPLORER→INTERSTELLAR`.
+- cleanup BD data-only (`_local_only/pt39_cleanup.py`) — script atómico auto-guardado (BEGIN → 4 UPDATEs + rowcount checks → asserts pré-COMMIT → COMMIT): `hands` 42874→SS 12 (INTERSTELLAR, players_left=129) e 42911→NULL (ZENITH); `table_ss_processing_log` id 9/13 → `no_match_to_hand` + tn NULL (re-link futuro). Sem DELETE (total mantém-se 7).
+
+**Continuam abertos (foco pt40):** `#RESOLVER-TIER12-WINDOW-NO-START` + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (cruzam-se: ambos sobre fiabilidade temporal; a re-diagnose dissolveu a antiga dependência "investigar TZ primeiro").
+
+Docs desta sessão: `JOURNAL_2026-05-24-pt39.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt39); `PENDENTES.md`.
+
+Última sessão fechada: **pt39** (24 Maio 2026 — 4 fixes HIGH do resolver: re-rotular `#START-TIME...` → `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` + `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ (partes 1/2+2/2) + cleanup BD; suite **646 PASSED**). Commits `b76cea7`→`e2c6460` (+ cleanup data-only). Detalhes em `docs/JOURNAL_2026-05-24-pt39.md`.
+
+Próxima sessão (**pt40**): **passos 5+6 do plano pt39** — `#RESOLVER-TIER12-WINDOW-NO-START` + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (cruzam-se entre si: a janela do TIER 1/2 não pode ancorar em `meta.start_time` porque este é a 1ª mão importada, não o arranque). **+ re-disparar os lobbys `tm_not_found`** (`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE`) para validar o fix do TIER 0 em prod (os 3 GG vanilla pt37 só fecham o ciclo após re-trigger). Continuam em fila a smoke battery 1 (`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY`), `#HRC-BOUNTY-HARDCODED-50PCT`, e a **Fase C** do pipeline SS de mesa (cliente automático; até lá o upload é manual). Backlog completo em `docs/PENDENTES.md`.
