@@ -338,6 +338,27 @@ export const hrc = {
   },
 }
 
+// ── SS de mesa (contexto players_left p/ HRC) ───────────────────────────────
+export const tableSs = {
+  upload: (file, opts = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts.filename) form.append('filename', opts.filename)
+    if (opts.captured_at) form.append('captured_at', opts.captured_at)
+    if (opts.source) form.append('source', opts.source)
+    return fetch(`${BASE}/table-ss/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(async (r) => {
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.detail || `Erro ${r.status}`)
+      return data
+    })
+  },
+  recent: (limit = 50) => req('GET', `/table-ss/recent?limit=${limit}`),
+}
+
 // ── GTO Brain ──────────────────────────────────────────────────────────────
 export const gto = {
   match: (params) => {
