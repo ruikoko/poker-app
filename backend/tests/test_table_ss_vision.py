@@ -70,11 +70,13 @@ def test_coerce_float():
 # ── parse_and_validate_table_ss_json ────────────────────────────────────────
 
 def _winamax_json():
+    # Painel Winamax "Rank: 56 / 71 (16)" → hero_rank=56, players_left=71, itm=16.
     return json.dumps({
         "site": "Winamax",
         "tournament_name": "ODYSSEY #013",
         "tournament_buy_in": "€50",
         "blinds_level": {"small_blind": 100, "big_blind": 200, "ante": 25},
+        "hero_rank": 56,
         "players_left": 71,
         "total_entries": 124,
         "itm_places": 16,
@@ -90,11 +92,49 @@ def test_parse_valid_round_trip_and_coerces():
     assert r is not None
     assert r["site"] == "Winamax"
     assert r["tournament_name"] == "ODYSSEY #013"
+    assert r["hero_rank"] == 56
     assert r["players_left"] == 71
     assert r["total_entries"] == 124
     assert r["itm_places"] == 16
     assert r["average_stack_bb"] == 100.8
     assert r["hero_stack_bb"] == 98.6
+
+
+def test_parse_coerces_hero_rank():
+    assert parse_and_validate_table_ss_json(
+        json.dumps({"tournament_name": "X", "hero_rank": 56}))["hero_rank"] == 56
+    assert parse_and_validate_table_ss_json(
+        json.dumps({"tournament_name": "X", "hero_rank": "56"}))["hero_rank"] == 56
+    assert parse_and_validate_table_ss_json(
+        json.dumps({"tournament_name": "X", "hero_rank": 0}))["hero_rank"] is None
+    # hero_rank ausente → None (não rebenta)
+    assert parse_and_validate_table_ss_json(
+        json.dumps({"tournament_name": "X", "players_left": 71}))["hero_rank"] is None
+
+
+def test_parse_hero_rank_players_left_total_entries_independent():
+    """Formato Winamax: os 3 campos ficam distintos, sem swap entre si."""
+    raw = json.dumps({
+        "site": "Winamax", "tournament_name": "HIGHROLLER #001",
+        "hero_rank": 6, "players_left": 8, "total_entries": 30,
+    })
+    r = parse_and_validate_table_ss_json(raw)
+    assert r["hero_rank"] == 6
+    assert r["players_left"] == 8
+    assert r["total_entries"] == 30
+
+
+def test_parse_total_entries_null_when_only_rank_and_left():
+    """Painel só com rank/left (sem contador de entradas) → total_entries=None;
+    players_left preservado (o número depois da barra)."""
+    raw = json.dumps({
+        "site": "Winamax", "tournament_name": "HIGHROLLER #001",
+        "hero_rank": 6, "players_left": 8,
+    })
+    r = parse_and_validate_table_ss_json(raw)
+    assert r["players_left"] == 8
+    assert r["total_entries"] is None
+    assert r["hero_rank"] == 6
 
 
 def test_parse_malformed_json():

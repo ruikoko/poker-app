@@ -53,8 +53,9 @@ _TABLE_PROMPT = (
     '  "tournament_name": "<exact name incl. number if shown, e.g. ODYSSEY #013>" | null,\n'
     '  "tournament_buy_in": "<as shown incl. currency, e.g. €50>" | null,\n'
     '  "blinds_level": {"small_blind": <int> | null, "big_blind": <int> | null, "ante": <int> | null},\n'
+    '  "hero_rank": <int hero current rank/standing among players alive> | null,\n'
     '  "players_left": <int players STILL ALIVE in the tournament right now> | null,\n'
-    '  "total_entries": <int total players that entered the tournament> | null,\n'
+    '  "total_entries": <int total players that ENTERED, only if shown separately> | null,\n'
     '  "itm_places": <int number of paid places / places paid> | null,\n'
     '  "average_stack_bb": <float average stack in BIG BLINDS> | null,\n'
     '  "hero_stack_bb": <float hero stack in BIG BLINDS> | null,\n'
@@ -67,11 +68,26 @@ _TABLE_PROMPT = (
     "- hero_position is the HERO seat relative to the dealer BUTTON (the 'D' "
     "chip). The seat with the button = BTN; the next clockwise = SB, then BB, "
     "then UTG, etc. Read carefully which seat the button is on.\n"
-    "- players_left = players still alive NOW (e.g. 'Players: 71/124', "
-    "'Entrants 124, Left 71', or a running count). total_entries = the total "
-    "that entered (the larger, static number).\n"
-    "- itm_places = number of paid positions ('16 paid', 'ITM: 16', 'Places "
-    "paid 16').\n"
+    "- TOURNAMENT INFO PANEL — read the rank/players line VERY CAREFULLY. The "
+    "format differs by site and the slash numbers are NOT 'left/entrants':\n"
+    "  * Winamax (top-right panel): 'Rank: <hero_rank> / <players_left> "
+    "(<itm_places>)'. The number BEFORE the '/' is the HERO's current rank; the "
+    "number AFTER the '/' is PLAYERS LEFT (still alive); the number in "
+    "PARENTHESES is itm_places (paid spots).\n"
+    "  * GGPoker: 'My Rank: <hero_rank> / <players_left>' (NO itm number in "
+    "this panel). Before the '/' = hero rank; after the '/' = players left.\n"
+    "- players_left = ALWAYS the count of players STILL ALIVE = the number "
+    "AFTER the '/'. It is NEVER the hero rank (before the '/') and NEVER the "
+    "parentheses number.\n"
+    "- hero_rank = the number BEFORE the '/' (hero's current standing). It is "
+    "always <= players_left.\n"
+    "- total_entries = the TOTAL number that entered, ONLY if a separate "
+    "explicit entrants counter is visible (e.g. '124 entrants', "
+    "'Entries: 1059'). The rank/players slash line is NOT total_entries. If no "
+    "explicit entrants counter is shown, set total_entries = null. Do NOT "
+    "derive it from the slash numbers.\n"
+    "- itm_places = number of paid positions. On Winamax it is the parentheses "
+    "number on the rank line; elsewhere 'X paid' / 'ITM: X'. Null if absent.\n"
     "- average_stack_bb / hero_stack_bb: report in BIG BLINDS. If the client "
     "shows stacks in CHIPS, convert to BB by dividing by big_blind. If shown in "
     "BB already, use as-is. Keep one decimal.\n"
@@ -184,6 +200,7 @@ def parse_and_validate_table_ss_json(raw: Optional[str]) -> Optional[dict]:
     # Normaliza os campos no dict devolvido.
     data["tournament_name"] = name
     data["site"] = site
+    data["hero_rank"] = _coerce_pos_int(data.get("hero_rank"))
     data["players_left"] = players_left
     data["total_entries"] = _coerce_pos_int(data.get("total_entries"))
     data["itm_places"] = _coerce_pos_int(data.get("itm_places"))
