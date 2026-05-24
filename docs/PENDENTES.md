@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 24 Maio 2026 (pt38 — descoberta empírica MTT-Stacks: `#HRC-MTT-OTHER-TABLES-INFO` é falso positivo; aberto `#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT`).
+**Última actualização:** 24 Maio 2026 (fim da pt38 — pipeline SS de mesa ponta-a-ponta: Fases A+B + trigger re-link + fix mapeamento Vision + reset BD).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -11,6 +11,12 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 ---
 
 ## Alta prioridade (atacar a seguir)
+
+> **Foco recomendado da próxima sessão (pós-pt38):** atacar os **bugs HIGH do
+> resolver** (itens 5–7) + o novo `#TABLE-SS-RESOLVER-COLLISION` (pt38),
+> começando por `#START-TIME-TIMEZONE-INCONSISTENCY` (bloqueia os outros). O
+> resolver é a **dependência transversal**: afecta o pipeline lobby→`tournament_payouts`
+> **e** o linking do pipeline SS de mesa (desambiguação de multi-tabling, item 9).
 
 1. **`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` — porta de entrada da Fase 2 do
    GTO Brain.** Validar o pipeline ponta-a-ponta nas **4 combinações site ×
@@ -80,17 +86,20 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    resultado real. Fix: detectar o tipo pelo conteúdo e encaminhar, ou avisar
    quando não é HH. Ver `TECH_DEBTS_INVENTARIO.md` (pt37).
 
-9. **`#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT` (🔴 HIGH, aberto pt38).**
-   Quando `players_left=None` no `meta.json` (mão sem lobby SS no `#lobbys`), o
-   watcher salta a página MTT-Stacks com Next directo
-   (`tools/watcher_src/patched_funcs.py:1861-1871`); a tabela fica em defaults
-   (Other Tables=0) e o Multi-Table ICM colapsa a FT ICM dos sentados. **Causa
-   raiz:** falta de `players_left` fidedigno por mão (a fonte actual, lobby SS no
-   `#lobbys`, cobre poucos torneios + ~34% de falha Vision). **Solução proposta:**
-   captura de SS de mesa via Intuitive Tables (1-clique por mão) → Vision extrai
-   `players_left` → `meta.json` populado → o HRC auto-calcula Other Tables
-   (verificado empiricamente em pt38). Substitui o ex-`#HRC-MTT-OTHER-TABLES-INFO`
-   (falso positivo). Ver `TECH_DEBTS_INVENTARIO.md` (pt38).
+9. **`#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT` (🔴 HIGH, aberto pt38; pipeline construído pt38).**
+   **Endereçado** pelo **pipeline SS de mesa** construído em pt38 (Fases A+B +
+   trigger re-link + fix mapeamento Vision): captura via Intuitive Tables →
+   Vision lê `players_left` **por mão** → `_resolve_players_left` usa-o
+   (prioridade granular, antes do fallback lobby). **Residual a fechar:**
+   - **Fase C** (cliente automático `.bat-like`) **pendente** → até lá o upload
+     é **manual** em `/table-ss`.
+   - **Captura:** a SS tem de incluir o painel "Rank:"
+     (`#TABLE-SS-VISION-CAPTURE-GAP`), senão `players_left` vem null —
+     Rui configurar o Intuitive Tables.
+   - **Fiabilidade do linking depende do resolver**
+     (`#TABLE-SS-PIPELINE-DEPENDENCIES`, `#TABLE-SS-RESOLVER-COLLISION`):
+     multi-tabling não é 100% fiável até os 3 HIGH do resolver (itens 5–7)
+     fecharem. Ver `docs/JOURNAL_2026-05-24-pt38.md` e `TECH_DEBTS_INVENTARIO.md` (pt38).
 
 ---
 

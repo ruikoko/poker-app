@@ -15,6 +15,13 @@ Centralizar o estudo de poker MTT, juntando dados que hoje estão espalhados em 
 3. **DISTRIBUIÇÃO** — enviar cada dado para a secção certa da app.
 4. **ANÁLISE** — Rui trabalha sobre o resultado distribuído.
 
+> **Pipeline de contexto — SS de mesa (pt38):** além das fontes de **mãos**
+> acima, a **SS de mesa** (capturada via Intuitive Tables; página `/table-ss`,
+> manual por agora) é um input de **contexto** — não cria mãos. A Vision lê o
+> painel da mesa e liga o `players_left` **por mão** (`hands.context_table_ss_id`)
+> para alimentar o HRC (Multi-Table ICM). É o análogo das imagens de contexto
+> Discord, mas para o pipeline HRC. Detalhe em `docs/JOURNAL_2026-05-24-pt38.md`.
+
 ## Filosofia
 
 Automação na recolha/processamento/distribuição. Controlo manual sempre disponível (alterar tags, remover vilões, eliminar mãos). Um único clique deve ser suficiente para o ciclo "varrer Discord + processar + distribuir"; mas o utilizador pode intervir em qualquer ponto pós-distribuição.
