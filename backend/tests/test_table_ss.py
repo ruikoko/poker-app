@@ -284,3 +284,111 @@ def test_select_andar1_selects_context_table_ss_id():
         hrc_queue.select_andar1_rows(["icm"], ["new"], now - timedelta(days=1), now)
     sql = mq.call_args[0][0]
     assert "context_table_ss_id" in sql
+
+
+# ── relink_orphan_table_ss (trigger pós-import) ─────────────────────────────
+
+def _orphan_row(rid=1, site="Winamax"):
+    return {"id": rid, "captured_at": CAP, "site": site,
+            "vision_json": {"tournament_name": "ODYSSEY #013"}}
+
+
+@patch("app.routers.table_ss._bump_attempt_table_ss")
+@patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
+@patch("app.routers.table_ss._find_candidate_hands",
+       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
+                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
+                      "played_at": CAP}])
+@patch("app.routers.table_ss.query")
+def test_relink_links_when_hand_now_in_window(mq, _find, mlink, mbump):
+    mq.return_value = [_orphan_row()]
+    res = table_ss.relink_orphan_table_ss()
+    assert res == {"checked": 1, "linked": 1, "still_orphan": 0}
+    mlink.assert_called_once()
+    assert mlink.call_args[0][0] == 1            # log_id
+    assert mlink.call_args[0][1]["id"] == 10     # matched hand
+    mbump.assert_not_called()
+
+
+@patch("app.routers.table_ss._bump_attempt_table_ss")
+@patch("app.routers.table_ss._link_orphan_table_ss")
+@patch("app.routers.table_ss._find_candidate_hands", return_value=[])
+@patch("app.routers.table_ss.query")
+def test_relink_keeps_orphan_when_no_hand(mq, _find, mlink, mbump):
+    mq.return_value = [_orphan_row()]
+    res = table_ss.relink_orphan_table_ss()
+    assert res == {"checked": 1, "linked": 0, "still_orphan": 1}
+    mlink.assert_not_called()
+    mbump.assert_called_once_with(1)
+
+
+@patch("app.routers.table_ss.query")
+def test_relink_empty_hand_ids_short_circuits(mq):
+    res = table_ss.relink_orphan_table_ss(hand_ids=[])
+    assert res == {"checked": 0, "linked": 0, "still_orphan": 0}
+    mq.assert_not_called()
+
+
+@patch("app.routers.table_ss._find_candidate_hands")
+@patch("app.routers.table_ss.query", return_value=[])
+def test_relink_select_filters_no_match_only(mq, _find):
+    # SELECT só apanha no_match_to_hand com captured_at → success nunca tocado.
+    res = table_ss.relink_orphan_table_ss()
+    assert res == {"checked": 0, "linked": 0, "still_orphan": 0}
+    sql = " ".join(mq.call_args[0][0].split())
+    assert "result = 'no_match_to_hand'" in sql
+    assert "captured_at IS NOT NULL" in sql
+    _find.assert_not_called()
+
+
+@patch("app.routers.table_ss.get_conn")
+def test_link_orphan_idempotent_when_not_orphan(mock_get_conn):
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 0   # já não está em no_match (success/raça)
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_get_conn.return_value = mock_conn
+    ok = table_ss._link_orphan_table_ss(
+        1, {"id": 10, "hand_id": "WN-10", "tournament_number": "T1"})
+    assert ok is False
+    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
+    assert not any("UPDATE hands" in s for s in sqls)  # não liga
+    mock_conn.commit.assert_not_called()
+
+
+@patch("app.routers.table_ss.get_conn")
+def test_link_orphan_success_updates_log_and_hand(mock_get_conn):
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 1
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_get_conn.return_value = mock_conn
+    ok = table_ss._link_orphan_table_ss(
+        1, {"id": 10, "hand_id": "WN-10", "tournament_number": "T1"})
+    assert ok is True
+    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
+    assert any("UPDATE table_ss_processing_log" in s and "result = 'success'" in s for s in sqls)
+    assert any("UPDATE hands SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
+    mock_conn.commit.assert_called_once()
+
+
+@patch("app.routers.table_ss.get_conn")
+@patch("app.routers.table_ss._find_candidate_hands",
+       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
+                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
+                      "played_at": CAP}])
+@patch("app.routers.table_ss.query")
+def test_relink_end_to_end_flips_orphan_to_success(mq, _find, mock_get_conn):
+    """no_match + mão agora na janela → worker liga e flip success (link real
+    sobre conn mockada)."""
+    mq.return_value = [_orphan_row()]
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 1
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_get_conn.return_value = mock_conn
+    res = table_ss.relink_orphan_table_ss()
+    assert res["linked"] == 1
+    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
+    assert any("result = 'success'" in s for s in sqls)
+    assert any("UPDATE hands SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)

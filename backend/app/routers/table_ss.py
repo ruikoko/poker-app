@@ -253,6 +253,120 @@ def _resolve_match(
             "reason": f"multi_tn_unresolved:{len(tns)}"}
 
 
+# ── Re-link pós-import (peça em falta da Fase A) ─────────────────────────────
+
+def _bump_attempt_table_ss(log_id: int) -> None:
+    """Incrementa attempt_count sem mudar o result (continua no_match_to_hand)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE table_ss_processing_log SET attempt_count = attempt_count + 1 "
+                "WHERE id = %s AND result = 'no_match_to_hand'",
+                (log_id,),
+            )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"[table_ss_relink] bump attempt falhou id={log_id}: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
+    """Liga uma SS órfã à mão agora encontrada, em 1 transacção. O guard
+    `WHERE result='no_match_to_hand'` garante idempotência (no-op se já success
+    ou corrida concorrente). Devolve True sse ligou."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE table_ss_processing_log
+                   SET result = 'success',
+                       matched_hand_id = %s,
+                       tournament_number = COALESCE(tournament_number, %s),
+                       attempt_count = attempt_count + 1,
+                       reason_detail = 'relinked_post_import'
+                 WHERE id = %s AND result = 'no_match_to_hand'
+                """,
+                (matched_hand["hand_id"], matched_hand.get("tournament_number"), log_id),
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                return False
+            cur.execute(
+                "UPDATE hands SET context_table_ss_id = %s WHERE id = %s",
+                (log_id, matched_hand["id"]),
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(
+            f"[table_ss_relink] link falhou id={log_id}: {type(e).__name__}: {e}"
+        )
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def relink_orphan_table_ss(hand_ids=None) -> dict:
+    """Re-tenta linkar SSs de mesa presas em `no_match_to_hand` a mãos agora
+    presentes (tipicamente recém-importadas). Disparado fire-and-forget no fim
+    de import_hm3 / import GG zip.
+
+    `hand_ids` é o sinal do trigger (que mãos chegaram); o match re-corre pela
+    janela temporal (`_find_candidate_hands`), por isso serve só para
+    curto-circuitar quando nada foi importado e para logging.
+
+    Idempotente: só selecciona rows `no_match_to_hand` com captured_at; rows já
+    `success` nunca são tocadas. Devolve {checked, linked, still_orphan}.
+    """
+    if hand_ids is not None and len(hand_ids) == 0:
+        return {"checked": 0, "linked": 0, "still_orphan": 0}
+
+    rows = query(
+        """SELECT id, captured_at, site, vision_json
+             FROM table_ss_processing_log
+            WHERE result = 'no_match_to_hand' AND captured_at IS NOT NULL"""
+    )
+    checked = linked = still = 0
+    for r in rows:
+        checked += 1
+        site = r.get("site")
+        captured_at = r.get("captured_at")
+        if not site or captured_at is None:
+            _bump_attempt_table_ss(r["id"])
+            still += 1
+            continue
+        vj = r.get("vision_json") or {}
+        candidates = _find_candidate_hands(captured_at, site)
+        m = _resolve_match(captured_at, vj, site, candidates)
+        if m["matched"] and _link_orphan_table_ss(r["id"], m["matched"]):
+            linked += 1
+        else:
+            _bump_attempt_table_ss(r["id"])
+            still += 1
+    logger.info(
+        "[table_ss_relink] checked=%d linked=%d still_orphan=%d",
+        checked, linked, still,
+    )
+    return {"checked": checked, "linked": linked, "still_orphan": still}
+
+
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None

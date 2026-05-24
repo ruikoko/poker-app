@@ -466,6 +466,22 @@ async def import_file(
 
         asyncio.create_task(_attachments_async())
 
+        # ── Trigger re-link SS de mesa órfãs (peça em falta da Fase A) ──
+        # SSs em no_match_to_hand podem agora ligar às mãos HH recém-importadas.
+        from app.routers.table_ss import relink_orphan_table_ss
+
+        async def _table_ss_relink_async():
+            try:
+                res = relink_orphan_table_ss()
+                logger.info(
+                    f"[import_] table_ss relink: {res['linked']} linked, "
+                    f"{res['still_orphan']} still orphan ({res['checked']} checked)"
+                )
+            except Exception as exc:
+                logger.error(f"[import_] table_ss relink falhou: {exc}")
+
+        asyncio.create_task(_table_ss_relink_async())
+
         return {
             "import_type": "hands",
             "entry_id": entry_id,

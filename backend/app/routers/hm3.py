@@ -1130,6 +1130,22 @@ async def import_hm3(
 
     asyncio.create_task(_attachments_async())
 
+    # ── Trigger re-link SS de mesa órfãs (peça em falta da Fase A) ──
+    # SSs presas em no_match_to_hand podem agora ligar a mãos recém-importadas.
+    from app.routers.table_ss import relink_orphan_table_ss
+
+    async def _table_ss_relink_async():
+        try:
+            res = relink_orphan_table_ss()
+            logger.info(
+                f"[import_hm3] table_ss relink: {res['linked']} linked, "
+                f"{res['still_orphan']} still orphan ({res['checked']} checked)"
+            )
+        except Exception as exc:
+            logger.error(f"[import_hm3] table_ss relink falhou: {exc}")
+
+    asyncio.create_task(_table_ss_relink_async())
+
     return {
         "status": "ok",
         "total_rows": len(hands_map),
