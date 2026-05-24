@@ -218,7 +218,9 @@ def derive_captured_at(
 
     O timestamp do filename é hora LOCAL da máquina de captura (default
     Europe/Lisbon, com DST WET/WEST). Converte-se para UTC para comparar com
-    `hands.played_at` (TIMESTAMPTZ UTC). Ver #START-TIME-TIMEZONE-INCONSISTENCY.
+    `hands.played_at` — que é gravado como datetime naïve do header da HH e
+    interpretado como UTC pela sessão Postgres (TimeZone=Etc/UTC), não porque a
+    sala escreva UTC no header. Ver #META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START.
 
     Devolve None se não houver grupo de 14 dígitos ou data inválida.
     """

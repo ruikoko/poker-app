@@ -32,6 +32,20 @@ from app.db import query
 
 logger = logging.getLogger("tournament_resolver")
 
+# pt39 — janela do TIER 0 ancorada no posted_at/captured_at. A SS é tirada
+# durante o torneio, logo a instância certa já arrancou; 24h cobre slow MTT que
+# atravessa a meia-noite. Ver #RESOLVER-TIER0-STRICT-EQUALITY.
+_TIER0_WINDOW_HOURS = 24
+
+
+def _currency_for_site(site: Optional[str]) -> Optional[str]:
+    """Moeda canónica por sala (para o filtro buy_in_currency do TIER 0)."""
+    if site in ("GGPoker", "PokerStars", "WPN"):
+        return "USD"
+    if site == "Winamax":
+        return "EUR"
+    return None
+
 
 def _tokenize_name(name: Optional[str]) -> list[str]:
     """Quebra um nome de torneio em tokens prontos para ILIKE match.
@@ -93,25 +107,62 @@ def _decide_window(
     return None
 
 
-def _query_summaries(site, patterns, prize_pool=None, total_players=None):
+def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
+                     prize_pool=None, total_players=None,
+                     anchor=None, window_hours=_TIER0_WINDOW_HOURS):
     """TIER 0 — tournament_summaries (autoritativo).
 
-    B2.1: sem janela temporal. TS sao fonte autoritativa post-jogo
-    e podem ser importados em backfill semanas depois da SS.
-    Discriminacao via prize_pool / total_players da Vision.
+    pt39 (#RESOLVER-TIER0-STRICT-EQUALITY): TIER 0 suporta DOIS conjuntos de
+    discriminadores, todos NULL-permissivos, conforme o consumidor:
+
+      - buy_in (igualdade exacta em buy_in_total) + buy_in_currency (estrito) +
+        janela em start_time ANCORADA no `anchor` (posted_at/captured_at):
+        usado pelos pipelines LIVE (lobby, table-ss). A SS é tirada durante o
+        torneio → selecciona a instância EM CURSO = maior start_time <= anchor
+        dentro de [anchor - window_hours, anchor] (resolve 2x/dia, ~18% TS GG).
+
+      - prize_pool + total_players (igualdade exacta): usado pelo pipeline
+        PÓS-JOGO (tournament_results backoffice), cujos valores são FINAIS e
+        batem com o TS — único discriminador entre instâncias em dias
+        diferentes quando não há âncora.
+
+    Sem anchor → sem janela, LIMIT 5 (deixa a ambiguidade subir). NB: ancorar
+    em start_time NÃO quebra backfill — start_time é o instante real do evento,
+    independente de quando o TS foi importado.
 
     NULL no parametro = sem filtro. Valor = filtro estricto (=).
     """
+    if anchor is not None:
+        return query(
+            """SELECT tournament_number, tournament_name, start_time
+                 FROM tournament_summaries
+                WHERE site = %s
+                  AND tournament_name ILIKE ALL (%s::text[])
+                  AND (%s::numeric IS NULL OR buy_in_total = %s::numeric)
+                  AND (%s::text IS NULL OR buy_in_currency = %s)
+                  AND (%s::numeric IS NULL OR prize_pool = %s::numeric)
+                  AND (%s::integer IS NULL OR total_players = %s::integer)
+                  AND start_time <= %s
+                  AND start_time >= %s - make_interval(hours => %s)
+                ORDER BY start_time DESC
+                LIMIT 1""",
+            (site, patterns, buy_in, buy_in, buy_in_currency, buy_in_currency,
+             prize_pool, prize_pool, total_players, total_players,
+             anchor, anchor, window_hours),
+        )
     return query(
         """SELECT tournament_number, tournament_name, start_time
              FROM tournament_summaries
             WHERE site = %s
               AND tournament_name ILIKE ALL (%s::text[])
+              AND (%s::numeric IS NULL OR buy_in_total = %s::numeric)
+              AND (%s::text IS NULL OR buy_in_currency = %s)
               AND (%s::numeric IS NULL OR prize_pool = %s::numeric)
               AND (%s::integer IS NULL OR total_players = %s::integer)
             ORDER BY start_time DESC NULLS LAST
             LIMIT 5""",
-        (site, patterns, prize_pool, prize_pool, total_players, total_players),
+        (site, patterns, buy_in, buy_in, buy_in_currency, buy_in_currency,
+         prize_pool, prize_pool, total_players, total_players),
     )
 
 
@@ -184,6 +235,8 @@ def resolve_tournament_number(
     *,
     window_hours: float = 2.0,
     posted_at_hint: Optional[datetime] = None,
+    buy_in: Optional[float] = None,
+    buy_in_currency: Optional[str] = None,
     prize_pool: Optional[float] = None,
     total_players: Optional[int] = None,
 ) -> tuple[Optional[str], list[dict]]:
@@ -196,10 +249,15 @@ def resolve_tournament_number(
         window_hours: tolerancia +/- em horas para o ramo start_time (default 2h).
         posted_at_hint: timestamp tz-aware do post Discord. Usado como
             ancora para tiers 1+2 quando start_time_iso e ausente/invalido.
-        prize_pool: B2.1 — discriminador para TIER 0 (filtro estricto =).
-            None = sem filtro. Vision le 'Total Prize Pool' do header.
-        total_players: B2.1 — discriminador para TIER 0 (filtro estricto =).
-            None = sem filtro. Vision le 'entrants' (total registered).
+        buy_in: pt39 — discriminador do TIER 0 (igualdade exacta em
+            buy_in_total, NULL-permissivo). Total stake+fee+bounty. Lobby:
+            vj['buy_in']. None = sem filtro.
+        buy_in_currency: moeda do buy_in ('USD'/'EUR'). None → derivada do
+            site. Só aplicada quando buy_in não-None.
+        prize_pool: discriminador TIER 0 do pipeline PÓS-JOGO (backoffice
+            results), igualdade exacta NULL-permissiva. Valores finais que
+            batem com o TS. None = sem filtro.
+        total_players: idem prize_pool (entrants finais do backoffice).
 
     Returns:
         (tn, []) se 1 match unico em qualquer tier (paragem imediata).
@@ -214,9 +272,17 @@ def resolve_tournament_number(
     patterns = [f"%{t}%" for t in tokens]
     window = _decide_window(start_time_iso, posted_at_hint, window_hours)
 
-    # TIER 0 — tournament_summaries (autoritativo, sem janela; B2.1)
+    # TIER 0 — tournament_summaries (autoritativo). pt39: nome + buy_in +
+    # janela start_time ancorada no posted_at_hint (instância em curso).
+    anchor = posted_at_hint
+    if anchor is not None and anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    ts_currency = (
+        (buy_in_currency or _currency_for_site(site)) if buy_in is not None else None
+    )
     candidates_summaries = [dict(r) for r in _query_summaries(
-        site, patterns, prize_pool=prize_pool, total_players=total_players,
+        site, patterns, buy_in=buy_in, buy_in_currency=ts_currency,
+        prize_pool=prize_pool, total_players=total_players, anchor=anchor,
     )]
     if candidates_summaries:
         if len(candidates_summaries) == 1:

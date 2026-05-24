@@ -377,76 +377,180 @@ def test_b2_summaries_query_targets_correct_table():
     assert "FROM tournament_summaries" in sql_1st
 
 
-# ── B2.1: TIER 0 sem janela + prize_pool/total_players discriminadores ──────
+# ── pt39: TIER 0 = nome + buy_in + janela start_time ancorada (posted_at) ───
+# Substitui a secção B2.1 (prize_pool/total_players removidos do TIER 0).
+# Ver #RESOLVER-TIER0-STRICT-EQUALITY.
 
-def test_b21_match_via_summaries_with_prize_pool_unique():
-    """prize_pool passado como discriminador estricto. SQL recebe-o como param."""
-    ts_rows = [_row("281017175", "Speed Racer Bounty $108",
-                    datetime(2026, 5, 3, 21, 0, tzinfo=timezone.utc))]
-    with patch("app.services.tournament_resolver.query",
-               side_effect=[ts_rows]) as m:
+def test_pt39_tier0_match_name_buyin_anchor_unique():
+    """Cenário 1 — os 3 GG vanilla pt37 passam a resolver: nome + buy_in +
+    âncora único. Confirma params buy_in (NULL-permissivo) + currency derivada
+    do site + LIMIT 1 + janela make_interval."""
+    posted = datetime(2026, 5, 19, 16, 7, tzinfo=timezone.utc)
+    ts_rows = [_row("284491487", "Daily Deepstack Special $125",
+                    datetime(2026, 5, 19, 15, 5, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
-            "GGPoker", "Speed Racer Bounty $108", "2026-05-03T21:00:00Z",
-            prize_pool=23150.88, total_players=233,
+            "GGPoker", "Daily Deepstack Special $125", None,
+            posted_at_hint=posted, buy_in=125.0,
         )
-    assert tn == "281017175"
+    assert tn == "284491487"
     assert candidates == []
     assert m.call_count == 1
-    # SQL params: (site, patterns, pp, pp, tp, tp) — 6 valores
-    sql_args = m.call_args_list[0][0][1]
-    assert len(sql_args) == 6
-    assert sql_args[2] == 23150.88
-    assert sql_args[3] == 23150.88
-    assert sql_args[4] == 233
-    assert sql_args[5] == 233
+    sql, sql_args = m.call_args_list[0][0]
+    assert "LIMIT 1" in sql and "make_interval" in sql
+    assert "ORDER BY start_time DESC" in sql
+    # ordem anchored: site,patterns, buy_in,buy_in, cur,cur, pp,pp, tp,tp, anchor,anchor, win
+    assert sql_args[2] == 125.0 and sql_args[3] == 125.0       # buy_in
+    assert sql_args[4] == "USD" and sql_args[5] == "USD"        # currency do site
+    assert sql_args[6] is None and sql_args[8] is None         # pool/players NULL (lobby)
+    assert sql_args[10] == posted                              # start_time <= anchor
 
 
-def test_b21_match_summaries_no_prize_pool_falls_back_name_only():
-    """Vision nao leu prize_pool nem entrants -> filtros opt-in NULL ->
-    match so por nome (TS sem janela)."""
-    ts_rows = [_row("X", "x", None)]
-    with patch("app.services.tournament_resolver.query",
-               side_effect=[ts_rows]) as m:
+def test_pt39_tier0_two_per_day_picks_running_instance():
+    """Cenário 2 — torneio 2x/dia (16:45 e 19:45); SS às 18:00. A DB (LIMIT 1,
+    start<=anchor, ORDER BY start_time DESC) devolve a das 16:45 (em curso); o
+    mock simula essa selecção. Aqui fixamos o contrato SQL + propagação do tn."""
+    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    running = [_row("284939948", "Daily Hyper $50",
+                    datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query", side_effect=[running]) as m:
         tn, candidates = resolve_tournament_number(
-            "GGPoker", "x", "2026-05-05T18:30:00Z",
-            # prize_pool e total_players nao passados (default None)
+            "GGPoker", "Daily Hyper $50", None,
+            posted_at_hint=posted, buy_in=50.0,
+        )
+    assert tn == "284939948"
+    assert candidates == []
+    sql, sql_args = m.call_args_list[0][0]
+    assert "ORDER BY start_time DESC" in sql and "LIMIT 1" in sql
+    assert sql_args[10] == posted   # start_time <= anchor
+    assert sql_args[12] == 24       # window_hours
+
+
+def test_pt39_tier0_anchor_before_starts_falls_through():
+    """Cenário 3 — SS antes de qualquer instância arrancar: a DB devolve 0
+    (start<=anchor vazio) → cascata para o TIER 1."""
+    posted = datetime(2026, 5, 19, 15, 0, tzinfo=timezone.utc)
+    meta_rows = [_row("X", "Daily Hyper $50",
+                      datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query",
+               side_effect=[[], meta_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Daily Hyper $50", None,
+            posted_at_hint=posted, buy_in=50.0,
         )
     assert tn == "X"
-    assert candidates == []
+    assert m.call_count == 2  # TS vazio -> meta
+
+
+def test_pt39_tier0_buyin_none_name_and_anchor_only():
+    """Cenário 4 — Vision não leu buy_in: filtro NULL-permissivo (buy_in e
+    currency a None), resolve por nome + janela."""
+    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    ts_rows = [_row("Y", "Daily Hyper $50",
+                    datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
+        tn, _ = resolve_tournament_number(
+            "GGPoker", "Daily Hyper $50", None, posted_at_hint=posted,  # buy_in None
+        )
+    assert tn == "Y"
     sql_args = m.call_args_list[0][0][1]
-    assert sql_args[2] is None  # prize_pool NULL -> filtro skipped via IS NULL
-    assert sql_args[4] is None  # total_players idem
+    assert sql_args[2] is None and sql_args[3] is None   # buy_in NULL
+    assert sql_args[4] is None and sql_args[5] is None   # currency NULL quando buy_in None
 
 
-def test_b21_summaries_no_window_returns_old_tournament():
-    """Caso real Rui: TS importado em backfill (semanas atras), SS postada
-    hoje -> match deterministico mesmo sem hint temporal coincidente."""
-    posted_today = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
-    old_ts_start = datetime(2026, 4, 15, 19, 30, tzinfo=timezone.utc)  # 24 dias antes
-    ts_rows = [_row("OLD-TN", "Daily Hyper $80", old_ts_start)]
+def test_pt39_tier0_currency_strict_then_fallthrough():
+    """Cenário 5 — currency divergente: a moeda estrita é enviada ao SQL (a DB
+    excluiria); mock devolve 0 → cascata. Currency explícita ganha sobre o site."""
+    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
     with patch("app.services.tournament_resolver.query",
-               side_effect=[ts_rows]) as m:
+               side_effect=[[], [], []]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "x", None,
+            posted_at_hint=posted, buy_in=50.0, buy_in_currency="EUR",
+        )
+    sql_args_ts = m.call_args_list[0][0][1]
+    assert sql_args_ts[4] == "EUR" and sql_args_ts[5] == "EUR"  # estrita, explícita
+    assert tn is None
+    assert m.call_count == 3  # TS vazio -> meta vazio -> hands vazio
+
+
+def test_pt39_tier0_no_anchor_multiple_returns_candidates():
+    """Cenário 6 — sem âncora + múltiplos: ramo LIMIT 5, devolve candidatos
+    (contrato preservado, ambiguidade sobe)."""
+    ts_rows = [
+        _row("A", "Daily Hyper $50", None),
+        _row("B", "Daily Hyper $50", None),
+    ]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Daily Hyper $50", None, buy_in=50.0,  # sem posted_at_hint
+        )
+    assert tn is None
+    assert len(candidates) == 2
+    sql = m.call_args_list[0][0][0]
+    assert "LIMIT 5" in sql
+    assert "make_interval" not in sql
+
+
+def test_pt39_tier0_backfill_event_contemporary_with_anchor():
+    """Cenário 7 — backfill: TS importado tarde, mas start_time = instante real
+    do evento, contemporâneo do posted_at → dentro da janela 24h → match."""
+    posted = datetime(2026, 5, 19, 17, 0, tzinfo=timezone.utc)
+    event_start = datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc)
+    ts_rows = [_row("284939948", "Daily Hyper $80", event_start)]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Daily Hyper $80", None,
-            posted_at_hint=posted_today,
-            prize_pool=7948.8, total_players=108,
+            posted_at_hint=posted, buy_in=80.0,
         )
-    assert tn == "OLD-TN"
+    assert tn == "284939948"
     assert candidates == []
     assert m.call_count == 1
 
 
-def test_b21_summaries_query_omits_window_clauses():
-    """Defensivo: SQL do TIER 0 NAO inclui BETWEEN nem filtro de start_time.
-    B2.1 colapsou os branches window/no-window."""
-    ts_rows = [_row("X", "x", None)]
-    with patch("app.services.tournament_resolver.query",
-               side_effect=[ts_rows]) as m:
-        resolve_tournament_number(
-            "GGPoker", "x", "2026-05-05T18:30:00Z",
-            posted_at_hint=datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc),
+def test_pt39_tier1_unchanged_when_tier0_empty():
+    """Cenário 8 — regressão: TIER 0 vazio → TIER 1 windowed inalterado
+    (BETWEEN presente, 4 args site/patterns/lo/hi)."""
+    rows = [_row("281416137", "BBG $215",
+                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
+        tn, _ = resolve_tournament_number(
+            "GGPoker", "BBG $215", "2026-05-05T18:30:00Z", buy_in=215.0,
         )
-    sql = m.call_args_list[0][0][0]
-    assert "BETWEEN" not in sql
-    assert "start_time BETWEEN" not in sql
-    assert "ORDER BY start_time" in sql  # ordenacao mantida
+    assert tn == "281416137"
+    sql_meta, sql_args_meta = m.call_args_list[1][0]
+    assert "BETWEEN" in sql_meta          # janela TIER 1 intacta
+    assert len(sql_args_meta) == 4        # site, patterns, lo, hi
+
+
+def test_pt39_tier0_naive_anchor_coerced_to_utc():
+    """Defensivo — posted_at_hint naïve é coerced para UTC antes de ir ao SQL."""
+    posted_naive = datetime(2026, 5, 19, 18, 0)  # sem tzinfo
+    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
+        resolve_tournament_number("GGPoker", "x", None,
+                                  posted_at_hint=posted_naive, buy_in=10.0)
+    # ordem anchored: anchor está no índice 10 (índices 6/8 são pool/players).
+    anchor_param = m.call_args_list[0][0][1][10]
+    assert anchor_param.tzinfo is not None
+
+
+def test_pt39_tier0_backoffice_pool_players_no_anchor():
+    """Backoffice (pós-jogo): pool/players FINAIS chegam ao SQL como filtros
+    NULL-permissivos no ramo sem âncora (posted_at_hint=None). Preserva o
+    discriminador correcto do pipeline tournament_results (reversão parcial da
+    decisão #4 — pool/players coexistem com buy_in). Ver #RESOLVER-TIER0-STRICT-EQUALITY."""
+    ts_rows = [_row("283542054", "Daily Hyper $80", None)]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Daily Hyper $80", None,
+            prize_pool=9420.80, total_players=128,
+        )
+    assert tn == "283542054"
+    assert candidates == []
+    sql, sql_args = m.call_args_list[0][0]
+    assert "LIMIT 5" in sql and "make_interval" not in sql
+    # ordem no-anchor: site,patterns, buy_in,buy_in, cur,cur, pp,pp, tp,tp
+    assert sql_args[2] is None                              # buy_in não passado
+    assert sql_args[6] == 9420.80 and sql_args[7] == 9420.80  # prize_pool
+    assert sql_args[8] == 128 and sql_args[9] == 128         # total_players

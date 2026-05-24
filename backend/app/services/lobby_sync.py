@@ -256,8 +256,7 @@ async def process_lobby_message(
             tournament_resolver.resolve_tournament_number,
             site, name, vj.get("start_time_iso"),
             posted_at_hint=posted_at,
-            prize_pool=vj.get("prize_pool"),
-            total_players=vj.get("entrants"),
+            buy_in=vj.get("buy_in"),
         )
 
     if tn is None:

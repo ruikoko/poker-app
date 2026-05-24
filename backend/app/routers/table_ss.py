@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -46,6 +47,27 @@ _VALID_RESULTS = frozenset({
     "success", "vision_failed", "json_invalid", "site_undetected",
     "tm_not_found", "tm_ambiguous", "no_match_to_hand", "upsert_error",
 })
+
+# pt39 — o buy_in da SS de mesa vem como string com moeda ("€50", "$108"),
+# ao contrário do lobby (float). Parse para (total_float, currency) p/ alimentar
+# o discriminador buy_in do TIER 0 do resolver.
+_BUY_IN_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _parse_buy_in_str(s: Optional[str]) -> tuple[Optional[float], Optional[str]]:
+    """'€50' -> (50.0, 'EUR'); '$108' -> (108.0, 'USD'); '€40+€10' -> (50.0,'EUR').
+
+    (None, None) se vazio/sem número. Vírgulas de milhares removidas; assume
+    buy-ins inteiros (decimal-vírgula EU não tratado — fora de scope pt39).
+    """
+    if not s or not isinstance(s, str):
+        return (None, None)
+    currency = "EUR" if "€" in s else ("USD" if "$" in s else None)
+    nums = _BUY_IN_NUM_RE.findall(s.replace(",", ""))
+    if not nums:
+        return (None, currency)
+    total = sum(float(n) for n in nums)
+    return (total if total > 0 else None, currency)
 
 
 # ── Schema ───────────────────────────────────────────────────────────────────
@@ -240,9 +262,10 @@ def _resolve_match(
         return {"matched": c, "tn": c["tournament_number"], "ambiguous": False,
                 "reason": "single_tn"}
     # Multi-tabling: desambiguar pelo nome lido nesta SS.
+    _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
     tn, _cands = resolve_tournament_number(
         site, vj.get("tournament_name") or "", None,
-        posted_at_hint=captured_at, total_players=vj.get("total_entries"),
+        posted_at_hint=captured_at, buy_in=_bi, buy_in_currency=_cur,
     )
     if tn and tn in tns:
         closest = next((c for c in candidates if c["tournament_number"] == tn), None)
@@ -483,9 +506,10 @@ async def _process_table_ss(
     if captured_at is None:
         out["result"] = "no_match_to_hand"
         out["reason_detail"] = "sem captured_at (filename sem YYYYMMDDHHMMSS)"
+        _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
         tn, _c = resolve_tournament_number(
             site, vj.get("tournament_name") or "", None,
-            total_players=vj.get("total_entries"),
+            buy_in=_bi, buy_in_currency=_cur,
         )
         out["tournament_number"] = tn
     else:
@@ -503,9 +527,10 @@ async def _process_table_ss(
         else:  # no_hands_in_window — tenta resolver p/ guardar tn (limbo linkável)
             out["result"] = "no_match_to_hand"
             out["reason_detail"] = m["reason"]
+            _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
             tn, _c = resolve_tournament_number(
                 site, vj.get("tournament_name") or "", None,
-                posted_at_hint=captured_at, total_players=vj.get("total_entries"),
+                posted_at_hint=captured_at, buy_in=_bi, buy_in_currency=_cur,
             )
             out["tournament_number"] = tn
 
