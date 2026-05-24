@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 23 Maio 2026 (fim da sessão pt37 — setup smoke battery 1 + tech debts do resolver/import/lobbys).
+**Última actualização:** 24 Maio 2026 (pt38 — descoberta empírica MTT-Stacks: `#HRC-MTT-OTHER-TABLES-INFO` é falso positivo; aberto `#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT`).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -80,6 +80,18 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    resultado real. Fix: detectar o tipo pelo conteúdo e encaminhar, ou avisar
    quando não é HH. Ver `TECH_DEBTS_INVENTARIO.md` (pt37).
 
+9. **`#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT` (🔴 HIGH, aberto pt38).**
+   Quando `players_left=None` no `meta.json` (mão sem lobby SS no `#lobbys`), o
+   watcher salta a página MTT-Stacks com Next directo
+   (`tools/watcher_src/patched_funcs.py:1861-1871`); a tabela fica em defaults
+   (Other Tables=0) e o Multi-Table ICM colapsa a FT ICM dos sentados. **Causa
+   raiz:** falta de `players_left` fidedigno por mão (a fonte actual, lobby SS no
+   `#lobbys`, cobre poucos torneios + ~34% de falha Vision). **Solução proposta:**
+   captura de SS de mesa via Intuitive Tables (1-clique por mão) → Vision extrai
+   `players_left` → `meta.json` populado → o HRC auto-calcula Other Tables
+   (verificado empiricamente em pt38). Substitui o ex-`#HRC-MTT-OTHER-TABLES-INFO`
+   (falso positivo). Ver `TECH_DEBTS_INVENTARIO.md` (pt38).
+
 ---
 
 ## GTO Brain — roadmap (depois da smoke battery)
@@ -105,23 +117,23 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 
 ## Médio prazo
 
-9. **`#CI-TARGET-INITIAL-NOT-CALIBRATED` (pt25e Bloco 2).** Calibrar a coord
+10. **`#CI-TARGET-INITIAL-NOT-CALIBRATED` (pt25e Bloco 2).** Calibrar a coord
    do campo CI Target inicial da 1ª run no main UI. Actualmente
    `CI_TARGET_FIELD_X/Y = 0` → `_set_ci_target_common` degrada para Enter
    (funciona, mas é menos limpo). Smoke devagar com o Rui para medir a
    coord.
 
-10. **`#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`.** `verify_wizard_finished`
+11. **`#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`.** `verify_wizard_finished`
    (state check WARN-only pós-Finish, pt29-v1) verifica **cedo demais** — o
    wizard ainda está visível no instante da verificação, gera WARN espúrio,
    mas a 1ª run efectivamente arranca. Adicionar um pequeno settle/poll
    antes de verificar, ou retirar o WARN. Não-bloqueante.
 
-11. **`#CURSOR-ANOMALY-POST-SAVE-AS`.** Após o Save As, o cursor da Strategy
+12. **`#CURSOR-ANOMALY-POST-SAVE-AS`.** Após o Save As, o cursor da Strategy
    Table cai na 2ª linha (EP). Origem desconhecida. Não bloqueia o flow,
    mas investigar (pode afectar uma futura 3ª run ou navegação encadeada).
 
-12. **`#PARSER-SEATS-FAILURES` (🟡 MED, aberto pt36).** `build_queue_zip`
+13. **`#PARSER-SEATS-FAILURES` (🟡 MED, aberto pt36).** `build_queue_zip`
    passou a skipar mãos cujo `derive_seats_in_preflop_order` devolve `[]`
    (sem button / <2 seats) com `reason="no_seats_at_table"`. Desde
    `#HRC-RUN-2-ALWAYS-DISPATCH`, uma falha do parser de seats custa a **mão
@@ -130,7 +142,7 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    ex.: nicks com espaços, `#DERIVE-MAX-PLAYERS-HERO-REGEX-GG`). Detalhe em
    `docs/TECH_DEBTS_INVENTARIO.md` (secção pt36).
 
-13. **`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE` (🟡 MED UX, aberto pt37).** O botão
+14. **`#LOBBYS-RETRIGGER-NOT-DISCOVERABLE` (🟡 MED UX, aberto pt37).** O botão
    "Sincronizar Lobbys" + Avançado/`tm_not_found` vive só na página Discord,
    fácil de não notar; não há aviso em Dashboard/Torneios quando há candidatos
    `tm_not_found` pendentes. O utilizador importa TS+HH e não sabe que precisa
@@ -142,16 +154,16 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 
 ## Baixo prazo / qualidade
 
-14. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
+15. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
    BB stack, prompt GTO mais forte.
-15. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
+16. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
    Discord ↔ mão; ver CLAUDE.md "Imagens de contexto Discord").
-16. **Filtros derivados no Estudo.**
-17. **Dashboard — colunas adicionais.**
-18. **Winamax replayer — URL da Vision.**
-19. **`_upload_screenshot_to_storage`** — limpeza do stub.
-20. **Discord entry status** — cosmético.
-21. **Discord page — dual time filters.**
+17. **Filtros derivados no Estudo.**
+18. **Dashboard — colunas adicionais.**
+19. **Winamax replayer — URL da Vision.**
+20. **`_upload_screenshot_to_storage`** — limpeza do stub.
+21. **Discord entry status** — cosmético.
+22. **Discord page — dual time filters.**
 
 ---
 
