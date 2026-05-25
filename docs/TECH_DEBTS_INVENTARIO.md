@@ -21,6 +21,31 @@ vanilla sem token (Opção A); Winamax/PS passam (bounty na HH crua). Banner D1
 |---|---|---|
 | **#MYSTERY-KO-DUAL-SUPPORT** | 🟡 MED | Mystery KO **excluído do /hrc na pt41** (gate site-agnóstico em `select_andar1_rows`). O HRC não modela Mystery KO de forma fiável: o bounty é **oculto/aleatório** e a equity muda radicalmente **pré- vs pós-ITM** (antes do ITM o bounty é desconhecido → a mão joga-se como **vanilla**; depois do ITM os bounties revelados viram **KO fixos**). **Suporte futuro:** (1) pré-ITM tratar como vanilla (sem token); (2) pós-ITM como KO fixo com o bounty revelado; (3) `players_left` vs `places_paid` como gate ITM (depende do pipeline SS de mesa fidedigno); (4) importar os TS Mystery (**~1.353 mãos GG 2026** à espera, ex. `tn 281143347` Sunday Showdown). **Bloqueado por:** estado ITM por mão + decisão de produto sobre o valor de bounty pós-revelação. Refs: `queue_export.py:MYSTERY_FORMATS`; `hrc_queue.py:select_andar1_rows`/`pending_ts_hands`. |
 
+### Tech debt novo aberto em pt41 (2 — foco pt42)
+
+**`#HRC-BETTING-SCRIPT-IMPROVEMENTS`** — 🔴 **HIGH 🚨 URGENTE (foco pt42, junto com Track A)**
+
+**Contexto.** O pipeline HRC gera, por mão, `<hand_id>/script.js` que tenta replicar a *betting structure* da HH (o gerador de scripts; ver investigação dependente para localização exacta). Descoberto pelo Rui **após o shipping do Track B** (`dfc13a5`): o script actual **limita a análise estratégica** em dois aspectos.
+
+**1. Cobertura de streets — variante "pré-flop + flop only".**
+Hoje o script gera bets em **pré-flop + flop + turn + river**. Em muitos estudos só interessam **pré-flop + flop**; turn/river expandem a árvore desnecessariamente (mais nós, mais tempo de cálculo, ruído). **Pedido:** variante com bets **só em pré-flop + flop**; turn e river ficam **sem betting** (só check).
+
+**2. Alternativas estratégicas para o Hero.**
+O script replica apenas as acções **tomadas** na HH. O Hero fica com uma única acção (ex.: all-in 14.6 BB no BU), **sem alternativas a comparar** (ex.: mini-raise 2 BB). Permite validar o resultado da linha jogada, mas **não comparar opções**. **Regra-base proposta pelo Rui** (única a fixar agora):
+- Stack effective do Hero **> 8 BB** num **spot de open** → o script **inclui SEMPRE mini-raise 2 BB**, independentemente da acção tomada na HH.
+- Mantém as acções **reais** da HH (replica) **+** adiciona o 2 BB se ainda não estiver lá.
+- **Outros sizes** (3.5 BB, 4 BB, etc.) e **outros spots** (3-bet, BB defense, cold-call) → regras a definir em **sessão futura**; **NÃO fixar agora**.
+
+**Investigação dependente (sessão futura, antes de codificar):**
+- Localização do gerador de scripts no código (provável `backend/app/services/` — `hrc_script_gen.py`/`queue_export.py`).
+- Parâmetros que controlam bets **por street** e **por seat**.
+- Como expor as variantes: múltiplos scripts no zip? botão alternativo no `/hrc`? toggle? parâmetro de endpoint?
+- Como **detectar "spot de open do Hero"**: posição + stack effective + acções anteriores (ninguém abriu antes).
+- Smoke test: gerar zip com scripts expandidos e validar que o **HRC processa** as alternativas.
+- Eventual **interacção entre os 2 aspectos** (variantes de streets × alternativas do Hero → combinatória de scripts).
+
+**Severidade HIGH 🚨:** afecta a utilidade analítica de **cada mão estudada** no HRC (o produto nº1 é o estudo). Refs (a confirmar na investigação): gerador de `script.js`; pipeline `build_queue_zip` (`queue_export.py`); painel `/hrc`.
+
 ---
 
 ## Estado actual (24 Maio 2026 — pt40, guarda lobby + regressão do anchor)
