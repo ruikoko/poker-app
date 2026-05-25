@@ -257,6 +257,7 @@ async def process_lobby_message(
             site, name, vj.get("start_time_iso"),
             posted_at_hint=posted_at,
             buy_in=vj.get("buy_in"),
+            anchor_mode="prestart",  # pt41 Track A — lobby SS é pré-start
         )
 
     if tn is None:

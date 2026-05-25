@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from app.services.tournament_resolver import (
     resolve_tournament_number, _tokenize_name, clean_tournament_name,
-    name_tokens_subset,
+    name_tokens_subset, _decide_window,
 )
 
 
@@ -209,9 +209,9 @@ def test_resolve_start_time_takes_precedence_over_posted_at():
         )
     args = m.call_args[0]
     lo, hi = args[1][2], args[1][3]
-    # window_hours default = 2.0 -> [16:30, 20:30] em torno de 18:30.
+    # pt41 ramo-1: back=window_hours(2h), forward=4h -> [16:30, 22:30] em torno de 18:30.
     assert lo == datetime(2026, 5, 9, 16, 30, tzinfo=timezone.utc)
-    assert hi == datetime(2026, 5, 9, 20, 30, tzinfo=timezone.utc)
+    assert hi == datetime(2026, 5, 9, 22, 30, tzinfo=timezone.utc)
 
 
 def test_resolve_no_hints_falls_back_to_limit_5():
@@ -401,18 +401,20 @@ def test_pt39_tier0_match_name_buyin_anchor_unique():
     assert m.call_count == 1
     sql, sql_args = m.call_args_list[0][0]
     assert "LIMIT 1" in sql and "make_interval" in sql
-    assert "ORDER BY start_time DESC" in sql
-    # ordem anchored: site,patterns, buy_in,buy_in, cur,cur, pp,pp, tp,tp, anchor,anchor, win
+    assert "ORDER BY abs(" in sql                              # pt41: closest (era DESC)
+    # ordem anchored pt41: site,patterns, buy,buy, cur,cur, pp,pp, tp,tp, anchor,back_h, anchor,fwd_h, anchor
     assert sql_args[2] == 125.0 and sql_args[3] == 125.0       # buy_in
     assert sql_args[4] == "USD" and sql_args[5] == "USD"        # currency do site
     assert sql_args[6] is None and sql_args[8] is None         # pool/players NULL (lobby)
-    assert sql_args[10] == posted                              # start_time <= anchor
+    assert sql_args[10] == posted                              # anchor (limite back)
+    assert sql_args[11] == 24 and sql_args[13] == 0            # during_play: back=24h, fwd=0
 
 
 def test_pt39_tier0_two_per_day_picks_running_instance():
-    """Cenário 2 — torneio 2x/dia (16:45 e 19:45); SS às 18:00. A DB (LIMIT 1,
-    start<=anchor, ORDER BY start_time DESC) devolve a das 16:45 (em curso); o
-    mock simula essa selecção. Aqui fixamos o contrato SQL + propagação do tn."""
+    """Cenário 2 — torneio 2x/dia (16:45 e 19:45); SS às 18:00 (table-ss, default
+    during_play). A DB (LIMIT 1, [anchor−24h, anchor], ORDER BY abs = closest)
+    devolve a das 16:45 (em curso, a mais próxima ≤ anchor); o mock simula essa
+    selecção. Aqui fixamos o contrato SQL + propagação do tn."""
     posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
     running = [_row("284939948", "Daily Hyper $50",
                     datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
@@ -424,9 +426,9 @@ def test_pt39_tier0_two_per_day_picks_running_instance():
     assert tn == "284939948"
     assert candidates == []
     sql, sql_args = m.call_args_list[0][0]
-    assert "ORDER BY start_time DESC" in sql and "LIMIT 1" in sql
-    assert sql_args[10] == posted   # start_time <= anchor
-    assert sql_args[12] == 24       # window_hours
+    assert "ORDER BY abs(" in sql and "LIMIT 1" in sql
+    assert sql_args[10] == posted             # anchor (limite back)
+    assert sql_args[11] == 24 and sql_args[13] == 0   # during_play: back=24h, fwd=0
 
 
 def test_pt39_tier0_anchor_before_starts_falls_through():
@@ -562,6 +564,60 @@ def test_pt39_tier0_backoffice_pool_players_no_anchor():
 # ── pt39 parte 1/2: clean_tournament_name (drop trailing #NNN) ───────────────
 # #TABLE-SS-RESOLVER-COLLISION — o sufixo #NNN (nº de mesa Winamax lido na SS de
 # mesa) envenenava o ILIKE ALL. clean_tournament_name apara só o trailing #\d+.
+
+# ── pt41 Track A: anchor_mode source-aware (#LOBBY-ANCHOR-PRESTART-REGRESSION) ──
+
+def test_trackA_tier0_prestart_window_and_closest_order():
+    """Lobby (anchor_mode='prestart'): TIER 0 usa [anchor−12h, anchor+2h] +
+    ORDER BY abs (closest) → resolve para o start futuro próximo."""
+    posted = datetime(2026, 5, 19, 16, 17, tzinfo=timezone.utc)
+    ts_rows = [_row("284939948", "Daily Hyper $80",
+                    datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]  # +28min
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
+        tn, candidates = resolve_tournament_number(
+            "GGPoker", "Daily Hyper $80", None,
+            posted_at_hint=posted, buy_in=80.0, anchor_mode="prestart",
+        )
+    assert tn == "284939948" and candidates == []
+    sql, sql_args = m.call_args_list[0][0]
+    assert "ORDER BY abs(" in sql and "LIMIT 1" in sql
+    assert sql_args[11] == 12 and sql_args[13] == 2   # prestart: back=12h, fwd=2h
+
+
+def test_trackA_tier0_during_play_is_default():
+    """Default (sem anchor_mode) = during_play: back=24h, fwd=0 (table-ss inalterado)."""
+    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 0, tzinfo=timezone.utc))]
+    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
+        resolve_tournament_number(
+            "GGPoker", "x", None, posted_at_hint=posted, buy_in=50.0)
+    sql_args = m.call_args_list[0][0][1]
+    assert sql_args[11] == 24 and sql_args[13] == 0
+
+
+def test_trackA_decide_window_ramo1_forward_4h():
+    """Ramo-1 (start_time válido): [start−2h, start+4h]; hand a +3h ainda dentro."""
+    lo, hi = _decide_window("2026-05-19T16:45:00Z", None, 2.0)
+    assert lo == datetime(2026, 5, 19, 14, 45, tzinfo=timezone.utc)
+    assert hi == datetime(2026, 5, 19, 20, 45, tzinfo=timezone.utc)   # +4h
+    assert lo <= datetime(2026, 5, 19, 19, 45, tzinfo=timezone.utc) <= hi
+
+
+def test_trackA_decide_window_ramo2_prestart_forward():
+    """Ramo-2 sem start_time + prestart: [posted−12h, posted+2h]."""
+    posted = datetime(2026, 5, 19, 16, 0, tzinfo=timezone.utc)
+    lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart")
+    assert lo == datetime(2026, 5, 19, 4, 0, tzinfo=timezone.utc)
+    assert hi == datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+
+
+def test_trackA_decide_window_ramo2_during_play_unchanged():
+    """Ramo-2 sem start_time + during_play (default): [posted−12h, posted−30min]."""
+    posted = datetime(2026, 5, 19, 16, 0, tzinfo=timezone.utc)
+    lo, hi = _decide_window(None, posted, 2.0)
+    assert lo == datetime(2026, 5, 19, 4, 0, tzinfo=timezone.utc)
+    assert hi == datetime(2026, 5, 19, 15, 30, tzinfo=timezone.utc)
+
 
 def test_clean_drops_trailing_table_suffix():
     assert clean_tournament_name("ZENITH #005") == "ZENITH"

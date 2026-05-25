@@ -38,6 +38,19 @@ logger = logging.getLogger("tournament_resolver")
 # atravessa a meia-noite. Ver #RESOLVER-TIER0-STRICT-EQUALITY.
 _TIER0_WINDOW_HOURS = 24
 
+# pt41 Track A (#LOBBY-ANCHOR-PRESTART-REGRESSION) — janelas source-aware.
+# 'during_play' (table-ss, default): SS tirada durante o jogo → start é PASSADO
+#   → janela [anchor−24h, anchor] + "closest" (≡ DESC LIMIT 1 anterior).
+# 'prestart' (lobby): SS tirada na inscrição → start é FUTURO próximo (~+30min)
+#   → janela [anchor−12h, anchor+2h] + "closest" (mata o mis-resolve do dia
+#   anterior, em que um instance já-começado dentro das 24h era apanhado).
+_PRESTART_BACK_HOURS = 12
+_PRESTART_FWD_HOURS = 2
+# Ramo-1 do _decide_window (start-centered, TIER 1/2): forward alargado de 2h
+# para 4h — a 1ª hand importada entra ~1-2h depois do start (late-reg/deep MTT;
+# empírico pt41), e ±2h era marginal.
+_RAMO1_FWD_HOURS = 4
+
 
 def _currency_for_site(site: Optional[str]) -> Optional[str]:
     """Moeda canónica por sala (para o filtro buy_in_currency do TIER 0)."""
@@ -120,24 +133,34 @@ def _decide_window(
     start_time_iso: Optional[str],
     posted_at_hint: Optional[datetime],
     window_hours: float,
+    anchor_mode: str = "during_play",
 ) -> Optional[tuple[datetime, datetime]]:
-    """Aplica a precedencia de janela temporal.
+    """Aplica a precedencia de janela temporal (TIER 1/2).
 
     Ordem (estricta):
-      1. start_time_iso valido -> [start - window_hours, start + window_hours].
-      2. posted_at_hint presente -> [posted_at - 12h, posted_at - 30min].
-         Justificacao: SS de lobby e tirada DURANTE o torneio. Logo o
-         torneio comecou antes do post Discord. -30min evita falsos
-         positivos com torneios que mal arrancaram; -12h cobre desde
-         Hyper/Turbo (~1-3h ago) ate Slow MTT (~6-12h ago).
+      1. start_time_iso valido (ramo-1) -> [start - window_hours, start + 4h].
+         pt41: forward alargado de 2h para 4h — a 1ª hand importada entra
+         ~1-2h depois do start (late-reg/deep MTT); ±2h era marginal.
+      2. posted_at_hint presente (ramo-2), source-aware (pt41):
+         - prestart (lobby): [posted - 12h, posted + 2h]. A SS é tirada na
+           inscricao → o torneio comeca DEPOIS do post.
+         - during_play (table-ss, default): [posted - 12h, posted - 30min].
+           SS tirada durante o jogo → torneio comecou antes do post; -30min
+           evita falsos positivos com torneios que mal arrancaram.
       3. nem start_time_iso nem posted_at_hint -> None (sem janela).
     """
     st = _parse_iso_utc(start_time_iso)
     if st:
-        return (st - timedelta(hours=window_hours), st + timedelta(hours=window_hours))
+        return (st - timedelta(hours=window_hours),
+                st + timedelta(hours=_RAMO1_FWD_HOURS))
     if posted_at_hint is not None:
         if posted_at_hint.tzinfo is None:
             posted_at_hint = posted_at_hint.replace(tzinfo=timezone.utc)
+        if anchor_mode == "prestart":
+            return (
+                posted_at_hint - timedelta(hours=_PRESTART_BACK_HOURS),
+                posted_at_hint + timedelta(hours=_PRESTART_FWD_HOURS),
+            )
         return (
             posted_at_hint - timedelta(hours=12),
             posted_at_hint - timedelta(minutes=30),
@@ -147,7 +170,8 @@ def _decide_window(
 
 def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
                      prize_pool=None, total_players=None,
-                     anchor=None, window_hours=_TIER0_WINDOW_HOURS):
+                     anchor=None, window_hours=_TIER0_WINDOW_HOURS,
+                     anchor_mode="during_play"):
     """TIER 0 — tournament_summaries (autoritativo).
 
     pt39 (#RESOLVER-TIER0-STRICT-EQUALITY): TIER 0 suporta DOIS conjuntos de
@@ -171,6 +195,13 @@ def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
     NULL no parametro = sem filtro. Valor = filtro estricto (=).
     """
     if anchor is not None:
+        # pt41 Track A: janela source-aware + selecção "closest" (ORDER BY abs)
+        # em vez de "start<=anchor DESC". during_play: [anchor−24h, anchor]
+        # (fwd=0 ≡ comportamento anterior). prestart: [anchor−12h, anchor+2h].
+        if anchor_mode == "prestart":
+            back_h, fwd_h = _PRESTART_BACK_HOURS, _PRESTART_FWD_HOURS
+        else:
+            back_h, fwd_h = window_hours, 0
         return query(
             """SELECT tournament_number, tournament_name, start_time
                  FROM tournament_summaries
@@ -180,13 +211,13 @@ def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
                   AND (%s::text IS NULL OR buy_in_currency = %s)
                   AND (%s::numeric IS NULL OR prize_pool = %s::numeric)
                   AND (%s::integer IS NULL OR total_players = %s::integer)
-                  AND start_time <= %s
                   AND start_time >= %s - make_interval(hours => %s)
-                ORDER BY start_time DESC
+                  AND start_time <= %s + make_interval(hours => %s)
+                ORDER BY abs(EXTRACT(EPOCH FROM (start_time - %s))) ASC
                 LIMIT 1""",
             (site, patterns, buy_in, buy_in, buy_in_currency, buy_in_currency,
              prize_pool, prize_pool, total_players, total_players,
-             anchor, anchor, window_hours),
+             anchor, back_h, anchor, fwd_h, anchor),
         )
     return query(
         """SELECT tournament_number, tournament_name, start_time
@@ -277,6 +308,7 @@ def resolve_tournament_number(
     buy_in_currency: Optional[str] = None,
     prize_pool: Optional[float] = None,
     total_players: Optional[int] = None,
+    anchor_mode: str = "during_play",
 ) -> tuple[Optional[str], list[dict]]:
     """Cascata em 3 tiers: tournament_summaries -> tournaments_meta -> hands.
 
@@ -308,7 +340,7 @@ def resolve_tournament_number(
         return (None, [])
 
     patterns = [f"%{t}%" for t in tokens]
-    window = _decide_window(start_time_iso, posted_at_hint, window_hours)
+    window = _decide_window(start_time_iso, posted_at_hint, window_hours, anchor_mode)
 
     # TIER 0 — tournament_summaries (autoritativo). pt39: nome + buy_in +
     # janela start_time ancorada no posted_at_hint (instância em curso).
@@ -321,6 +353,7 @@ def resolve_tournament_number(
     candidates_summaries = [dict(r) for r in _query_summaries(
         site, patterns, buy_in=buy_in, buy_in_currency=ts_currency,
         prize_pool=prize_pool, total_players=total_players, anchor=anchor,
+        anchor_mode=anchor_mode,
     )]
     if candidates_summaries:
         if len(candidates_summaries) == 1:
