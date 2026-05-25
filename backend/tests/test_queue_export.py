@@ -13,7 +13,8 @@ from app.services.queue_export import (
     _drop_dealt_to_non_hero,
     _trim_total_pot_trailing_fields,
     _strip_commas_from_amounts,
-    _HERO_BOUNTY_DEFAULT_USD,
+    compute_hero_bounty,
+    build_queue_zip,
 )
 
 
@@ -105,9 +106,10 @@ def test_convert_gg_full_pipeline():
     assert "d2ca5b9a" not in out
     assert "e0627537" not in out
 
-    # pt29 Fase 2 passo 3: Hero com bounty default; outros sem bounty na
-    # fixture (players_list ausente) ficam com €0.
-    assert "Seat 1: Hero (40492 in chips, €250 bounty)" in out
+    # pt41: sem tournament_format/bounty_ctx → formato não-bounty → SEM token
+    # de bounty (Opção A). O hardcode €250 foi removido.
+    assert "Seat 1: Hero (40492 in chips)" in out
+    assert "bounty)" not in out
 
     # Estrutura preservada.
     assert "*** HOLE CARDS ***" in out
@@ -203,41 +205,43 @@ def test_format_bounty_amount_fractional_keeps_two_decimals():
     assert _format_bounty_amount(75.25) == "75.25"
 
 
-def test_inject_bounties_hero_gets_default_when_not_in_players_list():
-    """Hero TEM bounty (HRC rejeita sem). Default _HERO_BOUNTY_DEFAULT_USD."""
+# pt41: _inject_bounties_ps_format passou a receber starting_bounty (base do TS).
+# Hardcode €250 removido. Hero = max(Vision, base); vilões = Vision real OU base.
+def test_inject_bounties_hero_uses_ts_base_when_not_in_players_list():
+    """Hero sem Vision -> base do TS (não 250). starting_bounty=100 -> €100."""
     hh = "Seat 1: Hero (40,492 in chips)\n"
-    out = _inject_bounties_ps_format(hh, [], {"Hero": "Lauro Dermio"})
-    assert "Seat 1: Hero (40,492 in chips, €250 bounty)" in out
+    out = _inject_bounties_ps_format(
+        hh, [], {"Hero": "Lauro Dermio"}, starting_bounty=100.0,
+    )
+    assert "Seat 1: Hero (40,492 in chips, €100 bounty)" in out
 
 
-def test_inject_bounties_hero_keeps_default_when_vision_below():
-    """Vision deu Hero bounty < 250 -> usa default (max). Tech debt aceite
-    porque bounty acumulado real fica para futura sessao."""
+def test_inject_bounties_hero_keeps_ts_base_when_vision_below():
+    """Vision do Hero < base -> usa base (max)."""
     hh = "Seat 1: Hero (40,492 in chips)\n"
     out = _inject_bounties_ps_format(
         hh, [{"name": "Lauro Dermio", "bounty_value_usd": 75}],
-        {"Hero": "Lauro Dermio"},
+        {"Hero": "Lauro Dermio"}, starting_bounty=100.0,
     )
-    assert "Seat 1: Hero (40,492 in chips, €250 bounty)" in out
+    assert "Seat 1: Hero (40,492 in chips, €100 bounty)" in out
 
 
-def test_inject_bounties_hero_keeps_vision_when_above_default():
-    """Se Vision viu Hero com bounty > default (post-KOs), usa Vision."""
+def test_inject_bounties_hero_keeps_vision_when_above_base():
+    """Vision do Hero > base (post-KOs) -> usa Vision."""
     hh = "Seat 1: Hero (40,492 in chips)\n"
     out = _inject_bounties_ps_format(
         hh, [{"name": "Lauro Dermio", "bounty_value_usd": 500}],
-        {"Hero": "Lauro Dermio"},
+        {"Hero": "Lauro Dermio"}, starting_bounty=100.0,
     )
     assert "Seat 1: Hero (40,492 in chips, €500 bounty)" in out
 
 
 def test_inject_bounties_non_hero_uses_players_list_value():
-    """Outros seats: lookup pelo nick em players_list. Sem decimais se inteiro."""
+    """Vilão com Vision real -> usa o valor por-nick (SS-matched)."""
     hh = "Seat 2: msthtb66 (26,167 in chips)\n"
     out = _inject_bounties_ps_format(
-        hh,
-        [{"name": "msthtb66", "bounty_value_usd": 50}],
-        {},
+        hh, [{"name": "msthtb66", "bounty_value_usd": 50}], {},
+        starting_bounty=100.0,
     )
     assert "Seat 2: msthtb66 (26,167 in chips, €50 bounty)" in out
 
@@ -245,26 +249,94 @@ def test_inject_bounties_non_hero_uses_players_list_value():
 def test_inject_bounties_non_hero_decimal_value():
     hh = "Seat 8: Dennis (272,264 in chips)\n"
     out = _inject_bounties_ps_format(
-        hh,
-        [{"name": "Dennis", "bounty_value_usd": 112.5}],
-        {},
+        hh, [{"name": "Dennis", "bounty_value_usd": 112.5}], {},
+        starting_bounty=100.0,
     )
     assert "Seat 8: Dennis (272,264 in chips, €112.50 bounty)" in out
 
 
-def test_inject_bounties_non_hero_missing_falls_back_to_zero():
-    """Sem bounty no players_list -> 0. HRC aceita seats com bounty €0."""
+def test_inject_bounties_non_hero_missing_falls_back_to_ts_base():
+    """pt41: vilão sem Vision (GG anon) -> base do TS, não €0."""
     hh = "Seat 7: Unknown (50,000 in chips)\n"
-    out = _inject_bounties_ps_format(hh, [], {})
-    assert "Seat 7: Unknown (50,000 in chips, €0 bounty)" in out
+    out = _inject_bounties_ps_format(hh, [], {}, starting_bounty=40.0)
+    assert "Seat 7: Unknown (50,000 in chips, €40 bounty)" in out
 
 
 def test_inject_bounties_currency_is_always_euro():
     """Validado empiricamente pelo Rui: HRC aceita € e rejeita $."""
     hh = "Seat 1: Hero (1000 in chips)\n"
-    out = _inject_bounties_ps_format(hh, [], {"Hero": "X"})
+    out = _inject_bounties_ps_format(hh, [], {"Hero": "X"}, starting_bounty=50.0)
     assert "€" in out
     assert "$" not in out
+
+
+# pt41 — compute_hero_bounty (fonte única Hero bounty + source)
+def test_compute_hero_bounty_ts_wins_when_no_vision():
+    val, src = compute_hero_bounty([], {"Hero": "Lauro"}, 100.0)
+    assert val == 100.0 and src == "ts"
+
+
+def test_compute_hero_bounty_vision_wins_when_above():
+    val, src = compute_hero_bounty(
+        [{"name": "Lauro", "bounty_value_usd": 250}], {"Hero": "Lauro"}, 100.0)
+    assert val == 250.0 and src == "vision"
+
+
+# pt41 — gate de formato no conversor
+def test_convert_gg_pko_with_ts_bounty_injects():
+    hand = {
+        "site": "GGPoker", "raw": SAMPLE_GG_RAW_FULL,
+        "tournament_format": "PKO",
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(
+        hand, bounty_ctx={"starting_bounty": 100.0})
+    # Hero sem Vision -> base TS 100; vilões (nicks reais via anon_map) -> base 100.
+    assert "Seat 1: Hero (40492 in chips, €100 bounty)" in out
+    assert "€100 bounty" in out
+
+
+def test_convert_gg_vanilla_no_bounty_token():
+    hand = {
+        "site": "GGPoker", "raw": SAMPLE_GG_RAW_FULL,
+        "tournament_format": "Vanilla",
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(
+        hand, bounty_ctx={"starting_bounty": None})
+    assert "bounty)" not in out
+    assert "Seat 1: Hero (40492 in chips)" in out
+
+
+def test_convert_gg_pko_without_ctx_no_token():
+    """PKO mas sem bounty_ctx (base None) -> sem token (defensiva no conversor)."""
+    hand = {
+        "site": "GGPoker", "raw": SAMPLE_GG_RAW_FULL,
+        "tournament_format": "PKO",
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(hand, bounty_ctx=None)
+    assert "bounty)" not in out
+
+
+# pt41 — defensiva no build_queue_zip: GG PKO sem TS -> skip pko_without_ts_bounty
+def test_build_queue_zip_skips_pko_without_ts_bounty():
+    import json
+    import zipfile
+    import io as _io
+    hand = {
+        "id": 1, "hand_id": "GG-1", "site": "GGPoker", "tournament_number": "T1",
+        "tournament_format": "PKO", "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+    zb = build_queue_zip(
+        [hand], {("GGPoker", "T1"): {"x": 1}},
+        bounty_by_key={},  # sem base do TS
+    )
+    with zipfile.ZipFile(_io.BytesIO(zb)) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 0
+    assert manifest["skipped"][0]["reason"] == "pko_without_ts_bounty"
 
 
 # Passo 4: drop SHOWDOWN sem shows
@@ -452,6 +524,7 @@ def test_end_to_end_gg_5944816316_passes_all_8_transformations():
     hand = {
         "site": "GGPoker",
         "raw": _HH_GG_5944816316_RAW,
+        "tournament_format": "PKO",
         "player_names": {
             "anon_map": {
                 "Hero": "Lauro Dermio",
@@ -470,7 +543,9 @@ def test_end_to_end_gg_5944816316_passes_all_8_transformations():
             ],
         },
     }
-    out = convert_gg_hh_to_pokerstars_compatible(hand)
+    # pt41: Big Game $525 = PKO, bounty base $250 do TS (via bounty_ctx).
+    out = convert_gg_hh_to_pokerstars_compatible(
+        hand, bounty_ctx={"starting_bounty": 250.0})
 
     # 1. Header PS
     assert "PokerStars Hand #5944816316:" in out
@@ -479,13 +554,14 @@ def test_end_to_end_gg_5944816316_passes_all_8_transformations():
     # 2. Level com espaco
     assert "Level 13 (1500/3000)" in out
 
-    # 3. Bounty: Hero default €250, outros do players_list, restantes €0
+    # 3. Bounty pt41: Hero sem Vision -> base TS €250; vilões com Vision -> valor
+    # real; vilões sem Vision (GG anon) -> base TS €250 (já não €0).
     assert "Seat 4: Hero (44250 in chips, €250 bounty)" in out
     assert "Seat 1: playerA (45123 in chips, €50 bounty)" in out
     assert "Seat 2: playerB (52400 in chips, €75 bounty)" in out
     assert "Seat 5: playerD (60000 in chips, €100 bounty)" in out
-    # Players sem bounty no players_list -> €0
-    assert "Seat 3: playerC (38800 in chips, €0 bounty)" in out
+    # Players sem bounty no players_list -> base do TS (€250), não €0.
+    assert "Seat 3: playerC (38800 in chips, €250 bounty)" in out
 
     # 4. SHOWDOWN removido (Hero ganhou por uncalled bet, sem shows)
     assert "*** SHOWDOWN ***" not in out

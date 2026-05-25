@@ -6,6 +6,23 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (25 Maio 2026 — pt41, fix do bounty base via TS)
+
+`#HERO-BOUNTY-FROM-TS-DERIVATION` resolvido: o bounty base por torneio vem de
+`tournament_summaries.buy_in_bounty` (Hero `max(Vision, base)`, vilões `base`,
+`€` mantido); hardcode `_HERO_BOUNTY_DEFAULT_USD=250` removido. Gate no Andar 1
+do /hrc (GG-only): PKO/SuperKO/KO exigem TS com bounty; **Mystery KO excluído**;
+vanilla sem token (Opção A); Winamax/PS passam (bounty na HH crua). Banner D1
+(`GET /api/hrc/pending-ts`) mostra as mãos escondidas por falta de TS.
+
+### Tech debt novo aberto em pt41 (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#MYSTERY-KO-DUAL-SUPPORT** | 🟡 MED | Mystery KO **excluído do /hrc na pt41** (gate site-agnóstico em `select_andar1_rows`). O HRC não modela Mystery KO de forma fiável: o bounty é **oculto/aleatório** e a equity muda radicalmente **pré- vs pós-ITM** (antes do ITM o bounty é desconhecido → a mão joga-se como **vanilla**; depois do ITM os bounties revelados viram **KO fixos**). **Suporte futuro:** (1) pré-ITM tratar como vanilla (sem token); (2) pós-ITM como KO fixo com o bounty revelado; (3) `players_left` vs `places_paid` como gate ITM (depende do pipeline SS de mesa fidedigno); (4) importar os TS Mystery (**~1.353 mãos GG 2026** à espera, ex. `tn 281143347` Sunday Showdown). **Bloqueado por:** estado ITM por mão + decisão de produto sobre o valor de bounty pós-revelação. Refs: `queue_export.py:MYSTERY_FORMATS`; `hrc_queue.py:select_andar1_rows`/`pending_ts_hands`. |
+
+---
+
 ## Estado actual (24 Maio 2026 — pt40, guarda lobby + regressão do anchor)
 
 Sessão fechada. Investigação read-only dos 2 HIGH temporais (passos 5+6 do plano

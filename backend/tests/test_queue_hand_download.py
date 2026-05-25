@@ -45,6 +45,7 @@ def test_hand_download_success():
     with patch("app.routers.queue.query", return_value=[_HAND]), \
          patch("app.routers.queue.lookup_payouts",
                return_value={("GGPoker", "T1"): {"x": 1}}), \
+         patch("app.routers.queue.lookup_bounties", return_value={}), \
          patch("app.routers.queue.build_queue_zip", return_value=zb) as bz:
         r = client.get("/api/queue/hrc/hand/GG-1")
     assert r.status_code == 200
@@ -88,6 +89,7 @@ def test_hand_download_422_skipped():
     with patch("app.routers.queue.query", return_value=[_HAND]), \
          patch("app.routers.queue.lookup_payouts",
                return_value={("GGPoker", "T1"): {"x": 1}}), \
+         patch("app.routers.queue.lookup_bounties", return_value={}), \
          patch("app.routers.queue.build_queue_zip", return_value=zb):
         r = client.get("/api/queue/hrc/hand/GG-1")
     assert r.status_code == 422
@@ -111,6 +113,7 @@ def test_eligible_includes_has_payout_field():
     with patch("app.services.hrc_queue.select_andar1_rows", return_value=rows), \
          patch("app.services.hrc_queue.lookup_payouts",
                return_value={("GGPoker", "T1"): {"p": 1}}), \
+         patch("app.services.hrc_queue.lookup_bounties", return_value={}), \
          patch("app.services.hrc_queue.convert_gg_hh_to_pokerstars_compatible",
                return_value="HH"), \
          patch("app.services.hrc_queue.derive_seats_in_preflop_order",

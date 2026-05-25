@@ -42,6 +42,18 @@ logger = logging.getLogger("queue_export")
 _EQUITY_FT_NORM_KEYS = {"icm ft", "icm pko ft"}
 
 
+# pt41 #HERO-BOUNTY-FROM-TS-DERIVATION — formatos de torneio com bounty real.
+# Valores lowercase (comparados contra `tournament_format` normalizado). FONTE
+# ÚNICA partilhada com o gate SQL do Andar 1 (`services/hrc_queue.py`) — não
+# duplicar (anti-drift, à la `classify_aggressor_source`).
+#   BOUNTY_FORMATS   — qualquer evento com bounty (decide se há token no HH).
+#   MYSTERY_FORMATS  — HRC não modela Mystery KO → excluídos do /hrc (gate).
+#   TS_GATED_FORMATS — exigem `tournament_summaries.buy_in_bounty` (GG only).
+BOUNTY_FORMATS = ("pko", "super ko", "ko", "mystery ko", "mystery")
+MYSTERY_FORMATS = ("mystery ko", "mystery")
+TS_GATED_FORMATS = ("pko", "super ko", "ko")
+
+
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
 # Ex: `Level17(2,500/5,000(600))` -> grupos: 17, 2,500, 5,000, 600.
 _LEVEL_RE = re.compile(
@@ -478,14 +490,12 @@ def derive_aggressor_real_action(
 #   7. Total pot trim: descartar trailing `| Jackpot 0 | Bingo 0 | ...`.
 #   8. Remover virgulas de TODOS os amounts numericos (passada final).
 #
-# Tech debt aceite (briefing Rui): Hero bounty hardcoded para $250 (= bounty
-# base do torneio Bounty Hunters Big Game $525). Para mãos depois de KOs o
-# Hero bounty real é maior; para outros torneios é diferente. Calculo PKO
-# equity HRC sera ligeiramente off mas funcional. Derivacao real fica para
-# futura sessao via TournamentSummaries -- `#HERO-BOUNTY-FROM-TS-DERIVATION`.
+# pt41 #HERO-BOUNTY-FROM-TS-DERIVATION: o bounty base deixou de ser hardcoded
+# ($250 = Big Game $525). Vem agora de `tournament_summaries.buy_in_bounty` por
+# torneio, injectado via `bounty_ctx` (ver `_inject_bounties_ps_format` +
+# `build_queue_zip`). O gate de formato vive no Andar 1 (`services/hrc_queue.py`):
+# só PKO/SuperKO/KO COM TS chegam ao injector; vanilla/mystery não levam token.
 # ---------------------------------------------------------------------------
-
-_HERO_BOUNTY_DEFAULT_USD = 250.0
 
 
 _HEADER_TM_RE = re.compile(r"^Poker Hand #TM(\d+):", re.MULTILINE)
@@ -518,45 +528,65 @@ def _format_bounty_amount(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _vision_bounties_by_name(players_list: list) -> dict:
+    """`{nick_real: bounty_value_usd}` para os seats que a Vision leu (>0).
+    Vazio para GG anonimizado sem SS match."""
+    out: dict = {}
+    for p in (players_list or []):
+        name = (p.get("name") or "").strip()
+        bv = p.get("bounty_value_usd")
+        if name and isinstance(bv, (int, float)) and bv > 0:
+            out[name] = float(bv)
+    return out
+
+
+def compute_hero_bounty(
+    players_list: list, anon_map: dict, starting_bounty: float
+) -> tuple[float, str]:
+    """pt41 — bounty do Hero + fonte. Hero = max(Vision acumulado, base do TS).
+
+    `starting_bounty` = `tournament_summaries.buy_in_bounty` (base por torneio).
+    O valor do Vision (post-KO accumulator) ganha quando é maior que a base.
+    Devolve `(valor, fonte)` com fonte ∈ {'vision','ts'}. FONTE ÚNICA partilhada
+    por `_inject_bounties_ps_format` e pelo audit do manifest em `build_queue_zip`.
+    """
+    hero_real = (anon_map or {}).get("Hero")
+    vision = _vision_bounties_by_name(players_list).get(hero_real, 0.0) if hero_real else 0.0
+    if vision > starting_bounty:
+        return vision, "vision"
+    return float(starting_bounty), "ts"
+
+
 def _inject_bounties_ps_format(
-    text: str, players_list: list, anon_map: dict
+    text: str, players_list: list, anon_map: dict, *, starting_bounty: float
 ) -> str:
     """Passo 3: injecta `, €<X> bounty)` em cada Seat line do HH.
 
-    Hero: lookup pelo real nick (via anon_map["Hero"]) no players_list;
-    se nao encontrado OU valor < default, usa `_HERO_BOUNTY_DEFAULT_USD`
-    ($250 = bounty base do torneio Bounty Hunters Big Game $525). HRC
-    rejeita HH sem bounty no Hero (briefing Rui: "Hero TEM de ter bounty").
+    pt41 #HERO-BOUNTY-FROM-TS-DERIVATION: o bounty base vem do TS
+    (`starting_bounty` = tournament_summaries.buy_in_bounty), não de um hardcode.
 
-    Outros seats: lookup pelo nick no players_list (`bounty_value_usd`).
-    Se nao encontrado, fallback para 0 -- HRC ainda assim aceita o seat
-    com bounty €0 (testado empiricamente).
+    - Hero: `max(Vision acumulado, starting_bounty)` (via compute_hero_bounty).
+    - Vilões: bounty real do Vision por nick (mãos GG com SS match); senão
+      `starting_bounty` (base do torneio — todos iguais, aproximação aceite
+      para GG anonimizado, onde a Vision não lê os hashes).
+    - Currency `€` literal (validado pelo Rui: HRC aceita € e rejeita $).
 
-    Currency hardcoded €: validado pelo Rui que HRC aceita € e rejeita $.
+    O caller (`convert_gg_hh_to_pokerstars_compatible`) só chama esta função
+    para formatos bounty-gated (PKO/SuperKO/KO) com `starting_bounty` não-None.
+    Vanilla/mystery não passam por aqui (sem token).
     """
     if not text:
         return text
 
-    bounty_by_name: dict = {}
-    if players_list:
-        for p in players_list:
-            name = (p.get("name") or "").strip()
-            bv = p.get("bounty_value_usd")
-            if name and isinstance(bv, (int, float)) and bv > 0:
-                bounty_by_name[name] = float(bv)
-
-    hero_real = (anon_map or {}).get("Hero")
+    bounty_by_name = _vision_bounties_by_name(players_list)
+    hero_value, _src = compute_hero_bounty(players_list, anon_map, starting_bounty)
 
     def _repl(m: re.Match) -> str:
         prefix, nick, mid = m.group(1), m.group(2), m.group(3)
         if nick == "Hero":
-            # Hero: prefer Vision value (post-KOs accumulator) if >= default,
-            # else fallback to default base (tech debt #HERO-BOUNTY-FROM-TS-
-            # DERIVATION). Garante HRC nunca ve Hero sem bounty.
-            vision_value = bounty_by_name.get(hero_real, 0.0) if hero_real else 0.0
-            value = max(vision_value, _HERO_BOUNTY_DEFAULT_USD)
+            value = hero_value
         else:
-            value = bounty_by_name.get(nick, 0.0)
+            value = bounty_by_name.get(nick, float(starting_bounty))
         formatted = _format_bounty_amount(value)
         return f"{prefix}{nick}{mid}, €{formatted} bounty)"
 
@@ -643,7 +673,9 @@ def _strip_commas_from_amounts(text: str) -> str:
     return _THOUSANDS_COMMA_RE.sub(lambda m: m.group(0).replace(",", ""), text)
 
 
-def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
+def convert_gg_hh_to_pokerstars_compatible(
+    hand: dict, *, bounty_ctx: Optional[dict] = None
+) -> str:
     """Converte raw HH GG para formato compativel com HRC.
 
     Hands non-GG (PokerStars, Winamax) passam tal e qual (pass-through) —
@@ -675,11 +707,20 @@ def convert_gg_hh_to_pokerstars_compatible(hand: dict) -> str:
     anon_map = pn.get("anon_map") or {}
     players_list = pn.get("players_list") or []
 
+    # pt41: bounty só para formatos bounty-gated (PKO/SuperKO/KO) com base do TS.
+    # Vanilla/Mystery/sem-base → sem token (Opção A). starting_bounty vem do
+    # bounty_ctx (tournament_summaries.buy_in_bounty), threaded por build_queue_zip.
+    fmt = (hand.get("tournament_format") or "").lower()
+    starting_bounty = (bounty_ctx or {}).get("starting_bounty")
+
     out = _format_level_line(raw)
     out = _replace_hashes(out, anon_map)
     out = _rewrite_header_to_pokerstars(out)                       # 1
     out = _normalize_level_spacing(out)                            # 2
-    out = _inject_bounties_ps_format(out, players_list, anon_map)  # 3
+    if fmt in TS_GATED_FORMATS and starting_bounty is not None:    # 3
+        out = _inject_bounties_ps_format(
+            out, players_list, anon_map, starting_bounty=float(starting_bounty),
+        )
     out = _drop_showdown_if_no_show(out)                           # 4
     out = _add_doesnt_show_after_collected(out)                    # 5
     out = _drop_dealt_to_non_hero(out)                             # 6
@@ -918,17 +959,22 @@ def build_queue_zip(
     *,
     include_no_payout: bool = False,
     filters_meta: Optional[dict] = None,
+    bounty_by_key: Optional[dict] = None,
 ) -> bytes:
     """Constroi um zip com pasta por mao + manifest.json no root.
 
     Args:
       hands: lista de dicts com keys: id, hand_id, site, tournament_number,
-             raw, player_names, played_at.
+             tournament_format, raw, player_names, played_at.
       payouts_by_key: lookup {(site, tournament_number): payouts_json_blob}.
       include_no_payout: se True, mao sem payout entra no zip sem payouts.json.
                          Se False, mao sem payout e excluida (vai para
                          manifest.missing_payouts).
       filters_meta: dict de filters echoado no manifest (observabilidade).
+      bounty_by_key: lookup {(site, tn): {"starting_bounty": float|None, ...}}
+                     (pt41, espelho de payouts_by_key). Threaded para o conversor
+                     via bounty_ctx. GG bounty-format sem base do TS é skipado
+                     defensivamente (reason='pko_without_ts_bounty').
 
     Estrutura:
       <hand_id_1>/hh.txt
@@ -952,12 +998,24 @@ def build_queue_zip(
                 skipped.append({"hand_id": None, "reason": "no_hand_id"})
                 continue
 
-            hh_text = convert_gg_hh_to_pokerstars_compatible(h)
+            key = (site, tnum) if site and tnum else None
+
+            # pt41 #HERO-BOUNTY-FROM-TS-DERIVATION: resolve o bounty base do TS
+            # antes da conversão. Defensiva — GG bounty-gated (PKO/SuperKO/KO)
+            # sem base do TS não devia chegar aqui (o gate do Andar 1 filtra),
+            # mas se chegar (per-mão/chamada externa) skipa em vez de inventar.
+            bctx = (bounty_by_key or {}).get(key) if key else None
+            fmt = (h.get("tournament_format") or "").lower()
+            starting_bounty = (bctx or {}).get("starting_bounty")
+            if site == "GGPoker" and fmt in TS_GATED_FORMATS and starting_bounty is None:
+                skipped.append({"hand_id": hand_id, "reason": "pko_without_ts_bounty"})
+                continue
+
+            hh_text = convert_gg_hh_to_pokerstars_compatible(h, bounty_ctx=bctx)
             if not hh_text:
                 skipped.append({"hand_id": hand_id, "reason": "no_raw_hh"})
                 continue
 
-            key = (site, tnum) if site and tnum else None
             payout_blob = payouts_by_key.get(key) if key else None
 
             if payout_blob is None and not include_no_payout:
@@ -1092,11 +1150,26 @@ def build_queue_zip(
                 json.dumps(hand_meta, indent=2, ensure_ascii=False),
             )
 
+            # pt41 audit do bounty (paralelo ao aggressor_source): só faz sentido
+            # quando houve injecção (GG bounty-gated com base do TS).
+            hero_bounty = None
+            hero_bounty_source = None
+            if site == "GGPoker" and fmt in TS_GATED_FORMATS and starting_bounty is not None:
+                _pn = _coerce_player_names(h.get("player_names"))
+                hero_bounty, hero_bounty_source = compute_hero_bounty(
+                    _pn.get("players_list") or [], _pn.get("anon_map") or {},
+                    float(starting_bounty),
+                )
+
             hands_included.append({
                 "hand_id": hand_id,
                 "tournament_number": tnum,
                 "site": site,
                 "has_payouts": payout_blob is not None,
+                "bounty_format": fmt or None,
+                "starting_bounty": starting_bounty,
+                "hero_bounty": hero_bounty,
+                "hero_bounty_source": hero_bounty_source,
                 "has_script": script_js is not None,
                 "script_overrides": script_overrides,
                 "script_generation_error": script_error,

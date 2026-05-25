@@ -27,7 +27,7 @@ from app.services.hrc_import import (
     read_settings,
     list_node_indices,
 )
-from app.services.hrc_queue import eligible_hands
+from app.services.hrc_queue import eligible_hands, pending_ts_hands
 
 router = APIRouter(prefix="/api/hrc", tags=["hrc"])
 logger = logging.getLogger("hrc")
@@ -201,6 +201,37 @@ def list_eligible(
         raise HTTPException(400, "played_after/played_before devem ser ISO date")
     result["generated_at"] = datetime.now(timezone.utc).isoformat()
     return result
+
+
+@router.get("/pending-ts")
+def list_pending_ts(
+    tags: Optional[str] = None,
+    study_state: Optional[str] = None,
+    played_after: Optional[str] = None,
+    played_before: Optional[str] = None,
+    _user=Depends(require_auth),
+):
+    """pt41 — mãos GG bounty-format escondidas do /hrc por falta de TS-com-bounty.
+
+    Alimenta o banner D1 no painel HRC. `reason` por grupo:
+      - `needs_ts_import`     — PKO/SuperKO/KO → importar o TS desbloqueia.
+      - `mystery_unsupported` — Mystery KO → #MYSTERY-KO-DUAL-SUPPORT (futuro).
+    Read-only; mesma janela/tags/study_state do `/eligible`.
+    """
+    try:
+        groups = pending_ts_hands(
+            tags=tags,
+            study_state=study_state,
+            played_after=played_after,
+            played_before=played_before,
+        )
+    except ValueError:
+        raise HTTPException(400, "played_after/played_before devem ser ISO date")
+    return {
+        "count": len(groups),
+        "total_hands": sum(g["n_hands"] for g in groups),
+        "groups": groups,
+    }
 
 
 @router.post("/import")

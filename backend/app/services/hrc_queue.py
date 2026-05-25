@@ -29,6 +29,9 @@ from app.services.queue_export import (
     derive_aggressor_real_action,
     classify_aggressor_source,
     _extract_blinds_from_header,
+    BOUNTY_FORMATS,
+    MYSTERY_FORMATS,
+    TS_GATED_FORMATS,
 )
 from app.services.hrc_node_offset import strategy_table_positions
 from app.services.hrc_script_gen import _parse_seat_stacks
@@ -136,9 +139,22 @@ def select_andar1_rows(
               OR EXISTS (SELECT 1 FROM unnest(COALESCE(discord_tags, '{{}}'::text[]))
                                 AS t WHERE {_NORM_SQL} = ANY(%s))
                )
+           -- pt41 #HERO-BOUNTY-FROM-TS-DERIVATION: Mystery KO fora do /hrc
+           -- (HRC não modela) + GG bounty-gated (PKO/SuperKO/KO) exige TS com
+           -- buy_in_bounty. Winamax/PS passam sempre (bounty na HH crua).
+           AND lower(COALESCE(tournament_format, '')) <> ALL(%s::text[])
+           AND (
+                 site <> 'GGPoker'
+              OR lower(COALESCE(tournament_format, '')) <> ALL(%s::text[])
+              OR EXISTS (SELECT 1 FROM tournament_summaries ts
+                          WHERE ts.site = hands.site
+                            AND ts.tournament_number = hands.tournament_number
+                            AND ts.buy_in_bounty IS NOT NULL)
+               )
          ORDER BY played_at {order}
         """,
-        (ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm),
+        (ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm,
+         list(MYSTERY_FORMATS), list(TS_GATED_FORMATS)),
     )
 
 
@@ -155,6 +171,91 @@ def lookup_payouts(rows: list[dict]) -> dict:
         (sites, tnums),
     )
     return {(r["site"], r["tournament_number"]): r["payouts_json"] for r in prows}
+
+
+def lookup_bounties(rows: list[dict]) -> dict:
+    """pt41 — lookup {(site, tn): {starting_bounty, ts_format}} para o set de mãos.
+    Espelho de `lookup_payouts` (anti-drift). `starting_bounty` =
+    `tournament_summaries.buy_in_bounty` (base por torneio, GG-only). None quando
+    o TS não tem bounty (vanilla) ou não existe."""
+    sites = list({r["site"] for r in rows if r.get("site")})
+    tnums = list({r["tournament_number"] for r in rows if r.get("tournament_number")})
+    if not (sites and tnums):
+        return {}
+    brows = query(
+        """SELECT site, tournament_number, buy_in_bounty, tournament_format
+             FROM tournament_summaries
+            WHERE site = ANY(%s) AND tournament_number = ANY(%s)""",
+        (sites, tnums),
+    )
+    return {
+        (r["site"], r["tournament_number"]): {
+            "starting_bounty": (
+                float(r["buy_in_bounty"]) if r["buy_in_bounty"] is not None else None
+            ),
+            "ts_format": r["tournament_format"],
+        }
+        for r in brows
+    }
+
+
+def pending_ts_hands(
+    *,
+    tags: Optional[str] = None,
+    study_state: Optional[str] = None,
+    played_after: Optional[str] = None,
+    played_before: Optional[str] = None,
+) -> list[dict]:
+    """pt41 — mãos GG bounty-format ESCONDIDAS do /hrc por falta de TS-com-bounty.
+
+    Espelha a janela/tags/study_state do Andar 1 mas devolve o complemento do
+    gate: GG bounty-format SEM `tournament_summaries.buy_in_bounty`, agrupado por
+    torneio. `reason`:
+      - `needs_ts_import`     — PKO/SuperKO/KO → importar o TS resolve.
+      - `mystery_unsupported` — Mystery KO → #MYSTERY-KO-DUAL-SUPPORT (sessão futura).
+    Alimenta o banner D1 no painel /hrc. Read-only.
+    """
+    f = resolve_filters(tags, study_state, played_after, played_before)
+    rows = query(
+        f"""
+        SELECT tournament_number AS tn,
+               max(tournament_name) AS tournament_name,
+               lower(COALESCE(tournament_format, '')) AS fmt,
+               count(*) AS n_hands
+          FROM hands
+         WHERE played_at >= '2026-01-01'
+           AND site = 'GGPoker'
+           AND played_at >= %s
+           AND played_at < %s
+           AND study_state = ANY(%s)
+           AND lower(COALESCE(tournament_format, '')) = ANY(%s::text[])
+           AND (
+                 EXISTS (SELECT 1 FROM unnest(COALESCE(hm3_tags, '{{}}'::text[]))
+                                AS t WHERE {_NORM_SQL} = ANY(%s))
+              OR EXISTS (SELECT 1 FROM unnest(COALESCE(discord_tags, '{{}}'::text[]))
+                                AS t WHERE {_NORM_SQL} = ANY(%s))
+               )
+           AND NOT EXISTS (SELECT 1 FROM tournament_summaries ts
+                            WHERE ts.site = hands.site
+                              AND ts.tournament_number = hands.tournament_number
+                              AND ts.buy_in_bounty IS NOT NULL)
+         GROUP BY tournament_number, lower(COALESCE(tournament_format, ''))
+         ORDER BY n_hands DESC
+        """,
+        (f["after_dt"], f["before_dt"], f["states_list"],
+         list(BOUNTY_FORMATS), f["tags_norm"], f["tags_norm"]),
+    )
+    out: list[dict] = []
+    for r in rows:
+        fmt = r["fmt"]
+        out.append({
+            "tournament_number": r["tn"],
+            "tournament_name": r["tournament_name"],
+            "tournament_format": fmt,
+            "n_hands": r["n_hands"],
+            "reason": "mystery_unsupported" if fmt in MYSTERY_FORMATS else "needs_ts_import",
+        })
+    return out
 
 
 def _hero_stack_bb(hh_text: str, bb: Optional[int]) -> Optional[float]:
@@ -194,6 +295,7 @@ def eligible_hands(
         played_desc=True,
     )]
     payouts = lookup_payouts(rows)
+    bounties = lookup_bounties(rows)
 
     hands: list[dict] = []
     scen = {"real": 0, "fallback_root": 0, "fallback_unusable_position": 0}
@@ -234,6 +336,9 @@ def eligible_hands(
             "stack_hero_bb": _hero_stack_bb(hh, bb),
             "aggressor_source": src,
             "has_payout": blob is not None,
+            "starting_bounty": (
+                bounties.get((h["site"], h["tournament_number"])) or {}
+            ).get("starting_bounty"),
         })
 
     return {

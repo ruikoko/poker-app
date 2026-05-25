@@ -32,6 +32,8 @@ export default function HRCQueuePage() {
   const [site, setSite] = useState('')
   const [format, setFormat] = useState('')
   const [dl, setDl] = useState({})  // hand_id -> 'busy' | 'err'
+  const [pending, setPending] = useState(null)   // pt41 — banner D1 (PKO sem TS)
+  const [pendingOpen, setPendingOpen] = useState(false)
 
   async function downloadPack(handId) {
     setDl(d => ({ ...d, [handId]: 'busy' }))
@@ -48,8 +50,9 @@ export default function HRCQueuePage() {
     setLoading(true)
     setError(null)
     try {
-      const out = await hrc.eligible()
+      const [out, pend] = await Promise.all([hrc.eligible(), hrc.pendingTs()])
       setData(out)
+      setPending(pend)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -97,6 +100,47 @@ export default function HRCQueuePage() {
       {error && (
         <div style={{ padding: 12, borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', fontSize: 13, marginBottom: 14 }}>
           Erro: {error}
+        </div>
+      )}
+
+      {/* pt41 Banner D1 — mãos bounty-format escondidas por falta de TS */}
+      {pending && pending.total_hands > 0 && (
+        <div style={{ marginBottom: 14, borderRadius: 8, border: '1px solid rgba(234,179,8,0.4)', background: 'rgba(234,179,8,0.08)' }}>
+          <button
+            onClick={() => setPendingOpen(o => !o)}
+            style={{ width: '100%', textAlign: 'left', cursor: 'pointer', background: 'transparent', border: 'none', color: '#eab308', fontSize: 13, fontWeight: 600, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <span>⚠ {pending.total_hands} mãos escondidas do /hrc por falta de Tournament Summary ({pending.count} torneios)</span>
+            <span>{pendingOpen ? '▾' : '▸'}</span>
+          </button>
+          {pendingOpen && (
+            <div style={{ padding: '0 12px 10px', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+                    {['torneio', 'tn', 'fmt', 'mãos', 'motivo'].map(h => (
+                      <th key={h} style={{ padding: '4px 8px', fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pending.groups.map(g => (
+                    <tr key={g.tournament_number} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <td style={{ padding: '4px 8px', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.tournament_name || '—'}</td>
+                      <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{g.tournament_number}</td>
+                      <td style={{ padding: '4px 8px' }}>{g.tournament_format || '—'}</td>
+                      <td style={{ padding: '4px 8px' }}>{g.n_hands}</td>
+                      <td style={{ padding: '4px 8px' }}>
+                        <Chip color={g.reason === 'needs_ts_import' ? '#eab308' : '#f97316'}>
+                          {g.reason === 'needs_ts_import' ? 'importar TS' : 'Mystery (não suportado)'}
+                        </Chip>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

@@ -336,6 +336,13 @@ export const hrc = {
     ).toString()
     return req('GET', `/hrc/eligible${qs ? `?${qs}` : ''}`)
   },
+  // pt41 — mãos bounty-format escondidas do /hrc por falta de TS (banner D1).
+  pendingTs: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/hrc/pending-ts${qs ? `?${qs}` : ''}`)
+  },
 }
 
 // ── HRC Queue (export p/ watcher + download per-mão) ────────────────────────
