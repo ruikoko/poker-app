@@ -6,14 +6,20 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (25 Maio 2026 — pt41, fix do bounty base via TS)
+## Estado actual (25-26 Maio 2026 — pt41, 2 fixes HIGH: bounty via TS + anchor lobby)
 
-`#HERO-BOUNTY-FROM-TS-DERIVATION` resolvido: o bounty base por torneio vem de
-`tournament_summaries.buy_in_bounty` (Hero `max(Vision, base)`, vilões `base`,
-`€` mantido); hardcode `_HERO_BOUNTY_DEFAULT_USD=250` removido. Gate no Andar 1
-do /hrc (GG-only): PKO/SuperKO/KO exigem TS com bounty; **Mystery KO excluído**;
-vanilla sem token (Opção A); Winamax/PS passam (bounty na HH crua). Banner D1
-(`GET /api/hrc/pending-ts`) mostra as mãos escondidas por falta de TS.
+Sessão com **2 fixes HIGH shipped** + re-disparo lobby validado + reversão da guarda.
+Suite **651 → 661 → 666 PASSED**. SHAs: `a942ac7` (bounty) → `0707978` (docs betting) →
+`6409b19` (anchor) → redeploy reversão guarda (mesmo commit, env-var only). Cronologia em
+`docs/JOURNAL_2026-05-25-pt41.md`.
+
+### Fixes shipped em pt41 (3 ✅)
+
+| Debt | Estado | Detalhe |
+|---|---|---|
+| **#HERO-BOUNTY-FROM-TS-DERIVATION** | ✅ FIXED (`a942ac7`) | Bounty base por torneio vem de `tournament_summaries.buy_in_bounty` (Hero `max(Vision, base)`, vilões `base`, `€` mantido); hardcode `_HERO_BOUNTY_DEFAULT_USD=250` **removido**. Gate Andar 1 GG-only: PKO/SuperKO/KO exigem TS com bounty; **Mystery KO excluído**; vanilla sem token (Opção A); Winamax/PS passthrough. `lookup_bounties` + `bounty_by_key` em `build_queue_zip`; defensiva 422 `pko_without_ts_bounty`; manifest audit. `GET /api/hrc/pending-ts` + banner D1 no `/hrc`. Smoke real do Rui: Hyper Special $108 importou com **bounty €50 correcto**. |
+| **#LOBBY-ANCHOR-PRESTART-REGRESSION** | ✅ FIXED (`6409b19`) | Resolver **source-aware** (`anchor_mode='during_play'`\|`'prestart'`; lobby passa `prestart`). **TIER 0** (`_query_summaries`): selecção **closest** (`ORDER BY abs`) + janela por modo (prestart `[anchor−12h, anchor+2h]`; during_play `[anchor−24h, anchor]` inalterado). 🟢 **Validação empírica:** msg 05-09 13:38 — código antigo teria mis-resolvido para o TS de 05-08 (dia anterior); o novo **rejeita** e devolve `tm_not_found` honesto. Mis-resolve silencioso → erro honesto. |
+| **#RESOLVER-TIER12-WINDOW-NO-START** | ✅ FIXED (`6409b19`) | Mesmo commit do anchor: `_decide_window` source-aware — **ramo-2** (sem `start_time_iso`) prestart `[posted−12h, posted+2h]` (forward-aware, em vez de `[posted−12h, posted−30min]` que excluía o torneio que arranca após o post); **ramo-1** forward 2h→4h (1ª hand importada entra ~1-2h depois do start). **Re-frame pt41:** o impacto real-world era modesto — as Winamax (caso TIER 1/2) têm `start_time_iso` → ramo-1, e desbloqueiam-se com **re-run** (hands já importadas), não com o anchor; o valor concreto do TIER 1/2 foi o **forward +4h do ramo-1**. Mecanismo da janela corrigido em ambos os ramos. |
 
 ### Tech debt novo aberto em pt41 (1)
 
@@ -45,6 +51,12 @@ O script replica apenas as acções **tomadas** na HH. O Hero fica com uma únic
 - Eventual **interacção entre os 2 aspectos** (variantes de streets × alternativas do Hero → combinatória de scripts).
 
 **Severidade HIGH 🚨:** afecta a utilidade analítica de **cada mão estudada** no HRC (o produto nº1 é o estudo). Refs (a confirmar na investigação): gerador de `script.js`; pipeline `build_queue_zip` (`queue_export.py`); painel `/hrc`.
+
+### Tech debt novo aberto em pt41 (3)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#LOBBY-SYNC-PAGINATION-LIMIT** | 🟡 MED | `gather_candidates` (`lobby_sync.py`) usa `channel.history()` **sem paginação explícita** → o discord.py assume **`limit=100`** por defeito. Em janelas largas (30d+) com canal activo, as mensagens **mais antigas** registadas no log **não são puxadas** pela history → não entram como candidatas do `sync-recent`. **Sintoma pt41:** probe encontrou **34** `tm_not_found` (12-24 Mai); `sync-recent` com 30d apanhou só **12** (as mais recentes). O Rui **confirmou que NÃO apaga mensagens** no `#lobbys` → não é apagamento, é limitação de paginação. **Solução futura:** paginação explícita (loop até esgotar a janela) ou `limit` maior. Não-bloqueante. Refs: `lobby_sync.py:gather_candidates`. |
 
 ---
 
@@ -128,8 +140,8 @@ abertos (foco pt40). Cronologia completa em `docs/JOURNAL_2026-05-24-pt39.md`.
 |---|---|---|
 | **#RESOLVER-TIER0-STRICT-EQUALITY** | ✅ FIXED (`35286c1`) | TIER 0 ganha `buy_in` (igualdade exacta em `buy_in_total` + currency) **+ janela `start_time` ancorada no `posted_at`/`captured_at`** (instância em curso, `ORDER BY start_time DESC LIMIT 1`). **Reversão parcial da decisão #4:** `prize_pool`/`total_players` **mantidos** NULL-permissivos porque o **5º consumidor do resolver — `routers/tournament_results.py` (backoffice GG, descoberto a meio do trabalho)** — é pós-jogo e precisa deles (valores finais, exactos; é o único discriminador entre instâncias em dias diferentes sem âncora). Achado **W4**: **18/101 TS GG são 2×/dia** (mesmo nome+buy_in) → só a hora desempata, daí janela+`LIMIT 1`. Helper `_parse_buy_in_str` em `table_ss.py` (buy_in da SS de mesa vem string "€50"). |
 | **#TABLE-SS-RESOLVER-COLLISION** | ✅ FIXED (`36f7f7f`+`e2c6460`+cleanup BD) | parte 1/2 `36f7f7f` — `clean_tournament_name` **trailing-only** (achado: W SERIES `#220 - …` é prefixo **legítimo**; drop global parti-lo-ia). parte 2/2 `e2c6460` — `name_tokens_subset` valida o nome no fast-path `single_tn` antes de aceitar. Cleanup BD data-only (`_local_only/pt39_cleanup.py`, 4 UPDATEs atómicos). Achado: **2 colisões** em prod, não 1 — `ODYSSEY→ZENITH` (**não estava flagged**) além de `EXPLORER→INTERSTELLAR`. |
-| **#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START** | ⏳ aberto (🟡 MED pós-pt40) | foco pt41, junto do TIER12. |
-| **#RESOLVER-TIER12-WINDOW-NO-START** | ⏳ aberto | foco pt40. |
+| **#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START** | ⏳ aberto (🟡 MED) | **continua aberto** após pt41 (não-bloqueante; TIER 0 usa o arranque do TS, não `meta.start_time`). |
+| **#RESOLVER-TIER12-WINDOW-NO-START** | ✅ FIXED (`6409b19`, pt41) | resolvido pelo `_decide_window` source-aware (ramo-2 prestart forward + ramo-1 +4h). Ver secção pt41. |
 
 Commits pt39 (cronológico): `b76cea7` (docs re-rotular) → `35286c1` (TIER 0) → `36f7f7f` (collision p1) → `e2c6460` (collision p2) + cleanup BD data-only. Suite **621 → 627 → 637 → 646 PASSED**. Detalhe em `docs/JOURNAL_2026-05-24-pt39.md`.
 

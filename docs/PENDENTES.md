@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 24 Maio 2026 (fim da pt40 — Track B `#HRC-PER-HAND-DOWNLOAD` ✅ `dfc13a5`; 🛡️ guarda `DISCORD_LOBBY_AUTO=false`; abertos `#LOBBY-ANCHOR-PRESTART-REGRESSION` HIGH + agravado `#HERO-BOUNTY-FROM-TS-DERIVATION` HIGH 🚨).
+**Última actualização:** 26 Maio 2026 (fim da pt41 — 2 fixes HIGH: `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ `a942ac7` + `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ `6409b19` (+ `#RESOLVER-TIER12-WINDOW-NO-START` ✅); guarda `DISCORD_LOBBY_AUTO=true` reposta; abertos `#HRC-BETTING-SCRIPT-IMPROVEMENTS` HIGH + `#LOBBY-SYNC-PAGINATION-LIMIT` MED).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,22 +12,27 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco pt41 (por ordem):**
-> 1. 🚨 **`#HERO-BOUNTY-FROM-TS-DERIVATION` (HIGH, URGENTE)** — o converter GG→PS
->    mete Hero bounty `€max(Vision,250)` em **todas** as mãos GG (hardcode do $525;
->    vanilla também; vilões a €0). **Afecta cada mão estudada hoje** (batch + per-mão)
->    → não pode esperar. Fix desbloqueado: usar `tournament_summaries.buy_in_bounty`
->    por tn + gate por formato; manter `€` (workaround HRC).
-> 2. **Track A: `#LOBBY-ANCHOR-PRESTART-REGRESSION` (HIGH)** — anchor `start ≤ posted`
->    do TIER 0 falha p/ lobby SS (pré-arranque) → mis-resolve. Desbloqueia o re-disparo.
-> 3. **Re-disparo dos ~24 lobby `tm_not_found`** (`sync-recent` `dry_run`→real).
-> 4. **Reverter `DISCORD_LOBBY_AUTO=true`** (a guarda só sai depois do Track A + re-disparo OK).
-> 5. Depois: `#RESOLVER-TIER12-WINDOW-NO-START` + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED).
+> **Foco pt42 (por ordem):**
+> 1. 🔴 **`#HRC-BETTING-SCRIPT-IMPROVEMENTS` (HIGH — foco principal)** — gerador de
+>    `script.js`: (a) variante pré-flop+flop only (turn/river só check); (b) alternativas
+>    do Hero (regra-base: stack effective > 8 BB no open → script inclui SEMPRE
+>    mini-raise 2 BB, além da acção real). Investigação dependente antes de codificar
+>    (localização do gerador, params por street/seat, como expor variantes).
+> 2. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates` sem paginação
+>    explícita (discord.py `limit=100`); janelas largas não puxam mensagens antigas.
+> 3. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do /hrc na pt41;
+>    suporte pré/pós-ITM + import dos TS Mystery (~1.353 mãos à espera).
+> 4. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** — se ainda
+>    relevante (não-bloqueante).
+> 5. **Importar TS GG faltosos** das edições `Daily Hyper $80` de 05-09 (e outras com
+>    `tm_not_found`) — workflow normal, não-bloqueante.
 >
-> 🛡️ **Guarda activa:** `DISCORD_LOBBY_AUTO=false` (deploy `ac26c261`) — **não**
-> correr sync de lobby nem re-disparar até o Track A.
-> **Fechados:** `#HRC-PER-HAND-DOWNLOAD` ✅ (`dfc13a5`, pt40); `#RESOLVER-TIER0-STRICT-EQUALITY`
-> ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ (pt39).
+> ✅ **Guarda reposta:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler real-time do
+> `#lobbys` activo, agora com o anchor `prestart`.
+> **Fechados pt41:** `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ (`a942ac7`);
+> `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ + `#RESOLVER-TIER12-WINDOW-NO-START` ✅ (`6409b19`).
+> **Fechados antes:** `#HRC-PER-HAND-DOWNLOAD` ✅ (`dfc13a5`, pt40);
+> `#RESOLVER-TIER0-STRICT-EQUALITY` ✅ + `#TABLE-SS-RESOLVER-COLLISION` ✅ (pt39).
 
 1. **`#PIPELINE-ROBUSTNESS-SMOKE-BATTERY` — porta de entrada da Fase 2 do
    GTO Brain.** Validar o pipeline ponta-a-ponta nas **4 combinações site ×
