@@ -52,6 +52,10 @@ _EQUITY_FT_NORM_KEYS = {"icm ft", "icm pko ft"}
 BOUNTY_FORMATS = ("pko", "super ko", "ko", "mystery ko", "mystery")
 MYSTERY_FORMATS = ("mystery ko", "mystery")
 TS_GATED_FORMATS = ("pko", "super ko", "ko")
+# pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — formatos bounty WN com pipeline
+# de injecção via HH crua (não TS, ao contrário do GG). Mystery KO fica
+# fora (HRC não modela; já gated em MYSTERY_FORMATS).
+WINAMAX_BOUNTY_FORMATS = ("pko", "super ko", "ko")
 
 
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
@@ -557,6 +561,37 @@ def compute_hero_bounty(
     return float(starting_bounty), "ts"
 
 
+def compute_hero_bounty_from_hh(
+    players_list: list, anon_map: dict, hh_bounties_by_nick: dict,
+) -> tuple[float, str]:
+    """pt42c — Hero bounty para Winamax. Vision tem prioridade (regra pt41
+    mantida); fallback à HH (que tem o pós-KO accumulator real do nick).
+
+    `hh_bounties_by_nick` = output de `_extract_winamax_seat_bounties`.
+    `anon_map.get("Hero")` resolve o nick real do Hero na HH (em WN não há
+    anonimização — o Hero aparece com o nick real, ex.: `thinvalium`).
+
+    Devolve `(valor, fonte)` com fonte ∈ {'vision','hh'}. Distinto do GG
+    pt41 (`compute_hero_bounty`) que devolve {'vision','ts'}.
+
+    Edge cases:
+      - `anon_map` vazio / sem "Hero" → vision=0, hh_value=0 → devolve (0.0, "hh").
+      - Vision = 0 ou ausente → devolve (hh_value, "hh"). Caso típico em WN
+        (Vision do replayer Discord é GG-only).
+    """
+    hero_real = (anon_map or {}).get("Hero")
+    if not hero_real:
+        return 0.0, "hh"
+    hh_value = float(hh_bounties_by_nick.get(hero_real, 0.0))
+    vision = (
+        _vision_bounties_by_name(players_list).get(hero_real, 0.0)
+        if hero_real else 0.0
+    )
+    if vision > hh_value:
+        return float(vision), "vision"
+    return hh_value, "hh"
+
+
 def _inject_bounties_ps_format(
     text: str, players_list: list, anon_map: dict, *, starting_bounty: float
 ) -> str:
@@ -591,6 +626,119 @@ def _inject_bounties_ps_format(
         return f"{prefix}{nick}{mid}, €{formatted} bounty)"
 
     return _SEAT_LINE_RE.sub(_repl, text)
+
+
+# pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — extracção de bounty Winamax
+# directamente da HH crua. WN não tem pipeline TS (parser GG-only desde
+# pt19); por isso a base de bounty vem do próprio HH, onde cada Seat
+# tem `(<chips>, <X>€ bounty)` literal (formato WN).
+#
+# Captura nick + chips + bounty. Currency `€` literal; vírgula obrigatória
+# como separador entre chips e bounty. Não confundir com vírgula de
+# milhares — WN escreve `75308` (sem vírgula) e PS escreve `75,308`.
+
+_WN_SEAT_BOUNTY_RE = re.compile(
+    r"^(?P<prefix>Seat\s+\d+:\s+)(?P<nick>.+?)\s+"
+    r"\((?P<chips>[\d,]+),\s+(?P<bounty>[\d.,]+)€\s+bounty\)\s*$",
+    re.MULTILINE,
+)
+
+
+def _extract_winamax_seat_bounties(hh_text: str) -> dict:
+    """Mapa `{nick: bounty_eur_float}` parseado dos Seat lines Winamax.
+
+    Cada Seat WN PKO tem o formato `Seat N: nick (chips, X€ bounty)` com
+    `X` em € (pode ter decimal). Devolve dict vazio se nenhum Seat tem
+    token bounty (formato non-bounty ou HH malformada — defensivo).
+    """
+    if not hh_text:
+        return {}
+    out: dict = {}
+    for m in _WN_SEAT_BOUNTY_RE.finditer(hh_text):
+        nick = m.group("nick").strip()
+        raw_bounty = m.group("bounty").replace(",", ".")
+        try:
+            bounty = float(raw_bounty)
+        except ValueError:
+            continue
+        if nick:
+            out[nick] = bounty
+    return out
+
+
+def _patch_winamax_payouts_bountytype(
+    blob: dict, *, progressive_factor: float = 0.5,
+) -> dict:
+    """Sobrescreve `structures[i].bountyType` e `progressiveFactor` em cada
+    structure do `payouts_json` para WN PKO.
+
+    Causa raiz: o lobby vision (apply_ratio_lookup em services/lobby_vision.py)
+    só reconhece nomes branded GG/PS ("Bounty Hunters", "[bounty]", etc.).
+    Nomes WN (GRAVITY, ZENITH, EXPLORER, ...) caem no default ("None", 0.0).
+    Aqui sobrescrevemos NO ZIP (não na BD — o blob na BD continua a
+    reflectir o que o lobby vision viu, audit trail preservado).
+
+    Devolve novo dict (deep-copy via json round-trip; não muta o input).
+    Se `blob` não é dict ou não tem `structures`, devolve cópia sem
+    alterações.
+    """
+    if not isinstance(blob, dict):
+        return blob
+    patched = json.loads(json.dumps(blob))  # deep-copy via serialização
+    structs = patched.get("structures")
+    if not isinstance(structs, list):
+        return patched
+    for s in structs:
+        if not isinstance(s, dict):
+            continue
+        s["bountyType"] = "PKO"
+        s["progressiveFactor"] = float(progressive_factor)
+    return patched
+
+
+def _inject_bounties_winamax_to_ps_format(
+    text: str, players_list: list, anon_map: dict,
+) -> str:
+    """pt42c — Reescrita Seat lines WN para formato PS-compat com bounty.
+
+    Antes:  Seat 1: nick (75308, 10€ bounty)
+    Depois: Seat 1: nick (75308 in chips, €10 bounty)
+
+    Bounties por nick:
+    - Hero: max(Vision, HH_bounty_hero). Vision raríssimo em WN (Vision do
+      replayer Discord é GG-only); tipicamente ganha HH.
+    - Vilões: bounty literal da HH (pós-KO accumulator real do nick).
+
+    Seat lines que não matchem o regex `_WN_SEAT_BOUNTY_RE` ficam intactas
+    (defensivo — formato inesperado não trava o pipeline).
+
+    Se a HH não tem bounty token em nenhum Seat (formato non-bounty ou
+    malformada), devolve o text inalterado.
+    """
+    if not text:
+        return text
+
+    hh_bounties = _extract_winamax_seat_bounties(text)
+    if not hh_bounties:
+        return text  # nada para fazer — pipeline degrada gracefully
+
+    hero_real = (anon_map or {}).get("Hero")
+    hero_value, _src = compute_hero_bounty_from_hh(
+        players_list, anon_map, hh_bounties,
+    )
+
+    def _repl(m: re.Match) -> str:
+        prefix = m.group("prefix")
+        nick = m.group("nick").strip()
+        chips = m.group("chips")
+        if hero_real and nick == hero_real:
+            value = hero_value
+        else:
+            value = hh_bounties.get(nick, 0.0)
+        formatted = _format_bounty_amount(value)
+        return f"{prefix}{nick} ({chips} in chips, €{formatted} bounty)"
+
+    return _WN_SEAT_BOUNTY_RE.sub(_repl, text)
 
 
 _SHOWDOWN_MARK = "*** SHOWDOWN ***"
@@ -676,16 +824,23 @@ def _strip_commas_from_amounts(text: str) -> str:
 def convert_gg_hh_to_pokerstars_compatible(
     hand: dict, *, bounty_ctx: Optional[dict] = None
 ) -> str:
-    """Converte raw HH GG para formato compativel com HRC.
+    """Converte raw HH para formato compatível com HRC.
 
-    Hands non-GG (PokerStars, Winamax) passam tal e qual (pass-through) —
-    Fase 2 tratara conversoes especificas se HRC reclamar de Winamax.
+    Sites suportados (cobertura por pipeline):
+
+    - **GGPoker**: pipeline pt29 completo (8 transformações; conversão
+      de header, hashes, bounty via TS, etc.).
+    - **Winamax PKO/SuperKO/KO** (pt42c): branch novo — reescrita das
+      Seat lines `(<chips>, <X>€ bounty)` → `(<chips> in chips, €<X> bounty)`
+      via `_inject_bounties_winamax_to_ps_format`. Hero usa Vision se
+      maior (regra pt41 mantida); fallback HH.
+    - **Winamax non-bounty** (vanilla, mystery KO) e **PokerStars**:
+      passthrough total — HH crua entregue ao HRC. Mystery KO já gated
+      em MYSTERY_FORMATS (excluído do /hrc).
 
     Hands com `raw` vazio devolvem string vazia (caller deve filtrar).
 
-    Pipeline pt29 Fase 2 (ver bloco de helpers acima para detalhe das 8
-    transformacoes):
-
+    Pipeline pt29 Fase 2 — só para GGPoker:
       _format_level_line   -> drop ante + virgulas no Level header
       _replace_hashes      -> substitui hashes por nicks reais
       passo 1              -> Poker Hand #TM<id>  ->  PokerStars Hand #<id>
@@ -700,7 +855,23 @@ def convert_gg_hh_to_pokerstars_compatible(
     raw = (hand.get("raw") or "").strip()
     if not raw:
         return ""
-    if hand.get("site") != "GGPoker":
+
+    site = hand.get("site")
+    fmt = (hand.get("tournament_format") or "").lower()
+
+    # pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — branch WN PKO: reescrita
+    # Seat lines para PS-compat usando bounty literal da HH. Não há TS
+    # Winamax; pipeline degrada gracefully se HH não tem token bounty.
+    if site == "Winamax" and fmt in WINAMAX_BOUNTY_FORMATS:
+        pn = _coerce_player_names(hand.get("player_names"))
+        anon_map = pn.get("anon_map") or {}
+        players_list = pn.get("players_list") or []
+        return _inject_bounties_winamax_to_ps_format(
+            raw, players_list, anon_map,
+        )
+
+    if site != "GGPoker":
+        # PS ou WN non-bounty (vanilla, mystery) → passthrough.
         return hand.get("raw") or ""
 
     pn = _coerce_player_names(hand.get("player_names"))
@@ -710,7 +881,6 @@ def convert_gg_hh_to_pokerstars_compatible(
     # pt41: bounty só para formatos bounty-gated (PKO/SuperKO/KO) com base do TS.
     # Vanilla/Mystery/sem-base → sem token (Opção A). starting_bounty vem do
     # bounty_ctx (tournament_summaries.buy_in_bounty), threaded por build_queue_zip.
-    fmt = (hand.get("tournament_format") or "").lower()
     starting_bounty = (bounty_ctx or {}).get("starting_bounty")
 
     out = _format_level_line(raw)
@@ -1123,8 +1293,25 @@ def build_queue_zip(
                 )
                 target_node_offset = None
 
-            if payout_blob is not None:
-                merged: dict = dict(payout_blob) if isinstance(payout_blob, dict) else {"_blob": payout_blob}
+            # pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — sobrescrever
+            # `bountyType` no payouts.json do zip para WN PKO. Lobby vision
+            # classifica nomes WN como "None" (apply_ratio_lookup só conhece
+            # nomes branded GG/PS). Patch é aplicado SÓ NO ZIP (não na BD —
+            # audit trail preservado).
+            payout_blob_for_zip = payout_blob
+            if (site == "Winamax"
+                    and fmt in WINAMAX_BOUNTY_FORMATS
+                    and payout_blob is not None):
+                payout_blob_for_zip = _patch_winamax_payouts_bountytype(
+                    payout_blob, progressive_factor=0.5,
+                )
+
+            if payout_blob_for_zip is not None:
+                merged: dict = (
+                    dict(payout_blob_for_zip)
+                    if isinstance(payout_blob_for_zip, dict)
+                    else {"_blob": payout_blob_for_zip}
+                )
                 merged.update(hints)
                 zf.writestr(
                     f"{hand_id}/payouts.json",
@@ -1151,7 +1338,8 @@ def build_queue_zip(
             )
 
             # pt41 audit do bounty (paralelo ao aggressor_source): só faz sentido
-            # quando houve injecção (GG bounty-gated com base do TS).
+            # quando houve injecção (GG bounty-gated com base do TS, ou pt42c WN
+            # PKO com bounty literal na HH).
             hero_bounty = None
             hero_bounty_source = None
             if site == "GGPoker" and fmt in TS_GATED_FORMATS and starting_bounty is not None:
@@ -1160,6 +1348,18 @@ def build_queue_zip(
                     _pn.get("players_list") or [], _pn.get("anon_map") or {},
                     float(starting_bounty),
                 )
+            elif site == "Winamax" and fmt in WINAMAX_BOUNTY_FORMATS:
+                # pt42c — audit WN: extrair bounties da HH crua (não do
+                # hh_text convertido — esse já está em PS-compat e não
+                # matcha o regex WN).
+                _pn = _coerce_player_names(h.get("player_names"))
+                wn_hh_bounties = _extract_winamax_seat_bounties(h.get("raw") or "")
+                if wn_hh_bounties:
+                    hero_bounty, hero_bounty_source = compute_hero_bounty_from_hh(
+                        _pn.get("players_list") or [],
+                        _pn.get("anon_map") or {},
+                        wn_hh_bounties,
+                    )
 
             hands_included.append({
                 "hand_id": hand_id,
@@ -1180,7 +1380,10 @@ def build_queue_zip(
                 "aggressor_source": aggressor_source,
                 "hand_meta": hand_meta,
                 "converted_format": (
-                    "pokerstars_compat" if site == "GGPoker" else "passthrough"
+                    "pokerstars_compat" if (
+                        site == "GGPoker"
+                        or (site == "Winamax" and fmt in WINAMAX_BOUNTY_FORMATS)
+                    ) else "passthrough"
                 ),
             })
 

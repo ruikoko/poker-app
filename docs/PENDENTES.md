@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 27 Maio 2026 (fim da pt42b — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ re-aberto e fechado; 3-bet IP por posição com CASO A/B; suite 705→713 PASSED; 28 testes pt42b novos; novo `#POSITION-LABELS-PYTHON-JS-DRIFT` LOW; commit/push + smoke real Beelink para pt42c).
+**Última actualização:** 27 Maio 2026 (fim da pt42c — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` ✅ HIGH (Opção C, diffs aplicados; smoke real Beelink pendente); pipeline WN PKO → PS-compat com bounty inline; suite 725→730 PASSED; 15 testes pt42c novos).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,25 +12,23 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco pt42c (por ordem):**
-> 1. **Commit + push pt42 + pt42b.** Diffs em buffer (T1-T6 aplicados, suite
->    713 PASSED). Aguardar validação Web final dos 4 docs.
-> 2. **Smoke real Beelink pt42 + pt42b** — mãos da BD que exercitem CASO A
->    + CASO B (3-bet IP por posição) + variante pré-flop + flop only:
->    - GG cadeia open + 3-bet IP real → validar `SIZES_3BET_<POS>` do
->      3-bettor (CASO A) + outros candidatos (CASO B).
->    - 6+ handed open só → validar `SIZES_3BET_<POS>` por candidato (só
->      CASO B).
->    - Open-jam → confirmar `opener_to_bb` é o jam-to-bb (não 2 BB).
->    - Comparar tree size antes/depois (esperado: redução por
->      `POSTFLOP_FORCE_CHECKDOWN_AFTER`).
-> 3. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates` sem
->    paginação explícita.
-> 4. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do /hrc
->    em pt41; suporte pré/pós-ITM + import dos TS Mystery.
+> **Foco pt42d (por ordem):**
+> 1. **Commit + push pt42c.** Diffs em buffer (T1-T6 aplicados, suite
+>    730 PASSED). Aguardar GO Rui.
+> 2. **Smoke real Beelink pt42c** — re-descarregar mão WN PKO e correr
+>    no HRC para validar:
+>    - HRC aceita formato WN-converted (Seat lines PS-compat).
+>    - `payouts.json` patched leva o HRC a tratar como PKO 50%.
+>    - Hero bounty no manifest bate com `(<X>€ bounty)` literal.
+>    - Se HRC rejeitar formato minimal: escalar para conversão completa
+>      (header + markers `*** PRE-FLOP ***`, etc.) em pt42d.
+> 3. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates`
+>    sem paginação explícita.
+> 4. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do
+>    /hrc em pt41 + pt42c; suporte pré/pós-ITM.
 > 5. **`#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW)** — só elevar
->    se smoke real pt42c mostrar drift.
-> 6. **`#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, novo pt42b)** — tabela
+>    se smoke real pt42d mostrar drift.
+> 6. **`#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, pt42b)** — tabela
 >    duplicada Python/JS. Não-bloqueante.
 > 7. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** —
 >    se ainda relevante.
@@ -38,9 +36,12 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 >
 > ✅ **Guarda mantida:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler
 > real-time do `#lobbys` activo com o anchor `prestart`.
+> **Fechados pt42c:** `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` ✅ (Opção C
+> diffs aplicados; smoke real Beelink pendente). Suite 725→730 PASSED.
+> 15 testes pt42c novos. **Pendente:** commit/push + smoke real Beelink.
 > **Fechados pt42b:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (re-aberto e
 > fechado; 3-bet IP por posição com CASO A/B; suite 705→713 PASSED;
-> 28 testes pt42b novos). **Pendente:** commit/push + smoke real Beelink.
+> 28 testes pt42b novos).
 > **Fechados pt42:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (1ª parte:
 > cortar turn/river + regra universal de sizings + efectiva dinâmica).
 > **Fechados pt41:** `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ (`a942ac7`);

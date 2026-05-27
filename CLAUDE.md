@@ -731,6 +731,56 @@ Detalhe completo em `docs/JOURNAL_2026-05-27-pt42b.md`,
 `docs/TECH_DEBTS_INVENTARIO.md` (secção pt42b),
 `docs/HRC_ANATOMIA_OPERACIONAL.md` §3.4.2.1.
 
-Última sessão fechada: **pt42b** (27 Maio 2026 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ re-aberto e fechado; 3-bet IP por posição com CASO A/B; suite **705 → 713 PASSED**; 28 testes pt42b novos; backend-only, `.exe` watcher não tocado). Detalhes em `docs/JOURNAL_2026-05-27-pt42b.md`.
+## pt42c — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` (27 Maio 2026)
 
-Próxima sessão (**pt42c**), por ordem: 1) **Commit + push pt42 + pt42b** (após validação Web final); 2) **Smoke real Beelink pt42 + pt42b** (cenários CASO A + CASO B; comparar tree size; validar `SIZES_3BET_<POS>` no script gerado); 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 5) `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW, só se smoke mostrar regressão); 6) `#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, novo pt42b, não-bloqueante); 7) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED, se ainda relevante); 8) importar TS GG faltosos. Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.
+**Backend-only; `.exe` do watcher não tocado.** Tech debt novo aberto
+e fechado na mesma sessão após smoke pt42b expor bounty null em mão WN
+PKO. **1232 mãos PKO 2026 Winamax** (em 179 torneios) tinham bounty null
+no pipeline HRC.
+
+**Causa raiz (3 falhas):** (1) lobby vision não classifica nomes WN
+como bounty (`apply_ratio_lookup` só reconhece nomes branded GG/PS);
+(2) TS pipeline é GG-only; (3) `convert_gg_hh_to_pokerstars_compatible`
+fazia passthrough total para non-GG.
+
+**Opção C escolhida pelo Web/Rui:** estender gerador para converter HH
+WN → PS-compat com bounty inline (sem dependency de TS Winamax). HH
+Winamax já tem `(<X>€ bounty)` literal por Seat.
+
+**Pipeline novo (`queue_export.py`):**
+
+1. `_extract_winamax_seat_bounties(hh)` parsea `{nick: bounty_eur}`.
+2. `_inject_bounties_winamax_to_ps_format(text, players_list, anon_map)`
+   reescreve Seat lines: `(<chips>, <X>€ bounty)` → `(<chips> in chips,
+   €<X> bounty)`.
+3. `compute_hero_bounty_from_hh` espelho do `compute_hero_bounty` pt41
+   GG; source enum `"hh"` (Vision ganha se > HH, regra pt41 mantida).
+4. `_patch_winamax_payouts_bountytype` sobrescreve `bountyType="PKO"` +
+   `progressiveFactor=0.5` no zip (BD não tocada — audit trail).
+5. `build_queue_zip` orquestra; `converted_format="pokerstars_compat"`
+   no manifest.
+
+**Branch novo em `convert_gg_hh_to_pokerstars_compatible`** (nome
+mantido por decisão Web): se `site == "Winamax"` AND `fmt in
+WINAMAX_BOUNTY_FORMATS` (`pko`, `super ko`, `ko`), aplica pipeline pt42c.
+Outros sites/formatos: passthrough actual.
+
+Suite **725 → 730 PASSED** (+15 testes pt42c líquidos; 0 removidos).
+Smoke real Beelink fica para pt42d.
+
+**Tech debt novo (HIGH 🚨 → ✅ FIXED na mesma sessão):**
+`#WN-BOUNTY-NULL-IN-HRC-PIPELINE`. Mystery KO WN continua excluído
+(gated em `MYSTERY_FORMATS` desde pt41).
+
+**Decisões product:** Hero bounty Vision ainda tem prioridade (Vision
+de WN é raríssima — replayer Discord é GG-only); vilões usam HH literal
+(pós-KO accumulator real); progressive factor 0.5 hardcoded (Rui
+confirma WN PKO 50% universal); patch só no zip, BD intacta.
+
+Detalhe completo em `docs/JOURNAL_2026-05-27-pt42c.md`,
+`docs/TECH_DEBTS_INVENTARIO.md` (secção pt42c),
+`docs/HRC_ANATOMIA_OPERACIONAL.md` §12.10.
+
+Última sessão fechada: **pt42c** (27 Maio 2026 — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` ✅ HIGH Opção C; pipeline WN → PS-compat com bounty inline; suite **725 → 730 PASSED**; 15 testes pt42c novos; backend-only; smoke real Beelink pendente para pt42d). Detalhes em `docs/JOURNAL_2026-05-27-pt42c.md`.
+
+Próxima sessão (**pt42d**), por ordem: 1) **Commit + push pt42c** (após validação Web final); 2) **Smoke real Beelink pt42c** — re-descarregar mão WN PKO e correr no HRC; validar formato WN-converted aceite + payouts patched + Hero bounty no manifest; 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 5) `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW); 6) `#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW); 7) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED); 8) importar TS GG faltosos. Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.

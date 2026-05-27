@@ -1478,6 +1478,281 @@ def test_apply_overrides_substitutes_multiple_3bet_positions():
     assert "let SIZES_3BET_BU = [6];" in out
 
 
+# ── pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — extracção bounty WN + patch ────
+
+import json
+
+from app.services.queue_export import (
+    WINAMAX_BOUNTY_FORMATS,
+    _extract_winamax_seat_bounties,
+    _inject_bounties_winamax_to_ps_format,
+    _patch_winamax_payouts_bountytype,
+    compute_hero_bounty_from_hh,
+)
+
+
+def test_winamax_bounty_formats_constant():
+    """pt42c — formatos WN com pipeline de bounty via HH (subset de
+    BOUNTY_FORMATS sem mystery)."""
+    assert WINAMAX_BOUNTY_FORMATS == ("pko", "super ko", "ko")
+    # Mystery KO continua fora (já gated em MYSTERY_FORMATS).
+    assert "mystery ko" not in WINAMAX_BOUNTY_FORMATS
+    assert "mystery" not in WINAMAX_BOUNTY_FORMATS
+
+
+def test_extract_winamax_seat_bounties_W_SERIES_sample():
+    """W SERIES SPACE KO 6-handed: 4 seats com bounty 10€, 2 com 12€
+    (pós-KO accumulator)."""
+    hh = (
+        "Table: '#304 - W SERIES - SPACE KO(1084517198)#0495' 6-max "
+        "(real money) Seat #1 is the button\n"
+        "Seat 1: oRosei- (75308, 10€ bounty)\n"
+        "Seat 2: Spaks (93565, 10€ bounty)\n"
+        "Seat 3: LHommePuma (256878, 12€ bounty)\n"
+        "Seat 4: P0isSheEeesH (103432, 10€ bounty)\n"
+        "Seat 5: wonderb0y (170188, 12€ bounty)\n"
+        "Seat 6: thinvalium (122943, 10€ bounty)\n"
+    )
+    out = _extract_winamax_seat_bounties(hh)
+    assert out == {
+        "oRosei-": 10.0,
+        "Spaks": 10.0,
+        "LHommePuma": 12.0,
+        "P0isSheEeesH": 10.0,
+        "wonderb0y": 12.0,
+        "thinvalium": 10.0,
+    }
+
+
+def test_extract_winamax_seat_bounties_LEGACY_DAY1_decimal():
+    """LEGACY MILLION DAY 1 5-handed: bounties com 2 decimais pós-KO."""
+    hh = (
+        "Seat 1: JMaestro (461388, 68.75€ bounty)\n"
+        "Seat 2: thinvalium (607387, 322.86€ bounty)\n"
+        "Seat 3: RoyalKata (117958, 89.25€ bounty)\n"
+        "Seat 4: Cumua Pulia (1011890, 213.25€ bounty)\n"
+        "Seat 5: PurrfectCaos (881474, 234.52€ bounty)\n"
+    )
+    out = _extract_winamax_seat_bounties(hh)
+    assert out["JMaestro"] == 68.75
+    assert out["thinvalium"] == 322.86
+    assert out["Cumua Pulia"] == 213.25  # nick com espaço
+    assert out["PurrfectCaos"] == 234.52
+    assert len(out) == 5
+
+
+def test_extract_winamax_seat_bounties_no_bounty_returns_empty():
+    """HH non-bounty (Vanilla) ou Seat lines sem token bounty → dict vazio."""
+    hh_vanilla = (
+        "Seat 1: PlayerA (10000)\n"  # WPN-like (sem 'in chips' e sem bounty)
+        "Seat 2: PlayerB (12000 in chips)\n"  # PS-like sem bounty
+    )
+    assert _extract_winamax_seat_bounties(hh_vanilla) == {}
+    assert _extract_winamax_seat_bounties("") == {}
+    assert _extract_winamax_seat_bounties(None) == {}
+
+
+def test_patch_winamax_payouts_bountytype_overwrites_None_to_PKO():
+    """pt42c — patch sobrescreve bountyType="None" + progressiveFactor=0.0
+    para PKO + 0.5 (default WN PKO 50%)."""
+    blob = {
+        "name": "/",
+        "folders": [],
+        "structures": [
+            {
+                "name": "GRAVITY",
+                "chips": 4259922.0,
+                "prizes": {"1": 4185.3, "2": 4185.17},
+                "bountyType": "None",
+                "progressiveFactor": 0.0,
+            }
+        ],
+    }
+    out = _patch_winamax_payouts_bountytype(blob)
+    assert out["structures"][0]["bountyType"] == "PKO"
+    assert out["structures"][0]["progressiveFactor"] == 0.5
+    # Outros campos preservados
+    assert out["structures"][0]["name"] == "GRAVITY"
+    assert out["structures"][0]["chips"] == 4259922.0
+    assert out["structures"][0]["prizes"] == {"1": 4185.3, "2": 4185.17}
+
+
+def test_patch_winamax_payouts_bountytype_deep_copy_does_not_mutate():
+    """pt42c — input não pode ser mutado (deep-copy via json round-trip)."""
+    blob = {
+        "structures": [
+            {"bountyType": "None", "progressiveFactor": 0.0}
+        ]
+    }
+    original = json.loads(json.dumps(blob))  # snapshot pré-patch
+    _ = _patch_winamax_payouts_bountytype(blob)
+    assert blob == original  # input intacto
+
+
+def test_patch_winamax_payouts_bountytype_multi_structures():
+    """pt42c — patch aplica-se a TODAS as structures (raríssimo ter >1,
+    mas defensivo)."""
+    blob = {
+        "structures": [
+            {"name": "A", "bountyType": "None", "progressiveFactor": 0.0},
+            {"name": "B", "bountyType": "Other", "progressiveFactor": 0.25},
+        ]
+    }
+    out = _patch_winamax_payouts_bountytype(blob)
+    for s in out["structures"]:
+        assert s["bountyType"] == "PKO"
+        assert s["progressiveFactor"] == 0.5
+
+
+def test_patch_winamax_payouts_bountytype_handles_missing_structures():
+    """pt42c — defensivo: blob sem `structures` → devolve cópia sem alterar
+    (não-crash)."""
+    blob_no_structs = {"name": "/", "folders": []}
+    out = _patch_winamax_payouts_bountytype(blob_no_structs)
+    assert out == blob_no_structs
+
+    blob_none = None
+    out = _patch_winamax_payouts_bountytype(blob_none)
+    assert out is None
+
+
+def test_inject_bounties_winamax_to_ps_format_basic_conversion():
+    """pt42c — reescrita 6 seats WN → PS-compat. Sem Hero (anon_map vazio).
+    Todos os bounties vêm da HH literal."""
+    hh = (
+        "Seat 1: oRosei- (75308, 10€ bounty)\n"
+        "Seat 2: Spaks (93565, 10€ bounty)\n"
+        "Seat 3: LHommePuma (256878, 12€ bounty)\n"
+    )
+    out = _inject_bounties_winamax_to_ps_format(
+        hh, players_list=[], anon_map={},
+    )
+    assert "Seat 1: oRosei- (75308 in chips, €10 bounty)" in out
+    assert "Seat 2: Spaks (93565 in chips, €10 bounty)" in out
+    assert "Seat 3: LHommePuma (256878 in chips, €12 bounty)" in out
+    # Formato WN original foi removido
+    assert "(75308, 10€ bounty)" not in out
+
+
+def test_inject_bounties_winamax_to_ps_format_hero_with_hh_value():
+    """pt42c — Hero identificado via anon_map['Hero'] usa hh_value
+    (sem Vision em WN, source="hh")."""
+    hh = (
+        "Seat 1: PlayerA (10000, 5€ bounty)\n"
+        "Seat 2: thinvalium (607387, 322.86€ bounty)\n"
+        "Seat 3: PlayerB (50000, 25€ bounty)\n"
+    )
+    out = _inject_bounties_winamax_to_ps_format(
+        hh, players_list=[], anon_map={"Hero": "thinvalium"},
+    )
+    # Hero (thinvalium): HH 322.86€ → preservado como €322.86 bounty.
+    assert "Seat 2: thinvalium (607387 in chips, €322.86 bounty)" in out
+    # Vilões: bounty literal da HH.
+    assert "Seat 1: PlayerA (10000 in chips, €5 bounty)" in out
+    assert "Seat 3: PlayerB (50000 in chips, €25 bounty)" in out
+
+
+def test_inject_bounties_winamax_to_ps_format_hero_vision_wins():
+    """pt42c — Vision > HH (raríssimo em WN, mas regra pt41 mantida):
+    Hero usa o valor Vision em vez do HH."""
+    hh = (
+        "Seat 1: thinvalium (100000, 50€ bounty)\n"
+        "Seat 2: PlayerB (80000, 50€ bounty)\n"
+    )
+    # Vision diz thinvalium acumulou 200€ post-KO (hipotético em WN).
+    players_list = [{"name": "thinvalium", "bounty_value_usd": 200.0}]
+    out = _inject_bounties_winamax_to_ps_format(
+        hh, players_list=players_list, anon_map={"Hero": "thinvalium"},
+    )
+    # Hero ganha Vision (200 > 50).
+    assert "Seat 1: thinvalium (100000 in chips, €200 bounty)" in out
+    # Vilão usa HH literal (Vision não cobre vilões em WN).
+    assert "Seat 2: PlayerB (80000 in chips, €50 bounty)" in out
+
+
+def test_inject_bounties_winamax_to_ps_format_empty_HH_returns_input():
+    """pt42c — defensivo: HH sem bounty token (formato non-bounty ou
+    malformado) → text inalterado, sem crash."""
+    hh_vanilla = (
+        "Seat 1: PlayerA (10000)\n"            # WPN-like (sem 'in chips' sem bounty)
+        "Seat 2: PlayerB (12000 in chips)\n"   # PS-like sem bounty
+    )
+    out = _inject_bounties_winamax_to_ps_format(
+        hh_vanilla, players_list=[], anon_map={"Hero": "PlayerA"},
+    )
+    # Input devolvido tal qual (pipeline degrada gracefully).
+    assert out == hh_vanilla
+
+
+def test_convert_gg_hh_winamax_pko_invokes_bounty_injection():
+    """pt42c — Winamax PKO: HH crua convertida com Seat lines no formato
+    PS-compat (bounty inline). Hero (thinvalium) usa HH literal (sem Vision)."""
+    hh_raw = (
+        'Winamax Poker - Tournament "INTERSTELLAR" buyIn: 90€ + 10€ '
+        'level: 22 - HandId: #4699459877053923331-277-1778535900 - '
+        'Holdem no limit (1000/4000/8000) - 2026/05/11 21:45:00 UTC\n'
+        "Table: 'INTERSTELLAR(1094178268)#002' 6-max (real money) "
+        "Seat #2 is the button\n"
+        "Seat 1: yousnouf75 (163754, 194.40€ bounty)\n"
+        "Seat 2: imbagosu (615675, 532.70€ bounty)\n"
+        "Seat 3: Beu_Teu (663845, 311.97€ bounty)\n"
+        "Seat 4: thinvalium (351657, 244.20€ bounty)\n"
+        "Seat 5: blueballs67 (354758, 140€ bounty)\n"
+        "*** ANTE/BLINDS ***\n"
+        "Beu_Teu posts ante 1000\n"
+        "*** PRE-FLOP ***\n"
+        "blueballs67 raises 8000 to 16000\n"
+    )
+    hand = {
+        "raw": hh_raw,
+        "site": "Winamax",
+        "tournament_format": "PKO",
+        "player_names": {"anon_map": {"Hero": "thinvalium"}, "players_list": []},
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(hand)
+    # Hero (thinvalium) com bounty HH 244.20€ → PS-compat €244.20 bounty.
+    assert "Seat 4: thinvalium (351657 in chips, €244.20 bounty)" in out
+    # Vilão preservado com o seu valor literal.
+    assert "Seat 1: yousnouf75 (163754 in chips, €194.40 bounty)" in out
+    # Formato WN original removido.
+    assert "(354758, 140€ bounty)" not in out
+    # Resto do HH (header, ANTE/BLINDS, PRE-FLOP, action lines) intacto.
+    assert "*** PRE-FLOP ***" in out
+    assert "blueballs67 raises 8000 to 16000" in out
+
+
+def test_convert_gg_hh_winamax_vanilla_passthrough():
+    """pt42c — Winamax Vanilla (non-bounty): passthrough total, sem
+    transformações. Format `Vanilla` (não está em WINAMAX_BOUNTY_FORMATS)."""
+    hh_raw = (
+        'Winamax Poker - Tournament "NONKO TEST" buyIn: 10€ + 1€ level: 5\n'
+        "Seat 1: PlayerA (10000)\n"
+        "Seat 2: PlayerB (12000)\n"
+        "*** PRE-FLOP ***\n"
+        "PlayerA raises 200 to 300\n"
+    )
+    hand = {
+        "raw": hh_raw,
+        "site": "Winamax",
+        "tournament_format": "Vanilla",
+        "player_names": {},
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(hand)
+    assert out == hh_raw  # passthrough total
+
+
+def test_convert_gg_hh_pokerstars_passthrough_unchanged():
+    """pt42c — PokerStars passa tal qual (sem branch dedicado; HH PS já
+    está em formato nativo)."""
+    out = convert_gg_hh_to_pokerstars_compatible({
+        "raw": _HH_PS_REAL,
+        "site": "PokerStars",
+        "tournament_format": "PKO",
+        "player_names": {},
+    })
+    assert out == _HH_PS_REAL
+
+
 # ── build_sizings_overrides — end-to-end ──────────────────────────────────
 
 def test_build_sizings_overrides_GG_HJ_open_deep():
@@ -2723,6 +2998,122 @@ def test_build_queue_zip_script_generation_error_on_template_io_failure(monkeypa
     assert entry["has_script"] is False
     assert entry["script_generation_error"] is not None
     assert "FileNotFoundError" in entry["script_generation_error"]
+
+
+# ── pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — end-to-end build_queue_zip ────
+
+
+def test_build_queue_zip_wn_pko_patches_payouts_and_audits_hero():
+    """pt42c end-to-end — WN PKO: zip ganha (a) payouts.json com
+    bountyType="PKO" + progressiveFactor=0.5 (patch do helper T1); (b)
+    audit Hero com `hero_bounty_source="hh"`; (c) converted_format
+    "pokerstars_compat" no manifest."""
+    hh_raw = (
+        'Winamax Poker - Tournament "INTERSTELLAR" buyIn: 90€ + 10€ '
+        'level: 22 - HandId: #X-1-1 - Holdem no limit (1000/4000/8000) '
+        '- 2026/05/11 21:45:00 UTC\n'
+        "Table: 'INTERSTELLAR(1)#001' 6-max (real money) Seat #2 is the button\n"
+        "Seat 1: yousnouf75 (163754, 194.40€ bounty)\n"
+        "Seat 2: imbagosu (615675, 532.70€ bounty)\n"
+        "Seat 3: Beu_Teu (663845, 311.97€ bounty)\n"
+        "Seat 4: thinvalium (351657, 244.20€ bounty)\n"
+        "Seat 5: blueballs67 (354758, 140€ bounty)\n"
+        "*** ANTE/BLINDS ***\n"
+        "Beu_Teu posts ante 1000\n"
+        "*** PRE-FLOP ***\n"
+        "blueballs67 raises 8000 to 16000\n"
+        "yousnouf75 folds\nimbagosu folds\nBeu_Teu folds\nthinvalium folds\n"
+    )
+    hand = {
+        "id": 1,
+        "hand_id": "WN-TEST-PT42C-1",
+        "site": "Winamax",
+        "tournament_number": "999111",
+        "tournament_format": "PKO",
+        "raw": hh_raw,
+        "player_names": {"anon_map": {"Hero": "thinvalium"}, "players_list": []},
+    }
+    # Payout blob simula o que o lobby vision escreveu (bountyType="None").
+    payout_blob = {
+        "structures": [
+            {
+                "name": "INTERSTELLAR",
+                "chips": 1000000.0,
+                "prizes": {"1": 5000.0, "2": 3000.0},
+                "bountyType": "None",
+                "progressiveFactor": 0.0,
+            }
+        ]
+    }
+    payouts_by_key = {("Winamax", "999111"): payout_blob}
+
+    zip_bytes = build_queue_zip([hand], payouts_by_key)
+
+    with _zipfile.ZipFile(_io.BytesIO(zip_bytes)) as zf:
+        # (a) payouts.json no zip: bountyType="PKO" + progressiveFactor=0.5
+        po = _json.loads(zf.read("WN-TEST-PT42C-1/payouts.json"))
+        assert po["structures"][0]["bountyType"] == "PKO"
+        assert po["structures"][0]["progressiveFactor"] == 0.5
+        # (b) manifest: hero_bounty=244.20 (HH literal) + source="hh"
+        manifest = _json.loads(zf.read("manifest.json"))
+        included = manifest["hands_included"]
+        assert len(included) == 1
+        m = included[0]
+        assert m["hero_bounty"] == 244.20
+        assert m["hero_bounty_source"] == "hh"
+        # (c) converted_format
+        assert m["converted_format"] == "pokerstars_compat"
+    # BD não mutada — blob original ainda tem "None"+0.0
+    assert payout_blob["structures"][0]["bountyType"] == "None"
+    assert payout_blob["structures"][0]["progressiveFactor"] == 0.0
+
+
+def test_build_queue_zip_wn_vanilla_no_patch_no_audit():
+    """pt42c — WN Vanilla: zip mantém payouts.json original (sem patch
+    pt42c); manifest sem audit Hero; converted_format="passthrough"."""
+    hh_raw = (
+        'Winamax Poker - Tournament "NONKO TEST" buyIn: 10€ + 1€ level: 5\n'
+        "Table: 'T(1)#001' 6-max (real money) Seat #1 is the button\n"
+        "Seat 1: PlayerA (10000)\n"
+        "Seat 2: PlayerB (12000)\n"
+        "*** PRE-FLOP ***\n"
+        "PlayerA raises 200 to 300\nPlayerB folds\n"
+    )
+    hand = {
+        "id": 2,
+        "hand_id": "WN-TEST-VANILLA-1",
+        "site": "Winamax",
+        "tournament_number": "888222",
+        "tournament_format": "Vanilla",
+        "raw": hh_raw,
+        "player_names": {},
+    }
+    payout_blob = {
+        "structures": [
+            {"name": "X", "bountyType": "None", "progressiveFactor": 0.0}
+        ]
+    }
+    payouts_by_key = {("Winamax", "888222"): payout_blob}
+
+    zip_bytes = build_queue_zip([hand], payouts_by_key)
+    with _zipfile.ZipFile(_io.BytesIO(zip_bytes)) as zf:
+        manifest = _json.loads(zf.read("manifest.json"))
+        included = manifest.get("hands_included", [])
+        if included:
+            m = included[0]
+            # Sem audit (não passou em WINAMAX_BOUNTY_FORMATS)
+            assert m["hero_bounty"] is None
+            assert m["hero_bounty_source"] is None
+            assert m["converted_format"] == "passthrough"
+            # payouts.json no zip NÃO é patchado (Vanilla não tem patch)
+            po = _json.loads(zf.read("WN-TEST-VANILLA-1/payouts.json"))
+            assert po["structures"][0]["bountyType"] == "None"
+            assert po["structures"][0]["progressiveFactor"] == 0.0
+        else:
+            # Skipped por outro gate (ex.: no_seats_at_table). Aceitável —
+            # o pipeline pt42c não é invocado para vanilla, é o que importa.
+            skipped = manifest.get("skipped", [])
+            assert any(s.get("hand_id") == "WN-TEST-VANILLA-1" for s in skipped)
 
 
 # ── pt36 #HRC-RUN-2-ALWAYS-DISPATCH: fallback do aggressor + skip no-seats ──

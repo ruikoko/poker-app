@@ -941,6 +941,45 @@ escreve no `payouts.json.chips`.
 | C | Formato Winamax — não testado se o HRC engole HH GG convertida para formato Winamax (alternativa ao PS). |
 | D | `*** ANTE/BLINDS ***` no Winamax separa essa fase do resto. PS não tem. Confirmar qual é exigido em cada formato. |
 
+### 12.10 Pipeline WN bounty (pt42c) — conversão Winamax → PS-compat
+
+Implementado em pt42c após descoberta no smoke pt42b de que **1232 mãos
+PKO Winamax** chegavam ao HRC sem bounty (`payouts.json.bountyType="None"`,
+sem injecção na HH).
+
+**Trigger:** site=`Winamax` AND tournament_format ∈ `WINAMAX_BOUNTY_FORMATS`
+(`"pko"`, `"super ko"`, `"ko"`; Mystery KO continua excluído via
+`MYSTERY_FORMATS`).
+
+**Transformações (subset das 11 do GG — só as necessárias para WN):**
+
+| # | Transformação | Origem (WN) | Destino (PS-compat) |
+|---|---|---|---|
+| 1 | Chips nas seats | `(75308, 10€ bounty)` | `(75308 in chips, €10 bounty)` |
+| 2 | Currency position | `10€` (depois do valor) | `€10` (antes do valor) |
+| 3 | `in chips` literal | Ausente | Adicionado |
+| 4 | Hero bounty value | `(<X>€ bounty)` literal | `max(Vision, HH)` (regra pt41) |
+
+**Header WN + markers (`*** ANTE/BLINDS ***`, `*** PRE-FLOP ***`) NÃO são
+convertidos** — pipeline minimal por decisão Web/Rui. Smoke real Beelink
+em pt42d validará se HRC aceita o formato WN-converted; se rejeitar
+(rejeita header não-PS, por exemplo), escalar para conversão completa.
+
+**`payouts.json` no zip** ganha `_patch_winamax_payouts_bountytype`:
+`bountyType="None"` → `"PKO"`, `progressiveFactor=0.0` → `0.5`. A BD
+(`tournament_payouts.payouts_json`) **não é mutada** — o blob continua a
+reflectir o que o lobby vision escreveu (audit trail).
+
+**Audit Hero bounty no manifest:** `hero_bounty_source="hh"` (novo enum)
+distingue WN pipeline pt42c de GG pipeline pt41 (`"ts"` ou `"vision"`).
+
+**Source de truth para o audit:** HH crua (`hand.raw`), não o hh_text
+convertido (que já não tem o regex `(<X>€ bounty)` original).
+
+**Implementação:** `backend/app/services/queue_export.py` —
+`convert_gg_hh_to_pokerstars_compatible` ganha branch WN PKO;
+`build_queue_zip` orquestra patch + audit.
+
 ---
 
 ## Anexo A: Convenção de índices HRC scripting

@@ -6,7 +6,69 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (27 Maio 2026 — pt42b, 3-bet IP por posição)
+## Estado actual (27 Maio 2026 — pt42c, WN bounty via HH crua)
+
+Re-abertura `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` (🔴 HIGH, novo) na mesma
+sessão pt42b após smoke da mão 4 expor bounty null em WN PKO. **1232
+mãos PKO 2026 Winamax** (em 179 torneios distintos) tinham
+`payouts_json.bountyType="None"` (lobby vision não classifica nomes WN
+como bounty) e `convert_gg_hh_to_pokerstars_compatible` em passthrough
+total para non-GG.
+
+**Opção C escolhida pelo Web/Rui:** estender gerador para converter HH
+WN → PS-compat com bounty inline (sem dependency de TS Winamax). HH
+Winamax já tem `(<X>€ bounty)` literal por Seat.
+
+**Pipeline pt42c:**
+1. `_extract_winamax_seat_bounties(hh)` parsea `{nick: bounty_eur}`.
+2. `_inject_bounties_winamax_to_ps_format(text, ...)` reescreve Seat
+   lines (`(<chips>, <X>€ bounty)` → `(<chips> in chips, €<X> bounty)`).
+3. `compute_hero_bounty_from_hh` para audit Hero (source `"hh"` novo;
+   Vision ganha se > HH — regra pt41 mantida).
+4. `_patch_winamax_payouts_bountytype` sobrescreve `bountyType="PKO"` +
+   `progressiveFactor=0.5` no zip (BD não tocada).
+5. `build_queue_zip` orquestra; `converted_format="pokerstars_compat"`
+   no manifest para WN PKO.
+
+Suite **725 → 730 PASSED** (+15 testes pt42c líquidos; 0 removidos).
+Backend-only — `.exe` do watcher não tocado.
+
+**Smoke real Beelink pendente** — re-descarregar mão WN PKO + correr no
+HRC para validar formato WN-converted. Se HRC rejeitar (header / markers
+WN diferem de PS), escalar para conversão completa em pt42d.
+
+### Fixes shipped em pt42c (1 ✅)
+
+| Debt | Estado | Detalhe |
+|---|---|---|
+| **#WN-BOUNTY-NULL-IN-HRC-PIPELINE** (novo) | ✅ FIXED (diffs aplicados; smoke real Beelink pendente) | (a) Helpers `_extract_winamax_seat_bounties`, `_patch_winamax_payouts_bountytype`, `_inject_bounties_winamax_to_ps_format`, `compute_hero_bounty_from_hh`. (b) Constante `WINAMAX_BOUNTY_FORMATS = ("pko", "super ko", "ko")`. (c) Branch WN PKO em `convert_gg_hh_to_pokerstars_compatible`. (d) `build_queue_zip` aplica patch ao `payouts.json` no zip + audit Hero bounty WN com source `"hh"`. (e) `hrc_queue.py` actualiza comentário do gate Andar 1 (sem mudar SQL — WN já passava). Mystery KO WN continua excluído (gated em `MYSTERY_FORMATS` desde pt41). Suite **730 PASSED**. Refs: `backend/app/services/queue_export.py`, `backend/app/services/hrc_queue.py`, `backend/tests/test_queue_export.py`. |
+
+### Decisões internas pt42c (refinamentos defensivos)
+
+- **HH crua como source no audit** (`h.get("raw")`, não `hh_text`
+  convertido). Razão: pós-converter, o formato Seat já está em PS-compat
+  e o regex WN não matcha. Audit corre **antes** do output ser escrito.
+- **Patch do `payouts.json` antes do merge com hints**. Preserva semântica
+  do merge (hints ganham se houver chave em conflito).
+- **`compute_hero_bounty_from_hh` separado de `compute_hero_bounty`** pt41
+  (em vez de estender o helper GG). Source enum claro: `"hh"` (WN) vs
+  `"ts"` (GG). Sem refactor da função pt41.
+- **`anon_map["Hero"] → nick_real` para identificar Hero em WN** (WN não
+  anonimiza; nick real aparece literal nos Seats). Distinto do GG (onde
+  `nick == "Hero"` literal funciona após `_replace_hashes`).
+- **Pipeline degrada gracefully** quando HH sem bounty token (`hh_bounties`
+  vazio → devolve text inalterado). Defensivo para formatos não-PKO ou
+  variantes inesperadas.
+- **`progressive_factor` parâmetro com default 0.5** (Rui confirma WN
+  PKO 50% universal). Override possível por keyword se variantes
+  aparecerem no futuro.
+- **`_patch_winamax_payouts_bountytype` força PKO mesmo quando bountyType
+  era "Other"** (não só "None"). Decisão defensiva: gerador para WN PKO
+  sabe melhor que o lobby vision (override total).
+
+---
+
+## Estado anterior (27 Maio 2026 — pt42b, 3-bet IP por posição)
 
 Re-abertura `#HRC-BETTING-SCRIPT-IMPROVEMENTS` para refinar o **3-bet
 clássico IP**: a regra pt42 aplicava-se a 1 array partilhado

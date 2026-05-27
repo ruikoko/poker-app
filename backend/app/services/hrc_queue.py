@@ -141,7 +141,11 @@ def select_andar1_rows(
                )
            -- pt41 #HERO-BOUNTY-FROM-TS-DERIVATION: Mystery KO fora do /hrc
            -- (HRC não modela) + GG bounty-gated (PKO/SuperKO/KO) exige TS com
-           -- buy_in_bounty. Winamax/PS passam sempre (bounty na HH crua).
+           -- buy_in_bounty. PS passa sempre (bounty na HH crua).
+           -- pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE: Winamax tem pipeline
+           -- próprio (queue_export.convert_gg_hh_to_pokerstars_compatible
+           -- + _patch_winamax_payouts_bountytype no build_queue_zip); HH WN
+           -- já tem bounty literal por Seat. Sem gate adicional aqui.
            AND lower(COALESCE(tournament_format, '')) <> ALL(%s::text[])
            AND (
                  site <> 'GGPoker'
