@@ -223,6 +223,42 @@ pt25f-extensão). Para cada raise voluntário preflop (open / 3-bet clássico / 
 | 4-bet | 2.3 × `previous_raise_to_bb` | (sempre) |
 | 5-bet | 2.2 × `previous_raise_to_bb` | (sempre) |
 
+#### 3.4.2.1 3-bet IP por posição (pt42b — re-abertura)
+
+A regra do §3.4.2 para 3-bet clássico aplica-se à **posição que efectivamente
+3-betou na HH**. Para as **outras posições candidatas IP** (entre opener+1 e
+BU inclusive, excluindo SB/BB), o gerador também gera arrays — em variáveis
+separadas `SIZES_3BET_<POSITION>` no template — com sizing baseado na **eff
+spot-específica** entre cada candidato e o opener:
+
+- **eff spot** = `min(opener_remaining, candidate_remaining) / BB` no
+  snapshot pós-open.
+- Multiplicador por bucket (mesmas constantes da tabela acima):
+  2.3×opener / 2.7×opener / 3.0×opener.
+- ALLIN como 2ª opção se eff spot ≤ 25 BB.
+
+**Variáveis no template canónico:** `SIZES_3BET_EP / MP / HJ / CO / BU`.
+EP1/EP2 (9-handed) partilham `SIZES_3BET_EP`. Fallback `SIZES_3BET_IP` mantido
+para defensivo (posição não esperada).
+
+**CASO A vs CASO B:**
+
+- **CASO A** (posição fez 3-bet na HH): regra universal pt42 aplicada com eff
+  spot (não eff dinâmica do parser). Sizing original como 1ª opção.
+- **CASO B** (posição NÃO fez 3-bet — gera sempre): só o bucket default,
+  sem sizing original (não houve).
+
+Ordem do gerador: **CASO B** preenche todos os candidatos primeiro; **CASO A**
+sobrescreve a entrada da posição que 3-betou.
+
+**SB/BB intocados** (continuam em `SIZES_3BET_SB_VS_*` /
+`SIZES_3BET_BB_VS_*`); squeeze intocado (continua em `SIZES_3BET_SQUEEZE_*`).
+
+**Dispatch no template** (JS): `getSizings3Bets` chama
+`getSizings3BetByPositionIP(ctx, player)` no branch IP — switch por
+`positionLabelForIdx(player, n)` que consome `POSITION_LABELS_BY_N` (mirror
+de `_POSITION_LABELS_BY_N` em `queue_export.py`).
+
 #### 3.4.3 Efectiva dinâmica por acção (pt42)
 
 `effective_stack_at_action_bb = min(raiser_remaining, max(active_opponents_remaining)) / BB`,

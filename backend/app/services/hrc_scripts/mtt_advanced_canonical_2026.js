@@ -30,6 +30,16 @@ let SIZES_OPEN_BB = [4];
 
 // general 3-bet sizing in big blinds
 let SIZES_3BET_IP = [6, ALLIN];
+// pt42b — 3-bet IP por posição. Gerador override per-mão consoante a eff
+// spot-específica de cada candidato vs opener. Defaults batem
+// `SIZES_3BET_IP` legacy (6 BB para todas). Fallback `SIZES_3BET_IP` em
+// `getSizings3BetByPositionIP` caso a posição não esteja em
+// {EP, MP, HJ, CO, BU} (defensivo).
+let SIZES_3BET_EP = [6];
+let SIZES_3BET_MP = [6];
+let SIZES_3BET_HJ = [6];
+let SIZES_3BET_CO = [6];
+let SIZES_3BET_BU = [6];
 let SIZES_3BET_BB_VS_SB = [10, ALLIN];
 let SIZES_3BET_BB_VS_OTHER = [8, ALLIN];
 let SIZES_3BET_SB_VS_BB = [11, ALLIN];
@@ -74,6 +84,21 @@ let ALLOWED_FLATS_PER_RAISE = {
 
 let ALLOW_COLD_CALLS = true;
 let ALLOW_FLATS_CLOSING_ACTION = true;
+
+
+// pt42b — Mirror de `_POSITION_LABELS_BY_N` (backend/app/services/queue_export.py).
+// Idx 0 = first-to-act preflop = UTG (N>=3) ou BU/SB (HU). Mantém em sync
+// se a tabela Python mudar — não há single-source-of-truth cross-language.
+const POSITION_LABELS_BY_N = {
+	2: ["BU/SB", "BB"],
+	3: ["BU", "SB", "BB"],
+	4: ["UTG", "BU", "SB", "BB"],
+	5: ["UTG", "HJ", "BU", "SB", "BB"],
+	6: ["UTG", "HJ", "CO", "BU", "SB", "BB"],
+	7: ["UTG", "EP", "MP", "CO", "BU", "SB", "BB"],
+	8: ["UTG", "EP", "MP", "HJ", "CO", "BU", "SB", "BB"],
+	9: ["UTG", "EP1", "EP2", "MP", "HJ", "CO", "BU", "SB", "BB"]
+};
 
 
 // =====================================================================
@@ -194,7 +219,39 @@ function getSizings3Bets(ctx) {
 		return SIZES_3BET_BB_VS_OTHER.map(s => ctx.sizingBigBlinds(s));
 	}
 
-	return SIZES_3BET_IP.map(s => ctx.sizingBigBlinds(s));
+	// pt42b — IP por posição (não SB nem BB; sem callers = não squeeze).
+	return getSizings3BetByPositionIP(ctx, player).map(s => ctx.sizingBigBlinds(s));
+}
+
+// pt42b — Dispatch de 3-bet clássico IP por posição. EP1/EP2 (9-handed)
+// partilham SIZES_3BET_EP. Fallback `SIZES_3BET_IP` para defensivo (posição
+// não esperada por má configuração de N ou bug do parser).
+function getSizings3BetByPositionIP(ctx, player) {
+	let n = ctx.getNumberOfPlayers();
+	let posName = positionLabelForIdx(player, n);
+
+	switch (posName) {
+		case "EP":
+		case "EP1":
+		case "EP2":
+			return SIZES_3BET_EP;
+		case "MP":
+			return SIZES_3BET_MP;
+		case "HJ":
+			return SIZES_3BET_HJ;
+		case "CO":
+			return SIZES_3BET_CO;
+		case "BU":
+			return SIZES_3BET_BU;
+		default:
+			return SIZES_3BET_IP;  // fallback defensivo
+	}
+}
+
+function positionLabelForIdx(idx, n) {
+	let labels = POSITION_LABELS_BY_N[n];
+	if (labels == null) return null;
+	return labels[idx] || null;
 }
 
 function getSizings4Bets(ctx) {

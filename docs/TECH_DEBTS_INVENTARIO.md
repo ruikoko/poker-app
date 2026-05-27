@@ -6,7 +6,57 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (26 Maio 2026 — pt42, regra universal de sizings + cortar turn/river)
+## Estado actual (27 Maio 2026 — pt42b, 3-bet IP por posição)
+
+Re-abertura `#HRC-BETTING-SCRIPT-IMPROVEMENTS` para refinar o **3-bet
+clássico IP**: a regra pt42 aplicava-se a 1 array partilhado
+(`SIZES_3BET_IP`); pt42b separa em **5 variáveis por posição**
+(`SIZES_3BET_EP/MP/HJ/CO/BU`), cada uma com sizing calibrado pela eff
+spot-específica entre essa posição e o opener.
+
+**CASO B** (todos os candidatos) → **CASO A** (sobrescreve a posição que
+efectivamente 3-betou). Decisão Web #3: CASO B gera mesmo sem 3-bet real,
+para o HRC simular vilões com sizings calibrados em vez do default
+genérico.
+
+Suite **705 → 713 PASSED** (+20 helpers unit, +6 e2e, +2 apply_overrides;
+0 removidos). Backend-only — `.exe` do watcher não tocado.
+
+### Fixes shipped em pt42b (1 ✅)
+
+| Debt | Estado | Detalhe |
+|---|---|---|
+| **#HRC-BETTING-SCRIPT-IMPROVEMENTS** (re-aberto) | ✅ FIXED (diffs aplicados; commit/push pt42c) | (a) 4 helpers novos no gerador: `_canonical_3bet_position`, `_candidate_3bet_positions_ip`, `_eff_spot_specific_bb`, `_default_3bet_for_candidate`. (b) `_bucket_3bet` devolve `SIZES_3BET_<POSITION>` para clássico IP. (c) `build_sizings_overrides` chama `_apply_caso_b_3bet_overrides` antes do loop + `_apply_caso_a_3bet_ip` no branch bc=2 IP por posição. (d) Template JS: 5 variáveis novas + `POSITION_LABELS_BY_N` const + `positionLabelForIdx` + `getSizings3BetByPositionIP` switch. Squeeze + SB/BB + opens intocados. Suite **713 PASSED**. Refs: `backend/app/services/hrc_script_gen.py`, `backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js`, `backend/tests/test_queue_export.py`. |
+
+### Tech debt novo aberto em pt42b (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#POSITION-LABELS-PYTHON-JS-DRIFT** | 🟢 LOW | `POSITION_LABELS_BY_N` duplicado em Python (`backend/app/services/queue_export.py:140`) e JS (`backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js` const). Sem single-source-of-truth cross-language. Doc no comment do template alerta para manter em sync. Fix futuro: injectar via gerador como string JS (mais complexo; sem ganho — a tabela Python é estável desde pt25d). Não-bloqueante. |
+
+### Decisões internas pt42b (refinamentos defensivos)
+
+- **`_eff_spot_specific_bb` recebe `remaining_chips`** (não nicks + dicts).
+  API mais clean; T3 calcula remaining no caller via
+  `_init_pot_from_blinds_antes` + opener override.
+- **`_canonical_3bet_position` rejeita SB/BB/UTG** (devolve None). Caller
+  filtra. BTN aceito como alias de BU (defensivo, alguns sites usam BTN
+  no `position`).
+- **Dedup EP1/EP2 no helper** (`_candidate_3bet_positions_ip` devolve
+  `[EP, MP, ...]`, não `[EP, EP, MP, ...]`). 9-handed raríssimo mas
+  contemplado.
+- **CASO A reusa `_array_for_raise`** via shallow copy do action com
+  `effective_stack_at_action_bb` substituído pela eff spot. Sem
+  duplicação de lógica.
+- **2 parses HH por mão** (1 no CASO B helper, 1 no CASO A helper se
+  3-bet IP real). Aceitável (HH pequena, ~2ms por parse).
+- **Open-jam edge case validado**: `opener_to_bb` é o jam-to-bb (ex.: 15
+  BB se UTG jam de 1500 chips em level 100), não 2 BB. Bucket low gera
+  `2.3 × 15 = 34.5 BB` no CASO B. Testes asseram isso explicitamente.
+
+---
+
+## Estado anterior (26 Maio 2026 — pt42, regra universal de sizings + cortar turn/river)
 
 Sessão de **gerador `script.js`**: fecha `#HRC-BETTING-SCRIPT-IMPROVEMENTS` (HIGH) com 2 mudanças
 combinadas (Pedidos 1 + 2): (1) variante "pré-flop + flop only" no template canónico (turn/river

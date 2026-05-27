@@ -691,6 +691,46 @@ smoke real pt43 mostrar navegação errada.
 Detalhe completo em `docs/JOURNAL_2026-05-26-pt42.md`, `docs/TECH_DEBTS_INVENTARIO.md`
 (secção pt42), `docs/HRC_ANATOMIA_OPERACIONAL.md` §3.4.
 
-Última sessão fechada: **pt42** (26 Maio 2026 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ diffs em buffer; cortar turn/river no template + regra universal de sizings + efectiva dinâmica por raise; tabela pt25f abandonada; suite **666 → 685 PASSED**). Detalhes em `docs/JOURNAL_2026-05-26-pt42.md`.
+## pt42b — Re-abertura `#HRC-BETTING-SCRIPT-IMPROVEMENTS` (27 Maio 2026)
 
-Próxima sessão (**pt43**), por ordem: 1) **Smoke real Beelink pt42** (4 cenários Q8: GG PKO cadeia; PS BU jam; WN squeeze BB; WPN HJ open) + validação visual do `script.js` + comparação tree size antes/depois → **pré-requisito de commit/push pt42**; 2) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 3) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 4) `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW, só se smoke mostrar regressão); 5) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED, se ainda relevante); 6) importar TS GG faltosos. Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.
+**Backend-only; `.exe` do watcher não tocado.** Re-abertura do mesmo tech
+debt fechado em pt42, com pedido novo do Rui: cada posição candidata a
+3-bet deve ter o seu próprio sizing baseado na efectiva spot-específica
+entre essa posição e o opener (em vez do array único `SIZES_3BET_IP`).
+Suite **705 → 713 PASSED** (+28 testes pt42b líquidos; 0 removidos).
+
+**Regra:** para 3-bet clássico IP (exclui SB/BB/squeeze):
+
+- **CASO A** (posição fez 3-bet na HH): 1ª = sizing original; 2ª = ALLIN
+  se eff spot ≤ 25.
+- **CASO B** (posição NÃO fez 3-bet — gera sempre): bucket por eff spot
+  (2.3 / 2.7 / 3.0 × opener_to_bb consoante eff <26 / [26,35) / ≥35);
+  + ALLIN se eff ≤ 25.
+
+**Eff spot-específica** = `min(opener_remaining, candidate_remaining) / BB`
+no snapshot pós-open (calculada no Python). Cada candidato (EP/MP/HJ/CO/BU
+em IP) tem o seu array. CASO B gera primeiro; CASO A sobrescreve a entrada
+do 3-bettor real.
+
+**Template canónico** ganha 5 variáveis (`SIZES_3BET_EP/MP/HJ/CO/BU`) +
+const `POSITION_LABELS_BY_N` (mirror Python) + helpers
+`positionLabelForIdx` + `getSizings3BetByPositionIP`. SB/BB/Squeeze/Opens
+intocados.
+
+**Implementação T1-T6:** helpers no gerador + refactor `_bucket_3bet` +
+refactor `build_sizings_overrides` (CASO B antes do loop, CASO A no loop) +
+template JS dispatch por posição + 8 testes novos + 28 modificações em
+testes existentes. Edge case validado: open-jam → `opener_to_bb` é o
+jam-to-bb (não 2 BB), bucket low devolve `2.3 × jam_bb`.
+
+**Tech debt novo (LOW):** `#POSITION-LABELS-PYTHON-JS-DRIFT` — tabela de
+posições duplicada Python/JS sem single-source-of-truth cross-language.
+Doc no comment do template alerta para manter em sync.
+
+Detalhe completo em `docs/JOURNAL_2026-05-27-pt42b.md`,
+`docs/TECH_DEBTS_INVENTARIO.md` (secção pt42b),
+`docs/HRC_ANATOMIA_OPERACIONAL.md` §3.4.2.1.
+
+Última sessão fechada: **pt42b** (27 Maio 2026 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ re-aberto e fechado; 3-bet IP por posição com CASO A/B; suite **705 → 713 PASSED**; 28 testes pt42b novos; backend-only, `.exe` watcher não tocado). Detalhes em `docs/JOURNAL_2026-05-27-pt42b.md`.
+
+Próxima sessão (**pt42c**), por ordem: 1) **Commit + push pt42 + pt42b** (após validação Web final); 2) **Smoke real Beelink pt42 + pt42b** (cenários CASO A + CASO B; comparar tree size; validar `SIZES_3BET_<POS>` no script gerado); 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 5) `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW, só se smoke mostrar regressão); 6) `#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, novo pt42b, não-bloqueante); 7) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED, se ainda relevante); 8) importar TS GG faltosos. Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.

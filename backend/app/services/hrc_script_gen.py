@@ -461,7 +461,14 @@ def _bucket_open(action: dict) -> Optional[str]:
 
 
 def _bucket_3bet(action: dict, opener_position: Optional[str]) -> Optional[str]:
-    """Devolve nome do SIZES_3BET_* / SIZES_3BET_SQUEEZE_* aplicável."""
+    """Devolve nome do SIZES_3BET_* / SIZES_3BET_SQUEEZE_* aplicável.
+
+    pt42b — 3-bet clássico não-SB/BB: devolve `SIZES_3BET_<POSITION>`
+    (variável diferenciada por posição IP do 3-bettor), em vez do legacy
+    `SIZES_3BET_IP` único. EP1/EP2 colapsam para `SIZES_3BET_EP` via
+    `_canonical_3bet_position`. Fallback `SIZES_3BET_IP` quando a
+    posição não está em `_CANONICAL_3BET_POSITIONS` (defensivo).
+    """
     if action["bet_count"] != 2:
         return None
     threebetter_pos = (action.get("position") or "").upper()
@@ -481,7 +488,11 @@ def _bucket_3bet(action: dict, opener_position: Optional[str]) -> Optional[str]:
         if opener == "SB":
             return "SIZES_3BET_BB_VS_SB"
         return "SIZES_3BET_BB_VS_OTHER"
-    return "SIZES_3BET_IP"
+    # pt42b — 3-bet clássico IP: dispatch por posição canónica.
+    canon = _canonical_3bet_position(threebetter_pos)
+    if canon:
+        return f"SIZES_3BET_{canon}"
+    return "SIZES_3BET_IP"  # fallback defensivo (posição não esperada)
 
 
 def _bucket_4bet5bet(action: dict, n_seated: int) -> Optional[str]:
@@ -563,6 +574,239 @@ def _compute_default_for_5bet(action: dict) -> Optional[float]:
     if prev is None:
         return None
     return round(prev * _NON_ALL_IN_DEFAULT_5BET_MULT, 2)
+
+
+# ── pt42b — Helpers para 3-bet IP por posição ────────────────────────────
+# Substitui a regra única `SIZES_3BET_IP` por arrays diferenciados por
+# posição candidata IP. Aplica-se SÓ a 3-bet clássico (não squeeze, não
+# SB/BB). Cada posição candidata recebe um sizing calibrado pela sua eff
+# spot-específica vs o opener.
+
+# Posições IP candidatas a 3-bet, mapeadas para variáveis no template
+# canónico. EP1/EP2 (9-handed) partilham SIZES_3BET_EP (decisão pt42b).
+_CANONICAL_3BET_POSITIONS = ("EP", "MP", "HJ", "CO", "BU")
+
+
+def _canonical_3bet_position(position: Optional[str]) -> Optional[str]:
+    """Mapeia label de posição → nome canónico usado em SIZES_3BET_<POS>.
+
+    EP1/EP2 → EP (partilham; decisão pt42b).
+    BTN → BU (alias tolerado, mesmo padrão de `_position_bucket_open`).
+    SB / BB / UTG / outros → None (não cobertos pela proposta B; SB/BB
+    têm os seus arrays SIZES_3BET_SB_VS_* / SIZES_3BET_BB_VS_*).
+    """
+    if not position:
+        return None
+    p = position.strip().upper()
+    if p in ("EP1", "EP2"):
+        return "EP"
+    if p == "BTN":
+        return "BU"
+    if p in _CANONICAL_3BET_POSITIONS:
+        return p
+    return None
+
+
+def _candidate_3bet_positions_ip(
+    seats: list, opener_position: Optional[str],
+) -> list:
+    """Posições candidatas a 3-bet IP, na ordem preflop.
+
+    Exclui o próprio opener, SB e BB (estes têm SIZES_3BET_SB_VS_* /
+    SIZES_3BET_BB_VS_*). Aplica `_canonical_3bet_position` + dedup.
+
+    Devolve [] quando:
+      - opener_position não está em `_POSITION_LABELS_BY_N[N]`;
+      - N inválido (não em 2..9);
+      - Não há posições entre opener+1 e BU inclusive (ex.: opener=BU em
+        6-handed, opener=SB, HU).
+    """
+    from app.services.queue_export import _POSITION_LABELS_BY_N  # avoid cycle
+
+    if not opener_position or not seats:
+        return []
+    n = len(seats)
+    labels = _POSITION_LABELS_BY_N.get(n)
+    if not labels:
+        return []
+
+    opener_upper = opener_position.strip().upper()
+    if opener_upper == "BTN":
+        opener_upper = "BU"
+    try:
+        opener_idx = labels.index(opener_upper)
+    except ValueError:
+        return []
+
+    # Candidates = labels[opener_idx+1 : N-2] (exclui SB nos últimos 2 slots).
+    raw = labels[opener_idx + 1 : n - 2]
+
+    seen: list = []
+    for p in raw:
+        canon = _canonical_3bet_position(p)
+        if canon and canon not in seen:
+            seen.append(canon)
+    return seen
+
+
+def _eff_spot_specific_bb(
+    opener_remaining_chips: Optional[float],
+    candidate_remaining_chips: Optional[float],
+    level_bb: int,
+) -> Optional[float]:
+    """Efectiva spot-específica entre opener e candidato em BB.
+
+    `remaining_chips` = stack inicial − contribuições no pot (blinds, antes,
+    open). Caller computa antes de chamar. Snapshot pós-open: o opener tem
+    `open_to_bb × BB` no pot; o candidato tem só blinds/antes se for SB/BB
+    (raro; SB/BB excluídos), 0 ou ante se for posição IP.
+
+    Devolve `min(opener_remaining, candidate_remaining) / BB`, rounded 2
+    casas. None se input inválido (qualquer None ou BB <= 0).
+    """
+    if (opener_remaining_chips is None
+            or candidate_remaining_chips is None
+            or level_bb is None or level_bb <= 0):
+        return None
+    eff_chips = min(opener_remaining_chips, candidate_remaining_chips)
+    return round(eff_chips / float(level_bb), 2)
+
+
+def _default_3bet_for_candidate(
+    opener_to_bb: Optional[float], eff_bb: Optional[float],
+) -> Optional[float]:
+    """Sizing default por bucket eff (idêntico ao bucket pt42 actual em
+    `_compute_default_for_classic_3bet`, mas usado para TODAS as posições
+    candidatas, não só para a posição que efectivamente 3-betou).
+
+    - eff < 26  → 2.3 × opener_to_bb
+    - 26 ≤ eff < 35 → 2.7 × opener_to_bb
+    - eff ≥ 35 → 3.0 × opener_to_bb
+
+    None se algum input None.
+    """
+    if opener_to_bb is None or eff_bb is None:
+        return None
+    if eff_bb >= 35:
+        mult = _NON_ALL_IN_DEFAULT_3BET_MULT_HIGH
+    elif eff_bb >= 26:
+        mult = _NON_ALL_IN_DEFAULT_3BET_MULT_MID
+    else:
+        mult = _NON_ALL_IN_DEFAULT_3BET_MULT_LOW
+    return round(opener_to_bb * mult, 2)
+
+
+def _apply_caso_b_3bet_overrides(
+    opener_action: dict, seats: list, hh_text: str,
+    level_sb: int, level_bb: int, overrides: dict,
+) -> None:
+    """pt42b — CASO B: gera SIZES_3BET_<POS> para cada posição candidata
+    IP (excluindo opener + SB + BB), mesmo quando ninguém 3-betou na HH.
+    Mutates `overrides` in place.
+
+    Decisão pt42b #3 (Web): geramos arrays mesmo sem 3-bet real, para o
+    HRC simular as respostas dos vilões com sizings calibrados por eff
+    spot-específica em vez do default genérico do template.
+
+    No-op silencioso se opener inválido ou sem candidatos.
+    """
+    opener_position = opener_action.get("position")
+    opener_nick = opener_action.get("nick")
+    opener_to_bb = opener_action.get("to_amount_bb")
+    if not opener_position or not opener_nick or opener_to_bb is None:
+        return
+
+    candidates = _candidate_3bet_positions_ip(seats, opener_position)
+    if not candidates:
+        return
+
+    initial_stacks = _parse_seat_stacks(hh_text)
+    blinds_contribs, _, _ = _init_pot_from_blinds_antes(
+        hh_text, seats, level_sb, level_bb,
+    )
+    contribs_post_open = dict(blinds_contribs)
+    # Opener tem `to_amount_chips` total no pot pós-open.
+    contribs_post_open[opener_nick] = opener_action.get("to_amount_chips", 0.0)
+
+    # Map canonical position → nick (1º match preserva ordem preflop;
+    # EP1 ganha sobre EP2 no caso 9-handed via dedup do candidate helper).
+    nick_by_position: dict = {}
+    for s in seats:
+        canon = _canonical_3bet_position(s.get("position"))
+        if canon and canon not in nick_by_position:
+            nick_by_position[canon] = s.get("nick")
+
+    opener_remaining = (
+        initial_stacks.get(opener_nick, 0.0)
+        - contribs_post_open.get(opener_nick, 0.0)
+    )
+
+    for candidate_pos in candidates:
+        candidate_nick = nick_by_position.get(candidate_pos)
+        if not candidate_nick:
+            continue
+        candidate_initial = initial_stacks.get(candidate_nick)
+        if candidate_initial is None:
+            continue
+        candidate_remaining = (
+            candidate_initial - contribs_post_open.get(candidate_nick, 0.0)
+        )
+        eff = _eff_spot_specific_bb(
+            opener_remaining, candidate_remaining, level_bb,
+        )
+        default = _default_3bet_for_candidate(opener_to_bb, eff)
+        if default is None:
+            continue
+        arr: list = [default]
+        if eff is not None and eff <= _OPEN_ALLIN_THRESHOLD_BB:
+            arr.append("ALLIN")
+        overrides[f"SIZES_3BET_{candidate_pos}"] = arr
+
+
+def _apply_caso_a_3bet_ip(
+    a: dict, opener_action: dict, seats: list,
+    hh_text: str, level_sb: int, level_bb: int,
+) -> list:
+    """pt42b — CASO A: array para SIZES_3BET_<POS> da posição que 3-betou.
+
+    Substitui a eff dinâmica do parser (`effective_stack_at_action_bb`)
+    pela eff spot-específica entre 3-bettor e opener (snapshot pós-open),
+    e reutiliza `_array_for_raise` para a regra universal pt42.
+
+    Diferença vs pt42 actual: spec do Rui na re-abertura pt42b pede eff
+    spot-específica para a 2ª opção ALLIN (não eff dinâmica do parser).
+    Em preflop estas duas eff são próximas (~iguais excepto se houve
+    interações pré-3-bet que mudem stacks significativamente — raro).
+    """
+    initial_stacks = _parse_seat_stacks(hh_text)
+    blinds_contribs, _, _ = _init_pot_from_blinds_antes(
+        hh_text, seats, level_sb, level_bb,
+    )
+    contribs = dict(blinds_contribs)
+    opener_nick = opener_action.get("nick")
+    contribs[opener_nick] = opener_action.get("to_amount_chips", 0.0)
+
+    threebettor_nick = a.get("nick")
+    opener_remaining = (
+        initial_stacks.get(opener_nick, 0.0)
+        - contribs.get(opener_nick, 0.0)
+    )
+    threebettor_remaining = (
+        initial_stacks.get(threebettor_nick, 0.0)
+        - contribs.get(threebettor_nick, 0.0)
+    )
+    eff_spot = _eff_spot_specific_bb(
+        opener_remaining, threebettor_remaining, level_bb,
+    )
+
+    action_with_spot_eff = {**a, "effective_stack_at_action_bb": eff_spot}
+    default = _default_3bet_for_candidate(
+        opener_action.get("to_amount_bb"), eff_spot,
+    )
+    return _array_for_raise(action_with_spot_eff, default)
+
+
+# ── Helpers de array (compositores) ─────────────────────────────────────
 
 
 def _array_for_raise(
@@ -653,6 +897,18 @@ def build_sizings_overrides(
 
     overrides: dict = {}
     actions = _parse_preflop_actions(hh_text, seats, level_sb, level_bb)
+    if not actions:
+        return overrides
+
+    # pt42b — opener é referência para CASO B (todos os candidatos IP) e
+    # CASO A (3-bettor real, sobrescreve CASO B). No-op se HH não tem
+    # opener (walk-to-BB, limp pot).
+    opener_action = next((a for a in actions if a["bet_count"] == 1), None)
+    if opener_action:
+        _apply_caso_b_3bet_overrides(
+            opener_action, seats, hh_text, level_sb, level_bb, overrides,
+        )
+    opener_position = opener_action.get("position") if opener_action else None
 
     for a in actions:
         bc = a["bet_count"]
@@ -665,17 +921,29 @@ def build_sizings_overrides(
             continue
 
         if bc == 2:
-            opener_position = (
-                actions[0].get("position") if actions and actions[0].get("bet_count") == 1
-                else None
-            )
             var = _bucket_3bet(a, opener_position)
-            if var and var not in overrides:
-                if var.startswith("SIZES_3BET_SQUEEZE_"):
+            if not var:
+                continue
+            if var.startswith("SIZES_3BET_SQUEEZE_"):
+                # Squeeze — lógica pt42 actual (fora do scope pt42b).
+                if var not in overrides:
                     default = _compute_default_for_squeeze(a)
-                else:
+                    overrides[var] = _array_for_raise(a, default)
+            elif var in (
+                "SIZES_3BET_SB_VS_BB", "SIZES_3BET_SB_VS_OTHER",
+                "SIZES_3BET_BB_VS_SB", "SIZES_3BET_BB_VS_OTHER",
+                "SIZES_3BET_IP",  # fallback defensivo (posição não esperada)
+            ):
+                # SB/BB ou fallback IP genérico — lógica pt42 actual.
+                if var not in overrides:
                     default = _compute_default_for_classic_3bet(a)
-                overrides[var] = _array_for_raise(a, default)
+                    overrides[var] = _array_for_raise(a, default)
+            else:
+                # pt42b — IP por posição (CASO A: sobrescreve CASO B sempre).
+                if opener_action:
+                    overrides[var] = _apply_caso_a_3bet_ip(
+                        a, opener_action, seats, hh_text, level_sb, level_bb,
+                    )
             continue
 
         if bc in (3, 4):

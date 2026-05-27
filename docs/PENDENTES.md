@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 26 Maio 2026 (fim da pt42 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ HIGH, diffs em buffer; suite 666→685 PASSED; smoke real Beelink + commits para pt43; novo `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` LOW).
+**Última actualização:** 27 Maio 2026 (fim da pt42b — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ re-aberto e fechado; 3-bet IP por posição com CASO A/B; suite 705→713 PASSED; 28 testes pt42b novos; novo `#POSITION-LABELS-PYTHON-JS-DRIFT` LOW; commit/push + smoke real Beelink para pt42c).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,30 +12,37 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco pt43 (por ordem):**
-> 1. **Smoke real Beelink pt42** — 4 cenários da Q8 (GG PKO 8-handed cadeia open+3bet+4bet;
->    PS BU jam eff ≤ 25; WN squeeze BB; WPN HJ open deep). Comparar tree size antes/depois.
->    Validar que `script.js` chega com `POSTFLOP_FORCE_CHECKDOWN_AFTER` em FLOP × 8 e que
->    os arrays SIZES_* têm o shape novo (1ª opção = original ou ALLIN). **Pré-requisito
->    para commit/push pt42.**
-> 2. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates` sem paginação
->    explícita (discord.py `limit=100`); janelas largas não puxam mensagens antigas.
-> 3. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do /hrc na pt41;
->    suporte pré/pós-ITM + import dos TS Mystery (~1.353 mãos à espera).
-> 4. **`#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW, novo pt42)** — só elevar se o
->    smoke real pt43 mostrar `target_node_offset` errado (1+ linhas a mais quando alguma
->    posição precedente ao raiser não fez raise voluntária). Não-bloqueante.
-> 5. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** — se ainda
->    relevante (não-bloqueante).
-> 6. **Importar TS GG faltosos** das edições `Daily Hyper $80` de 05-09 (e outras com
->    `tm_not_found`) — workflow normal, não-bloqueante.
+> **Foco pt42c (por ordem):**
+> 1. **Commit + push pt42 + pt42b.** Diffs em buffer (T1-T6 aplicados, suite
+>    713 PASSED). Aguardar validação Web final dos 4 docs.
+> 2. **Smoke real Beelink pt42 + pt42b** — mãos da BD que exercitem CASO A
+>    + CASO B (3-bet IP por posição) + variante pré-flop + flop only:
+>    - GG cadeia open + 3-bet IP real → validar `SIZES_3BET_<POS>` do
+>      3-bettor (CASO A) + outros candidatos (CASO B).
+>    - 6+ handed open só → validar `SIZES_3BET_<POS>` por candidato (só
+>      CASO B).
+>    - Open-jam → confirmar `opener_to_bb` é o jam-to-bb (não 2 BB).
+>    - Comparar tree size antes/depois (esperado: redução por
+>      `POSTFLOP_FORCE_CHECKDOWN_AFTER`).
+> 3. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates` sem
+>    paginação explícita.
+> 4. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do /hrc
+>    em pt41; suporte pré/pós-ITM + import dos TS Mystery.
+> 5. **`#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW)** — só elevar
+>    se smoke real pt42c mostrar drift.
+> 6. **`#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, novo pt42b)** — tabela
+>    duplicada Python/JS. Não-bloqueante.
+> 7. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** —
+>    se ainda relevante.
+> 8. **Importar TS GG faltosos** das edições `Daily Hyper $80`.
 >
-> ✅ **Guarda mantida:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler real-time do
-> `#lobbys` activo com o anchor `prestart`.
-> **Fechados pt42:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (diffs em buffer; cortar
-> turn/river + regra universal de sizings + efectiva dinâmica por raise; tabela pt25f
-> abandonada). Suite 666→685 PASSED. 35 testes novos. **Pendente:** commit/push após
-> validação Web + smoke real Beelink.
+> ✅ **Guarda mantida:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler
+> real-time do `#lobbys` activo com o anchor `prestart`.
+> **Fechados pt42b:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (re-aberto e
+> fechado; 3-bet IP por posição com CASO A/B; suite 705→713 PASSED;
+> 28 testes pt42b novos). **Pendente:** commit/push + smoke real Beelink.
+> **Fechados pt42:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (1ª parte:
+> cortar turn/river + regra universal de sizings + efectiva dinâmica).
 > **Fechados pt41:** `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ (`a942ac7`);
 > `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ + `#RESOLVER-TIER12-WINDOW-NO-START` ✅ (`6409b19`).
 > **Fechados antes:** `#HRC-PER-HAND-DOWNLOAD` ✅ (`dfc13a5`, pt40);
