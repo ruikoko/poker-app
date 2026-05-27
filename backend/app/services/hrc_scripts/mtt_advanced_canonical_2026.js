@@ -87,11 +87,19 @@ let POSTFLOP_ADD_ALLIN_SPR = 5;
 let POSTFLOP_ALLOW_DONK = false;
 let POSTFLOP_ALLOW_DONK_PREV_AGGRESSION = true;
 
+// pt42 — variante "pré-flop + flop only". Forçar checkdown após FLOP para
+// todos os live counts (2..9): turn e river ficam sem betting modelado, só
+// check. Reduz substancialmente o tamanho da árvore HRC para mesas de
+// estudo onde só interessam decisões pré-flop e flop.
 let POSTFLOP_FORCE_CHECKDOWN_AFTER = {
-	2: RIVER,
-	3: RIVER,
-	4: TURN,
-	5: FLOP
+	2: FLOP,
+	3: FLOP,
+	4: FLOP,
+	5: FLOP,
+	6: FLOP,
+	7: FLOP,
+	8: FLOP,
+	9: FLOP
 }
 
 

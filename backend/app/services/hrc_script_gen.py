@@ -37,33 +37,34 @@ _HRC_TEMPLATE_PATH = os.path.join(
     "mtt_advanced_canonical_2026.js",
 )
 
-# ≤ → ALLIN fica como 2ª entrada nos SIZES_OPEN_*; > → só size real.
-# Decisão product (Maio 2026): em stacks profundas o jam-only-or-open
-# é ruído na árvore HRC.
+# pt42 — Regra universal de sizings (substitui as duas regras anteriores:
+# (a) "ALLIN só ≤25 BB nos opens" pré-pt25f; (b) tabela de multiplicadores
+# do 3-bet clássico pt25f).
+#
+# 1ª opção do array de sizings = sizing original da HH (ou "ALLIN" se a
+# acção foi all-in). 2ª opção:
+#   - Se 1ª não é ALLIN AND `effective_stack_at_action_bb <= 25` → "ALLIN".
+#   - Se 1ª é ALLIN AND condições do tipo de aposta satisfeitas → non-all-in
+#     default per tipo (ver _compute_default_*).
+#
+# Threshold do ALLIN como 2ª opção em raises non-all-in.
 _OPEN_ALLIN_THRESHOLD_BB = 25
 
-
-# ── Regra do multiplicador para 3-bets clássicos ──────────────────────
-# Decisão product (Maio 2026, extensão pós-9b6e839): para os 5 buckets
-# de 3-bet clássico, o sizing real da HH é ignorado. Em vez disso,
-# aplica-se um multiplicador ao default do template em função da stack
-# efectiva. Squeezes mantêm sizing real.
+# pt42 — Multiplicadores do non-all-in default por tipo de aposta. Só se
+# aplicam quando o sizing original foi ALLIN (caso jam-or-fold com
+# alternativa não-jam).
 #
-# Convenção dos limiares: lower bound inclusivo, upper bound exclusivo
-# (`eff_bb >= threshold` em cascata). Isso resolve as duas perguntas de
-# fronteira:
-#   - eff_bb == 25  → cai em [25,30), multiplicador ×0.80
-#   - eff_bb == 18  → cai em [18,25), multiplicador ×0.70
-# Justificação: uma cadeia única `eff_bb >= 35/30/25/18` sem casos
-# especiais, lê do mais profundo para o mais raso, e cada tier é
-# mutuamente exclusivo sem ambiguidade no ponto-fronteira.
-_CLASSIC_3BET_DEFAULTS = {
-    "SIZES_3BET_IP": 6,
-    "SIZES_3BET_BB_VS_SB": 10,
-    "SIZES_3BET_BB_VS_OTHER": 8,
-    "SIZES_3BET_SB_VS_BB": 11,
-    "SIZES_3BET_SB_VS_OTHER": 8,
-}
+# 4-bet / 5-bet / squeeze são fixos; 3-bet clássico varia por efectiva
+# (lower inclusivo, upper exclusivo).
+_NON_ALL_IN_DEFAULT_OPEN_BB = 2.0          # 2 BB (só se eff > 8 BB e não-blind)
+_NON_ALL_IN_OPEN_MIN_EFF_BB = 8.0
+_NON_ALL_IN_DEFAULT_4BET_MULT = 2.3        # 2.3 × 3-bet anterior
+_NON_ALL_IN_DEFAULT_5BET_MULT = 2.2        # 2.2 × 4-bet anterior
+_NON_ALL_IN_DEFAULT_SQUEEZE_MULT = 3.0     # 3 × open original
+# 3-bet clássico — multiplicador sobre opener_to_bb por bucket de efectiva.
+_NON_ALL_IN_DEFAULT_3BET_MULT_HIGH = 3.0   # eff >= 35
+_NON_ALL_IN_DEFAULT_3BET_MULT_MID = 2.7    # 26 <= eff < 35
+_NON_ALL_IN_DEFAULT_3BET_MULT_LOW = 2.3    # eff < 26 (inclui 0-25)
 
 
 # ── Regex parsing ───────────────────────────────────────────────────────
@@ -257,12 +258,25 @@ def _parse_preflop_actions(
                                     #   (preenchido só para bet_count >= 2)
         'opener_idx': int|None,     # hrc_idx do primeiro raiser (bet_count=1)
         'previous_raiser_idx': int|None,  # idx do last raiser (bet_count-1)
+        # pt42 — campos novos para a regra universal de sizings:
+        'previous_raise_to_bb': float|None,   # to_amount_bb da raise anterior;
+                                              # None para opens (bet_count=1)
+        'opener_to_bb': float|None,           # to_amount_bb do open original;
+                                              # None para opens (auto-ref)
+        'is_all_in': bool,          # heurística 95%: raiser commits ~all do
+                                    # stack inicial (reutiliza threshold de
+                                    # hrc_node_offset._ALL_IN_EFFECTIVE_THRESHOLD)
+        'effective_stack_at_action_bb': float|None,
+            # min(raiser_remaining, max(active_opponents_remaining)) / BB;
+            # recalculada por raise (dinâmica). None se faltar info de stacks.
       }
 
     Não-raises (folds, calls, checks, bets) não geram entry mas contribuem
-    para pot tracking + callers_before.
+    para pot tracking + callers_before. Folds removem o nick de active_players
+    (usado em effective_stack_at_action_bb).
     """
     from app.services.queue_export import find_preflop_marker  # avoid cycle
+    from app.services.hrc_node_offset import _ALL_IN_EFFECTIVE_THRESHOLD
 
     out: list = []
     if not hh_text:
@@ -278,16 +292,101 @@ def _parse_preflop_actions(
     preflop = hh_text[start:end]
 
     nick_to_seat = {s.get("nick"): s for s in seats}
+    initial_stacks = _parse_seat_stacks(hh_text)
 
     contributions, pot_total, current_to_call = _init_pot_from_blinds_antes(
         hh_text, seats, level_sb, level_bb,
     )
 
+    # pt42 — set de jogadores activos no momento de cada raise (para
+    # effective_stack_at_action). Fold remove. Empty set defensivo.
+    active_players: set = {
+        s.get("nick") for s in seats if s.get("nick")
+    }
+
     bet_count = 1  # BB is the implicit first "bet"
-    last_raiser_nick: Optional[str] = None
     last_raiser_idx: Optional[int] = None
     opener_idx: Optional[int] = None
+    # pt42 — sizings cumulativos para a regra universal (BB).
+    last_raise_to_bb: Optional[float] = None
+    opener_to_bb_acc: Optional[float] = None
     callers_since_open = 0
+
+    def _compute_effective_at_action(actor_nick: str) -> Optional[float]:
+        """min(raiser_remaining, max(opp_remaining)) / BB, em BB.
+
+        - Remaining = initial_stacks[nick] - contributions[nick] (antes do raise
+          actual; reflecte o "que o jogador ainda tem para apostar").
+        - Active opponents = `active_players` excluindo o actor.
+        - None se faltar info (stack inicial do actor, ou nenhum opp activo).
+        """
+        actor_initial = initial_stacks.get(actor_nick)
+        if actor_initial is None or level_bb <= 0:
+            return None
+        actor_remaining = actor_initial - contributions.get(actor_nick, 0.0)
+        opps_remaining: list = []
+        for other in active_players:
+            if other == actor_nick:
+                continue
+            opp_initial = initial_stacks.get(other)
+            if opp_initial is None:
+                continue
+            opps_remaining.append(
+                opp_initial - contributions.get(other, 0.0)
+            )
+        if not opps_remaining:
+            return None
+        eff_chips = min(actor_remaining, max(opps_remaining))
+        return round(eff_chips / float(level_bb), 2)
+
+    def _is_all_in_for_actor(actor_nick: str, to_amount: float) -> bool:
+        """True sse to_amount >= initial * 0.95 (raiser commits ~all)."""
+        initial = initial_stacks.get(actor_nick)
+        if initial is None or initial <= 0:
+            return False
+        return float(to_amount) >= float(initial) * _ALL_IN_EFFECTIVE_THRESHOLD
+
+    def _append_raise_entry(
+        nick: str,
+        to_amount: float,
+        previous_to_call: float,
+    ) -> None:
+        """Compõe a entry de uma raise/bet e adiciona-a a `out`.
+
+        Não actualiza state — caller responsável por tudo o que altera
+        `contributions`, `pot_total`, `current_to_call`, `bet_count`, etc.
+        """
+        raise_increment = to_amount - previous_to_call
+        pot_after_call_actor = pot_total + max(
+            previous_to_call - contributions.get(nick, 0.0), 0.0
+        )
+        pot_fraction = (
+            round(raise_increment / pot_after_call_actor, 2)
+            if pot_after_call_actor > 0 else 0.0
+        )
+        seat = nick_to_seat.get(nick) or {}
+        eff_at_action_bb = _compute_effective_at_action(nick)
+        is_all_in = _is_all_in_for_actor(nick, to_amount)
+        entry = {
+            "bet_count": bet_count,
+            "nick": nick,
+            "hrc_idx": seat.get("hrc_idx"),
+            "position": seat.get("position"),
+            "to_amount_chips": to_amount,
+            "to_amount_bb": round(to_amount / float(level_bb), 2),
+            "raise_increment_chips": raise_increment,
+            "pot_after_call_chips": pot_after_call_actor,
+            "pot_fraction": pot_fraction,
+            "callers_before": callers_since_open,
+            "opener_idx": opener_idx,
+            "previous_raiser_idx": last_raiser_idx,
+            # pt42 — campos novos:
+            "previous_raise_to_bb": last_raise_to_bb,
+            "opener_to_bb": opener_to_bb_acc if bet_count > 1 else None,
+            "is_all_in": is_all_in,
+            "effective_stack_at_action_bb": eff_at_action_bb,
+        }
+        out.append(entry)
 
     for m in _ACTION_LINE_RE.finditer(preflop):
         nick = m.group("nick").strip()
@@ -300,7 +399,10 @@ def _parse_preflop_actions(
         if nick.startswith("***"):
             continue
 
-        if verb == "folds" or verb == "checks":
+        if verb == "folds":
+            active_players.discard(nick)
+            continue
+        if verb == "checks":
             continue
 
         if verb == "calls":
@@ -317,90 +419,32 @@ def _parse_preflop_actions(
                 callers_since_open += 1
             continue
 
-        if verb == "bets":
-            # Bet preflop é raro (e.g., só no caso degenerate). Trata como
-            # open: to_amount = arg1.
-            if arg1 is None:
-                continue
-            to_amount = arg1
-            raise_increment = to_amount - current_to_call
-            pot_after_call_actor = pot_total + max(
-                current_to_call - contributions.get(nick, 0.0), 0.0
-            )
-            pot_fraction = (
-                round(raise_increment / pot_after_call_actor, 2)
-                if pot_after_call_actor > 0 else 0.0
-            )
-            seat = nick_to_seat.get(nick) or {}
-            entry = {
-                "bet_count": bet_count + 0,  # bets is a fresh open
-                "nick": nick,
-                "hrc_idx": seat.get("hrc_idx"),
-                "position": seat.get("position"),
-                "to_amount_chips": to_amount,
-                "to_amount_bb": round(to_amount / float(level_bb), 2),
-                "raise_increment_chips": raise_increment,
-                "pot_after_call_chips": pot_after_call_actor,
-                "pot_fraction": pot_fraction,
-                "callers_before": callers_since_open,
-                "opener_idx": opener_idx,
-                "previous_raiser_idx": last_raiser_idx,
-            }
-            out.append(entry)
-            # Atualiza estado
-            add = to_amount - contributions.get(nick, 0.0)
-            contributions[nick] = to_amount
-            pot_total += add
-            current_to_call = to_amount
-            last_raiser_nick = nick
-            last_raiser_idx = seat.get("hrc_idx")
-            if opener_idx is None:
-                opener_idx = last_raiser_idx
-            bet_count += 1
-            callers_since_open = 0
-            continue
-
-        if verb == "raises":
-            # arg1 = incremento, arg2 = to-amount.
-            to_amount = arg2 if arg2 is not None else (arg1 or 0.0)
+        if verb in ("bets", "raises"):
+            # bets: arg1 = to_amount (preflop é raro/degenerate, trata como open)
+            # raises: arg1 = incremento, arg2 = to-amount.
+            if verb == "bets":
+                if arg1 is None:
+                    continue
+                to_amount = arg1
+            else:
+                to_amount = arg2 if arg2 is not None else (arg1 or 0.0)
             previous_to_call = current_to_call
-            raise_increment = to_amount - previous_to_call
-            pot_after_call_actor = pot_total + max(
-                previous_to_call - contributions.get(nick, 0.0), 0.0
-            )
-            pot_fraction = (
-                round(raise_increment / pot_after_call_actor, 2)
-                if pot_after_call_actor > 0 else 0.0
-            )
+            _append_raise_entry(nick, to_amount, previous_to_call)
 
-            seat = nick_to_seat.get(nick) or {}
-            this_bet_count = bet_count  # 1 = open, 2 = 3-bet, ...
-
-            entry = {
-                "bet_count": this_bet_count,
-                "nick": nick,
-                "hrc_idx": seat.get("hrc_idx"),
-                "position": seat.get("position"),
-                "to_amount_chips": to_amount,
-                "to_amount_bb": round(to_amount / float(level_bb), 2),
-                "raise_increment_chips": raise_increment,
-                "pot_after_call_chips": pot_after_call_actor,
-                "pot_fraction": pot_fraction,
-                "callers_before": callers_since_open,
-                "opener_idx": opener_idx,
-                "previous_raiser_idx": last_raiser_idx,
-            }
-            out.append(entry)
-
-            # Atualiza estado
+            # Atualiza estado depois de gravar a entry (campos novos usam
+            # state pré-raise para `previous_raise_to_bb`, `opener_to_bb`,
+            # `effective_stack_at_action_bb`).
             add = to_amount - contributions.get(nick, 0.0)
             contributions[nick] = to_amount
             pot_total += add
             current_to_call = to_amount
-            last_raiser_nick = nick
+            seat = nick_to_seat.get(nick) or {}
             last_raiser_idx = seat.get("hrc_idx")
+            this_to_bb = round(to_amount / float(level_bb), 2)
+            last_raise_to_bb = this_to_bb
             if opener_idx is None:
                 opener_idx = last_raiser_idx
+                opener_to_bb_acc = this_to_bb
             bet_count += 1
             callers_since_open = 0
             continue
@@ -456,49 +500,98 @@ def _bucket_4bet5bet(action: dict, n_seated: int) -> Optional[str]:
     return f"SIZES_POT_5BET_{suffix}"
 
 
-def _classic_3bet_band(
-    effective_stack_bb: Optional[float],
-) -> tuple:
-    """Devolve `(mult, shove_only)` para os 5 buckets de 3-bet clássico.
+# ── Defaults non-all-in (pt42 — só usado quando original foi ALLIN) ────
 
-    - `eff >= 35`  → `(None, False)` — defaults intactos, sem override.
-    - `[30, 35)`   → `(0.90, False)`
-    - `[25, 30)`   → `(0.80, False)`
-    - `[18, 25)`   → `(0.70, False)`
-    - `eff < 18`   → `(None, True)`  — array `[ALLIN]` só (jam-or-fold).
-    - `None`       → `(None, False)` — defensivo, sem override.
+def _compute_default_for_open(action: dict) -> Optional[float]:
+    """Non-all-in default do open: 2 BB, só se efectiva > 8 BB e posição
+    ≠ SB ≠ BB. None caso contrário (array fica `["ALLIN"]` só).
+
+    HU: posição é "BU/SB" — não cai em ("SB","BB"), logo o 2 BB aplica-se.
     """
-    if effective_stack_bb is None:
-        return None, False
-    if effective_stack_bb >= 35:
-        return None, False
-    if effective_stack_bb >= 30:
-        return 0.90, False
-    if effective_stack_bb >= 25:
-        return 0.80, False
-    if effective_stack_bb >= 18:
-        return 0.70, False
-    return None, True
+    pos = (action.get("position") or "").upper()
+    if pos in ("SB", "BB"):
+        return None
+    eff = action.get("effective_stack_at_action_bb")
+    if eff is None or eff <= _NON_ALL_IN_OPEN_MIN_EFF_BB:
+        return None
+    return _NON_ALL_IN_DEFAULT_OPEN_BB
 
 
-def _compute_classic_3bet_overrides(
-    effective_stack_bb: Optional[float],
-) -> dict:
-    """Compõe `{var: sizings}` para os 5 buckets de 3-bet clássico.
+def _compute_default_for_classic_3bet(action: dict) -> Optional[float]:
+    """2.3/2.7/3 × opener_to_bb por bucket de efectiva.
 
-    - eff >= 35 ou None → `{}` (defaults do template ficam).
-    - eff < 18           → `{var: ["ALLIN"]}` para os 5 buckets.
-    - Bandas intermédias → `{var: [round(default * mult, 2), "ALLIN"]}`.
+    - eff < 26  → ×2.3 (inclui 0-25)
+    - 26 ≤ eff < 35 → ×2.7
+    - eff ≥ 35 → ×3.0
+
+    None se faltar `opener_to_bb` ou efectiva.
     """
-    mult, shove_only = _classic_3bet_band(effective_stack_bb)
-    if shove_only:
-        return {var: ["ALLIN"] for var in _CLASSIC_3BET_DEFAULTS}
-    if mult is None:
-        return {}
-    return {
-        var: [round(default * mult, 2), "ALLIN"]
-        for var, default in _CLASSIC_3BET_DEFAULTS.items()
-    }
+    opener_to_bb = action.get("opener_to_bb")
+    if opener_to_bb is None:
+        return None
+    eff = action.get("effective_stack_at_action_bb")
+    if eff is None:
+        return None
+    if eff >= 35:
+        mult = _NON_ALL_IN_DEFAULT_3BET_MULT_HIGH
+    elif eff >= 26:
+        mult = _NON_ALL_IN_DEFAULT_3BET_MULT_MID
+    else:
+        mult = _NON_ALL_IN_DEFAULT_3BET_MULT_LOW
+    return round(opener_to_bb * mult, 2)
+
+
+def _compute_default_for_squeeze(action: dict) -> Optional[float]:
+    """3 × opener_to_bb. None se faltar opener_to_bb."""
+    opener_to_bb = action.get("opener_to_bb")
+    if opener_to_bb is None:
+        return None
+    return round(opener_to_bb * _NON_ALL_IN_DEFAULT_SQUEEZE_MULT, 2)
+
+
+def _compute_default_for_4bet(action: dict) -> Optional[float]:
+    """2.3 × previous_raise_to_bb (3-bet anterior). None se faltar."""
+    prev = action.get("previous_raise_to_bb")
+    if prev is None:
+        return None
+    return round(prev * _NON_ALL_IN_DEFAULT_4BET_MULT, 2)
+
+
+def _compute_default_for_5bet(action: dict) -> Optional[float]:
+    """2.2 × previous_raise_to_bb (4-bet anterior). None se faltar."""
+    prev = action.get("previous_raise_to_bb")
+    if prev is None:
+        return None
+    return round(prev * _NON_ALL_IN_DEFAULT_5BET_MULT, 2)
+
+
+def _array_for_raise(
+    action: dict,
+    non_all_in_default: Optional[float],
+) -> list:
+    """Aplica a regra universal de sizings a uma acção (open / 3-bet
+    clássico / squeeze / 4-bet / 5-bet).
+
+    - 1ª opção = sizing original em BB (ou "ALLIN" se a acção foi all-in).
+    - 2ª opção:
+        * original NÃO é ALLIN + eff ≤ 25 BB → "ALLIN".
+        * original NÃO é ALLIN + eff > 25 BB (ou eff None) → sem 2ª opção.
+        * original É ALLIN + `non_all_in_default` not None → o default.
+        * original É ALLIN + default None → sem 2ª opção (array só `["ALLIN"]`).
+    """
+    is_all_in = bool(action.get("is_all_in"))
+    eff = action.get("effective_stack_at_action_bb")
+    to_bb = action.get("to_amount_bb")
+
+    if is_all_in:
+        if non_all_in_default is not None:
+            return ["ALLIN", non_all_in_default]
+        return ["ALLIN"]
+
+    # Original NÃO é ALLIN — 1ª opção é o sizing real.
+    if eff is not None and eff <= _OPEN_ALLIN_THRESHOLD_BB:
+        return [to_bb, "ALLIN"]
+    return [to_bb]
 
 
 def build_sizings_overrides(
@@ -523,71 +616,129 @@ def build_sizings_overrides(
       * 4º raise (bet_count=4) → SIZES_POT_5BET_<IP|OOP>
       * ≥ 5º raise (6-bet+)   → ignorado (template runtime devolve shove)
 
-    Sizings:
-      * Opens em BB: `[to_amount_bb, ALLIN]` se efectiva ≤25BB; `[to_amount_bb]`
-        senão. `ALLIN` é o token literal `"ALLIN"` (não 9999) — fica no .js
-        como nome da const já declarada no template.
-      * 3-bets em BB: sempre `[to_amount_bb, ALLIN]`.
-      * Squeezes em BB: sempre `[to_amount_bb, ALLIN]`.
-      * 4-bet / 5-bet pot-fraction: sempre `[pot_fraction, ALLIN]`.
+    pt42 — Regra universal de sizings:
+      * 1ª opção = sizing original em BB (ou `"ALLIN"` se a acção foi
+        all-in, detectada via `is_all_in` no parser).
+      * 2ª opção:
+          - Original NÃO é ALLIN + `effective_stack_at_action_bb <= 25`
+            → `"ALLIN"`.
+          - Original NÃO é ALLIN + eff > 25 BB ou None → sem 2ª opção
+            (array só `[to_amount_bb]`).
+          - Original É ALLIN + non-all-in default do tipo aplicável
+            → o default (BB para opens/3-bet/squeeze; pot-fraction
+            derivada para 4-bet/5-bet).
+          - Original É ALLIN + default None → sem 2ª opção (`["ALLIN"]`).
+
+    Non-all-in defaults por tipo (só quando original = ALLIN):
+      * Open: 2 BB, só se eff > 8 BB e posição ≠ SB ≠ BB.
+      * 3-bet clássico: 2.3 (eff <26) / 2.7 (26-34) / 3.0 (≥35) × opener_to_bb.
+      * Squeeze: 3.0 × opener_to_bb.
+      * 4-bet: 2.3 × previous_raise_to_bb (3-bet anterior, em BB).
+      * 5-bet: 2.2 × previous_raise_to_bb (4-bet anterior, em BB).
 
     Acções não-realizadas → sem entry no dict → defaults do template ficam.
-    Múltiplas acções no mesmo bucket → primeira ganha (rare em real life).
+    Múltiplas acções no mesmo bucket → primeira ganha (raro em real life).
 
-    Excepção: os 5 buckets de 3-bet clássico (SIZES_3BET_IP / _BB_VS_SB /
-    _BB_VS_OTHER / _SB_VS_BB / _SB_VS_OTHER) **ignoram o sizing real da HH**
-    — recebem sempre o sizing derivado de `_compute_classic_3bet_overrides`
-    (regra do multiplicador por efectiva). Squeezes não estão nesta excepção
-    e continuam a usar o sizing real da HH.
+    Nota sobre 4-bet/5-bet: o template canónico continua a usar
+    `SIZES_POT_4BET_*` / `SIZES_POT_5BET_*` como pot fractions. A
+    conversão BB → pot-fraction é feita aqui via `pot_after_call_chips`
+    + `raise_increment` (ver `_array_for_4bet5bet_in_pot_fraction`).
+
+    Parameter `effective_stack_bb` mantido para retrocompatibilidade mas
+    NÃO é usado — a efectiva passou a ser dinâmica por acção (campo
+    `effective_stack_at_action_bb` no parser).
     """
     if not hh_text or not seats:
         return {}
 
     overrides: dict = {}
     actions = _parse_preflop_actions(hh_text, seats, level_sb, level_bb)
-    opener_position: Optional[str] = None
-    n_seated = len(seats)
-    keep_open_allin = (
-        effective_stack_bb is None or effective_stack_bb <= _OPEN_ALLIN_THRESHOLD_BB
-    )
 
     for a in actions:
         bc = a["bet_count"]
 
         if bc == 1:
             var = _bucket_open(a)
-            opener_position = a.get("position")
             if var and var not in overrides:
-                size = a["to_amount_bb"]
-                if keep_open_allin:
-                    overrides[var] = [size, "ALLIN"]
-                else:
-                    overrides[var] = [size]
+                default = _compute_default_for_open(a)
+                overrides[var] = _array_for_raise(a, default)
             continue
 
         if bc == 2:
+            opener_position = (
+                actions[0].get("position") if actions and actions[0].get("bet_count") == 1
+                else None
+            )
             var = _bucket_3bet(a, opener_position)
-            # Squeezes mantêm sizing real da HH. Classic 3-bets ignoram —
-            # a regra do multiplicador aplica-se post-loop.
-            if (var and var.startswith("SIZES_3BET_SQUEEZE_")
-                    and var not in overrides):
-                overrides[var] = [a["to_amount_bb"], "ALLIN"]
+            if var and var not in overrides:
+                if var.startswith("SIZES_3BET_SQUEEZE_"):
+                    default = _compute_default_for_squeeze(a)
+                else:
+                    default = _compute_default_for_classic_3bet(a)
+                overrides[var] = _array_for_raise(a, default)
             continue
 
         if bc in (3, 4):
-            var = _bucket_4bet5bet(a, n_seated)
+            var = _bucket_4bet5bet(a, len(seats))
             if var and var not in overrides:
-                overrides[var] = [a["pot_fraction"], "ALLIN"]
+                if bc == 3:
+                    bb_default = _compute_default_for_4bet(a)
+                else:
+                    bb_default = _compute_default_for_5bet(a)
+                overrides[var] = _array_for_4bet5bet_in_pot_fraction(
+                    a, bb_default, level_bb,
+                )
             continue
 
-        # bc >= 5: skip (template runtime shove-or-fold).
-
-    # Regra do multiplicador para os 5 buckets de 3-bet clássico.
-    # Aplica-se sempre, independentemente de a HH ter (ou não) um 3-bet
-    # clássico. Vazio se eff >= 35 BB (defaults do template ficam).
-    overrides.update(_compute_classic_3bet_overrides(effective_stack_bb))
+        # bc >= 5: skip (template runtime shove-or-fold em getSizingsPreflop).
 
     return overrides
+
+
+def _array_for_4bet5bet_in_pot_fraction(
+    action: dict,
+    non_all_in_default_bb: Optional[float],
+    level_bb: int,
+) -> list:
+    """Variante de `_array_for_raise` para 4-bet/5-bet: a regra universal
+    expressa-se em BB, mas o template usa SIZES_POT_*BET_* como pot-fraction
+    (a JS function aplica `ctx.sizingPot(s)`). Esta função traduz BB→fração
+    para os 4-bet/5-bet.
+
+    Mantém a mesma lógica de 1ª/2ª opção; só altera a UNIDADE escrita no
+    .js para que o consumidor (HRC) gere a aposta esperada.
+    """
+    is_all_in = bool(action.get("is_all_in"))
+    eff = action.get("effective_stack_at_action_bb")
+    pot_fr_real = action.get("pot_fraction") or 0.0
+
+    def _bb_to_pot_fraction(target_bb: Optional[float]) -> Optional[float]:
+        if target_bb is None or level_bb <= 0:
+            return None
+        pot_after_call = action.get("pot_after_call_chips") or 0.0
+        if pot_after_call <= 0:
+            return None
+        target_chips = float(target_bb) * float(level_bb)
+        # raise_increment = target_chips - previous_to_call_chips.
+        # previous_to_call_chips = to_amount_chips - raise_increment_chips.
+        prev_to_call_chips = (
+            (action.get("to_amount_chips") or 0.0)
+            - (action.get("raise_increment_chips") or 0.0)
+        )
+        inc = target_chips - prev_to_call_chips
+        if inc <= 0:
+            return None
+        return round(inc / pot_after_call, 2)
+
+    if is_all_in:
+        default_pot_fr = _bb_to_pot_fraction(non_all_in_default_bb)
+        if default_pot_fr is not None:
+            return ["ALLIN", default_pot_fr]
+        return ["ALLIN"]
+
+    if eff is not None and eff <= _OPEN_ALLIN_THRESHOLD_BB:
+        return [pot_fr_real, "ALLIN"]
+    return [pot_fr_real]
 
 
 # ── Substituição no template ──────────────────────────────────────────

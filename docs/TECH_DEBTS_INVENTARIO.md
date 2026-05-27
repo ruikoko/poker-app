@@ -6,7 +6,61 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (25-26 Maio 2026 — pt41, 2 fixes HIGH: bounty via TS + anchor lobby)
+## Estado actual (26 Maio 2026 — pt42, regra universal de sizings + cortar turn/river)
+
+Sessão de **gerador `script.js`**: fecha `#HRC-BETTING-SCRIPT-IMPROVEMENTS` (HIGH) com 2 mudanças
+combinadas (Pedidos 1 + 2): (1) variante "pré-flop + flop only" no template canónico (turn/river
+sem betting); (2) regra universal de sizings — 1ª opção = sizing original da HH (ou ALLIN se a
+acção foi all-in), 2ª opção = ALLIN (se eff ≤ 25) ou non-all-in default por tipo de aposta (se
+original foi ALLIN). Efectiva passa a ser **dinâmica por raise** (`min(raiser_remaining,
+max(active_opponents_remaining)) / BB`), substituindo a `compute_effective_stack_bb` global.
+Tabela pt25f de multiplicadores 3-bet (`_classic_3bet_band`, `_compute_classic_3bet_overrides`)
+**abandonada**.
+
+Suite **666 → 685 PASSED** (-16 testes obsoletos pt25f, +35 novos pt42). Modo investigação +
+implementação read-only; sem commits/push/smoke real Beelink ainda — diffs em buffer para
+validação Web. **`.exe` do watcher não tocado.**
+
+### Fixes shipped em pt42 (1 ✅)
+
+| Debt | Estado | Detalhe |
+|---|---|---|
+| **#HRC-BETTING-SCRIPT-IMPROVEMENTS** | ✅ FIXED (diffs em buffer) | (a) Template canónico `mtt_advanced_canonical_2026.js`: `POSTFLOP_FORCE_CHECKDOWN_AFTER` força checkdown após FLOP para **todos** os live counts (2..9) — turn/river ficam sem betting modelado, só check. Reduz árvore. (b) Gerador `hrc_script_gen.py`: regra universal por acção — 1ª opção sempre original (ou ALLIN se a acção foi jam); 2ª opção: ALLIN se `effective_stack_at_action_bb <= 25` e original NÃO ALLIN, OU non-all-in default por tipo (open 2 BB se eff>8 e não-blind; 3-bet clássico 2.3/2.7/3.0×opener_to_bb conforme bucket; squeeze 3.0×opener; 4-bet 2.3×3-bet anterior; 5-bet 2.2×4-bet anterior). 4-bet/5-bet ficam em pot-fraction (compatibilidade com `getSizings4Bets`/`5Bets`); conversão BB→fraction em `_array_for_4bet5bet_in_pot_fraction`. Parser ganha 4 campos novos por acção: `previous_raise_to_bb`, `opener_to_bb`, `is_all_in` (95% threshold de `_ALL_IN_EFFECTIVE_THRESHOLD` partilhado com `hrc_node_offset`), `effective_stack_at_action_bb`. Removidos: `_CLASSIC_3BET_DEFAULTS`, `_classic_3bet_band`, `_compute_classic_3bet_overrides`. Suite **685 PASSED**. Refs: `backend/app/services/hrc_script_gen.py`, `backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js`. |
+
+### Tech debt novo aberto em pt42 (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT** | 🟢 LOW | `count_lines_for_position` em `services/hrc_node_offset.py:88-105` usa `_TEMPLATE_DEFAULT_OPEN_COUNT = 2`, mas o template default actual (pt29 tree-size control) é `[2]` com 1 entrada. Quando uma posição **não** está em `script_overrides` (não fez raise voluntária na HH), o offset é calculado com 2 linhas por posição em vez de 1 → `target_node_offset` pode estar **+1 por posição precedente**. **Não é regressão pt42** (vive desde pt29). Cross-ref com `#TEMPLATE-DEFAULT-OPEN-COUNT-MISMATCH` se quisermos abrir um par. Fix: alinhar `_TEMPLATE_DEFAULT_OPEN_COUNT` com `len(template_default)` (1, ou ler dinamicamente do template). Impacto real: navegação 2ª run aterra 1+ linhas a mais quando o raiser real está depois de uma posição sem override. **Validar empiricamente em smoke real** pt42 antes de elevar severidade. |
+
+### Investigação Q1-Q8 pt42 (read-only, antes da implementação)
+
+A investigação ficou no journal pt42 e cobre: (Q1) localização do código a tocar; (Q2) 3
+opções de cortar turn/river com trade-offs (Opção A escolhida — `POSTFLOP_FORCE_CHECKDOWN_AFTER`);
+(Q3) detecção de tipos de raise (já existia no parser, faltava expor previous/opener);
+(Q4) detecção de all-in via 95% threshold (reutilizado de `hrc_node_offset`);
+(Q5) efectiva dinâmica por acção como min(raiser_remaining, max_opp_remaining);
+(Q6) 11 edge cases E1-E11 com tratamento; (Q7) testes a remover/reescrever/adicionar;
+(Q8) 4 cenários smoke (1 por site) para próxima fase.
+
+### Decisões internas pt42 (refinamentos defensivos)
+
+- **Threshold ALLIN partilhado.** `_is_all_in_for_actor` reusa `_ALL_IN_EFFECTIVE_THRESHOLD =
+  0.95` de `hrc_node_offset.py` em vez de duplicar (single source of truth para a heurística
+  "raiser commits ~all"). Threshold INCLUSIVO: 950/1000 → True, 949/1000 → False.
+- **4-bet/5-bet ficam em pot-fraction.** Considerada Opção II (renomear `SIZES_POT_*BET_*` →
+  `SIZES_*BET_*` em BB, mudar JS function para `sizingBigBlinds`) mas rejeitada — mudança
+  estrutural maior do template. Optou-se por conversão BB→fraction *dentro do gerador*
+  (`_array_for_4bet5bet_in_pot_fraction`), preservando a forma do template.
+- **Boundary do gate "eff > 8 BB" inclusiva no <=.** `_compute_default_for_open` devolve None
+  para `eff <= 8` (não `eff < 8`). Validado por teste dedicado.
+- **`opener_to_bb` é None para o open (auto-referência).** Para `bet_count > 1` aponta ao open.
+- **`effective_stack_bb` parâmetro de `build_sizings_overrides` mantido para retro-compatibilidade
+  da assinatura**, mas **não é usado** (a efectiva é por acção). Caller pode passar None.
+
+---
+
+## Estado anterior (25-26 Maio 2026 — pt41, 2 fixes HIGH: bounty via TS + anchor lobby)
 
 Sessão com **2 fixes HIGH shipped** + re-disparo lobby validado + reversão da guarda.
 Suite **651 → 661 → 666 PASSED**. SHAs: `a942ac7` (bounty) → `0707978` (docs betting) →

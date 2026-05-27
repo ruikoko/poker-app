@@ -628,6 +628,69 @@ Docs desta sessão: `JOURNAL_2026-05-24-pt40.md` (novo); `TECH_DEBTS_INVENTARIO.
 
 Docs desta sessão: `JOURNAL_2026-05-25-pt41.md` (novo); `TECH_DEBTS_INVENTARIO.md` (secção pt41); `PENDENTES.md`.
 
-Última sessão fechada: **pt41** (25-26 Maio 2026 — `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ `a942ac7` + `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ + `#RESOLVER-TIER12-WINDOW-NO-START` ✅ `6409b19`; guarda `DISCORD_LOBBY_AUTO=true` reposta; suite **666 PASSED**). Detalhes em `docs/JOURNAL_2026-05-25-pt41.md`.
+## pt42 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (26 Maio 2026, diffs em buffer)
 
-Próxima sessão (**pt42**), por ordem: 1) 🔴 **`#HRC-BETTING-SCRIPT-IMPROVEMENTS`** (foco principal — gerador `script.js`: variante pré-flop+flop only + alternativas do Hero); 2) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 3) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 4) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED, se ainda relevante); 5) importar TS GG faltosos (`Daily Hyper $80` 05-09 etc., não-bloqueante). Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.
+**Backend-only; `.exe` do watcher não tocado.** Fecha `#HRC-BETTING-SCRIPT-IMPROVEMENTS`
+(🔴 HIGH) combinando 2 pedidos product no mesmo trabalho. Suite **666 → 685 PASSED**
+(-16 testes pt25f obsoletos, +35 novos pt42). Diffs em buffer (sem commit/push/smoke real
+Beelink ainda — pendente validação Web + smoke pt43).
+
+### Pedido 1 — variante "pré-flop + flop only" no template
+
+`backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js` —
+`POSTFLOP_FORCE_CHECKDOWN_AFTER` passa de `{2:RIVER, 3:RIVER, 4:TURN, 5:FLOP}` para
+`{2:FLOP, 3:FLOP, ..., 9:FLOP}`. Turn/river ficam sem betting modelado (só check) para
+todos os live counts → árvore HRC corta turn/river. `hasNextStreetBetting` (callback que
+o HRC consome) devolve agora `false` em qualquer street pós-flop.
+
+### Pedido 2 — regra universal de sizings + efectiva dinâmica
+
+`backend/app/services/hrc_script_gen.py` reescrito. Cada raise preflop (open / 3-bet
+clássico / squeeze / 4-bet / 5-bet) recebe um array com a forma:
+
+- **1ª opção** = `to_amount_bb` da HH (ou `"ALLIN"` se a acção foi all-in, detectada via
+  heurística 95% reusada de `hrc_node_offset._ALL_IN_EFFECTIVE_THRESHOLD`).
+- **2ª opção** depende:
+  - Original NÃO ALLIN + `effective_stack_at_action_bb <= 25` → `"ALLIN"`.
+  - Original NÃO ALLIN + eff > 25 (ou None) → sem 2ª opção.
+  - Original ALLIN + non-all-in default existe → o default por tipo.
+  - Original ALLIN + default None → sem 2ª opção (`["ALLIN"]` só).
+
+**Non-all-in defaults (só quando original=ALLIN):** Open 2 BB (se `eff > 8` e pos ≠ SB/BB;
+HU "BU/SB" passa); 3-bet clássico 2.3/2.7/3.0 × `opener_to_bb` por bucket `<26`/`[26,35)`/`>=35`;
+squeeze 3.0 × opener; 4-bet 2.3 × `previous_raise_to_bb`; 5-bet 2.2 × `previous_raise_to_bb`.
+
+**Efectiva dinâmica por raise** (substitui `compute_effective_stack_bb` global como
+referência para regras product): `min(raiser_remaining, max(active_opponents_remaining)) / BB`,
+recalculada por acção. Activeness é set actualizado nos `folds`. Para 4-bet/5-bet o template
+continua a usar `SIZES_POT_*BET_*` em pot-fraction; a conversão BB→fração vive no gerador
+(`_array_for_4bet5bet_in_pot_fraction`).
+
+### Implicação: pt25f abandonada
+
+Os helpers `_classic_3bet_band`, `_compute_classic_3bet_overrides` e `_CLASSIC_3BET_DEFAULTS`
+(extensão pt25f, 5 buckets de multiplicador que **ignoravam** o sizing real da HH) foram
+**removidos**. A regra nova traz o sizing real de volta como 1ª opção em todas as raises.
+
+### Parser ganha 4 campos novos por acção
+
+`_parse_preflop_actions` em `hrc_script_gen.py` passa a expor:
+- `previous_raise_to_bb` (BB do raise imediatamente anterior; None para opens)
+- `opener_to_bb` (BB do open original; None para opens — auto-ref)
+- `is_all_in` (bool, threshold 95% inclusivo)
+- `effective_stack_at_action_bb` (efectiva dinâmica)
+
+### Tech debt latente novo (descoberto pt42, não-regressão)
+
+🟢 `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (LOW) — `_TEMPLATE_DEFAULT_OPEN_COUNT = 2`
+em `services/hrc_node_offset.py:52` desalinha do template default actual `[2]` (1 entrada,
+pt29). Quando o gerador não overrida uma posição (não fez raise voluntário na HH), o
+`target_node_offset` pode ficar +1 por posição precedente. Vive desde pt29; só elevar se o
+smoke real pt43 mostrar navegação errada.
+
+Detalhe completo em `docs/JOURNAL_2026-05-26-pt42.md`, `docs/TECH_DEBTS_INVENTARIO.md`
+(secção pt42), `docs/HRC_ANATOMIA_OPERACIONAL.md` §3.4.
+
+Última sessão fechada: **pt42** (26 Maio 2026 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ diffs em buffer; cortar turn/river no template + regra universal de sizings + efectiva dinâmica por raise; tabela pt25f abandonada; suite **666 → 685 PASSED**). Detalhes em `docs/JOURNAL_2026-05-26-pt42.md`.
+
+Próxima sessão (**pt43**), por ordem: 1) **Smoke real Beelink pt42** (4 cenários Q8: GG PKO cadeia; PS BU jam; WN squeeze BB; WPN HJ open) + validação visual do `script.js` + comparação tree size antes/depois → **pré-requisito de commit/push pt42**; 2) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 3) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 4) `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW, só se smoke mostrar regressão); 5) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED, se ainda relevante); 6) importar TS GG faltosos. Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.

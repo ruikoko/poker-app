@@ -172,11 +172,80 @@ avançar. A última página termina com "Finish".
 
 | Item | Valor |
 |---|---|
-| Função | Carregar o script JavaScript que define sizings e prune actions |
+| Função | Carregar o script JavaScript que define sizings preflop e regras postflop (force checkdown, donk bets, all-in SPR, etc) |
 | Tab "Scripting" | Coord `SCRIPTING_TAB` (**LACUNA — valor literal está no .pyc Baltazar**) |
 | Campo Script Folder | Coord `SCRIPT_FOLDER` (**LACUNA — idem**) |
 | Sequência | Click no Script Folder → paste do path absoluto do `.js` |
-| Script per-mão | O backend gera um `.js` específico para cada mão (Trabalho A pt25f). Path absoluto vai em `payouts.json.script_path` |
+| Script per-mão | O backend gera um `.js` específico para cada mão (Trabalho A pt25f; **regra universal pt42**). Path absoluto vai em `payouts.json.script_path` |
+
+#### 3.4.1 Template canónico (pt42)
+
+`backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js`. Único — não há
+variantes legacy. Os arrays `SIZES_*` são overridden per-mão pelo gerador
+(`backend/app/services/hrc_script_gen.py`). Variáveis que a mão não toca ficam com os
+defaults do template.
+
+**Variáveis preflop (BB):** `SIZES_OPEN_OTHERS / BU / SB / BB`,
+`SIZES_3BET_IP / BB_VS_SB / BB_VS_OTHER / SB_VS_BB / SB_VS_OTHER`,
+`SIZES_3BET_SQUEEZE_IP / SB / BB`.
+**Variáveis preflop (pot-fraction):** `SIZES_POT_4BET_IP / OOP`,
+`SIZES_POT_5BET_IP / OOP` (conversão BB→fração vive no gerador
+`_array_for_4bet5bet_in_pot_fraction`, preservando a forma do template; a JS function
+`getSizings4Bets / 5Bets` aplica `ctx.sizingPot(s)`).
+
+**Cortar turn/river (pt42, "pré-flop + flop only"):** `POSTFLOP_FORCE_CHECKDOWN_AFTER =
+{2:FLOP, 3:FLOP, ..., 9:FLOP}`. `hasNextStreetBetting(ctx)` devolve `street <
+POSTFLOP_FORCE_CHECKDOWN_AFTER[live]` → só PREFLOP tem next street com betting. Turn/river
+ficam sem betting modelado (só check). Reduz tree size significativamente.
+
+#### 3.4.2 Regra universal de sizings (pt42)
+
+Substitui as duas regras anteriores (Trabalho A pt25f + tabela de multiplicadores 3-bet
+pt25f-extensão). Para cada raise voluntário preflop (open / 3-bet clássico / squeeze /
+4-bet / 5-bet), o gerador escreve um array com a forma:
+
+- **1ª opção** = `to_amount_bb` da HH (ou `"ALLIN"` se a acção foi all-in via heurística
+  95% — `to_amount_chips >= seat_initial × 0.95`, threshold `_ALL_IN_EFFECTIVE_THRESHOLD`
+  partilhado com `hrc_node_offset.py`).
+- **2ª opção:**
+  - Original NÃO ALLIN + `effective_stack_at_action_bb <= 25` → `"ALLIN"`.
+  - Original NÃO ALLIN + eff > 25 (ou None) → sem 2ª opção.
+  - Original ALLIN + non-all-in default existe → o default por tipo (ver tabela abaixo).
+  - Original ALLIN + default None → sem 2ª opção (`["ALLIN"]` só).
+
+| Tipo | Non-all-in default | Condição |
+|---|---|---|
+| Open | 2 BB | `eff > 8 BB` E posição ≠ SB ≠ BB (HU `"BU/SB"` passa) |
+| 3-bet clássico | 2.3 × `opener_to_bb` | `eff < 26` |
+| 3-bet clássico | 2.7 × `opener_to_bb` | `26 ≤ eff < 35` |
+| 3-bet clássico | 3.0 × `opener_to_bb` | `eff ≥ 35` |
+| Squeeze | 3.0 × `opener_to_bb` | (sempre que `opener_to_bb` conhecido) |
+| 4-bet | 2.3 × `previous_raise_to_bb` | (sempre) |
+| 5-bet | 2.2 × `previous_raise_to_bb` | (sempre) |
+
+#### 3.4.3 Efectiva dinâmica por acção (pt42)
+
+`effective_stack_at_action_bb = min(raiser_remaining, max(active_opponents_remaining)) / BB`,
+**recalculada por raise**. Substitui a `compute_effective_stack_bb` global (que ficou só
+para retrocompat). É a referência única para: gate `eff > 8` do open default; buckets
+3-bet 0-25/26-35/35+; threshold `eff <= 25` do ALLIN-como-2ª-opção.
+
+Active players = set actualizado nos `folds` (parser walker); raiser_remaining e opp_remaining
+lêem `initial_stacks[nick] - contributions[nick]` ANTES do raise actual.
+
+#### 3.4.4 Campos novos do parser (pt42)
+
+`_parse_preflop_actions` em `hrc_script_gen.py` passa a expor por acção:
+
+| Campo | Significado |
+|---|---|
+| `previous_raise_to_bb` | `to_amount_bb` do raise imediatamente anterior na sequência. `None` para opens (não há anterior preflop). |
+| `opener_to_bb` | `to_amount_bb` do open original (1º raise voluntário). `None` para o próprio open (auto-ref). |
+| `is_all_in` | True sse `to_amount_chips >= seat_initial × 0.95`. Threshold inclusivo. |
+| `effective_stack_at_action_bb` | min(raiser_remaining, max_opp_active_remaining) / BB. |
+
+Os campos legacy (`bet_count`, `to_amount_bb`, `pot_fraction`, `callers_before`,
+`opener_idx`, `previous_raiser_idx`, etc.) mantêm-se.
 
 ### 3.5 Página Finish
 

@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 26 Maio 2026 (fim da pt41 — 2 fixes HIGH: `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ `a942ac7` + `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ `6409b19` (+ `#RESOLVER-TIER12-WINDOW-NO-START` ✅); guarda `DISCORD_LOBBY_AUTO=true` reposta; abertos `#HRC-BETTING-SCRIPT-IMPROVEMENTS` HIGH + `#LOBBY-SYNC-PAGINATION-LIMIT` MED).
+**Última actualização:** 26 Maio 2026 (fim da pt42 — `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ HIGH, diffs em buffer; suite 666→685 PASSED; smoke real Beelink + commits para pt43; novo `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` LOW).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,23 +12,30 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco pt42 (por ordem):**
-> 1. 🔴 **`#HRC-BETTING-SCRIPT-IMPROVEMENTS` (HIGH — foco principal)** — gerador de
->    `script.js`: (a) variante pré-flop+flop only (turn/river só check); (b) alternativas
->    do Hero (regra-base: stack effective > 8 BB no open → script inclui SEMPRE
->    mini-raise 2 BB, além da acção real). Investigação dependente antes de codificar
->    (localização do gerador, params por street/seat, como expor variantes).
+> **Foco pt43 (por ordem):**
+> 1. **Smoke real Beelink pt42** — 4 cenários da Q8 (GG PKO 8-handed cadeia open+3bet+4bet;
+>    PS BU jam eff ≤ 25; WN squeeze BB; WPN HJ open deep). Comparar tree size antes/depois.
+>    Validar que `script.js` chega com `POSTFLOP_FORCE_CHECKDOWN_AFTER` em FLOP × 8 e que
+>    os arrays SIZES_* têm o shape novo (1ª opção = original ou ALLIN). **Pré-requisito
+>    para commit/push pt42.**
 > 2. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates` sem paginação
 >    explícita (discord.py `limit=100`); janelas largas não puxam mensagens antigas.
 > 3. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do /hrc na pt41;
 >    suporte pré/pós-ITM + import dos TS Mystery (~1.353 mãos à espera).
-> 4. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** — se ainda
+> 4. **`#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW, novo pt42)** — só elevar se o
+>    smoke real pt43 mostrar `target_node_offset` errado (1+ linhas a mais quando alguma
+>    posição precedente ao raiser não fez raise voluntária). Não-bloqueante.
+> 5. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** — se ainda
 >    relevante (não-bloqueante).
-> 5. **Importar TS GG faltosos** das edições `Daily Hyper $80` de 05-09 (e outras com
+> 6. **Importar TS GG faltosos** das edições `Daily Hyper $80` de 05-09 (e outras com
 >    `tm_not_found`) — workflow normal, não-bloqueante.
 >
-> ✅ **Guarda reposta:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler real-time do
-> `#lobbys` activo, agora com o anchor `prestart`.
+> ✅ **Guarda mantida:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler real-time do
+> `#lobbys` activo com o anchor `prestart`.
+> **Fechados pt42:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (diffs em buffer; cortar
+> turn/river + regra universal de sizings + efectiva dinâmica por raise; tabela pt25f
+> abandonada). Suite 666→685 PASSED. 35 testes novos. **Pendente:** commit/push após
+> validação Web + smoke real Beelink.
 > **Fechados pt41:** `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ (`a942ac7`);
 > `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ + `#RESOLVER-TIER12-WINDOW-NO-START` ✅ (`6409b19`).
 > **Fechados antes:** `#HRC-PER-HAND-DOWNLOAD` ✅ (`dfc13a5`, pt40);
