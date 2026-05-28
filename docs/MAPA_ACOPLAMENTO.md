@@ -1866,7 +1866,9 @@ UNIQUE (hand_db_id)
 | `failed` | Watcher tentou e falhou (HRC error, malformed input, etc.); `error` populado. |
 | `expired` | TTL excedido sem feedback (decisão de produto futura — manualmente ou por job). |
 
-**Endpoint upstream (`GET /api/queue/hrc`):** auth `require_auth_or_api_key` (pt21 — `764b53e`); query params `tags/study_state/played_after/played_before/include_no_payout`; devolve zip com `<hand_id>/hh.txt + payouts.json + manifest.json` (gerado por `services/queue_export.build_queue_zip`).
+**Endpoint upstream (`GET /api/queue/hrc`):** auth `require_auth_or_api_key` (pt21 — `764b53e`); query params `tags/study_state/played_after/played_before/include_no_payout`; devolve zip com `<hand_id>/hh.txt + payouts.json + meta.json + script.js + manifest.json` (gerado por `services/queue_export.build_queue_zip`).
+
+**pt42d:** `meta.json` ganha 4 hints (`equity_model`, `max_players`, `script_path`, `aggressor_real_action`) que migraram de `payouts.json` para evitar rejeição do HRC (HRC rejeita campos top-level extra → ICM puro). Watcher (`tools/watcher_src/patched_funcs.py:setup_hand`) lê de `hand_meta.get(...)`. Adapter (`tools/hrc_adapter/payouts_helpers.py:rewrite_script_path_in_meta`) reescreve `script_path` para path absoluto pós-unzip. `payouts.json` no zip passa a conter APENAS `{name, folders, structures}` (formato HRC-native).
 
 **Endpoint downstream (`POST /api/queue/hrc/results`):** auth `require_auth_or_api_key`; multipart com `file` + query params `hand_id/status/error`; status só `done`/`failed`; UPSERT por `hand_db_id`. Sem batch (1 zip por request, D-G2-12 pt21).
 

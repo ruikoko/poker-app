@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 27 Maio 2026 (fim da pt42c — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` ✅ HIGH (Opção C, diffs aplicados; smoke real Beelink pendente); pipeline WN PKO → PS-compat com bounty inline; suite 725→730 PASSED; 15 testes pt42c novos).
+**Última actualização:** 28 Maio 2026 (fim da pt42d — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2 ✅ HIGH resolvido; payouts.json HRC-native + hints em meta.json; .exe recompilado SHA cdfc7247...3262; novo `#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING` LOW; smoke real Beelink pendente para validação final).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,38 +12,35 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **Foco pt42d (por ordem):**
-> 1. **Commit + push pt42c.** Diffs em buffer (T1-T6 aplicados, suite
->    730 PASSED). Aguardar GO Rui.
-> 2. **Smoke real Beelink pt42c** — re-descarregar mão WN PKO e correr
->    no HRC para validar:
->    - HRC aceita formato WN-converted (Seat lines PS-compat).
->    - `payouts.json` patched leva o HRC a tratar como PKO 50%.
->    - Hero bounty no manifest bate com `(<X>€ bounty)` literal.
->    - Se HRC rejeitar formato minimal: escalar para conversão completa
->      (header + markers `*** PRE-FLOP ***`, etc.) em pt42d.
-> 3. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — `gather_candidates`
->    sem paginação explícita.
-> 4. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — Mystery KO excluído do
->    /hrc em pt41 + pt42c; suporte pré/pós-ITM.
-> 5. **`#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW)** — só elevar
->    se smoke real pt42d mostrar drift.
-> 6. **`#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, pt42b)** — tabela
->    duplicada Python/JS. Não-bloqueante.
-> 7. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)** —
->    se ainda relevante.
-> 8. **Importar TS GG faltosos** das edições `Daily Hyper $80`.
+> **Foco pt42e (por ordem):**
+> 1. **Smoke real Beelink pt42d** (CRITICAL pré-commit). Sequência:
+>    - Rui corre backend DEV LOCAL (`uvicorn` em `:8000`).
+>    - Descarrega zip WN PKO pós-pt42d local.
+>    - Valida `payouts.json` no zip: APENAS `{name, folders, structures}`;
+>      `structures[0].name == "<Name>  #<tn>"`; `bountyType="PKO"`;
+>      `progressiveFactor=0.5`.
+>    - Copia para o Beelink: `.exe` novo (SHA cdfc7247...3262) +
+>      `payouts_helpers.py`.
+>    - Importa no HRC → confirma Instant=50% (não ICM puro).
+>    - Corre robot Beelink (1ª + 2ª run) com hints em meta.json.
+> 2. **Commit + push pt42d** (após smoke OK).
+> 3. **`#LOBBY-SYNC-PAGINATION-LIMIT` (🟡 MED)** — paginação Discord.
+> 4. **`#MYSTERY-KO-DUAL-SUPPORT` (🟡 MED)** — pré/pós-ITM.
+> 5. **`#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING` (🟢 LOW, novo pt42d)**.
+> 6. **`#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW)**.
+> 7. **`#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW, pt42b)**.
+> 8. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED)**.
 >
-> ✅ **Guarda mantida:** `DISCORD_LOBBY_AUTO=true` (pt41) — handler
-> real-time do `#lobbys` activo com o anchor `prestart`.
-> **Fechados pt42c:** `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` ✅ (Opção C
-> diffs aplicados; smoke real Beelink pendente). Suite 725→730 PASSED.
-> 15 testes pt42c novos. **Pendente:** commit/push + smoke real Beelink.
-> **Fechados pt42b:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (re-aberto e
-> fechado; 3-bet IP por posição com CASO A/B; suite 705→713 PASSED;
-> 28 testes pt42b novos).
-> **Fechados pt42:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (1ª parte:
-> cortar turn/river + regra universal de sizings + efectiva dinâmica).
+> ✅ **Guarda mantida:** `DISCORD_LOBBY_AUTO=true`.
+> **Fechados pt42d:** `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2 ✅ (pt42c v1
+> revertido em T2; pipeline v2 final com payouts HRC-native + meta hints).
+> Suite 730→734 PASSED. .exe recompilado.
+> **Pendente:** smoke real Beelink + commit/push.
+> **Fechados pt42c:** `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v1 (parcial — Seat
+> lines conversion subsequentemente revertida em pt42d).
+> **Fechados pt42b:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (3-bet IP por
+> posição).
+> **Fechados pt42:** `#HRC-BETTING-SCRIPT-IMPROVEMENTS` ✅ (1ª parte).
 > **Fechados pt41:** `#HERO-BOUNTY-FROM-TS-DERIVATION` ✅ (`a942ac7`);
 > `#LOBBY-ANCHOR-PRESTART-REGRESSION` ✅ + `#RESOLVER-TIER12-WINDOW-NO-START` ✅ (`6409b19`).
 > **Fechados antes:** `#HRC-PER-HAND-DOWNLOAD` ✅ (`dfc13a5`, pt40);

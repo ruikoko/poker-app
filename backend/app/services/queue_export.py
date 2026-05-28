@@ -667,20 +667,35 @@ def _extract_winamax_seat_bounties(hh_text: str) -> dict:
 
 
 def _patch_winamax_payouts_bountytype(
-    blob: dict, *, progressive_factor: float = 0.5,
+    blob: dict, *,
+    progressive_factor: float = 0.5,
+    tournament_number: Optional[str] = None,
 ) -> dict:
     """Sobrescreve `structures[i].bountyType` e `progressiveFactor` em cada
-    structure do `payouts_json` para WN PKO.
+    structure do `payouts_json` para WN PKO. Em pt42d, também aplica
+    `_format_winamax_structure_name` ao `structures[i].name` para o padrão
+    HRC-aceite "<Name>  #<tn>" (quando `tournament_number` é passado).
 
     Causa raiz: o lobby vision (apply_ratio_lookup em services/lobby_vision.py)
     só reconhece nomes branded GG/PS ("Bounty Hunters", "[bounty]", etc.).
     Nomes WN (GRAVITY, ZENITH, EXPLORER, ...) caem no default ("None", 0.0).
-    Aqui sobrescrevemos NO ZIP (não na BD — o blob na BD continua a
-    reflectir o que o lobby vision viu, audit trail preservado).
+    Adicionalmente (pt42d): o HRC guarda a structure importada na sua
+    biblioteca persistente (`custom.json`) com o `name` como chave; sem
+    sufixo `#<tn>`, structures de torneios distintos com mesmo nome
+    colidem e a biblioteca fica corrupta. Patch aqui sobrescreve no zip
+    (não na BD — audit trail preservado).
 
     Devolve novo dict (deep-copy via json round-trip; não muta o input).
     Se `blob` não é dict ou não tem `structures`, devolve cópia sem
     alterações.
+
+    Args:
+      blob: payout_blob como vem da BD (lobby vision).
+      progressive_factor: 0.5 para PKO 50% (default — Rui confirma WN PKO
+        50% universal).
+      tournament_number: se passado, aplica `_format_winamax_structure_name`
+        ao `structures[i].name`. None → name original preservado (pt42c
+        compat).
     """
     if not isinstance(blob, dict):
         return blob
@@ -693,52 +708,38 @@ def _patch_winamax_payouts_bountytype(
             continue
         s["bountyType"] = "PKO"
         s["progressiveFactor"] = float(progressive_factor)
+        # pt42d — name "<Name>  #<tn>" (HRC-aceite). Sem `tn` → preserva original.
+        if tournament_number:
+            s["name"] = _format_winamax_structure_name(
+                s.get("name"), tournament_number,
+            )
     return patched
 
 
-def _inject_bounties_winamax_to_ps_format(
-    text: str, players_list: list, anon_map: dict,
-) -> str:
-    """pt42c — Reescrita Seat lines WN para formato PS-compat com bounty.
+def _format_winamax_structure_name(
+    name: Optional[str], tournament_number: Optional[str],
+) -> Optional[str]:
+    """pt42d — formata `structures[i].name` para o padrão HRC-aceite.
 
-    Antes:  Seat 1: nick (75308, 10€ bounty)
-    Depois: Seat 1: nick (75308 in chips, €10 bounty)
+    Convenção observada empiricamente nos JSON HRC Ninja (validada pelo
+    Rui em pt42d): "<TournamentName>  #<tournament_number>" — **2 espaços**
+    + #ID. Ex.: "GRAVITY  #1101080235".
 
-    Bounties por nick:
-    - Hero: max(Vision, HH_bounty_hero). Vision raríssimo em WN (Vision do
-      replayer Discord é GG-only); tipicamente ganha HH.
-    - Vilões: bounty literal da HH (pós-KO accumulator real do nick).
+    Sem este formato, o HRC importa a structure mas a sua biblioteca
+    `custom.json` guarda-a com `bountyType` ausente — quando re-corrida,
+    cai em ICM puro mesmo que o JSON do zip tenha `bountyType: "PKO"`.
 
-    Seat lines que não matchem o regex `_WN_SEAT_BOUNTY_RE` ficam intactas
-    (defensivo — formato inesperado não trava o pipeline).
-
-    Se a HH não tem bounty token em nenhum Seat (formato non-bounty ou
-    malformada), devolve o text inalterado.
+    Defensivo:
+    - `name` None → devolve None (caller decide).
+    - `tournament_number` None/empty/falsy → devolve `name` original
+      (sem sufixo).
+    - Ambos preenchidos → `"<name>  #<tn>"`.
     """
-    if not text:
-        return text
-
-    hh_bounties = _extract_winamax_seat_bounties(text)
-    if not hh_bounties:
-        return text  # nada para fazer — pipeline degrada gracefully
-
-    hero_real = (anon_map or {}).get("Hero")
-    hero_value, _src = compute_hero_bounty_from_hh(
-        players_list, anon_map, hh_bounties,
-    )
-
-    def _repl(m: re.Match) -> str:
-        prefix = m.group("prefix")
-        nick = m.group("nick").strip()
-        chips = m.group("chips")
-        if hero_real and nick == hero_real:
-            value = hero_value
-        else:
-            value = hh_bounties.get(nick, 0.0)
-        formatted = _format_bounty_amount(value)
-        return f"{prefix}{nick} ({chips} in chips, €{formatted} bounty)"
-
-    return _WN_SEAT_BOUNTY_RE.sub(_repl, text)
+    if name is None:
+        return None
+    if not tournament_number:
+        return name
+    return f"{name}  #{tournament_number}"
 
 
 _SHOWDOWN_MARK = "*** SHOWDOWN ***"
@@ -826,17 +827,15 @@ def convert_gg_hh_to_pokerstars_compatible(
 ) -> str:
     """Converte raw HH para formato compatível com HRC.
 
-    Sites suportados (cobertura por pipeline):
+    Sites suportados:
 
-    - **GGPoker**: pipeline pt29 completo (8 transformações; conversão
+    - **GGPoker**: pipeline pt29 completo (8 transformações: conversão
       de header, hashes, bounty via TS, etc.).
-    - **Winamax PKO/SuperKO/KO** (pt42c): branch novo — reescrita das
-      Seat lines `(<chips>, <X>€ bounty)` → `(<chips> in chips, €<X> bounty)`
-      via `_inject_bounties_winamax_to_ps_format`. Hero usa Vision se
-      maior (regra pt41 mantida); fallback HH.
-    - **Winamax non-bounty** (vanilla, mystery KO) e **PokerStars**:
-      passthrough total — HH crua entregue ao HRC. Mystery KO já gated
-      em MYSTERY_FORMATS (excluído do /hrc).
+    - **PokerStars, Winamax, WPN**: passthrough total — HH crua entregue
+      ao HRC sem reescrita. HRC lê os formatos nativos directamente.
+      Pt42c havia introduzido um branch WN para reescrita Seat lines mas
+      foi revertido em pt42d: HRC aceita formato WN nativo; só o
+      `payouts.json` precisa de patch (em `build_queue_zip`).
 
     Hands com `raw` vazio devolvem string vazia (caller deve filtrar).
 
@@ -856,22 +855,12 @@ def convert_gg_hh_to_pokerstars_compatible(
     if not raw:
         return ""
 
-    site = hand.get("site")
-    fmt = (hand.get("tournament_format") or "").lower()
-
-    # pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — branch WN PKO: reescrita
-    # Seat lines para PS-compat usando bounty literal da HH. Não há TS
-    # Winamax; pipeline degrada gracefully se HH não tem token bounty.
-    if site == "Winamax" and fmt in WINAMAX_BOUNTY_FORMATS:
-        pn = _coerce_player_names(hand.get("player_names"))
-        anon_map = pn.get("anon_map") or {}
-        players_list = pn.get("players_list") or []
-        return _inject_bounties_winamax_to_ps_format(
-            raw, players_list, anon_map,
-        )
-
-    if site != "GGPoker":
-        # PS ou WN non-bounty (vanilla, mystery) → passthrough.
+    # pt42d — branch WN PKO removido. HRC lê HH WN nativa (com `(<X>€ bounty)`
+    # nos Seats) sem necessitar de conversão para PS-compat. O bounty pt42c
+    # vive agora apenas no `payouts.json` (via `_patch_winamax_payouts_bountytype`
+    # em `build_queue_zip`) com formato HRC-aceite.
+    if hand.get("site") != "GGPoker":
+        # PS, Winamax e WPN → passthrough total.
         return hand.get("raw") or ""
 
     pn = _coerce_player_names(hand.get("player_names"))
@@ -881,6 +870,7 @@ def convert_gg_hh_to_pokerstars_compatible(
     # pt41: bounty só para formatos bounty-gated (PKO/SuperKO/KO) com base do TS.
     # Vanilla/Mystery/sem-base → sem token (Opção A). starting_bounty vem do
     # bounty_ctx (tournament_summaries.buy_in_bounty), threaded por build_queue_zip.
+    fmt = (hand.get("tournament_format") or "").lower()
     starting_bounty = (bounty_ctx or {}).get("starting_bounty")
 
     out = _format_level_line(raw)
@@ -938,25 +928,37 @@ def _build_hand_meta(
     equity_model,
     payout_blob,
     target_node_offset,
+    *,
+    max_players: Optional[int] = None,
+    script_path: Optional[str] = None,
+    aggressor_real_action: Optional[dict] = None,
 ) -> dict:
-    """Compõe o `meta.json` per-hand: 4 legacy fields + target_node_offset.
+    """Compõe o `meta.json` per-hand.
 
-    Legacy schema (consumido pelo `setup_hand` do watcher antes de pt25e
-    Bloco 2):
+    Schema:
       - `stage`           : "FT" ou "MTT" (deriva de equity_model).
       - `players_left`    : int | None (lookup em lobby_processing_log).
-      - `total_chips`     : int | None (legacy: input manual do Rui na
-                            página MTT Stacks; auto-derivação per-hand
-                            não-fidedigna → None).
+      - `total_chips`     : int | None (legacy — input manual no UI HRC).
       - `ci`              : float (default 10.0, CI Target aplicado a
                             ambas as runs — alinhado pt27 com o watcher
                             que já hardcode 10.0 na 2ª run).
+      - `target_node_offset`: int | None (pt25e Bloco 2 piece 2 — setas
+                              para baixo até pousar na linha do raiser
+                              antes da 2ª run em Selected Subtree).
 
-    Extensão pt25e Bloco 2 piece 2:
-      - `target_node_offset`: int | None — nº de seta-para-baixo presses
-                              que o watcher faz na Strategy Table HRC após
-                              a 1ª run, para pousar na linha do raiser
-                              real antes da 2ª run em Selected Subtree.
+    Hints pt42d (movidos de `payouts.json` em pt42d porque HRC rejeita
+    campos extra no payouts.json; ficam aqui no meta.json):
+      - `equity_model`    : "malmuth_harville_icm" | "multi_table_icm".
+                            Watcher (`set_equity_model`) faz typeahead
+                            no dropdown HRC.
+      - `max_players`     : int | None (override do `players_in_hand`
+                            no `set_hand_mode_players`).
+      - `script_path`     : str | None ("script.js" no zip; adapter
+                            reescreve para path absoluto pós-unzip).
+      - `aggressor_real_action`: dict | None. Gate da 2ª run: se
+                            `is not None`, watcher dispara
+                            `navigate_to_target_node` +
+                            `start_calculation_selected_subtree`.
 
     Defensivo: campos individuais que falham na derivação caem para None
     (graceful — `setup_hand` legacy tem fallbacks para cada um).
@@ -967,6 +969,10 @@ def _build_hand_meta(
         "total_chips": None,
         "ci": _DEFAULT_CI_TARGET,
         "target_node_offset": target_node_offset,
+        "equity_model": equity_model,
+        "max_players": max_players,
+        "script_path": script_path,
+        "aggressor_real_action": aggressor_real_action,
     }
 
 
@@ -1294,33 +1300,37 @@ def build_queue_zip(
                 target_node_offset = None
 
             # pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — sobrescrever
-            # `bountyType` no payouts.json do zip para WN PKO. Lobby vision
-            # classifica nomes WN como "None" (apply_ratio_lookup só conhece
-            # nomes branded GG/PS). Patch é aplicado SÓ NO ZIP (não na BD —
-            # audit trail preservado).
+            # `bountyType` + `progressiveFactor` (pt42c) + `name` com sufixo
+            # `#<tn>` (pt42d) no payouts.json do zip para WN PKO. Patch é
+            # aplicado SÓ NO ZIP (não na BD — audit trail preservado).
             payout_blob_for_zip = payout_blob
             if (site == "Winamax"
                     and fmt in WINAMAX_BOUNTY_FORMATS
                     and payout_blob is not None):
                 payout_blob_for_zip = _patch_winamax_payouts_bountytype(
-                    payout_blob, progressive_factor=0.5,
+                    payout_blob,
+                    progressive_factor=0.5,
+                    tournament_number=tnum,
                 )
 
+            # pt42d #WN-BOUNTY-NULL-IN-HRC-PIPELINE v2 — payouts.json no zip
+            # contém APENAS `{name, folders, structures}` (sem merge com
+            # hints top-level). HRC rejeita campos extra (custom.json fica
+            # com structure sem bountyType → ICM puro). Hints mudam-se
+            # para meta.json (pt42d T5).
             if payout_blob_for_zip is not None:
-                merged: dict = (
-                    dict(payout_blob_for_zip)
-                    if isinstance(payout_blob_for_zip, dict)
-                    else {"_blob": payout_blob_for_zip}
-                )
-                merged.update(hints)
                 zf.writestr(
                     f"{hand_id}/payouts.json",
-                    json.dumps(merged, indent=2, ensure_ascii=False),
+                    json.dumps(payout_blob_for_zip, indent=2, ensure_ascii=False),
                 )
             else:
+                # Sem payout_blob — caller (build_queue_zip) já filtra mãos
+                # sem payout via `missing_payouts` antes de chegar aqui;
+                # esta branch é defensiva.
                 zf.writestr(
                     f"{hand_id}/payouts.json",
-                    json.dumps(hints, indent=2, ensure_ascii=False),
+                    json.dumps({"name": "/", "folders": [], "structures": []},
+                               indent=2, ensure_ascii=False),
                 )
 
             # pt25e Bloco 2 piece 2: meta.json passa a ser produzido pelo
@@ -1331,6 +1341,11 @@ def build_queue_zip(
                 equity_model=hints.get("equity_model"),
                 payout_blob=payout_blob,
                 target_node_offset=target_node_offset,
+                # pt42d — hints movidos de payouts.json para meta.json
+                # (HRC rejeitava campos extra → ICM puro).
+                max_players=hints.get("max_players"),
+                script_path=hints.get("script_path"),
+                aggressor_real_action=aggressor_real_action,
             )
             zf.writestr(
                 f"{hand_id}/meta.json",

@@ -1766,29 +1766,23 @@ def setup_hand(hand_name, hand_path):
 
     # auto-discovery de script .js no hand_path (mecanismo Baltazar) —
     # preservado para fidelidade ao original; em pt23 não é utilizado
-    # quando há hint `script_path` no payouts.json
+    # quando há hint `script_path` no meta.json (pt42d)
     custom_script = None
     for fname in os.listdir(hand_path):
         if fname.endswith('.js'):
             custom_script = os.path.join(hand_path, fname)
             print(f'   Script custom: {fname}')
 
-    # === pt23 fix A/B/C: hints do payouts.json ===
-    _payouts = {}
-    if prize_path:
-        try:
-            with open(prize_path, 'r', encoding='utf-8') as f:
-                _loaded = json.load(f)
-            if isinstance(_loaded, dict):
-                _payouts = _loaded
-        except Exception as _e:
-            print(f"   [WARN] payouts.json load falhou ({_e}); usando defaults pt23")
-    equity_model = _payouts.get('equity_model', 'multi_table_icm')
-    max_players = _payouts.get('max_players')
+    # === pt23 fix A/B/C (revisto pt42d): hints lidos de `meta.json` em vez
+    # de `payouts.json` (HRC rejeita campos extra no payouts.json — pt42d
+    # #WN-BOUNTY-NULL-IN-HRC-PIPELINE v2). `hand_meta` já carregado acima
+    # (linha ~1749) com defensivo `{}` quando meta.json ausente.
+    equity_model = hand_meta.get('equity_model', 'multi_table_icm')
+    max_players = hand_meta.get('max_players')
     if max_players is None:
         max_players = players_in_hand
-    script_path = _payouts.get('script_path')
-    # === end pt23 ===
+    script_path = hand_meta.get('script_path')
+    # === end pt23 (pt42d revisto) ===
 
     # arrancar HRC
     hrc = ensure_hrc()
@@ -1981,7 +1975,7 @@ def setup_hand(hand_name, hand_path):
     # Defensive completo: cada passo tem fallback se algum coord ainda
     # estiver placeholder ou se popup detection falhar. O watcher degrada
     # para no-op com WARN logs em vez de cliques errantes.
-    aggressor_real_action = _payouts.get('aggressor_real_action')
+    aggressor_real_action = hand_meta.get('aggressor_real_action')
     target_node_offset = hand_meta.get('target_node_offset')
     second_run_dispatched = None  # None = não tentada; True/False = resultado
     if aggressor_real_action is not None:

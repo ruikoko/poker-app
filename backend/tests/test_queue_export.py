@@ -1485,7 +1485,7 @@ import json
 from app.services.queue_export import (
     WINAMAX_BOUNTY_FORMATS,
     _extract_winamax_seat_bounties,
-    _inject_bounties_winamax_to_ps_format,
+    _format_winamax_structure_name,
     _patch_winamax_payouts_bountytype,
     compute_hero_bounty_from_hh,
 )
@@ -1616,77 +1616,91 @@ def test_patch_winamax_payouts_bountytype_handles_missing_structures():
     assert out is None
 
 
-def test_inject_bounties_winamax_to_ps_format_basic_conversion():
-    """pt42c — reescrita 6 seats WN → PS-compat. Sem Hero (anon_map vazio).
-    Todos os bounties vêm da HH literal."""
-    hh = (
-        "Seat 1: oRosei- (75308, 10€ bounty)\n"
-        "Seat 2: Spaks (93565, 10€ bounty)\n"
-        "Seat 3: LHommePuma (256878, 12€ bounty)\n"
+def test_patch_winamax_payouts_with_tn_applies_name_format():
+    """pt42d — com `tournament_number`, sobrescreve `structures[i].name`
+    para "<Name>  #<tn>" via `_format_winamax_structure_name`."""
+    blob = {
+        "structures": [
+            {
+                "name": "GRAVITY",
+                "chips": 4259922.0,
+                "prizes": {"1": 4185.3},
+                "bountyType": "None",
+                "progressiveFactor": 0.0,
+            }
+        ]
+    }
+    out = _patch_winamax_payouts_bountytype(
+        blob, tournament_number="1101080235",
     )
-    out = _inject_bounties_winamax_to_ps_format(
-        hh, players_list=[], anon_map={},
-    )
-    assert "Seat 1: oRosei- (75308 in chips, €10 bounty)" in out
-    assert "Seat 2: Spaks (93565 in chips, €10 bounty)" in out
-    assert "Seat 3: LHommePuma (256878 in chips, €12 bounty)" in out
-    # Formato WN original foi removido
-    assert "(75308, 10€ bounty)" not in out
+    assert out["structures"][0]["name"] == "GRAVITY  #1101080235"
+    # bountyType + progressiveFactor continuam aplicados (pt42c)
+    assert out["structures"][0]["bountyType"] == "PKO"
+    assert out["structures"][0]["progressiveFactor"] == 0.5
+    # Outros campos preservados
+    assert out["structures"][0]["chips"] == 4259922.0
+    assert out["structures"][0]["prizes"] == {"1": 4185.3}
 
 
-def test_inject_bounties_winamax_to_ps_format_hero_with_hh_value():
-    """pt42c — Hero identificado via anon_map['Hero'] usa hh_value
-    (sem Vision em WN, source="hh")."""
-    hh = (
-        "Seat 1: PlayerA (10000, 5€ bounty)\n"
-        "Seat 2: thinvalium (607387, 322.86€ bounty)\n"
-        "Seat 3: PlayerB (50000, 25€ bounty)\n"
-    )
-    out = _inject_bounties_winamax_to_ps_format(
-        hh, players_list=[], anon_map={"Hero": "thinvalium"},
-    )
-    # Hero (thinvalium): HH 322.86€ → preservado como €322.86 bounty.
-    assert "Seat 2: thinvalium (607387 in chips, €322.86 bounty)" in out
-    # Vilões: bounty literal da HH.
-    assert "Seat 1: PlayerA (10000 in chips, €5 bounty)" in out
-    assert "Seat 3: PlayerB (50000 in chips, €25 bounty)" in out
+def test_patch_winamax_payouts_without_tn_preserves_name():
+    """pt42d — sem `tournament_number` (default None), name original
+    preservado (compat pt42c — backward compat antes do switch ao novo
+    flow em build_queue_zip)."""
+    blob = {
+        "structures": [
+            {
+                "name": "GRAVITY",
+                "bountyType": "None",
+                "progressiveFactor": 0.0,
+            }
+        ]
+    }
+    out = _patch_winamax_payouts_bountytype(blob)  # tn não passado
+    assert out["structures"][0]["name"] == "GRAVITY"
+    # bountyType + progressiveFactor ainda aplicados
+    assert out["structures"][0]["bountyType"] == "PKO"
+    assert out["structures"][0]["progressiveFactor"] == 0.5
 
 
-def test_inject_bounties_winamax_to_ps_format_hero_vision_wins():
-    """pt42c — Vision > HH (raríssimo em WN, mas regra pt41 mantida):
-    Hero usa o valor Vision em vez do HH."""
-    hh = (
-        "Seat 1: thinvalium (100000, 50€ bounty)\n"
-        "Seat 2: PlayerB (80000, 50€ bounty)\n"
-    )
-    # Vision diz thinvalium acumulou 200€ post-KO (hipotético em WN).
-    players_list = [{"name": "thinvalium", "bounty_value_usd": 200.0}]
-    out = _inject_bounties_winamax_to_ps_format(
-        hh, players_list=players_list, anon_map={"Hero": "thinvalium"},
-    )
-    # Hero ganha Vision (200 > 50).
-    assert "Seat 1: thinvalium (100000 in chips, €200 bounty)" in out
-    # Vilão usa HH literal (Vision não cobre vilões em WN).
-    assert "Seat 2: PlayerB (80000 in chips, €50 bounty)" in out
+def test_format_winamax_structure_name_basic():
+    """pt42d — formato HRC-aceite: <Name> + 2 espaços + #<tn>."""
+    out = _format_winamax_structure_name("GRAVITY", "1101080235")
+    assert out == "GRAVITY  #1101080235"
 
 
-def test_inject_bounties_winamax_to_ps_format_empty_HH_returns_input():
-    """pt42c — defensivo: HH sem bounty token (formato non-bounty ou
-    malformado) → text inalterado, sem crash."""
-    hh_vanilla = (
-        "Seat 1: PlayerA (10000)\n"            # WPN-like (sem 'in chips' sem bounty)
-        "Seat 2: PlayerB (12000 in chips)\n"   # PS-like sem bounty
-    )
-    out = _inject_bounties_winamax_to_ps_format(
-        hh_vanilla, players_list=[], anon_map={"Hero": "PlayerA"},
-    )
-    # Input devolvido tal qual (pipeline degrada gracefully).
-    assert out == hh_vanilla
+def test_format_winamax_structure_name_two_spaces_not_one():
+    """pt42d — 2 espaços literais (não 1) entre nome e #. Empírico do HRC."""
+    out = _format_winamax_structure_name("INTERSTELLAR", "1094178268")
+    # Garantir que há exactamente 2 espaços antes do #
+    assert "INTERSTELLAR  #1094178268" in out
+    assert "INTERSTELLAR #1094178268" not in out  # 1 espaço NÃO basta
 
 
-def test_convert_gg_hh_winamax_pko_invokes_bounty_injection():
-    """pt42c — Winamax PKO: HH crua convertida com Seat lines no formato
-    PS-compat (bounty inline). Hero (thinvalium) usa HH literal (sem Vision)."""
+def test_format_winamax_structure_name_missing_tn_returns_name():
+    """pt42d — sem tournament_number → devolve name original (sem sufixo)."""
+    assert _format_winamax_structure_name("GRAVITY", None) == "GRAVITY"
+    assert _format_winamax_structure_name("GRAVITY", "") == "GRAVITY"
+    assert _format_winamax_structure_name("GRAVITY", 0) == "GRAVITY"
+
+
+def test_format_winamax_structure_name_None_name_returns_None():
+    """pt42d — name None → None (caller decide o que fazer)."""
+    assert _format_winamax_structure_name(None, "1101080235") is None
+    assert _format_winamax_structure_name(None, None) is None
+
+
+def test_format_winamax_structure_name_preserves_spaces_and_special_chars():
+    """pt42d — tolera nomes com espaços, caracteres especiais, e numeric tn
+    com underscore/letras (defensivo embora WN só tenha int tn)."""
+    out = _format_winamax_structure_name("W SERIES - SPACE KO", "1084517198")
+    assert out == "W SERIES - SPACE KO  #1084517198"
+
+
+def test_convert_gg_hh_winamax_pko_passthrough():
+    """pt42d — Winamax PKO: HRC lê HH WN nativa; converter faz passthrough
+    total. Branch WN PKO de pt42c foi removido (HRC aceita formato WN
+    directamente; bounty entra via patch ao payouts.json, não via reescrita
+    Seat lines)."""
     hh_raw = (
         'Winamax Poker - Tournament "INTERSTELLAR" buyIn: 90€ + 10€ '
         'level: 22 - HandId: #4699459877053923331-277-1778535900 - '
@@ -1695,9 +1709,6 @@ def test_convert_gg_hh_winamax_pko_invokes_bounty_injection():
         "Seat #2 is the button\n"
         "Seat 1: yousnouf75 (163754, 194.40€ bounty)\n"
         "Seat 2: imbagosu (615675, 532.70€ bounty)\n"
-        "Seat 3: Beu_Teu (663845, 311.97€ bounty)\n"
-        "Seat 4: thinvalium (351657, 244.20€ bounty)\n"
-        "Seat 5: blueballs67 (354758, 140€ bounty)\n"
         "*** ANTE/BLINDS ***\n"
         "Beu_Teu posts ante 1000\n"
         "*** PRE-FLOP ***\n"
@@ -1710,15 +1721,11 @@ def test_convert_gg_hh_winamax_pko_invokes_bounty_injection():
         "player_names": {"anon_map": {"Hero": "thinvalium"}, "players_list": []},
     }
     out = convert_gg_hh_to_pokerstars_compatible(hand)
-    # Hero (thinvalium) com bounty HH 244.20€ → PS-compat €244.20 bounty.
-    assert "Seat 4: thinvalium (351657 in chips, €244.20 bounty)" in out
-    # Vilão preservado com o seu valor literal.
-    assert "Seat 1: yousnouf75 (163754 in chips, €194.40 bounty)" in out
-    # Formato WN original removido.
-    assert "(354758, 140€ bounty)" not in out
-    # Resto do HH (header, ANTE/BLINDS, PRE-FLOP, action lines) intacto.
-    assert "*** PRE-FLOP ***" in out
-    assert "blueballs67 raises 8000 to 16000" in out
+    # Passthrough total — formato WN preservado, sem reescrita.
+    assert out == hh_raw
+    # Formato Seat original WN preservado (NÃO transformado para PS-compat).
+    assert "(163754, 194.40€ bounty)" in out
+    assert "in chips" not in out
 
 
 def test_convert_gg_hh_winamax_vanilla_passthrough():
@@ -2775,9 +2782,10 @@ def test_build_queue_zip_excludes_missing_payouts_by_default():
 
 
 def test_build_queue_zip_includes_no_payout_when_flag_set():
-    """pt23: mesmo sem payout_blob, escrevemos payouts.json só com os 3 hints
-    do watcher (equity_model, max_players, script_path). `has_payouts` no
-    manifest reflecte a presença do blob, não do hints-file."""
+    """pt42d: sem payout_blob + `include_no_payout=True` → payouts.json no
+    zip é defensivo `{name, folders, structures: []}` (formato HRC-aceite).
+    Hints (equity_model, max_players, script_path) vivem em meta.json
+    desde pt42d (HRC rejeitava campos extra no payouts.json → ICM puro)."""
     hand = {
         "id": 1, "hand_id": "GG-Z", "site": "GGPoker",
         "tournament_number": "999",
@@ -2788,23 +2796,29 @@ def test_build_queue_zip_includes_no_payout_when_flag_set():
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     names = set(zf.namelist())
     assert "GG-Z/hh.txt" in names
-    # pt23: payouts.json escrito SEMPRE (mesmo sem blob) para entregar hints
     assert "GG-Z/payouts.json" in names
+    assert "GG-Z/meta.json" in names
+    # pt42d: payouts.json sem hints — só layout HRC-aceite
     payouts = _json.loads(zf.read("GG-Z/payouts.json"))
-    # hints presentes, sem dados de payout
-    assert payouts["equity_model"] in ("malmuth_harville_icm", "multi_table_icm")
-    assert isinstance(payouts["max_players"], int)
+    assert set(payouts.keys()) == {"name", "folders", "structures"}
+    assert "equity_model" not in payouts
+    assert "script_path" not in payouts
+    # pt42d: hints em meta.json
+    meta = _json.loads(zf.read("GG-Z/meta.json"))
+    assert meta["equity_model"] in ("malmuth_harville_icm", "multi_table_icm")
+    assert isinstance(meta["max_players"], int)
     # script_path apontará para script.js (gerado sempre em Maio 2026+)
-    assert payouts["script_path"] == "script.js"
-    assert "CompletedTournament" not in payouts  # sem blob, só hints
+    assert meta["script_path"] == "script.js"
     manifest = _json.loads(zf.read("manifest.json"))
     assert manifest["total_in_zip"] == 1
     assert manifest["hands_included"][0]["has_payouts"] is False
 
 
-def test_build_queue_zip_hints_merged_with_payouts():
-    """pt23: quando há payout_blob, hints são merged como top-level keys
-    no payouts.json (sem destruir CompletedTournament/structures)."""
+def test_build_queue_zip_hints_in_meta_not_payouts():
+    """pt42d (substitui pt23 _hints_merged_with_payouts): hints saem do
+    payouts.json (HRC rejeita campos extra → ICM puro) e ficam em
+    meta.json. payouts.json preserva apenas o payout blob (name, folders,
+    structures)."""
     hand = {
         "id": 1, "hand_id": "GG-HINT", "site": "GGPoker",
         "tournament_number": "111",
@@ -2816,18 +2830,24 @@ def test_build_queue_zip_hints_merged_with_payouts():
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     payouts = _json.loads(zf.read("GG-HINT/payouts.json"))
-    # payout blob preservado
+    # payout blob preservado em payouts.json
     assert payouts["structures"][0]["name"] == "Test BBG $54"
     assert payouts["structures"][0]["bountyType"] == "PKO"
-    # hints presentes
-    assert payouts["equity_model"] == "malmuth_harville_icm"
-    assert isinstance(payouts["max_players"], int)
+    # pt42d: hints NÃO estão em payouts.json
+    assert "equity_model" not in payouts
+    assert "max_players" not in payouts
+    assert "script_path" not in payouts
+    # pt42d: hints estão em meta.json
+    meta = _json.loads(zf.read("GG-HINT/meta.json"))
+    assert meta["equity_model"] == "malmuth_harville_icm"
+    assert isinstance(meta["max_players"], int)
     # script.js gerado sempre (Maio 2026+) — script_path relativo "script.js"
-    assert payouts["script_path"] == "script.js"
+    assert meta["script_path"] == "script.js"
 
 
 def test_build_queue_zip_default_equity_when_no_FT_tags():
-    """pt23: sem tags FT (HM3 ou Discord), default = multi_table_icm."""
+    """pt23: sem tags FT (HM3 ou Discord), default = multi_table_icm.
+    pt42d: assertion movida de payouts.json para meta.json."""
     hand = {
         "id": 1, "hand_id": "GG-DEF", "site": "GGPoker",
         "tournament_number": "111",
@@ -2838,8 +2858,8 @@ def test_build_queue_zip_default_equity_when_no_FT_tags():
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    payouts = _json.loads(zf.read("GG-DEF/payouts.json"))
-    assert payouts["equity_model"] == "multi_table_icm"
+    meta = _json.loads(zf.read("GG-DEF/meta.json"))
+    assert meta["equity_model"] == "multi_table_icm"
 
 
 def test_build_queue_zip_skips_hand_without_raw():
@@ -2915,8 +2935,9 @@ def test_build_queue_zip_writes_script_js_for_hand_with_open():
     names = set(zf.namelist())
     assert "GG-OPEN/script.js" in names
 
-    payouts = _json.loads(zf.read("GG-OPEN/payouts.json"))
-    assert payouts["script_path"] == "script.js"
+    # pt42d: script_path movido para meta.json
+    meta = _json.loads(zf.read("GG-OPEN/meta.json"))
+    assert meta["script_path"] == "script.js"
 
     js = zf.read("GG-OPEN/script.js").decode("utf-8")
     # UTGopener é UTG (idx 0 em 8-handed) → SIZES_OPEN_OTHERS substituído.
@@ -3004,10 +3025,10 @@ def test_build_queue_zip_script_generation_error_on_template_io_failure(monkeypa
 
 
 def test_build_queue_zip_wn_pko_patches_payouts_and_audits_hero():
-    """pt42c end-to-end — WN PKO: zip ganha (a) payouts.json com
-    bountyType="PKO" + progressiveFactor=0.5 (patch do helper T1); (b)
-    audit Hero com `hero_bounty_source="hh"`; (c) converted_format
-    "pokerstars_compat" no manifest."""
+    """pt42c/pt42d end-to-end — WN PKO: zip ganha (a) payouts.json com
+    bountyType="PKO" + progressiveFactor=0.5 + name "<Name>  #<tn>" (pt42d);
+    (b) audit Hero com `hero_bounty_source="hh"`; (c) payouts.json sem
+    hints top-level (pt42d); (d) hints em meta.json (pt42d)."""
     hh_raw = (
         'Winamax Poker - Tournament "INTERSTELLAR" buyIn: 90€ + 10€ '
         'level: 22 - HandId: #X-1-1 - Holdem no limit (1000/4000/8000) '
@@ -3033,8 +3054,12 @@ def test_build_queue_zip_wn_pko_patches_payouts_and_audits_hero():
         "raw": hh_raw,
         "player_names": {"anon_map": {"Hero": "thinvalium"}, "players_list": []},
     }
-    # Payout blob simula o que o lobby vision escreveu (bountyType="None").
+    # Payout blob simula o que o lobby vision escreveu (bountyType="None"
+    # para nomes WN não-branded). Formato canónico com name/folders/structures
+    # top-level (idêntico ao que escreve `tournament_payouts.payouts_json`).
     payout_blob = {
+        "name": "/",
+        "folders": [],
         "structures": [
             {
                 "name": "INTERSTELLAR",
@@ -3050,10 +3075,20 @@ def test_build_queue_zip_wn_pko_patches_payouts_and_audits_hero():
     zip_bytes = build_queue_zip([hand], payouts_by_key)
 
     with _zipfile.ZipFile(_io.BytesIO(zip_bytes)) as zf:
-        # (a) payouts.json no zip: bountyType="PKO" + progressiveFactor=0.5
+        # (a) payouts.json patched: bountyType + progressiveFactor + name#tn
         po = _json.loads(zf.read("WN-TEST-PT42C-1/payouts.json"))
         assert po["structures"][0]["bountyType"] == "PKO"
         assert po["structures"][0]["progressiveFactor"] == 0.5
+        # pt42d: name com sufixo #<tn>
+        assert po["structures"][0]["name"] == "INTERSTELLAR  #999111"
+        # (c) pt42d: payouts.json sem hints top-level (HRC-aceite)
+        assert set(po.keys()) == {"name", "folders", "structures"}
+        assert "equity_model" not in po
+        assert "aggressor_real_action" not in po
+        # (d) pt42d: hints em meta.json
+        meta = _json.loads(zf.read("WN-TEST-PT42C-1/meta.json"))
+        assert "equity_model" in meta
+        assert "aggressor_real_action" in meta
         # (b) manifest: hero_bounty=244.20 (HH literal) + source="hh"
         manifest = _json.loads(zf.read("manifest.json"))
         included = manifest["hands_included"]
@@ -3061,11 +3096,38 @@ def test_build_queue_zip_wn_pko_patches_payouts_and_audits_hero():
         m = included[0]
         assert m["hero_bounty"] == 244.20
         assert m["hero_bounty_source"] == "hh"
-        # (c) converted_format
-        assert m["converted_format"] == "pokerstars_compat"
     # BD não mutada — blob original ainda tem "None"+0.0
     assert payout_blob["structures"][0]["bountyType"] == "None"
     assert payout_blob["structures"][0]["progressiveFactor"] == 0.0
+
+
+def test_build_queue_zip_payouts_json_in_zip_has_only_three_keys():
+    """pt42d — payouts.json no zip contém APENAS name, folders, structures.
+    Hints (equity_model, max_players, script_path, aggressor_real_action)
+    estão em meta.json. HRC rejeita campos extra no payouts.json (cai em
+    ICM puro) — esta restrição é a essência da pt42d."""
+    hand = {
+        "id": 1, "hand_id": "GG-LAYOUT", "site": "GGPoker",
+        "tournament_number": "111",
+        "raw": _HH_UTG_OPEN_8MAX,
+        "player_names": {},
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    payouts = _json.loads(zf.read("GG-LAYOUT/payouts.json"))
+    # Layout HRC-aceite: apenas estes 3 top-level keys.
+    assert set(payouts.keys()) == {"name", "folders", "structures"}
+    # Hints NÃO em payouts.json
+    assert "equity_model" not in payouts
+    assert "max_players" not in payouts
+    assert "script_path" not in payouts
+    assert "aggressor_real_action" not in payouts
+    # Hints estão em meta.json
+    meta = _json.loads(zf.read("GG-LAYOUT/meta.json"))
+    assert "equity_model" in meta
+    assert "max_players" in meta
+    assert "script_path" in meta
+    assert "aggressor_real_action" in meta
 
 
 def test_build_queue_zip_wn_vanilla_no_patch_no_audit():
@@ -3138,8 +3200,9 @@ def test_build_queue_zip_fallback_root_on_walk():
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    payouts = _json.loads(zf.read("GG-FR/payouts.json"))
-    ara = payouts["aggressor_real_action"]
+    # pt42d: aggressor_real_action movido para meta.json
+    meta = _json.loads(zf.read("GG-FR/meta.json"))
+    ara = meta["aggressor_real_action"]
     assert ara is not None
     assert ara["source"] == "fallback_root"
     assert ara["position"] == "BU/SB"   # positions[0] em HU (2 seated)
@@ -3175,8 +3238,9 @@ def test_build_queue_zip_fallback_unusable_position_bb_raise():
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    payouts = _json.loads(zf.read("GG-BB/payouts.json"))
-    ara = payouts["aggressor_real_action"]
+    # pt42d: aggressor_real_action movido para meta.json
+    meta = _json.loads(zf.read("GG-BB/meta.json"))
+    ara = meta["aggressor_real_action"]
     assert ara is not None
     assert ara["source"] == "fallback_unusable_position"
     assert ara["position"] == "BU"   # positions[0] em 3-handed
@@ -3225,8 +3289,9 @@ def test_build_queue_zip_aggressor_source_real_on_open():
     }
     blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
-    payouts = _json.loads(zf.read("GG-REAL/payouts.json"))
-    ara = payouts["aggressor_real_action"]
+    # pt42d: aggressor_real_action movido para meta.json
+    meta = _json.loads(zf.read("GG-REAL/meta.json"))
+    ara = meta["aggressor_real_action"]
     assert ara is not None
     assert "source" not in ara          # caso real preserva estrutura legacy
     assert ara["position"] == "UTG"
@@ -3645,11 +3710,12 @@ def test_extract_blinds_unknown_header_returns_None():
 
 # Integração build_queue_zip: aggressor_real_action no manifest + payouts.json.
 
-def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_payouts():
-    """pt25e: hand com raise preflop → manifest entry + payouts.json têm
+def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_meta():
+    """pt25e + pt42d: hand com raise preflop → manifest entry + meta.json têm
     `aggressor_real_action={type, size_bb, position}`. _HH_UTG_OPEN_8MAX usa
     Level5 (200/400) e UTGopener (Seat 7, BU=Seat 4 → UTG em 8-handed)
-    raises 800 to 1200 → 3.0bb + position UTG."""
+    raises 800 to 1200 → 3.0bb + position UTG. pt42d: campo movido de
+    payouts.json para meta.json (HRC rejeitava campos extra)."""
     hand = {
         "id": 1, "hand_id": "GG-AGG", "site": "GGPoker",
         "tournament_number": "111",
@@ -3663,8 +3729,9 @@ def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_payouts()
     entry = manifest["hands_included"][0]
     expected = {"type": "raise", "size_bb": 3.0, "position": "UTG"}
     assert entry["aggressor_real_action"] == expected
-    payouts = _json.loads(zf.read("GG-AGG/payouts.json"))
-    assert payouts["aggressor_real_action"] == expected
+    # pt42d: aggressor_real_action em meta.json (não em payouts.json)
+    meta = _json.loads(zf.read("GG-AGG/meta.json"))
+    assert meta["aggressor_real_action"] == expected
 
 
 def test_build_queue_zip_fallback_root_for_limp_pot():
@@ -3705,5 +3772,6 @@ BBplayer: checks
     assert ara is not None
     assert ara["source"] == "fallback_root"
     assert ara["position"] == "UTG"   # positions[0] em 4 seats (UTG, BU, SB)
-    payouts = _json.loads(zf.read("GG-LIMP/payouts.json"))
-    assert payouts["aggressor_real_action"]["source"] == "fallback_root"
+    # pt42d: aggressor_real_action movido para meta.json
+    meta = _json.loads(zf.read("GG-LIMP/meta.json"))
+    assert meta["aggressor_real_action"]["source"] == "fallback_root"

@@ -941,44 +941,90 @@ escreve no `payouts.json.chips`.
 | C | Formato Winamax — não testado se o HRC engole HH GG convertida para formato Winamax (alternativa ao PS). |
 | D | `*** ANTE/BLINDS ***` no Winamax separa essa fase do resto. PS não tem. Confirmar qual é exigido em cada formato. |
 
-### 12.10 Pipeline WN bounty (pt42c) — conversão Winamax → PS-compat
+### 12.10 Pipeline WN PKO — arquitectura final pt42d
 
-Implementado em pt42c após descoberta no smoke pt42b de que **1232 mãos
-PKO Winamax** chegavam ao HRC sem bounty (`payouts.json.bountyType="None"`,
-sem injecção na HH).
+Iterado em pt42c v1 + pt42d v2 após descoberta empírica de que o HRC
+rejeita `payouts.json` com campos extra top-level (cai em ICM puro
+mesmo com `bountyType="PKO"`).
 
 **Trigger:** site=`Winamax` AND tournament_format ∈ `WINAMAX_BOUNTY_FORMATS`
 (`"pko"`, `"super ko"`, `"ko"`; Mystery KO continua excluído via
 `MYSTERY_FORMATS`).
 
-**Transformações (subset das 11 do GG — só as necessárias para WN):**
+**3 elementos da arquitectura final:**
 
-| # | Transformação | Origem (WN) | Destino (PS-compat) |
+#### (1) HH WN passthrough — `convert_gg_hh_to_pokerstars_compatible`
+
+HRC lê formato WN nativo `Seat N: nick (chips, X€ bounty)` directamente.
+**SEM** reescrita Seat lines. Branch WN PKO de pt42c v1 foi revertido em
+pt42d T2. Para WN/PS/WPN: `return hand.get("raw")` (passthrough total).
+
+#### (2) `payouts.json` no zip — formato HRC-aceite
+
+APENAS 3 top-level keys: `{name, folders, structures}`. Sem hints. Sem
+campos extra. HRC rejeita qualquer campo desconhecido na top-level →
+cai em ICM puro (validado empíricamente pt42d smoke real).
+
+Patch via `_patch_winamax_payouts_bountytype(blob, progressive_factor=0.5,
+tournament_number=tnum)`:
+- `structures[i].bountyType` = `"PKO"`.
+- `structures[i].progressiveFactor` = `0.5`.
+- `structures[i].name` = `_format_winamax_structure_name(orig, tn)` →
+  `"<TournamentName>  #<tournament_number>"` (**2 espaços** + `#tn`).
+  Sufixo `#tn` é essencial — sem ele, structures de torneios distintos
+  com o mesmo nome ("GRAVITY", "INTERSTELLAR", etc.) colidem na
+  biblioteca persistente HRC (`custom.json`) e ficam órfãs sem
+  `bountyType`. Mesmo num re-import, o HRC mantém a entry antiga sem
+  `bountyType` → ICM puro.
+
+**Patch é aplicado SÓ NO ZIP** (não na BD — `tournament_payouts.payouts_json`
+continua a reflectir o que o lobby vision escreveu; audit trail
+preservado).
+
+#### (3) Hints em `meta.json` (não em `payouts.json`)
+
+4 hints que o watcher consome para configurar o wizard HRC migram do
+payouts.json (pt23 antigo) para meta.json (pt42d):
+
+- `equity_model`: `"malmuth_harville_icm"` | `"multi_table_icm"`.
+  Watcher (`set_equity_model`) faz typeahead no dropdown HRC.
+- `max_players`: int | None. Watcher (`set_hand_mode_players`).
+- `script_path`: str | None. `"script.js"` (relativo no zip); adapter
+  (`rewrite_script_path_in_meta`) reescreve para path absoluto
+  pós-unzip; watcher (`setup_scripting`).
+- `aggressor_real_action`: dict | None. Gate da 2ª run em Selected
+  Subtree.
+
+#### Watcher source (recompilado pt42d)
+
+`tools/watcher_src/patched_funcs.py:setup_hand` lê os 4 hints de
+`hand_meta.get(...)` em vez de `_payouts.get(...)`. Linhas 1786, 1787,
+1790, 1984 actualizadas. Load `_payouts` órfão removido. **.exe
+recompilado SHA `cdfc7247...3262`** (era pt35 SHA `33eae43a...c53c4f`).
+
+#### Adapter (Python puro)
+
+`tools/hrc_adapter/payouts_helpers.py:rewrite_script_path_in_meta` (era
+`_in_payouts`). Target file = `meta.json`. Caller em
+`hrc_adapter.py:pull_handler` actualizado.
+
+#### Audit no manifest (preservado de pt42c)
+
+`hands_included[i].hero_bounty` + `hero_bounty_source = "hh"` (audit-only;
+não muda HRC). Source HH crua via `_extract_winamax_seat_bounties`.
+
+#### Cobertura por formato
+
+| Site / Formato | Pipeline | payouts.json patched? | Hints em meta? |
 |---|---|---|---|
-| 1 | Chips nas seats | `(75308, 10€ bounty)` | `(75308 in chips, €10 bounty)` |
-| 2 | Currency position | `10€` (depois do valor) | `€10` (antes do valor) |
-| 3 | `in chips` literal | Ausente | Adicionado |
-| 4 | Hero bounty value | `(<X>€ bounty)` literal | `max(Vision, HH)` (regra pt41) |
-
-**Header WN + markers (`*** ANTE/BLINDS ***`, `*** PRE-FLOP ***`) NÃO são
-convertidos** — pipeline minimal por decisão Web/Rui. Smoke real Beelink
-em pt42d validará se HRC aceita o formato WN-converted; se rejeitar
-(rejeita header não-PS, por exemplo), escalar para conversão completa.
-
-**`payouts.json` no zip** ganha `_patch_winamax_payouts_bountytype`:
-`bountyType="None"` → `"PKO"`, `progressiveFactor=0.0` → `0.5`. A BD
-(`tournament_payouts.payouts_json`) **não é mutada** — o blob continua a
-reflectir o que o lobby vision escreveu (audit trail).
-
-**Audit Hero bounty no manifest:** `hero_bounty_source="hh"` (novo enum)
-distingue WN pipeline pt42c de GG pipeline pt41 (`"ts"` ou `"vision"`).
-
-**Source de truth para o audit:** HH crua (`hand.raw`), não o hh_text
-convertido (que já não tem o regex `(<X>€ bounty)` original).
-
-**Implementação:** `backend/app/services/queue_export.py` —
-`convert_gg_hh_to_pokerstars_compatible` ganha branch WN PKO;
-`build_queue_zip` orquestra patch + audit.
+| GGPoker / PKO/SuperKO/KO | pt29 (`convert_gg_hh_to_pokerstars_compatible`) | Não (GG já tem bountyType correcto) | Sim |
+| GGPoker / Vanilla | pt29 | Não (sem bounty) | Sim |
+| GGPoker / Mystery KO | Excluído (`MYSTERY_FORMATS` desde pt41) | — | — |
+| **Winamax / PKO/SuperKO/KO** | **pt42d** (passthrough HH + patch payouts + hints em meta) | **Sim** (bountyType "None" → "PKO" + `#tn` no name) | Sim |
+| Winamax / Vanilla | passthrough | Não | Sim |
+| Winamax / Mystery KO | Excluído | — | — |
+| PokerStars (todos) | passthrough | Não (PS lobby vision já classifica correctamente) | Sim |
+| WPN | passthrough (no /hrc, mas WPN não está em `ALLOWED_SITES`) | — | — |
 
 ---
 

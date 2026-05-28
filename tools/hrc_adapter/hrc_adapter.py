@@ -32,7 +32,7 @@ from urllib3.util.retry import Retry
 
 # pt25: helper para rewrite de script_path no payouts.json pós-unzip.
 # Pure-stdlib, importável sem o resto do adapter (facilita pytest do backend).
-from payouts_helpers import rewrite_script_path_in_payouts
+from payouts_helpers import rewrite_script_path_in_meta
 
 
 # ----- config -----
@@ -263,20 +263,20 @@ def pull_queue(session: requests.Session, api_base: str, queue_dir: Path,
                     continue
 
                 # pt25 prune-in-gap-downstream: backend pode escrever script.js
-                # no zip (com hints REAL_AGGRESSOR_POS + DOWNSTREAM_POSITIONS
-                # injectados). Reescreve script_path no payouts.json com path
+                # no zip. Reescreve script_path no meta.json (pt42d — migrado
+                # de payouts.json porque HRC rejeitava campos extra) com path
                 # absoluto, para o watcher pegar via setup_scripting.
                 script_js = target_dir / "script.js"
-                payouts_path = target_dir / "payouts.json"
-                if script_js.is_file() and payouts_path.is_file():
-                    if rewrite_script_path_in_payouts(payouts_path, str(script_js)):
+                meta_path = target_dir / "meta.json"
+                if script_js.is_file() and meta_path.is_file():
+                    if rewrite_script_path_in_meta(meta_path, str(script_js)):
                         logger.info(
-                            "pull %s: script.js detected -> payouts.script_path=%s",
+                            "pull %s: script.js detected -> meta.script_path=%s",
                             hand_id, str(script_js),
                         )
                     else:
                         logger.warning(
-                            "pull %s: script.js presente mas rewrite payouts falhou",
+                            "pull %s: script.js presente mas rewrite meta falhou",
                             hand_id,
                         )
 

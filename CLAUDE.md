@@ -781,6 +781,59 @@ Detalhe completo em `docs/JOURNAL_2026-05-27-pt42c.md`,
 `docs/TECH_DEBTS_INVENTARIO.md` (secção pt42c),
 `docs/HRC_ANATOMIA_OPERACIONAL.md` §12.10.
 
-Última sessão fechada: **pt42c** (27 Maio 2026 — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` ✅ HIGH Opção C; pipeline WN → PS-compat com bounty inline; suite **725 → 730 PASSED**; 15 testes pt42c novos; backend-only; smoke real Beelink pendente para pt42d). Detalhes em `docs/JOURNAL_2026-05-27-pt42c.md`.
+## pt42d — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2 (28 Maio 2026)
 
-Próxima sessão (**pt42d**), por ordem: 1) **Commit + push pt42c** (após validação Web final); 2) **Smoke real Beelink pt42c** — re-descarregar mão WN PKO e correr no HRC; validar formato WN-converted aceite + payouts patched + Hero bounty no manifest; 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 5) `#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT` (🟢 LOW); 6) `#POSITION-LABELS-PYTHON-JS-DRIFT` (🟢 LOW); 7) `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🟡 MED); 8) importar TS GG faltosos. Em fila: smoke battery 1, `#HRC-BOUNTY-HARDCODED-50PCT`, Fase C do pipeline SS de mesa. Backlog completo em `docs/PENDENTES.md`.
+**Backend + watcher recompilado + adapter.** Re-abertura pt42c após smoke
+real expor que o HRC continuava em ICM puro (Instant=0%) apesar do
+`bountyType="PKO"` correcto no payouts.json. Investigação profunda da
+biblioteca persistente HRC revelou causa raiz dupla.
+
+**Causa raiz definitiva:**
+
+1. **4 hints top-level no `payouts.json`** (`equity_model`, `max_players`,
+   `script_path`, `aggressor_real_action`) — HRC rejeita campos extra e
+   guarda a structure na biblioteca `custom.json` sem `bountyType`. Em
+   re-imports, fica órfã → ICM puro.
+2. **`structures[i].name` sem sufixo `#<tournament_number>`** — colisão
+   na biblioteca HRC com structures de outros torneios com o mesmo nome
+   ("GRAVITY", "INTERSTELLAR").
+3. **Seat lines conversion WN→PS de pt42c v1** era desnecessária — HRC
+   lê formato WN nativo.
+
+**Arquitectura final (3 elementos):**
+
+1. **HH WN passthrough** — `convert_gg_hh_to_pokerstars_compatible`
+   simplificado (branch WN PKO removido).
+2. **`payouts.json` no zip = APENAS `{name, folders, structures}`** — sem
+   hints top-level. Patch via `_patch_winamax_payouts_bountytype` com
+   `tournament_number=tnum` → name = `"<Name>  #<tn>"` (2 espaços + #ID).
+3. **Hints em `meta.json`** — 4 campos migrados do payouts.json:
+   `equity_model`, `max_players`, `script_path`, `aggressor_real_action`.
+   Watcher (`patched_funcs.py:setup_hand`) lê de `hand_meta.get(...)`.
+
+**Path B (Web/Rui)** — backend + watcher source + adapter recompilados
+na mesma sessão para evitar degradação do robot.
+
+**Suite 730 → 734 PASSED.** 15 alterações líquidas (T1 +5, T2 −3, T3 +2,
+T4+T5 9 modificados + 1 novo, T2 1 renomeado/invertido).
+
+**Watcher recompilado:** `.exe` SHA `cdfc7247...3262` (pt35 era
+`33eae43a...c53c4f`). Adapter Python puro: `rewrite_script_path_in_meta`
+substitui `rewrite_script_path_in_payouts`.
+
+**Tech debt novo:** `#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING` (LOW) —
+swap_and_smoke.py harness in-process bate em sub-test pre-existente
+(mock Win32 ausente desde pt30); não-bloqueante.
+
+**Decisões product:** prizes/chips passam como vêm do parsing (HRC aceita
+números brutos; sem helpers de formato); `_extract_winamax_seat_bounties`
++ `compute_hero_bounty_from_hh` mantidos para audit no manifest;
+patch só no zip, BD intacta.
+
+Detalhe completo em `docs/JOURNAL_2026-05-28-pt42d.md`,
+`docs/TECH_DEBTS_INVENTARIO.md` (secção pt42d),
+`docs/HRC_ANATOMIA_OPERACIONAL.md` §12.10 (reescrita).
+
+Última sessão fechada: **pt42d** (28 Maio 2026 — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2 ✅ RESOLVIDO; payouts.json HRC-native + hints em meta.json + .exe recompilado SHA cdfc7247...3262; suite **730 → 734 PASSED**; smoke real Beelink pendente para validação final). Detalhes em `docs/JOURNAL_2026-05-28-pt42d.md`.
+
+Próxima sessão (**pt42e**), por ordem: 1) **Smoke real Beelink pt42d** (uvicorn local + cópia .exe novo + payouts_helpers.py para Beelink; validar HRC Instant=50%); 2) **Commit + push pt42d** (após smoke OK); 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 5) `#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING` (🟢 LOW novo); 6) outros. Backlog em `docs/PENDENTES.md`.

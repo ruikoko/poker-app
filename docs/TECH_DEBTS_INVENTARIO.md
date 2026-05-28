@@ -6,7 +6,81 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## Estado actual (27 Maio 2026 — pt42c, WN bounty via HH crua)
+## Estado actual (28 Maio 2026 — pt42d, payouts.json HRC-native + hints em meta.json)
+
+Re-abertura pt42c após smoke real expor `Instant=0%` no HRC apesar do
+`bountyType="PKO"`/`progressiveFactor=0.5` aplicado em pt42c. Investigação
+profunda da biblioteca HRC persistente (`%USERPROFILE%\HoldemResources\
+.metadata\.plugins\net.holdemresources.calculator\structuredata\custom.json`)
+revelou que o HRC rejeita campos extra no `payouts.json` (cai em ICM puro)
+e que o `name` da structure precisa de sufixo `"  #<tournament_number>"`
+(2 espaços + `#tn`) para evitar colisão na biblioteca.
+
+**Causa raiz definitiva (3 elementos):**
+
+1. **4 hints top-level no payouts.json** (`equity_model`, `max_players`,
+   `script_path`, `aggressor_real_action`) injectados em pt23+ via
+   `_build_watcher_hints` faziam o HRC rejeitar a structure inteira.
+2. **`structures[i].name` sem sufixo `#<tn>`** — colidia na biblioteca
+   persistente HRC com entries de outros torneios com o mesmo nome
+   ("GRAVITY", "INTERSTELLAR", etc.).
+3. **Pipeline pt42c v1 (Seat lines conversion WN→PS)** era desnecessário —
+   HRC lê formato WN nativo `(<chips>, <X>€ bounty)` directamente. Reverter.
+
+**Path B (Web/Rui):** backend + watcher source recompilado + adapter na
+mesma sessão. Manual flow (Rui descarrega → importa no HRC) é o caso de
+uso principal; smoke real Beelink usa uvicorn local antes do push para
+prod.
+
+Suite **730 → 734 PASSED** (+15 testes pt42d − 14 modificações: T1 +5
+novos, T2 −4 removidos T2 pt42c +1 update, T3 +2 novos, T4+T5 9 updates +
+1 e2e + 1 novo). 0 regressões.
+
+**Watcher recompilado:** `.exe` SHA `cdfc7247...3262` (pt35 era
+`33eae43a...c53c4f`); ~13 MB; build sucesso. Smoke harness in-process
+parte num sub-test pre-existente (mock `_wait_for_finish_ready` ausente);
+issue ortogonal documentado em debt novo.
+
+**Adapter recompilado** (Python puro): `rewrite_script_path_in_meta`
+substitui `rewrite_script_path_in_payouts`; target file = `meta.json`.
+
+### Fixes shipped em pt42d (1 ✅)
+
+| Debt | Estado | Detalhe |
+|---|---|---|
+| **#WN-BOUNTY-NULL-IN-HRC-PIPELINE** v2 | ✅ FIXED RESOLVIDO (pt42c v1 revertido em T2; pipeline v2 final em T1+T3+T4+T5+T6+T8+T9+T10) | (a) Helper `_format_winamax_structure_name(name, tn) → "<Name>  #<tn>"`. (b) `_patch_winamax_payouts_bountytype` aceita `tournament_number` kwarg + aplica formato HRC-aceite. (c) `convert_gg_hh_to_pokerstars_compatible`: branch WN PKO removido → passthrough total para PS/WN/WPN (HRC lê formato WN nativo). (d) `build_queue_zip`: `payouts.json` no zip = APENAS `{name, folders, structures}` (sem merge com hints top-level — HRC rejeitava). (e) `_build_hand_meta` ganha 4 hints (`equity_model`/`max_players`/`script_path`/`aggressor_real_action`) — movidos do payouts para meta. (f) `tools/watcher_src/patched_funcs.py`: 4× `_payouts.get(...) → hand_meta.get(...)`; load `_payouts` órfão removido. **`.exe` recompilado, SHA `cdfc7247...3262`.** (g) `tools/hrc_adapter/payouts_helpers.py`: `rewrite_script_path_in_payouts → rewrite_script_path_in_meta` (target = meta.json). (h) `hrc_queue.py`: comentário Andar 1 actualizado. Suite **734 PASSED**. Refs: `backend/app/services/{queue_export,hrc_queue}.py`, `backend/tests/test_queue_export.py`, `tools/watcher_src/patched_funcs.py`, `tools/hrc_adapter/{payouts_helpers,hrc_adapter}.py`. |
+
+### Tech debt novo aberto em pt42d (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING** | 🟢 LOW | `_local_only/watcher_decompile/swap_and_smoke.py` smoke harness in-process bate em `RuntimeError: WIZARD_FINISH_NEVER_RE_ENABLED` quando exercita `setup_hand`. Causa: `_wait_for_finish_ready` (função APPEND adicionada pt30) faz polling Win32 do botão Finish (disabled→enabled), mas o harness usa `CallRec` mocks que retornam None → polling timeout 60s. **Não-bloqueante:** o `.pyc` swapped é gravado em `repacked/` ANTES do smoke; PyInstaller consome-o sem problema. Fix: adicionar mock dedicado de `_wait_for_finish_ready` (returns True) no `install_module_mocks` ou pré-bind no `g["_wait_for_finish_ready"]`. Pre-existente desde pt30; só agora foi exercitado (sessões pt30-pt42c não correram swap_and_smoke.py com este path). Não bloqueia builds futuros (.pyc continua a gerar OK). |
+
+### Decisões internas pt42d (refinamentos defensivos)
+
+- **Path B (vs Path A passthrough degrada watcher temporariamente)** —
+  Rui prefere recompilar watcher na mesma sessão para evitar regressão
+  na 2ª run do robot. Custo: +T8+T9+T10. Benefício: smoke real Beelink
+  pós-T12 é completo (manual + robot ambos).
+- **`_payouts` removido por completo do watcher** (Opção B "limpeza" em T8)
+  em vez de manter dead code (Opção A). −15 / +9 linhas. Sem risco
+  porque o load era only consumed nas 4 substituições.
+- **Ficheiro `payouts_helpers.py` mantém o nome** (sem renomear para
+  `meta_helpers.py`) — só a função interior muda. Reduz reinstalação
+  no Beelink (cópia de 1 ficheiro inalterada).
+- **`compute_hero_bounty_from_hh` + `_extract_winamax_seat_bounties`
+  mantidos** para audit no manifest (informativo, não muda HRC). Sem
+  alteração face a pt42c.
+- **Tournament_number defensivo como kwarg-only com default None** em
+  `_patch_winamax_payouts_bountytype`. Permite backward-compat dos 4 tests
+  existentes pt42c (passam tn=None implícito) — 0 tests partidos por kwarg.
+- **payouts.json escrito SEMPRE no zip** mesmo sem blob (defensivo: `{name:
+  "/", folders: [], structures: []}`). Pré-pt42d era hints-only-fallback;
+  agora é structures-only-fallback.
+
+---
+
+## Estado anterior (27 Maio 2026 — pt42c, WN bounty via HH crua)
 
 Re-abertura `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` (🔴 HIGH, novo) na mesma
 sessão pt42b após smoke da mão 4 expor bounty null em WN PKO. **1232

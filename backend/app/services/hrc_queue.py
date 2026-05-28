@@ -142,10 +142,18 @@ def select_andar1_rows(
            -- pt41 #HERO-BOUNTY-FROM-TS-DERIVATION: Mystery KO fora do /hrc
            -- (HRC não modela) + GG bounty-gated (PKO/SuperKO/KO) exige TS com
            -- buy_in_bounty. PS passa sempre (bounty na HH crua).
-           -- pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE: Winamax tem pipeline
-           -- próprio (queue_export.convert_gg_hh_to_pokerstars_compatible
-           -- + _patch_winamax_payouts_bountytype no build_queue_zip); HH WN
-           -- já tem bounty literal por Seat. Sem gate adicional aqui.
+           -- pt42d #WN-BOUNTY-NULL-IN-HRC-PIPELINE v2: Winamax arquitectura
+           -- final (revertida pt42c v1 — Seat lines conversion não era
+           -- necessária):
+           --   * HH WN passthrough (HRC lê formato `(<X>€ bounty)` nativo).
+           --   * payouts.json no zip = layout HRC-aceite `{{name, folders,
+           --     structures}}` com `_patch_winamax_payouts_bountytype` a
+           --     aplicar bountyType="PKO" + progressiveFactor=0.5 + name
+           --     "<Name>  #<tn>" (build_queue_zip).
+           --   * Hints (equity_model, max_players, script_path,
+           --     aggressor_real_action) em meta.json (não payouts.json —
+           --     HRC rejeita campos extra → ICM puro).
+           -- Sem gate adicional aqui — WN PKO passa pelo Andar 1 normalmente.
            AND lower(COALESCE(tournament_format, '')) <> ALL(%s::text[])
            AND (
                  site <> 'GGPoker'
