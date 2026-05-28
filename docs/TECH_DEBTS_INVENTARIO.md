@@ -1241,17 +1241,18 @@ Sessão de investigação read-only sobre o IRE v2 em prod (deployed pt16). 3 te
 - **Origem:** Investigação prod 2026-05-08 sobre 6 mãos. Hand id=29675 é do torneio "$215 Sunday Bounty Overload [Monster Bounties]" — Monster Bounties = ratio bounty 75%, não 25%.
 - **Vector:** A tabela W3cray hardcoded em `ire.py:54-76` (`W3CRAY_TABLE_25PCT`) é exclusivamente para ratio 25% (PKO standard). O único guard contra ratios diferentes é a deny-list textual `SUPER_KO_NEEDLE = "super ko"` que esconde Super KO 40%. Monster Bounties 75% **não** está na deny-list → IRE é calculado mas o valor está errado contra a tabela errada. UI mostra um número aparentemente válido que não corresponde à realidade do torneio.
 - **Severidade:** 🔴 Funcional crítico. Dados errados apresentados como certos — pior que esconder.
-- **Status:** **por corrigir**.
+- **Status:** **pronto para implementar (Onda 1, próxima sessão)** — bloqueador empírico (`instant_fraction` dos Big Bounty) RESOLVIDO em 2026-05-29; ver análise abaixo, ponto 6.
 - **Solução temporária (~1h):** alargar a deny-list para apanhar todos os formatos não-25%. Adicionar needles tipo `"monster bounties"`, `"mystery bounties"` (case-insens). IRE fica escondido em vez de errado.
 - **Solução robusta (~4h):** adicionar coluna `pko_ratio NUMERIC(4,2)` em `tournaments_meta` (ex: 0.25, 0.40, 0.75) com derivação automática via parser de nome do torneio + override manual. `compute_ire` selecciona a tabela W3cray correcta (ou fórmula fallback) consoante `pko_ratio`. Permite suportar todos os formatos sem deny-list crescente.
 - **Esforço:** 1h (deny-list temporária) ou 4h (coluna `pko_ratio`).
 
-#### Análise 2026-05-28 (Web + Rui) — **EM ABERTO — aguarda dado empírico**
+#### Análise 2026-05-28 (Web + Rui) — **PRONTO PARA IMPLEMENTAR — bloqueador empírico RESOLVIDO (2026-05-29, ponto 6)**
 
 Sessão de investigação sobre como resolver o `#IRE-MB` correctamente (não só esconder).
 Conclusão: o caminho certo **não** é tabelas W3cray paralelas por formato — é decompor a
-constante `0.25` em 2 parâmetros lidos por torneio. **Nada implementado** (bloqueado por dado
-empírico do ponto 4).
+constante `0.25` em 2 parâmetros lidos por torneio. **Ainda nada implementado**, mas o bloqueador
+do ponto 4 ficou **resolvido** com a confirmação empírica do ponto 6 (2026-05-29) → fix pronto
+para Onda 1 na próxima sessão.
 
 **1. Mecanismo entendido.** A constante `0.25` do W3cray (`bounty_si = ko_units × 0.25`,
 `ire.py:_formula_fallback` + a tabela `W3CRAY_TABLE_25PCT`) decompõe-se em:
@@ -1282,11 +1283,11 @@ parâmetros por torneio e calcular a constante dinamicamente:
   do formato.
 - 50/50 → `0.25` (inalterado); Big Bounty 25/75 com instant 0.5 → `0.375`.
 
-**4. Bloqueador (porque está EM ABERTO).** Confirmar **empiricamente** a `instant_fraction` dos
-Big Bounty / Monster 25/75. A busca online confirmou progressive 0.5 no PKO standard, mas foi
-**inconclusiva** para os Big Bounty 25/75 (fontes de salas pequenas, sem especificar o
-mecanismo). **Rui vai trazer um lobby/TS de um Big Bounty real** para ler o instant por KO. Se
-for metade → constante `0.375`.
+**4. Bloqueador (resolvido no ponto 6).** Confirmar **empiricamente** a `instant_fraction` dos
+Big Bounty / Monster. A busca online confirmou progressive 0.5 no PKO standard, mas foi
+**inconclusiva** para os Big Bounty (fontes de salas pequenas, sem especificar o
+mecanismo). **Rui trouxe um TS+HH de um Big Bounty real** para ler o instant por KO → ✅ **RESOLVIDO
+(ponto 6): `instant_fraction = 0,5` confirmado também nos Big Bounty HR do GG.**
 ⚠️ **Não confundir `instant_fraction` com o `progressiveFactor` do HRC / `lobby_vision.py`** — são
 convenções potencialmente distintas (no `lobby_vision` o PKO standard tem `progressiveFactor=0.50`,
 mas o IRE trata o bounty standard como 25% do SI). Confirmar a convenção de cada um **antes** de
@@ -1295,6 +1296,25 @@ mexer. Cross-ref: `#TS-RATIO-MYSTERY-CONFIRM`.
 **5. Interino.** Enquanto não resolvido, a app continua a mostrar **IRE errado** em Big Bounty.
 Opção interina a decidir com o Rui: **deny-list** (não mostrar IRE em Big Bounty — needle no gate
 `ire.py:229`, à imagem do `SUPER_KO_NEEDLE`) até o cálculo correcto estar validado.
+
+**6. Confirmação empírica (Big Bounty HR) — 2026-05-29.** ✅ **Fecha o bloqueador do ponto 4.**
+- TS analisado: **GG Tournament #278862118**, **$525 Bounty Hunters HR [Big Bounties]**, 554 players.
+  Split do buy-in **$150 (PP) + $25 (rake) + $350 (KOP)** → `KOP_fraction` líquida = `350 / 500` =
+  **0,70**.
+- HH do mesmo torneio: **bounty total na cabeça do eliminado = $262,50**; **instant recebido pelo
+  vencedor = $131,25** → `instant_fraction = 131,25 / 262,50 =` **0,5 exacto**.
+- Conclusão: a família **Bounty Hunters do GG mantém progressive 0,5** mesmo na variante
+  **[Big Bounties]**.
+- Constante calculada para este torneio: `0,70 × 0,5 =` **0,35**.
+- A fórmula geral `constante = KOP_fraction × instant_fraction` está agora validada com **2 pontos
+  empíricos** (50/50 → `0,25`; 30/70 → `0,35`). **Status do bloqueador: RESOLVIDO.**
+
+**7. Nota de implementação pendente.** A tabela W3cray (`ire.py:54-76`) é calibrada
+empiricamente para a constante `0,25` e dá valores ligeiramente diferentes da fórmula pura (ex.:
+célula `[1,1] = 5,1%` vs fórmula `5,56%`). Para constantes ≠ `0,25` há que decidir: **(a)** usar só
+a fórmula nesses casos, mantendo a tabela como caminho rápido para `0,25`; **(b)** recalibrar
+tabelas para outras constantes; **(c)** abandonar a tabela e usar sempre a fórmula. Decisão a tomar
+quando o fix for implementado.
 
 📎 **Dado empírico relacionado:** ver «Estruturas observadas — Mystery Bounty PokerStars
 (2026-05-28)» logo abaixo. Não é o caso directo (esse lobby é **Mystery**, não Big Bounty
