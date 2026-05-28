@@ -265,7 +265,7 @@ Suite **651 → 661 → 666 PASSED**. SHAs: `a942ac7` (bounty) → `0707978` (do
 
 | ID | Severidade | Resumo |
 |---|---|---|
-| **#MYSTERY-KO-DUAL-SUPPORT** | 🟡 MED | Mystery KO **excluído do /hrc na pt41** (gate site-agnóstico em `select_andar1_rows`). O HRC não modela Mystery KO de forma fiável: o bounty é **oculto/aleatório** e a equity muda radicalmente **pré- vs pós-ITM** (antes do ITM o bounty é desconhecido → a mão joga-se como **vanilla**; depois do ITM os bounties revelados viram **KO fixos**). **Suporte futuro:** (1) pré-ITM tratar como vanilla (sem token); (2) pós-ITM como KO fixo com o bounty revelado; (3) `players_left` vs `places_paid` como gate ITM (depende do pipeline SS de mesa fidedigno); (4) importar os TS Mystery (**~1.353 mãos GG 2026** à espera, ex. `tn 281143347` Sunday Showdown). **Bloqueado por:** estado ITM por mão + decisão de produto sobre o valor de bounty pós-revelação. Refs: `queue_export.py:MYSTERY_FORMATS`; `hrc_queue.py:select_andar1_rows`/`pending_ts_hands`. |
+| **#MYSTERY-KO-DUAL-SUPPORT** | 🟡 MED | Mystery KO **excluído do /hrc na pt41** (gate site-agnóstico em `select_andar1_rows`). O HRC não modela Mystery KO de forma fiável: o bounty é **oculto/aleatório** e a equity muda radicalmente **pré- vs pós-ITM** (antes do ITM o bounty é desconhecido → a mão joga-se como **vanilla**; depois do ITM os bounties revelados viram **KO fixos**). **Suporte futuro:** (1) pré-ITM tratar como vanilla (sem token); (2) pós-ITM como KO fixo com o bounty revelado; (3) `players_left` vs `places_paid` como gate ITM (depende do pipeline SS de mesa fidedigno); (4) importar os TS Mystery (**~1.353 mãos GG 2026** à espera, ex. `tn 281143347` Sunday Showdown). **Bloqueado por:** estado ITM por mão + decisão de produto sobre o valor de bounty pós-revelação. Refs: `queue_export.py:MYSTERY_FORMATS`; `hrc_queue.py:select_andar1_rows`/`pending_ts_hands`. 📎 **Estrutura real observada:** ver «Estruturas observadas — Mystery Bounty PokerStars (2026-05-28)» na secção IRE (split 33/67, mecânica de desbloqueio, coluna Bounty = acumulado). |
 
 ### Tech debt novo aberto em pt41 (2 — foco pt42)
 
@@ -1018,8 +1018,8 @@ af7e3c8  Backoffice import — /tournament-results/import (vanilla+PKO)
 
 | ID | Severidade | Resumo |
 |---|---|---|
-| **#BACKOFFICE-MYSTERY** | 🟡 MEDIUM | Suportar Mystery KO no backoffice import. Hoje devolve `mystery_unsupported` (fail-fast em `tournament_results._process_one` quando `ts_tournament_format == 'KO'`). Precisa de sample SS Mystery real + confirmação do `bountyType` aceite pelo HRC Structure Manager (`"KO"` ou mapear para `"PKO"` com factor especial). |
-| **#TS-RATIO-MYSTERY-CONFIRM** | 🟢 LOW | Confirmar `apply_ratio_lookup` em `services/lobby_vision.py:35-45` para Mystery KO `("KO", 0.33)`. Web mencionou em pt20 que regra GG real é 25/75 — clarificar antes de fechar #BACKOFFICE-MYSTERY (impacta validação de drift). |
+| **#BACKOFFICE-MYSTERY** | 🟡 MEDIUM | Suportar Mystery KO no backoffice import. Hoje devolve `mystery_unsupported` (fail-fast em `tournament_results._process_one` quando `ts_tournament_format == 'KO'`). Precisa de sample SS Mystery real + confirmação do `bountyType` aceite pelo HRC Structure Manager (`"KO"` ou mapear para `"PKO"` com factor especial). 📎 **Estrutura real observada (PS Mystery, split 33/67, KOP > PP, valores random):** ver «Estruturas observadas — Mystery Bounty PokerStars (2026-05-28)» na secção IRE. |
+| **#TS-RATIO-MYSTERY-CONFIRM** | 🟢 LOW | Confirmar `apply_ratio_lookup` em `services/lobby_vision.py:35-45` para Mystery KO `("KO", 0.33)`. Web mencionou em pt20 que regra GG real é 25/75 — clarificar antes de fechar #BACKOFFICE-MYSTERY (impacta validação de drift). 📎 **Corroboração empírica (PS Mystery 2026-05-28):** split observado **PP ≈ 33%** / KOP ≈ 67% bate com `0.33` **enquanto fracção de PP** — atenção à ambiguidade PP-fraction (0,33) vs KOP-fraction (0,667). Ver «Estruturas observadas — Mystery Bounty PokerStars (2026-05-28)» na secção IRE. |
 | **#TS-AUTO-PAYOUTS-ICM** | 🟢 FUTURE | Derivar `tournament_payouts` automaticamente a partir do TS via algoritmo ICM (TS tem pool+players+ratio; falta distribuição). Decisão de produto: ICM é estimativa, backoffice é literal. Manter pipelines distintos a não ser que Rui peça automação. |
 | **#SYNC-RECENT-RESPECT-MANUAL** | 🟡 MEDIUM | `sync-recent` actualmente re-tenta SSs onde já há `tournament_payouts.source` `manual:` ou `backoffice_vision:` — overwrite com `discord_lobby_vision:` (dados parciais) seria regressão de qualidade. Adicionar guard: `process_lobby_message` skipa UPSERT se source actual ≠ `discord_lobby_vision:`. Hoje a precedência D11 está documentada mas não enforced no lobby pipeline (só no backoffice). |
 | **#PYDANTIC-V1-VALIDATOR-DEPRECATION** | 🟢 LOW | `routers/lobbys.py:34` usa `@validator` Pydantic V1 (1 warning durante pytest). Migrar para `@field_validator` V2. Sem impacto funcional; cosmético. |
@@ -1295,6 +1295,58 @@ mexer. Cross-ref: `#TS-RATIO-MYSTERY-CONFIRM`.
 **5. Interino.** Enquanto não resolvido, a app continua a mostrar **IRE errado** em Big Bounty.
 Opção interina a decidir com o Rui: **deny-list** (não mostrar IRE em Big Bounty — needle no gate
 `ire.py:229`, à imagem do `SUPER_KO_NEEDLE`) até o cálculo correcto estar validado.
+
+📎 **Dado empírico relacionado:** ver «Estruturas observadas — Mystery Bounty PokerStars
+(2026-05-28)» logo abaixo. Não é o caso directo (esse lobby é **Mystery**, não Big Bounty
+progressive), mas valida o ponto estrutural do ponto 4c: as distribuições reais são variadas
+(50/50, 25/75, 33/67…) → o fix tem de **ler `KOP_fraction` do TS por torneio**, não hardcodar
+por formato.
+
+### Estruturas observadas — Mystery Bounty PokerStars (2026-05-28)
+
+Registo read-only de uma estrutura real partilhada pelo Rui, para guiar `#MYSTERY-KO-DUAL-SUPPORT`,
+`#BACKOFFICE-MYSTERY`, `#TS-RATIO-MYSTERY-CONFIRM` e `#IRE-MB`. **Nada implementado** — só dado de
+referência validado aritmeticamente. Estas 4 entradas linkam para aqui.
+
+**1. Identificação.**
+- Site: **PokerStars**.
+- Torneio: **Mystery Bounty Series-36**, **€50 Mega Mystery Bounty [6-Max]**, €25.000 GTD.
+- Field: **690 entradas** (508 únicas + 182 re-entries). 4 re-entries permitidas durante late reg.
+
+**2. Split do buy-in (€50)** — confirmado pelos totais do lobby:
+| Componente | Por entrada | Total (×690) | Validação |
+|---|---|---|---|
+| **KOP** (bounty pool) | €30 | €20.700 | 690 × 30 ✓ |
+| **PP** (prize pool) | €15 | €10.350 | 690 × 15 ✓ |
+| **Rake** | €5 | €3.450 | — |
+
+→ **Distribuição líquida (sem rake): 33,3% PP / 66,7% KOP.** Ou seja `KOP_fraction ≈ 0,667` do
+líquido (`30 / 45`).
+
+**3. Mecanismo (Mystery).**
+- Bounties só **desbloqueiam após o fecho do late registration** ("bounties… can be won as soon as
+  the late [reg closes]").
+- Valor de **cada** Mystery Bounty é **aleatório/desconhecido** até ao KO (mecânica padrão Mystery).
+- A coluna **"Bounty"** no lobby por jogador = **acumulado ganho por esse jogador até ao momento**,
+  **NÃO** o valor na cabeça dele (confirmado pelo Rui). Implicação técnica: o valor por jogador
+  **não é simétrico** (uns a 0, outros centenas/milhares de €), reflectindo o histórico de KOs.
+
+**4. Implicações para a backlog.**
+- **`#MYSTERY-KO-DUAL-SUPPORT`** — exemplo concreto de estrutura Mystery do PS com split 33/67. Dado
+  real para o suporte na app (estado ITM por mão, threshold de desbloqueio por fecho de late reg).
+- **`#BACKOFFICE-MYSTERY`** — a importação TS terá de lidar com este formato (**KOP > PP**, valores
+  random).
+- **`#TS-RATIO-MYSTERY-CONFIRM`** — o split observado (**PP ≈ 33%**) corrobora empiricamente o
+  `("KO", 0.33)` do `apply_ratio_lookup` **enquanto fracção de PP**; atenção à ambiguidade
+  PP-fraction (0,33) vs KOP-fraction (0,667) ao fechar o debt.
+- **`#IRE-MB`** — **não** é o caso directo (Mystery ≠ Big Bounty progressive), mas reforça que o
+  caminho do fix é ler `KOP_fraction` do TS por torneio, não hardcodar por formato.
+
+**5. Nota técnica — IRE em Mystery.** A fórmula `IRE = bounty_si / (4·stack_si + 2·bounty_si)` foi
+derivada para bounty **fixo e conhecido**. No Mystery o valor é aleatório/desconhecido até ao KO →
+para aplicar a fórmula seria preciso usar o **EV/média do pool de bounties restantes** (que decresce
+à medida que os top mystery bounties vão sendo revelados). **Tema distinto do `#IRE-MB`** — pertence
+a `#MYSTERY-KO-DUAL-SUPPORT`.
 
 ### #IRE-CL — Clamp duro em off-table (sem fallback fórmula)
 
