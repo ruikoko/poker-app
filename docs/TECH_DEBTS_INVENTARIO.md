@@ -1246,6 +1246,56 @@ Sessão de investigação read-only sobre o IRE v2 em prod (deployed pt16). 3 te
 - **Solução robusta (~4h):** adicionar coluna `pko_ratio NUMERIC(4,2)` em `tournaments_meta` (ex: 0.25, 0.40, 0.75) com derivação automática via parser de nome do torneio + override manual. `compute_ire` selecciona a tabela W3cray correcta (ou fórmula fallback) consoante `pko_ratio`. Permite suportar todos os formatos sem deny-list crescente.
 - **Esforço:** 1h (deny-list temporária) ou 4h (coluna `pko_ratio`).
 
+#### Análise 2026-05-28 (Web + Rui) — **EM ABERTO — aguarda dado empírico**
+
+Sessão de investigação sobre como resolver o `#IRE-MB` correctamente (não só esconder).
+Conclusão: o caminho certo **não** é tabelas W3cray paralelas por formato — é decompor a
+constante `0.25` em 2 parâmetros lidos por torneio. **Nada implementado** (bloqueado por dado
+empírico do ponto 4).
+
+**1. Mecanismo entendido.** A constante `0.25` do W3cray (`bounty_si = ko_units × 0.25`,
+`ire.py:_formula_fallback` + a tabela `W3CRAY_TABLE_25PCT`) decompõe-se em:
+
+> `constante = KOP_fraction × instant_fraction`
+
+- **`KOP_fraction`** = fracção do buy-in que vai para o **bounty pool** (a distribuição): 50% no
+  PKO standard, 75% no Big Bounty.
+- **`instant_fraction`** = parte do bounty que se ganha **em cash imediatamente** ao eliminar
+  alguém. No PKO standard é metade (`0.5`); a outra metade vai para o head do vencedor.
+
+PKO standard 50/50 com instant 0.5 → `0.50 × 0.50 = 0.25`. **Confere** com a tabela e a fórmula
+actuais.
+
+**2. Validação.** Derivação independente por pot odds (Rui): bounty inicial = 25% das fichas
+iniciais (= metade do KO inicial de 50%); a redução de equity num spot 1-stack / 1-KO =
+**5,556%**, que é exactamente `IRE = bounty_si / (4·stack_si + 2·bounty_si)` com `bounty_si=0.25`,
+`stack_si=1`. O GTO Wizard descreve o mesmo split do PKO standard: 50% prize / 25% capturável
+instant / 25% para o head.
+
+**3. Caminho do fix (proposto, a confirmar).** Em vez de tabelas paralelas por formato, ler 2
+parâmetros por torneio e calcular a constante dinamicamente:
+
+- **`KOP_fraction`**: do split do buy-in (disponível no TS / lobby aba Info, ex.
+  `"$14.44 + $15 + $2.56"`).
+- **`instant_fraction`**: do mecanismo do torneio (lobby diz "instant $X por KO").
+- `constante = KOP_fraction × instant_fraction`; aplicar na **fórmula geral**, que é independente
+  do formato.
+- 50/50 → `0.25` (inalterado); Big Bounty 25/75 com instant 0.5 → `0.375`.
+
+**4. Bloqueador (porque está EM ABERTO).** Confirmar **empiricamente** a `instant_fraction` dos
+Big Bounty / Monster 25/75. A busca online confirmou progressive 0.5 no PKO standard, mas foi
+**inconclusiva** para os Big Bounty 25/75 (fontes de salas pequenas, sem especificar o
+mecanismo). **Rui vai trazer um lobby/TS de um Big Bounty real** para ler o instant por KO. Se
+for metade → constante `0.375`.
+⚠️ **Não confundir `instant_fraction` com o `progressiveFactor` do HRC / `lobby_vision.py`** — são
+convenções potencialmente distintas (no `lobby_vision` o PKO standard tem `progressiveFactor=0.50`,
+mas o IRE trata o bounty standard como 25% do SI). Confirmar a convenção de cada um **antes** de
+mexer. Cross-ref: `#TS-RATIO-MYSTERY-CONFIRM`.
+
+**5. Interino.** Enquanto não resolvido, a app continua a mostrar **IRE errado** em Big Bounty.
+Opção interina a decidir com o Rui: **deny-list** (não mostrar IRE em Big Bounty — needle no gate
+`ire.py:229`, à imagem do `SUPER_KO_NEEDLE`) até o cálculo correcto estar validado.
+
 ### #IRE-CL — Clamp duro em off-table (sem fallback fórmula)
 
 - **File:** `backend/app/services/ire.py:149-181` (`_nearest_idx`, `lookup_ire_pct`, `_formula_fallback`).
