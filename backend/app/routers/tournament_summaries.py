@@ -323,6 +323,131 @@ def parse_tournament_summary(text: str, filename: Optional[str] = None) -> dict:
     }
 
 
+# ── Winamax TS (#WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE) ───────────────────────
+# Formato Winamax = linhas etiquetadas, DIFERENTE do GG. Validado contra o
+# ZENITH(1102500091) real (backend/tests/fixtures/winamax_ts_zenith.txt).
+_WN_HEADER = re.compile(r"Winamax Poker - Tournament summary\s*:\s*(.+?)\((\d+)\)")
+_WN_BUYIN = re.compile(r"^Buy-?In\s*:\s*(.+?)\s*$", re.MULTILINE)
+_WN_EUR_TOKEN = re.compile(r"(\d+(?:[.,]\d+)?)\s*€")
+_WN_PLAYERS = re.compile(r"^Registered players\s*:\s*(\d+)", re.MULTILINE)
+_WN_PRIZEPOOL = re.compile(r"^Prizepool\s*:\s*([\d.,]+)\s*€", re.MULTILINE)
+_WN_START = re.compile(
+    r"^Tournament started\s+(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})\s*UTC",
+    re.MULTILINE,
+)
+_WN_FINISH = re.compile(r"You finished in\s+(\d+)(?:st|nd|rd|th)\s+place", re.IGNORECASE)
+_WN_WON = re.compile(
+    r"You won\s+([\d.,]+)\s*€(?:\s*\+\s*Bounty\s+([\d.,]+)\s*€)?", re.IGNORECASE
+)
+_WN_TYPE = re.compile(r"^Type\s*:\s*(.+?)\s*$", re.MULTILINE)
+_WN_SPEED = re.compile(r"^Speed\s*:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _parse_eur(s) -> Optional[Decimal]:
+    """Decimal de um valor EUR Winamax (aceita vírgula ou ponto)."""
+    if s is None:
+        return None
+    try:
+        return Decimal(str(s).strip().replace(",", "."))
+    except InvalidOperation:
+        return None
+
+
+def parse_winamax_tournament_summary(text: str, filename: Optional[str] = None) -> dict:
+    """Parseia 1 TS Winamax. Mesma dict-shape do GG (reusa _INSERT_SQL).
+
+    ⚠️ ORDEM do buy-in WN = [entry, bounty, rake] — confirmada via HH (bounty
+    por seat = 2º componente). NÃO é a ordem GG [PP, rake, KOP]. 3 componentes
+    = KO; 2 = sem bounty (não-KO). tournament_pko_ratio e game_type ficam None
+    (decisão: não misturar semântica GG; o split carrega a info real do bounty).
+    """
+    m_h = _WN_HEADER.search(text)
+    if not m_h:
+        raise ValueError("missing Winamax TS header")
+    name = m_h.group(1).strip()
+    tn = m_h.group(2)
+
+    m_s = _WN_START.search(text)
+    if not m_s:
+        raise ValueError(f"missing start_time for tn={tn}")
+    start_time = _parse_start_time_utc(m_s.group(1))
+    if start_time is None:
+        raise ValueError(f"invalid start_time tn={tn}: {m_s.group(1)!r}")
+
+    m_buy = _WN_BUYIN.search(text)
+    buy_in_text = m_buy.group(1).strip() if m_buy else None
+    comps = [_parse_eur(x) for x in _WN_EUR_TOKEN.findall(buy_in_text or "")]
+    entry = bounty = rake = None
+    if len(comps) == 3:
+        entry, bounty, rake = comps          # [entry, bounty, rake]
+    elif len(comps) == 2:
+        entry, rake = comps                  # sem bounty (não-KO)
+    parts = [c for c in (entry, bounty, rake) if c is not None]
+    buy_in_total = sum(parts) if parts else None
+
+    m_pool = _WN_PRIZEPOOL.search(text)
+    prize_pool = _parse_eur(m_pool.group(1)) if m_pool else None
+    m_pl = _WN_PLAYERS.search(text)
+    total_players = int(m_pl.group(1)) if m_pl else None
+    m_fin = _WN_FINISH.search(text)
+    hero_position = int(m_fin.group(1)) if m_fin else None
+
+    m_won = _WN_WON.search(text)
+    hero_payout = _parse_eur(m_won.group(1)) if m_won else None
+    hero_bounty = _parse_eur(m_won.group(2)) if (m_won and m_won.group(2)) else None
+    if hero_payout is None and hero_bounty is None:
+        hero_total_received = None
+    else:
+        hero_total_received = (hero_payout or Decimal(0)) + (hero_bounty or Decimal(0))
+
+    m_type = _WN_TYPE.search(text)
+    type_raw = m_type.group(1).strip().lower() if m_type else ""
+    is_ko = ("knockout" in type_raw) or (bounty is not None)
+    tournament_format = "PKO" if is_ko else "Vanilla"
+
+    m_speed = _WN_SPEED.search(text)
+    # Valor cru Winamax ('normal'/'turbo'/'semiturbo') — NÃO forçar o mapa GG
+    # (Slow/Turbo/Hyper) para não introduzir semântica errada ('normal' ≠ slow).
+    tournament_speed = m_speed.group(1).strip().lower() if m_speed else None
+
+    return {
+        "site": "Winamax",
+        "tournament_number": tn,
+        "tournament_name": name,
+        "buy_in_text": buy_in_text,
+        "buy_in_total": buy_in_total,
+        "buy_in_currency": "EUR",
+        "total_players": total_players,
+        "prize_pool": prize_pool,
+        "start_time": start_time,
+        "hero_position": hero_position,
+        "hero_payout": hero_payout,
+        "hero_re_entries": 0,
+        "raw_text": text,
+        "source_filename": filename,
+        "game_type": None,
+        "buy_in_entry": entry,
+        "buy_in_rake": rake,
+        "buy_in_bounty": bounty,
+        "hero_total_received": hero_total_received,
+        "hero_finish_phrase_position": hero_position,
+        "tournament_modifiers": [],
+        "tournament_series": None,
+        "tournament_speed": tournament_speed,
+        "tournament_schedule": _detect_schedule(name),
+        "tournament_format": tournament_format,
+        "tournament_pko_ratio": None,
+    }
+
+
+def _parse_ts_by_site(text: str, filename: Optional[str] = None) -> dict:
+    """Despacha o TS para o parser certo por sniff de conteúdo. Default GG
+    (caminho legacy intocado)."""
+    if text.lstrip().startswith("Winamax Poker"):
+        return parse_winamax_tournament_summary(text, filename)
+    return parse_tournament_summary(text, filename)
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────
 
 _INSERT_SQL = """
@@ -376,7 +501,8 @@ async def import_tournament_summaries(
     file: UploadFile = File(...),
     current_user=Depends(require_auth),
 ):
-    """Aceita .txt (single) ou .zip (batch). GG-only.
+    """Aceita .txt (single) ou .zip (batch). GG + Winamax (dispatch por
+    conteúdo em _parse_ts_by_site).
 
     Resposta:
       {total, inserted, updated, skipped_pre_2026, failed: [{filename, error}]}
@@ -434,7 +560,7 @@ def persist_tournament_summaries(files: list[tuple[str, bytes]]) -> dict:
             for name, raw_bytes in files:
                 try:
                     text = raw_bytes.decode("utf-8", errors="replace")
-                    parsed = parse_tournament_summary(text, name)
+                    parsed = _parse_ts_by_site(text, name)
                 except ValueError as e:
                     stats["failed"].append({"filename": name, "error": str(e)})
                     continue

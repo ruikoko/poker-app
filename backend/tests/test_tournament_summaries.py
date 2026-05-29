@@ -14,11 +14,17 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from pathlib import Path
+
 from app.routers.tournament_summaries import (
     parse_tournament_summary,
+    parse_winamax_tournament_summary,
+    _parse_ts_by_site,
     _parse_buy_in,
     import_tournament_summaries,
 )
+
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 # ── Fixtures (sinteticas) ────────────────────────────────────────────
@@ -340,3 +346,70 @@ def test_endpoint_idempotency():
 
     assert r1["inserted"] == 1 and r1["updated"] == 0
     assert r2["inserted"] == 0 and r2["updated"] == 1
+
+
+# ── #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE — parser WN (fixture ZENITH real) ──
+
+def test_parse_winamax_ts_zenith_real():
+    """ZENITH(1102500091) real. Ordem buy-in WN [entry, bounty, rake]."""
+    txt = (_FIXTURES / "winamax_ts_zenith.txt").read_text(encoding="utf-8")
+    d = parse_winamax_tournament_summary(txt, "winamax_ts_zenith.txt")
+    assert d["site"] == "Winamax"
+    assert d["tournament_number"] == "1102500091"
+    assert d["tournament_name"] == "ZENITH"
+    # split 40€ + 50€ + 10€ -> [entry, bounty, rake]
+    assert d["buy_in_entry"] == Decimal("40")
+    assert d["buy_in_bounty"] == Decimal("50")
+    assert d["buy_in_rake"] == Decimal("10")
+    assert d["buy_in_total"] == Decimal("100")
+    assert d["buy_in_currency"] == "EUR"
+    assert d["total_players"] == 133
+    assert d["prize_pool"] == Decimal("6240")
+    assert d["start_time"] == datetime(2026, 5, 28, 16, 0, 0, tzinfo=timezone.utc)
+    assert d["hero_position"] == 6
+    assert d["hero_payout"] == Decimal("278.95")
+    assert d["hero_total_received"] == Decimal("342.95")   # prize + bounty 64
+    assert d["tournament_format"] == "PKO"
+    assert d["tournament_speed"] == "normal"   # valor cru, sem mapa GG
+    assert d["tournament_pko_ratio"] is None   # decisão: split carrega a info
+    assert d["game_type"] is None
+
+
+def test_winamax_ts_tn_matches_hh():
+    """Cross-validação: o TN do TS bate com o do HH (Table name)."""
+    import re
+    ts = (_FIXTURES / "winamax_ts_zenith.txt").read_text(encoding="utf-8")
+    hh = (_FIXTURES / "winamax_hh_zenith.txt").read_text(encoding="utf-8")
+    ts_tn = parse_winamax_tournament_summary(ts)["tournament_number"]
+    hh_tn = re.search(r"Table:\s*'[^(]+\((\d+)\)#", hh).group(1)
+    assert ts_tn == hh_tn == "1102500091"
+
+
+def test_parse_winamax_ts_two_components_no_bounty():
+    """TS WN não-KO (2 componentes) -> sem bounty, format Vanilla."""
+    synthetic = (
+        "Winamax Poker - Tournament summary : DAILY FREEROLL(999000111)\n"
+        "Buy-In : 9€ + 1€\n"
+        "Registered players : 50\n"
+        "Type : normal\n"
+        "Speed : turbo\n"
+        "Prizepool : 450€\n"
+        "Tournament started 2026/04/10 20:00:00 UTC\n"
+        "You finished in 3rd place\n"
+        "You won 60€\n"
+    )
+    d = parse_winamax_tournament_summary(synthetic, "x.txt")
+    assert d["buy_in_entry"] == Decimal("9")
+    assert d["buy_in_rake"] == Decimal("1")
+    assert d["buy_in_bounty"] is None
+    assert d["tournament_format"] == "Vanilla"
+    assert d["tournament_speed"] == "turbo"
+    assert d["hero_payout"] == Decimal("60")
+    assert d["hero_total_received"] == Decimal("60")
+
+
+def test_parse_ts_by_site_dispatch():
+    """Sniff de conteúdo: WN -> parser WN; GG -> parser GG (default)."""
+    wn = (_FIXTURES / "winamax_ts_zenith.txt").read_text(encoding="utf-8")
+    assert _parse_ts_by_site(wn)["site"] == "Winamax"
+    assert _parse_ts_by_site(TS_VANILLA)["site"] == "GGPoker"

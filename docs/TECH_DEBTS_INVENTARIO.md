@@ -1318,8 +1318,14 @@ quando o fix for implementado.
 
 **8. Cobertura por site (resolvido).** Fonte do `KOP_fraction` por site:
 - **GG:** via **TS parser** (já existe).
-- **Winamax / WPN:** **não aplicável** — constante fixa `0,25` (= actual); estes sites só têm PKO
-  50/50 progressive.
+- **Winamax / WPN:** ~~constante fixa `0,25`~~ — **DESMENTIDO empiricamente (2026-05-29, ZENITH WN
+  `1102500091`):** o TS Winamax real tem split **40€/50€/10€** (ordem WN `[entry, bounty, rake]`) →
+  `KOP_fraction = 50/90 ≈ 0,556`, **não** 50/50. A assunção "Winamax = sempre PKO 50/50 → constante
+  0,25 fixa" está errada. Hoje **sem impacto** (o IRE é GG-only via gate de site em `compute_ire`; e o
+  HRC-WN usa os bounties da **HH**, não do TS — pt42c/d). Mas se o gate de site do IRE for relaxado para
+  WN, a constante WN tem de ser **derivada do split** (`buy_in_bounty/(buy_in_entry+buy_in_bounty)`),
+  nunca assumida `0,25`. O split WN passou a estar disponível em `tournament_summaries` desde o
+  `#WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE`.
 - **PS:** via **HH header**. Investigação read-only confirmou: buy-in decomposto em **3 componentes**
   (`€A+€B+€C = PP + KOP + rake`; ex. `€22.50+€22.50+€5.00` → 50/50), e **bounty na cabeça por jogador
   inline na linha Seat** (ex. `Seat 1: Berkowitza33 (111680 in chips, €22.50 bounty)`).

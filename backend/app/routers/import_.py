@@ -27,10 +27,10 @@ SUMMARY_PARSERS = {
 
 # Sites com pipeline TS OPERACIONAL (tournament_summaries: resolver TIER 0 +
 # bounty). Hoje só GG (parse_tournament_summary lê header GG `Tournament #`).
-# Cresce para {"ggpoker", "winamax"} quando o parser operacional WN existir
-# — ver #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE (próximo fix). Mantido como set
-# (não literal hardcoded) para a extensão ser trivial.
-OPERATIONAL_TS_SITES = {"ggpoker"}
+# GG + Winamax desde o #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE (parser WN
+# operacional em tournament_summaries._parse_ts_by_site). Mantido como set
+# para extensão futura (PS/WPN) ser trivial.
+OPERATIONAL_TS_SITES = {"ggpoker", "winamax"}
 
 # ── HH multi-site splitter ────────────────────────────────────────────────────
 
@@ -180,6 +180,16 @@ def _detect_site_from_zip(content: bytes) -> str | None:
                     return "winamax"
                 if "pokerstars" in fn:
                     return "pokerstars"
+            # Fallback: sniff do conteúdo do 1º .txt — um TS Winamax não tem
+            # "winamax" no nome do ficheiro (#WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE).
+            for name in zf.namelist():
+                if name.lower().endswith(".txt"):
+                    head = zf.read(name)[:2000].decode("utf-8", errors="replace").lower()
+                    if "winamax" in head:
+                        return "winamax"
+                    if "ggpoker" in head or "tournament #" in head:
+                        return "ggpoker"
+                    break
     except Exception:
         pass
     return None

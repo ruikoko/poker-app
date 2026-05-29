@@ -58,9 +58,12 @@ def test_ts_gg_populates_both(_site, _ctype, _entry, _conn, _clog, m_run, _ulog,
     m_run.assert_called_once()          # P&L correu
 
 
-# ── TS Winamax → só P&L (operacional é GG-only) ──────────────────────────────
+# ── TS Winamax → AMBOS (operacional + P&L) desde #WINAMAX-TOURNAMENT-SUMMARIES ─
+#   (era "só P&L" antes; WN entrou em OPERATIONAL_TS_SITES — teste invertido)
 
-@patch("app.routers.tournament_summaries.persist_tournament_summaries")
+@patch("app.routers.tournament_summaries._extract_txt_files", return_value=[("wn.txt", b"x")])
+@patch("app.routers.tournament_summaries.persist_tournament_summaries",
+       return_value={"total": 1, "inserted": 1, "updated": 0, "skipped_pre_2026": 0, "failed": []})
 @patch("app.routers.import_._update_log")
 @patch("app.routers.import_._run_tournament_import", return_value=(3, 1))
 @patch("app.routers.import_._create_log", return_value=99)
@@ -68,15 +71,17 @@ def test_ts_gg_populates_both(_site, _ctype, _entry, _conn, _clog, m_run, _ulog,
 @patch("app.routers.import_.create_entry", return_value={"id": 8})
 @patch("app.routers.import_._detect_zip_content_type", return_value="tournament_summary")
 @patch("app.routers.import_._detect_site", return_value="winamax")
-def test_ts_winamax_pnl_only(_site, _ctype, _entry, _conn, _clog, m_run, _ulog, m_persist):
+def test_ts_winamax_now_dual(_site, _ctype, _entry, _conn, _clog, m_run, _ulog, m_persist, _extract):
     with patch.dict("app.routers.import_.SUMMARY_PARSERS",
                     {"winamax": MagicMock(return_value=([{"x": 1}], []))}, clear=True):
         r = asyncio.run(import_file(file=_FakeUpload("wn.zip", b"PK\x03\x04"),
                                     site=None, current_user=object()))
     assert r["import_type"] == "tournament_summary"
-    assert r["ts_applicable"] is False     # operacional NÃO aplicável a WN
+    assert r["ts_applicable"] is True      # WN agora operacional (popula tournament_summaries)
+    assert r["ts_inserted"] == 1
     assert r["pnl_inserted"] == 3
-    m_persist.assert_not_called()          # operacional NÃO correu
+    m_persist.assert_called_once()         # operacional correu
+    m_run.assert_called_once()             # P&L correu
 
 
 # ── HH ZIP → hands (regressão: não toca o pipeline TS) ───────────────────────
