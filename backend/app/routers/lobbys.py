@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.auth import require_auth
 from app.services.lobby_sync import run_sync
@@ -31,7 +31,8 @@ class SyncRecentBody(BaseModel):
     failure_types: Optional[list[str]] = None
     retry_success: bool = False
 
-    @validator("failure_types")
+    @field_validator("failure_types")
+    @classmethod
     def _check_failure_types(cls, v):
         if v is None:
             return v

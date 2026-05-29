@@ -584,15 +584,6 @@ class PokerBot(discord.Client):
         logger.info(f"Servidores monitorizados: {MONITORED_SERVERS}")
         logger.info(f"Canais ignorados: {IGNORED_CHANNELS}")
         logger.info(f"AUTO_SYNC: {AUTO_SYNC} (false = sync só manual via /api/discord/sync)")
-        # FASE A C3 — instrumentacao temporaria para diagnose lobby pipeline.
-        # Remover em commit subsequente apos diagnostico.
-        logger.info(f"LOBBY_CHANNEL_NAME={LOBBY_CHANNEL_NAME!r} LOBBY_AUTO={LOBBY_AUTO}")
-        for g in self.guilds:
-            if str(g.id) in MONITORED_SERVERS:
-                names = [c.name for c in g.text_channels]
-                logger.info(
-                    f"  guild {g.name!r} ({g.id}): {len(names)} text channels — {names[:30]}"
-                )
         _ensure_sync_table()
 
         if not AUTO_SYNC:
@@ -632,13 +623,6 @@ class PokerBot(discord.Client):
 
         # Canal lobby tem path proprio — bypass de _save_to_db / pipeline maos.
         if _is_lobby_channel(message.channel):
-            # FASE A C3 — instrumentacao temporaria; remover apos diagnose.
-            logger.info(
-                f"[debug-msg-lobby] msg_id={message.id} "
-                f"author={message.author.name!r} "
-                f"attachments={len(message.attachments)} "
-                f"LOBBY_AUTO={LOBBY_AUTO}"
-            )
             if LOBBY_AUTO:
                 asyncio.create_task(self._handle_lobby_message(message))
             return
