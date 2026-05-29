@@ -21,6 +21,22 @@ router = APIRouter(prefix="/api/discord", tags=["discord"])
 # pragmática (T1 apanha batches pequenos; T2 apanha o resto).
 ATTACHMENTS_DELAYED_RETRY_SECONDS = 90
 
+# #DISCORD-VISION-NO-RECOVERY (pt43) — SELECT do step 4b de sync_and_process,
+# extraído para constante para ser testável. Predicado `IS DISTINCT FROM 'true'`
+# = "vision ainda não concluída" (apanha vision_done NULL E =false). Antes era
+# só `IS NULL`, deixando os =false (falha transitória de Vision) em limbo.
+_RECOVERY_REPLAYER_SQL = """
+    SELECT id, raw_text, discord_posted_at, raw_json
+    FROM entries
+    WHERE entry_type = 'replayer_link'
+      AND site = 'GGPoker'
+      AND source = 'discord'
+      AND (raw_json->>'img_b64') IS NOT NULL
+      AND (raw_json->>'vision_done') IS DISTINCT FROM 'true'
+    ORDER BY id ASC
+    LIMIT 500
+"""
+
 # Mapeamento window pré-definida → (timedelta, label PT-PT para UI/banner).
 # Regra de negócio: "1 semana"=7d, "1 mês"=30d (calendar-aware não é pedido,
 # 30d é approximation aceite). Janelas curtas (24h/72h) cobrem pós-sessão
@@ -278,22 +294,14 @@ async def sync_and_process(
             processed_response = {"error": str(e.detail)}
 
     # 4b. Recuperar estado intermediário: replayer_link com img_b64 populado
-    # mas vision_done=null. Acontece quando Vision falha transitoriamente
-    # (ex: API key inválida, deploy a meio). Filtro do step 4 (img_b64 IS NULL)
-    # não apanha este estado. #P13 fix (pt14).
+    # mas vision ainda não concluída (vision_done NULL OU =false). Acontece
+    # quando Vision falha transitoriamente (API key inválida, deploy a meio).
+    # Filtro do step 4 (img_b64 IS NULL) não apanha este estado. #P13 fix (pt14);
+    # alargado de `IS NULL` para `IS DISTINCT FROM 'true'` em pt43
+    # (#DISCORD-VISION-NO-RECOVERY) para apanhar também o estado =false.
     import base64
     from app.routers.screenshot import _run_vision_for_entry
-    intermediate_rows = _q("""
-        SELECT id, raw_text, discord_posted_at, raw_json
-        FROM entries
-        WHERE entry_type = 'replayer_link'
-          AND site = 'GGPoker'
-          AND source = 'discord'
-          AND (raw_json->>'img_b64') IS NOT NULL
-          AND (raw_json->>'vision_done') IS NULL
-        ORDER BY id ASC
-        LIMIT 500
-    """)
+    intermediate_rows = _q(_RECOVERY_REPLAYER_SQL)
     intermediate_queued = 0
     for r in intermediate_rows:
         rj = r["raw_json"] or {}
