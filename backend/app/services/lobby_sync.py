@@ -376,7 +376,12 @@ async def gather_candidates(
     bot_user = getattr(channel.guild, "me", None)
     bot_user_id = getattr(bot_user, "id", None) if bot_user else None
 
-    async for msg in channel.history(after=since, before=until, oldest_first=True):
+    # limit=None: o discord.py pagina internamente (lazy) toda a janela
+    # after/before; o cap real é max_messages (break abaixo). Sem isto o default
+    # 100 do discord.py cortava janelas largas em silêncio
+    # (#LOBBY-SYNC-PAGINATION-LIMIT). NÃO toca os canais de estudo
+    # (_sync_guild_history em discord_bot.py, que já passa limit=500).
+    async for msg in channel.history(after=since, before=until, oldest_first=True, limit=None):
         if bot_user_id is not None and getattr(msg.author, "id", None) == bot_user_id:
             continue
         if not msg.attachments:

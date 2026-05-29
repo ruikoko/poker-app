@@ -435,3 +435,31 @@ def test_endpoint_bot_offline_returns_503(mock_get_bot):
     r = client.post("/api/lobbys/sync-recent", json={})
     assert r.status_code == 503
     assert "not online" in r.json()["detail"].lower()
+
+
+# ── #LOBBY-SYNC-PAGINATION-LIMIT ─────────────────────────────────────────────
+
+def test_gather_candidates_passes_limit_none_not_capped_at_100():
+    """history() recebe limit=None (sem o cap silencioso de 100 do discord.py).
+    Cap real = max_messages."""
+    msgs = [_mock_msg(msg_id=str(2000 + i), minutes_ago=i + 1) for i in range(250)]
+    bot, channel = _mock_bot_with_channel(msgs)
+
+    captured = {}
+
+    def _hist(*a, **k):
+        captured.update(k)
+        async def gen():
+            for m in msgs:
+                yield m
+        return gen()
+
+    channel.history = _hist
+    now = datetime.now(timezone.utc)
+    with patch("app.services.lobby_sync.query", return_value=[]):
+        out = asyncio.run(lobby_sync.gather_candidates(
+            channel, now - timedelta(days=30), now, max_messages=200,
+        ))
+
+    assert "limit" in captured and captured["limit"] is None   # fix: limit=None explícito
+    assert len(out) == 200                                     # cap = max_messages, não 100
