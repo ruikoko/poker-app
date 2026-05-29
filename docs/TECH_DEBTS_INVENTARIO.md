@@ -1316,6 +1316,20 @@ a fórmula nesses casos, mantendo a tabela como caminho rápido para `0,25`; **(
 tabelas para outras constantes; **(c)** abandonar a tabela e usar sempre a fórmula. Decisão a tomar
 quando o fix for implementado.
 
+**8. Cobertura por site (resolvido).** Fonte do `KOP_fraction` por site:
+- **GG:** via **TS parser** (já existe).
+- **Winamax / WPN:** **não aplicável** — constante fixa `0,25` (= actual); estes sites só têm PKO
+  50/50 progressive.
+- **PS:** via **HH header**. Investigação read-only confirmou: buy-in decomposto em **3 componentes**
+  (`€A+€B+€C = PP + KOP + rake`; ex. `€22.50+€22.50+€5.00` → 50/50), e **bounty na cabeça por jogador
+  inline na linha Seat** (ex. `Seat 1: Berkowitza33 (111680 in chips, €22.50 bounty)`).
+  `detect_tournament_format` (`tournament_format.py:97-110`) já faz a detecção estrutural. **Não
+  depende do nome do torneio** (o HH PS não o inclui).
+  - ⚠️ **Caveat (sub-item):** **Mystery PS** — o que o Seat bounty mostra num HH Mystery PS
+    (random/desconhecido) precisa de **confirmação empírica futura**.
+
+**Conclusão:** cobertura completa dos **4 sites** possível na **1ª iteração**, sem novos parsers TS.
+
 📎 **Dado empírico relacionado:** ver «Estruturas observadas — Mystery Bounty PokerStars
 (2026-05-28)» logo abaixo. Não é o caso directo (esse lobby é **Mystery**, não Big Bounty
 progressive), mas valida o ponto estrutural do ponto 4c: as distribuições reais são variadas
