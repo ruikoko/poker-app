@@ -48,7 +48,10 @@ async function uploadFile(file, type, options = {}) {
     case 'hh':
     case 'hh_zip': {
       const res = await fetch(`${API}/import`, { method: 'POST', credentials: 'include', body: form })
-      return await res.json()
+      // _ok captura erro HTTP (ex.: 400 de conteúdo não reconhecido) — fetch não
+      // lança em 4xx. Usado por importAll para marcar ✗ em vez de ✓ falso.
+      const data = await res.json()
+      return { _ok: res.ok, ...data }
     }
     case 'gto': {
       form.append('name', file.name.replace(/\.zip$/i, ''))
@@ -67,6 +70,21 @@ async function uploadFile(file, type, options = {}) {
 function formatResult(type, result) {
   if (!result) return 'Sem resposta'
   if (result.detail) return `Erro: ${result.detail}`
+
+  // O destino real de um .zip é autoritativo via result.import_type — o frontend
+  // não consegue espreitar dentro do .zip (sem JSZip), por isso um TS largado no
+  // modal chega aqui como type='hh_zip' mas o backend devolve import_type='tournament_summary'.
+  // NOTA (#IMPORT-MODAL decisão #4): screenshots de backoffice GG ficam FORA do
+  // modal (botão dedicado em Torneios) — .png continua a ir para screenshot de mesa.
+  if (result.import_type === 'tournament_summary') {
+    const parts = []
+    if (result.ts_applicable)
+      parts.push(`${(result.ts_inserted || 0) + (result.ts_updated || 0)} summaries (operacional)`)
+    parts.push(`${result.pnl_inserted || 0} P&L`)
+    if (result.ts_failed) parts.push(`${result.ts_failed} falhas`)
+    if (!result.ts_applicable) parts.push('Winamax: só P&L')
+    return parts.join(' · ')
+  }
 
   switch (type) {
     case 'hm3':
@@ -158,7 +176,10 @@ export default function ImportModal({ open, onClose }) {
         const options = {}
         if (f.type === 'hm3' && f.daysBack) options.daysBack = parseInt(f.daysBack)
         const result = await uploadFile(f.file, f.type, options)
-        updateFile(f.id, { status: 'done', result })
+        // Falha = erro HTTP (4xx/5xx), status 'error' do backend, ou detail de erro.
+        // Mata o "Importado" falso (#IMPORT-MODAL): 400/zero → ✗ vermelho, não ✓.
+        const failed = result._ok === false || result.status === 'error' || !!result.detail
+        updateFile(f.id, { status: failed ? 'error' : 'done', result })
       } catch (err) {
         updateFile(f.id, { status: 'error', result: { detail: err.message } })
       }

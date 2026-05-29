@@ -25,6 +25,13 @@ SUMMARY_PARSERS = {
     "ggpoker": ggpoker.parse_file,
 }
 
+# Sites com pipeline TS OPERACIONAL (tournament_summaries: resolver TIER 0 +
+# bounty). Hoje só GG (parse_tournament_summary lê header GG `Tournament #`).
+# Cresce para {"ggpoker", "winamax"} quando o parser operacional WN existir
+# — ver #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE (próximo fix). Mantido como set
+# (não literal hardcoded) para a extensão ser trivial.
+OPERATIONAL_TS_SITES = {"ggpoker"}
+
 # ── HH multi-site splitter ────────────────────────────────────────────────────
 
 # Patterns that mark the start of a new hand in each site's HH format
@@ -499,47 +506,73 @@ async def import_file(
             "migrated_to_study": migrated_to_study,
         }
 
-    # ── TOURNAMENT SUMMARY / REPORT → vai para tournaments (P&L) ──
+    # ── Conteúdo não reconhecido (nem HH nem TS) → rejeitar claramente ──
+    #    #IMPORT-MODAL-MISROUTES-TS-RESULTS (decisão #1): nunca "Importado" falso.
+    if content_type != "tournament_summary":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Conteúdo não reconhecido (nem Hand History nem Tournament "
+                f"Summary; detectado {content_type!r}). Screenshots de backoffice "
+                f"GG usam o botão dedicado em Torneios, não o importador geral."
+            ),
+        )
+
+    # ── TOURNAMENT SUMMARY → popula AMBOS (decisão #3) ──
+    #    (1) P&L (tournaments)                  — multi-site GG/WN (SUMMARY_PARSERS).
+    #    (2) operacional (tournament_summaries) — resolver TIER 0 + bounty; só
+    #        sites em OPERATIONAL_TS_SITES (hoje GG; WN entra com o
+    #        #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE).
     if not detected_site or detected_site not in SUMMARY_PARSERS:
         raise HTTPException(
             status_code=400,
-            detail=f"Sala nao reconhecida ({detected_site}). Usa ?site=winamax ou ?site=ggpoker",
+            detail=f"Tournament Summary de sala não suportada ({detected_site}).",
         )
 
+    # (1) P&L → tournaments
     records, parse_errors = SUMMARY_PARSERS[detected_site](content, filename)
     records_found = len(records)
-
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             import_id = _create_log(cur, detected_site, filename, records_found)
-
-        inserted, skipped = _run_tournament_import(conn, records, import_id)
-
-        status = "ok" if not parse_errors else ("partial" if inserted > 0 else "error")
-
+        pnl_inserted, pnl_skipped = _run_tournament_import(conn, records, import_id)
+        pnl_status = "ok" if not parse_errors else ("partial" if pnl_inserted > 0 else "error")
         with conn.cursor() as cur:
-            _update_log(cur, import_id, status, inserted, skipped, parse_errors)
-
+            _update_log(cur, import_id, pnl_status, pnl_inserted, pnl_skipped, parse_errors)
         conn.commit()
-
     except Exception as exc:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Rollback efectuado: {exc}")
-
+        raise HTTPException(status_code=500, detail=f"Rollback efectuado (P&L): {exc}")
     finally:
         conn.close()
 
+    # (2) operacional → tournament_summaries (gated por OPERATIONAL_TS_SITES)
+    ts_stats = None
+    if detected_site in OPERATIONAL_TS_SITES:
+        from app.routers.tournament_summaries import (  # lazy: evita ciclo de import
+            persist_tournament_summaries,
+            _extract_txt_files,
+        )
+        ts_stats = persist_tournament_summaries(_extract_txt_files(content, filename))
+
+    ts_total = (ts_stats["inserted"] + ts_stats["updated"]) if ts_stats else 0
     return {
-        "import_type": "tournaments",
+        "import_type": "tournament_summary",
         "import_id": import_id,
         "entry_id": entry_id,
         "site": detected_site,
         "filename": filename,
-        "status": status,
-        "records_found": records_found,
-        "inserted": inserted,
-        "skipped": skipped,
+        "status": "ok" if (ts_total + pnl_inserted) > 0 else "error",
+        # operacional (tournament_summaries) — ts_applicable=False p/ Winamax
+        "ts_applicable": ts_stats is not None,
+        "ts_inserted": (ts_stats or {}).get("inserted"),
+        "ts_updated": (ts_stats or {}).get("updated"),
+        "ts_skipped_pre_2026": (ts_stats or {}).get("skipped_pre_2026"),
+        "ts_failed": len((ts_stats or {}).get("failed", [])),
+        # P&L (tournaments)
+        "pnl_inserted": pnl_inserted,
+        "pnl_skipped": pnl_skipped,
         "errors": len(parse_errors),
         "error_log": parse_errors[:20],
     }

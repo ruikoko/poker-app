@@ -387,23 +387,36 @@ async def import_tournament_summaries(
     """
     content = await file.read()
     filename = file.filename or "upload"
-    lower = filename.lower()
+    try:
+        files = _extract_txt_files(content, filename)
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "ZIP corrompido")
+    return persist_tournament_summaries(files)
 
+
+def _extract_txt_files(content: bytes, filename: str) -> list[tuple[str, bytes]]:
+    """Extrai (name, bytes) dos .txt de um .zip ou de um único .txt. Partilhado
+    pelo handler HTTP e por /api/import (anti-drift). Raises HTTPException(400)
+    para formato não suportado; BadZipFile propaga para o caller tratar."""
+    lower = (filename or "upload").lower()
     if lower.endswith(".zip"):
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                files = [
-                    (name, zf.read(name))
-                    for name in zf.namelist()
-                    if name.lower().endswith(".txt")
-                ]
-        except zipfile.BadZipFile:
-            raise HTTPException(400, "ZIP corrompido")
-    elif lower.endswith(".txt"):
-        files = [(filename, content)]
-    else:
-        raise HTTPException(400, "Formato nao suportado (use .txt ou .zip)")
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            return [
+                (name, zf.read(name))
+                for name in zf.namelist()
+                if name.lower().endswith(".txt")
+            ]
+    if lower.endswith(".txt"):
+        return [(filename, content)]
+    raise HTTPException(400, "Formato nao suportado (use .txt ou .zip)")
 
+
+def persist_tournament_summaries(files: list[tuple[str, bytes]]) -> dict:
+    """Núcleo operacional: parse + upsert em tournament_summaries (GG-only).
+    Gere a própria conn/txn (SAVEPOINT por row). Consumido pelo handler HTTP
+    `/api/tournament-summaries/import` e por `/api/import` (TS detectado num
+    ZIP largado no ImportModal — #IMPORT-MODAL-MISROUTES-TS-RESULTS).
+    Devolve {total, inserted, updated, skipped_pre_2026, failed}."""
     stats: dict = {
         "total": len(files),
         "inserted": 0,
