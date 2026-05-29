@@ -320,7 +320,7 @@ Quando uma row já existe em `tournament_payouts` para um `(site, tn)`:
 - `backoffice_vision:` **sobrescreve** `discord_lobby_vision:` (backoffice tem dados mais completos: distribuição de prizes por posição vs lobby SS que muitas vezes só mostra top-N visível).
 - `skip_existing=true` no endpoint backoffice skipa apenas rows com source `backoffice_vision:` ou `manual:` (não skipa lobby).
 
-**Limitação pt20:** o lobby pipeline (`process_lobby_message`) hoje não verifica a precedência ao fazer UPSERT — pode sobrescrever uma row `backoffice_vision:` com `discord_lobby_vision:` (regressão de qualidade). Tech debt `#SYNC-RECENT-RESPECT-MANUAL`.
+**Resolvido (pt43, `#SYNC-RECENT-RESPECT-MANUAL`):** o lobby pipeline (`process_lobby_message`) passou a verificar a precedência antes do UPSERT — faz `SELECT source` e skipa (com `result="skipped_precedence"`) se a fonte actual for `manual:` ou `backoffice_vision:`. Discord-sobre-Discord continua a sobrescrever (last-write-wins). Mesma semântica do `skip_existing` do backoffice (`routers/tournament_results.py`).
 
 ### 12.3. Mystery KO actualmente unsupported no backoffice
 

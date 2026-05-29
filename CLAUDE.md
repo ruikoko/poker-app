@@ -50,6 +50,18 @@ passadas.
 conceito mapeado? Actualiza o MAPA na mesma sessão. Senão fica
 desactualizado e mente ao próximo Claude (pior do que não existir).
 
+## ⚠️ Reconfirmar tech debts no repo antes de atacar
+
+Antes de atacar qualquer tech debt, **reconfirma o estado actual lendo o
+código/docs do repo** — não confies em listas de estado mantidas na conversa
+(podem estar desactualizadas, ou o item pode ter sido silenciosamente resolvido
+noutra sessão). Em pt43 isto apanhou: o `#DISCORD-VISION-NO-RECOVERY` já tinha
+um step 4b de recuperação parcial (a redacção do debt estava stale), e o
+`#SERVER-FILTER-HRC-STATUS`/`#SYNC-RECENT-RESPECT-MANUAL` tinham docs (MAPA,
+REGRAS_NEGOCIO) a afirmar "não implementado" depois de implementados. Para cada
+debt: confirma se ainda existe, onde vive (ficheiro:linha), e quantifica o
+impacto real (ex.: query read-only) antes de estimar esforço.
+
 ## Stack
 
 - **Backend**: FastAPI + `psycopg2` contra PostgreSQL. Entry point `backend/app/main.py`; routers em `backend/app/routers/`; lógica em `backend/app/services/` e `backend/app/hand_service.py` (top-level); parsers por sala em `backend/app/parsers/`.
@@ -834,6 +846,26 @@ Detalhe completo em `docs/JOURNAL_2026-05-28-pt42d.md`,
 `docs/TECH_DEBTS_INVENTARIO.md` (secção pt42d),
 `docs/HRC_ANATOMIA_OPERACIONAL.md` §12.10 (reescrita).
 
-Última sessão fechada: **pt42d** (28 Maio 2026 — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2 ✅ RESOLVIDO; payouts.json HRC-native + hints em meta.json + .exe recompilado SHA cdfc7247...3262; suite **730 → 734 PASSED**; smoke real Beelink pendente para validação final). Detalhes em `docs/JOURNAL_2026-05-28-pt42d.md`.
+## pt43 — Onda 1 de tech debts: 6 resolvidos + 1 adiado (29 Maio 2026)
 
-Próxima sessão (**pt42e**), por ordem: 1) **Smoke real Beelink pt42d** (uvicorn local + cópia .exe novo + payouts_helpers.py para Beelink; validar HRC Instant=50%); 2) **Commit + push pt42d** (após smoke OK); 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED); 5) `#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING` (🟢 LOW novo); 6) outros. Backlog em `docs/PENDENTES.md`.
+4 commits atómicos em main; suite **734 → 770 PASSED** (+36; `ire.py` ganhou
+cobertura directa 0 → 30). Protocolo apertado (diff-em-buffer → validação Web →
+aplicar → suite) por cada mudança.
+
+| Commit | Tech debts |
+|---|---|
+| `942ec08` | **#IRE-MB** — constante do bounty derivada por torneio (`KOP_fraction × instant_fraction`), já não fixa em 0.25. `ire.py` parametrizado + `derive_kop_fraction`/`derive_constant`; `hands.py` faz LEFT JOIN a `tournament_summaries` (`buy_in_entry`/`buy_in_bounty`). Banda ±0.01 mantém PKO standard na tabela W3cray; Big Bounty (0.35) usa fórmula. Guarda PKO-only (Mystery 0.25 legacy). Super KO escondido. Ramo PS construído mas dormante (gate GG). |
+| `6a1aa14` | **#AUTH-SCHEME** (docs, zero refs X-API-Key), **#PYDANTIC-V1** (`@validator`→`@field_validator` em `lobbys.py`), **F-cleanup** (remove instrumentação `[debug-msg-lobby]` em `discord_bot.py`). |
+| `008342e` | **#DISCORD-VISION-NO-RECOVERY** — step 4b de `sync_and_process` alargado de `vision_done IS NULL` para `IS DISTINCT FROM 'true'` (SQL em constante `_RECOVERY_REPLAYER_SQL`). Defensivo: zero entries presas hoje (quantificado). |
+| `16faa1e` | **#5 SERVER-FILTER-HRC-STATUS** (`select_andar1_rows` exclui `hrc_jobs.status='done'` via NOT EXISTS — afecta adapter GET e painel /hrc), **#7 SYNC-RECENT-RESPECT-MANUAL** (precedência D11 enforced em `lobby_sync.process_lobby_message`), **#2 TS-RATIO-MYSTERY-CONFIRM** (adiado → #MYSTERY-KO-DUAL-SUPPORT). |
+
+**Info técnica Mystery KO (Rui):** não-progressivo, `instant_fraction=1.0`, bounties
+ligam só no ITM (raramente no fecho do late reg), valor por sorteio. Reforça que o
+suporte Mystery (incl. IRE Mystery via EV do pool) pertence a #MYSTERY-KO-DUAL-SUPPORT,
+não ao #IRE-MB (daí a guarda PKO-only).
+
+Última sessão fechada: **pt43** (29 Maio 2026 — Onda 1 de tech debts: 6 resolvidos + 1 adiado, 4 commits atómicos `942ec08`/`6a1aa14`/`008342e`/`16faa1e`; suite **734 → 770 PASSED**). Detalhes em `docs/JOURNAL_2026-05-29-pt43.md`.
+
+⚠️ **Pendente herdado (não tocado em pt43):** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
+
+Próxima sessão, por ordem sugerida: 1) **Smoke real Beelink pt42d** (herdado); 2) **`#MYSTERY-KO-DUAL-SUPPORT`** (🟡 MED — agora com info técnica nova: não-progressivo, instant=1.0, ITM-gated); 3) **`#LOBBY-SYNC-PAGINATION-LIMIT`** (🟡 MED); 4) outros. Backlog em `docs/PENDENTES.md`.

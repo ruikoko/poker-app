@@ -603,6 +603,8 @@ A entrada `(9999, "pos-nko")` em `HM3_REAL_TAGS` é sintética: `pos-nko` é nom
 - WPN não tem padrão numérico de buyin — `buy_in` fica NULL.
 - PS tem `tournament_name=NULL` por design — frontend compõe título via `buy_in + format + #tournament_number`.
 
+**Acoplamento novo (pt43, #IRE-MB):** o IRE (`backend/app/services/ire.py:compute_ire`, chamado em `routers/hands.py:list_hands` e `get_hand`) lê `tournament_summaries.buy_in_entry` e `buy_in_bounty` via **LEFT JOIN** a `tournaments_meta` (GG-only) para derivar a constante do bounty (`KOP_fraction × instant_fraction`). Ausência de TS → degradação graciosa para 0.25. Mexer no parser TS (`buy_in_entry`/`buy_in_bounty`, `tournament_summaries.py:_split_buy_in_parts`) afecta agora também os valores de IRE mostrados nos Big Bounty GG.
+
 **Cross-references:** [`tags`](#25-tags), [Torneios](#65-torneios-gg-com-ss--sem-ss-hm3-tab), [HM3](#66-hm3).
 
 ---
@@ -819,6 +821,7 @@ created_at    TIMESTAMPTZ DEFAULT NOW()
 **Comportamento esperado quando muda:**
 
 - `vision_done: false → true`: dispara qualquer auto-rematch com `WHERE (raw_json->>'vision_done')::boolean = true`.
+- **Recuperação de Vision falhada (pt43, `#DISCORD-VISION-NO-RECOVERY`):** o step 4b de `discord.py:sync_and_process` re-dispatcha Vision para `replayer_link` Discord GG com `img_b64 IS NOT NULL` e `vision_done IS DISTINCT FROM 'true'` (apanha NULL **e** `'false'`). SQL na constante `_RECOVERY_REPLAYER_SQL` (`discord.py`). Nota: `/vision/backfill` (`screenshot.py`) cobre só `entry_type='screenshot'` — escopo distinto.
 - `img_b64` removido: `/api/screenshots/image/{entry_id}` devolve 404.
 - `tm` ausente: nenhum auto-match acontece.
 
@@ -1946,7 +1949,7 @@ UNIQUE (hand_db_id)
 }
 ```
 
-Source of truth **local** — backend ainda não filtra `GET /api/queue/hrc` por `hrc_jobs.status` (tech debt `#SERVER-FILTER-HRC-STATUS`). Reset manual = apagar linha do state ou apagar ficheiro inteiro.
+Source of truth **local** do adapter. **pt43:** o backend passou a filtrar — `hrc_queue.select_andar1_rows` exclui mãos com `hrc_jobs.status='done'` (NOT EXISTS), portanto tanto o `GET /api/queue/hrc` como o painel `/hrc` já não devolvem mãos calculadas (`#SERVER-FILTER-HRC-STATUS` ✅). O `state.json` local continua a deduplicar `pulled`/`processing`/`failed`. Reset manual = apagar linha do state ou o ficheiro inteiro.
 
 **Comportamento esperado quando muda:**
 
