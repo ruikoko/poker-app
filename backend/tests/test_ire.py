@@ -1,0 +1,263 @@
+"""Baseline T0 (#IRE-MB) — congela o comportamento ACTUAL de `ire.py` (constante
+0,25 hardcoded) ANTES do refactor da constante dinâmica (T1+).
+
+Sem DB: `compute_ire` recebe `hand` + `tournament_meta` como dicts. Valores
+capturados por execução read-only das funções actuais em 2026-05-29. Se algum
+destes asserts partir num refactor futuro, é regressão no caminho 0,25 — não
+alterar os números sem decisão explícita.
+"""
+import pytest
+
+from app.services import ire
+
+
+# ── lookup_ire_pct — células da tabela W3cray (ratio 25%) ────────────────────
+
+def test_lookup_table_cells_exact():
+    assert ire.lookup_ire_pct(1.0, 1) == 5.1
+    assert ire.lookup_ire_pct(0.25, 1) == 13.0
+    assert ire.lookup_ire_pct(7.0, 1) == 0.2
+    assert ire.lookup_ire_pct(0.5, 2) == 13.0
+
+
+def test_lookup_none_when_ko_units_nonpositive():
+    assert ire.lookup_ire_pct(1.0, 0) is None
+    assert ire.lookup_ire_pct(1.0, -1) is None
+    assert ire.lookup_ire_pct(0.0, 1) is None
+
+
+def test_lookup_offtable_high_clamps_then_falls_back_to_formula():
+    # (20, 10) cai fora da tabela -> _nearest_idx clampa a rows[-1]=7.0,cols[-1]=5
+    # -> célula None -> _formula_fallback(20,10) com bounty_si=10*0.25=2.5.
+    assert ire.lookup_ire_pct(20.0, 10.0) == pytest.approx(2.941176, abs=1e-4)
+
+
+# ── _formula_fallback — constante 0,25 hardcoded (ALVO do T1) ────────────────
+
+def test_formula_fallback_known_points():
+    # bounty_si = ko_units * 0.25 ; IRE = bounty_si/(4*stack_si+2*bounty_si)*100
+    assert ire._formula_fallback(1.0, 1.0) == pytest.approx(5.555556, abs=1e-4)
+    assert ire._formula_fallback(2.0, 3.0) == pytest.approx(7.894737, abs=1e-4)
+
+
+def test_formula_fallback_none_on_nonpositive():
+    assert ire._formula_fallback(1.0, 0.0) is None
+    assert ire._formula_fallback(0.0, 1.0) is None
+
+
+# ── compute_ire — caminho PKO 50/50 (GG) end-to-end ──────────────────────────
+
+def _hand_5050():
+    """Mão GG PKO standard: 2 vilões, ambos bounty_pct=100 (1 KO inicial).
+    starting_stack=20000 -> villainA stack_si=1.0 (activo), villainB 2.0 (foldou)."""
+    return {
+        "site": "GGPoker",
+        "tournament_format": "PKO",
+        "hm3_tags": ["ICM", "pko"],
+        "discord_tags": None,
+        "player_names": {"match_method": "anchor_stack", "players_list": []},
+        "all_players_actions": {
+            "_meta": {"bb": 1000},
+            "Hero":     {"is_hero": True, "stack": 30000, "position": "BTN",
+                         "actions": {"preflop": ["Raise 2000"]}},
+            "villainA": {"stack": 20000, "bounty_pct": 100, "position": "CO",
+                         "actions": {"preflop": ["Call 2000"]}},
+            "villainB": {"stack": 40000, "bounty_pct": 100, "position": "SB",
+                         "actions": {"preflop": ["Fold"]}},
+        },
+    }
+
+
+def _meta(name="Bounty Hunters $88", stack=20000):
+    return {"tournament_name": name, "starting_stack": stack}
+
+
+def test_compute_ire_5050_main_villain():
+    out = ire.compute_ire(_hand_5050(), _meta())
+    assert out is not None
+    mv = out["main_villain"]
+    assert mv["nick"] == "villainA"
+    assert mv["stack_si"] == 1.0
+    assert mv["ko_units"] == 1.0
+    assert mv["ire_pct"] == 5.1          # tabela [1.0][1]
+    assert mv["is_covered"] is True
+
+
+def test_compute_ire_5050_per_opponent_order_and_foldado():
+    out = ire.compute_ire(_hand_5050(), _meta())
+    per = out["per_opponent"]
+    assert [p["nick"] for p in per] == ["villainA", "villainB"]  # CO antes de SB
+    folded = per[1]
+    assert folded["nick"] == "villainB"
+    assert folded["is_active"] is False      # foldou
+    assert folded["ire_pct"] == 2.6          # ire_pct calculado mesmo foldado (stack_si=2.0)
+    assert folded["is_main"] is False
+
+
+# ── compute_ire — gates que devolvem None (esconder IRE) ─────────────────────
+
+def test_gate_super_ko_hidden():
+    assert ire.compute_ire(_hand_5050(), _meta(name="Super KO Daily $50")) is None
+
+
+def test_gate_non_allowed_format_hidden():
+    h = _hand_5050()
+    h["tournament_format"] = "Vanilla"
+    assert ire.compute_ire(h, _meta()) is None
+
+
+def test_gate_non_gg_site_hidden():
+    h = _hand_5050()
+    h["site"] = "PokerStars"
+    assert ire.compute_ire(h, _meta()) is None
+
+
+def test_gate_no_ko_tag_hidden():
+    h = _hand_5050()
+    h["hm3_tags"] = ["ICM"]
+    h["discord_tags"] = ["nota"]
+    assert ire.compute_ire(h, _meta()) is None
+
+
+def test_gate_placeholder_match_method_hidden():
+    h = _hand_5050()
+    h["player_names"] = {"match_method": "discord_placeholder_tm"}
+    assert ire.compute_ire(h, _meta()) is None
+
+
+def test_gate_no_starting_stack_hidden():
+    assert ire.compute_ire(_hand_5050(), {"tournament_name": "X", "starting_stack": 0}) is None
+    assert ire.compute_ire(_hand_5050(), None) is None
+
+
+def test_gate_no_opponent_bounty_hidden():
+    h = _hand_5050()
+    h["all_players_actions"]["villainA"]["bounty_pct"] = 0
+    h["all_players_actions"]["villainB"]["bounty_pct"] = 0
+    assert ire.compute_ire(h, _meta()) is None
+
+
+# ── T2: derive_kop_fraction / derive_constant (helpers puros) ────────────────
+
+def test_kop_fraction_gg_big_bounty():
+    # $525 Big Bounty: PP=150, rake=25, KOP=350 -> 350/(150+350)=0.70
+    assert ire.derive_kop_fraction("GGPoker", buy_in_entry=150, buy_in_bounty=350) \
+        == pytest.approx(0.70, abs=1e-9)
+
+
+def test_constant_gg_big_bounty_is_035():
+    assert ire.derive_constant("GGPoker", buy_in_entry=150, buy_in_bounty=350) \
+        == pytest.approx(0.35, abs=1e-9)
+
+
+def test_kop_fraction_gg_none_without_bounty():
+    assert ire.derive_kop_fraction("GGPoker", buy_in_entry=80, buy_in_bounty=None) is None
+    assert ire.derive_kop_fraction("GGPoker", buy_in_entry=80, buy_in_bounty=0) is None
+
+
+def test_kop_fraction_winamax_wpn_none():
+    assert ire.derive_kop_fraction("Winamax", buy_in_bounty=20) is None
+    assert ire.derive_kop_fraction("WPN", buy_in_bounty=20) is None
+
+
+def test_kop_fraction_ps_5050_from_header():
+    raw = "PokerStars Hand #123: ... €22.50+€22.50+€5.00 EUR ...\nSeat 1: x (1000 in chips)"
+    assert ire.derive_kop_fraction("PokerStars", raw_hh=raw) == pytest.approx(0.5, abs=1e-9)
+
+
+def test_kop_fraction_ps_superko_bounty_gt_prize():
+    # B>A (KOP>PP): header $10+$40+$5 -> 40/50 = 0.8. Função agnóstica ao gate.
+    raw = "PokerStars Hand #9: ... $10+$40+$5 USD ..."
+    assert ire.derive_kop_fraction("PokerStars", raw_hh=raw) == pytest.approx(0.8, abs=1e-9)
+
+
+def test_constant_defaults_to_025_when_kop_none():
+    assert ire.derive_constant("Winamax", buy_in_bounty=20) == 0.25
+    assert ire.derive_constant("GGPoker") == 0.25
+    assert ire.derive_constant(None) == 0.25
+
+
+def test_compute_ire_t3_activation_big_bounty():
+    """T3 wiring: tournament_meta com buy_in_entry/buy_in_bounty do TS
+    deve propagar para constant=0.35 e usar a fórmula (não a tabela 0.25)."""
+    hand = _hand_5050()
+    meta = {
+        "tournament_name": "Big Bounty Hunters $525",
+        "starting_stack": 20000,
+        "buy_in_entry": 150,
+        "buy_in_bounty": 350,
+    }
+    out = ire.compute_ire(hand, meta)
+    assert out is not None
+    mv = out["main_villain"]
+    # constant = 350/(150+350) * 0.5 = 0.35 ; bounty_si = 1.0 * 0.35 = 0.35
+    # IRE bruto = 0.35 / (4 + 0.7) * 100 = 7.446808... ; armazenado a 1 casa -> 7.4
+    assert ire._formula_fallback(1.0, 1.0, 0.35) == pytest.approx(7.446808, abs=1e-4)
+    assert mv["ire_pct"] == pytest.approx(7.4, abs=0.05)   # valor armazenado (round 1 casa)
+    # Sanity: diferente de 5.1 (PKO standard via tabela) -> wiring vivo
+    assert mv["ire_pct"] != 5.1
+
+
+def test_compute_ire_mystery_ko_stays_legacy_025():
+    """T5: Mystery KO NÃO usa a constante derivada (bounty aleatório). Mesmo com
+    split 33/67 no TS, mantém-se em 0.25 -> tabela -> 5.1 (legacy, não 7.1)."""
+    hand = _hand_5050()
+    hand["tournament_format"] = "Mystery KO"
+    meta = {"tournament_name": "Sunday Mystery", "starting_stack": 20000,
+            "buy_in_entry": 15, "buy_in_bounty": 30}   # 30/(15+30)=0.667 -> seria 0.333
+    out = ire.compute_ire(hand, meta)
+    assert out["main_villain"]["ire_pct"] == 5.1   # legacy, derivação NÃO aplicada
+
+
+# ── T6: fórmula com constants diferentes, decisão (a), edge cases ────────────
+
+def test_formula_monotonic_in_constant():
+    """IRE cresce monotonicamente com a constante (mais bounty pool -> mais
+    equity reduction), para (stack_si, ko_units) fixos."""
+    a = ire._formula_fallback(1.0, 1.0, 0.10)
+    b = ire._formula_fallback(1.0, 1.0, 0.25)
+    c = ire._formula_fallback(1.0, 1.0, 0.50)
+    assert a < b < c
+    assert (a, b, c) == pytest.approx((2.380952, 5.555556, 10.0), abs=1e-4)
+
+
+def test_lookup_nonstandard_constant_bypasses_table():
+    """Decisão (a): numa célula que EXISTE na tabela (1.0,1 -> 5.1), uma constante
+    fora da banda usa a fórmula, não a tabela."""
+    assert ire.lookup_ire_pct(1.0, 1, 0.35) == pytest.approx(7.446808, abs=1e-4)
+    assert ire.lookup_ire_pct(1.0, 1, 0.35) != 5.1
+
+
+def test_lookup_inside_band_uses_table():
+    """Constante dentro da banda ±0.01 (ruído do rake) usa a tabela calibrada."""
+    assert ire.lookup_ire_pct(1.0, 1, 0.255) == 5.1
+    assert ire.lookup_ire_pct(1.0, 1, 0.25) == 5.1
+
+
+def test_ps_header_edge_cases_none():
+    """PS header não parseável -> None (cai no default 0.25 no caller)."""
+    assert ire._kop_from_ps_header("sem montantes aqui") is None
+    assert ire._kop_from_ps_header("buy-in $10+$5 (so 2 componentes)") is None
+    assert ire._kop_from_ps_header("") is None
+    assert ire._kop_from_ps_header(None) is None
+
+
+def test_kop_from_parts_pure_bounty_edge():
+    """entry=0 (toda a contribuição vai para o bounty pool) -> KOP_fraction=1.0."""
+    assert ire._kop_from_parts(0, 50) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_derive_kop_fraction_unknown_site_none():
+    """Site não reconhecido -> None -> default 0.25 no caller."""
+    assert ire.derive_kop_fraction("888poker", buy_in_bounty=10) is None
+    assert ire.derive_kop_fraction("", buy_in_bounty=10) is None
+
+
+def test_compute_ire_ps_dormant_despite_valid_header():
+    """O ramo PS de derive_kop_fraction existe e é testado, mas compute_ire está
+    gated a GGPoker -> uma mão PS com header válido continua escondida (None).
+    Documenta que o ramo PS está DORMANTE até o gate de site ser relaxado."""
+    hand = _hand_5050()
+    hand["site"] = "PokerStars"
+    hand["raw"] = "PokerStars Hand #1: ... €22.50+€22.50+€5.00 EUR ..."
+    assert ire.compute_ire(hand, _meta()) is None

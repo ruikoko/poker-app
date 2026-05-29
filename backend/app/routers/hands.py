@@ -731,9 +731,12 @@ def list_hands(
     tournament_meta_by_num: dict = {}
     if tournament_numbers:
         meta_rows = query(
-            "SELECT tournament_number, tournament_name, starting_stack "
-            "  FROM tournaments_meta "
-            " WHERE site = 'GGPoker' AND tournament_number = ANY(%s)",
+            "SELECT tm.tournament_number, tm.tournament_name, tm.starting_stack, "
+            "       ts.buy_in_entry, ts.buy_in_bounty "
+            "  FROM tournaments_meta tm "
+            "  LEFT JOIN tournament_summaries ts "
+            "    ON ts.site = tm.site AND ts.tournament_number = tm.tournament_number "
+            " WHERE tm.site = 'GGPoker' AND tm.tournament_number = ANY(%s)",
             (tournament_numbers,)
         )
         tournament_meta_by_num = {m["tournament_number"]: dict(m) for m in meta_rows}
@@ -1356,9 +1359,12 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
     tournament_meta = None
     if hand.get("site") == "GGPoker" and hand.get("tournament_number"):
         meta_rows = query(
-            "SELECT tournament_number, tournament_name, starting_stack "
-            "  FROM tournaments_meta "
-            " WHERE site = 'GGPoker' AND tournament_number = %s",
+            "SELECT tm.tournament_number, tm.tournament_name, tm.starting_stack, "
+            "       ts.buy_in_entry, ts.buy_in_bounty "
+            "  FROM tournaments_meta tm "
+            "  LEFT JOIN tournament_summaries ts "
+            "    ON ts.site = tm.site AND ts.tournament_number = tm.tournament_number "
+            " WHERE tm.site = 'GGPoker' AND tm.tournament_number = %s",
             (hand["tournament_number"],)
         )
         if meta_rows:

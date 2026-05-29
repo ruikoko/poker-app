@@ -1,9 +1,14 @@
 """
-IRE v2 (Indice de Reducao de Equity / Bounty Power) — GG-only, ratio 25%.
+IRE v2 (Indice de Reducao de Equity / Bounty Power) — GG-only.
 
-Substitui v1 (formula em runtime) por lookup numa tabela hardcoded W3cray
-(SI/KO_inicial = 4 = ratio 25%) com nearest-neighbour clamp e fallback
-formula quando a celula = None ou (stack_si, ko_units) cai fora da tabela.
+#IRE-MB (2026-05-29): a constante do bounty é DERIVADA por torneio
+(KOP_fraction × instant_fraction), já não é fixa em 25%. Default 0.25 =
+PKO standard 50/50. Ver `derive_constant`.
+
+Lookup numa tabela hardcoded W3cray (SI/KO_inicial = 4 = constante 0.25) com
+nearest-neighbour clamp e fallback formula quando a celula = None ou
+(stack_si, ko_units) cai fora da tabela. Decisão (a) do #IRE-MB: a tabela só é
+valida para a constante 0.25 (banda ±0.01); outras constantes usam a formula.
 
 Filtros de activacao (qualquer falha => return None, IRE escondido):
     - hand.site == 'GGPoker'
@@ -11,7 +16,9 @@ Filtros de activacao (qualquer falha => return None, IRE escondido):
     - tag *ko* em hm3_tags ou discord_tags (case-insens)
     - tournament_format in {'PKO', 'Mystery KO'}
     - tournaments_meta com starting_stack > 0
-    - tournament_name NAO contem 'Super KO' (= ratio 40%, escondido em v1)
+    - tournament_name NAO contem 'Super KO' (= ratio 40%). MANTIDO escondido
+      mesmo com a constante derivavel (decisao b, #IRE-MB T4): falta validacao
+      empirica da instant_fraction do Super KO (so 50/50 e 70/30 confirmados).
     - >= 1 oponente (non-hero) com bounty_pct > 0
 
 Output (quando aplicavel):
@@ -34,12 +41,30 @@ import logging
 import re
 from typing import Optional
 
+# Reuso do regex dos 3 componentes do header PS (anti-drift com o classificador).
+from app.utils.tournament_format import _PS_3COMP_AMOUNTS_RE
+
 logger = logging.getLogger(__name__)
 
 
 ALLOWED_FORMATS = {"PKO", "Mystery KO"}
 KO_TAG_NEEDLE = "ko"
 SUPER_KO_NEEDLE = "super ko"
+
+# #IRE-MB — a constante do bounty (bounty_si = ko_units × constante) decompõe-se
+# em KOP_fraction × instant_fraction. 0.25 = PKO standard 50/50 (0.5 × 0.5).
+# Decisão (a): a tabela W3cray só é válida para 0.25; outras constantes usam a
+# fórmula pura. O default mantém o comportamento legacy byte-a-byte.
+_DEFAULT_CONSTANT = 0.25
+# Banda de "standard" à volta de 0.25: absorve o ruído do rake no split GG
+# (50/50 real ~0.247) -> usa a tabela W3cray calibrada. Formatos genuinamente
+# diferentes (Big Bounty 0.35, Super KO 0.40) caem fora -> fórmula (decisão α).
+_TABLE_CONSTANT_BAND = 0.01
+# instant_fraction: parte do bounty ganha em CASH imediato ao eliminar. Confirmada
+# empiricamente = 0.5 no PKO standard E no Big Bounty HR do GG (#IRE-MB ponto 6,
+# 2026-05-29). ⚠️ NÃO confundir com o progressiveFactor do HRC / lobby_vision.py
+# — são convenções distintas. Const nomeada para futura parametrização (Mystery).
+_INSTANT_FRACTION = 0.5
 _STREETS = ("preflop", "flop", "turn", "river")
 
 # Ordem visual da mesa (mesma de HandDetailPage.jsx).
@@ -154,23 +179,31 @@ def _nearest_idx(value: float, axis: list) -> int:
     return min(range(len(axis)), key=lambda i: abs(axis[i] - value))
 
 
-def _formula_fallback(stack_si: float, ko_units: float) -> Optional[float]:
+def _formula_fallback(stack_si: float, ko_units: float,
+                      constant: float = _DEFAULT_CONSTANT) -> Optional[float]:
     """IRE_pct = bounty_si / (4*stack_si + 2*bounty_si) * 100, com bounty_si
-    = ko_units * 0.25 (= ratio 25% expresso em SI)."""
+    = ko_units * `constant` (= KOP_fraction × instant_fraction expresso em SI).
+    `constant` default 0.25 = PKO standard 50/50."""
     if ko_units <= 0 or stack_si <= 0:
         return None
-    bounty_si = ko_units * 0.25
+    bounty_si = ko_units * constant
     denom = 4.0 * stack_si + 2.0 * bounty_si
     if denom <= 0:
         return None
     return (bounty_si / denom) * 100.0
 
 
-def lookup_ire_pct(stack_si: float, ko_units: float) -> Optional[float]:
-    """Devolve IRE % para (stack_op_em_SI, ko_op_em_KO_inicial). Ratio 25%.
-    None quando ko_units<=0 ou stack invalido."""
+def lookup_ire_pct(stack_si: float, ko_units: float,
+                   constant: float = _DEFAULT_CONSTANT) -> Optional[float]:
+    """Devolve IRE % para (stack_op_em_SI, ko_op_em_KO_inicial).
+    `constant` = KOP_fraction × instant_fraction. Para `constant == 0.25`
+    (PKO standard) usa a tabela W3cray calibrada; para qualquer outra constante
+    (decisão (a) do #IRE-MB) usa a fórmula pura — a tabela não é válida fora de
+    0.25. None quando ko_units<=0 ou stack invalido."""
     if ko_units <= 0 or stack_si <= 0:
         return None
+    if abs(constant - _DEFAULT_CONSTANT) > _TABLE_CONSTANT_BAND:
+        return _formula_fallback(stack_si, ko_units, constant)
     rows = W3CRAY_TABLE_25PCT["rows_si"]
     cols = W3CRAY_TABLE_25PCT["cols_ko"]
     y_idx = _nearest_idx(stack_si, rows)
@@ -178,7 +211,87 @@ def lookup_ire_pct(stack_si: float, ko_units: float) -> Optional[float]:
     cell = W3CRAY_TABLE_25PCT["values_pct"][rows[y_idx]][x_idx]
     if cell is not None:
         return float(cell)
-    return _formula_fallback(stack_si, ko_units)
+    return _formula_fallback(stack_si, ko_units, constant)
+
+
+# ── Derivação da constante por torneio (#IRE-MB) ─────────────────────────────
+
+def _kop_from_parts(entry, bounty) -> Optional[float]:
+    """GG: KOP_fraction = bounty / (entry + bounty). Rake NÃO entra no
+    denominador (fracção líquida). None se inputs inválidos ou bounty<=0."""
+    try:
+        e = float(entry) if entry is not None else None
+        b = float(bounty) if bounty is not None else None
+    except (TypeError, ValueError):
+        return None
+    if b is None or b <= 0 or e is None or e < 0:
+        return None
+    net = e + b
+    if net <= 0:
+        return None
+    return b / net
+
+
+def _kop_from_ps_header(raw_hh: Optional[str]) -> Optional[float]:
+    """PS: 3 componentes no header `$A+$B+$C`. ORDEM PS = [A=PP, B=KOP, C=rake]
+    (≠ GG TS [PP, rake, KOP]). KOP_fraction = B / (A + B). None se não parseável."""
+    if not raw_hh:
+        return None
+    header = raw_hh[:2000]
+    m = _PS_3COMP_AMOUNTS_RE.search(header)
+    if not m:
+        return None
+    try:
+        a = float(m.group(1))   # PP
+        b = float(m.group(2))   # KOP
+    except (ValueError, IndexError):
+        return None
+    net = a + b
+    if b <= 0 or net <= 0:
+        return None
+    return b / net
+
+
+def derive_kop_fraction(
+    site: Optional[str],
+    *,
+    buy_in_entry=None,
+    buy_in_bounty=None,
+    raw_hh: Optional[str] = None,
+) -> Optional[float]:
+    """Fracção líquida do buy-in que vai para o bounty pool (KOP), por sala.
+    None => caller usa o default 0.25 (degradação graciosa).
+
+    - GG:          de tournament_summaries (buy_in_entry/buy_in_bounty).
+    - Winamax/WPN: None (constante fixa 0.25 — só PKO 50/50 progressive).
+    - PS:          dos 3 componentes do header do raw_hh.
+    """
+    s = (site or "").lower()
+    if s == "ggpoker":
+        return _kop_from_parts(buy_in_entry, buy_in_bounty)
+    if s in ("winamax", "wpn"):
+        return None
+    if s == "pokerstars":
+        return _kop_from_ps_header(raw_hh)
+    return None
+
+
+def derive_constant(
+    site: Optional[str],
+    *,
+    buy_in_entry=None,
+    buy_in_bounty=None,
+    raw_hh: Optional[str] = None,
+) -> float:
+    """Constante do bounty = KOP_fraction × instant_fraction. Quando o
+    KOP_fraction não é derivável (None) devolve o default 0.25 (comportamento
+    legacy). Ex.: GG Big Bounty 30/70 → 0.70 × 0.5 = 0.35."""
+    kop = derive_kop_fraction(
+        site, buy_in_entry=buy_in_entry, buy_in_bounty=buy_in_bounty, raw_hh=raw_hh
+    )
+    if kop is None:
+        return _DEFAULT_CONSTANT
+    return kop * _INSTANT_FRACTION
 
 
 # ── Vilao principal (regra D) ────────────────────────────────────────────────
@@ -227,7 +340,10 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
 
     tname = (tournament_meta.get("tournament_name") or "").lower()
     if SUPER_KO_NEEDLE in tname:
-        return None  # ratio 40%, escondido em v1
+        # #IRE-MB T4 (decisao b): escondido ate validar empiricamente a
+        # instant_fraction do Super KO. A constante seria derivavel, mas sem
+        # esse dado o IRE ficaria potencialmente errado -> preferimos esconder.
+        return None
 
     apa = _coerce_apa(hand.get("all_players_actions"))
     if not apa:
@@ -235,6 +351,24 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
     bb = (apa.get("_meta") or {}).get("bb") or 0
     if bb <= 0:
         return None
+
+    # #IRE-MB — constante do bounty por torneio (KOP_fraction × instant_fraction).
+    # GG: de buy_in_entry/buy_in_bounty (tournament_summaries, via JOIN no caller).
+    # Ausente/non-derivável -> default 0.25 (legacy). raw_hh=None: ramo PS dormante.
+    #
+    # T5 (#MYSTERY-KO-DUAL-SUPPORT): SÓ o PKO usa a constante derivada. No Mystery
+    # KO o bounty é aleatório/desconhecido até ao KO -> a fórmula de bounty fixo
+    # não aplica; mantém-se em 0.25 (legacy) até suporte dedicado. ⚠️ Mystery PS
+    # (Seat bounty random) precisa de confirmação empírica futura — sub-item adiado.
+    if hand.get("tournament_format") == "PKO":
+        constant = derive_constant(
+            hand.get("site"),
+            buy_in_entry=(tournament_meta or {}).get("buy_in_entry"),
+            buy_in_bounty=(tournament_meta or {}).get("buy_in_bounty"),
+            raw_hh=None,
+        )
+    else:
+        constant = _DEFAULT_CONSTANT
 
     pl_by_name = {}
     for p in (pn.get("players_list") or []):
@@ -261,7 +395,7 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
             ko_pct = _coerce_int((pl_by_name.get(nick) or {}).get("bounty_pct"))
         ko_units = ko_pct / 100.0 if ko_pct > 0 else 0.0
         stack_si = stack_chips / si if si > 0 else 0.0
-        ire_pct = lookup_ire_pct(stack_si, ko_units) if ko_units > 0 else None
+        ire_pct = lookup_ire_pct(stack_si, ko_units, constant) if ko_units > 0 else None
         per_opponent.append({
             "nick": nick,
             "position": info.get("position"),
