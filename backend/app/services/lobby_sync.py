@@ -276,6 +276,34 @@ async def process_lobby_message(
         base["candidates"] = candidates
         return base
 
+    # #SYNC-RECENT-RESPECT-MANUAL (pt43) — guarda de precedência D11
+    # (manual > backoffice_vision > discord_lobby_vision). O lobby é a fonte de
+    # menor prioridade: NÃO sobrescreve manual/backoffice já presentes (dados
+    # parciais do lobby = regressão de qualidade). Discord-sobre-Discord passa
+    # (last-write-wins na mesma fonte). Espelha o skip_existing do backoffice
+    # (routers/tournament_results.py:170-182). Ref: REGRAS_NEGOCIO.md §12.2.
+    existing = await asyncio.to_thread(
+        query,
+        "SELECT source FROM tournament_payouts "
+        "WHERE site = %s AND tournament_number = %s",
+        (site, tn),
+    )
+    if existing:
+        cur_src = existing[0].get("source") or ""
+        if cur_src.startswith("manual:") or cur_src.startswith("backoffice_vision:"):
+            _upsert_lobby_log(
+                message_id=message_id, channel_id=channel_id,
+                result="skipped_precedence",
+                reason_detail=f"existing source={cur_src!r} >= discord_lobby_vision",
+                site=site, tournament_name=name, tournament_number=tn,
+                vision_json=vj, posted_at=posted_at,
+                players_left=players_left,
+            )
+            base["result"] = "skipped_precedence"
+            base["reason_detail"] = f"existing source={cur_src!r}"
+            base["tournament_number"] = tn
+            return base
+
     blob = lobby_vision.build_hrc_payouts_blob(vj)
     try:
         upsert_res = await asyncio.to_thread(

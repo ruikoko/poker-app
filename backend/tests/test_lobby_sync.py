@@ -62,6 +62,7 @@ def _mock_bot_with_channel(history_msgs, channel_name="lobbys"):
 
 # ── 1-3. process_lobby_message ──────────────────────────────────────────────
 
+@patch("app.services.lobby_sync.query", return_value=[])
 @patch("app.services.lobby_sync._upsert_lobby_log")
 @patch("app.services.payouts_service.upsert_payout",
        return_value={"action": "inserted"})
@@ -78,7 +79,7 @@ def _mock_bot_with_channel(history_msgs, channel_name="lobbys"):
 @patch("app.services.lobby_vision.extract_lobby_payout_json",
        return_value='{"site":"GGPoker","tournament_name":"X","prizes":{"1":1.0}}')
 def test_process_success_writes_log_and_returns_success(
-    _ex, _pa, _re, _bl, _up, mock_log
+    _ex, _pa, _re, _bl, _up, mock_log, mock_query
 ):
     r = asyncio.run(lobby_sync.process_lobby_message(
         b"\x89PNG", "image/png", "msg1", "ch1",
@@ -122,6 +123,60 @@ def test_process_pre_2026_skip_no_log():
         ))
     assert r["result"] == "pre_2026_skip"
     mock_log.assert_not_called()
+
+
+# ── #SYNC-RECENT-RESPECT-MANUAL — guarda de precedência D11 ──────────────────
+
+def _PREC_PATCHES():
+    return (
+        patch("app.services.lobby_sync._upsert_lobby_log"),
+        patch("app.services.payouts_service.upsert_payout",
+              return_value={"action": "updated"}),
+        patch("app.services.lobby_vision.build_hrc_payouts_blob",
+              return_value={"name": "/", "folders": [],
+                            "structures": [{"name": "X", "bountyType": "PKO",
+                                            "progressiveFactor": 0.5}]}),
+        patch("app.services.tournament_resolver.resolve_tournament_number",
+              return_value=("12345", [])),
+        patch("app.services.lobby_vision.parse_and_validate_lobby_json",
+              return_value={"site": "GGPoker", "tournament_name": "X",
+                            "prizes": {"1": 1.0}}),
+        patch("app.services.lobby_vision.extract_lobby_payout_json",
+              return_value='{"site":"GGPoker"}'),
+    )
+
+
+def _run_with_existing_source(existing_source):
+    """Corre process_lobby_message com `query` a devolver a source actual.
+    Devolve (result_dict, mock_upsert)."""
+    cms = _PREC_PATCHES()
+    with cms[0], cms[1] as m_up, cms[2], cms[3], cms[4], cms[5], \
+         patch("app.services.lobby_sync.query",
+               return_value=([{"source": existing_source}] if existing_source else [])):
+        r = asyncio.run(lobby_sync.process_lobby_message(
+            b"\x89PNG", "image/png", "msg1", "ch1",
+            datetime.now(timezone.utc), "",
+        ))
+    return r, m_up
+
+
+def test_precedence_discord_skips_manual():
+    r, m_up = _run_with_existing_source("manual:rui")
+    assert r["result"] == "skipped_precedence"
+    m_up.assert_not_called()
+
+
+def test_precedence_discord_skips_backoffice():
+    r, m_up = _run_with_existing_source("backoffice_vision:foo.png")
+    assert r["result"] == "skipped_precedence"
+    m_up.assert_not_called()
+
+
+def test_precedence_discord_overwrites_discord():
+    # Mesma fonte (ou sem row) -> last-write-wins, upsert procede.
+    r, m_up = _run_with_existing_source("discord_lobby_vision:old99")
+    assert r["result"] == "success"
+    m_up.assert_called_once()
 
 
 # ── 4-9. run_sync ───────────────────────────────────────────────────────────

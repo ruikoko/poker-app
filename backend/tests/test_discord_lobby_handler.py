@@ -78,7 +78,8 @@ def test_lobby_success_inserted():
          patch("app.services.tournament_resolver.resolve_tournament_number",
                return_value=("281416137", [])), \
          patch("app.services.payouts_service.upsert_payout",
-               return_value=upsert_result) as m_upsert:
+               return_value=upsert_result) as m_upsert, \
+         patch("app.services.lobby_sync.query", return_value=[]):
         asyncio.run(bot._handle_lobby_message(msg))
 
     msg.reply.assert_called_once()

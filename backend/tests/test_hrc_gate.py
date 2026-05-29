@@ -30,6 +30,26 @@ def test_andar1_sql_has_bounty_gate_and_params():
     assert captured["params"][-1] == list(hrc_queue.TS_GATED_FORMATS)
 
 
+def test_andar1_sql_excludes_done_hrc_jobs():
+    """#SERVER-FILTER-HRC-STATUS — o SQL do Andar 1 exclui mãos com
+    hrc_jobs.status='done' (NOT EXISTS join por hand_db_id)."""
+    captured = {}
+
+    def fake_query(sql, params):
+        captured["sql"] = sql
+        return []
+
+    dt = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    with patch("app.services.hrc_queue.query", side_effect=fake_query):
+        hrc_queue.select_andar1_rows(["icm pko"], ["new"], dt, dt)
+
+    sql = captured["sql"]
+    assert "hrc_jobs" in sql
+    assert "j.hand_db_id = hands.id" in sql
+    assert "j.status = 'done'" in sql
+    assert "NOT EXISTS" in sql
+
+
 def test_lookup_bounties_maps_and_coerces_decimal():
     rows = [
         {"site": "GGPoker", "tournament_number": "T1",

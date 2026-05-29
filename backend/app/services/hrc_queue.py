@@ -163,6 +163,14 @@ def select_andar1_rows(
                             AND ts.tournament_number = hands.tournament_number
                             AND ts.buy_in_bounty IS NOT NULL)
                )
+           -- #SERVER-FILTER-HRC-STATUS (pt43): excluir mãos já calculadas
+           -- (hrc_jobs.status='done'). Reduz bandwidth do GET /api/queue/hrc
+           -- (adapter) e tira-as do painel /hrc — ambos partilham esta fonte.
+           AND NOT EXISTS (
+                 SELECT 1 FROM hrc_jobs j
+                  WHERE j.hand_db_id = hands.id
+                    AND j.status = 'done'
+               )
          ORDER BY played_at {order}
         """,
         (ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm,
