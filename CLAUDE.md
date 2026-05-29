@@ -62,6 +62,16 @@ REGRAS_NEGOCIO) a afirmar "não implementado" depois de implementados. Para cada
 debt: confirma se ainda existe, onde vive (ficheiro:linha), e quantifica o
 impacto real (ex.: query read-only) antes de estimar esforço.
 
+## ⚠️ Descrever o problema em PT-PT simples antes de pedir decisão ao Rui
+
+Antes de qualquer **decisão de produto**, o problema **todo** tem de estar descrito
+em **linguagem normal** (PT-PT), em prosa, **sem jargão técnico** e **sem omitir o que
+importa**. O Rui decide sobre o problema real, não sobre uma versão filtrada por termos
+de engenharia. Se a explicação precisa de `match_method`, `NOT EXISTS`, `instant_fraction`
+para se perceber, ainda não está pronta — traduz primeiro. A decisão técnica (como
+implementar) vem **depois** da decisão de produto (o quê e porquê), e essa exige o
+problema em claro.
+
 ## Stack
 
 - **Backend**: FastAPI + `psycopg2` contra PostgreSQL. Entry point `backend/app/main.py`; routers em `backend/app/routers/`; lógica em `backend/app/services/` e `backend/app/hand_service.py` (top-level); parsers por sala em `backend/app/parsers/`.
@@ -846,9 +856,9 @@ Detalhe completo em `docs/JOURNAL_2026-05-28-pt42d.md`,
 `docs/TECH_DEBTS_INVENTARIO.md` (secção pt42d),
 `docs/HRC_ANATOMIA_OPERACIONAL.md` §12.10 (reescrita).
 
-## pt43 — Onda 1 de tech debts: 6 resolvidos + 1 adiado (29 Maio 2026)
+## pt43 — Onda 1 de tech debts: 8 fechados + 1 adiado (29 Maio 2026)
 
-4 commits atómicos em main; suite **734 → 770 PASSED** (+36; `ire.py` ganhou
+6 commits atómicos em main; suite **734 → 774 PASSED** (+40; `ire.py` ganhou
 cobertura directa 0 → 30). Protocolo apertado (diff-em-buffer → validação Web →
 aplicar → suite) por cada mudança.
 
@@ -858,13 +868,15 @@ aplicar → suite) por cada mudança.
 | `6a1aa14` | **#AUTH-SCHEME** (docs, zero refs X-API-Key), **#PYDANTIC-V1** (`@validator`→`@field_validator` em `lobbys.py`), **F-cleanup** (remove instrumentação `[debug-msg-lobby]` em `discord_bot.py`). |
 | `008342e` | **#DISCORD-VISION-NO-RECOVERY** — step 4b de `sync_and_process` alargado de `vision_done IS NULL` para `IS DISTINCT FROM 'true'` (SQL em constante `_RECOVERY_REPLAYER_SQL`). Defensivo: zero entries presas hoje (quantificado). |
 | `16faa1e` | **#5 SERVER-FILTER-HRC-STATUS** (`select_andar1_rows` exclui `hrc_jobs.status='done'` via NOT EXISTS — afecta adapter GET e painel /hrc), **#7 SYNC-RECENT-RESPECT-MANUAL** (precedência D11 enforced em `lobby_sync.process_lobby_message`), **#2 TS-RATIO-MYSTERY-CONFIRM** (adiado → #MYSTERY-KO-DUAL-SUPPORT). |
+| `d074634` | **#VISION-LOBBY-API-FAILURE** — fechado por reclassificação empírica. Premissa "~34% silent failures" stale: `lobby_processing_log` (131 tentativas) tem **0 vision_failed**; 50% `tm_not_found` é fase resolver (não Vision). Observabilidade pedida já existia. |
+| `2794aab` | **#TAGS-DISCORD-HM3-FRAGMENTATION** — fix proporcional: alias `nota++`→`nota` + backfill 273 mãos + `tag_family_key` (`nota`/`nota ex` no grouping do Estudo) + reclassificação. Tabela canónica `#TAGS-CANONICAL` **decidida contra** (ROI desproporcional p/ ~30 literais com 6 já unificados por `normalize_tag_key`). |
 
 **Info técnica Mystery KO (Rui):** não-progressivo, `instant_fraction=1.0`, bounties
 ligam só no ITM (raramente no fecho do late reg), valor por sorteio. Reforça que o
 suporte Mystery (incl. IRE Mystery via EV do pool) pertence a #MYSTERY-KO-DUAL-SUPPORT,
 não ao #IRE-MB (daí a guarda PKO-only).
 
-Última sessão fechada: **pt43** (29 Maio 2026 — Onda 1 de tech debts: 6 resolvidos + 1 adiado, 4 commits atómicos `942ec08`/`6a1aa14`/`008342e`/`16faa1e`; suite **734 → 770 PASSED**). Detalhes em `docs/JOURNAL_2026-05-29-pt43.md`.
+Última sessão fechada: **pt43** (29 Maio 2026 — 8 tech debts fechados + 1 adiado, 6 commits atómicos `942ec08`/`6a1aa14`/`008342e`/`16faa1e`/`d074634`/`2794aab` + 2 commits docs `6839875`/este; suite **734 → 774 PASSED**). Detalhes em `docs/JOURNAL_2026-05-29-pt43.md`.
 
 ⚠️ **Pendente herdado (não tocado em pt43):** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
 
