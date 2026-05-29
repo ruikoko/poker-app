@@ -516,6 +516,20 @@ def normalize_tag_key(tag: str | None) -> str:
     return _re.sub(r'\s+', ' ', tag.replace('-', ' ').lower()).strip()
 
 
+# Famílias de tags para AGRUPAMENTO visual no Estudo (#TAGS pt43). NÃO toca
+# INSERT nem os literais — opera sobre a chave já normalizada, só no grouping.
+# 'nota ex' (nota exemplar p/ ML futuro) agrupa visualmente com 'nota', mas
+# permanece literal em hm3_tags. 'nota++' é tratado a montante (alias → 'nota').
+_TAG_FAMILIES = {"nota ex": "nota"}
+
+
+def tag_family_key(normalized_key: str) -> str:
+    """Colapsa variantes da mesma família para o agrupamento do Estudo.
+    SÓ usado no grouping/label, nunca na escrita. Devolve 'nota' para
+    'nota' e 'nota ex'; passthrough para o resto."""
+    return _TAG_FAMILIES.get(normalized_key, normalized_key)
+
+
 def _build_conditions(
     site, tag, study_state, position, search, date_from,
     exclude_mtt_only: bool = False,
@@ -840,7 +854,7 @@ def tag_groups(
 
             seen_keys = set()
             for theme, src in entries:
-                nk = normalize_tag_key(theme) if theme else ''
+                nk = tag_family_key(normalize_tag_key(theme)) if theme else ''
                 if nk in seen_keys:
                     continue
                 seen_keys.add(nk)

@@ -7,6 +7,7 @@ importer da app converte automaticamente.
 
 _HM3_TAG_RENAMES = {
     "GTw": "pos-nko",
+    "nota++": "nota",   # sinónimo — pode perder (pt43). 'nota ex' NÃO entra (significado distinto: nota exemplar p/ ML futuro).
 }
 
 
