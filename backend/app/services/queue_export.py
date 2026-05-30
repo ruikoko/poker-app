@@ -109,6 +109,14 @@ def _coerce_player_names(pn) -> dict:
 # engine. Preflop turn order = [0, 1, ..., N-1] sequencial (BB sempre último).
 _SEAT_ALL_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
 _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
+# Linhas de post de blind, cross-site (GG/PS com colon, WN/WPN sem).
+# Ex.: "Hero: posts small blind 200" | "Dvstrr posts small blind 1000".
+_POSTS_BLIND_RE = re.compile(
+    r"^(.+?):?\s+posts (small|big) blind\s+([\d,.]+)", re.MULTILINE
+)
+# Labels de late position por distância ao botão (vocab Rui): 1 antes do
+# botão = CO, 2 = HJ, 3 = MP, 4 = UTG1, 5 = UTG, 6 = UTG2.
+_DEAD_BUTTON_DISTANCE_LABELS = ("CO", "HJ", "MP", "UTG1", "UTG", "UTG2")
 # pt25b: regex tolera ambos os formatos de action line:
 # - PS/GG: `Hero: raises 800 to 1200` (com colon após nick)
 # - Winamax: `blueballs67 raises 8000 to 16000` (sem colon)
@@ -156,6 +164,102 @@ _POSITION_LABELS_BY_N: dict = {
 }
 
 
+def _parse_posted_blinds(hh_text: str) -> dict:
+    """Parseia as linhas `posts small/big blind` → `{'small': (nick, amount),
+    'big': (nick, amount)}`. Devolve só as chaves encontradas (pode ser
+    parcial / vazio). Montantes em chips (decimais truncados via int(float)).
+    """
+    out: dict = {}
+    if not hh_text:
+        return out
+    for m in _POSTS_BLIND_RE.finditer(hh_text):
+        nick = m.group(1).strip()
+        which = m.group(2)
+        if which in out:  # 1º vence (defensivo contra re-posts)
+            continue
+        try:
+            amt = int(float(m.group(3).replace(",", "")))
+        except ValueError:
+            continue
+        out[which] = (nick, amt)
+    return out
+
+
+def _blinds_match(hh_text: str, posted: dict) -> bool:
+    """Cross-check: os montantes postados (SB/BB) batem com o header da HH?
+
+    Defesa contra HH adulterada / parsing parcial: se o SB ou BB postado não
+    bate com o nível do header, o caller (dead button) rejeita a derivação em
+    vez de produzir posições erradas.
+    """
+    header_blinds = _extract_blinds_from_header(hh_text)
+    if not header_blinds:
+        return False
+    sb_h, bb_h = header_blinds
+    sb = posted.get("small")
+    bb = posted.get("big")
+    if not sb or not bb:
+        return False
+    return sb[1] == sb_h and bb[1] == bb_h
+
+
+def _derive_seats_dead_button(
+    seats_dict: dict, btn_seat: int, hh_text: str
+) -> list:
+    """Dead button: o botão aponta para um seat vazio (eliminação típica de
+    MTT). Sem jogador no botão, não há linha BTN — ancoramos nas blinds
+    postadas + distância geométrica ao botão morto.
+
+    Algoritmo:
+    1. Parseia quem postou SB/BB; cross-check com o header (`_blinds_match`).
+    2. Ordena os seats ocupados em sentido horário a partir do seat logo a
+       seguir ao botão (morto): `cw = [seats > btn] + [seats < btn]`. O 1º é o
+       SB, o 2º o BB (rejeita se não bater — só tratamos dead button com
+       blinds vivas).
+    3. SB/BB ganham os seus labels; os restantes seats (entre BB e o botão)
+       recebem CO/HJ/MP/... por distância ao botão (o mais próximo = CO).
+    4. Ordem de acção preflop (hrc_idx) = [não-blinds (UTG→CO), SB, BB].
+
+    Devolve `[]` se as blinds não baterem / parsing falhar — graceful, igual
+    aos outros early-returns de `derive_seats_in_preflop_order`.
+    """
+    posted = _parse_posted_blinds(hh_text)
+    if not _blinds_match(hh_text, posted):
+        return []
+    sb_nick = posted["small"][0]
+    bb_nick = posted["big"][0]
+    nick_to_seat = {nick: seat for seat, nick in seats_dict.items()}
+    sb_seat = nick_to_seat.get(sb_nick)
+    bb_seat = nick_to_seat.get(bb_nick)
+    if sb_seat is None or bb_seat is None:
+        return []
+
+    occupied = sorted(seats_dict.keys())
+    # Sentido horário a partir do seat logo após o botão morto.
+    cw = [s for s in occupied if s > btn_seat] + [s for s in occupied if s < btn_seat]
+    if len(cw) < 2 or cw[0] != sb_seat or cw[1] != bb_seat:
+        return []
+
+    middles = cw[2:]  # seats entre BB e o botão (UTG-most → CO-most)
+    pos_for_seat = {sb_seat: "SB", bb_seat: "BB"}
+    # O mais próximo do botão (último em cw) = CO; depois HJ, MP, ...
+    for j, seat in enumerate(reversed(middles)):
+        if j >= len(_DEAD_BUTTON_DISTANCE_LABELS):
+            return []  # mais seats do que labels conhecidas → não fabricar
+        pos_for_seat[seat] = _DEAD_BUTTON_DISTANCE_LABELS[j]
+
+    action_order = middles + [sb_seat, bb_seat]
+    return [
+        {
+            "seat": seat,
+            "position": pos_for_seat[seat],
+            "hrc_idx": hrc_idx,
+            "nick": seats_dict[seat],
+        }
+        for hrc_idx, seat in enumerate(action_order)
+    ]
+
+
 def derive_seats_in_preflop_order(hh_text: str) -> list:
     """pt25d — fonte canónica do mapping seat ↔ HRC player index ↔ position
     label ↔ nick, ordenado pre-flop por convenção HRC docs (UTG primeiro =
@@ -174,8 +278,11 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
     com vocab da Strategy Table HRC (pt25e Bloco 2 follow-up; era "BTN" em
     pt25d/Bloco 1).
 
-    Devolve `[]` se parsing falhar (sem button, sem seats, button fora do
-    seat list). Cada entry: `{seat: int, position: str, hrc_idx: int, nick: str}`.
+    Devolve `[]` se parsing falhar (sem button, sem seats). Quando o button
+    aponta para um seat vazio (dead button, eliminação MTT) despacha para
+    `_derive_seats_dead_button` (ancora nas blinds postadas + distância
+    geométrica ao botão morto). Cada entry: `{seat: int, position: str,
+    hrc_idx: int, nick: str}`.
 
     Sample 5-handed INTERSTELLAR (button=Seat 2 imbagosu):
         idx 0 = UTG (Seat 5, blueballs67)
@@ -201,7 +308,8 @@ def derive_seats_in_preflop_order(hh_text: str) -> list:
     btn_seat = int(btn_m.group(1))
     seat_list = sorted(seats_dict.keys())
     if btn_seat not in seat_list:
-        return []
+        # Dead button: botão num seat vazio (eliminação). Ancorar nas blinds.
+        return _derive_seats_dead_button(seats_dict, btn_seat, hh_text)
 
     btn_idx_in_list = seat_list.index(btn_seat)
     n = len(seat_list)

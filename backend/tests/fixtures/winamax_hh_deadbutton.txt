@@ -1,0 +1,41 @@
+Winamax Poker - Tournament "#1 - W SERIES - 3 MILLION EVENT - DAY 1" buyIn: 114€ + 11€ level: 9 - HandId: #4627029952301105208-84-1776267837 - Holdem no limit (250/1000/2000) - 2026/04/15 15:43:57 UTC
+Table: '#1 - W SERIES - 3 MILLION EVENT - DAY 1(1077314362)#0055' 6-max (real money) Seat #6 is the button
+Seat 1: Dvstrr (303699, 152.50€ bounty)
+Seat 3: KipitKiet (78910, 62.50€ bounty)
+Seat 4: River_Judge (116260, 106.25€ bounty)
+Seat 5: thinvalium (183842, 181.25€ bounty)
+*** ANTE/BLINDS ***
+Dvstrr posts ante 250
+KipitKiet posts ante 250
+River_Judge posts ante 250
+thinvalium posts ante 250
+Dvstrr posts small blind 1000
+KipitKiet posts big blind 2000
+Dealt to thinvalium [Th As]
+*** PRE-FLOP ***
+River_Judge folds
+thinvalium raises 2000 to 4000
+Dvstrr folds
+KipitKiet calls 2000
+*** FLOP *** [Qh Ah 5c]
+KipitKiet checks
+thinvalium bets 3300
+KipitKiet calls 3300
+*** TURN *** [Qh Ah 5c][9s]
+KipitKiet checks
+thinvalium bets 16110
+KipitKiet calls 16110
+*** RIVER *** [Qh Ah 5c 9s][7c]
+KipitKiet checks
+thinvalium bets 160182 and is all-in
+KipitKiet calls 55250 and is all-in
+*** SHOW DOWN ***
+KipitKiet shows [Ac 7h] (Two pairs : Aces and 7)
+thinvalium shows [Th As] (One pair : Aces)
+thinvalium collected 104932 from side pot 1
+KipitKiet collected 159320 from main pot
+*** SUMMARY ***
+Total pot 264252 | No rake
+Board: [Qh Ah 5c 9s 7c]
+Seat 3: KipitKiet (big blind) showed [Ac 7h] and won 159320 with Two pairs : Aces and 7
+Seat 5: thinvalium showed [Th As] and won 104932 with One pair : Aces

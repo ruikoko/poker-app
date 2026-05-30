@@ -972,6 +972,45 @@ def test_seats_no_seats_returns_empty():
     assert derive_seats_in_preflop_order("Just a header\n*** HOLE CARDS ***\n") == []
 
 
+# ── dead button (botão num seat vazio) ──────────────────────────────────────
+
+from pathlib import Path as _Path
+
+_FIXTURES_DIR = _Path(__file__).parent / "fixtures"
+
+
+def test_seats_dead_button_winamax_real_sample():
+    """Mão real WN-4627029952301105208-84 (W SERIES 3M, dead button): 6-max,
+    `Seat #6 is the button` mas Seat 6 está vazio (eliminado). 4 sentados
+    (Seats 1,3,4,5). Ancorando nas blinds + distância geométrica ao botão
+    morto: Seat1=SB, Seat3=BB, Seat5=CO (1 antes do botão), Seat4=HJ (2
+    antes). Ordem de acção preflop [Seat4, Seat5, Seat1, Seat3] confere com
+    as acções reais (River_Judge folds, thinvalium raises, Dvstrr/SB folds,
+    KipitKiet/BB calls)."""
+    hh = (_FIXTURES_DIR / "winamax_hh_deadbutton.txt").read_text(encoding="utf-8")
+    seats = derive_seats_in_preflop_order(hh)
+    assert len(seats) == 4
+    by_seat = {s["seat"]: s["position"] for s in seats}
+    assert by_seat == {1: "SB", 3: "BB", 4: "HJ", 5: "CO"}
+    # hrc_idx em ordem de acção preflop.
+    assert [s["seat"] for s in seats] == [4, 5, 1, 3]
+    assert [s["position"] for s in seats] == ["HJ", "CO", "SB", "BB"]
+    assert [s["nick"] for s in seats] == [
+        "River_Judge", "thinvalium", "Dvstrr", "KipitKiet",
+    ]
+
+
+def test_seats_dead_button_rejects_adulterated_blinds():
+    """Cross-check de blinds: se o montante postado não bate com o nível do
+    header (HH adulterada / corrompida), a derivação dead button rejeita
+    (`[]`) em vez de fabricar posições erradas. Header é (250/1000/2000) →
+    SB=1000; mudar o post de SB para 999 desalinha e deve devolver []."""
+    hh = (_FIXTURES_DIR / "winamax_hh_deadbutton.txt").read_text(encoding="utf-8")
+    bad = hh.replace("posts small blind 1000", "posts small blind 999")
+    assert "posts small blind 999" in bad  # sanity: a mutação aplicou-se
+    assert derive_seats_in_preflop_order(bad) == []
+
+
 # ── derive_table_format ─────────────────────────────────────────────────────
 
 def test_table_format_PS():
