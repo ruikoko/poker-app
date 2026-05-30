@@ -47,29 +47,35 @@ def test_formula_fallback_none_on_nonpositive():
 
 # ── compute_ire — caminho PKO 50/50 (GG) end-to-end ──────────────────────────
 
-def _hand_5050():
-    """Mão GG PKO standard: 2 vilões, ambos bounty_pct=100 (1 KO inicial).
-    starting_stack=20000 -> villainA stack_si=1.0 (activo), villainB 2.0 (foldou)."""
+def _hand_5050(bounty_usd=25.0):
+    """Mão GG PKO standard: 2 vilões com bounty real (coroa) = bounty inicial
+    -> ko_units=1.0. starting_stack=20000 -> villainA stack_si=1.0 (activo),
+    villainB 2.0 (foldou). bounty_value_usd vive em players_list (a coroa); o
+    apa já não carrega bounty (era VPIP). #BOUNTY-PCT-VPIP-FIX."""
     return {
         "site": "GGPoker",
         "tournament_format": "PKO",
         "hm3_tags": ["ICM", "pko"],
         "discord_tags": None,
-        "player_names": {"match_method": "anchor_stack", "players_list": []},
+        "player_names": {"match_method": "anchor_stack", "players_list": [
+            {"name": "villainA", "bounty_value_usd": bounty_usd},
+            {"name": "villainB", "bounty_value_usd": bounty_usd},
+        ]},
         "all_players_actions": {
             "_meta": {"bb": 1000},
             "Hero":     {"is_hero": True, "stack": 30000, "position": "BTN",
                          "actions": {"preflop": ["Raise 2000"]}},
-            "villainA": {"stack": 20000, "bounty_pct": 100, "position": "CO",
+            "villainA": {"stack": 20000, "position": "CO",
                          "actions": {"preflop": ["Call 2000"]}},
-            "villainB": {"stack": 40000, "bounty_pct": 100, "position": "SB",
+            "villainB": {"stack": 40000, "position": "SB",
                          "actions": {"preflop": ["Fold"]}},
         },
     }
 
 
-def _meta(name="Bounty Hunters $88", stack=20000):
-    return {"tournament_name": name, "starting_stack": stack}
+def _meta(name="Bounty Hunters $88", stack=20000, buy_in_bounty=25):
+    return {"tournament_name": name, "starting_stack": stack,
+            "buy_in_bounty": buy_in_bounty}
 
 
 def test_compute_ire_5050_main_villain():
@@ -131,10 +137,50 @@ def test_gate_no_starting_stack_hidden():
 
 
 def test_gate_no_opponent_bounty_hidden():
+    # Sem coroa ($0) em nenhum vilão -> ko_units=0 -> escondido.
+    assert ire.compute_ire(_hand_5050(bounty_usd=0), _meta()) is None
+
+
+def test_gate_no_buy_in_bounty_hidden():
+    # Sem buy_in_bounty (TS) não há base p/ converter $ -> KO_inicial -> escondido.
+    assert ire.compute_ire(_hand_5050(), _meta(buy_in_bounty=None)) is None
+    assert ire.compute_ire(_hand_5050(), _meta(buy_in_bounty=0)) is None
+
+
+# ── #BOUNTY-PCT-VPIP-FIX pacote IRE: tag speed-racer + 1→N ───────────────────
+
+def test_has_ko_tag_accepts_speed_racer():
+    """Família speed-racer conta como tag de estudo PKO (sem "ko")."""
+    assert ire._has_ko_tag(["ICM"], ["speed-racer"]) is True
+    assert ire._has_ko_tag(["ICM"], ["speed-racer-ft"]) is True
+    assert ire._has_ko_tag(["speed racer"], None) is True      # já normalizado
+    assert ire._has_ko_tag(["icm-pko"], None) is True          # ainda apanha "ko"
+    assert ire._has_ko_tag(["ICM"], ["nota"]) is False         # nem ko nem speed-racer
+
+
+def test_gate_speed_racer_tag_accepted():
+    """Mão PKO com tag speed-racer (sem "ko") passa o gate da tag e mostra IRE."""
     h = _hand_5050()
-    h["all_players_actions"]["villainA"]["bounty_pct"] = 0
-    h["all_players_actions"]["villainB"]["bounty_pct"] = 0
-    assert ire.compute_ire(h, _meta()) is None
+    h["hm3_tags"] = ["ICM"]; h["discord_tags"] = ["speed-racer"]
+    assert ire.compute_ire(h, _meta()) is not None
+    h["discord_tags"] = ["speed-racer-ft"]
+    assert ire.compute_ire(h, _meta()) is not None
+
+
+def test_compute_ire_1toN_folded_only_crown_shows_headline():
+    """1→N: se o único oponente com coroa foldou, o IRE já NÃO esconde — calcula
+    per-opponent e o main_villain é o headline (maior ire_pct, foldado incluído)."""
+    h = _hand_5050()
+    # villainA passa a foldar também -> ambos os vilões com coroa foldaram.
+    h["all_players_actions"]["villainA"]["actions"] = {"preflop": ["Fold"]}
+    out = ire.compute_ire(h, _meta())
+    assert out is not None
+    # headline = villainA (stack_si 1.0 -> ire_pct 5.1 > villainB 2.6).
+    assert out["main_villain"] is not None
+    assert out["main_villain"]["nick"] == "villainA"
+    # per_opponent inclui ambos com ire_pct calculado (foldados incluídos).
+    assert {op["nick"] for op in out["per_opponent"]} == {"villainA", "villainB"}
+    assert all(op["ire_pct"] is not None for op in out["per_opponent"])
 
 
 # ── T2: derive_kop_fraction / derive_constant (helpers puros) ────────────────
@@ -180,7 +226,7 @@ def test_constant_defaults_to_025_when_kop_none():
 def test_compute_ire_t3_activation_big_bounty():
     """T3 wiring: tournament_meta com buy_in_entry/buy_in_bounty do TS
     deve propagar para constant=0.35 e usar a fórmula (não a tabela 0.25)."""
-    hand = _hand_5050()
+    hand = _hand_5050(bounty_usd=350)   # coroa = bounty inicial -> ko_units=1.0
     meta = {
         "tournament_name": "Big Bounty Hunters $525",
         "starting_stack": 20000,
@@ -201,7 +247,7 @@ def test_compute_ire_t3_activation_big_bounty():
 def test_compute_ire_mystery_ko_stays_legacy_025():
     """T5: Mystery KO NÃO usa a constante derivada (bounty aleatório). Mesmo com
     split 33/67 no TS, mantém-se em 0.25 -> tabela -> 5.1 (legacy, não 7.1)."""
-    hand = _hand_5050()
+    hand = _hand_5050(bounty_usd=30)   # coroa = bounty inicial -> ko_units=1.0
     hand["tournament_format"] = "Mystery KO"
     meta = {"tournament_name": "Sunday Mystery", "starting_stack": 20000,
             "buy_in_entry": 15, "buy_in_bounty": 30}   # 30/(15+30)=0.667 -> seria 0.333

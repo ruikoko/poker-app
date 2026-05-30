@@ -19,7 +19,8 @@ Filtros de activacao (qualquer falha => return None, IRE escondido):
     - tournament_name NAO contem 'Super KO' (= ratio 40%). MANTIDO escondido
       mesmo com a constante derivavel (decisao b, #IRE-MB T4): falta validacao
       empirica da instant_fraction do Super KO (so 50/50 e 70/30 confirmados).
-    - >= 1 oponente (non-hero) com bounty_pct > 0
+    - tournament_meta com buy_in_bounty > 0 (base de ko_units = bounty/bounty_inicial)
+    - >= 1 oponente (non-hero) com bounty REAL > 0 (coroa, bounty_value_usd)
 
 Output (quando aplicavel):
     {
@@ -49,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_FORMATS = {"PKO", "Mystery KO"}
 KO_TAG_NEEDLE = "ko"
+# Família Speed Racer (GG hyper PKO) — a tag NÃO contém "ko", por isso é
+# reconhecida explicitamente como tag de estudo PKO (apanha 'speed-racer' e
+# 'speed-racer-ft' via normalização hyphen→espaço).
+SPEED_RACER_NEEDLE = "speed racer"
 SUPER_KO_NEEDLE = "super ko"
 
 # #IRE-MB — a constante do bounty (bounty_si = ko_units × constante) decompõe-se
@@ -104,11 +109,14 @@ W3CRAY_TABLE_25PCT = {
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _has_ko_tag(hm3_tags, discord_tags) -> bool:
-    for tag in (hm3_tags or []):
-        if tag and KO_TAG_NEEDLE in tag.lower():
-            return True
-    for tag in (discord_tags or []):
-        if tag and KO_TAG_NEEDLE in tag.lower():
+    """True se alguma tag (HM3 ou Discord) é tag de estudo PKO: contém "ko"
+    (apanha pko/icm-pko/ko/...) OU é da família speed-racer (GG hyper PKO,
+    cuja tag não tem "ko"). Normaliza hyphen→espaço."""
+    for tag in list(hm3_tags or []) + list(discord_tags or []):
+        if not tag:
+            continue
+        norm = tag.replace("-", " ").lower()
+        if KO_TAG_NEEDLE in norm or SPEED_RACER_NEEDLE in norm:
             return True
     return False
 
@@ -131,17 +139,17 @@ def _coerce_pn(pn) -> dict:
     return pn if isinstance(pn, dict) else {}
 
 
-def _coerce_int(v) -> int:
-    """bounty_pct vem como int (apa) ou TEXT/None. Coerce robusta."""
+def _coerce_float(v) -> float:
+    """bounty_value_usd vem como float/int/TEXT/None. Coerce robusta."""
     if v is None:
-        return 0
+        return 0.0
     if isinstance(v, (int, float)):
-        return int(v)
+        return float(v)
     try:
-        m = re.search(r"\d+", str(v))
-        return int(m.group(0)) if m else 0
+        m = re.search(r"\d+(?:\.\d+)?", str(v))
+        return float(m.group(0)) if m else 0.0
     except (ValueError, TypeError):
-        return 0
+        return 0.0
 
 
 def _is_active(actions: Optional[dict]) -> bool:
@@ -297,9 +305,17 @@ def derive_constant(
 # ── Vilao principal (regra D) ────────────────────────────────────────────────
 
 def _pick_main_villain(per_opponent: list, hero_stack_chips: float) -> Optional[dict]:
-    activos = [op for op in per_opponent if op["is_active"] and op["ko_pct"] > 0]
+    """Headline da lista (regra D). 1→N: o IRE é calculado por-oponente; isto só
+    escolhe o oponente a destacar no badge da lista. Prefere ACTIVOS com bounty;
+    se nenhum activo, faz fallback ao oponente com coroa de maior `ire_pct`
+    (foldados incluídos). `None` só se nenhum oponente tem `ko_units>0`."""
+    activos = [op for op in per_opponent if op["is_active"] and op["ko_units"] > 0]
     if not activos:
-        return None
+        # fallback 1→N: sem activo com coroa -> melhor foldado com coroa.
+        com_coroa = [op for op in per_opponent if op["ko_units"] > 0]
+        if not com_coroa:
+            return None
+        return max(com_coroa, key=lambda op: (op["ire_pct"] or 0.0))
     if len(activos) == 1:
         return activos[0]
     cobertos = [op for op in activos if op["stack_chips"] <= hero_stack_chips]
@@ -336,6 +352,17 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
     except (TypeError, ValueError):
         return None
     if si <= 0:
+        return None
+
+    # #BOUNTY-PCT-VPIP-FIX: o IRE passa a usar o bounty REAL ($, coroa dourada =
+    # bounty_value_usd) em vez de bounty_pct (que era VPIP, chama laranja).
+    # ko_units = bounty_value_usd / buy_in_bounty (múltiplos do bounty inicial;
+    # jogador fresco = 1). Sem buy_in_bounty (TS) não há base de conversão -> oculto.
+    try:
+        bib = float((tournament_meta or {}).get("buy_in_bounty") or 0)
+    except (TypeError, ValueError):
+        bib = 0.0
+    if bib <= 0:
         return None
 
     tname = (tournament_meta.get("tournament_name") or "").lower()
@@ -390,10 +417,10 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
             stack_chips = float(info.get("stack") or 0)
         except (TypeError, ValueError):
             stack_chips = 0.0
-        ko_pct = _coerce_int(info.get("bounty_pct"))
-        if ko_pct <= 0:
-            ko_pct = _coerce_int((pl_by_name.get(nick) or {}).get("bounty_pct"))
-        ko_units = ko_pct / 100.0 if ko_pct > 0 else 0.0
+        # Bounty real ($) = coroa dourada; vive em player_names.players_list
+        # (o apa só carrega bounty_pct=VPIP). ko_units = bounty_$ / bounty_inicial_$.
+        bounty_usd = _coerce_float((pl_by_name.get(nick) or {}).get("bounty_value_usd"))
+        ko_units = bounty_usd / bib if bounty_usd > 0 else 0.0
         stack_si = stack_chips / si if si > 0 else 0.0
         ire_pct = lookup_ire_pct(stack_si, ko_units, constant) if ko_units > 0 else None
         per_opponent.append({
@@ -402,7 +429,7 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
             "stack_chips": int(round(stack_chips)),
             "stack_bb": round(stack_chips / bb, 1) if bb else None,
             "stack_si": round(stack_si, 3),
-            "ko_pct": ko_pct,
+            "ko_pct": round(ko_units * 100),   # bounty em % do inicial (derivado; ko_units é o canónico)
             "ko_units": round(ko_units, 2),
             "ire_pct": round(ire_pct, 1) if ire_pct is not None else None,
             "is_main": False,
@@ -413,8 +440,8 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
     if not per_opponent:
         return None
 
-    # nenhum oponente com bounty>0 => escondido
-    if not any(op["ko_pct"] > 0 for op in per_opponent):
+    # nenhum oponente com bounty real (coroa) > 0 => escondido
+    if not any(op["ko_units"] > 0 for op in per_opponent):
         return None
 
     if hero_stack is None or hero_stack <= 0:
@@ -424,25 +451,32 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
     for op in per_opponent:
         op["is_covered"] = op["stack_chips"] <= hero_stack_f
 
+    # 1→N (#BOUNTY-PCT-VPIP-FIX): o IRE é calculado por-oponente (per_opponent,
+    # foldados incluídos). `main_villain` mantém-se só como headline da lista
+    # (HandRow). Já NÃO é gate: a partir do guard `any(ko_units>0)` acima, há
+    # sempre ≥1 oponente com coroa, e `_pick_main_villain` escolhe sempre um
+    # (fallback ao melhor foldado se nenhum activo). `_is_active` deixou de ser
+    # gate — fica só como campo de display (tooltip "folded").
     main = _pick_main_villain(per_opponent, hero_stack_f)
-    if main is None:
-        return None
-    for op in per_opponent:
-        if op["nick"] == main["nick"]:
-            op["is_main"] = True
-            break
+    if main is not None:
+        for op in per_opponent:
+            if op["nick"] == main["nick"]:
+                op["is_main"] = True
+                break
 
     per_opponent.sort(key=lambda op: _seat_order_key(op.get("position")))
 
-    main_out = {
-        "nick": main["nick"],
-        "position": main.get("position"),
-        "stack_chips": main["stack_chips"],
-        "stack_bb": main["stack_bb"],
-        "stack_si": main["stack_si"],
-        "ko_pct": main["ko_pct"],
-        "ko_units": main["ko_units"],
-        "ire_pct": main["ire_pct"],
-        "is_covered": main["is_covered"],
-    }
+    main_out = None
+    if main is not None:
+        main_out = {
+            "nick": main["nick"],
+            "position": main.get("position"),
+            "stack_chips": main["stack_chips"],
+            "stack_bb": main["stack_bb"],
+            "stack_si": main["stack_si"],
+            "ko_pct": main["ko_pct"],
+            "ko_units": main["ko_units"],
+            "ire_pct": main["ire_pct"],
+            "is_covered": main["is_covered"],
+        }
     return {"main_villain": main_out, "per_opponent": per_opponent}

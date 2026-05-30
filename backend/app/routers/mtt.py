@@ -819,6 +819,32 @@ def _extract_buyin(tournament_name: str) -> str | None:
     return None
 
 
+def _has_real_bounty_signal(conn, tournament_number, ss_players) -> bool:
+    """#BOUNTY-PCT-VPIP-FIX — sinal REAL de bounty para o fallback de formato GG
+    em `detect_tournament_format`. NUNCA usa `bounty_pct` (que é VPIP, a chama
+    laranja, não o bounty). Prefere `buy_in_bounty>0` do Tournament Summary (a
+    3ª parcela do buy-in GG é o bounty inicial); sem TS, cai na coroa dourada
+    (`bounty_value_usd>0`).
+    """
+    if tournament_number:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT buy_in_bounty FROM tournament_summaries "
+                    "WHERE site = 'GGPoker' AND tournament_number = %s",
+                    (str(tournament_number),),
+                )
+                row = cur.fetchone()
+            if row is not None:  # TS é autoritativo quando existe
+                bib = row.get("buy_in_bounty") if isinstance(row, dict) else row[0]
+                return bib is not None and float(bib) > 0
+        except Exception:
+            logger.warning(
+                "_has_real_bounty_signal: TS lookup falhou tn=%s", tournament_number,
+            )
+    return any((p.get("bounty_value_usd") or 0) > 0 for p in (ss_players or []))
+
+
 def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: dict, seat_to_name: dict):
     """
     Quando uma mão MTT tem screenshot, garante que existe na tabela hands
@@ -830,8 +856,8 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
 
     tournament_name = hh_hand.get("tournament_name") or hh_hand.get("blinds", "")
     screenshot_players = screenshot_data.get("players_list", [])
-    has_player_bounty = any(
-        (p.get("bounty_pct") or 0) > 0 for p in screenshot_players
+    has_player_bounty = _has_real_bounty_signal(
+        conn, hh_hand.get("tournament_id"), screenshot_players,
     )
     tournament_format = detect_tournament_format(
         tournament_name,
@@ -1048,10 +1074,11 @@ async def import_mtt(
                     "num_players": h.get("num_players", 0),
                 }
 
-                # Classificar formato — enriquecer com bounty_pct da SS (se houver)
+                # Classificar formato — sinal REAL de bounty (#BOUNTY-PCT-VPIP-FIX:
+                # TS buy_in_bounty>0, senão coroa bounty_value_usd>0; NUNCA o VPIP).
                 ss_players = screenshot.get("players_list", []) if has_screenshot else []
-                has_player_bounty = any(
-                    (p.get("bounty_pct") or 0) > 0 for p in ss_players
+                has_player_bounty = _has_real_bounty_signal(
+                    conn, h.get("tournament_id"), ss_players,
                 )
                 tournament_format = detect_tournament_format(
                     tournament_name,
