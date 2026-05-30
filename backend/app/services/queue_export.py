@@ -136,20 +136,23 @@ def find_preflop_marker(hh_text: str) -> Optional[int]:
     return min(candidates) if candidates else None
 
 
-# pt25d: labels canónicos por número de jogadores sentados na mão. HRC docs
-# convention: idx 0 = first-to-act preflop (UTG em N>=3, BU/SB em HU), idx
-# N-2 = SB, idx N-1 = BB. Labels variam consoante o N (mesa "regular" de
-# N-max). Para tables com seats vazios (e.g. 6-max com 5 sentados após
-# eliminação), tratamos como N-handed (CO desaparece em 5-handed).
+# Labels canónicos por nº de jogadores sentados na mão. Convenção do Rui
+# (distância geométrica ao botão): CO=1 antes, HJ=2, MP=3, UTG1=4, UTG=5,
+# UTG2=6. Lista em ORDEM DE ACÇÃO preflop: idx 0 = mais distante do botão
+# presente (= first-to-act), idx N-2 = SB, idx N-1 = BB. Em HU (n=2) o botão
+# é o SB. Para tables com seats vazios tratamos como N-handed.
+# ⚠️ ESPELHADA em mtt_advanced_canonical_2026.js:POSITION_LABELS_BY_N — manter
+# em sync (semântica idêntica). O botão chama-se "BTN" aqui; na camada de
+# sizings HRC converte para "BU" (nome do HRC) via _canonical_3bet_position.
 _POSITION_LABELS_BY_N: dict = {
-    2: ["BU/SB", "BB"],
-    3: ["BU", "SB", "BB"],
-    4: ["UTG", "BU", "SB", "BB"],
-    5: ["UTG", "HJ", "BU", "SB", "BB"],
-    6: ["UTG", "HJ", "CO", "BU", "SB", "BB"],
-    7: ["UTG", "EP", "MP", "CO", "BU", "SB", "BB"],
-    8: ["UTG", "EP", "MP", "HJ", "CO", "BU", "SB", "BB"],
-    9: ["UTG", "EP1", "EP2", "MP", "HJ", "CO", "BU", "SB", "BB"],
+    2: ["SB", "BB"],
+    3: ["BTN", "SB", "BB"],
+    4: ["CO", "BTN", "SB", "BB"],
+    5: ["HJ", "CO", "BTN", "SB", "BB"],
+    6: ["MP", "HJ", "CO", "BTN", "SB", "BB"],
+    7: ["UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"],
+    8: ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"],
+    9: ["UTG2", "UTG1", "UTG", "MP", "HJ", "CO", "BTN", "SB", "BB"],  # n=9/UTG2 provisório
 }
 
 
@@ -1281,23 +1284,32 @@ def build_queue_zip(
             # passa); raiser_stack_bb só faz sentido no caso real.
             # pt27: `seats_at_table` (nº real de jogadores sentados, não a
             # redução `max_players` ICM) — derivado na Zona 1 acima.
-            target_node_offset = None
-            try:
-                raiser_stack_bb = (
-                    derive_aggressor_stack_bb(hh_text, _bb)
-                    if (aggressor_source == "real" and _bb is not None) else None
-                )
-                target_node_offset = compute_target_node_offset(
-                    aggressor_real_action,
-                    seats_at_table,
-                    script_overrides,
-                    raiser_stack_bb,
-                )
-            except Exception:
-                logger.exception(
-                    "compute_target_node_offset falhou hand_id=%s", hand_id,
-                )
-                target_node_offset = None
+            #
+            # Migração vocab posições: o botão em HU passou a ter label "SB"
+            # (positions[0] de _POSITION_LABELS_BY_N[2]=[SB,BB]). Para um
+            # fallback, compute_target_node_offset cairia no special-case SB
+            # de offset_within_bucket (Complete=0 / raise=1) e devolveria 1 em
+            # vez da raiz. O fallback NÃO tem agressão real → forçamos offset 0
+            # directamente (invariante "fallback = raiz"), só computando para
+            # o caso "real".
+            target_node_offset = 0 if aggressor_source != "real" else None
+            if aggressor_source == "real":
+                try:
+                    raiser_stack_bb = (
+                        derive_aggressor_stack_bb(hh_text, _bb)
+                        if _bb is not None else None
+                    )
+                    target_node_offset = compute_target_node_offset(
+                        aggressor_real_action,
+                        seats_at_table,
+                        script_overrides,
+                        raiser_stack_bb,
+                    )
+                except Exception:
+                    logger.exception(
+                        "compute_target_node_offset falhou hand_id=%s", hand_id,
+                    )
+                    target_node_offset = None
 
             # pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — sobrescrever
             # `bountyType` + `progressiveFactor` (pt42c) + `name` com sufixo

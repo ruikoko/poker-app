@@ -30,13 +30,13 @@ def test_strategy_table_positions_drops_BB_for_all_N():
 
 def test_strategy_table_positions_keeps_other_labels_in_order():
     """Mantém a ordem do `_POSITION_LABELS_BY_N` (UTG primeiro, SB último)."""
-    assert strategy_table_positions(2) == ["BU/SB"]
-    assert strategy_table_positions(3) == ["BU", "SB"]
-    assert strategy_table_positions(4) == ["UTG", "BU", "SB"]
-    assert strategy_table_positions(5) == ["UTG", "HJ", "BU", "SB"]
-    assert strategy_table_positions(6) == ["UTG", "HJ", "CO", "BU", "SB"]
+    assert strategy_table_positions(2) == ["SB"]
+    assert strategy_table_positions(3) == ["BTN", "SB"]
+    assert strategy_table_positions(4) == ["CO", "BTN", "SB"]
+    assert strategy_table_positions(5) == ["HJ", "CO", "BTN", "SB"]
+    assert strategy_table_positions(6) == ["MP", "HJ", "CO", "BTN", "SB"]
     assert strategy_table_positions(8) == [
-        "UTG", "EP", "MP", "HJ", "CO", "BU", "SB",
+        "UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB",
     ]
 
 
@@ -132,16 +132,16 @@ def test_offset_within_bucket_sb_all_in_effective():
 # ── compute_target_node_offset: positions × N-max ──────────────────────
 
 def test_compute_target_node_offset_5max_each_position_small_raise():
-    """5-max default: UTG@0, HJ@2, BU@4, SB-complete@6, SB-raise@7, SB-jam@8."""
+    """5-max default: HJ@0, CO@2, BTN@4, SB-complete@6, SB-raise@7, SB-jam@8."""
     base = {"type": "raise", "size_bb": 2.0}
     assert compute_target_node_offset(
-        {**base, "position": "UTG"}, 5, {}, raiser_stack_bb=50.0,
+        {**base, "position": "HJ"}, 5, {}, raiser_stack_bb=50.0,
     ) == 0
     assert compute_target_node_offset(
-        {**base, "position": "HJ"}, 5, {}, raiser_stack_bb=50.0,
+        {**base, "position": "CO"}, 5, {}, raiser_stack_bb=50.0,
     ) == 2
     assert compute_target_node_offset(
-        {**base, "position": "BU"}, 5, {}, raiser_stack_bb=50.0,
+        {**base, "position": "BTN"}, 5, {}, raiser_stack_bb=50.0,
     ) == 4
     assert compute_target_node_offset(
         {"type": "complete", "size_bb": 1.0, "position": "SB"}, 5, {},
@@ -158,16 +158,16 @@ def test_compute_target_node_offset_5max_each_position_small_raise():
 
 
 def test_compute_target_node_offset_6max():
-    """6-max default: UTG=0, HJ=2, CO=4, BU=6, SB-complete=8."""
+    """6-max default: MP=0, HJ=2, CO=4, BTN=6, SB-complete=8."""
     base = {"type": "raise", "size_bb": 2.0}
     assert compute_target_node_offset(
-        {**base, "position": "UTG"}, 6, {}, raiser_stack_bb=50.0,
+        {**base, "position": "MP"}, 6, {}, raiser_stack_bb=50.0,
     ) == 0
     assert compute_target_node_offset(
         {**base, "position": "CO"}, 6, {}, raiser_stack_bb=50.0,
     ) == 4
     assert compute_target_node_offset(
-        {**base, "position": "BU"}, 6, {}, raiser_stack_bb=50.0,
+        {**base, "position": "BTN"}, 6, {}, raiser_stack_bb=50.0,
     ) == 6
     assert compute_target_node_offset(
         {"type": "complete", "size_bb": 1.0, "position": "SB"}, 6, {},
@@ -175,14 +175,14 @@ def test_compute_target_node_offset_6max():
     ) == 8
 
 
-def test_compute_target_node_offset_8max_EP_MP():
-    """8-max default: UTG=0, EP=2, MP=4, HJ=6, CO=8, BU=10."""
+def test_compute_target_node_offset_8max_UTG1_MP():
+    """8-max default: UTG=0, UTG1=2, MP=4, HJ=6, CO=8, BTN=10."""
     base = {"type": "raise", "size_bb": 2.0}
     assert compute_target_node_offset(
         {**base, "position": "UTG"}, 8, {}, raiser_stack_bb=50.0,
     ) == 0
     assert compute_target_node_offset(
-        {**base, "position": "EP"}, 8, {}, raiser_stack_bb=50.0,
+        {**base, "position": "UTG1"}, 8, {}, raiser_stack_bb=50.0,
     ) == 2
     assert compute_target_node_offset(
         {**base, "position": "MP"}, 8, {}, raiser_stack_bb=50.0,
@@ -194,21 +194,21 @@ def test_compute_target_node_offset_8max_EP_MP():
         {**base, "position": "CO"}, 8, {}, raiser_stack_bb=50.0,
     ) == 8
     assert compute_target_node_offset(
-        {**base, "position": "BU"}, 8, {}, raiser_stack_bb=50.0,
+        {**base, "position": "BTN"}, 8, {}, raiser_stack_bb=50.0,
     ) == 10
 
 
 def test_compute_target_node_offset_all_in_effective_within_bucket():
-    """UTG jam @ stack 50 → 0 + 1 = 1."""
+    """HJ jam @ stack 50 (1ª posição em 5-max) → 0 + 1 = 1."""
     assert compute_target_node_offset(
-        {"type": "raise", "size_bb": 50.0, "position": "UTG"}, 5, {},
+        {"type": "raise", "size_bb": 50.0, "position": "HJ"}, 5, {},
         raiser_stack_bb=50.0,
     ) == 1
 
 
 def test_compute_target_node_offset_override_eff_above_25_collapses_buckets():
     """Eff > 25BB → Trabalho A devolve [size] (1 entrada). 5-max com
-    UTG/HJ/BU override [2.5]: UTG=0, HJ=1, BU=2, SB-complete=3."""
+    HJ/CO/BTN override [2.5]: HJ=0, CO=1, BTN=2, SB-complete=3."""
     overrides = {
         "SIZES_OPEN_OTHERS": [2.5],
         "SIZES_OPEN_BU": [2.0],
@@ -216,13 +216,13 @@ def test_compute_target_node_offset_override_eff_above_25_collapses_buckets():
     }
     base = {"type": "raise", "size_bb": 2.5}
     assert compute_target_node_offset(
-        {**base, "position": "UTG"}, 5, overrides, raiser_stack_bb=30.0,
+        {**base, "position": "HJ"}, 5, overrides, raiser_stack_bb=30.0,
     ) == 0
     assert compute_target_node_offset(
-        {**base, "position": "HJ"}, 5, overrides, raiser_stack_bb=30.0,
+        {**base, "position": "CO"}, 5, overrides, raiser_stack_bb=30.0,
     ) == 1
     assert compute_target_node_offset(
-        {**base, "position": "BU"}, 5, overrides, raiser_stack_bb=30.0,
+        {**base, "position": "BTN"}, 5, overrides, raiser_stack_bb=30.0,
     ) == 2
     assert compute_target_node_offset(
         {"type": "complete", "size_bb": 1.0, "position": "SB"}, 5, overrides,
@@ -261,9 +261,10 @@ def test_compute_target_node_offset_gg5944816316_8handed_MP_open():
     """pt27 regressão: GG-5944816316 — 8-handed, Pinduca77 (MP) raises 2.0bb,
     Hero (HJ) 3-bet jam. Antes do Fix 2, `max_players=6` (redução ICM via
     `derive_max_players`) era passado para `compute_target_node_offset`, e
-    MP não estava em `strategy_table_positions(6)=[UTG,HJ,CO,BU,SB]` →
-    devolvia None. Pós-fix passa-se `seats_at_table=8`, MP é a 3ª posição
-    (UTG, EP, MP, …), opens default = 2 entries → offset = 2*2 + 0 = 4.
+    O bug pt27 era passar max_players=6 (redução ICM) em vez de seats_at_table=8:
+    a position do agressor falhava o lookup na strategy table reduzida. Pós-fix
+    passa-se `seats_at_table=8`; no vocab actual MP é a 3ª posição em 8-max
+    (UTG, UTG1, MP, …), opens default = 2 entries → offset = 2*2 + 0 = 4.
 
     Eff stack do raiser: Pinduca77 359522 chips / BB 3500 = 102.72 BB
     → `is_all_in(2.0, 102.72) = False` → offset_within_bucket = 0.

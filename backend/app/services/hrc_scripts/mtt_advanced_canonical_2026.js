@@ -34,8 +34,9 @@ let SIZES_3BET_IP = [6, ALLIN];
 // spot-específica de cada candidato vs opener. Defaults batem
 // `SIZES_3BET_IP` legacy (6 BB para todas). Fallback `SIZES_3BET_IP` em
 // `getSizings3BetByPositionIP` caso a posição não esteja em
-// {EP, MP, HJ, CO, BU} (defensivo).
-let SIZES_3BET_EP = [6];
+// {UTG1, UTG, MP, HJ, CO, BU} (defensivo; BTN→BU).
+let SIZES_3BET_UTG1 = [6];
+let SIZES_3BET_UTG = [6];
 let SIZES_3BET_MP = [6];
 let SIZES_3BET_HJ = [6];
 let SIZES_3BET_CO = [6];
@@ -231,18 +232,19 @@ function getSizings3BetByPositionIP(ctx, player) {
 	let posName = positionLabelForIdx(player, n);
 
 	switch (posName) {
-		case "EP":
-		case "EP1":
-		case "EP2":
-			return SIZES_3BET_EP;
+		case "UTG2":
+		case "UTG1":
+			return SIZES_3BET_UTG1;   // UTG2 partilha (provisório, n=9)
+		case "UTG":
+			return SIZES_3BET_UTG;
 		case "MP":
 			return SIZES_3BET_MP;
 		case "HJ":
 			return SIZES_3BET_HJ;
 		case "CO":
 			return SIZES_3BET_CO;
-		case "BU":
-			return SIZES_3BET_BU;
+		case "BTN":
+			return SIZES_3BET_BU;     // botão = "BTN" na tabela, "BU" no HRC
 		default:
 			return SIZES_3BET_IP;  // fallback defensivo
 	}

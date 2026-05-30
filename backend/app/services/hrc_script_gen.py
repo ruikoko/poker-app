@@ -584,24 +584,28 @@ def _compute_default_for_5bet(action: dict) -> Optional[float]:
 
 # Posições IP candidatas a 3-bet, mapeadas para variáveis no template
 # canónico. EP1/EP2 (9-handed) partilham SIZES_3BET_EP (decisão pt42b).
-_CANONICAL_3BET_POSITIONS = ("EP", "MP", "HJ", "CO", "BU")
+# Vocab novo (convenção do Rui). O botão chama-se "BTN" na tabela de posições,
+# mas na camada HRC é "BU" (nome do HRC) — por isso BTN converte para BU aqui e
+# a var é SIZES_3BET_BU. As restantes posições passam directas (sem mapeamento).
+# UTG2 (n=9) partilha SIZES_3BET_UTG1 (provisório, espelha o antigo EP1/EP2→EP).
+_CANONICAL_3BET_POSITIONS = ("UTG1", "UTG", "MP", "HJ", "CO", "BU")
 
 
 def _canonical_3bet_position(position: Optional[str]) -> Optional[str]:
     """Mapeia label de posição → nome canónico usado em SIZES_3BET_<POS>.
 
-    EP1/EP2 → EP (partilham; decisão pt42b).
-    BTN → BU (alias tolerado, mesmo padrão de `_position_bucket_open`).
-    SB / BB / UTG / outros → None (não cobertos pela proposta B; SB/BB
-    têm os seus arrays SIZES_3BET_SB_VS_* / SIZES_3BET_BB_VS_*).
+    BTN → BU (o HRC fala "BU"; só o botão tem nome próprio na fronteira HRC).
+    UTG2 → UTG1 (partilham; provisório, n=9).
+    UTG1 / UTG / MP / HJ / CO → directas.
+    SB / BB / outros → None (têm SIZES_3BET_SB_VS_* / SIZES_3BET_BB_VS_*).
     """
     if not position:
         return None
     p = position.strip().upper()
-    if p in ("EP1", "EP2"):
-        return "EP"
-    if p == "BTN":
+    if p in ("BTN", "BU/SB"):
         return "BU"
+    if p == "UTG2":
+        return "UTG1"
     if p in _CANONICAL_3BET_POSITIONS:
         return p
     return None
