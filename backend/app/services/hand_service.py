@@ -249,10 +249,47 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                     # excluída de Estudo pelo STUDY_VIEW_GG_MATCH_FILTER.
                     pn_clean = dict(existing_pn) if isinstance(existing_pn, dict) else {}
                     if pn_clean.get("match_method", "").startswith("discord_placeholder_"):
+                        # #ANON-MAP-MISSING-V2-PROMOTE: ao promover a 'v2', correr o
+                        # binding hash→nick (como o screenshot.py / Fix #B32) em vez de
+                        # pôr só a etiqueta. Antes, esta via marcava 'v2' sem anon_map
+                        # → a HH ficava visível em Estudo com hashes. Agora: só promove
+                        # se o binding resolver; enriquece o apa (chaves → nicks reais)
+                        # + grava anon_map. Sem binding, descarta o marker (não força
+                        # entrada em Estudo sem ligação feita).
+                        anon_map = {}
                         if pn_clean.get("players_list"):
-                            # Há dados Vision → upgrade para marker de match real.
+                            vision_data = {
+                                "players_list": pn_clean.get("players_list", []),
+                                "hero": pn_clean.get("hero"),
+                                "vision_sb": pn_clean.get("vision_sb"),
+                                "vision_bb": pn_clean.get("vision_bb"),
+                            }
+                            apa_new = h.get("all_players_actions")
+                            try:
+                                from app.routers.screenshot import (
+                                    _build_anon_to_real_map,
+                                    _enrich_all_players_actions,
+                                )
+                                anon_map = _build_anon_to_real_map(
+                                    {"raw": h.get("raw", ""),
+                                     "all_players_actions": apa_new},
+                                    vision_data,
+                                ) or {}
+                                if anon_map:
+                                    h["all_players_actions"] = _enrich_all_players_actions(
+                                        apa_new, anon_map, vision_data,
+                                    )
+                            except Exception:
+                                logger.exception(
+                                    "[_insert_hand] binding hash->nick falhou hand_id=%s",
+                                    h.get("hand_id"),
+                                )
+                                anon_map = {}
+                        if anon_map:
+                            pn_clean["anon_map"] = anon_map
                             pn_clean["match_method"] = "anchors_stack_elimination_v2"
                         else:
+                            # Sem binding -> não promover (não força Estudo com hashes).
                             pn_clean.pop("match_method", None)
                     placeholder_metadata = {
                         "origin": existing.get("origin"),
