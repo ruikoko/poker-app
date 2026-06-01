@@ -127,6 +127,47 @@ def test_gate_no_ko_tag_hidden():
     assert ire.compute_ire(h, _meta()) is None
 
 
+# ── max_opponent_ire_pct (#IRE-FILTER) — maior-da-mesa, não o badge ──────────
+
+def _ire_result(*ire_pcts, main_ire=None):
+    per = [{"nick": f"v{i}", "ire_pct": p} for i, p in enumerate(ire_pcts)]
+    return {"main_villain": {"ire_pct": main_ire}, "per_opponent": per}
+
+
+def test_max_opponent_ire_uses_table_max_not_badge():
+    # badge/main = 2.6, mas um oponente tem 14.0 -> o filtro tem de ver 14.0
+    assert ire.max_opponent_ire_pct(_ire_result(2.6, 14.0, 5.1, main_ire=2.6)) == 14.0
+
+
+def test_threshold_14_enters_all():
+    mx = ire.max_opponent_ire_pct(_ire_result(14.0))
+    assert mx >= 13 and mx >= 9 and mx >= 5.1
+
+
+def test_threshold_10_enters_9_and_51_not_13():
+    mx = ire.max_opponent_ire_pct(_ire_result(10.0))
+    assert not (mx >= 13)
+    assert mx >= 9 and mx >= 5.1
+
+
+def test_no_ire_out_of_all_thresholds():
+    assert ire.max_opponent_ire_pct(None) is None
+    assert ire.max_opponent_ire_pct({"per_opponent": []}) is None
+    assert ire.max_opponent_ire_pct({"per_opponent": [{"ire_pct": None}]}) is None
+
+
+def test_compute_ire_table_max_includes_folded_higher_than_main():
+    # villainA activo stack grande -> IRE baixo (badge); villainB foldado stack
+    # pequeno -> IRE alto. O maior-da-mesa tem de ser o foldado, não o badge.
+    h = _hand_5050()
+    h["all_players_actions"]["villainA"]["stack"] = 40000   # si=2.0 -> 2.6
+    h["all_players_actions"]["villainB"]["stack"] = 5000    # si=0.25 -> 13.0 (foldou)
+    out = ire.compute_ire(h, _meta())
+    assert out["main_villain"]["nick"] == "villainA"
+    assert out["main_villain"]["ire_pct"] == 2.6
+    assert ire.max_opponent_ire_pct(out) == 13.0
+
+
 def test_gate_placeholder_match_method_hidden():
     h = _hand_5050()
     h["player_names"] = {"match_method": "discord_placeholder_tm"}

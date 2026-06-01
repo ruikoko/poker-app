@@ -548,3 +548,15 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
                     bounty_by_nick.setdefault(v, _coerce_float(p.get("bounty_value_usd")))
     return _assemble_ire(apa, si=si, bib=bib, constant=constant,
                          ko_units_instant=ko_units_instant, bounty_by_nick=bounty_by_nick)
+
+
+def max_opponent_ire_pct(ire_result: Optional[dict]) -> Optional[float]:
+    """Maior `ire_pct` de QUALQUER oponente da mão (o "maior da mesa"), foldados
+    incluídos. NÃO é o do main_villain/badge — o badge (regra D: activo coberto)
+    nem sempre é o oponente de maior IRE. None se não há IRE ou nenhum oponente
+    tem ire_pct (sem bounty / não-PKO / fora de GG+WN)."""
+    if not ire_result:
+        return None
+    vals = [op.get("ire_pct") for op in (ire_result.get("per_opponent") or [])
+            if op.get("ire_pct") is not None]
+    return max(vals) if vals else None

@@ -656,6 +656,7 @@ def list_hands(
     source:           Optional[str] = Query(None, description="Filtrar por source da entry (ex: discord)"),
     villain:          Optional[str] = Query(None, description="Filtrar por vilão (nick exacto em all_players_actions)"),
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
+    ire_min:          Optional[float] = Query(None, description="#IRE-FILTER: só mãos cujo MAIOR ire_pct de qualquer oponente (maior-da-mesa) >= este limiar (em %). None = sem filtro."),
     study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
     include_discord_placeholders: bool = Query(False, description="Se true (e study_view=true), aceita placeholders Discord excepto discord_tags=['nota'] exclusivamente. Para a secção 'Discord — Só SS (sem HH)' da vista Por Tags."),
     page:             int = Query(1, ge=1),
@@ -682,17 +683,7 @@ def list_hands(
         conditions.append(STUDY_VIEW_HAS_STUDY_TAG) # #B15 exclui só-nota
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    total = query(
-        f"""SELECT COUNT(*) AS total FROM hands h
-            LEFT JOIN entries e ON h.entry_id = e.id
-            LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
-            {where}""",
-        params
-    )[0]["total"]
-    offset = (page - 1) * page_size
-
-    rows = query(
-        f"""
+    select_sql = f"""
         SELECT h.id, h.site, h.hand_id, h.played_at, h.stakes, h.position,
                h.hero_cards, h.board, h.result, h.currency, h.notes, h.tags, h.hm3_tags,
                h.discord_tags,
@@ -739,43 +730,67 @@ def list_hands(
         LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
         {where}
         ORDER BY h.played_at DESC NULLS LAST, h.id DESC
-        LIMIT %s OFFSET %s
-        """,
-        params + [page_size, offset]
-    )
+    """
 
-    # IRE v2 (GG-only, ratio 25%). Bulk-fetch tournaments_meta + compute em-memoria.
-    from app.services.ire import compute_ire
-    tournament_numbers = sorted({r["tournament_number"] for r in rows
-                                  if r.get("tournament_number") and r.get("site") == "GGPoker"})
-    tournament_meta_by_num: dict = {}
-    if tournament_numbers:
-        meta_rows = query(
-            "SELECT tm.tournament_number, tm.tournament_name, tm.starting_stack, "
-            "       ts.buy_in_entry, ts.buy_in_bounty "
-            "  FROM tournaments_meta tm "
-            "  LEFT JOIN tournament_summaries ts "
-            "    ON ts.site = tm.site AND ts.tournament_number = tm.tournament_number "
-            " WHERE tm.site = 'GGPoker' AND tm.tournament_number = ANY(%s)",
-            (tournament_numbers,)
-        )
-        tournament_meta_by_num = {m["tournament_number"]: dict(m) for m in meta_rows}
+    # IRE v2 (GG ratio 25% + WN). Bulk-fetch tournaments_meta + raw WN, compute
+    # em-memoria por linha. Extraido para helper p/ ser reusado nos 2 caminhos
+    # (com/sem filtro #IRE-FILTER).
+    from app.services.ire import compute_ire, max_opponent_ire_pct
 
-    # #IRE-WN: a lista não traz h.raw; o IRE Winamax precisa do raw p/ extrair
-    # os bounties literais. Busca o raw só das mãos WN da página (minoria).
-    wn_raw_by_id: dict = {}
-    wn_ids = [r["id"] for r in rows if r.get("site") == "Winamax"]
-    if wn_ids:
-        for x in query("SELECT id, raw FROM hands WHERE id = ANY(%s)", (wn_ids,)):
-            wn_raw_by_id[x["id"]] = x["raw"]
+    def _attach_ire(rs):
+        tnums = sorted({r["tournament_number"] for r in rs
+                        if r.get("tournament_number") and r.get("site") == "GGPoker"})
+        meta_by_num: dict = {}
+        if tnums:
+            meta_rows = query(
+                "SELECT tm.tournament_number, tm.tournament_name, tm.starting_stack, "
+                "       ts.buy_in_entry, ts.buy_in_bounty "
+                "  FROM tournaments_meta tm "
+                "  LEFT JOIN tournament_summaries ts "
+                "    ON ts.site = tm.site AND ts.tournament_number = tm.tournament_number "
+                " WHERE tm.site = 'GGPoker' AND tm.tournament_number = ANY(%s)",
+                (tnums,)
+            )
+            meta_by_num = {m["tournament_number"]: dict(m) for m in meta_rows}
+        # #IRE-WN: a lista não traz h.raw; o IRE Winamax precisa do raw p/ extrair
+        # os bounties literais. Busca o raw só das mãos WN (minoria).
+        wn_raw: dict = {}
+        wn_ids = [r["id"] for r in rs if r.get("site") == "Winamax"]
+        if wn_ids:
+            for x in query("SELECT id, raw FROM hands WHERE id = ANY(%s)", (wn_ids,)):
+                wn_raw[x["id"]] = x["raw"]
+        out = []
+        for r in rs:
+            d = dict(r)
+            if d.get("site") == "Winamax" and not d.get("raw"):
+                d["raw"] = wn_raw.get(d["id"])
+            d["ire"] = compute_ire(d, meta_by_num.get(d.get("tournament_number")))
+            out.append(d)
+        return out
 
-    data = []
-    for r in rows:
-        d = dict(r)
-        if d.get("site") == "Winamax" and not d.get("raw"):
-            d["raw"] = wn_raw_by_id.get(d["id"])
-        d["ire"] = compute_ire(d, tournament_meta_by_num.get(d.get("tournament_number")))
-        data.append(d)
+    if ire_min is None:
+        # Caminho legacy — inalterado: COUNT SQL + LIMIT/OFFSET, IRE só na página.
+        total = query(
+            f"""SELECT COUNT(*) AS total FROM hands h
+                LEFT JOIN entries e ON h.entry_id = e.id
+                LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id
+                {where}""",
+            params
+        )[0]["total"]
+        offset = (page - 1) * page_size
+        rows = query(select_sql + " LIMIT %s OFFSET %s", params + [page_size, offset])
+        data = _attach_ire(rows)
+    else:
+        # #IRE-FILTER: o IRE é on-the-fly (sem coluna p/ WHERE). Para apanhar TODAS
+        # as mãos do conjunto filtrado (não só a página/grupo visível), busca o
+        # conjunto inteiro, calcula o IRE, corta pelo MAIOR-DA-MESA (qualquer
+        # oponente, foldados incluídos — NÃO o badge), e pagina em memória.
+        enriched = _attach_ire(query(select_sql, params))
+        filtered = [d for d in enriched
+                    if (mx := max_opponent_ire_pct(d["ire"])) is not None and mx >= ire_min]
+        total = len(filtered)
+        offset = (page - 1) * page_size
+        data = filtered[offset:offset + page_size]
 
     return {
         "total":     total,
