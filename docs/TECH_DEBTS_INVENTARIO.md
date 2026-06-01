@@ -6,6 +6,93 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (31 Maio 2026 — pt46, UX do ImportModal + comentários stale WN + imagem replayer GG)
+
+Diagnóstico read-only (sessão de ingestão pós-pt45). Sem código alterado.
+Tech debt novo aberto **#IMPORT-MODAL-UX** (🟢 LOW, sem pressa) + bónus de
+correcção de comentários stale. Contexto: imports de HH GG correram bem
+(`hh_import` 29 788 → 58 214, +28 426 mãos reais; backend `/health` 200), mas
+o modal mostrou feedback enganador ("✗ + N screenshots matched") em re-imports
+dedupados. Não é bug funcional — é display.
+
+### Tech debt novo aberto em pt46 (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#IMPORT-MODAL-UX** | 🟢 LOW | UX do feedback de import de HH no ImportModal. **Três faces do mesmo problema** + 1 bónus. Não-bloqueante; os imports gravam correctamente, só o display engana. |
+
+**Detalhe #IMPORT-MODAL-UX (3 pontos):**
+
+1. **`status:"error"` em re-import dedupado.** O ramo HH de `/api/import`
+   devolve `"status": "ok" if total_inserted > 0 else "error"`
+   (`backend/app/routers/import_.py:507`). Num re-import do mesmo ZIP, o dedup
+   por `hand_id` faz `total_inserted=0` (comportamento **correcto**), mas o
+   backend devolve `status:"error"` e o modal (`ImportModal.jsx:181`, regra
+   `result.status === 'error'`) pinta **✗ vermelho**. Resultado: re-importar o
+   mesmo ZIP garante ✗ na 2ª vez, sem haver erro nenhum. **Fix:** distinguir
+   "0 novas por dedup" (sucesso benigno) de erro real — ex. novo status
+   `"noop"`/`"duplicate"`, ou o frontend tratar `hands_inserted===0 &&
+   errors===0` como sucesso.
+
+2. **Com 0 inseridas, o modal esconde as mãos e só mostra `rematched.length`.**
+   `formatResult` (`ImportModal.jsx:104-110`, caso `hh`/`hh_zip`) só lista
+   `hands_inserted` se `> 0`; com 0 inseridas a única parte truthy que resta é
+   `rematched.length` → "N screenshots matched". Combinado com o ✗ do ponto 1,
+   dá **"✗ + N screenshots matched"** sem contexto de quantas mãos havia /
+   foram ignoradas. **Fix:** mostrar sempre "0 novas · X duplicadas" mesmo
+   quando inserted=0.
+
+3. **"N screenshots matched" é total global, não delta.** O `rematched`
+   (`import_.py:514`, `len(rematched)`) vem de um **auto-rematch global** que,
+   no fim de *qualquer* import HH, varre **todos** os entries órfãos
+   (replayer/image/screenshot com Vision feito + TM) e re-enriquece a mão
+   GG-`<tm>` correspondente — **independente do conteúdo do ZIP**. Por isso 3
+   ZIP diferentes deram exactamente o mesmo número (ex. "176"): é o mesmo pool
+   global recomputado igual. **Fix:** rotular como global ("N órfãos
+   re-associados (total)") ou calcular/mostrar o delta atribuível a este import.
+
+**Bónus — comentários stale no `import_.py` (corrigir quando se mexer):**
+~linhas **534** e **577** dizem "hoje só GG / WN é só P&L / `ts_applicable=False`
+p/ Winamax", mas o código já tem `OPERATIONAL_TS_SITES = {"ggpoker", "winamax"}`
+(desde `7ecf092`, pt44) — **WN popula o operacional, não só o P&L**. O comentário
+contradiz o código e foi o que induziu uma descrição errada em sessão anterior.
+Corrigir o texto dos comentários (não há mudança de comportamento).
+
+**Refs:** `backend/app/routers/import_.py:507,514,534,577`,
+`frontend/src/components/ImportModal.jsx:104-110,181`.
+
+### #REPLAYER-IMG-HH-FIRST ✅ FECHADO (pt46, commit `4eef6b5`)
+
+Mãos GG em Estudo deixaram de mostrar a imagem captada do replayer. **Causa:**
+no caminho **HH-primeiro** (HH importada antes do replayer Discord sincronizar —
+a ordem actual), o enrich (`_run_vision_for_entry` → match em `hands` →
+`_enrich_hand_from_orphan_entry`) liga o entry replayer à mão e mete os nomes,
+mas **não propaga a imagem**: `hands.screenshot_url` fica NULL (o dict passado e
+o `raw_json` do entry não têm chave `screenshot_url` — só `img_b64` +
+`file_meta.og_image_url`), e o entry é `replayer_link`, que o flag
+`has_screenshot_image` (só `'screenshot'`) não aceitava. As duas vias de imagem
+do frontend (`Hands.jsx:1272`) falhavam apesar dos ~242 KB de `img_b64` estarem
+no entry ligado. **Evidência prod:** G-6019169471 (entry 2357, `replayer_link`,
+`img_b64` presente, `screenshot_url`=NULL, `hand_created` < `entry_created` →
+HH-primeiro). **313 mãos** afectadas (todas com `img_b64`).
+
+**Fix (Opção B, read-path, sem backfill):** `has_screenshot_image` (lista
+`hands.py:715` + detalhe `:1331`) passa a aceitar `replayer_link` COM `img_b64`;
+`GET /api/screenshots/image/{id}` (`screenshot.py:1664`) serve `entry_type IN
+('screenshot','replayer_link')`. Como é computado em query-time, as 313 ficam
+repostas no deploy sem UPDATE. Suite 797 → 801 PASSED.
+
+### Tech debt latente novo aberto em pt46 (1)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#CDN-URL-EXPIRY-OLD-REPLAYER-SS** | 🟢 LOW | ~147 mãos GG antigas (replayer-primeiro) têm `hands.screenshot_url` a apontar para a URL CDN GG (`user.gg-global-cdn.com/...png`), externa e potencialmente expirável. O `img_b64` está no entry replayer ligado → recuperáveis pelo mesmo read-path do `#REPLAYER-IMG-HH-FIRST` (frontend cair no fallback do entry quando a URL falha, ou migrar `screenshot_url`→endpoint interno). Não bloqueia; só se imagens antigas começarem a falhar. |
+
+**Refs:** `backend/app/routers/hands.py:715,1331`,
+`backend/app/routers/screenshot.py:1664`, `frontend/src/pages/Hands.jsx:1272`.
+
+---
+
 ## Estado actual (28 Maio 2026 — pt42d, payouts.json HRC-native + hints em meta.json)
 
 Re-abertura pt42c após smoke real expor `Instant=0%` no HRC apesar do
