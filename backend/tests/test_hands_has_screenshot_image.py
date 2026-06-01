@@ -45,7 +45,10 @@ def test_list_hands_sql_inclui_has_screenshot_image_column():
         + "\n---\n".join(sqls_captured)
     )
     # Verifica que a derivacao usa o JOIN com entries.
-    assert "COALESCE(e.entry_type = 'screenshot', false)" in matches[0]
+    # #REPLAYER-IMG-HH-FIRST (pt46): aceita também replayer_link com img_b64.
+    assert "e.entry_type = 'screenshot'" in matches[0]
+    assert "replayer_link" in matches[0]
+    assert "img_b64" in matches[0]
 
 
 def test_get_hand_detail_sql_inclui_has_screenshot_image_column():

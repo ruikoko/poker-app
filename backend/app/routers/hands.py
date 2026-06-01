@@ -706,13 +706,19 @@ def list_hands(
                    WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
                    ELSE 'matched'
                END AS match_state,
-               -- #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4: flag que sinaliza ao
-               -- frontend se vale a pena tentar carregar imagem via
-               -- /api/screenshots/image/<entry_id>. Quando hand.entry_id
-               -- aponta para uma entry sintetica HM3 (entry_type !=
-               -- 'screenshot'), o endpoint devolve 404 e o navegador
-               -- mostra icone broken — guard previne isso.
-               COALESCE(e.entry_type = 'screenshot', false) AS has_screenshot_image,
+               -- #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4 + #REPLAYER-IMG-HH-FIRST (pt46):
+               -- flag que sinaliza ao frontend se há imagem servível via
+               -- /api/screenshots/image/<entry_id>. True para SS manual
+               -- (entry_type='screenshot') OU replayer GG (entry_type=
+               -- 'replayer_link' com img_b64 — caminho HH-primeiro, em que o
+               -- enrich liga o replayer mas não preenche screenshot_url).
+               -- Entries sinteticas HM3 (sem img) ficam false -> sem 404/broken.
+               COALESCE(
+                   e.entry_type = 'screenshot'
+                   OR (e.entry_type = 'replayer_link'
+                       AND (e.raw_json->>'img_b64') IS NOT NULL),
+                   false
+               ) AS has_screenshot_image,
                e.discord_channel, e.discord_posted_at,
                d.channel_name AS discord_channel_name,
                (SELECT COUNT(*) FROM hand_attachments WHERE hand_db_id = h.id)::int AS attachment_count,
@@ -1327,8 +1333,14 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
                    WHEN (h.player_names->>'match_method') LIKE 'discord_placeholder_%%' THEN 'pending'
                    ELSE 'matched'
                END AS match_state,
-               -- #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4 (ver comment no /api/hands list)
-               COALESCE(e.entry_type = 'screenshot', false) AS has_screenshot_image
+               -- #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4 + #REPLAYER-IMG-HH-FIRST (pt46)
+               -- (ver comment no /api/hands list)
+               COALESCE(
+                   e.entry_type = 'screenshot'
+                   OR (e.entry_type = 'replayer_link'
+                       AND (e.raw_json->>'img_b64') IS NOT NULL),
+                   false
+               ) AS has_screenshot_image
         FROM hands h
         LEFT JOIN entries e ON h.entry_id = e.id
         LEFT JOIN discord_sync_state d ON e.discord_channel = d.channel_id

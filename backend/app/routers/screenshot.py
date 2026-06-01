@@ -1656,12 +1656,17 @@ def cleanup_before_2026(current_user=Depends(require_auth)):
 @router.get("/image/{entry_id}")
 def get_screenshot_image(entry_id: int, current_user=Depends(require_auth)):
     """
-    Devolve a imagem do screenshot guardado em entries.raw_json.img_b64
-    como binário (image/jpeg ou image/png).
-    Permite abrir o SS em nova tab do browser sem os limites dos data: URIs.
+    Devolve a imagem guardada em entries.raw_json.img_b64 como binário
+    (image/jpeg ou image/png). Permite abrir em nova tab sem limites de data: URIs.
+
+    #REPLAYER-IMG-HH-FIRST (pt46): serve SS manual (entry_type='screenshot')
+    E replayer GG (entry_type='replayer_link', cujo img_b64 é a imagem captada
+    do replayer). Antes só 'screenshot' -> mãos HH-primeiro ficavam sem imagem
+    apesar dos bytes estarem em BD.
     """
     rows = query(
-        "SELECT raw_json FROM entries WHERE id = %s AND entry_type = 'screenshot'",
+        "SELECT raw_json FROM entries WHERE id = %s "
+        "AND entry_type IN ('screenshot', 'replayer_link')",
         (entry_id,)
     )
     if not rows:
