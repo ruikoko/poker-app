@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { hands, hrc, queue } from '../api/client'
+import { hands as handsApi, hrc, queue } from '../api/client'
 
 // Cores por cenário do aggressor (espelha build_queue_zip / classify_aggressor_source).
 const SRC_COLOR = {
@@ -42,13 +42,13 @@ export default function HRCQueuePage() {
   function curState(h) { return marks[h.id] ?? h.study_state ?? 'new' }
 
   // Alterna Nova(new) <-> Revista(resolved) reutilizando o MESMO PATCH do Estudo
-  // (hands.update -> PATCH /hands/{id}). Optimista: a linha fica visível até ao
+  // (handsApi.update -> PATCH /hands/{id}). Optimista: a linha fica visível até ao
   // próximo Refresh (aí, as Revista saem do basket 'new' do gate /hrc).
   async function toggleState(h) {
     const next = curState(h) === 'resolved' ? 'new' : 'resolved'
     setStBusy(s => ({ ...s, [h.id]: 'busy' }))
     try {
-      await hands.update(h.id, { study_state: next })
+      await handsApi.update(h.id, { study_state: next })
       setMarks(m => ({ ...m, [h.id]: next }))
       setStBusy(s => { const n = { ...s }; delete n[h.id]; return n })
     } catch (e) {
