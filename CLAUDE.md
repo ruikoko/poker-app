@@ -876,7 +876,46 @@ ligam só no ITM (raramente no fecho do late reg), valor por sorteio. Reforça q
 suporte Mystery (incl. IRE Mystery via EV do pool) pertence a #MYSTERY-KO-DUAL-SUPPORT,
 não ao #IRE-MB (daí a guarda PKO-only).
 
-Última sessão fechada: **pt43** (29 Maio 2026 — 8 tech debts fechados + 1 adiado, 6 commits atómicos `942ec08`/`6a1aa14`/`008342e`/`16faa1e`/`d074634`/`2794aab` + 2 commits docs `6839875`/este; suite **734 → 774 PASSED**). Detalhes em `docs/JOURNAL_2026-05-29-pt43.md`.
+## pt46 — KO crown fix + imagem replayer + IRE Winamax (1 Junho 2026)
+
+3 fixes shipped em commits isolados; suite **774 → 809 PASSED**. BD de produção
+queryada read-only via proxy público (`ballast.proxy.rlwy.net`, padrão pt37+).
+
+| Commit | O quê |
+|---|---|
+| `24e1898` | **#KO-CROWN-INSTANT-FIX** — a coroa lida pela Vision (`bounty_value_usd`) é a parte INSTANTÂNEA do bounty (metade no PKO 50/50), não o total. Era usada como total em 2 sítios → tudo a metade (HRC KO-T$ e IRE ko_units). Fix: recuperar total = coroa ÷ instant_fraction (×2), gated a PKO 50/50. HRC (`queue_export._crown_to_total_factor` + `crown_factor` threaded por `_vision_bounties_by_name`/`compute_hero_bounty`/`_inject_bounties_ps_format`) e IRE (`ko_units = bounty/(bib×ko_units_instant)`, instant=0.5 PKO). Super KO/KO/Mystery/Winamax intocados; Hero fresco fica $20; fallback `starting_bounty` não escala. |
+| `4eef6b5` | **#REPLAYER-IMG-HH-FIRST** — mãos GG em Estudo deixaram de mostrar a imagem captada no caminho **HH-primeiro** (HH importada antes do replayer Discord sincronizar): o enrich (`_enrich_hand_from_orphan_entry`) liga o entry replayer e mete nomes mas não propaga a imagem (`screenshot_url` NULL; `entry_type='replayer_link'` que `has_screenshot_image` — só `'screenshot'` — rejeitava). Fix read-path (Opção B, **sem backfill**): `has_screenshot_image` (`hands.py:715,1331`) aceita `replayer_link` com `img_b64`; `GET /api/screenshots/image/{id}` serve `IN ('screenshot','replayer_link')`. 313 mãos repostas no deploy. |
+| `e71e22a` | docs — secção pt46 do `TECH_DEBTS_INVENTARIO.md` (**#IMPORT-MODAL-UX** investigação + **#REPLAYER-IMG-HH-FIRST** + latente **#CDN-URL-EXPIRY-OLD-REPLAYER-SS**). |
+| `64958f9` | **#IRE-WN** — estende o IRE à Winamax (ver abaixo). |
+
+### #IRE-WN — IRE Winamax (`64958f9`)
+
+O IRE era GG-only. Estende-se à WN mantendo a **GG 100% inalterada nos gates**
+(núcleo partilhado novo `_assemble_ire` em `ire.py`; dispatch por site em
+`compute_ire`). Mecânica WN: gate = site WN + `tournament_format` PKO +
+`tournament_name` na tabela curada `app/services/winamax_ire_tournaments.py`
+(10 torneios; interna, sem UI, à la `hero_names.py`); **sem** `match_method`
+nem tag (WN tem nicks reais); `starting_stack/entry/bounty` da tabela; bounty
+por jogador = literal da HH (`_extract_winamax_seat_bounties`, reuso read-only
+do `queue_export`), que é o **TOTAL na cabeça** → `ko_units = bounty/bib`
+(`ko_units_instant=1.0`, **sem** o ×2 da coroa GG); `constant =
+(bounty/(entry+bounty))×0.5` (~0.278 nos 50/100, ~0.269 nos 250). A lista
+(`hands.py`) injecta `h.raw` só p/ mãos WN da página; detalhe (`SELECT h.*`) e
+frontend (badge site-agnóstico) intocados. Scope prod 2026: **~1116 mãos** WN PKO
+em 9 torneios curados acendem o IRE. +9 testes WN.
+
+**⚠️ Nota 1 — cobertura limitada à tabela:** **335 mãos WN PKO 2026 ficam fora
+da tabela curada** (torneios não listados) → **IRE None** (escondido, não
+errado). Extensível: acrescentar o torneio a `WINAMAX_IRE_TOURNAMENTS` com
+`{starting_stack, buy_in_entry, buy_in_bounty}`.
+
+**⚠️ Nota 2 — escala WN não comparável à GG:** o IRE-WN usa **sempre o
+`_formula_fallback`** (constant ~0.278/0.269 cai fora da banda 0.25 da W3cray),
+**não** a tabela W3cray calibrada. Por isso a escala WN sai um pouco **mais
+alta** e **não é directamente comparável** ao IRE GG (que no PKO standard usa a
+tabela). É intencional — não alinhar os dois sem recalibração empírica.
+
+Última sessão fechada: **pt46** (1 Junho 2026 — 3 fixes shipped: `#KO-CROWN-INSTANT-FIX`, `#REPLAYER-IMG-HH-FIRST`, `#IRE-WN` + 1 commit docs; commits `24e1898`/`4eef6b5`/`e71e22a`/`64958f9`/este; suite **774 → 809 PASSED**). pt43 detalhado em `docs/JOURNAL_2026-05-29-pt43.md`.
 
 ⚠️ **Pendente herdado (não tocado em pt43):** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
 
