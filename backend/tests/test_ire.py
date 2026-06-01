@@ -47,11 +47,13 @@ def test_formula_fallback_none_on_nonpositive():
 
 # ── compute_ire — caminho PKO 50/50 (GG) end-to-end ──────────────────────────
 
-def _hand_5050(bounty_usd=25.0):
-    """Mão GG PKO standard: 2 vilões com bounty real (coroa) = bounty inicial
-    -> ko_units=1.0. starting_stack=20000 -> villainA stack_si=1.0 (activo),
-    villainB 2.0 (foldou). bounty_value_usd vive em players_list (a coroa); o
-    apa já não carrega bounty (era VPIP). #BOUNTY-PCT-VPIP-FIX."""
+def _hand_5050(bounty_usd=12.5):
+    """Mão GG PKO standard: 2 vilões frescos. #KO-CROWN-INSTANT-FIX — a coroa
+    (`bounty_value_usd`) é a parte INSTANTÂNEA do bounty (metade no 50/50), logo
+    num fresco coroa = buy_in_bounty/2 = 25/2 = 12.5 -> ko_units = 12.5/(25×0.5)
+    = 1.0. starting_stack=20000 -> villainA stack_si=1.0 (activo), villainB 2.0
+    (foldou). bounty_value_usd vive em players_list (a coroa); o apa já não
+    carrega bounty (era VPIP). #BOUNTY-PCT-VPIP-FIX."""
     return {
         "site": "GGPoker",
         "tournament_format": "PKO",
@@ -226,7 +228,7 @@ def test_constant_defaults_to_025_when_kop_none():
 def test_compute_ire_t3_activation_big_bounty():
     """T3 wiring: tournament_meta com buy_in_entry/buy_in_bounty do TS
     deve propagar para constant=0.35 e usar a fórmula (não a tabela 0.25)."""
-    hand = _hand_5050(bounty_usd=350)   # coroa = bounty inicial -> ko_units=1.0
+    hand = _hand_5050(bounty_usd=175)   # coroa = metade do bounty inicial (fresco) -> ko_units=1.0
     meta = {
         "tournament_name": "Big Bounty Hunters $525",
         "starting_stack": 20000,
@@ -247,12 +249,43 @@ def test_compute_ire_t3_activation_big_bounty():
 def test_compute_ire_mystery_ko_stays_legacy_025():
     """T5: Mystery KO NÃO usa a constante derivada (bounty aleatório). Mesmo com
     split 33/67 no TS, mantém-se em 0.25 -> tabela -> 5.1 (legacy, não 7.1)."""
-    hand = _hand_5050(bounty_usd=30)   # coroa = bounty inicial -> ko_units=1.0
+    # #KO-CROWN-INSTANT-FIX: Mystery KO tem instant_fraction=1.0 (não-progressivo,
+    # bounty inteiro pago) -> coroa = bounty inicial completo = 30 -> ko_units=1.0
+    # (NÃO dividido por 0.5; o guard mantém o cálculo legacy coroa/bib no Mystery).
+    hand = _hand_5050(bounty_usd=30)   # coroa = bounty inicial (Mystery: instant=1.0)
     hand["tournament_format"] = "Mystery KO"
     meta = {"tournament_name": "Sunday Mystery", "starting_stack": 20000,
             "buy_in_entry": 15, "buy_in_bounty": 30}   # 30/(15+30)=0.667 -> seria 0.333
     out = ire.compute_ire(hand, meta)
     assert out["main_villain"]["ire_pct"] == 5.1   # legacy, derivação NÃO aplicada
+
+
+# ── #KO-CROWN-INSTANT-FIX — regressão: coroa = parte instantânea (metade) ─────
+
+def test_ire_fresh_pko_kounits_one_canonical_forty_stack():
+    """REGRESSÃO da guarda: Forty Stack $44 (PKO 50/50), vilão FRESCO. A coroa
+    lida pela Vision é $10 (parte instantânea = metade do bounty total $20). O
+    bug antigo fazia ko_units = coroa/bib = 10/20 = 0.5 (fresco subestimado 2×);
+    o fix recupera ko_units = coroa/(bib×0.5) = 10/10 = 1.0 / ko_pct = 100."""
+    hand = _hand_5050(bounty_usd=10)   # coroa $10 = parte instantânea
+    meta = _meta(name="Bounty Hunters Forty Stack $44", buy_in_bounty=20)  # bounty total $20
+    out = ire.compute_ire(hand, meta)
+    assert out is not None
+    mv = out["main_villain"]
+    assert mv["ko_units"] == 1.0   # era 0.5 (10/20) antes do fix
+    assert mv["ko_pct"] == 100     # era 50 antes do fix
+
+
+def test_ire_mystery_ko_crown_not_halved_guard():
+    """REGRESSÃO da guarda: no Mystery KO a coroa NÃO é dividida por
+    instant_fraction (bounty inteiro, instant=1.0). Com coroa = bib = 20,
+    ko_units fica 1.0 (e não 2.0 como ficaria se a lógica PKO escapasse)."""
+    hand = _hand_5050(bounty_usd=20)
+    hand["tournament_format"] = "Mystery KO"
+    meta = _meta(name="Sunday Mystery", buy_in_bounty=20)
+    out = ire.compute_ire(hand, meta)
+    assert out is not None
+    assert out["main_villain"]["ko_units"] == 1.0   # NÃO 2.0 → guard Mystery intacto
 
 
 # ── T6: fórmula com constants diferentes, decisão (a), edge cases ────────────

@@ -356,8 +356,10 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
 
     # #BOUNTY-PCT-VPIP-FIX: o IRE passa a usar o bounty REAL ($, coroa dourada =
     # bounty_value_usd) em vez de bounty_pct (que era VPIP, chama laranja).
-    # ko_units = bounty_value_usd / buy_in_bounty (múltiplos do bounty inicial;
-    # jogador fresco = 1). Sem buy_in_bounty (TS) não há base de conversão -> oculto.
+    # #KO-CROWN-INSTANT-FIX: a coroa é a parte INSTANTÂNEA (metade no PKO 50/50),
+    # logo ko_units = bounty_value_usd / (buy_in_bounty × instant_fraction) =
+    # múltiplos do bounty inicial total; jogador fresco = 1. Sem buy_in_bounty
+    # (TS) não há base de conversão -> oculto.
     try:
         bib = float((tournament_meta or {}).get("buy_in_bounty") or 0)
     except (TypeError, ValueError):
@@ -394,8 +396,14 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
             buy_in_bounty=(tournament_meta or {}).get("buy_in_bounty"),
             raw_hh=None,
         )
+        # #KO-CROWN-INSTANT-FIX: a coroa (bounty_value_usd) é a parte instantânea
+        # (metade no PKO 50/50). ko_units = bounty_total / bounty_inicial =
+        # coroa / (bib × instant_fraction). Mystery KO fica de fora (instant=1.0,
+        # bounty aleatório) → mantém o cálculo legacy coroa/bib.
+        ko_units_instant = _INSTANT_FRACTION
     else:
         constant = _DEFAULT_CONSTANT
+        ko_units_instant = 1.0
 
     pl_by_name = {}
     for p in (pn.get("players_list") or []):
@@ -420,7 +428,7 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
         # Bounty real ($) = coroa dourada; vive em player_names.players_list
         # (o apa só carrega bounty_pct=VPIP). ko_units = bounty_$ / bounty_inicial_$.
         bounty_usd = _coerce_float((pl_by_name.get(nick) or {}).get("bounty_value_usd"))
-        ko_units = bounty_usd / bib if bounty_usd > 0 else 0.0
+        ko_units = bounty_usd / (bib * ko_units_instant) if bounty_usd > 0 else 0.0
         stack_si = stack_chips / si if si > 0 else 0.0
         ire_pct = lookup_ire_pct(stack_si, ko_units, constant) if ko_units > 0 else None
         per_opponent.append({

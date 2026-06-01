@@ -636,6 +636,22 @@ _SEAT_LINE_RE = re.compile(
 )
 
 
+# #KO-CROWN-INSTANT-FIX — a coroa lida pela Vision (`bounty_value_usd`) é a parte
+# INSTANTÂNEA do bounty (metade no PKO 50/50), NÃO o total. O HRC quer o bounty
+# total por jogador → coroa ÷ instant_fraction. SÓ PKO (standard e Big Bounty,
+# ambos instant_fraction 0.5, confirmado pt41); Super KO (40%, não confirmado) e
+# Mystery (excluído do /hrc) ficam com a coroa inalterada (factor 1.0). Espelha
+# `_INSTANT_FRACTION` de `services/ire.py` (convenção partilhada). ⚠️ NÃO é o
+# progressiveFactor do HRC — esse parte o total (já correcto) em cash+head.
+_INSTANT_FRACTION = 0.5
+
+
+def _crown_to_total_factor(tournament_format: Optional[str]) -> float:
+    """Factor para recuperar o bounty total a partir da coroa (instantânea):
+    `1/instant_fraction` (=2.0) só para PKO; 1.0 (sem escala) para o resto."""
+    return (1.0 / _INSTANT_FRACTION) if (tournament_format or "").lower() == "pko" else 1.0
+
+
 def _format_bounty_amount(value: float) -> str:
     """`250.0` -> `'250'`; `112.5` -> `'112.50'`. Sem decimais quando inteiro."""
     if float(value).is_integer():
@@ -643,20 +659,25 @@ def _format_bounty_amount(value: float) -> str:
     return f"{value:.2f}"
 
 
-def _vision_bounties_by_name(players_list: list) -> dict:
-    """`{nick_real: bounty_value_usd}` para os seats que a Vision leu (>0).
-    Vazio para GG anonimizado sem SS match."""
+def _vision_bounties_by_name(players_list: list, *, crown_factor: float = 1.0) -> dict:
+    """`{nick_real: bounty_total_usd}` para os seats que a Vision leu (>0).
+    Vazio para GG anonimizado sem SS match.
+
+    #KO-CROWN-INSTANT-FIX: a coroa (`bounty_value_usd`) é a parte instantânea;
+    `crown_factor` (=1/instant_fraction, 2.0 no PKO 50/50) recupera o total.
+    Default 1.0 = coroa inalterada (caminho WN e formatos não-PKO)."""
     out: dict = {}
     for p in (players_list or []):
         name = (p.get("name") or "").strip()
         bv = p.get("bounty_value_usd")
         if name and isinstance(bv, (int, float)) and bv > 0:
-            out[name] = float(bv)
+            out[name] = float(bv) * crown_factor
     return out
 
 
 def compute_hero_bounty(
-    players_list: list, anon_map: dict, starting_bounty: float
+    players_list: list, anon_map: dict, starting_bounty: float,
+    *, crown_factor: float = 1.0,
 ) -> tuple[float, str]:
     """pt41 — bounty do Hero + fonte. Hero = max(Vision acumulado, base do TS).
 
@@ -664,9 +685,15 @@ def compute_hero_bounty(
     O valor do Vision (post-KO accumulator) ganha quando é maior que a base.
     Devolve `(valor, fonte)` com fonte ∈ {'vision','ts'}. FONTE ÚNICA partilhada
     por `_inject_bounties_ps_format` e pelo audit do manifest em `build_queue_zip`.
+
+    #KO-CROWN-INSTANT-FIX: `crown_factor` escala a coroa (instantânea) para o
+    total ANTES do max. `starting_bounty` (base do TS) já é total — não escala.
     """
     hero_real = (anon_map or {}).get("Hero")
-    vision = _vision_bounties_by_name(players_list).get(hero_real, 0.0) if hero_real else 0.0
+    vision = (
+        _vision_bounties_by_name(players_list, crown_factor=crown_factor).get(hero_real, 0.0)
+        if hero_real else 0.0
+    )
     if vision > starting_bounty:
         return vision, "vision"
     return float(starting_bounty), "ts"
@@ -704,7 +731,8 @@ def compute_hero_bounty_from_hh(
 
 
 def _inject_bounties_ps_format(
-    text: str, players_list: list, anon_map: dict, *, starting_bounty: float
+    text: str, players_list: list, anon_map: dict, *,
+    starting_bounty: float, crown_factor: float = 1.0,
 ) -> str:
     """Passo 3: injecta `, €<X> bounty)` em cada Seat line do HH.
 
@@ -724,8 +752,10 @@ def _inject_bounties_ps_format(
     if not text:
         return text
 
-    bounty_by_name = _vision_bounties_by_name(players_list)
-    hero_value, _src = compute_hero_bounty(players_list, anon_map, starting_bounty)
+    bounty_by_name = _vision_bounties_by_name(players_list, crown_factor=crown_factor)
+    hero_value, _src = compute_hero_bounty(
+        players_list, anon_map, starting_bounty, crown_factor=crown_factor,
+    )
 
     def _repl(m: re.Match) -> str:
         prefix, nick, mid = m.group(1), m.group(2), m.group(3)
@@ -983,6 +1013,8 @@ def convert_gg_hh_to_pokerstars_compatible(
     # bounty_ctx (tournament_summaries.buy_in_bounty), threaded por build_queue_zip.
     fmt = (hand.get("tournament_format") or "").lower()
     starting_bounty = (bounty_ctx or {}).get("starting_bounty")
+    # #KO-CROWN-INSTANT-FIX: PKO → coroa ÷ instant_fraction (×2); Super KO/KO → 1.0.
+    crown_factor = _crown_to_total_factor(fmt)
 
     out = _format_level_line(raw)
     out = _replace_hashes(out, anon_map)
@@ -991,6 +1023,7 @@ def convert_gg_hh_to_pokerstars_compatible(
     if fmt in TS_GATED_FORMATS and starting_bounty is not None:    # 3
         out = _inject_bounties_ps_format(
             out, players_list, anon_map, starting_bounty=float(starting_bounty),
+            crown_factor=crown_factor,
         )
     out = _drop_showdown_if_no_show(out)                           # 4
     out = _add_doesnt_show_after_collected(out)                    # 5
@@ -1482,6 +1515,7 @@ def build_queue_zip(
                 hero_bounty, hero_bounty_source = compute_hero_bounty(
                     _pn.get("players_list") or [], _pn.get("anon_map") or {},
                     float(starting_bounty),
+                    crown_factor=_crown_to_total_factor(fmt),
                 )
             elif site == "Winamax" and fmt in WINAMAX_BOUNTY_FORMATS:
                 # pt42c — audit WN: extrair bounties da HH crua (não do

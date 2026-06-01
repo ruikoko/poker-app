@@ -14,6 +14,7 @@ from app.services.queue_export import (
     _trim_total_pot_trailing_fields,
     _strip_commas_from_amounts,
     compute_hero_bounty,
+    _crown_to_total_factor,
     build_queue_zip,
 )
 
@@ -280,6 +281,80 @@ def test_compute_hero_bounty_vision_wins_when_above():
     val, src = compute_hero_bounty(
         [{"name": "Lauro", "bounty_value_usd": 250}], {"Hero": "Lauro"}, 100.0)
     assert val == 250.0 and src == "vision"
+
+
+# ── #KO-CROWN-INSTANT-FIX — coroa = parte instantânea (metade); recuperar total ─
+def test_crown_to_total_factor_gates_pko_only():
+    """PKO → ×2 (coroa ÷ instant_fraction 0.5); Super KO / KO / Mystery / Vanilla
+    → 1.0 (coroa inalterada)."""
+    assert _crown_to_total_factor("PKO") == 2.0
+    assert _crown_to_total_factor("pko") == 2.0
+    assert _crown_to_total_factor("Super KO") == 1.0
+    assert _crown_to_total_factor("KO") == 1.0
+    assert _crown_to_total_factor("Mystery KO") == 1.0
+    assert _crown_to_total_factor("Vanilla") == 1.0
+    assert _crown_to_total_factor(None) == 1.0
+
+
+def test_compute_hero_bounty_pko_doubles_crown_but_stays_at_base_when_fresh():
+    """#KO-CROWN-INSTANT-FIX: Hero fresco — coroa $10 × 2 = $20 = base do TS.
+    `max(coroa×2, starting)` = max(20, 20) = 20 (mantém-se a $20)."""
+    val, src = compute_hero_bounty(
+        [{"name": "Lauro", "bounty_value_usd": 10}], {"Hero": "Lauro"}, 20.0,
+        crown_factor=2.0)
+    assert val == 20.0   # max(10×2, 20) = 20 — Hero continua a $20
+
+
+def test_convert_gg_pko_fresh_crown_doubles_to_total():
+    """REGRESSÃO: Forty Stack $44 (PKO 50/50), vilão FRESCO. A coroa Vision é $10
+    (parte instantânea); o HRC precisa do total $20. Antes: €10 (KO-T$=10, com
+    progressiveFactor 0.5 → KO-P$=5). Depois: €20 (KO-T$=20 → KO-P$=10)."""
+    hand = {
+        "site": "GGPoker", "raw": SAMPLE_GG_RAW_FULL,
+        "tournament_format": "PKO",
+        "player_names": {
+            "anon_map": SAMPLE_GG_ANON_MAP,
+            "players_list": [{"name": "msthtb66", "bounty_value_usd": 10}],
+        },
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(
+        hand, bounty_ctx={"starting_bounty": 20.0})
+    # vilão fresco: coroa 10 × 2 = €20 (KO-T$=20)
+    assert "Seat 2: msthtb66 (26167 in chips, €20 bounty)" in out
+    # Hero sem coroa: base do TS €20 (não escala) — continua a 20
+    assert "Seat 1: Hero (40492 in chips, €20 bounty)" in out
+
+
+def test_convert_gg_superko_crown_not_doubled():
+    """GUARDA: Super KO (instant_fraction não confirmado) NÃO duplica a coroa.
+    msthtb66 coroa $10 → €10 (inalterado), apesar de passar pela injecção; o
+    Hero (sem coroa) usa a base €20 — contraste que prova a coroa intocada."""
+    hand = {
+        "site": "GGPoker", "raw": SAMPLE_GG_RAW_FULL,
+        "tournament_format": "Super KO",
+        "player_names": {
+            "anon_map": SAMPLE_GG_ANON_MAP,
+            "players_list": [{"name": "msthtb66", "bounty_value_usd": 10}],
+        },
+    }
+    out = convert_gg_hh_to_pokerstars_compatible(
+        hand, bounty_ctx={"starting_bounty": 20.0})
+    assert "Seat 2: msthtb66 (26167 in chips, €10 bounty)" in out   # NÃO €20
+    assert "Seat 1: Hero (40492 in chips, €20 bounty)" in out       # base, não coroa
+
+
+def test_convert_winamax_passthrough_crown_unchanged():
+    """GUARDA: Winamax é passthrough total (HRC lê WN nativo). A coroa/bounty da
+    HH WN NÃO é tocada pelo fix GG, mesmo com tournament_format=PKO + bounty_ctx."""
+    wn_raw = (
+        'Winamax Poker - Tournament "X" buyIn: 90€ + 10€ - 2026/05/11 21:45:00 UTC\n'
+        "Seat 1: thinvalium (351657, 244.20€ bounty)\n"
+    )
+    hand = {"site": "Winamax", "raw": wn_raw, "tournament_format": "PKO",
+            "player_names": {}}
+    out = convert_gg_hh_to_pokerstars_compatible(
+        hand, bounty_ctx={"starting_bounty": 20.0})
+    assert out == wn_raw   # idêntico, sem duplicar 244.20€
 
 
 # pt41 — gate de formato no conversor
@@ -554,13 +629,14 @@ def test_end_to_end_gg_5944816316_passes_all_8_transformations():
     # 2. Level com espaco
     assert "Level 13 (1500/3000)" in out
 
-    # 3. Bounty pt41: Hero sem Vision -> base TS €250; vilões com Vision -> valor
-    # real; vilões sem Vision (GG anon) -> base TS €250 (já não €0).
+    # 3. Bounty pt41 + #KO-CROWN-INSTANT-FIX: Hero sem Vision -> base TS €250;
+    # vilões com Vision -> coroa × 2 (coroa = parte instantânea no PKO 50/50);
+    # vilões sem Vision (GG anon) -> base TS €250 (já não €0; base não escala).
     assert "Seat 4: Hero (44250 in chips, €250 bounty)" in out
-    assert "Seat 1: playerA (45123 in chips, €50 bounty)" in out
-    assert "Seat 2: playerB (52400 in chips, €75 bounty)" in out
-    assert "Seat 5: playerD (60000 in chips, €100 bounty)" in out
-    # Players sem bounty no players_list -> base do TS (€250), não €0.
+    assert "Seat 1: playerA (45123 in chips, €100 bounty)" in out   # 50 × 2
+    assert "Seat 2: playerB (52400 in chips, €150 bounty)" in out   # 75 × 2
+    assert "Seat 5: playerD (60000 in chips, €200 bounty)" in out   # 100 × 2
+    # Players sem bounty no players_list -> base do TS (€250), não €0 nem ×2.
     assert "Seat 3: playerC (38800 in chips, €250 bounty)" in out
 
     # 4. SHOWDOWN removido (Hero ganhou por uncalled bet, sem shows)
