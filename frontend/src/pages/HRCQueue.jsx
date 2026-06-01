@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { hrc, queue } from '../api/client'
+import { hands, hrc, queue } from '../api/client'
 
 // Cores por cenário do aggressor (espelha build_queue_zip / classify_aggressor_source).
 const SRC_COLOR = {
@@ -32,8 +32,30 @@ export default function HRCQueuePage() {
   const [site, setSite] = useState('')
   const [format, setFormat] = useState('')
   const [dl, setDl] = useState({})  // hand_id -> 'busy' | 'err'
+  const [marks, setMarks] = useState({})    // id -> 'new'|'resolved' (override optimista)
+  const [stBusy, setStBusy] = useState({})  // id -> 'busy'|'err'
   const [pending, setPending] = useState(null)   // pt41 — banner D1 (PKO sem TS)
   const [pendingOpen, setPendingOpen] = useState(false)
+
+  // Estado actual da mão: override optimista > o que veio do backend > 'new'
+  // (o /eligible só devolve mãos study_state='new', mas o fallback é defensivo).
+  function curState(h) { return marks[h.id] ?? h.study_state ?? 'new' }
+
+  // Alterna Nova(new) <-> Revista(resolved) reutilizando o MESMO PATCH do Estudo
+  // (hands.update -> PATCH /hands/{id}). Optimista: a linha fica visível até ao
+  // próximo Refresh (aí, as Revista saem do basket 'new' do gate /hrc).
+  async function toggleState(h) {
+    const next = curState(h) === 'resolved' ? 'new' : 'resolved'
+    setStBusy(s => ({ ...s, [h.id]: 'busy' }))
+    try {
+      await hands.update(h.id, { study_state: next })
+      setMarks(m => ({ ...m, [h.id]: next }))
+      setStBusy(s => { const n = { ...s }; delete n[h.id]; return n })
+    } catch (e) {
+      setStBusy(s => ({ ...s, [h.id]: 'err' }))
+      console.error('study_state toggle falhou:', e)
+    }
+  }
 
   async function downloadPack(handId) {
     setDl(d => ({ ...d, [handId]: 'busy' }))
@@ -49,6 +71,7 @@ export default function HRCQueuePage() {
   async function refresh() {
     setLoading(true)
     setError(null)
+    setMarks({}); setStBusy({})
     try {
       const [out, pend] = await Promise.all([hrc.eligible(), hrc.pendingTs()])
       setData(out)
@@ -188,8 +211,11 @@ export default function HRCQueuePage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
-                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'fmt', 'pos', 'heroBB', 'aggressor', 'tags', ''].map(h => (
-                      <th key={h} style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'fmt', 'pos', 'heroBB', 'aggressor', 'tags', 'acções'].map(h => (
+                      <th key={h} style={{
+                        padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
+                        ...(h === 'acções' ? { position: 'sticky', right: 0, background: 'var(--bg)', zIndex: 2, borderLeft: '1px solid var(--border)' } : {}),
+                      }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -216,7 +242,25 @@ export default function HRCQueuePage() {
                           {!(h.hm3_tags || []).length && !(h.discord_tags || []).length && '—'}
                         </span>
                       </td>
-                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', position: 'sticky', right: 0, background: 'var(--bg)', zIndex: 1, borderLeft: '1px solid var(--border)' }}>
+                        {(() => {
+                          const isRev = curState(h) === 'resolved'
+                          const c = isRev ? '#22c55e' : '#3b82f6'
+                          const busy = stBusy[h.id] === 'busy'
+                          return (
+                            <button
+                              onClick={() => toggleState(h)}
+                              disabled={busy}
+                              title={isRev ? 'Marcar como Nova' : 'Marcar como Revista'}
+                              style={{
+                                fontSize: 11, fontWeight: 600, cursor: busy ? 'wait' : 'pointer',
+                                color: c, background: `${c}1f`, border: `1px solid ${c}55`,
+                                borderRadius: 4, padding: '2px 7px', marginRight: 8,
+                                opacity: busy ? 0.5 : 1,
+                              }}
+                            >{busy ? '…' : (isRev ? 'Revista' : 'Nova')}</button>
+                          )
+                        })()}
                         {h.has_payout && (
                           <button
                             onClick={() => downloadPack(h.hand_id)}
@@ -233,6 +277,9 @@ export default function HRCQueuePage() {
                         )}
                         <Link to={`/replayer/${h.id}`} style={{ color: 'var(--accent2, #818cf8)', textDecoration: 'none' }}>ver →</Link>
                         {dl[h.hand_id] === 'err' && (
+                          <span style={{ color: '#ef4444', marginLeft: 6, fontSize: 11 }}>erro</span>
+                        )}
+                        {stBusy[h.id] === 'err' && (
                           <span style={{ color: '#ef4444', marginLeft: 6, fontSize: 11 }}>erro</span>
                         )}
                       </td>
