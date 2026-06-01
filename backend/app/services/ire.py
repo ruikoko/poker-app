@@ -1,5 +1,9 @@
 """
-IRE v2 (Indice de Reducao de Equity / Bounty Power) — GG-only.
+IRE v2 (Indice de Reducao de Equity / Bounty Power) — GG + Winamax (#IRE-WN).
+
+#IRE-WN: extensão à Winamax. Núcleo partilhado `_assemble_ire`; o WN entra por
+`_compute_ire_winamax` (tabela curada `winamax_ire_tournaments`, bounty literal
+da HH, ko_units sem o ×2 da coroa GG). GG 100% inalterada nos gates.
 
 #IRE-MB (2026-05-29): a constante do bounty é DERIVADA por torneio
 (KOP_fraction × instant_fraction), já não é fixa em 25%. Default 0.25 =
@@ -44,6 +48,7 @@ from typing import Optional
 
 # Reuso do regex dos 3 componentes do header PS (anti-drift com o classificador).
 from app.utils.tournament_format import _PS_3COMP_AMOUNTS_RE
+from app.services.winamax_ire_tournaments import lookup_winamax_ire_tournament
 
 logger = logging.getLogger(__name__)
 
@@ -326,12 +331,139 @@ def _pick_main_villain(per_opponent: list, hero_stack_chips: float) -> Optional[
     return max(activos, key=lambda op: op["stack_chips"])
 
 
+# ── Núcleo partilhado GG/WN ──────────────────────────────────────────────────
+
+def _assemble_ire(apa: dict, *, si: float, bib: float, constant: float,
+                  ko_units_instant: float, bounty_by_nick: dict) -> Optional[dict]:
+    """Núcleo partilhado GG/WN. Constrói per_opponent (ko_units, stack_si,
+    ire_pct), aplica as guardas (>=1 oponente com bounty; hero válido) e escolhe
+    o vilão principal (regra D). Site-agnóstico: recebe já o bounty por nick
+    (GG: coroa Vision; WN: literal da HH) e os parâmetros do torneio.
+
+    ko_units = bounty / (bib × ko_units_instant). GG PKO -> 0.5 (a coroa é
+    metade — #KO-CROWN-INSTANT-FIX); WN e Mystery -> 1.0 (bounty já é o total
+    na cabeça)."""
+    bb = (apa.get("_meta") or {}).get("bb") or 0
+    if bb <= 0:
+        return None
+    hero_stack = None
+    per_opponent: list[dict] = []
+    for nick, info in apa.items():
+        if nick == "_meta" or not isinstance(info, dict):
+            continue
+        if info.get("is_hero"):
+            hero_stack = info.get("stack")
+            continue
+        try:
+            stack_chips = float(info.get("stack") or 0)
+        except (TypeError, ValueError):
+            stack_chips = 0.0
+        bounty = _coerce_float(bounty_by_nick.get(nick))
+        ko_units = bounty / (bib * ko_units_instant) if bounty > 0 else 0.0
+        stack_si = stack_chips / si if si > 0 else 0.0
+        ire_pct = lookup_ire_pct(stack_si, ko_units, constant) if ko_units > 0 else None
+        per_opponent.append({
+            "nick": nick,
+            "position": info.get("position"),
+            "stack_chips": int(round(stack_chips)),
+            "stack_bb": round(stack_chips / bb, 1) if bb else None,
+            "stack_si": round(stack_si, 3),
+            "ko_pct": round(ko_units * 100),   # bounty em % do inicial (derivado; ko_units é o canónico)
+            "ko_units": round(ko_units, 2),
+            "ire_pct": round(ire_pct, 1) if ire_pct is not None else None,
+            "is_main": False,
+            "is_active": _is_active(info.get("actions")),
+            "is_covered": False,  # preenchido depois quando soubermos hero_stack
+        })
+
+    if not per_opponent:
+        return None
+
+    # nenhum oponente com bounty real > 0 => escondido
+    if not any(op["ko_units"] > 0 for op in per_opponent):
+        return None
+
+    if hero_stack is None or hero_stack <= 0:
+        return None
+    hero_stack_f = float(hero_stack)
+
+    for op in per_opponent:
+        op["is_covered"] = op["stack_chips"] <= hero_stack_f
+
+    # 1→N (#BOUNTY-PCT-VPIP-FIX): o IRE é calculado por-oponente (per_opponent,
+    # foldados incluídos). `main_villain` mantém-se só como headline da lista
+    # (HandRow). Já NÃO é gate: a partir do guard `any(ko_units>0)` acima, há
+    # sempre ≥1 oponente com bounty, e `_pick_main_villain` escolhe sempre um
+    # (fallback ao melhor foldado se nenhum activo). `_is_active` deixou de ser
+    # gate — fica só como campo de display (tooltip "folded").
+    main = _pick_main_villain(per_opponent, hero_stack_f)
+    if main is not None:
+        for op in per_opponent:
+            if op["nick"] == main["nick"]:
+                op["is_main"] = True
+                break
+
+    per_opponent.sort(key=lambda op: _seat_order_key(op.get("position")))
+
+    main_out = None
+    if main is not None:
+        main_out = {
+            "nick": main["nick"],
+            "position": main.get("position"),
+            "stack_chips": main["stack_chips"],
+            "stack_bb": main["stack_bb"],
+            "stack_si": main["stack_si"],
+            "ko_pct": main["ko_pct"],
+            "ko_units": main["ko_units"],
+            "ire_pct": main["ire_pct"],
+            "is_covered": main["is_covered"],
+        }
+    return {"main_villain": main_out, "per_opponent": per_opponent}
+
+
+def _compute_ire_winamax(hand: dict) -> Optional[dict]:
+    """IRE Winamax (#IRE-WN). Elegível se: WN (garantido pelo dispatch) +
+    tournament_format PKO + tournament_name na tabela curada. NÃO exige
+    match_method (WN tem nicks reais, sem o passo de match da GG) nem tag.
+
+    si/entry/bib vêm da tabela curada; bounty por jogador = literal da HH
+    (_extract_winamax_seat_bounties), que é o TOTAL na cabeça -> ko_units_instant
+    = 1.0 (sem o ×2 da coroa GG); constant = (bib/(entry+bib))×instant
+    (~0.278/0.269), fora da banda 0.25 -> _formula_fallback (a tabela W3cray
+    não aplica)."""
+    if hand.get("tournament_format") != "PKO":
+        return None
+    meta = lookup_winamax_ire_tournament(hand.get("tournament_name"))
+    if not meta:
+        return None
+    try:
+        si = float(meta["starting_stack"])
+        entry = float(meta["buy_in_entry"])
+        bib = float(meta["buy_in_bounty"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    if si <= 0 or bib <= 0:
+        return None
+    apa = _coerce_apa(hand.get("all_players_actions"))
+    if not apa:
+        return None
+    kop = _kop_from_parts(entry, bib)
+    constant = (kop * _INSTANT_FRACTION) if kop is not None else _DEFAULT_CONSTANT
+    from app.services.queue_export import _extract_winamax_seat_bounties
+    bounty_by_nick = _extract_winamax_seat_bounties(hand.get("raw") or "")
+    return _assemble_ire(apa, si=si, bib=bib, constant=constant,
+                         ko_units_instant=1.0, bounty_by_nick=bounty_by_nick)
+
+
 # ── API publica ──────────────────────────────────────────────────────────────
 
 def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
     """Devolve {main_villain, per_opponent} ou None.
     Hero e excluido de per_opponent. Vilao principal escolhido pela regra D."""
-    if hand.get("site") != "GGPoker":
+    site = hand.get("site")
+    if site == "Winamax":
+        return _compute_ire_winamax(hand)
+    if site != "GGPoker":
         return None
 
     pn = _coerce_pn(hand.get("player_names"))
@@ -405,86 +537,14 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
         constant = _DEFAULT_CONSTANT
         ko_units_instant = 1.0
 
-    pl_by_name = {}
+    # Bounty por nick = coroa Vision (#KO-CROWN-INSTANT-FIX divide por instant
+    # dentro de _assemble_ire). Vilões sem entrada -> 0.0 (igual ao anterior).
+    bounty_by_nick: dict = {}
     for p in (pn.get("players_list") or []):
         if isinstance(p, dict):
             for key in ("name", "real_name"):
                 v = p.get(key)
                 if v:
-                    pl_by_name.setdefault(v, p)
-
-    hero_stack = None
-    per_opponent: list[dict] = []
-    for nick, info in apa.items():
-        if nick == "_meta" or not isinstance(info, dict):
-            continue
-        if info.get("is_hero"):
-            hero_stack = info.get("stack")
-            continue
-        try:
-            stack_chips = float(info.get("stack") or 0)
-        except (TypeError, ValueError):
-            stack_chips = 0.0
-        # Bounty real ($) = coroa dourada; vive em player_names.players_list
-        # (o apa só carrega bounty_pct=VPIP). ko_units = bounty_$ / bounty_inicial_$.
-        bounty_usd = _coerce_float((pl_by_name.get(nick) or {}).get("bounty_value_usd"))
-        ko_units = bounty_usd / (bib * ko_units_instant) if bounty_usd > 0 else 0.0
-        stack_si = stack_chips / si if si > 0 else 0.0
-        ire_pct = lookup_ire_pct(stack_si, ko_units, constant) if ko_units > 0 else None
-        per_opponent.append({
-            "nick": nick,
-            "position": info.get("position"),
-            "stack_chips": int(round(stack_chips)),
-            "stack_bb": round(stack_chips / bb, 1) if bb else None,
-            "stack_si": round(stack_si, 3),
-            "ko_pct": round(ko_units * 100),   # bounty em % do inicial (derivado; ko_units é o canónico)
-            "ko_units": round(ko_units, 2),
-            "ire_pct": round(ire_pct, 1) if ire_pct is not None else None,
-            "is_main": False,
-            "is_active": _is_active(info.get("actions")),
-            "is_covered": False,  # preenchido depois quando soubermos hero_stack
-        })
-
-    if not per_opponent:
-        return None
-
-    # nenhum oponente com bounty real (coroa) > 0 => escondido
-    if not any(op["ko_units"] > 0 for op in per_opponent):
-        return None
-
-    if hero_stack is None or hero_stack <= 0:
-        return None
-    hero_stack_f = float(hero_stack)
-
-    for op in per_opponent:
-        op["is_covered"] = op["stack_chips"] <= hero_stack_f
-
-    # 1→N (#BOUNTY-PCT-VPIP-FIX): o IRE é calculado por-oponente (per_opponent,
-    # foldados incluídos). `main_villain` mantém-se só como headline da lista
-    # (HandRow). Já NÃO é gate: a partir do guard `any(ko_units>0)` acima, há
-    # sempre ≥1 oponente com coroa, e `_pick_main_villain` escolhe sempre um
-    # (fallback ao melhor foldado se nenhum activo). `_is_active` deixou de ser
-    # gate — fica só como campo de display (tooltip "folded").
-    main = _pick_main_villain(per_opponent, hero_stack_f)
-    if main is not None:
-        for op in per_opponent:
-            if op["nick"] == main["nick"]:
-                op["is_main"] = True
-                break
-
-    per_opponent.sort(key=lambda op: _seat_order_key(op.get("position")))
-
-    main_out = None
-    if main is not None:
-        main_out = {
-            "nick": main["nick"],
-            "position": main.get("position"),
-            "stack_chips": main["stack_chips"],
-            "stack_bb": main["stack_bb"],
-            "stack_si": main["stack_si"],
-            "ko_pct": main["ko_pct"],
-            "ko_units": main["ko_units"],
-            "ire_pct": main["ire_pct"],
-            "is_covered": main["is_covered"],
-        }
-    return {"main_villain": main_out, "per_opponent": per_opponent}
+                    bounty_by_nick.setdefault(v, _coerce_float(p.get("bounty_value_usd")))
+    return _assemble_ire(apa, si=si, bib=bib, constant=constant,
+                         ko_units_instant=ko_units_instant, bounty_by_nick=bounty_by_nick)

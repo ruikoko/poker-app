@@ -761,9 +761,19 @@ def list_hands(
         )
         tournament_meta_by_num = {m["tournament_number"]: dict(m) for m in meta_rows}
 
+    # #IRE-WN: a lista não traz h.raw; o IRE Winamax precisa do raw p/ extrair
+    # os bounties literais. Busca o raw só das mãos WN da página (minoria).
+    wn_raw_by_id: dict = {}
+    wn_ids = [r["id"] for r in rows if r.get("site") == "Winamax"]
+    if wn_ids:
+        for x in query("SELECT id, raw FROM hands WHERE id = ANY(%s)", (wn_ids,)):
+            wn_raw_by_id[x["id"]] = x["raw"]
+
     data = []
     for r in rows:
         d = dict(r)
+        if d.get("site") == "Winamax" and not d.get("raw"):
+            d["raw"] = wn_raw_by_id.get(d["id"])
         d["ire"] = compute_ire(d, tournament_meta_by_num.get(d.get("tournament_number")))
         data.append(d)
 

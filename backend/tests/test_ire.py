@@ -340,3 +340,85 @@ def test_compute_ire_ps_dormant_despite_valid_header():
     hand["site"] = "PokerStars"
     hand["raw"] = "PokerStars Hand #1: ... €22.50+€22.50+€5.00 EUR ..."
     assert ire.compute_ire(hand, _meta()) is None
+
+
+# ── #IRE-WN — Winamax (tabela curada + bounty literal da HH) ─────────────────
+
+def _hand_wn(name="EXPLORER", villain_bounty="25", villain_stack=20000, fmt="PKO"):
+    """WN PKO: 2 vilões + Hero (nick real, is_hero). Bounty literal na HH (TOTAL
+    na cabeça). EXPLORER: entry 20 / bounty 25 / stack 20000."""
+    return {
+        "site": "Winamax",
+        "tournament_format": fmt,
+        "tournament_name": name,
+        "player_names": {},   # WN: vazio, sem match_method
+        "raw": (
+            'Winamax Poker - Tournament "%s" buyIn: 20€ + 5€ - HandId: #x\n'
+            "Seat 1: villainA (%s, %s€ bounty)\n"
+            "Seat 2: villainB (18000, 25€ bounty)\n"
+            "Seat 3: thinvalium (30000, 25€ bounty)\n"
+            "*** ANTE/BLINDS ***\n"
+        ) % (name, villain_stack, villain_bounty),
+        "all_players_actions": {
+            "_meta": {"bb": 200},
+            "thinvalium": {"is_hero": True, "stack": 30000, "position": "BTN",
+                           "actions": {"preflop": ["Raise 400"]}},
+            "villainA": {"stack": villain_stack, "position": "CO",
+                         "actions": {"preflop": ["Call 400"]}},
+            "villainB": {"stack": 18000, "position": "SB",
+                         "actions": {"preflop": ["Fold"]}},
+        },
+    }
+
+
+def test_ire_wn_explorer_fresh_ko_units_one_constant_278():
+    out = ire.compute_ire(_hand_wn(), None)   # tournament_meta ignorado p/ WN
+    assert out is not None
+    mv = out["main_villain"]
+    assert mv["nick"] == "villainA"
+    assert mv["stack_si"] == 1.0          # 20000/20000
+    assert mv["ko_units"] == 1.0          # 25/25 (sem ×2)
+    assert mv["ko_pct"] == 100
+    # constant = (25/45)*0.5 = 0.27778 -> fórmula (fora da banda 0.25), não tabela
+    assert ire.lookup_ire_pct(1.0, 1.0, 0.27778) != 5.1
+    assert mv["ire_pct"] == 6.1           # 0.27778/(4+0.55556)*100
+
+
+def test_ire_wn_accumulated_bounty_ko_units_above_one():
+    # EXPLORER, vilão com 62.50€ (2.5× o bounty inicial 25)
+    out = ire.compute_ire(_hand_wn(villain_bounty="62.50"), None)
+    assert out["main_villain"]["ko_units"] == 2.5
+
+
+def test_ire_wn_constant_250_buyin_is_269():
+    # GRAVITY: entry 107 / bounty 125 -> (125/232)*0.5 = 0.26940
+    assert ire._kop_from_parts(107, 125) * ire._INSTANT_FRACTION == \
+        pytest.approx(0.26940, abs=1e-4)
+
+
+def test_ire_wn_tournament_not_in_table_hidden():
+    assert ire.compute_ire(_hand_wn(name="MEGA RUSH XPTO"), None) is None
+
+
+def test_ire_wn_non_pko_hidden():
+    assert ire.compute_ire(_hand_wn(fmt="KO"), None) is None
+
+
+def test_ire_wn_no_match_method_required():
+    # player_names vazio (sem match_method) NÃO esconde no WN (≠ GG).
+    h = _hand_wn()
+    assert h["player_names"] == {}
+    assert ire.compute_ire(h, None) is not None
+
+
+def test_ire_wn_no_hh_bounties_hidden():
+    # HH sem token de bounty -> _extract devolve {} -> ko_units 0 -> None
+    h = _hand_wn()
+    h["raw"] = 'Winamax Poker - Tournament "EXPLORER"\nSeat 1: villainA (20000)\n'
+    assert ire.compute_ire(h, None) is None
+
+
+def test_ire_gg_still_works_after_refactor():
+    # sanidade: a GG continua a devolver o mesmo (fixtures GG existentes cobrem).
+    out = ire.compute_ire(_hand_5050(), _meta())
+    assert out["main_villain"]["ire_pct"] == 5.1
