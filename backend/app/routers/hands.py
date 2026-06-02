@@ -1112,33 +1112,36 @@ def hand_stats(current_user=Depends(require_auth)):
         ss_dash_rows = query("""
             WITH ss_entries AS (
                 SELECT e.id, e.source, e.entry_type,
-                       h.id AS hand_db_id,
-                       h.player_names ->> 'match_method' AS mm
+                       -- #DUP-REPLAYER-COUNT: "matched" = a entry tem mão
+                       -- enriquecida, seja pela ligação entry_id (h) OU pela mão
+                       -- com hand_id = GG-{tm} (ht). Sem o ramo ht, replayer
+                       -- entries duplicados (a mesma mão partilhada em vários
+                       -- canais ligam a UMA entry via entry_id) ou com TM
+                       -- recuperado inflavam "Discord sem match" apesar de a mão
+                       -- existir e estar decifrada. Conta por mão, não por entry
+                       -- solta (dedupe por TM).
+                       COALESCE(
+                           (h.player_names ->> 'match_method' IS NOT NULL
+                              AND h.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%')
+                           OR
+                           (ht.player_names ->> 'match_method' IS NOT NULL
+                              AND ht.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%'),
+                           false
+                       ) AS is_matched
                 FROM entries e
                 LEFT JOIN hands h ON h.entry_id = e.id
+                LEFT JOIN hands ht ON e.raw_json ? 'tm'
+                                  AND ht.hand_id = 'GG-' || replace(e.raw_json ->> 'tm', 'TM', '')
                 WHERE
                     (e.source = 'screenshot' AND e.entry_type = 'screenshot')
                     OR (e.source = 'discord' AND e.entry_type IN ('replayer_link', 'image'))
             )
             SELECT
                 COUNT(*) AS total,
-                COUNT(*) FILTER (
-                    WHERE hand_db_id IS NOT NULL
-                      AND mm IS NOT NULL
-                      AND mm NOT LIKE 'discord_placeholder_%%'
-                ) AS with_match,
-                COUNT(*) FILTER (
-                    WHERE source = 'screenshot'
-                      AND (hand_db_id IS NULL OR mm IS NULL OR mm LIKE 'discord_placeholder_%%')
-                ) AS no_match_manual,
-                COUNT(*) FILTER (
-                    WHERE source = 'discord' AND entry_type = 'replayer_link'
-                      AND (hand_db_id IS NULL OR mm IS NULL OR mm LIKE 'discord_placeholder_%%')
-                ) AS no_match_replayer,
-                COUNT(*) FILTER (
-                    WHERE source = 'discord' AND entry_type = 'image'
-                      AND (hand_db_id IS NULL OR mm IS NULL OR mm LIKE 'discord_placeholder_%%')
-                ) AS no_match_image
+                COUNT(*) FILTER (WHERE is_matched) AS with_match,
+                COUNT(*) FILTER (WHERE source = 'screenshot' AND NOT is_matched) AS no_match_manual,
+                COUNT(*) FILTER (WHERE source = 'discord' AND entry_type = 'replayer_link' AND NOT is_matched) AS no_match_replayer,
+                COUNT(*) FILTER (WHERE source = 'discord' AND entry_type = 'image' AND NOT is_matched) AS no_match_image
             FROM ss_entries
         """)
         d = dict(ss_dash_rows[0]) if ss_dash_rows else {}
