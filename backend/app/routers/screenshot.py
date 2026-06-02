@@ -1364,10 +1364,30 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     if (existing_mm == "anchors_stack_elimination_v2"
             and raw_already_present
             and existing_anon_map):
-        # Marcar entry como resolved (semântica preservada) e retornar.
+        # apa já enriquecido → NÃO re-corre o algoritmo v2 caro (anon_map). MAS
+        # continua a fazer as duas coisas que NÃO dependem do re-enrich, senão
+        # perdem-se silenciosamente quando uma 2ª/3ª entry da MESMA mão (mesma
+        # mão partilhada em vários canais Discord) cai neste guard
+        # (#VILLAIN-MISSED-ON-ENRICH-GUARD):
+        #   (1) apensar a discord_tag DESTE entry — sem isto a tag do 2º canal
+        #       (ex.: pos-pko / icm-pko) nunca chega à mão.
+        #   (2) re-correr apply_villain_rules (idempotente) contra as
+        #       discord_tags ACTUAIS — sem isto, tags que chegam depois do 1º
+        #       enrich (ex.: 'nota' de outro canal) nunca disparam a Regra C →
+        #       villain perdido. O loop de auto-rematch (import_.py) re-corre
+        #       por mão em cada import, por isso isto torna o fix self-healing
+        #       nos re-imports da fase 2/3.
+        from app.discord_bot import _resolve_channel_name_for_entry
         conn = get_conn()
         try:
             with conn.cursor() as cur:
+                _ch = _resolve_channel_name_for_entry(entry_id)
+                if _ch:
+                    cur.execute(
+                        "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
+                        "COALESCE(discord_tags, '{}'::text[]) || %s::text[])) WHERE id = %s",
+                        ([_ch], hand_db_id),
+                    )
                 cur.execute(
                     "UPDATE entries SET status = 'resolved' WHERE id = %s",
                     (entry_id,),
@@ -1375,6 +1395,13 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
             conn.commit()
         finally:
             conn.close()
+        try:
+            from app.services.villain_rules import apply_villain_rules
+            apply_villain_rules(hand_db_id)  # idempotente; lê discord_tags actuais
+        except Exception as e:
+            logger.error(
+                f"Villain creation (already_enriched guard) failed hand {hand_db_id}: {e}"
+            )
         return {
             "status": "already_enriched",
             "hand_id": hand_db_id,
