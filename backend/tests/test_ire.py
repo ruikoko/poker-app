@@ -383,15 +383,17 @@ def test_compute_ire_ps_dormant_despite_valid_header():
     assert ire.compute_ire(hand, _meta()) is None
 
 
-# ── #IRE-WN — Winamax (tabela curada + bounty literal da HH) ─────────────────
+# ── #IRE-WN — Winamax (mapa por PREÇO + bounty literal da HH) ────────────────
 
-def _hand_wn(name="EXPLORER", villain_bounty="25", villain_stack=20000, fmt="PKO"):
+def _hand_wn(name="EXPLORER", buy_in=50, villain_bounty="25", villain_stack=20000, fmt="PKO"):
     """WN PKO: 2 vilões + Hero (nick real, is_hero). Bounty literal na HH (TOTAL
-    na cabeça). EXPLORER: entry 20 / bounty 25 / stack 20000."""
+    na cabeça). O lookup casa por `buy_in` (não pelo nome): buy_in=50 -> entry 20
+    / bounty 25 / stack 20000. O `tournament_name` é decorativo (não usado)."""
     return {
         "site": "Winamax",
         "tournament_format": fmt,
         "tournament_name": name,
+        "buy_in": buy_in,
         "player_names": {},   # WN: vazio, sem match_method
         "raw": (
             'Winamax Poker - Tournament "%s" buyIn: 20€ + 5€ - HandId: #x\n'
@@ -437,8 +439,43 @@ def test_ire_wn_constant_250_buyin_is_269():
         pytest.approx(0.26940, abs=1e-4)
 
 
-def test_ire_wn_tournament_not_in_table_hidden():
-    assert ire.compute_ire(_hand_wn(name="MEGA RUSH XPTO"), None) is None
+def test_lookup_winamax_ire_by_price_all_four():
+    from app.services.winamax_ire_tournaments import lookup_winamax_ire_by_price as L
+    assert L(50) == {"starting_stack": 20000, "buy_in_entry": 20.0, "buy_in_bounty": 25.0, "buy_in_rake": 5.0}
+    assert L(100) == {"starting_stack": 20000, "buy_in_entry": 40.0, "buy_in_bounty": 50.0, "buy_in_rake": 10.0}
+    assert L(125) == {"starting_stack": 20000, "buy_in_entry": 51.5, "buy_in_bounty": 62.5, "buy_in_rake": 11.0}
+    assert L(250) == {"starting_stack": 20000, "buy_in_entry": 107.0, "buy_in_bounty": 125.0, "buy_in_rake": 18.0}
+    # normalização a 2 casas: int, float e Decimal-like batem na mesma chave
+    assert L(50.0) == L(50) and L(50.00) == L(50)
+
+
+def test_lookup_winamax_ire_by_price_out_of_map_none():
+    from app.services.winamax_ire_tournaments import lookup_winamax_ire_by_price as L
+    for p in (33, 75, 200, 215, 0, -1):
+        assert L(p) is None          # preço fora do mapa -> None (nunca inventar)
+    assert L(None) is None           # buy_in ausente
+    assert L("abc") is None          # não-numérico -> except -> None
+
+
+def test_ire_wn_price_not_in_map_hidden():
+    # buy_in fora do mapa por preço -> IRE escondido (nunca inventar)
+    assert ire.compute_ire(_hand_wn(buy_in=33), None) is None
+    assert ire.compute_ire(_hand_wn(buy_in=None), None) is None
+
+
+def test_ire_wn_unknown_name_known_price_resolves():
+    # O nome já NÃO importa: nome desconhecido + preço no mapa -> IRE acende.
+    # (era o caso que a tabela por nome escondia; agora casa por buy_in.)
+    h = _hand_wn(name="MILLION WEEK SPACE KO 999K - DAY 1", buy_in=50)
+    assert ire.compute_ire(h, None) is not None
+
+
+def test_ire_wn_price_250_uses_gravity_split():
+    # buy_in 250 -> entry 107 / bounty 125 (sem depender do nome). Vilão fresco
+    # com coroa = bounty inicial 125 -> ko_units = 125/125 = 1.0.
+    out = ire.compute_ire(_hand_wn(name="HIGHROLLER", buy_in=250, villain_bounty="125"), None)
+    assert out is not None
+    assert out["main_villain"]["ko_units"] == 1.0
 
 
 def test_ire_wn_non_pko_hidden():

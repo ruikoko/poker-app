@@ -2,7 +2,7 @@
 IRE v2 (Indice de Reducao de Equity / Bounty Power) — GG + Winamax (#IRE-WN).
 
 #IRE-WN: extensão à Winamax. Núcleo partilhado `_assemble_ire`; o WN entra por
-`_compute_ire_winamax` (tabela curada `winamax_ire_tournaments`, bounty literal
+`_compute_ire_winamax` (mapa por PREÇO `winamax_ire_tournaments`, bounty literal
 da HH, ko_units sem o ×2 da coroa GG). GG 100% inalterada nos gates.
 
 #IRE-MB (2026-05-29): a constante do bounty é DERIVADA por torneio
@@ -48,7 +48,7 @@ from typing import Optional
 
 # Reuso do regex dos 3 componentes do header PS (anti-drift com o classificador).
 from app.utils.tournament_format import _PS_3COMP_AMOUNTS_RE
-from app.services.winamax_ire_tournaments import lookup_winamax_ire_tournament
+from app.services.winamax_ire_tournaments import lookup_winamax_ire_by_price
 
 logger = logging.getLogger(__name__)
 
@@ -423,17 +423,18 @@ def _assemble_ire(apa: dict, *, si: float, bib: float, constant: float,
 
 def _compute_ire_winamax(hand: dict) -> Optional[dict]:
     """IRE Winamax (#IRE-WN). Elegível se: WN (garantido pelo dispatch) +
-    tournament_format PKO + tournament_name na tabela curada. NÃO exige
-    match_method (WN tem nicks reais, sem o passo de match da GG) nem tag.
+    tournament_format PKO + buy_in no mapa por preço. NÃO exige match_method
+    (WN tem nicks reais, sem o passo de match da GG) nem tag, nem o nome do
+    torneio (casa por `hand.buy_in`, não por `tournament_name`).
 
-    si/entry/bib vêm da tabela curada; bounty por jogador = literal da HH
-    (_extract_winamax_seat_bounties), que é o TOTAL na cabeça -> ko_units_instant
-    = 1.0 (sem o ×2 da coroa GG); constant = (bib/(entry+bib))×instant
-    (~0.278/0.269), fora da banda 0.25 -> _formula_fallback (a tabela W3cray
-    não aplica)."""
+    si/entry/bib vêm do mapa por preço (chave = buy_in total, 2 casas); bounty
+    por jogador = literal da HH (_extract_winamax_seat_bounties), que é o TOTAL
+    na cabeça -> ko_units_instant = 1.0 (sem o ×2 da coroa GG); constant =
+    (bib/(entry+bib))×instant (~0.278/0.269), fora da banda 0.25 ->
+    _formula_fallback (a tabela W3cray não aplica)."""
     if hand.get("tournament_format") != "PKO":
         return None
-    meta = lookup_winamax_ire_tournament(hand.get("tournament_name"))
+    meta = lookup_winamax_ire_by_price(hand.get("buy_in"))
     if not meta:
         return None
     try:
