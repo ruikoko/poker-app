@@ -12,6 +12,17 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
+> **Sessão 2026-06-02 — planeado, NÃO aplicado (ver `docs/PLAN_2026-06-02-table-ss-gg-match.md`):**
+> Match SS de mesa ↔ mão GG em multi-tabling. Investigação read-only completa.
+> Achados: GG falha sobretudo por **import em falta** (68/99 SS sem mão na janela) + ~9 que o
+> matcher devia apanhar (usa o resolver de nomes frágil em vez de nome-directo+fingerprint);
+> nomes GG **fiéis** (prefixos de série a manter), `#NNN` é só da Winamax (já aparado, garantido
+> preservado); TZ OK; 2 SS Winamax mal classificados como GG pelo Vision.
+> **Próxima sessão (por ordem):** 1) fix `_resolve_match` (nome-directo por-site + impressão
+> digital stack/blinds; GG sem limpeza; chokepoint que serve upload+relink) + testes; 2) importar
+> as HH GG em falta (depois do fix, p/ o relink ligar); 3) abrir `#TABLE-SS-VISION-SITE-MISCLASS`.
+> Constantes fixadas: `_FINGERPRINT_STACK_TOL=0.20`, blinds exacto, NÃO usar hero_position.
+
 > **Foco pt42e (por ordem):**
 > 1. **Smoke real Beelink pt42d** (CRITICAL pré-commit). Sequência:
 >    - Rui corre backend DEV LOCAL (`uvicorn` em `:8000`).

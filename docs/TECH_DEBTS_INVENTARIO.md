@@ -6,6 +6,21 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## Estado actual (2 Junho 2026 — investigação read-only: match SS de mesa ↔ mão GG)
+
+Sessão read-only (zero código). Diagnóstico completo de porque é que a importação em massa dos
+SS do Intuitive Tables ligou pouco às mãos GG. Plano detalhado em
+**`docs/PLAN_2026-06-02-table-ss-gg-match.md`**.
+
+### Tech debts novos abertos (2)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#TABLE-SS-GG-MULTITABLING-MATCH** | 🟡 MED | Em multi-tabling GG (média 3.2 torneios concorrentes na janela ±5min, até 8), o `_resolve_match` (`table_ss.py`) desambigua via `resolve_tournament_number` (resolver de nomes frágil) em vez de comparar o **nome fiel da imagem** directamente com os candidatos + **impressão digital (hero_stack_bb ±20% + big_blind exacto)**. Resultado: GG liga só 33% (vs WN 73%). Dos 99 SS GG falhados: 68 sem mão na janela (**import em falta**, bloqueio dominante), ~9 que o matcher devia apanhar, 2 Winamax mal classificados. TZ OK (offset ~±1min). Nomes GG são **fiéis** (prefixos de série `250-H:` a MANTER — NÃO limpar). Fix desenhado (chokepoint `_resolve_match`, serve upload+relink; single_tn/WN intactos; 0 falsos positivos validados em 31). Alvo final: alimentar `#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT`. |
+| **#TABLE-SS-VISION-SITE-MISCLASS** | 🟢 LOW | O Vision do SS de mesa classifica esporadicamente o site errado (2 SS Winamax — `EXPLORER 150K`, `GALACTI` — marcados `GGPoker`). Faz o match procurar candidatos no site errado. Fix candidato: prompt reforça detecção de site, ou pós-passo que corrige o site quando o nome bate um torneio de outro site. Refs: `backend/app/services/table_ss_vision.py`. |
+
+---
+
 ## Estado actual (31 Maio 2026 — pt46, UX do ImportModal + comentários stale WN + imagem replayer GG)
 
 Diagnóstico read-only (sessão de ingestão pós-pt45). Sem código alterado.
