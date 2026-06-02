@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { hands as handsApi } from '../api/client'
 
 // ── Lista das 53 tags HM3 com mãos (scan de 18/04/2026) ─────────────────────
@@ -33,10 +34,12 @@ export default function TagEditor({ hand, onUpdate, variant = 'full' }) {
   const [saving, setSaving] = useState(false)
   const popoverRef = useRef(null)
   const buttonRef = useRef(null)
+  const [coords, setCoords] = useState(null)
 
   const currentTags = hand?.hm3_tags || []
 
-  // Fechar ao clicar fora
+  // Fechar ao clicar fora. popoverRef vive no portal (body) — contains() opera
+  // sobre o nó DOM real, por isso o close continua a funcionar fora do wrapper.
   useEffect(() => {
     if (!open) return
     function handler(e) {
@@ -47,6 +50,40 @@ export default function TagEditor({ hand, onUpdate, variant = 'full' }) {
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Posição do popover. É renderizado via portal no <body> para não ser cortado
+  // pelo overflow:hidden de antecedentes (cartões de grupo na Estudo, Hands.jsx
+  // 950/1065). Por estar fora do wrapper position:relative, top:calc(100%+4px)
+  // já não serve — calculamos position:fixed a partir do rect do botão.
+  // Recalcula em scroll (capture, p/ scroll de qualquer contentor) + resize.
+  useLayoutEffect(() => {
+    if (!open) return
+    function update() {
+      const btn = buttonRef.current
+      if (!btn) return
+      const r = btn.getBoundingClientRect()
+      const W = 280, margin = 8, gap = 4
+      let left = r.left
+      if (left + W > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - W - margin)
+      }
+      const spaceBelow = window.innerHeight - r.bottom - margin
+      const spaceAbove = r.top - margin
+      if (spaceBelow < 220 && spaceAbove > spaceBelow) {
+        // pouco espaço abaixo e mais acima → abre para cima (ancora no topo do botão)
+        setCoords({ left, bottom: window.innerHeight - r.top + gap, maxHeight: Math.min(380, spaceAbove - gap) })
+      } else {
+        setCoords({ left, top: r.bottom + gap, maxHeight: Math.min(380, spaceBelow - gap) })
+      }
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
   }, [open])
 
   async function applyChange(newTags) {
@@ -111,7 +148,7 @@ export default function TagEditor({ hand, onUpdate, variant = 'full' }) {
         >
           {currentTags.length > 0 ? `🏷️ ${currentTags.length}` : '🏷️ +'}
         </button>
-        {open && renderPopover(popoverRef, currentTags, filter, setFilter, filteredOptions, toggleTag, handleKeyDown, saving)}
+        {open && coords && renderPopover(popoverRef, coords, currentTags, filter, setFilter, filteredOptions, toggleTag, handleKeyDown, saving)}
       </div>
     )
   }
@@ -151,19 +188,22 @@ export default function TagEditor({ hand, onUpdate, variant = 'full' }) {
           + tag
         </button>
       </div>
-      {open && renderPopover(popoverRef, currentTags, filter, setFilter, filteredOptions, toggleTag, handleKeyDown, saving)}
+      {open && coords && renderPopover(popoverRef, coords, currentTags, filter, setFilter, filteredOptions, toggleTag, handleKeyDown, saving)}
     </div>
   )
 }
 
 // ── Popover reutilizado entre variants ──────────────────────────────────────
-function renderPopover(ref, currentTags, filter, setFilter, filteredOptions, toggleTag, handleKeyDown, saving) {
-  return (
+function renderPopover(ref, coords, currentTags, filter, setFilter, filteredOptions, toggleTag, handleKeyDown, saving) {
+  return createPortal(
     <div
       ref={ref}
       style={{
-        position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 9999,
-        width: 280, maxHeight: 380, display: 'flex', flexDirection: 'column',
+        position: 'fixed',
+        left: coords.left,
+        ...(coords.top != null ? { top: coords.top } : { bottom: coords.bottom }),
+        zIndex: 9999,
+        width: 280, maxHeight: coords.maxHeight, display: 'flex', flexDirection: 'column',
         background: '#0f172a', border: '1px solid rgba(255,255,255,0.12)',
         borderRadius: 6, boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
       }}
@@ -220,6 +260,7 @@ function renderPopover(ref, currentTags, filter, setFilter, filteredOptions, tog
           )
         })}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
