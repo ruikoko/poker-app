@@ -46,6 +46,14 @@ DEFAULT_TAGS = [
     "ICM",
     "ICM FT",
     "ICM PKO FT",
+    # Família Speed Racer (GG hyper PKO). O basket faz match EXACTO normalizado
+    # (NORM(t)=ANY), ao contrário do IRE que usa substring (ire.py
+    # SPEED_RACER_NEEDLE). Por isso as duas variantes reais das discord_tags do
+    # Rui — `speed-racer` (→ "speed racer") e `speed-racer-ft` (→ "speed racer
+    # ft") — têm de estar AMBAS aqui; não são case-variants redundantes (diferem
+    # em nº de tokens). NÃO colapsar numa só.
+    "speed-racer",
+    "speed-racer-ft",
 ]
 DEFAULT_STUDY_STATES = ["new"]
 ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
