@@ -57,23 +57,26 @@ def test_basket_normalize_drops_empty_and_dedupes_preserving_order():
     assert out == ["icm", "icm pko"]
 
 
-def test_default_basket_normalizes_to_six_distinct_keys():
-    """Os 6 conceitos do _DEFAULT_TAGS produzem 6 norm_keys distintos.
+def test_default_basket_normalizes_to_eight_distinct_keys():
+    """Os 8 conceitos do _DEFAULT_TAGS produzem 8 norm_keys distintos.
 
-    Cobre o objectivo da limpeza Fix 1: a lista perdeu os 2 duplicados
-    case-variant ('icm-ft', 'icm-pko-ft') sem perder cobertura — antes
-    precisava de escrever ambas as forms.
+    Cobre a limpeza Fix 1 (perdeu os 2 duplicados case-variant 'icm-ft',
+    'icm-pko-ft' sem perder cobertura) + a família Speed Racer adicionada em
+    pt47 (#HRC-BASKET-SPEED-RACER): 'speed-racer' e 'speed-racer-ft' normalizam
+    para keys distintas ('speed racer' != 'speed racer ft').
     """
     norm = _normalize_tags_basket(_DEFAULT_TAGS)
     assert sorted(norm) == sorted({
-        normalize_tag_key("icm-pko"),       # 'icm pko'
-        normalize_tag_key("PKO SS"),        # 'pko ss'
-        normalize_tag_key("sqz-pko"),       # 'sqz pko'
-        normalize_tag_key("ICM"),           # 'icm'
-        normalize_tag_key("ICM FT"),        # 'icm ft'
-        normalize_tag_key("ICM PKO FT"),    # 'icm pko ft'
+        normalize_tag_key("icm-pko"),         # 'icm pko'
+        normalize_tag_key("PKO SS"),          # 'pko ss'
+        normalize_tag_key("sqz-pko"),         # 'sqz pko'
+        normalize_tag_key("ICM"),             # 'icm'
+        normalize_tag_key("ICM FT"),          # 'icm ft'
+        normalize_tag_key("ICM PKO FT"),      # 'icm pko ft'
+        normalize_tag_key("speed-racer"),     # 'speed racer'
+        normalize_tag_key("speed-racer-ft"),  # 'speed racer ft'
     })
-    assert len(norm) == 6
+    assert len(norm) == 8
 
 
 # ── Regressão: casos ICM antigos continuam a funcionar ──────────────
@@ -126,7 +129,7 @@ def test_endpoint_passes_normalized_basket_to_sql():
     assert sorted(tags_arg) == ["icm", "icm pko"]
 
 
-def test_endpoint_default_basket_passes_six_keys_to_sql():
+def test_endpoint_default_basket_passes_eight_keys_to_sql():
     app = _make_app()
     client = TestClient(app)
     captured = {}
@@ -140,7 +143,7 @@ def test_endpoint_default_basket_passes_six_keys_to_sql():
         r = client.get("/api/queue/hrc")
     assert r.status_code == 200
     tags_arg = captured["params"][4]
-    assert len(tags_arg) == 6
+    assert len(tags_arg) == 8
 
 
 def test_endpoint_filters_meta_echoes_both_raw_and_normalized():
