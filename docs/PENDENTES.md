@@ -217,6 +217,11 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 20. **`_upload_screenshot_to_storage`** — limpeza do stub.
 21. **Discord entry status** — cosmético.
 22. **Discord page — dual time filters.**
+23. **Teste de regressão `/ss-without-match`** (pt48) — não há teste pytest para o
+   endpoint; o dedupe por TM só está verificado por simulação ad-hoc. Adicionar: 2
+   uploads manuais **sem TM** por casar → **ambos** aparecem (não colapsam por
+   `NULL=NULL`); N replayers do **mesmo** TM → **1** linha. Cobre o `COALESCE(tm,
+   'e'||entry_id)` do `56025af`.
 
 ---
 

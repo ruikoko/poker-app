@@ -6,6 +6,35 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt48 (2 Junho 2026 — reenquadramento docs + editor de tags + IRE-WN por preço)
+
+Sequência da pt47. Suite **818 PASSED**. Journal: `docs/JOURNAL_2026-06-02-pt48.md`.
+
+| ID | Estado | Resumo |
+|---|---|---|
+| **#IRE-WN-BY-PRICE** | ✅ FECHADO (`87f3c67`) | Evolução do **#IRE-WN** (pt46). O gate WN deixou de ser "nome na tabela curada" → passou a **`buy_in` no mapa de preços** `{50,100,125,250}` (stack 20000). Resolve a limitação da pt46 (335 mãos WN PKO 2026 fora da tabela → IRE None): `hands.buy_in` é 100% fiável na WN (0 NULL em 219). Todos os WN PKO 2026 acendem o IRE, retroactivo, sem manutenção de nomes. `winamax_ire_tournaments.py` (mapa por preço) + `ire.py:_compute_ire_winamax`. |
+| **#TAGEDITOR-PORTAL** | ✅ FECHADO (`32d6746`) | Frontend. O popover de sugestões do editor de tags ficava cortado pelo `overflow:hidden` dos cartões de grupo na Estudo (`Hands.jsx` 950/1065). Render via React portal no `<body>` (`position:fixed` por `getBoundingClientRect`). Capacidades + os 3 outros usos intactos. |
+| **#DEFAULT-TAGS-STALE-TESTS** | ✅ FECHADO (`dec944f`) | `test_queue_default_tags` assumia 6 keys; o basket Speed Racer da pt47 (`eb839e0`) levou-o a 8. Fix stale-only (assert 8 + as 2 keys speed-racer). Não-bug. |
+| **#DOCS-PROPOSITO-REENQUADRAMENTO** | ✅ FECHADO (`ebd8e5e`) | `## Propósito` (VISAO_PRODUTO) + `## Modelo de domínio` (CLAUDE) reposicionados: propósito = centralizar o estudo; o cruzamento SS↔HH GG é mecanismo (da GG), não a razão de ser. |
+
+**Override por nome no IRE-WN** — **não implementado**, registado para a 1ª excepção real
+(ex.: deepstack com stack ≠ 20000 ao mesmo preço): dict por nome a sobrepor-se ao preço.
+
+---
+
+## pt47 (2 Junho 2026 — reset BD + reimport + 3 fixes)
+
+Reset total da BD + reimport + investigação read-only. Suite **não corrida** (validação
+read-only contra prod). Journal: `docs/JOURNAL_2026-06-02-pt47.md`.
+
+| ID | Estado | Resumo |
+|---|---|---|
+| **#HRC-BASKET-SPEED-RACER** | ✅ FECHADO (`eb839e0`) | `DEFAULT_TAGS` (`hrc_queue.py`) ganha `speed-racer`+`speed-racer-ft`. Match exacto normalizado (`NORM(t)=ANY`) exige as 2 formas (diferem em nº de tokens), ≠ IRE que usa substring. +10 mãos elegíveis no Andar 1 (validado contra prod). Partiu 2 testes stale → fechados na pt48 (`dec944f`). |
+| **#DUP-REPLAYER-COUNT** | ✅ FECHADO (`10d7229` contador + `56025af` lista) | "Discord sem match" / `/ss-without-match` contavam por entry (LEFT JOIN `entry_id`), inflando com replayer duplicados (mão liga a UMA entry; irmãs ficavam `hand_db_id NULL` apesar de a mão existir). Fix: `is_matched` por `entry_id` **ou** `hand_id=GG-{tm}` + dedupe por TM na lista (`COALESCE(tm,'e'||entry_id)` — sem-TM não colapsam). 17→0. |
+| **#VILLAIN-MISSED-ON-ENRICH-GUARD** | ✅ FECHADO (`42dc4e8`) | O guard de idempotência de `_enrich_hand_from_orphan_entry` (`screenshot.py`) fazia `return` cedo, saltando o append da `discord_tag` do canal **e** `apply_villain_rules`. Como o auto-rematch chama o enrich por cada entry com TM, a 2ª/3ª entry de uma mão partilhada perdia a tag do 2º canal **e** a Regra C não re-corria → vilão perdido (7 mãos GG `nota` do 30/05). Fix: o guard passa a apensar a tag + correr a Regra (idempotente) antes do `return` → self-healing nos re-imports. |
+
+---
+
 ## Estado actual (2 Junho 2026 — investigação read-only: match SS de mesa ↔ mão GG)
 
 Sessão read-only (zero código). Diagnóstico completo de porque é que a importação em massa dos

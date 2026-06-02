@@ -197,6 +197,23 @@ O vilão principal é escolhido pela **regra D** (`_pick_main_villain`):
 entre activos com bounty, prefere o que o Hero **cobre** (stack ≤ hero);
 desempate pelo maior stack coberto, senão o maior stack activo.
 
+### IRE-WN — Winamax (#IRE-WN)
+
+O IRE estende-se à WN por um caminho próprio (`_compute_ire_winamax`), com gate
+diferente do GG:
+
+- **Gate:** `site == 'Winamax'` + `tournament_format == 'PKO'` + **`buy_in` no mapa
+  de preços** `winamax_ire_tournaments.py` (`{50, 100, 125, 250}` → split
+  `{stack 20000, entry, bounty}`). Desde a **pt48** (`87f3c67`) casa por **preço
+  (`hand.buy_in`, 100% fiável na WN)** — já **não** por nome de torneio (o número
+  no nome, `80K`/`120K`/`150K`, é a garantia, não o preço). **Sem** `match_method`
+  nem tag (WN tem nicks reais). `buy_in` fora do mapa → `None` (IRE escondido).
+- **Mecânica:** bounty por jogador = literal da HH (`_extract_winamax_seat_bounties`,
+  o **TOTAL na cabeça**) → `ko_units = bounty/bib`, `ko_units_instant = 1.0` (sem o
+  ×2 da coroa GG); `constant = (bounty/(entry+bounty))×0.5` (~0.278 / ~0.269) →
+  `_formula_fallback` (**não** usa a tabela W3cray de 25%). Escala WN **não**
+  directamente comparável à GG (intencional).
+
 ---
 
 ## 6. Fluxo de input — as fontes até à BD

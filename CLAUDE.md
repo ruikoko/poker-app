@@ -917,7 +917,41 @@ errado). Extensível: acrescentar o torneio a `WINAMAX_IRE_TOURNAMENTS` com
 alta** e **não é directamente comparável** ao IRE GG (que no PKO standard usa a
 tabela). É intencional — não alinhar os dois sem recalibração empírica.
 
-Última sessão fechada: **pt46** (1 Junho 2026 — 3 fixes shipped: `#KO-CROWN-INSTANT-FIX`, `#REPLAYER-IMG-HH-FIRST`, `#IRE-WN` + 1 commit docs; commits `24e1898`/`4eef6b5`/`e71e22a`/`64958f9`/este; suite **774 → 809 PASSED**). pt43 detalhado em `docs/JOURNAL_2026-05-29-pt43.md`.
+## pt47 — Reset total da BD + reimport + 3 fixes (2 Junho 2026)
+
+Reset total dos dados (backup restore-verificado em `_local_only/reset_pt47/`,
+`TRUNCATE … RESTART IDENTITY CASCADE`; preservados `users`/`stat_ideals`/`monthly_stats`;
+DB 474 MB → 10 MB) + reimport por cima + investigação read-only da re-ingestão (ordem,
+Discord sem-match, HM3 295→265, 30/05 fora da janela, gap de vilões). 4 commits em main:
+
+| Hash | O quê |
+|---|---|
+| `eb839e0` | #HRC-BASKET-SPEED-RACER — Speed Racer no basket de elegibilidade HRC (`DEFAULT_TAGS` ganha `speed-racer`+`speed-racer-ft`; match exacto normalizado exige as 2 formas). |
+| `10d7229` | #DUP-REPLAYER-COUNT (contador) — "Discord sem match" conta por mão (`is_matched` via `entry_id` **ou** `hand_id=GG-{tm}`), não por entry; 17→0. |
+| `42dc4e8` | #VILLAIN-MISSED-ON-ENRICH-GUARD — o guard de idempotência do enrich (`screenshot.py`) saltava o append da tag do canal **e** `apply_villain_rules`; passa a fazer ambos antes do `return` → self-healing nos re-imports. |
+| `56025af` | #DUP-REPLAYER-COUNT (lista) — `/ss-without-match` alinhada com o contador + dedupe por TM (`DISTINCT ON (COALESCE(tm,'e'||entry_id))`; sem-TM não colapsam). |
+
+Suite **não corrida** nesta sessão (fixes validados read-only contra prod); o `eb839e0`
+partiu 2 testes stale, fechados na pt48. Recuperação manual de dados (sem commit): 5 tags
+de 2º canal + 3 TMs (Vision falhara) + 7 vilões do 30/05. Detalhe em `docs/JOURNAL_2026-06-02-pt47.md`.
+
+## pt48 — Reenquadramento docs + editor de tags via portal + IRE-WN por preço (2 Junho 2026)
+
+Sequência da pt47 (mesmo dia). 4 commits em main; suite `test_ire` 53 / completa **818 PASSED** (verde):
+
+| Hash | O quê |
+|---|---|
+| `ebd8e5e` | docs — `## Propósito` (VISAO_PRODUTO) + `## Modelo de domínio` (CLAUDE) reposicionados à volta da **centralização do estudo**; o cruzamento SS↔HH GG passa a ser mecanismo (específico da GG), não a razão de ser. |
+| `32d6746` | #TAGEDITOR-PORTAL (frontend) — popover de tags via React portal no `<body>` (`position:fixed` por `getBoundingClientRect`) → deixa de ser cortado pelo `overflow:hidden` dos cartões de grupo na Estudo. Capacidades e os 3 outros usos intactos. |
+| `87f3c67` | #IRE-WN-BY-PRICE — IRE Winamax casa por **preço (`buy_in`)**, não por nome. `winamax_ire_tournaments.py` vira mapa por preço `{50,100,125,250}`→split (stack 20000); `_compute_ire_winamax` faz lookup por `hand.buy_in`. `buy_in` 100% fiável na WN (219 mãos 2026, 0 NULL). Efeito: todos os WN PKO 2026 acendem o IRE, retroactivo, sem manutenção de nomes. Override por nome não implementado (registado p/ 1ª excepção). |
+| `dec944f` | test — `test_queue_default_tags` 6→8 keys (stale do basket Speed Racer da pt47, não do IRE-WN). |
+
+Confirmado read-only: `56025af` em `origin/main`; dedupe `/ss-without-match` não colapsa
+entries sem TM (`COALESCE`, provado por simulação). Achado: proveniência de
+`hands.tournament_name` por sala — GG nome real da HH · WN nome entre aspas · WPN string
+de garantia (sem nome real) · PS NULL de propósito. Detalhe em `docs/JOURNAL_2026-06-02-pt48.md`.
+
+Última sessão fechada: **pt48** (2 Junho 2026 — reenquadramento docs `ebd8e5e`, editor de tags via portal `32d6746`, IRE-WN por preço `87f3c67`, testes stale `dec944f`; suite **818 PASSED**). Antecedida pela pt47 (mesmo dia): reset BD + reimport + `eb839e0`/`10d7229`/`42dc4e8`/`56025af`. Journals: `docs/JOURNAL_2026-06-02-pt47.md` e `docs/JOURNAL_2026-06-02-pt48.md`.
 
 ⚠️ **Pendente herdado (não tocado em pt43):** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
 
