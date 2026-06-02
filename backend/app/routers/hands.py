@@ -1276,9 +1276,19 @@ def ss_without_match(current_user=Depends(require_auth)):
       - entries source='discord'    AND entry_type='replayer_link'
       - entries source='discord'    AND entry_type='image'
 
-    Critério "sem match real": entry sem hand associada OU hand com
-    match_method NULL OU LIKE 'discord_placeholder_%'. Mesmo predicado dos
-    contadores ss_dashboard.no_match_* — soma de tipos == ss_dashboard.no_match_total.
+    Critério "sem match real" (alinhado com os contadores ss_dashboard,
+    #DUP-REPLAYER-COUNT): uma entry está MATCHED se a mão existe e está
+    enriquecida (match_method real, não placeholder) — seja pela ligação
+    `entry_id` (h) OU pela mão com `hand_id = GG-{tm}` (ht). Sem o ramo ht, os
+    gémeos (a mesma mão partilhada em vários canais liga a UMA entry via
+    entry_id) e entries com TM recuperado apareciam na lista apesar de a mão
+    existir e estar decifrada.
+
+    A lista faz **dedupe por TM** (a mesma mão em N canais conta 1x; entries sem
+    TM mantêm-se distintas). Quando todas as mãos partilhadas estão enriquecidas,
+    lista e contador convergem para ~0. Nota: o contador conta *entries*, a lista
+    conta *mãos distintas por TM* — por isso não há igualdade entry-a-entry fora
+    do caso 0.
 
     Discriminador `type` ∈ {'manual', 'replayer', 'image'} para o badge da UI.
     Frontend OrphanList consome os mesmos campos (raw_json, screenshot_url,
@@ -1298,15 +1308,40 @@ def ss_without_match(current_user=Depends(require_auth)):
                 e.discord_posted_at,
                 e.created_at,
                 e.raw_json,
+                e.raw_json ->> 'tm' AS tm,
                 h.id              AS hand_db_id,
                 h.played_at,
                 h.screenshot_url  AS hand_screenshot_url,
-                h.player_names ->> 'match_method' AS mm
+                h.player_names ->> 'match_method' AS mm,
+                -- #DUP-REPLAYER-COUNT: matched = mão enriquecida via entry_id (h)
+                -- OU via hand_id=GG-{tm} (ht). Mesmo predicado do contador
+                -- ss_dashboard.no_match_*.
+                COALESCE(
+                    (h.player_names ->> 'match_method' IS NOT NULL
+                       AND h.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%')
+                    OR
+                    (ht.player_names ->> 'match_method' IS NOT NULL
+                       AND ht.player_names ->> 'match_method' NOT LIKE 'discord_placeholder_%%'),
+                    false
+                ) AS is_matched
             FROM entries e
             LEFT JOIN hands h ON h.entry_id = e.id
+            LEFT JOIN hands ht ON e.raw_json ? 'tm'
+                              AND ht.hand_id = 'GG-' || replace(e.raw_json ->> 'tm', 'TM', '')
             WHERE
                 (e.source = 'screenshot' AND e.entry_type = 'screenshot')
                 OR (e.source = 'discord'    AND e.entry_type IN ('replayer_link', 'image'))
+        ),
+        unmatched AS (
+            -- dedupe_key: por TM quando existe; senão por entry (TM-less fica distinto)
+            SELECT *, COALESCE(tm, 'e' || entry_id::text) AS dedupe_key
+            FROM ss_no_match
+            WHERE NOT is_matched
+        ),
+        deduped AS (
+            SELECT DISTINCT ON (dedupe_key) *
+            FROM unmatched
+            ORDER BY dedupe_key, COALESCE(played_at, discord_posted_at, created_at) DESC
         )
         SELECT
             entry_id, source, entry_type, file_name,
@@ -1317,11 +1352,8 @@ def ss_without_match(current_user=Depends(require_auth)):
                 WHEN source = 'discord' AND entry_type = 'replayer_link' THEN 'replayer'
                 WHEN source = 'discord' AND entry_type = 'image' THEN 'image'
             END AS type,
-            (SELECT s.channel_name FROM discord_sync_state s WHERE s.channel_id = ss_no_match.discord_channel) AS channel_name
-        FROM ss_no_match
-        WHERE hand_db_id IS NULL
-           OR mm IS NULL
-           OR mm LIKE 'discord_placeholder_%%'
+            (SELECT s.channel_name FROM discord_sync_state s WHERE s.channel_id = deduped.discord_channel) AS channel_name
+        FROM deduped
         ORDER BY COALESCE(played_at, discord_posted_at, created_at) DESC
     """)
 
