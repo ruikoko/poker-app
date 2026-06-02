@@ -182,3 +182,57 @@ def test_parse_players_left_as_string():
     r = parse_and_validate_table_ss_json(raw)
     assert r is not None
     assert r["players_left"] == 71
+
+
+# ── #TABLE-SS-VISION-SITE-MISCLASS — _correct_site ──────────────────────────
+
+from unittest.mock import patch
+from app.services.table_ss_vision import _correct_site
+
+_SITES = "app.services.table_ss_vision._sites_for_tournament_name"
+
+
+def test_correct_site_rule_a_trailing_table_num():
+    # #NNN trailing + site != Winamax → Winamax (pura string, sem BD).
+    assert _correct_site("EXPLORER 150K #032", "GGPoker") == "Winamax"
+    assert _correct_site("ODYSSEY #013", "WPN") == "Winamax"
+
+
+def test_correct_site_rule_a_skips_when_already_winamax():
+    # site já Winamax → Regra A não dispara; B confirma (no-op).
+    with patch(_SITES, return_value={"Winamax"}):
+        assert _correct_site("ODYSSEY #013", "Winamax") == "Winamax"
+
+
+def test_correct_site_rule_b_truncated_galacti():
+    # GALACTI (sem #NNN) lido GGPoker; BD só tem o nome na Winamax → corrige.
+    with patch(_SITES, return_value={"Winamax"}):
+        assert _correct_site("GALACTI", "GGPoker") == "Winamax"
+
+
+def test_correct_site_no_change_gg_legit():
+    # Nome GG legítimo, BD confirma GG (sala lida tem o nome) → sem mudança.
+    with patch(_SITES, return_value={"GGPoker"}):
+        assert _correct_site("Speed Racer Bounty $54 [10 BB]", "GGPoker") == "GGPoker"
+
+
+def test_correct_site_no_change_middle_hash_not_trailing():
+    # #NNN no MEIO (série WN) → Regra A NÃO dispara; B sem match → sem mudança.
+    with patch(_SITES, return_value=set()):
+        assert _correct_site("W SERIES #220 - Main Event", "GGPoker") == "GGPoker"
+
+
+def test_correct_site_no_change_name_shared_by_two_sites():
+    # Nome em >1 sala → guard "exactamente 1" da Regra B não corrige.
+    with patch(_SITES, return_value={"GGPoker", "Winamax"}):
+        assert _correct_site("Daily", "PokerStars") == "PokerStars"
+
+
+def test_correct_site_db_failure_keeps_read_site():
+    # Erro de BD na Regra B → fail-safe (mantém a leitura).
+    with patch(_SITES, side_effect=RuntimeError("no DB")):
+        assert _correct_site("GALACTI", "GGPoker") == "GGPoker"
+
+
+def test_correct_site_none_name_keeps_read_site():
+    assert _correct_site(None, "GGPoker") == "GGPoker"

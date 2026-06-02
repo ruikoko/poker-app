@@ -171,6 +171,64 @@ def _coerce_float(value: Any) -> Optional[float]:
     return None
 
 
+# ── #TABLE-SS-VISION-SITE-MISCLASS — corrigir a site lida quando o nome a contradiz ──
+
+# `#NNN` no FIM do nome = nº de mesa Winamax (`Table: 'NAME(num)#seat'`); nenhuma
+# outra sala o usa. O `#NNN` de prefixo/meio (ex.: série "W SERIES #220 - …") é
+# legítimo — a regex só apanha o FIM, por isso não o toca.
+_TRAILING_TABLE_NUM_RE = re.compile(r"#\s*\d+\s*$")
+
+
+def _sites_for_tournament_name(name: str) -> set:
+    """Salas (de `hands` 2026) cujo `tournament_name` bate `name` por token-subset
+    (com `clean_tournament_name`). Read-only. Usado pela Regra B de `_correct_site`."""
+    from app.db import query
+    from app.services.tournament_resolver import name_tokens_subset, clean_tournament_name
+    nc = clean_tournament_name(name)
+    rows = query(
+        "SELECT DISTINCT site, tournament_name FROM hands "
+        "WHERE tournament_name IS NOT NULL AND tournament_name <> '' "
+        "AND played_at >= '2026-01-01'"
+    )
+    out: set = set()
+    for r in rows:
+        tc = clean_tournament_name(r["tournament_name"])
+        if name_tokens_subset(nc, tc) or name_tokens_subset(tc, nc):
+            out.add(r["site"])
+    return out
+
+
+def _correct_site(name: Optional[str], read_site: Optional[str]) -> Optional[str]:
+    """Corrige a site lida pela Vision quando o NOME a contradiz (determinístico,
+    sem listas hardcoded). #TABLE-SS-VISION-SITE-MISCLASS.
+
+    - **Regra A** (zero-risco): nome com `#NNN` trailing (nº de mesa Winamax) +
+      site lida != Winamax → Winamax.
+    - **Regra B** (cross-check BD, conservadora): se a sala lida NÃO tem torneio
+      com este nome e existe EXACTAMENTE uma outra que tem → essa.
+    - Senão mantém `read_site`. Loga INFO em cada correcção (rasto de auditoria).
+    """
+    if not name:
+        return read_site
+    # Regra A — string pura, 0 falsos positivos (nenhuma sala não-WN usa #NNN trailing).
+    if read_site != "Winamax" and _TRAILING_TABLE_NUM_RE.search(name):
+        logger.info("[table_ss_site_fix] %s -> Winamax | name=%r | rule=A (#NNN trailing)",
+                    read_site, name)
+        return "Winamax"
+    # Regra B — cross-check BD. Fail-safe: erro de BD não corrige (mantém leitura).
+    try:
+        sites = _sites_for_tournament_name(name)
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.warning("[table_ss_site_fix] cross-check BD falhou name=%r: %s", name, e)
+        return read_site
+    if sites and read_site not in sites and len(sites) == 1:
+        new_site = next(iter(sites))
+        logger.info("[table_ss_site_fix] %s -> %s | name=%r | rule=B (cross-check BD)",
+                    read_site, new_site, name)
+        return new_site
+    return read_site
+
+
 def parse_and_validate_table_ss_json(raw: Optional[str]) -> Optional[dict]:
     """Parse + sanity check do JSON Vision. None em qualquer falha.
 

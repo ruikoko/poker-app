@@ -499,6 +499,10 @@ async def _process_table_ss(
         out["reason_detail"] = "JSON inválido ou sem campos úteis"
         return _finalize(out, source=source, original_filename=filename,
                          file_size=fsize, captured_at=captured_at)
+    # #TABLE-SS-VISION-SITE-MISCLASS: corrige a site lida quando o nome a
+    # contradiz (Regra A `#NNN` trailing + Regra B cross-check BD), ANTES de
+    # gravar a site no log e de filtrar candidatos por site.
+    vj["site"] = tv._correct_site(vj.get("tournament_name"), vj.get("site"))
     out["vision_json"] = vj
     out["site"] = vj.get("site")
     out["tournament_name"] = vj.get("tournament_name")
