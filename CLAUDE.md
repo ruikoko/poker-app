@@ -109,12 +109,14 @@ Não há suite de testes nem linter configurados.
 
 ## Modelo de domínio
 
-O produto existe para conciliar duas fontes de verdade, cada uma com metade da informação:
+O produto existe para **centralizar o estudo do Rui** — juntar num sítio único, organizado e trabalhável, as mãos de dúvida que hoje estão espalhadas por várias salas, vários sítios e vários formatos (tags HM3, canais Discord, screenshots, HHs em texto). Tudo o resto é canalização ao serviço disto.
+
+Uma dessas salas — a **GGPoker** — vem **anonimizada**, e por isso exige um mecanismo extra para entrar no sítio único com nicks reais como as outras. Esse mecanismo cruza **duas fontes de verdade**, cada uma com metade da informação:
 
 1. **Hand History (HH) da GGPoker** — matematicamente exacta (acções, stacks, pot) mas **anonimizada**: jogadores aparecem como hashes (`89ef4cba`).
 2. **Screenshots** tirados durante o jogo — têm nicks reais e bounties mas sem dados de acção fiáveis.
 
-A app cruza as duas para produzir `hands.all_players_actions` enriquecido. Ter isto em mente ao mexer em `screenshot.py`, `mtt.py`, ou no parser GG.
+A app cruza as duas para produzir `hands.all_players_actions` enriquecido. **Este cruzamento é um mecanismo (específico da GG), não o propósito da app.** Ter isto em mente ao mexer em `screenshot.py`, `mtt.py`, ou no parser GG.
 
 ### Duas pistas de ciclo de vida
 

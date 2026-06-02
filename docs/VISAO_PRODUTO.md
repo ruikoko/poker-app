@@ -4,9 +4,13 @@ Documento de referência da intenção do utilizador (Rui). Próximas sessões d
 
 ## Propósito
 
-Centralizar o estudo de poker MTT, juntando dados que hoje estão espalhados em HM3 (Winamax/WPN/PokerStars) e Discord (GGPoker). Foco principal:
+A app existe para **centralizar o estudo de poker do Rui**. Ele joga MTT em várias salas (GGPoker, PokerStars, Winamax, WPN) e marca mãos de dúvida de maneiras diferentes — tags no HM3, mensagens em canais Discord, screenshots na hora, HHs em texto. Hoje isso fica **espalhado por sítios diferentes, em formatos diferentes**. A app é o **sítio único** onde tudo isso fica junto, organizado e trabalhável.
+
+Foco principal:
 1. Mãos próprias com dúvida marcadas durante a sessão (estudo posterior em GTOWizard/HRC).
 2. Mãos de adversários que merecem nota.
+
+Por cima desta base de centralização, a app expande-se em quatro eixos: **análise de vilões**, **note-taking / criação de notas com AI**, **HRC Watcher** e **GTO Brain**. Estes transformam o repositório organizado num sistema de estudo activo — não são o propósito em si, são o que se constrói sobre ele.
 
 ## Os 4 vectores da app
 
