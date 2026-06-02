@@ -314,6 +314,32 @@ def _bump_attempt_table_ss(log_id: int) -> None:
             pass
 
 
+def _persist_corrected_site_table_ss(log_id: int, new_site: str) -> None:
+    """#TABLE-SS-VISION-SITE-MISCLASS self-healing: grava a site corrigida numa
+    row órfã. Guard `result='no_match_to_hand'` = idempotência + escopo (nunca
+    toca rows já `success`)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE table_ss_processing_log SET site = %s "
+                "WHERE id = %s AND result = 'no_match_to_hand'",
+                (new_site, log_id),
+            )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"[table_ss_relink] persistir site corrigida falhou id={log_id}: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
     """Liga uma SS órfã à mão agora encontrada, em 1 transacção. O guard
     `WHERE result='no_match_to_hand'` garante idempotência (no-op se já success
@@ -388,6 +414,16 @@ def relink_orphan_table_ss(hand_ids=None) -> dict:
             still += 1
             continue
         vj = r.get("vision_json") or {}
+        # #TABLE-SS-VISION-SITE-MISCLASS self-healing: corrige a site já gravada
+        # quando o nome a contradiz, ANTES do match; persiste a correcção no log.
+        corrected = tv._correct_site(vj.get("tournament_name"), site)
+        if corrected != site:
+            logger.info(
+                "[table_ss_relink] site corrigida id=%s %s -> %s | name=%r",
+                r["id"], site, corrected, vj.get("tournament_name"),
+            )
+            _persist_corrected_site_table_ss(r["id"], corrected)
+            site = corrected
         candidates = _find_candidate_hands(captured_at, site)
         m = _resolve_match(captured_at, vj, site, candidates)
         if m["matched"] and _link_orphan_table_ss(r["id"], m["matched"]):

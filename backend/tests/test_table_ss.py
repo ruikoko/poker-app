@@ -215,16 +215,18 @@ def test_process_json_invalid(_q, _ex, _up):
     assert out["result"] == "json_invalid"
 
 
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
 @patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
 @patch("app.routers.table_ss.tv.extract_table_ss_json",
        return_value='{"site":"PartyPoker","tournament_name":"X","players_left":50}')
 @patch("app.routers.table_ss.query", return_value=[])
-def test_process_site_undetected(_q, _ex, _up):
+def test_process_site_undetected(_q, _ex, _up, _mcorrect):
     out = _run_process()
     assert out["result"] == "site_undetected"
     assert out["site"] == "PartyPoker"
 
 
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
 @patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
 @patch("app.routers.table_ss._find_candidate_hands",
        return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
@@ -234,7 +236,7 @@ def test_process_site_undetected(_q, _ex, _up):
        return_value='{"site":"Winamax","tournament_name":"ODYSSEY #013",'
                     '"players_left":71,"total_entries":124}')
 @patch("app.routers.table_ss.query", return_value=[])
-def test_process_success_links_hand(_q, _ex, _find, _up):
+def test_process_success_links_hand(_q, _ex, _find, _up, _mcorrect):
     out = _run_process()
     assert out["result"] == "success"
     assert out["hand_matched"] == "WN-10"
@@ -244,13 +246,14 @@ def test_process_success_links_hand(_q, _ex, _find, _up):
     assert _up.call_args.kwargs["matched_hand_db_id"] == 10
 
 
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
 @patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
 @patch("app.routers.table_ss.resolve_tournament_number", return_value=("T9", []))
 @patch("app.routers.table_ss._find_candidate_hands", return_value=[])
 @patch("app.routers.table_ss.tv.extract_table_ss_json",
        return_value='{"site":"Winamax","tournament_name":"ODYSSEY #013","players_left":71}')
 @patch("app.routers.table_ss.query", return_value=[])
-def test_process_no_match_stores_resolver_tn(_q, _ex, _find, _res, _up):
+def test_process_no_match_stores_resolver_tn(_q, _ex, _find, _res, _up, _mcorrect):
     out = _run_process()
     assert out["result"] == "no_match_to_hand"
     assert out["tournament_number"] == "T9"  # guardado p/ limbo linkável
@@ -360,6 +363,10 @@ def _orphan_row(rid=1, site="Winamax"):
             "vision_json": {"tournament_name": "ODYSSEY #013"}}
 
 
+# Os testes abaixo isolam-se do self-healing de site (#TABLE-SS-VISION-SITE-MISCLASS)
+# com `_correct_site` identidade — focam o link/no-link. O self-healing tem testes
+# dedicados mais abaixo.
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
 @patch("app.routers.table_ss._bump_attempt_table_ss")
 @patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
 @patch("app.routers.table_ss._find_candidate_hands",
@@ -367,7 +374,7 @@ def _orphan_row(rid=1, site="Winamax"):
                       "tournament_name": "ODYSSEY #013", "site": "Winamax",
                       "played_at": CAP}])
 @patch("app.routers.table_ss.query")
-def test_relink_links_when_hand_now_in_window(mq, _find, mlink, mbump):
+def test_relink_links_when_hand_now_in_window(mq, _find, mlink, mbump, _mcorrect):
     mq.return_value = [_orphan_row()]
     res = table_ss.relink_orphan_table_ss()
     assert res == {"checked": 1, "linked": 1, "still_orphan": 0}
@@ -377,11 +384,12 @@ def test_relink_links_when_hand_now_in_window(mq, _find, mlink, mbump):
     mbump.assert_not_called()
 
 
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
 @patch("app.routers.table_ss._bump_attempt_table_ss")
 @patch("app.routers.table_ss._link_orphan_table_ss")
 @patch("app.routers.table_ss._find_candidate_hands", return_value=[])
 @patch("app.routers.table_ss.query")
-def test_relink_keeps_orphan_when_no_hand(mq, _find, mlink, mbump):
+def test_relink_keeps_orphan_when_no_hand(mq, _find, mlink, mbump, _mcorrect):
     mq.return_value = [_orphan_row()]
     res = table_ss.relink_orphan_table_ss()
     assert res == {"checked": 1, "linked": 0, "still_orphan": 1}
@@ -439,13 +447,14 @@ def test_link_orphan_success_updates_log_and_hand(mock_get_conn):
     mock_conn.commit.assert_called_once()
 
 
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
 @patch("app.routers.table_ss.get_conn")
 @patch("app.routers.table_ss._find_candidate_hands",
        return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
                       "tournament_name": "ODYSSEY #013", "site": "Winamax",
                       "played_at": CAP}])
 @patch("app.routers.table_ss.query")
-def test_relink_end_to_end_flips_orphan_to_success(mq, _find, mock_get_conn):
+def test_relink_end_to_end_flips_orphan_to_success(mq, _find, mock_get_conn, _mcorrect):
     """no_match + mão agora na janela → worker liga e flip success (link real
     sobre conn mockada)."""
     mq.return_value = [_orphan_row()]
@@ -459,3 +468,54 @@ def test_relink_end_to_end_flips_orphan_to_success(mq, _find, mock_get_conn):
     sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
     assert any("result = 'success'" in s for s in sqls)
     assert any("UPDATE hands SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
+
+
+# ── relink self-healing de site (#TABLE-SS-VISION-SITE-MISCLASS) ────────────
+
+@patch("app.routers.table_ss.tv._correct_site", return_value="Winamax")
+@patch("app.routers.table_ss._persist_corrected_site_table_ss")
+@patch("app.routers.table_ss._bump_attempt_table_ss")
+@patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
+@patch("app.routers.table_ss._find_candidate_hands",
+       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
+                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
+                      "played_at": CAP}])
+@patch("app.routers.table_ss.query")
+def test_relink_self_heals_misclassified_site(mq, _find, mlink, mbump, mpersist, _mcorrect):
+    # Row gravada com site errada (GGPoker); _correct_site → Winamax: persiste a
+    # correcção E procura candidatos no site corrigido (onde a mão WN aparece).
+    mq.return_value = [_orphan_row(site="GGPoker")]
+    res = table_ss.relink_orphan_table_ss()
+    mpersist.assert_called_once_with(1, "Winamax")
+    assert _find.call_args[0][1] == "Winamax"     # match no site corrigido, não no gravado
+    assert res["linked"] == 1
+
+
+@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
+@patch("app.routers.table_ss._persist_corrected_site_table_ss")
+@patch("app.routers.table_ss._bump_attempt_table_ss")
+@patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
+@patch("app.routers.table_ss._find_candidate_hands",
+       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
+                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
+                      "played_at": CAP}])
+@patch("app.routers.table_ss.query")
+def test_relink_no_persist_when_site_already_correct(mq, _find, mlink, mbump, mpersist, _mcorrect):
+    # _correct_site identidade (site já correcta) → não persiste (idempotente).
+    mq.return_value = [_orphan_row(site="Winamax")]
+    table_ss.relink_orphan_table_ss()
+    mpersist.assert_not_called()
+
+
+@patch("app.routers.table_ss.get_conn")
+def test_persist_corrected_site_guarded_update(mock_get_conn):
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_get_conn.return_value = mock_conn
+    table_ss._persist_corrected_site_table_ss(1, "Winamax")
+    sql = " ".join(mock_cur.execute.call_args[0][0].split())
+    assert "UPDATE table_ss_processing_log SET site = %s" in sql
+    assert "result = 'no_match_to_hand'" in sql            # guard idempotência/escopo
+    assert mock_cur.execute.call_args[0][1] == ("Winamax", 1)
+    mock_conn.commit.assert_called_once()
