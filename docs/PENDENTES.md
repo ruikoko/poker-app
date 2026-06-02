@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 28 Maio 2026 (fim da pt42d — `#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2 ✅ HIGH resolvido; payouts.json HRC-native + hints em meta.json; .exe recompilado SHA cdfc7247...3262; novo `#SMOKE-HARNESS-WAIT-FOR-FINISH-MOCK-MISSING` LOW; smoke real Beelink pendente para validação final).
+**Última actualização:** 2 Junho 2026 (reconciliação de backlog pós-pt48 — removidos os itens stale 3/5/6/8/16, já fechados: `#B12` (pt47), `#RESOLVER-TIER0-STRICT-EQUALITY` (pt39), `#RESOLVER-TIER12-WINDOW-NO-START` (pt41), `#IMPORT-MODAL-MISROUTES-TS-RESULTS` (pt43, `ced7531`), `#B9` Bucket 1 (galeria manual). Marcados ✅ no `TECH_DEBTS_INVENTARIO.md`).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -88,31 +88,10 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    do HRC. Suporta PKO 25% e Mystery KO correctamente. Ver
    `TECH_DEBTS_INVENTARIO.md` e `WORKFLOW_OPERACIONAL.md` §4.2.
 
-3. **Discord — 2ª entry para Tournament Markers duplicados.** Bug aberto há
-   sessões: quando um TM aparece em 2 canais, o 2º canal não é adicionado a
-   `discord_tags`, e a regra C de villain não dispara. Alta prioridade
-   pré-sessão.
-
 4. **Uniformização de tags Discord ↔ HM3.** Urgente — fragmentação visual
    no Estudo (o mesmo conceito aparece com nomes diferentes consoante a
    fonte). 3 opções já levantadas: renomear canais, dict de aliases
    hardcoded, ou UI admin central de tags. Decisão de produto pendente.
-
-5. **`#RESOLVER-TIER0-STRICT-EQUALITY` — ✅ FIXED pt39 (`35286c1`).** TIER 0 passa
-   a `buy_in` (igualdade exacta `buy_in_total`+currency) + **janela `start_time`
-   ancorada no `posted_at`** (instância em curso); `prize_pool`/`total_players`
-   mantidos NULL-permissivos para o backoffice (`tournament_results.py`, 5º
-   consumidor). Detalhe em `TECH_DEBTS_INVENTARIO.md` secção pt39.
-   *(Pendente só: re-disparar os lobbys `tm_not_found` para validar em prod — ver foco.)*
-
-6. **`#RESOLVER-TIER12-WINDOW-NO-START` (🔴 HIGH, aberto pt37).** Janela dos
-   TIER 1/2 inutilizável quando a Vision não lê `start_time` (consistente): o
-   fallback `[posted_at−12h, posted_at−30min]` exclui o candidato (o torneio
-   começa depois do post). Fix: alargar fallback para `+12h`, ou Vision extrair
-   `start_time`. **Relacionado: `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`**
-   (ex-`#START-TIME-TIMEZONE-INCONSISTENCY`); a dependência "TZ primeiro"
-   dissolveu-se em pt39 (não é TZ — `meta.start_time` é a 1ª mão, não o arranque).
-   Ver `TECH_DEBTS_INVENTARIO.md` (pt37 + pt39).
 
 7. **`#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START` (🔴 HIGH, aberto pt37
    como `#START-TIME-TIMEZONE-INCONSISTENCY`, re-rotulado pt39).** **NÃO é bug de
@@ -123,12 +102,6 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    relógio. **Já não bloqueia os outros** (não há TZ a corrigir); mas continua a
    contaminar qualquer janela ancorada em `meta.start_time`. Ver
    `TECH_DEBTS_INVENTARIO.md` (secção pt39).
-
-8. **`#IMPORT-MODAL-MISROUTES-TS-RESULTS` (🟠 HIGH UX, aberto pt37).** O
-   `ImportModal` manda qualquer `.zip` para `/api/import`; um TS cai no ramo P&L
-   (degrada), Results dá 400/screenshot, e a UI mostra "Importado" escondendo o
-   resultado real. Fix: detectar o tipo pelo conteúdo e encaminhar, ou avisar
-   quando não é HH. Ver `TECH_DEBTS_INVENTARIO.md` (pt37).
 
 9. **`#HRC-MTT-STACKS-PAGE-SKIPPED-ON-NULL-PLAYERS-LEFT` (🔴 HIGH, aberto pt38; pipeline construído pt38).**
    **Endereçado** pelo **pipeline SS de mesa** construído em pt38 (Fases A+B +
@@ -142,8 +115,9 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
      Rui configurar o Intuitive Tables.
    - **Fiabilidade do linking depende do resolver**
      (`#TABLE-SS-PIPELINE-DEPENDENCIES`, `#TABLE-SS-RESOLVER-COLLISION`):
-     multi-tabling não é 100% fiável até os 3 HIGH do resolver (itens 5–7)
-     fecharem. Ver `docs/JOURNAL_2026-05-24-pt38.md` e `TECH_DEBTS_INVENTARIO.md` (pt38).
+     multi-tabling não é 100% fiável enquanto o resolver não estabilizar (TIER0
+     ✅ pt39, TIER12 ✅ pt41; resta `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`,
+     item 7). Ver `docs/JOURNAL_2026-05-24-pt38.md` e `TECH_DEBTS_INVENTARIO.md` (pt38).
 
 ---
 
@@ -209,8 +183,6 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 
 15. **Vision parser improvements** — tolerância ao prefixo TM, heurística do
    BB stack, prompt GTO mais forte.
-16. **Gyazo pipeline** — tabela `hand_attachments` (anexos de imagem
-   Discord ↔ mão; ver CLAUDE.md "Imagens de contexto Discord").
 17. **Filtros derivados no Estudo.**
 18. **Dashboard — colunas adicionais.**
 19. **Winamax replayer — URL da Vision.**
