@@ -951,7 +951,24 @@ entries sem TM (`COALESCE`, provado por simulação). Achado: proveniência de
 `hands.tournament_name` por sala — GG nome real da HH · WN nome entre aspas · WPN string
 de garantia (sem nome real) · PS NULL de propósito. Detalhe em `docs/JOURNAL_2026-06-02-pt48.md`.
 
-Última sessão fechada: **pt48** (2 Junho 2026 — reenquadramento docs `ebd8e5e`, editor de tags via portal `32d6746`, IRE-WN por preço `87f3c67`, testes stale `dec944f`; suite **818 PASSED**). Antecedida pela pt47 (mesmo dia): reset BD + reimport + `eb839e0`/`10d7229`/`42dc4e8`/`56025af`. Journals: `docs/JOURNAL_2026-06-02-pt47.md` e `docs/JOURNAL_2026-06-02-pt48.md`.
+## pt49 — table-SS site-misclass + descoberta e fix do bug de fuso GG/PS (2–3 Junho 2026)
+
+Sessão longa (seguiu de pt47/pt48 no mesmo dia). 5 commits em main; suite
+**818 → 840 PASSED**. Journal completo: `docs/JOURNAL_2026-06-02-pt49.md`.
+
+| Hash | O quê |
+|---|---|
+| `feefacd` | docs — reconciliação de backlog contra o repo real: fechados (já-feitos) `#B12` (pt47), `#RESOLVER-TIER0-STRICT-EQUALITY` (pt39), `#RESOLVER-TIER12-WINDOW-NO-START` (pt41), `#IMPORT-MODAL-MISROUTES-TS-RESULTS` (pt43), `#B9` (Bucket 1). Abertos genuínos: itens 2/20/23 + `#META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START`. |
+| `ef82a0d` | **#TABLE-SS-VISION-SITE-MISCLASS** ✅ — `_correct_site(name, read_site)` pós-parse no upload (`table_ss_vision.py` + `routers/table_ss.py`): Regra A (`#NNN` trailing → Winamax, 0 falsos positivos) + Regra B (cross-check BD, exactamente-1). +8 testes. |
+| `41d83d3` | #TABLE-SS-VISION-SITE-MISCLASS — **relink self-healing**: `relink_orphan_table_ss` re-aplica `_correct_site` às rows `no_match_to_hand` e persiste a site corrigida (`_persist_corrected_site_table_ss`, guard). +3 testes. |
+| `eb6b447` | **#GG-PLAYED-AT-LOCAL-NOT-UTC** aberto + validação read-only do fuso. |
+| `e902d52` | **#GG-PLAYED-AT-LOCAL-NOT-UTC** ✅ — `played_at` GG **e PokerStars** normalizado para UTC **DST-aware** (helper `lisbon_local_to_utc` em `app/utils/timezones.py`); UI mostra Lisboa (`frontend/src/utils/datetime.js`). Winamax/WPN gravam **UTC nativo** → intocados. +11 testes. **Sem backfill.** |
+
+**★ Descoberta central:** o `played_at` da GG (e da PS) era gravado em **hora local de Lisboa, sem normalizar para UTC** (HH GG sem marcador de fuso; PS com a 1ª timestamp em WET/Lisboa, bracket em ET). No Verão fica +1h → só o **table-SS** (casa por tempo) estava exposto: no-match (torneio curto) ou **match FALSO ~1h antes** (torneio longo, provado por blinds na mão `id=14`). O offset **+1h** foi validado **independente da localização** (o Rui joga sempre de Portugal / hora de Lisboa). O pipeline principal GG (casa por **TM number**) é imune. Verificação à parte: Winamax/WPN gravam **UTC explícito** (sem bug); PokerStars tinha o **bug idêntico**, corrigido na mesma mudança.
+
+**⚠️ Pendente de validação (não bloqueia):** confirmar o **Inverno** (DST-aware vs constante +1h) — cruzar nas mãos **PS** a hora **Lisboa↔ET** (a HH PS traz as duas) no re-import. **Próximo grande passo operacional: RE-IMPORT end-to-end** com os dados já certos (GG+PS em UTC).
+
+Última sessão fechada: **pt49** (2–3 Junho 2026 — `feefacd` reconciliação backlog, `ef82a0d`/`41d83d3` `#TABLE-SS-VISION-SITE-MISCLASS` ✅, `eb6b447`/`e902d52` `#GG-PLAYED-AT-LOCAL-NOT-UTC` ✅ GG+PS→UTC DST-aware; suite **840 PASSED**, sem backfill). Journal: `docs/JOURNAL_2026-06-02-pt49.md`. Antecedida por pt47 e pt48 (mesmo arco): `docs/JOURNAL_2026-06-02-pt47.md`, `…-pt48.md`.
 
 ⚠️ **Pendente herdado (não tocado em pt43):** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
 

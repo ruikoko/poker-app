@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 2 Junho 2026 (reconciliação de backlog pós-pt48 — removidos os itens stale 3/5/6/8/16, já fechados: `#B12` (pt47), `#RESOLVER-TIER0-STRICT-EQUALITY` (pt39), `#RESOLVER-TIER12-WINDOW-NO-START` (pt41), `#IMPORT-MODAL-MISROUTES-TS-RESULTS` (pt43, `ced7531`), `#B9` Bucket 1 (galeria manual). Marcados ✅ no `TECH_DEBTS_INVENTARIO.md`).
+**Última actualização:** 3 Junho 2026 (pt49 — `#TABLE-SS-VISION-SITE-MISCLASS` ✅ e `#GG-PLAYED-AT-LOCAL-NOT-UTC` ✅ GG+PS→UTC; **próximo grande passo: RE-IMPORT end-to-end**). Antes (2 Jun): reconciliação de backlog pós-pt48 — removidos os itens stale 3/5/6/8/16, já fechados: `#B12` (pt47), `#RESOLVER-TIER0-STRICT-EQUALITY` (pt39), `#RESOLVER-TIER12-WINDOW-NO-START` (pt41), `#IMPORT-MODAL-MISROUTES-TS-RESULTS` (pt43, `ced7531`), `#B9` Bucket 1 (galeria manual). Marcados ✅ no `TECH_DEBTS_INVENTARIO.md`.
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,6 +12,21 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
+> **★ pt49 — RE-IMPORT end-to-end é o PRÓXIMO GRANDE PASSO operacional.**
+> A BD vai ser limpa e re-importada de ponta a ponta com os dados já certos:
+> GG+PS `played_at` em **UTC DST-aware** (`#GG-PLAYED-AT-LOCAL-NOT-UTC` ✅);
+> Winamax/WPN gravam **UTC nativo** (intocados). A fechar no recomeço:
+> 1. **Validação de Inverno** (não bloqueia): cruzar nas mãos **PS** de Jan–Mar a
+>    hora **Lisboa→UTC** vs **ET→UTC** (a HH PS traz as duas: `… WET [… ET]`). Se
+>    baterem no Verão **E** no Inverno → PROVADO que a 1ª timestamp é DST-aware
+>    (Lisboa real); reforça por analogia que o GG também é. Até lá, `Europe/Lisbon`
+>    está aplicado (Inverno = 0h).
+> 2. **Reavaliar o table-SS** com dados limpos: parte dos "sem match / ambíguo" da
+>    investigação era o **bug de fuso a esconder a mão certa** (1h fora da janela
+>    ±5min), não import em falta nem multi-tabling. Suspeitos reais que sobram:
+>    **nomes genéricos do WPN**, **multi-tabling** GG, **gaps reais de import**.
+>    `#TABLE-SS-VISION-SITE-MISCLASS` ✅ (pt49); `#TABLE-SS-GG-MULTITABLING-MATCH` MED.
+
 > **Sessão 2026-06-02 — planeado, NÃO aplicado (ver `docs/PLAN_2026-06-02-table-ss-gg-match.md`):**
 > Match SS de mesa ↔ mão GG em multi-tabling. Investigação read-only completa.
 > Achados: GG falha sobretudo por **import em falta** (68/99 SS sem mão na janela) + ~9 que o
@@ -22,6 +37,9 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 > digital stack/blinds; GG sem limpeza; chokepoint que serve upload+relink) + testes; 2) importar
 > as HH GG em falta (depois do fix, p/ o relink ligar); 3) abrir `#TABLE-SS-VISION-SITE-MISCLASS`.
 > Constantes fixadas: `_FINGERPRINT_STACK_TOL=0.20`, blinds exacto, NÃO usar hero_position.
+> **⚠️ Actualização pt49:** `#TABLE-SS-VISION-SITE-MISCLASS` já **FEITO** (`ef82a0d`/`41d83d3`);
+> e o "TZ OK" acima estava **errado** — o GG tinha o bug de fuso `#GG-PLAYED-AT-LOCAL-NOT-UTC`
+> (✅ pt49) a falsear a janela ±5min. Re-medir tudo **pós-reimport** (ver bloco ★ pt49 no topo).
 
 > **Foco pt42e (por ordem):**
 > 1. **Smoke real Beelink pt42d** (CRITICAL pré-commit). Sequência:
