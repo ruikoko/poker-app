@@ -799,6 +799,42 @@ async def process_replayer_links(
     }
 
 
+@router.post("/revision-replayers")
+async def revision_replayers(
+    limit: int = 1000,
+    current_user=Depends(require_auth),
+):
+    """Re-corre a Vision sobre entries replayer_link GG do Discord que JÁ têm
+    `img_b64` mas ainda NÃO têm Vision concluída (`vision_done` != 'true'). Usa o
+    `img_b64` guardado (não re-extrai og:image). Dispara `_backfill_worker` em
+    BACKGROUND e responde de imediato → não bloqueia o pedido HTTP (recuperação
+    sem rebentar o frontend com 'Failed to fetch'). pt52: usar depois de repor a
+    quota OpenAI + reset das entries presas. Acompanhar via GET /sync-state ou logs.
+    """
+    import asyncio
+    from app.routers.screenshot import _backfill_worker
+
+    def _fetch():
+        return query(
+            """SELECT id FROM entries
+                WHERE source='discord' AND entry_type='replayer_link'
+                  AND (raw_json->>'img_b64') IS NOT NULL
+                  AND (raw_json->>'vision_done') IS DISTINCT FROM 'true'
+                ORDER BY id ASC LIMIT %s""",
+            (limit,),
+        )
+    rows = await asyncio.to_thread(_fetch)
+    entry_ids = [r["id"] for r in rows]
+    if entry_ids:
+        asyncio.create_task(_backfill_worker(entry_ids))
+    return {
+        "queued": len(entry_ids),
+        "first": entry_ids[:3],
+        "last": entry_ids[-3:],
+        "note": "Vision corre em background (sequencial). Acompanha por logs / contagem de TM extraído.",
+    }
+
+
 # ─── Backfill GGDiscord para entries com Vision feito mas sem mão ───────────
 
 @router.get("/backfill-ggdiscord/preview")
