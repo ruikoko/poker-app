@@ -88,6 +88,42 @@ def test_resolve_match_single_tn_empty_ss_name_lenient_accepts():
     assert m["reason"] == "single_tn"
 
 
+# ── #FIX-B2 (pt50): name-estrito site-gated (não partir salas de nome genérico) ─
+
+def _candn_site(hid, tn, name, site):
+    return {"id": hid, "hand_id": f"X-{hid}", "tournament_number": tn,
+            "tournament_name": name, "site": site, "played_at": CAP}
+
+
+def test_resolve_match_gg_name_mismatch_still_rejects():
+    """GGPoker (nome fiável): SS com nome que NÃO bate → continua a rejeitar."""
+    cands = [_candn_site(1, "T1", "ZENITH", "GGPoker")]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "ODYSSEY"}, "GGPoker", cands)
+    assert m["matched"] is None
+    assert m["reason"].startswith("single_tn_name_mismatch")
+
+
+def test_resolve_match_wpn_generic_name_does_not_break_match():
+    """WPN grava string de garantia genérica: o nome legível da SS NÃO bate o
+    nome da mão, mas como WPN não tem nome fiável → NÃO rejeitar (cai no tempo).
+    Sem o site-gating isto rejeitaria um match WPN válido."""
+    cands = [_candn_site(2, "T2", "$5,000 GTD Guaranteed", "WPN")]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "Sunday Special"}, "WPN", cands)
+    assert m["matched"]["id"] == 2
+    assert m["reason"] == "single_tn"
+
+
+def test_resolve_match_pokerstars_null_name_does_not_break_match():
+    """PokerStars grava tournament_name NULL → sem nome p/ validar → aceita."""
+    cands = [_candn_site(3, "T3", None, "PokerStars")]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "Bounty Builder"}, "PokerStars", cands)
+    assert m["matched"]["id"] == 3
+    assert m["reason"] == "single_tn"
+
+
 @patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
 @patch("app.routers.table_ss.resolve_tournament_number",
        return_value=("EXPLORER-TN", []))
@@ -406,12 +442,14 @@ def test_relink_empty_hand_ids_short_circuits(mq):
 
 @patch("app.routers.table_ss._find_candidate_hands")
 @patch("app.routers.table_ss.query", return_value=[])
-def test_relink_select_filters_no_match_only(mq, _find):
-    # SELECT só apanha no_match_to_hand com captured_at → success nunca tocado.
+def test_relink_select_filters_orphans_only(mq, _find):
+    # #FIX-B1 (pt50): SELECT apanha orfãos (no_match_to_hand E tm_ambiguous) com
+    # captured_at → success nunca tocado.
     res = table_ss.relink_orphan_table_ss()
     assert res == {"checked": 0, "linked": 0, "still_orphan": 0}
     sql = " ".join(mq.call_args[0][0].split())
-    assert "result = 'no_match_to_hand'" in sql
+    assert "result IN ('no_match_to_hand', 'tm_ambiguous')" in sql
+    assert "'success'" not in sql            # success nunca é re-tentado
     assert "captured_at IS NOT NULL" in sql
     _find.assert_not_called()
 
@@ -443,6 +481,8 @@ def test_link_orphan_success_updates_log_and_hand(mock_get_conn):
     assert ok is True
     sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
     assert any("UPDATE table_ss_processing_log" in s and "result = 'success'" in s for s in sqls)
+    # #FIX-B1 (pt50): o guard de origem aceita no_match_to_hand E tm_ambiguous.
+    assert any("result IN ('no_match_to_hand', 'tm_ambiguous')" in s for s in sqls)
     assert any("UPDATE hands SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
     mock_conn.commit.assert_called_once()
 
@@ -516,6 +556,7 @@ def test_persist_corrected_site_guarded_update(mock_get_conn):
     table_ss._persist_corrected_site_table_ss(1, "Winamax")
     sql = " ".join(mock_cur.execute.call_args[0][0].split())
     assert "UPDATE table_ss_processing_log SET site = %s" in sql
-    assert "result = 'no_match_to_hand'" in sql            # guard idempotência/escopo
+    # #FIX-B1 (pt50): guard cobre os dois estados órfãos (idempotência/escopo).
+    assert "result IN ('no_match_to_hand', 'tm_ambiguous')" in sql
     assert mock_cur.execute.call_args[0][1] == ("Winamax", 1)
     mock_conn.commit.assert_called_once()

@@ -919,7 +919,24 @@ async def import_hm3(
                     )
 
                     cur.execute(
-                        "UPDATE hands SET tags = %s, hm3_tags = %s, all_players_actions = %s, has_showdown = %s, position_parse_failed = %s, tournament_name = %s, tournament_number = %s, buy_in = %s WHERE id = %s",
+                        # #FIX-A (pt50): guard de preservação de enrich no caminho
+                        # UPDATE de mão já existente (PATH A). Espelha o CASE do
+                        # PATH B (INSERT...ON CONFLICT): uma mão GG já decifrada por
+                        # Vision (match_method presente) NÃO é sobrescrita pelo
+                        # re-parse HM3 (o replayer lê os nicks só do
+                        # all_players_actions). GG sem match (ainda hashes) e todas
+                        # as non-GG (nicks reais no raw) → overwrite OK. Sem isto, o
+                        # import HM3 a chegar DEPOIS do enrich apagava-o (dependência
+                        # de ordem latente).
+                        "UPDATE hands SET tags = %s, hm3_tags = %s, "
+                        "all_players_actions = CASE "
+                        "  WHEN site = 'GGPoker' "
+                        "       AND (player_names ->> 'match_method') IS NOT NULL "
+                        "    THEN all_players_actions "
+                        "  ELSE %s END, "
+                        "has_showdown = %s, position_parse_failed = %s, "
+                        "tournament_name = %s, tournament_number = %s, buy_in = %s "
+                        "WHERE id = %s",
                         (
                             merged_tags,
                             merged_hm3,

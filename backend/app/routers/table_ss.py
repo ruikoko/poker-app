@@ -244,6 +244,15 @@ def _find_candidate_hands(captured_at: datetime, site: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# #FIX-B2 (pt50): salas cuja HH traz o NOME REAL do torneio (validável por nome
+# token-a-token). GG e Winamax gravam o nome real; a Winamax pode trazer o nº de
+# mesa #NNN (aparado por clean_tournament_name). WPN grava string de garantia
+# genérica e PokerStars grava NULL → SEM nome usável para comparar; nessas salas
+# o name-estrito ficaria sempre em mismatch e partia matches válidos, por isso
+# caem na proximidade temporal.
+_NAME_RELIABLE_SITES = {"GGPoker", "Winamax"}
+
+
 def _resolve_match(
     captured_at: datetime, vj: dict, site: str, candidates: list[dict]
 ) -> dict:
@@ -267,10 +276,17 @@ def _resolve_match(
         # ODYSSEY→ZENITH). Se a SS tem nome lido e NÃO bate com o do único
         # torneio na janela → o torneio da SS não tem mão aqui → no match.
         ss_name = vj.get("tournament_name")
-        if ss_name and not name_tokens_subset(ss_name, c.get("tournament_name")):
+        hand_name = c.get("tournament_name")
+        # #FIX-B2 (pt50): name-estrito SÓ quando há nome fiável dos dois lados e a
+        # sala grava nome real (GG/Winamax). Evita ligar ao torneio errado
+        # (ODYSSEY→ZENITH). WPN (garantia genérica) e PS (NULL) não dão para
+        # validar por nome → não rejeitar, cair na proximidade temporal.
+        if (ss_name and hand_name and site in _NAME_RELIABLE_SITES
+                and not name_tokens_subset(ss_name, hand_name)):
             return {"matched": None, "tn": None, "ambiguous": False,
-                    "reason": f"single_tn_name_mismatch:{ss_name}!={c.get('tournament_name')}"}
-        # SS sem nome lido → leniente (proximidade temporal é o único sinal).
+                    "reason": f"single_tn_name_mismatch:{ss_name}!={hand_name}"}
+        # SS sem nome lido, ou sala de nome genérico (WPN/PS) → leniente
+        # (proximidade temporal é o único sinal).
         return {"matched": c, "tn": c["tournament_number"], "ambiguous": False,
                 "reason": "single_tn"}
     # Multi-tabling: desambiguar pelo nome lido nesta SS.
@@ -291,13 +307,14 @@ def _resolve_match(
 # ── Re-link pós-import (peça em falta da Fase A) ─────────────────────────────
 
 def _bump_attempt_table_ss(log_id: int) -> None:
-    """Incrementa attempt_count sem mudar o result (continua no_match_to_hand)."""
+    """Incrementa attempt_count sem mudar o result (continua orfão:
+    no_match_to_hand ou tm_ambiguous — #FIX-B1 pt50)."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE table_ss_processing_log SET attempt_count = attempt_count + 1 "
-                "WHERE id = %s AND result = 'no_match_to_hand'",
+                "WHERE id = %s AND result IN ('no_match_to_hand', 'tm_ambiguous')",
                 (log_id,),
             )
         conn.commit()
@@ -316,14 +333,14 @@ def _bump_attempt_table_ss(log_id: int) -> None:
 
 def _persist_corrected_site_table_ss(log_id: int, new_site: str) -> None:
     """#TABLE-SS-VISION-SITE-MISCLASS self-healing: grava a site corrigida numa
-    row órfã. Guard `result='no_match_to_hand'` = idempotência + escopo (nunca
-    toca rows já `success`)."""
+    row órfã. Guard `result IN ('no_match_to_hand','tm_ambiguous')` = idempotência
+    + escopo (nunca toca rows já `success`; #FIX-B1 pt50 cobre ambíguos)."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE table_ss_processing_log SET site = %s "
-                "WHERE id = %s AND result = 'no_match_to_hand'",
+                "WHERE id = %s AND result IN ('no_match_to_hand', 'tm_ambiguous')",
                 (new_site, log_id),
             )
         conn.commit()
@@ -342,8 +359,10 @@ def _persist_corrected_site_table_ss(log_id: int, new_site: str) -> None:
 
 def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
     """Liga uma SS órfã à mão agora encontrada, em 1 transacção. O guard
-    `WHERE result='no_match_to_hand'` garante idempotência (no-op se já success
-    ou corrida concorrente). Devolve True sse ligou."""
+    `WHERE result IN ('no_match_to_hand','tm_ambiguous')` garante idempotência
+    (no-op se já success ou corrida concorrente) e, desde #FIX-B1 (pt50), permite
+    resgatar rows que ficaram ambíguas no upload (ex.: o TS desambiguador chegou
+    depois). Devolve True sse ligou."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -355,7 +374,7 @@ def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
                        tournament_number = COALESCE(tournament_number, %s),
                        attempt_count = attempt_count + 1,
                        reason_detail = 'relinked_post_import'
-                 WHERE id = %s AND result = 'no_match_to_hand'
+                 WHERE id = %s AND result IN ('no_match_to_hand', 'tm_ambiguous')
                 """,
                 (matched_hand["hand_id"], matched_hand.get("tournament_number"), log_id),
             )
@@ -385,16 +404,19 @@ def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
 
 
 def relink_orphan_table_ss(hand_ids=None) -> dict:
-    """Re-tenta linkar SSs de mesa presas em `no_match_to_hand` a mãos agora
-    presentes (tipicamente recém-importadas). Disparado fire-and-forget no fim
-    de import_hm3 / import GG zip.
+    """Re-tenta linkar SSs de mesa órfãs (`no_match_to_hand` ou `tm_ambiguous`)
+    a mãos agora presentes (tipicamente recém-importadas). Disparado
+    fire-and-forget no fim de import_hm3 / import GG zip.
 
     `hand_ids` é o sinal do trigger (que mãos chegaram); o match re-corre pela
     janela temporal (`_find_candidate_hands`), por isso serve só para
     curto-circuitar quando nada foi importado e para logging.
 
-    Idempotente: só selecciona rows `no_match_to_hand` com captured_at; rows já
-    `success` nunca são tocadas. Devolve {checked, linked, still_orphan}.
+    Idempotente: só selecciona rows órfãs com captured_at; rows já `success`
+    nunca são tocadas. #FIX-B1 (pt50): inclui `tm_ambiguous` para que uma SS que
+    ficou ambígua no upload (resolver sem TS/meta na altura) seja re-avaliada
+    quando o desambiguador chega — convergência independente da ordem. Devolve
+    {checked, linked, still_orphan}.
     """
     if hand_ids is not None and len(hand_ids) == 0:
         return {"checked": 0, "linked": 0, "still_orphan": 0}
@@ -402,7 +424,8 @@ def relink_orphan_table_ss(hand_ids=None) -> dict:
     rows = query(
         """SELECT id, captured_at, site, vision_json
              FROM table_ss_processing_log
-            WHERE result = 'no_match_to_hand' AND captured_at IS NOT NULL"""
+            WHERE result IN ('no_match_to_hand', 'tm_ambiguous')
+              AND captured_at IS NOT NULL"""
     )
     checked = linked = still = 0
     for r in rows:
