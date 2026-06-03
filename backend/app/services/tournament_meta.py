@@ -29,7 +29,7 @@ def ensure_tournaments_meta_schema():
       currency           TEXT,
       tournament_format  TEXT,
       starting_stack     NUMERIC,
-      start_time         TIMESTAMPTZ,
+      start_time         TIMESTAMP,   -- pt51: Lisboa naive (= MIN(played_at))
       hand_count         INTEGER,
       updated_at         TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (site, tournament_number)

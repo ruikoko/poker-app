@@ -1,21 +1,37 @@
-"""Conversão de hora-local-de-Lisboa → UTC (#GG-PLAYED-AT-LOCAL-NOT-UTC).
+"""Convenção de fuso da app: o ponto de encontro de TODAS as horas-de-evento é
+hora de LISBOA (Europe/Lisbon), gravada como datetime **NAIVE** (coluna
+`timestamp WITHOUT TIME ZONE`) = wall-clock de Lisboa. Nenhuma conversão na
+leitura / matching / display — o que se grava é o que se lê.
 
-A GGPoker e a PokerStars gravam a hora da HH em hora LOCAL (Lisboa/WET-WEST),
-sem normalizar para UTC — GG sem marcador de fuso; PS com a 1ª timestamp em WET
-(seguida do bracket ET). O Rui joga sempre de Portugal. Normalizamos para UTC de
-forma DST-aware pela data da própria mão — NUNCA offset fixo, NUNCA a data de
-"agora". Winamax e WPN trazem a hora já em UTC explícito (não passam por aqui).
-Storage = UTC; a UI reconverte UTC→Lisboa para mostrar.
+Decisão (pt51, Rui): a referência passou de UTC para Lisboa. Vantagem dura: as
+mãos locais (GG/PokerStars) gravam-se VERBATIM, sem qualquer aritmética de fuso
+→ a ambiguidade da hora de Inverno (fall-back) deixa de existir por não haver
+conversão. A única conversão DST que sobra é UTC→Lisboa (Winamax/WPN/Discord),
+que é sempre bem definida (UTC→local nunca é ambíguo).
+
+Por fonte:
+  - GG / PokerStars : a HH já vem em Lisboa → `lisbon_naive_verbatim` (identidade).
+  - Winamax / WPN   : a HH vem em UTC      → `utc_to_lisbon_naive`.
+  - Discord posted_at: vem em UTC          → `utc_to_lisbon_naive`.
+  - table-SS captured_at: filename já é Lisboa → naive verbatim (no vision helper).
 """
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-_LISBON_TZ = ZoneInfo("Europe/Lisbon")
-_UTC_TZ = ZoneInfo("UTC")
+_LISBON = ZoneInfo("Europe/Lisbon")
+_UTC = ZoneInfo("UTC")
 
 
-def lisbon_local_to_utc(naive_local: datetime) -> datetime:
-    """Interpreta um datetime naive (hora local de Lisboa lida da HH) e devolve o
-    instante equivalente em UTC (tz-aware), DST-aware pela data da própria mão.
-    Uma mão de Verão (WEST) recua 1h; uma de Inverno (WET) fica igual."""
-    return naive_local.replace(tzinfo=_LISBON_TZ).astimezone(_UTC_TZ)
+def lisbon_naive_verbatim(dt: datetime) -> datetime:
+    """GG/PS/table-SS: o valor já está em hora de Lisboa → devolve-o NAIVE tal e
+    qual (descarta tzinfo se existir; NUNCA faz aritmética de fuso). É o que
+    elimina a ambiguidade de Inverno nas mãos locais."""
+    return dt.replace(tzinfo=None)
+
+
+def utc_to_lisbon_naive(dt_utc: datetime) -> datetime:
+    """Winamax/WPN/Discord: instante em UTC (aware, ou naive assumido UTC) →
+    wall-clock NAIVE de Lisboa, DST-aware. UTC→local é sempre não-ambíguo."""
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=_UTC)
+    return dt_utc.astimezone(_LISBON).replace(tzinfo=None)

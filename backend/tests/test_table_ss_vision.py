@@ -14,23 +14,25 @@ from app.services.table_ss_vision import (
 )
 
 
-# ── derive_captured_at (TZ Europe/Lisbon) ───────────────────────────────────
+# ── derive_captured_at (pt51: Lisboa naive, verbatim do filename) ───────────
 
-def test_derive_captured_at_winamax_west_dst():
-    """23 Mai 2026 → WEST (UTC+1). 17:04:00 local = 16:04:00 UTC."""
+def test_derive_captured_at_winamax_verbatim():
+    """O filename já é hora de Lisboa → naive verbatim, sem conversão."""
     dt = derive_captured_at("Shot1-Winamax-20260523170400.png")
-    assert dt == datetime(2026, 5, 23, 16, 4, 0, tzinfo=timezone.utc)
+    assert dt == datetime(2026, 5, 23, 17, 4, 0)
+    assert dt.tzinfo is None
 
 
-def test_derive_captured_at_gg():
+def test_derive_captured_at_gg_verbatim():
     dt = derive_captured_at("Shot2-GGPoker-20260523172943.png")
-    assert dt == datetime(2026, 5, 23, 16, 29, 43, tzinfo=timezone.utc)
+    assert dt == datetime(2026, 5, 23, 17, 29, 43)
+    assert dt.tzinfo is None
 
 
-def test_derive_captured_at_winter_no_dst():
-    """15 Jan 2026 → WET (UTC+0). 12:00:00 local = 12:00:00 UTC."""
+def test_derive_captured_at_winter_verbatim():
     dt = derive_captured_at("Shot-20260115120000.png")
-    assert dt == datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    assert dt == datetime(2026, 1, 15, 12, 0, 0)
+    assert dt.tzinfo is None
 
 
 def test_derive_captured_at_no_digits():

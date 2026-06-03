@@ -272,13 +272,13 @@ def parse_and_validate_table_ss_json(raw: Optional[str]) -> Optional[dict]:
 def derive_captured_at(
     filename: Optional[str], tz_name: str = "Europe/Lisbon"
 ) -> Optional[datetime]:
-    """`YYYYMMDDHHMMSS` no nome do ficheiro -> datetime tz-aware em UTC.
+    """`YYYYMMDDHHMMSS` no nome do ficheiro -> datetime NAIVE em hora de LISBOA.
 
-    O timestamp do filename é hora LOCAL da máquina de captura (default
-    Europe/Lisbon, com DST WET/WEST). Converte-se para UTC para comparar com
-    `hands.played_at` — que é gravado como datetime naïve do header da HH e
-    interpretado como UTC pela sessão Postgres (TimeZone=Etc/UTC), não porque a
-    sala escreva UTC no header. Ver #META-START-TIME-IS-FIRST-HAND-NOT-SCHEDULED-START.
+    Convenção pt51: o timestamp do filename é a hora local da máquina de captura
+    (Lisboa) → guarda-se VERBATIM (naive), na MESMA referência que
+    `hands.played_at` (também Lisboa naive). Sem conversão = match temporal
+    directo, sem offset. (`tz_name` mantido por compatibilidade de assinatura;
+    não é usado — a convenção é sempre Lisboa.)
 
     Devolve None se não houver grupo de 14 dígitos ou data inválida.
     """
@@ -288,16 +288,6 @@ def derive_captured_at(
     if not m:
         return None
     try:
-        naive = datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
+        return datetime.strptime(m.group(1), "%Y%m%d%H%M%S")  # naive = Lisboa
     except ValueError:
         return None
-    try:
-        from zoneinfo import ZoneInfo
-        local = naive.replace(tzinfo=ZoneInfo(tz_name))
-    except Exception:
-        logger.warning(
-            "zoneinfo %r indisponível (tzdata em falta?); a tratar captured_at "
-            "como UTC — match temporal pode falhar por offset", tz_name,
-        )
-        local = naive.replace(tzinfo=timezone.utc)
-    return local.astimezone(timezone.utc)

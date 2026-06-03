@@ -86,7 +86,7 @@ def ensure_entries_schema():
             discord_message_id TEXT,
             discord_message_url TEXT,
             discord_author TEXT,
-            discord_posted_at TIMESTAMPTZ,
+            discord_posted_at TIMESTAMP,   -- pt51: Lisboa naive (convertido de UTC)
 
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )

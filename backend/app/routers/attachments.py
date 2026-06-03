@@ -198,14 +198,14 @@ def _find_primary_match(img_entry: dict) -> dict | None:
             h.played_at,
             e2.id AS sibling_entry_id,
             e2.discord_posted_at AS sibling_posted_at,
-            ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamptz)))::int AS delta_s
+            ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamp)))::int AS delta_s
         FROM entries e2
         JOIN hands h ON h.entry_id = e2.id
         WHERE e2.id <> %s
           AND e2.source = 'discord'
           AND e2.discord_channel = %s
           AND e2.discord_posted_at IS NOT NULL
-          AND ABS(EXTRACT(EPOCH FROM (e2.discord_posted_at - %s::timestamptz))) <= 90
+          AND ABS(EXTRACT(EPOCH FROM (e2.discord_posted_at - %s::timestamp))) <= 90
           AND h.played_at >= '2026-01-01'
         ORDER BY delta_s ASC, h.played_at ASC, h.id ASC
         LIMIT 1
@@ -234,12 +234,12 @@ def _find_fallback_match(img_entry: dict) -> dict | None:
             h.id AS hand_db_id,
             h.hand_id AS hand_id_text,
             h.played_at,
-            ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamptz)))::int AS delta_s
+            ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamp)))::int AS delta_s
         FROM hands h
         WHERE h.origin IN ('hm3', 'hh_import')
           AND h.played_at IS NOT NULL
           AND h.played_at >= '2026-01-01'
-          AND ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamptz))) <= 90
+          AND ABS(EXTRACT(EPOCH FROM (h.played_at - %s::timestamp))) <= 90
         ORDER BY delta_s ASC, h.played_at ASC, h.id ASC
         LIMIT 1
         """,
@@ -353,7 +353,7 @@ def _apply_match(candidate: dict) -> dict:
                 VALUES (
                     %s, %s,
                     %s, NULL, %s, %s,
-                    %s::timestamptz, %s,
+                    %s::timestamp, %s,
                     %s, %s
                 )
                 ON CONFLICT (hand_db_id, entry_id) WHERE entry_id IS NOT NULL DO NOTHING

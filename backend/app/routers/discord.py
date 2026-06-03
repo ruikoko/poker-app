@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import require_auth
 from app.db import query
+from app.utils.timezones import utc_to_lisbon_naive
 
 logger = logging.getLogger("discord_router")
 router = APIRouter(prefix="/api/discord", tags=["discord"])
@@ -963,7 +964,8 @@ def backfill_ggdiscord(
                 if m:
                     try:
                         ts_ms = int(m.group(1))
-                        played_at_extracted = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                        # pt51: unix-ms é UTC → grava em Lisboa naive.
+                        played_at_extracted = utc_to_lisbon_naive(_dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc))
                     except (ValueError, OSError):
                         pass
 
@@ -1064,7 +1066,8 @@ def fix_ggdiscord_played_at(
                     continue
                 try:
                     ts_ms = int(m.group(1))
-                    new_played_at = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                    # pt51: unix-ms é UTC → grava em Lisboa naive.
+                    new_played_at = utc_to_lisbon_naive(_dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc))
                 except (ValueError, OSError) as e:
                     skipped.append({"hand_id": r["hand_id"], "reason": f"timestamp inválido: {e}"})
                     continue

@@ -85,7 +85,7 @@ def ensure_table_ss_processing_log_schema():
         original_filename  TEXT,
         file_size          INTEGER,
         uploaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        captured_at        TIMESTAMPTZ,
+        captured_at        TIMESTAMP,   -- pt51: Lisboa naive (filename é local)
         attempt_count      INTEGER NOT NULL DEFAULT 1,
         result             TEXT NOT NULL,
         reason_detail      TEXT,

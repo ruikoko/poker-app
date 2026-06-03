@@ -15,7 +15,7 @@ from collections import defaultdict
 from app.utils.tournament_format import detect_tournament_format
 # #GG-PLAYED-AT-LOCAL-NOT-UTC: a HH GG grava a hora em local de Lisboa sem fuso;
 # normalizamos para UTC (DST-aware) via helper partilhado (GG + PS).
-from app.utils.timezones import lisbon_local_to_utc
+from app.utils.timezones import lisbon_naive_verbatim
 
 
 # ── Position Logic ───────────────────────────────────────────────────────────
@@ -372,12 +372,13 @@ def _parse_single_hand(block: str) -> dict | None:
     date_m = re.search(r"(\d{4})[/-](\d{2})[/-](\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})", block)
     if date_m:
         try:
-            # Hora da HH = local de Lisboa → converter para UTC (DST-aware).
+            # Convenção pt51: a HH GG já está em hora de Lisboa → grava VERBATIM
+            # (naive), sem conversão. Sem aritmética de fuso = sem ambiguidade.
             naive_local = datetime(
                 int(date_m.group(1)), int(date_m.group(2)), int(date_m.group(3)),
                 int(date_m.group(4)), int(date_m.group(5)), int(date_m.group(6)),
             )
-            result["played_at"] = lisbon_local_to_utc(naive_local).isoformat()
+            result["played_at"] = lisbon_naive_verbatim(naive_local).isoformat()
         except ValueError:
             pass
 

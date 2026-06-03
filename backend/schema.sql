@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS hands (
     id          SERIAL PRIMARY KEY,
     site        TEXT,
     hand_id     TEXT UNIQUE,
-    played_at   TIMESTAMPTZ,
+    played_at   TIMESTAMP,   -- pt51: hora de LISBOA naive (wall-clock), não UTC
     stakes      TEXT,
     position    TEXT,
     hero_cards  TEXT[],
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS entries (
     discord_message_id TEXT,
     discord_message_url TEXT,
     discord_author TEXT,
-    discord_posted_at TIMESTAMPTZ,
+    discord_posted_at TIMESTAMP,   -- pt51: Lisboa naive (convertido de UTC)
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 
 from app.ingest_filters import is_pre_2026
+from app.utils.timezones import utc_to_lisbon_naive
 from app.services.lobby_sync import process_lobby_message
 from app.services.image_utils import detect_image_mime as _detect_image_mime  # noqa: F401
 
@@ -218,7 +219,8 @@ def _save_to_db(
         discord_channel=channel_id,
         discord_message_id=message_id,
         discord_author=author,
-        discord_posted_at=message_created_at,
+        # Convenção pt51: o Discord dá created_at em UTC → grava em Lisboa naive.
+        discord_posted_at=utc_to_lisbon_naive(message_created_at),
     )
 
     # entry=None → ON CONFLICT DO NOTHING disparou em entry_service.py

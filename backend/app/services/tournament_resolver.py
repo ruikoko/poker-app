@@ -116,17 +116,18 @@ def name_tokens_subset(short_name: Optional[str], full_name: Optional[str]) -> b
     return all(tok in full for tok in toks)
 
 
-def _parse_iso_utc(start_time_iso: Optional[str]) -> Optional[datetime]:
-    """Parse ISO 8601 (com/sem 'Z' suffix) -> datetime tz-aware UTC ou None."""
+def _parse_iso_naive(start_time_iso: Optional[str]) -> Optional[datetime]:
+    """Parse ISO 8601 -> datetime NAIVE em hora de Lisboa, ou None (convenção
+    pt51). A referência da app é Lisboa naive; qualquer tzinfo no input é
+    descartado (assume-se que já vem em Lisboa, como `tournament_summaries.
+    start_time` e `hands.played_at`)."""
     if not start_time_iso:
         return None
     try:
         st = datetime.fromisoformat(start_time_iso.replace("Z", "+00:00"))
     except ValueError:
         return None
-    if st.tzinfo is None:
-        st = st.replace(tzinfo=timezone.utc)
-    return st
+    return st.replace(tzinfo=None)
 
 
 def _decide_window(
@@ -149,13 +150,15 @@ def _decide_window(
            evita falsos positivos com torneios que mal arrancaram.
       3. nem start_time_iso nem posted_at_hint -> None (sem janela).
     """
-    st = _parse_iso_utc(start_time_iso)
+    st = _parse_iso_naive(start_time_iso)
     if st:
         return (st - timedelta(hours=window_hours),
                 st + timedelta(hours=_RAMO1_FWD_HOURS))
     if posted_at_hint is not None:
-        if posted_at_hint.tzinfo is None:
-            posted_at_hint = posted_at_hint.replace(tzinfo=timezone.utc)
+        # Convenção pt51: tudo em Lisboa naive. Descarta tzinfo se vier (mantém o
+        # wall-clock de Lisboa) p/ comparar naive↔naive com as colunas.
+        if posted_at_hint.tzinfo is not None:
+            posted_at_hint = posted_at_hint.replace(tzinfo=None)
         if anchor_mode == "prestart":
             return (
                 posted_at_hint - timedelta(hours=_PRESTART_BACK_HOURS),
@@ -344,9 +347,11 @@ def resolve_tournament_number(
 
     # TIER 0 — tournament_summaries (autoritativo). pt39: nome + buy_in +
     # janela start_time ancorada no posted_at_hint (instância em curso).
+    # Convenção pt51: anchor em Lisboa naive (compara naive↔naive com
+    # tournament_summaries.start_time). Descarta tzinfo se vier.
     anchor = posted_at_hint
-    if anchor is not None and anchor.tzinfo is None:
-        anchor = anchor.replace(tzinfo=timezone.utc)
+    if anchor is not None and anchor.tzinfo is not None:
+        anchor = anchor.replace(tzinfo=None)
     ts_currency = (
         (buy_in_currency or _currency_for_site(site)) if buy_in is not None else None
     )

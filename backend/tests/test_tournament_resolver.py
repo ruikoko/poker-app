@@ -15,7 +15,7 @@ def _row(tn, name, st):
 
 def test_resolve_unique_match_returns_tn():
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
-                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                 datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Big Game $215",
@@ -37,9 +37,9 @@ def test_resolve_zero_matches_returns_none_and_empty():
 def test_resolve_multiple_matches_returns_none_and_list():
     rows = [
         _row("281416137", "Bounty Hunters Big Game $215",
-             datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc)),
+             datetime(2026, 5, 5, 18, 30)),
         _row("281200092", "Bounty Hunters Big Game $215",
-             datetime(2026, 5, 5, 19, 30, tzinfo=timezone.utc)),
+             datetime(2026, 5, 5, 19, 30)),
     ]
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]):
         tn, candidates = resolve_tournament_number(
@@ -54,7 +54,7 @@ def test_resolve_passes_token_array_to_sql():
     """Caller diz 'BBG $215'; SQL recebe ['%bbg%', '%$215%'] como
     array para ILIKE ALL (substitui o antigo substring_match_passes_through)."""
     rows = [_row("281416137", "Bounty Hunters Big Game $215",
-                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                 datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number("GGPoker", "BBG $215", "2026-05-05T18:30:00Z")
     args = m.call_args[0]
@@ -83,13 +83,14 @@ def test_resolve_invalid_iso_falls_back_gracefully():
 
 def test_resolve_handles_z_suffix_in_iso():
     rows = [_row("281416137", "x",
-                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                 datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number("GGPoker", "x", "2026-05-05T18:30:00Z")
     args = m.call_args[0]
     assert len(args[1]) == 4
-    assert args[1][2].tzinfo is not None  # lo
-    assert args[1][3].tzinfo is not None  # hi
+    # pt51: convenção Lisboa naive → janela sem tzinfo.
+    assert args[1][2].tzinfo is None  # lo
+    assert args[1][3].tzinfo is None  # hi
 
 
 # ── Token-set match — resolver-level (G2 cobertura) ─────────────────────────
@@ -115,7 +116,7 @@ def test_resolve_subset_match_simulated():
     caminho feliz no resolver."""
     rows = [_row("123456789",
                  "Bounty Hunters Sunday Hyper Special $108",
-                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                 datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]):
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Hyper Special $108",
@@ -187,7 +188,7 @@ def test_tokenize_empty_and_none_and_whitespace():
 def test_resolve_uses_posted_at_window_when_no_start_time():
     """start_time_iso=None + posted_at_hint -> janela [posted-12h, posted-30min]."""
     rows = [_row("X", "x", None)]
-    posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 9, 14, 0)
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number(
             "GGPoker", "x", None, posted_at_hint=posted,
@@ -195,14 +196,14 @@ def test_resolve_uses_posted_at_window_when_no_start_time():
     args = m.call_args[0]
     assert len(args[1]) == 4  # site, patterns, lo, hi
     lo, hi = args[1][2], args[1][3]
-    assert lo == datetime(2026, 5, 9, 2, 0, tzinfo=timezone.utc)   # posted - 12h
-    assert hi == datetime(2026, 5, 9, 13, 30, tzinfo=timezone.utc)  # posted - 30min
+    assert lo == datetime(2026, 5, 9, 2, 0)   # posted - 12h
+    assert hi == datetime(2026, 5, 9, 13, 30)  # posted - 30min
 
 
 def test_resolve_start_time_takes_precedence_over_posted_at():
     """Ambos passados -> janela final e a do start_time, nao a do posted_at."""
     rows = [_row("X", "x", None)]
-    posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 9, 14, 0)
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         resolve_tournament_number(
             "GGPoker", "x", "2026-05-09T18:30:00Z", posted_at_hint=posted,
@@ -210,8 +211,8 @@ def test_resolve_start_time_takes_precedence_over_posted_at():
     args = m.call_args[0]
     lo, hi = args[1][2], args[1][3]
     # pt41 ramo-1: back=window_hours(2h), forward=4h -> [16:30, 22:30] em torno de 18:30.
-    assert lo == datetime(2026, 5, 9, 16, 30, tzinfo=timezone.utc)
-    assert hi == datetime(2026, 5, 9, 22, 30, tzinfo=timezone.utc)
+    assert lo == datetime(2026, 5, 9, 16, 30)
+    assert hi == datetime(2026, 5, 9, 22, 30)
 
 
 def test_resolve_no_hints_falls_back_to_limit_5():
@@ -230,7 +231,7 @@ def test_resolve_falls_back_to_hands_when_meta_empty():
     """Winamax: meta retorna []; 2a query (hands) devolve row; resolver retorna tn."""
     meta_rows: list[dict] = []
     hands_rows = [_row("987654321", "Winamax Daily $50",
-                       datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc))]
+                       datetime(2026, 5, 9, 12, 0))]
     with patch("app.services.tournament_resolver.query",
                side_effect=[[], meta_rows, hands_rows]) as m:
         tn, candidates = resolve_tournament_number(
@@ -245,7 +246,7 @@ def test_resolve_prefers_meta_when_meta_has_match():
     """Meta retorna 1 row -> hands query NAO e chamada (call_count == 2 pos-B2:
     TS empty + meta hit)."""
     meta_rows = [_row("281416137", "BBG $215",
-                      datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                      datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query",
                side_effect=[[], meta_rows]) as m:
         tn, candidates = resolve_tournament_number(
@@ -277,8 +278,8 @@ def test_resolve_winamax_with_posted_at_hint_only():
     com janela [posted-12h, posted-30min] aplicada a hands."""
     meta_rows: list[dict] = []
     hands_rows = [_row("987654321", "Winamax Daily $50",
-                       datetime(2026, 5, 9, 8, 0, tzinfo=timezone.utc))]
-    posted = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+                       datetime(2026, 5, 9, 8, 0))]
+    posted = datetime(2026, 5, 9, 14, 0)
     with patch("app.services.tournament_resolver.query",
                side_effect=[[], meta_rows, hands_rows]) as m:
         tn, candidates = resolve_tournament_number(
@@ -290,8 +291,8 @@ def test_resolve_winamax_with_posted_at_hint_only():
     assert m.call_count == 3
     sql_args_3rd = m.call_args_list[2][0][1]
     lo, hi = sql_args_3rd[2], sql_args_3rd[3]
-    assert lo == datetime(2026, 5, 9, 2, 0, tzinfo=timezone.utc)
-    assert hi == datetime(2026, 5, 9, 13, 30, tzinfo=timezone.utc)
+    assert lo == datetime(2026, 5, 9, 2, 0)
+    assert hi == datetime(2026, 5, 9, 13, 30)
 
 
 # ── B2: tier 0 (tournament_summaries) ───────────────────────────────────────
@@ -299,7 +300,7 @@ def test_resolve_winamax_with_posted_at_hint_only():
 def test_b2_match_via_summaries_unique():
     """1 row em TS -> resolve directo, nao toca em meta nem hands."""
     ts_rows = [_row("281416137", "BBG $215",
-                    datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                    datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query",
                side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
@@ -315,9 +316,9 @@ def test_b2_match_via_summaries_ambiguous():
     (preserva semantica do commit B: ambig curto-circuita tiers seguintes)."""
     ts_rows = [
         _row("281416137", "BBG $215",
-             datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc)),
+             datetime(2026, 5, 5, 18, 30)),
         _row("281200092", "BBG $215",
-             datetime(2026, 5, 5, 19, 30, tzinfo=timezone.utc)),
+             datetime(2026, 5, 5, 19, 30)),
     ]
     with patch("app.services.tournament_resolver.query",
                side_effect=[ts_rows]) as m:
@@ -388,9 +389,9 @@ def test_pt39_tier0_match_name_buyin_anchor_unique():
     """Cenário 1 — os 3 GG vanilla pt37 passam a resolver: nome + buy_in +
     âncora único. Confirma params buy_in (NULL-permissivo) + currency derivada
     do site + LIMIT 1 + janela make_interval."""
-    posted = datetime(2026, 5, 19, 16, 7, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 16, 7)
     ts_rows = [_row("284491487", "Daily Deepstack Special $125",
-                    datetime(2026, 5, 19, 15, 5, tzinfo=timezone.utc))]
+                    datetime(2026, 5, 19, 15, 5))]
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Daily Deepstack Special $125", None,
@@ -415,9 +416,9 @@ def test_pt39_tier0_two_per_day_picks_running_instance():
     during_play). A DB (LIMIT 1, [anchor−24h, anchor], ORDER BY abs = closest)
     devolve a das 16:45 (em curso, a mais próxima ≤ anchor); o mock simula essa
     selecção. Aqui fixamos o contrato SQL + propagação do tn."""
-    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 18, 0)
     running = [_row("284939948", "Daily Hyper $50",
-                    datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+                    datetime(2026, 5, 19, 16, 45))]
     with patch("app.services.tournament_resolver.query", side_effect=[running]) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Daily Hyper $50", None,
@@ -434,9 +435,9 @@ def test_pt39_tier0_two_per_day_picks_running_instance():
 def test_pt39_tier0_anchor_before_starts_falls_through():
     """Cenário 3 — SS antes de qualquer instância arrancar: a DB devolve 0
     (start<=anchor vazio) → cascata para o TIER 1."""
-    posted = datetime(2026, 5, 19, 15, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 15, 0)
     meta_rows = [_row("X", "Daily Hyper $50",
-                      datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+                      datetime(2026, 5, 19, 16, 45))]
     with patch("app.services.tournament_resolver.query",
                side_effect=[[], meta_rows]) as m:
         tn, candidates = resolve_tournament_number(
@@ -450,9 +451,9 @@ def test_pt39_tier0_anchor_before_starts_falls_through():
 def test_pt39_tier0_buyin_none_name_and_anchor_only():
     """Cenário 4 — Vision não leu buy_in: filtro NULL-permissivo (buy_in e
     currency a None), resolve por nome + janela."""
-    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 18, 0)
     ts_rows = [_row("Y", "Daily Hyper $50",
-                    datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+                    datetime(2026, 5, 19, 16, 45))]
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, _ = resolve_tournament_number(
             "GGPoker", "Daily Hyper $50", None, posted_at_hint=posted,  # buy_in None
@@ -466,7 +467,7 @@ def test_pt39_tier0_buyin_none_name_and_anchor_only():
 def test_pt39_tier0_currency_strict_then_fallthrough():
     """Cenário 5 — currency divergente: a moeda estrita é enviada ao SQL (a DB
     excluiria); mock devolve 0 → cascata. Currency explícita ganha sobre o site."""
-    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 18, 0)
     with patch("app.services.tournament_resolver.query",
                side_effect=[[], [], []]) as m:
         tn, candidates = resolve_tournament_number(
@@ -500,8 +501,8 @@ def test_pt39_tier0_no_anchor_multiple_returns_candidates():
 def test_pt39_tier0_backfill_event_contemporary_with_anchor():
     """Cenário 7 — backfill: TS importado tarde, mas start_time = instante real
     do evento, contemporâneo do posted_at → dentro da janela 24h → match."""
-    posted = datetime(2026, 5, 19, 17, 0, tzinfo=timezone.utc)
-    event_start = datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 17, 0)
+    event_start = datetime(2026, 5, 19, 16, 45)
     ts_rows = [_row("284939948", "Daily Hyper $80", event_start)]
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
@@ -517,7 +518,7 @@ def test_pt39_tier1_unchanged_when_tier0_empty():
     """Cenário 8 — regressão: TIER 0 vazio → TIER 1 windowed inalterado
     (BETWEEN presente, 4 args site/patterns/lo/hi)."""
     rows = [_row("281416137", "BBG $215",
-                 datetime(2026, 5, 5, 18, 30, tzinfo=timezone.utc))]
+                 datetime(2026, 5, 5, 18, 30))]
     with patch("app.services.tournament_resolver.query", side_effect=[[], rows]) as m:
         tn, _ = resolve_tournament_number(
             "GGPoker", "BBG $215", "2026-05-05T18:30:00Z", buy_in=215.0,
@@ -528,16 +529,18 @@ def test_pt39_tier1_unchanged_when_tier0_empty():
     assert len(sql_args_meta) == 4        # site, patterns, lo, hi
 
 
-def test_pt39_tier0_naive_anchor_coerced_to_utc():
-    """Defensivo — posted_at_hint naïve é coerced para UTC antes de ir ao SQL."""
-    posted_naive = datetime(2026, 5, 19, 18, 0)  # sem tzinfo
-    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]
+def test_pt39_tier0_naive_anchor_stays_naive():
+    """pt51: convenção Lisboa naive — o anchor vai ao SQL como naive (compara
+    naive↔naive com tournament_summaries.start_time, sem coerção de fuso)."""
+    posted_naive = datetime(2026, 5, 19, 18, 0)  # Lisboa naive
+    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 45))]
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         resolve_tournament_number("GGPoker", "x", None,
                                   posted_at_hint=posted_naive, buy_in=10.0)
     # ordem anchored: anchor está no índice 10 (índices 6/8 são pool/players).
     anchor_param = m.call_args_list[0][0][1][10]
-    assert anchor_param.tzinfo is not None
+    assert anchor_param.tzinfo is None
+    assert anchor_param == posted_naive
 
 
 def test_pt39_tier0_backoffice_pool_players_no_anchor():
@@ -570,9 +573,9 @@ def test_pt39_tier0_backoffice_pool_players_no_anchor():
 def test_trackA_tier0_prestart_window_and_closest_order():
     """Lobby (anchor_mode='prestart'): TIER 0 usa [anchor−12h, anchor+2h] +
     ORDER BY abs (closest) → resolve para o start futuro próximo."""
-    posted = datetime(2026, 5, 19, 16, 17, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 16, 17)
     ts_rows = [_row("284939948", "Daily Hyper $80",
-                    datetime(2026, 5, 19, 16, 45, tzinfo=timezone.utc))]  # +28min
+                    datetime(2026, 5, 19, 16, 45))]  # +28min
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
             "GGPoker", "Daily Hyper $80", None,
@@ -586,8 +589,8 @@ def test_trackA_tier0_prestart_window_and_closest_order():
 
 def test_trackA_tier0_during_play_is_default():
     """Default (sem anchor_mode) = during_play: back=24h, fwd=0 (table-ss inalterado)."""
-    posted = datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
-    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 0, tzinfo=timezone.utc))]
+    posted = datetime(2026, 5, 19, 18, 0)
+    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 0))]
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         resolve_tournament_number(
             "GGPoker", "x", None, posted_at_hint=posted, buy_in=50.0)
@@ -598,25 +601,25 @@ def test_trackA_tier0_during_play_is_default():
 def test_trackA_decide_window_ramo1_forward_4h():
     """Ramo-1 (start_time válido): [start−2h, start+4h]; hand a +3h ainda dentro."""
     lo, hi = _decide_window("2026-05-19T16:45:00Z", None, 2.0)
-    assert lo == datetime(2026, 5, 19, 14, 45, tzinfo=timezone.utc)
-    assert hi == datetime(2026, 5, 19, 20, 45, tzinfo=timezone.utc)   # +4h
-    assert lo <= datetime(2026, 5, 19, 19, 45, tzinfo=timezone.utc) <= hi
+    assert lo == datetime(2026, 5, 19, 14, 45)
+    assert hi == datetime(2026, 5, 19, 20, 45)   # +4h
+    assert lo <= datetime(2026, 5, 19, 19, 45) <= hi
 
 
 def test_trackA_decide_window_ramo2_prestart_forward():
     """Ramo-2 sem start_time + prestart: [posted−12h, posted+2h]."""
-    posted = datetime(2026, 5, 19, 16, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 16, 0)
     lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart")
-    assert lo == datetime(2026, 5, 19, 4, 0, tzinfo=timezone.utc)
-    assert hi == datetime(2026, 5, 19, 18, 0, tzinfo=timezone.utc)
+    assert lo == datetime(2026, 5, 19, 4, 0)
+    assert hi == datetime(2026, 5, 19, 18, 0)
 
 
 def test_trackA_decide_window_ramo2_during_play_unchanged():
     """Ramo-2 sem start_time + during_play (default): [posted−12h, posted−30min]."""
-    posted = datetime(2026, 5, 19, 16, 0, tzinfo=timezone.utc)
+    posted = datetime(2026, 5, 19, 16, 0)
     lo, hi = _decide_window(None, posted, 2.0)
-    assert lo == datetime(2026, 5, 19, 4, 0, tzinfo=timezone.utc)
-    assert hi == datetime(2026, 5, 19, 15, 30, tzinfo=timezone.utc)
+    assert lo == datetime(2026, 5, 19, 4, 0)
+    assert hi == datetime(2026, 5, 19, 15, 30)
 
 
 def test_clean_drops_trailing_table_suffix():
@@ -666,7 +669,7 @@ def test_resolve_strips_table_suffix_before_sql():
                side_effect=[[], [], rows]) as m:
         tn, _ = resolve_tournament_number(
             "Winamax", "ZENITH #005", None,
-            posted_at_hint=datetime(2026, 5, 23, 17, 46, 58, tzinfo=timezone.utc),
+            posted_at_hint=datetime(2026, 5, 23, 17, 46, 58),
         )
     assert tn == "1099830438"
     patterns_seen = [c[0][1][1] for c in m.call_args_list]  # params[1] = patterns

@@ -122,7 +122,7 @@ def test_parse_vanilla_sample_real():
     assert p["buy_in_currency"] == "USD"
     assert p["total_players"] == 108
     assert p["prize_pool"] == Decimal("7948.8")
-    assert p["start_time"] == datetime(2026, 3, 31, 19, 45, tzinfo=timezone.utc)
+    assert p["start_time"] == datetime(2026, 3, 31, 19, 45)  # pt51: Lisboa naive
     assert p["hero_position"] == 42
     assert p["hero_payout"] == Decimal("0")
     assert p["hero_re_entries"] == 0
@@ -146,7 +146,7 @@ def test_parse_vanilla_sample_real():
 def test_parse_pre_2026_returns_dt_unfiltered():
     """Parser nao rejeita pre-2026 — filter e responsabilidade do endpoint."""
     p = parse_tournament_summary(TS_PRE_2026)
-    assert p["start_time"] == datetime(2025, 12, 15, 18, 0, tzinfo=timezone.utc)
+    assert p["start_time"] == datetime(2025, 12, 15, 18, 0)  # pt51: Lisboa naive
 
 
 def test_parse_missing_tournament_number_raises():
@@ -365,7 +365,8 @@ def test_parse_winamax_ts_zenith_real():
     assert d["buy_in_currency"] == "EUR"
     assert d["total_players"] == 133
     assert d["prize_pool"] == Decimal("6240")
-    assert d["start_time"] == datetime(2026, 5, 28, 16, 0, 0, tzinfo=timezone.utc)
+    # pt51: TS WN traz 16:00:00 UTC → Lisboa (Verão) = 17:00:00 naive.
+    assert d["start_time"] == datetime(2026, 5, 28, 17, 0, 0)
     assert d["hero_position"] == 6
     assert d["hero_payout"] == Decimal("278.95")
     assert d["hero_total_received"] == Decimal("342.95")   # prize + bounty 64

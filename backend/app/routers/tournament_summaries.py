@@ -22,6 +22,7 @@ from app.auth import require_auth
 from app.db import get_conn
 from app.ingest_filters import is_pre_2026
 from app.services.lobby_vision import apply_ratio_lookup
+from app.utils.timezones import utc_to_lisbon_naive
 
 router = APIRouter(prefix="/api/tournament-summaries", tags=["tournament-summaries"])
 logger = logging.getLogger("tournament_summaries")
@@ -41,7 +42,7 @@ def ensure_tournament_summaries_schema():
         buy_in_currency    TEXT,
         total_players      INTEGER,
         prize_pool         NUMERIC(12,2),
-        start_time         TIMESTAMPTZ,
+        start_time         TIMESTAMP,   -- pt51: Lisboa naive (TS GG é local)
         hero_position      INTEGER,
         hero_payout        NUMERIC(10,2),
         hero_re_entries    INTEGER NOT NULL DEFAULT 0,
@@ -209,18 +210,14 @@ def _detect_schedule(name: str) -> Optional[str]:
     return None
 
 
-def _parse_start_time_utc(s: str) -> Optional[datetime]:
-    """Parse '2026/03/31 19:45:00' como UTC.
-
-    Convenção: TS GG não indica timezone explícito. Assumimos UTC (consistente
-    com o parser de raw HH GG). Smoke real (B2) cruza start_time com
-    MIN(played_at) das hands do mesmo TM para confirmar.
-    """
+def _parse_start_time_naive(s: str) -> Optional[datetime]:
+    """Parse '2026/03/31 19:45:00' → datetime NAIVE (sem semântica de fuso). O
+    CALLER decide: a TS GG é local de Lisboa → VERBATIM; a TS Winamax traz 'UTC'
+    explícito → converter UTC→Lisboa (convenção pt51)."""
     try:
-        dt = datetime.strptime(s.strip(), "%Y/%m/%d %H:%M:%S")
+        return datetime.strptime(s.strip(), "%Y/%m/%d %H:%M:%S")
     except ValueError:
         return None
-    return dt.replace(tzinfo=timezone.utc)
 
 
 def parse_tournament_summary(text: str, filename: Optional[str] = None) -> dict:
@@ -239,7 +236,8 @@ def parse_tournament_summary(text: str, filename: Optional[str] = None) -> dict:
     m_start = _RE_START_TIME.search(text)
     if not m_start:
         raise ValueError(f"missing start_time for tn={tn}")
-    start_time = _parse_start_time_utc(m_start.group(1))
+    # TS GG: hora local de Lisboa → VERBATIM (naive).
+    start_time = _parse_start_time_naive(m_start.group(1))
     if start_time is None:
         raise ValueError(f"invalid start_time for tn={tn}: {m_start.group(1)!r}")
 
@@ -370,7 +368,9 @@ def parse_winamax_tournament_summary(text: str, filename: Optional[str] = None) 
     m_s = _WN_START.search(text)
     if not m_s:
         raise ValueError(f"missing start_time for tn={tn}")
-    start_time = _parse_start_time_utc(m_s.group(1))
+    # TS Winamax traz 'UTC' explícito → converter UTC→Lisboa naive (pt51).
+    _st = _parse_start_time_naive(m_s.group(1))
+    start_time = utc_to_lisbon_naive(_st) if _st is not None else None
     if start_time is None:
         raise ValueError(f"invalid start_time tn={tn}: {m_s.group(1)!r}")
 

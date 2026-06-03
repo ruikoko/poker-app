@@ -1,55 +1,46 @@
-"""Fuso de played_at (#GG-PLAYED-AT-LOCAL-NOT-UTC).
+"""Convenção de fuso = LISBOA naive (pt51).
 
-GG e PS gravam a hora da HH em hora local de Lisboa; os parsers normalizam para
-UTC DST-aware (Verão −1h, Inverno 0h). Winamax/WPN trazem UTC explícito → naive
-sem conversão. Testa a LÓGICA, independente dos dados.
+GG/PokerStars: a HH já vem em Lisboa → played_at gravado VERBATIM (naive, sem
+conversão; a ambiguidade de Inverno deixa de existir). Winamax/WPN: a HH vem em
+UTC → converte-se UTC→Lisboa. Testa a LÓGICA, independente dos dados.
 """
 from datetime import datetime, timezone
 
-from app.utils.timezones import lisbon_local_to_utc
+from app.utils.timezones import lisbon_naive_verbatim, utc_to_lisbon_naive
 from app.parsers.gg_hands import parse_hands
 from app.routers.hm3 import _parse_hand
 
 
-def _utc(y, mo, d, h, mi, s):
-    return datetime(y, mo, d, h, mi, s, tzinfo=timezone.utc)
+# ── helpers de fuso ─────────────────────────────────────────────────────────
+
+def test_verbatim_strips_tz_keeps_wallclock():
+    # GG/PS: naive in → naive out, mesmo wall-clock.
+    assert lisbon_naive_verbatim(datetime(2026, 5, 31, 17, 42, 42)) == datetime(2026, 5, 31, 17, 42, 42)
+    # aware in → tz descartado, wall-clock intacto (NUNCA converte).
+    assert lisbon_naive_verbatim(datetime(2026, 5, 31, 17, 42, 42, tzinfo=timezone.utc)) == datetime(2026, 5, 31, 17, 42, 42)
 
 
-# ── helper partilhado lisbon_local_to_utc ───────────────────────────────────
-
-def test_summer_subtracts_1h():
-    assert lisbon_local_to_utc(datetime(2026, 5, 31, 17, 42, 42)) == _utc(2026, 5, 31, 16, 42, 42)
-
-
-def test_winter_no_offset():
-    assert lisbon_local_to_utc(datetime(2026, 1, 15, 17, 42, 42)) == _utc(2026, 1, 15, 17, 42, 42)
+def test_utc_to_lisbon_summer_adds_1h():
+    # Verão (WEST): UTC 19:40 → Lisboa 20:40, naive.
+    assert utc_to_lisbon_naive(datetime(2026, 5, 31, 19, 40, 15, tzinfo=timezone.utc)) == datetime(2026, 5, 31, 20, 40, 15)
 
 
-def test_dst_aware_uses_hand_date_not_fixed_offset():
-    """Mesma hora-de-relógio → UTC diferente consoante a data: DST-aware (não é
-    offset fixo nem a data de 'agora')."""
-    summer = lisbon_local_to_utc(datetime(2026, 7, 1, 20, 0, 0))
-    winter = lisbon_local_to_utc(datetime(2026, 12, 1, 20, 0, 0))
-    assert summer == _utc(2026, 7, 1, 19, 0, 0)
-    assert winter == _utc(2026, 12, 1, 20, 0, 0)
-    assert (summer.hour, winter.hour) == (19, 20)
+def test_utc_to_lisbon_winter_no_offset():
+    # Inverno (WET=UTC): sem mudança.
+    assert utc_to_lisbon_naive(datetime(2026, 1, 15, 17, 42, 42, tzinfo=timezone.utc)) == datetime(2026, 1, 15, 17, 42, 42)
 
 
-def test_just_after_spring_forward_is_summer():
-    # DST UE 2026: spring-forward 29 Mar → 30 Mar já é WEST (−1h).
-    assert lisbon_local_to_utc(datetime(2026, 3, 30, 12, 0, 0)) == _utc(2026, 3, 30, 11, 0, 0)
+def test_utc_to_lisbon_naive_assumes_utc_for_naive_input():
+    # input naive é assumido UTC.
+    assert utc_to_lisbon_naive(datetime(2026, 7, 1, 19, 0, 0)) == datetime(2026, 7, 1, 20, 0, 0)
 
 
-def test_just_before_spring_forward_is_winter():
-    assert lisbon_local_to_utc(datetime(2026, 3, 28, 12, 0, 0)) == _utc(2026, 3, 28, 12, 0, 0)
+def test_results_are_naive():
+    assert lisbon_naive_verbatim(datetime(2026, 5, 31, 17, 42, 42)).tzinfo is None
+    assert utc_to_lisbon_naive(datetime(2026, 5, 31, 19, 40, 15, tzinfo=timezone.utc)).tzinfo is None
 
 
-def test_result_is_utc_tzaware():
-    r = lisbon_local_to_utc(datetime(2026, 5, 31, 17, 42, 42))
-    assert r.utcoffset().total_seconds() == 0
-
-
-# ── GG: parse_hands devolve played_at em UTC ────────────────────────────────
+# ── GG: parse_hands devolve played_at em Lisboa naive (verbatim) ────────────
 
 _GG_BLOCK = (
     "Poker Hand #TM6021825338: Tournament #287210981, Daily Hyper $50 Hold'em "
@@ -63,18 +54,19 @@ _GG_BLOCK = (
 )
 
 
-def test_gg_played_at_utc_summer():
+def test_gg_played_at_lisbon_verbatim_summer():
     hands, _ = parse_hands(_GG_BLOCK.encode("utf-8"), "t.txt")
-    assert hands and hands[0]["played_at"].startswith("2026-05-31T16:42:42")
+    # Verbatim: o wall-clock da HH (17:42:42) é o played_at, SEM offset.
+    assert hands and hands[0]["played_at"] == "2026-05-31T17:42:42"
 
 
-def test_gg_played_at_utc_winter():
+def test_gg_played_at_lisbon_verbatim_winter():
     block = _GG_BLOCK.replace("2026/05/31 17:42:42", "2026/01/15 17:42:42")
     hands, _ = parse_hands(block.encode("utf-8"), "t.txt")
-    assert hands and hands[0]["played_at"].startswith("2026-01-15T17:42:42")
+    assert hands and hands[0]["played_at"] == "2026-01-15T17:42:42"
 
 
-# ── PS: _parse_hand converte a 1ª timestamp (WET/Lisboa) → UTC ──────────────
+# ── PS: _parse_hand grava a 1ª timestamp (WET/Lisboa) VERBATIM ──────────────
 
 _PS_BLOCK = (
     "PokerStars Hand #260988837997: Tournament #4002440970, €45+€45+€10 EUR "
@@ -87,20 +79,13 @@ _PS_BLOCK = (
 )
 
 
-def test_ps_played_at_utc_summer():
-    # 18:20:32 WET (Verão = WEST) → 17:20:32 UTC. (O bracket ET é ignorado.)
+def test_ps_played_at_lisbon_verbatim():
     r = _parse_hand(_PS_BLOCK, "PokerStars")
-    assert r and r["played_at"].startswith("2026-05-31T17:20:32")
+    # 18:20:32 (Lisboa) verbatim; o bracket ET é ignorado.
+    assert r and r["played_at"] == "2026-05-31T18:20:32"
 
 
-def test_ps_played_at_utc_winter():
-    block = _PS_BLOCK.replace("2026/05/31 18:20:32 WET", "2026/01/15 18:20:32 WET")
-    r = _parse_hand(block, "PokerStars")
-    # Inverno (WET=UTC) → sem mudança.
-    assert r and r["played_at"].startswith("2026-01-15T18:20:32")
-
-
-# ── Winamax: UTC explícito → NÃO converter (guard) ──────────────────────────
+# ── Winamax: UTC explícito → converter UTC→Lisboa ───────────────────────────
 
 _WN_BLOCK = (
     'Winamax Poker - Tournament "MAIN" buyIn: 5€ level: 1 - '
@@ -112,7 +97,28 @@ _WN_BLOCK = (
 )
 
 
-def test_winamax_played_at_unchanged_utc():
+def test_winamax_played_at_converted_utc_to_lisbon():
     r = _parse_hand(_WN_BLOCK, "Winamax")
-    # Já é UTC na HH; o parser mantém-no (sem subtrair 1h).
-    assert r and r["played_at"].startswith("2026-05-31T19:40:15")
+    # 19:40:15 UTC → Verão → 20:40:15 Lisboa, naive.
+    assert r and r["played_at"] == "2026-05-31T20:40:15"
+
+
+# ── Convergência do match em Lisboa: SS de mesa ↔ mão na MESMA referência ────
+
+def test_match_anchor_aligns_with_played_at_in_lisbon():
+    """O `captured_at` da SS de mesa (filename Lisboa naive) e o `played_at` da
+    mão GG (HH Lisboa naive) ficam na MESMA referência → match temporal directo,
+    sem offset. (Antes do pt51: SS em UTC vs HH em UTC — também batia, mas a
+    pt49 destapou o risco de mistura ±1h; agora não há conversão de nenhum lado.)
+    """
+    from datetime import datetime
+    from app.services.table_ss_vision import derive_captured_at
+
+    # Mesma hora de relógio (17:42:42 de 2026/05/31, Verão) dos dois lados.
+    hands, _ = parse_hands(_GG_BLOCK.encode("utf-8"), "t.txt")
+    played_at = datetime.fromisoformat(hands[0]["played_at"])          # 17:42:42 naive
+    captured_at = derive_captured_at("Table-GGPoker-20260531174242.png")  # 17:42:42 naive
+
+    assert played_at.tzinfo is None and captured_at.tzinfo is None
+    assert played_at == captured_at                                    # 0s de diferença
+    assert abs((captured_at - played_at).total_seconds()) <= 300       # dentro da janela ±5min

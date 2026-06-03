@@ -32,6 +32,7 @@ from app.auth import require_auth
 from app.db import get_conn, query
 from app.hero_names import HERO_NAMES_ALL, ALL_NICKS_BY_SITE
 from app.ingest_filters import is_pre_2026
+from app.utils.timezones import utc_to_lisbon_naive
 
 router = APIRouter(prefix="/api/screenshots", tags=["screenshots"])
 logger = logging.getLogger("screenshots")
@@ -1140,7 +1141,8 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                         if m:
                             try:
                                 ts_ms = int(m.group(1))
-                                played_at_extracted = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc)
+                                # pt51: unix-ms é UTC → grava em Lisboa naive.
+                                played_at_extracted = utc_to_lisbon_naive(_dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc))
                             except (ValueError, OSError):
                                 pass
                     screenshot_url_val = og_url
