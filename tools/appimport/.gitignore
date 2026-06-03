@@ -1,0 +1,6 @@
+# Credenciais + caminho local — NUNCA commitar.
+config_local.py
+
+# Cache Python.
+__pycache__/
+*.pyc
