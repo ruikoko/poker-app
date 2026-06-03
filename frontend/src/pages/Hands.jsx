@@ -7,6 +7,7 @@ import HandRow from '../components/HandRow'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
 import TournamentHeader, { SiteWatermark } from '../components/TournamentHeader'
+import { isoDateLisbon, dateTimeLisbon } from '../utils/datetime'
 
 // A aba Mãos é para estudo — exclui mãos que só têm a tag #mtt (bulk HH sem marcação)
 
@@ -519,7 +520,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                 }
                 return null
               })()}
-              <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.site} &middot; {hand.played_at ? hand.played_at.slice(0, 10) : ''}</span>
+              <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.site} &middot; {isoDateLisbon(hand.played_at)}</span>
             </div>
           </div>
           <button
@@ -553,7 +554,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
         }}>
           {[
             { l: 'Sala', v: hand.site },
-            { l: 'Data', v: hand.played_at ? hand.played_at.slice(0, 10) : null },
+            { l: 'Data', v: hand.played_at ? isoDateLisbon(hand.played_at) : null },
             { l: 'Resultado', v: <ResultBadge result={hand.result} /> },
             { l: 'Posição', v: <PosBadge pos={hand.position} /> },
             { l: 'Torneio', v: hand.stakes },
@@ -1152,7 +1153,7 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
             for (const h of tagHands) {
               const tName = h.tournament_name || h.stakes || 'Sem torneio'
               const dayIso = h.played_at
-                ? new Date(h.played_at).toISOString().slice(0, 10)
+                ? isoDateLisbon(h.played_at)
                 : 'sem-data'
               const key = h.tournament_number
                 ? `tm:${h.tournament_number}`
@@ -1260,7 +1261,7 @@ function PlaceholderHandRow({ hand, onDelete }) {
   const heroName = pn.hero || null
   const channels = hand.discord_tags || []
   const playedAt = hand.played_at
-    ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    ? dateTimeLisbon(hand.played_at, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     : '—'
   // Hero stack: tenta encontrar player com nome do hero em players_list e usar stack
   const heroPlayer = heroName
@@ -1882,7 +1883,7 @@ export default function HandsPage() {
                         return <span style={{ fontSize: 10, fontWeight: 700, color: sc }}>{ss}</span>
                       })()}
                     </td>
-                    <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>{h.played_at ? h.played_at.slice(0, 10) : '&mdash;'}</td>
+                    <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>{h.played_at ? isoDateLisbon(h.played_at) : '&mdash;'}</td>
                     <td style={{ padding: '10px 14px', color: '#374151', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>#{h.id}</td>
                     <td style={{ padding: '10px 14px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#94a3b8', fontSize: 11 }}>{h.stakes || '&mdash;'}</td>
                     <td style={{ padding: '10px 14px' }}><PosBadge pos={h.position} /></td>

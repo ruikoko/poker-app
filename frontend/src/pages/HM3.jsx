@@ -4,6 +4,7 @@ import Replayer from '../components/Replayer'
 import HandRow from '../components/HandRow'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import TournamentHeader from '../components/TournamentHeader'
+import { isoDateLisbon } from '../utils/datetime'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
                 }
                 return null
               })()}
-              <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.site} &middot; {hand.played_at ? hand.played_at.slice(0, 10) : ''}</span>
+              <span style={{ fontSize: 11, color: '#4b5563' }}>{hand.site} &middot; {isoDateLisbon(hand.played_at)}</span>
             </div>
           </div>
           <button style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18, padding: 4 }} onClick={onClose}>&#10005;</button>
@@ -173,7 +174,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 14 }}>
               {[
                 { l: 'SALA', v: hand.site },
-                { l: 'DATA', v: hand.played_at ? hand.played_at.slice(0, 10) : '—' },
+                { l: 'DATA', v: hand.played_at ? isoDateLisbon(hand.played_at) : '—' },
                 { l: 'RESULTADO', v: hand.result != null ? `${hand.result > 0 ? '+' : ''}${Number(hand.result).toFixed(1)} BB` : '—', c: resultColor },
                 { l: 'POSIÇÃO', v: null, badge: hand.position },
                 { l: 'TORNEIO', v: hand.stakes || '—' },
@@ -738,7 +739,7 @@ export default function HM3Page() {
         // Group by date
         const byDay = {}
         for (const h of rows) {
-          const dk = h.played_at ? h.played_at.slice(0, 10) : 'sem-data'
+          const dk = h.played_at ? isoDateLisbon(h.played_at) : 'sem-data'
           if (!byDay[dk]) byDay[dk] = []
           byDay[dk].push(h)
         }

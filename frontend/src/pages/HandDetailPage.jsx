@@ -5,6 +5,7 @@ import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
+import { dateTimeLisbon } from '../utils/datetime'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
@@ -70,7 +71,7 @@ export default function HandDetailPage() {
   const blindsLabel = meta.sb && meta.bb ? `${Math.round(meta.sb)}/${Math.round(meta.bb)}${meta.ante ? `(${Math.round(meta.ante)})` : ''}` : ''
 
   const tourneyName = hand.stakes || ''
-  const playedDate = hand.played_at ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+  const playedDate = dateTimeLisbon(hand.played_at, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   const resultColor = hand.result > 0 ? '#22c55e' : hand.result < 0 ? '#ef4444' : '#64748b'
 
   return (
@@ -152,9 +153,7 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
   const visionBb = pn.vision_bb
   const visionLevel = pn.vision_level
   const playersList = pn.players_list || []
-  const playedDate = hand.played_at
-    ? new Date(hand.played_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-    : '—'
+  const playedDate = dateTimeLisbon(hand.played_at, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) || '—'
   // #ORFA-HM3-SYNTHETIC-ENTRIES Peca 4: guard has_screenshot_image — evita
   // broken image icon quando entry_id aponta para entry sintetica HM3
   // (entry_type != 'screenshot' → endpoint devolve 404). Fallback `?? true`

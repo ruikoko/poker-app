@@ -1,4 +1,5 @@
 import TagEditor from './TagEditor'
+import { dateTimeLisbon } from '../utils/datetime'
 
 // ── Constantes (cópia de Hands.jsx para auto-conteúdo) ──────────────────────
 
@@ -130,15 +131,9 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
     buyin = `${stakesStr.includes('$') ? '$' : '€'}${total}`
   }
 
-  // DD/MM + HH:MM em TZ local. Antes slicava a string ISO (UTC), agora
-  // converte via Date para bater com as horas a que o utilizador jogou.
-  const playedDt = hand.played_at ? new Date(hand.played_at) : null
-  const dateStr = playedDt
-    ? `${String(playedDt.getDate()).padStart(2, '0')}/${String(playedDt.getMonth() + 1).padStart(2, '0')}`
-    : ''
-  const timeStr = playedDt
-    ? `${String(playedDt.getHours()).padStart(2, '0')}:${String(playedDt.getMinutes()).padStart(2, '0')}`
-    : ''
+  // DD/MM + HH:MM em hora de Lisboa (storage=UTC, display=Lisboa).
+  const dateStr = hand.played_at ? dateTimeLisbon(hand.played_at, { day: '2-digit', month: '2-digit' }) : ''
+  const timeStr = hand.played_at ? dateTimeLisbon(hand.played_at, { hour: '2-digit', minute: '2-digit' }) : ''
 
   // GG.gl link (se existir em raw ou notes)
   const ggMatch = (hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/)

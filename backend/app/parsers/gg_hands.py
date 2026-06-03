@@ -13,6 +13,9 @@ import json
 from datetime import datetime
 from collections import defaultdict
 from app.utils.tournament_format import detect_tournament_format
+# #GG-PLAYED-AT-LOCAL-NOT-UTC: a HH GG grava a hora em local de Lisboa sem fuso;
+# normalizamos para UTC (DST-aware) via helper partilhado (GG + PS).
+from app.utils.timezones import lisbon_local_to_utc
 
 
 # ── Position Logic ───────────────────────────────────────────────────────────
@@ -369,10 +372,12 @@ def _parse_single_hand(block: str) -> dict | None:
     date_m = re.search(r"(\d{4})[/-](\d{2})[/-](\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})", block)
     if date_m:
         try:
-            result["played_at"] = datetime(
+            # Hora da HH = local de Lisboa → converter para UTC (DST-aware).
+            naive_local = datetime(
                 int(date_m.group(1)), int(date_m.group(2)), int(date_m.group(3)),
                 int(date_m.group(4)), int(date_m.group(5)), int(date_m.group(6)),
-            ).isoformat()
+            )
+            result["played_at"] = lisbon_local_to_utc(naive_local).isoformat()
         except ValueError:
             pass
 

@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 from collections import defaultdict
 from app.utils.tournament_format import detect_tournament_format
+from app.utils.timezones import lisbon_local_to_utc
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -297,13 +298,22 @@ def _parse_hand(hh_text, site_name):
             result["hand_id"] = f"{site_name[:3].upper()}-{m.group(1)}"
 
     # ── Date ──
+    # PS grava a 1ª timestamp em hora local (WET/Lisboa), seguida do bracket ET;
+    # o regex apanha a 1ª (Lisboa) → normalizar Lisboa→UTC DST-aware, igual ao GG
+    # (#GG-PLAYED-AT-LOCAL-NOT-UTC). Winamax/WPN trazem UTC explícito → manter naive.
+    # GGPoker incluído por consistência (o caminho HM3→GG hoje está vazio, mas se
+    # alguma mão GG entrar por aqui deve normalizar tal como o parser GG dedicado).
     m = re.search(r"(\d{4})/(\d{2})/(\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})", hh_text)
     if m:
         try:
-            result["played_at"] = datetime(
+            naive = datetime(
                 int(m.group(1)), int(m.group(2)), int(m.group(3)),
                 int(m.group(4)), int(m.group(5)), int(m.group(6)),
-            ).isoformat()
+            )
+            if site_name in ("PokerStars", "GGPoker"):
+                result["played_at"] = lisbon_local_to_utc(naive).isoformat()
+            else:
+                result["played_at"] = naive.isoformat()
         except ValueError:
             pass
 

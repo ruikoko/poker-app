@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { discord, hands as handsApi, images as imagesApi, lobbys } from '../api/client'
 import HandRow from '../components/HandRow'
+import { isoDateLisbon } from '../utils/datetime'
 
 // ── Constantes ──────────────────────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ function HandDetailModal({ hand, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 20px', marginBottom: 20, fontSize: 13 }}>
           {[
             { l: 'Sala', v: hand.site },
-            { l: 'Data da Mão', v: hand.played_at ? hand.played_at.slice(0, 10) : null },
+            { l: 'Data da Mão', v: hand.played_at ? isoDateLisbon(hand.played_at) : null },
             { l: 'Resultado', v: <ResultBadge result={hand.result} /> },
             { l: 'Posição', v: <PosBadge pos={hand.position} /> },
             { l: 'Torneio', v: hand.stakes },

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
 import { SITE_COLORS, SITE_COLOR_DEFAULT } from '../lib/siteColors'
 import { compactStreetActions } from '../lib/handParser'
+import { isoDateLisbon } from '../utils/datetime'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ function CompactHandRow({ hand, villainNick, expanded, onToggle }) {
   const turn = board.slice(3, 4)
   const river = board.slice(4, 5)
 
-  const dateStr = hand.played_at ? hand.played_at.slice(5, 10) : '—'
+  const dateStr = hand.played_at ? isoDateLisbon(hand.played_at).slice(5, 10) : '—'
   const tourneyName = hand.tournament_name || hand.stakes || ''
   const result = hand.villain_result ?? hand.result
 
