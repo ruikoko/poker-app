@@ -187,6 +187,119 @@ def _parse_filename(filename: str) -> dict:
 
 # ── Vision: extrair jogadores, SB/BB do painel, stacks ───────────────────────
 
+def _build_gg_vision_prompt() -> str:
+    """Prompt ÚNICO da Vision do replayer GG, partilhado pelo caminho OpenAI
+    (live) e pelo caminho Claude (#pt53 migração). Injecta a lista dinâmica de
+    heroes GG (Rui + FRIEND_HEROES) e preserva os detalhes sensíveis: VPIP%
+    (badge laranja) vs bounty USD (coroa dourada), e os nomes SB/BB lidos do
+    painel esquerdo. Saída em LINHAS (parseada por _parse_vision_response)."""
+    # Lista dinâmica de heroes GG (Rui + FRIEND_HEROES aplicáveis a GG).
+    # 4 nicks — pequeno o suficiente para não confundir o modelo.
+    gg_heroes = sorted(n.title() for n in ALL_NICKS_BY_SITE.get("GGPoker", []))
+    hero_list_str = ", ".join(f"'{n}'" for n in gg_heroes) if gg_heroes else "'Lauro Dermio'"
+
+    return (
+        "This is a GGPoker hand replayer screenshot.\n\n"
+        "KNOWN FACTS:\n"
+        f"- The HERO is one of these names (centered at bottom of table): {hero_list_str}.\n"
+        "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
+        "- The tournament LEVEL number is shown in the LEFT PANEL (e.g. 'Lv 5' or 'Level 5').\n"
+        "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
+        "- Players with 'WIN' overlay on their avatar must still be included.\n"
+        "- Players who went all-in may show stack 0.\n"
+        "- Each player has TWO distinct badges, do NOT confuse them:\n"
+        "    * ORANGE FLAME (small circle next to nickname) -> VPIP percentage (an integer,\n"
+        "      e.g. '28', '23', '0'). This represents how often the player voluntarily puts\n"
+        "      money in the pot.\n"
+        "    * GOLDEN CROWN (icon above the nickname) -> bounty value in USD\n"
+        "      (e.g. '$50', '$75', '$100', '$112.50', '$125'). This is the dollar prize\n"
+        "      awarded to whoever knocks this player out.\n\n"
+        "YOUR TASKS:\n"
+        "1. Read the title bar for TM number and tournament name.\n"
+        "2. Read the LEFT PANEL to identify the SB and BB player names.\n"
+        "3. Read the LEFT PANEL for the current tournament LEVEL number.\n"
+        "4. For EVERY player seated at the table, read:\n"
+        "   (a) Nickname.\n"
+        "   (b) Chip stack — the colored number shown directly below each player's name.\n"
+        "   (c) VPIP percentage — the integer inside the ORANGE FLAME badge (use 0 if not shown).\n"
+        "   (d) Bounty USD value — the dollar amount inside the GOLDEN CROWN above the name\n"
+        "       (output the number ONLY, no '$' or commas; use 0 if not shown).\n"
+        "   (e) Country code from the flag (2 letters, or NONE).\n\n"
+        "Reply in EXACTLY this format (no extra text, no markdown):\n"
+        "TM: <TM number, e.g. TM5672663145>\n"
+        "TOURNAMENT: <tournament name from title>\n"
+        "LEVEL: <integer level number from LEFT PANEL, e.g. 5, or NONE>\n"
+        "HERO: <hero player name>\n"
+        "BOARD: <community cards, e.g. 7s 9d 5d Jc Kd, or NONE>\n"
+        "POT: <pot size number, or NONE>\n"
+        "SB: <SB player name from LEFT PANEL>\n"
+        "BB: <BB player name from LEFT PANEL>\n"
+        "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
+        "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
+        "... (one PLAYER line per player, including Hero, SB, and BB)\n\n"
+        "RULES:\n"
+        "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
+        "- If a player's stack shows 0, write 0\n"
+        "- vpip_pct is the integer in the ORANGE FLAME badge (e.g. '28' for 28%); use 0 if not visible\n"
+        "- bounty_value_usd is the dollar amount in the GOLDEN CROWN above the nickname\n"
+        "  (e.g. '125' for $125, '112.50' for $112.50). NEVER include '$' or commas. Use 0 if not visible.\n"
+        "- DO NOT confuse VPIP (orange flame, integer like '28') with Bounty (golden crown, dollar like '$125'). They are TWO DIFFERENT badges in DIFFERENT positions on the avatar.\n"
+        "- Country is the 2-letter code from the flag, or NONE\n"
+        "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
+        "- Include ALL players visible at the table, even if eliminated\n"
+        "- Do NOT guess positions — only output SB and BB from the left panel\n\n"
+        "Output ONLY the structured lines above. No explanations."
+    )
+
+
+# Modelo Claude para a Vision do replayer (#pt53). Igual aos outros 3 pipelines.
+_REPLAYER_CLAUDE_MODEL = "claude-sonnet-4-6"
+
+
+def _extract_hand_data_from_image_claude(image_bytes: bytes, mime_type: str = "image/png") -> str | None:
+    """Versão CLAUDE da leitura do replayer GG (#pt53 migração OpenAI→Claude).
+    Mesmo prompt e mesmo formato de saída em LINHAS que o caminho OpenAI (para
+    _parse_vision_response ficar intacto). Mesmo padrão de imagem base64 dos 3
+    pipelines Claude existentes. Devolve o texto em linhas, ou None em falha de
+    API (não engole: o caller decide retry-able). NÃO está ligada à pipeline
+    live no passo 1 — só validação contra o baseline OpenAI."""
+    try:
+        from anthropic import Anthropic  # lazy
+    except ImportError:
+        logger.error("anthropic SDK não instalado")
+        return None
+    try:
+        client = Anthropic()
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        prompt = _build_gg_vision_prompt()
+        response = client.messages.create(
+            model=_REPLAYER_CLAUDE_MODEL,
+            max_tokens=1500,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": b64,
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                },
+            ],
+        )
+        text = (response.content[0].text or "").strip()
+        logger.info(f"[claude] Vision response: {text}")
+        return text
+    except Exception as e:
+        logger.error(f"[claude] Vision error: {type(e).__name__}: {e}")
+        return None
+
+
 def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/png") -> str | None:
     """
     Usa Vision para extrair dados do screenshot do replayer GG.
@@ -203,63 +316,7 @@ def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/pn
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         data_url = f"data:{mime_type};base64,{b64}"
 
-        # Lista dinâmica de heroes GG (Rui + FRIEND_HEROES aplicáveis a GG).
-        # 4 nicks — pequeno o suficiente para não confundir o modelo.
-        gg_heroes = sorted(n.title() for n in ALL_NICKS_BY_SITE.get("GGPoker", []))
-        hero_list_str = ", ".join(f"'{n}'" for n in gg_heroes) if gg_heroes else "'Lauro Dermio'"
-
-        prompt = (
-            "This is a GGPoker hand replayer screenshot.\n\n"
-            "KNOWN FACTS:\n"
-            f"- The HERO is one of these names (centered at bottom of table): {hero_list_str}.\n"
-            "- SB and BB player names are written in the LEFT PANEL (Blind/Ante section).\n"
-            "- The tournament LEVEL number is shown in the LEFT PANEL (e.g. 'Lv 5' or 'Level 5').\n"
-            "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
-            "- Players with 'WIN' overlay on their avatar must still be included.\n"
-            "- Players who went all-in may show stack 0.\n"
-            "- Each player has TWO distinct badges, do NOT confuse them:\n"
-            "    * ORANGE FLAME (small circle next to nickname) -> VPIP percentage (an integer,\n"
-            "      e.g. '28', '23', '0'). This represents how often the player voluntarily puts\n"
-            "      money in the pot.\n"
-            "    * GOLDEN CROWN (icon above the nickname) -> bounty value in USD\n"
-            "      (e.g. '$50', '$75', '$100', '$112.50', '$125'). This is the dollar prize\n"
-            "      awarded to whoever knocks this player out.\n\n"
-            "YOUR TASKS:\n"
-            "1. Read the title bar for TM number and tournament name.\n"
-            "2. Read the LEFT PANEL to identify the SB and BB player names.\n"
-            "3. Read the LEFT PANEL for the current tournament LEVEL number.\n"
-            "4. For EVERY player seated at the table, read:\n"
-            "   (a) Nickname.\n"
-            "   (b) Chip stack — the colored number shown directly below each player's name.\n"
-            "   (c) VPIP percentage — the integer inside the ORANGE FLAME badge (use 0 if not shown).\n"
-            "   (d) Bounty USD value — the dollar amount inside the GOLDEN CROWN above the name\n"
-            "       (output the number ONLY, no '$' or commas; use 0 if not shown).\n"
-            "   (e) Country code from the flag (2 letters, or NONE).\n\n"
-            "Reply in EXACTLY this format (no extra text, no markdown):\n"
-            "TM: <TM number, e.g. TM5672663145>\n"
-            "TOURNAMENT: <tournament name from title>\n"
-            "LEVEL: <integer level number from LEFT PANEL, e.g. 5, or NONE>\n"
-            "HERO: <hero player name>\n"
-            "BOARD: <community cards, e.g. 7s 9d 5d Jc Kd, or NONE>\n"
-            "POT: <pot size number, or NONE>\n"
-            "SB: <SB player name from LEFT PANEL>\n"
-            "BB: <BB player name from LEFT PANEL>\n"
-            "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
-            "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
-            "... (one PLAYER line per player, including Hero, SB, and BB)\n\n"
-            "RULES:\n"
-            "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
-            "- If a player's stack shows 0, write 0\n"
-            "- vpip_pct is the integer in the ORANGE FLAME badge (e.g. '28' for 28%); use 0 if not visible\n"
-            "- bounty_value_usd is the dollar amount in the GOLDEN CROWN above the nickname\n"
-            "  (e.g. '125' for $125, '112.50' for $112.50). NEVER include '$' or commas. Use 0 if not visible.\n"
-            "- DO NOT confuse VPIP (orange flame, integer like '28') with Bounty (golden crown, dollar like '$125'). They are TWO DIFFERENT badges in DIFFERENT positions on the avatar.\n"
-            "- Country is the 2-letter code from the flag, or NONE\n"
-            "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
-            "- Include ALL players visible at the table, even if eliminated\n"
-            "- Do NOT guess positions — only output SB and BB from the left panel\n\n"
-            "Output ONLY the structured lines above. No explanations."
-        )
+        prompt = _build_gg_vision_prompt()
 
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
