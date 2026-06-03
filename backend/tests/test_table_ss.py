@@ -211,7 +211,9 @@ def test_upsert_insert_on_conflict_and_links_hand(mock_get_conn):
 
 
 @patch("app.routers.table_ss.get_conn")
-def test_upsert_no_link_when_not_success(mock_get_conn):
+def test_upsert_unlinks_when_no_match(mock_get_conn):
+    """#FIX-B3 (pt50): sem match (matched_hand_db_id=None), o upsert desliga
+    qualquer mão obsoleta que ainda aponte para esta SS (não cria link)."""
     mock_conn = MagicMock()
     mock_cur = MagicMock()
     mock_cur.fetchone.return_value = {"id": 8}
@@ -220,10 +222,12 @@ def test_upsert_no_link_when_not_success(mock_get_conn):
 
     table_ss._upsert_table_ss_log(
         file_hash="abc", source="manual_upload", original_filename="x.png",
-        file_size=1, result="no_match_to_hand", matched_hand_db_id=10,
+        file_size=1, result="no_match_to_hand", matched_hand_db_id=None,
     )
     sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
-    assert not any("UPDATE hands" in s for s in sqls)
+    # desliga (SET NULL) — nunca liga.
+    assert any("UPDATE hands SET context_table_ss_id = NULL WHERE context_table_ss_id = %s" in s for s in sqls)
+    assert not any("SET context_table_ss_id = %s WHERE id" in s for s in sqls)
 
 
 # ── _process_table_ss (orquestração) ─────────────────────────────────────────
@@ -392,171 +396,137 @@ def test_select_andar1_selects_context_table_ss_id():
     assert "context_table_ss_id" in sql
 
 
-# ── relink_orphan_table_ss (trigger pós-import) ─────────────────────────────
+# ── #FIX-B3 (pt50): R — match único determinístico (compute) ────────────────
 
-def _orphan_row(rid=1, site="Winamax"):
+def _ss_row(rid=1, site="Winamax", result="no_match_to_hand", matched=None,
+            name="ODYSSEY #013"):
     return {"id": rid, "captured_at": CAP, "site": site,
-            "vision_json": {"tournament_name": "ODYSSEY #013"}}
+            "vision_json": {"tournament_name": name}, "result": result,
+            "matched_hand_id": matched}
 
 
-# Os testes abaixo isolam-se do self-healing de site (#TABLE-SS-VISION-SITE-MISCLASS)
-# com `_correct_site` identidade — focam o link/no-link. O self-healing tem testes
-# dedicados mais abaixo.
-@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
-@patch("app.routers.table_ss._bump_attempt_table_ss")
-@patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
-@patch("app.routers.table_ss._find_candidate_hands",
-       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
-                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
-                      "played_at": CAP}])
+def test_compute_match_single_tn_success():
+    """R puro: 1 torneio na janela, nome bate → success com o hand_db_id."""
+    with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[
+             {"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
+              "tournament_name": "ODYSSEY #013", "site": "Winamax", "played_at": CAP}]):
+        d = table_ss.compute_table_ss_match(
+            CAP, "Winamax", {"tournament_name": "ODYSSEY #013"})
+    assert d["result"] == "success"
+    assert d["matched_hand_id"] == "WN-10"
+    assert d["matched_hand_db_id"] == 10
+    assert d["tournament_number"] == "T1"
+
+
+def test_compute_match_no_hands_resolves_tn_for_limbo():
+    with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[]), \
+         patch("app.routers.table_ss.resolve_tournament_number", return_value=("T9", [])):
+        d = table_ss.compute_table_ss_match(
+            CAP, "Winamax", {"tournament_name": "ODYSSEY #013"})
+    assert d["result"] == "no_match_to_hand"
+    assert d["matched_hand_db_id"] is None
+    assert d["tournament_number"] == "T9"
+
+
+def test_compute_match_corrects_site_before_matching():
+    """R aplica _correct_site ANTES de procurar candidatos (self-healing)."""
+    seen = {}
+    def fake_find(captured_at, site):
+        seen["site"] = site
+        return []
+    with patch("app.routers.table_ss.tv._correct_site", return_value="Winamax"), \
+         patch("app.routers.table_ss._find_candidate_hands", side_effect=fake_find), \
+         patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, [])):
+        d = table_ss.compute_table_ss_match(
+            CAP, "GGPoker", {"tournament_name": "ODYSSEY #013"})
+    assert d["site"] == "Winamax"
+    assert seen["site"] == "Winamax"   # procura no site corrigido, não no gravado
+
+
+def test_compute_match_no_captured_at_resolves_tn():
+    with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
+         patch("app.routers.table_ss.resolve_tournament_number", return_value=("T5", [])):
+        d = table_ss.compute_table_ss_match(None, "Winamax", {"tournament_name": "X"})
+    assert d["result"] == "no_match_to_hand"
+    assert d["tournament_number"] == "T5"
+    assert d["matched_hand_db_id"] is None
+
+
+# ── _apply_hand_link — primitiva única (des)ligação ─────────────────────────
+
+def test_apply_hand_link_links_and_unlinks_stale():
+    cur = MagicMock()
+    table_ss._apply_hand_link(cur, ss_id=7, matched_hand_db_id=10)
+    sqls = [" ".join(c[0][0].split()) for c in cur.execute.call_args_list]
+    # desliga obsoletas (id <> match) E liga a mão casada.
+    assert any("SET context_table_ss_id = NULL WHERE context_table_ss_id = %s AND id <> %s" in s for s in sqls)
+    assert any("SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
+
+
+def test_apply_hand_link_none_unlinks_all():
+    cur = MagicMock()
+    table_ss._apply_hand_link(cur, ss_id=7, matched_hand_db_id=None)
+    sqls = [" ".join(c[0][0].split()) for c in cur.execute.call_args_list]
+    assert sqls == ["UPDATE hands SET context_table_ss_id = NULL WHERE context_table_ss_id = %s"]
+
+
+# ── reconcile_table_ss (R sobre TODAS as SS, pós-import) ────────────────────
+
 @patch("app.routers.table_ss.query")
-def test_relink_links_when_hand_now_in_window(mq, _find, mlink, mbump, _mcorrect):
-    mq.return_value = [_orphan_row()]
-    res = table_ss.relink_orphan_table_ss()
-    assert res == {"checked": 1, "linked": 1, "still_orphan": 0}
-    mlink.assert_called_once()
-    assert mlink.call_args[0][0] == 1            # log_id
-    assert mlink.call_args[0][1]["id"] == 10     # matched hand
-    mbump.assert_not_called()
-
-
-@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
-@patch("app.routers.table_ss._bump_attempt_table_ss")
-@patch("app.routers.table_ss._link_orphan_table_ss")
-@patch("app.routers.table_ss._find_candidate_hands", return_value=[])
-@patch("app.routers.table_ss.query")
-def test_relink_keeps_orphan_when_no_hand(mq, _find, mlink, mbump, _mcorrect):
-    mq.return_value = [_orphan_row()]
-    res = table_ss.relink_orphan_table_ss()
-    assert res == {"checked": 1, "linked": 0, "still_orphan": 1}
-    mlink.assert_not_called()
-    mbump.assert_called_once_with(1)
-
-
-@patch("app.routers.table_ss.query")
-def test_relink_empty_hand_ids_short_circuits(mq):
-    res = table_ss.relink_orphan_table_ss(hand_ids=[])
-    assert res == {"checked": 0, "linked": 0, "still_orphan": 0}
+def test_reconcile_empty_hand_ids_short_circuits(mq):
+    res = table_ss.reconcile_table_ss(hand_ids=[])
+    assert res == {"checked": 0, "changed": 0, "success": 0, "orphan": 0, "ambiguous": 0}
     mq.assert_not_called()
 
 
-@patch("app.routers.table_ss._find_candidate_hands")
-@patch("app.routers.table_ss.query", return_value=[])
-def test_relink_select_filters_orphans_only(mq, _find):
-    # #FIX-B1 (pt50): SELECT apanha orfãos (no_match_to_hand E tm_ambiguous) com
-    # captured_at → success nunca tocado.
-    res = table_ss.relink_orphan_table_ss()
-    assert res == {"checked": 0, "linked": 0, "still_orphan": 0}
+@patch("app.routers.table_ss.query")
+def test_reconcile_select_includes_success_for_correction(mq):
+    # #FIX-B3: re-avalia TODAS (incl. success) → SELECT cobre os 3 results.
+    mq.return_value = []
+    table_ss.reconcile_table_ss()
     sql = " ".join(mq.call_args[0][0].split())
-    assert "result IN ('no_match_to_hand', 'tm_ambiguous')" in sql
-    assert "'success'" not in sql            # success nunca é re-tentado
-    assert "captured_at IS NOT NULL" in sql
-    _find.assert_not_called()
+    assert "result IN ('success', 'no_match_to_hand', 'tm_ambiguous')" in sql
+    assert "vision_json IS NOT NULL" in sql
 
 
-@patch("app.routers.table_ss.get_conn")
-def test_link_orphan_idempotent_when_not_orphan(mock_get_conn):
-    mock_conn = MagicMock()
-    mock_cur = MagicMock()
-    mock_cur.rowcount = 0   # já não está em no_match (success/raça)
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-    mock_get_conn.return_value = mock_conn
-    ok = table_ss._link_orphan_table_ss(
-        1, {"id": 10, "hand_id": "WN-10", "tournament_number": "T1"})
-    assert ok is False
-    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
-    assert not any("UPDATE hands" in s for s in sqls)  # não liga
-    mock_conn.commit.assert_not_called()
-
-
-@patch("app.routers.table_ss.get_conn")
-def test_link_orphan_success_updates_log_and_hand(mock_get_conn):
-    mock_conn = MagicMock()
-    mock_cur = MagicMock()
-    mock_cur.rowcount = 1
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-    mock_get_conn.return_value = mock_conn
-    ok = table_ss._link_orphan_table_ss(
-        1, {"id": 10, "hand_id": "WN-10", "tournament_number": "T1"})
-    assert ok is True
-    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
-    assert any("UPDATE table_ss_processing_log" in s and "result = 'success'" in s for s in sqls)
-    # #FIX-B1 (pt50): o guard de origem aceita no_match_to_hand E tm_ambiguous.
-    assert any("result IN ('no_match_to_hand', 'tm_ambiguous')" in s for s in sqls)
-    assert any("UPDATE hands SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
-    mock_conn.commit.assert_called_once()
-
-
-@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
-@patch("app.routers.table_ss.get_conn")
-@patch("app.routers.table_ss._find_candidate_hands",
-       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
-                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
-                      "played_at": CAP}])
+@patch("app.routers.table_ss._persist_table_ss_match", return_value=True)
+@patch("app.routers.table_ss.compute_table_ss_match")
 @patch("app.routers.table_ss.query")
-def test_relink_end_to_end_flips_orphan_to_success(mq, _find, mock_get_conn, _mcorrect):
-    """no_match + mão agora na janela → worker liga e flip success (link real
-    sobre conn mockada)."""
-    mq.return_value = [_orphan_row()]
-    mock_conn = MagicMock()
-    mock_cur = MagicMock()
-    mock_cur.rowcount = 1
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-    mock_get_conn.return_value = mock_conn
-    res = table_ss.relink_orphan_table_ss()
-    assert res["linked"] == 1
-    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
-    assert any("result = 'success'" in s for s in sqls)
-    assert any("UPDATE hands SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
+def test_reconcile_recomputes_and_persists_each_row(mq, mcompute, mpersist):
+    mq.return_value = [_ss_row(1, result="no_match_to_hand"),
+                       _ss_row(2, result="success", matched="WN-10")]
+    mcompute.return_value = {
+        "result": "success", "matched_hand_id": "WN-10", "matched_hand_db_id": 10,
+        "tournament_number": "T1", "site": "Winamax", "reason_detail": "single_tn"}
+    res = table_ss.reconcile_table_ss()
+    assert res["checked"] == 2
+    assert res["success"] == 2
+    assert mpersist.call_count == 2   # recalcula+persiste cada row (de raiz)
 
 
-# ── relink self-healing de site (#TABLE-SS-VISION-SITE-MISCLASS) ────────────
-
-@patch("app.routers.table_ss.tv._correct_site", return_value="Winamax")
-@patch("app.routers.table_ss._persist_corrected_site_table_ss")
-@patch("app.routers.table_ss._bump_attempt_table_ss")
-@patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
-@patch("app.routers.table_ss._find_candidate_hands",
-       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
-                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
-                      "played_at": CAP}])
-@patch("app.routers.table_ss.query")
-def test_relink_self_heals_misclassified_site(mq, _find, mlink, mbump, mpersist, _mcorrect):
-    # Row gravada com site errada (GGPoker); _correct_site → Winamax: persiste a
-    # correcção E procura candidatos no site corrigido (onde a mão WN aparece).
-    mq.return_value = [_orphan_row(site="GGPoker")]
-    res = table_ss.relink_orphan_table_ss()
-    mpersist.assert_called_once_with(1, "Winamax")
-    assert _find.call_args[0][1] == "Winamax"     # match no site corrigido, não no gravado
-    assert res["linked"] == 1
-
-
-@patch("app.routers.table_ss.tv._correct_site", side_effect=lambda name, site: site)
-@patch("app.routers.table_ss._persist_corrected_site_table_ss")
-@patch("app.routers.table_ss._bump_attempt_table_ss")
-@patch("app.routers.table_ss._link_orphan_table_ss", return_value=True)
-@patch("app.routers.table_ss._find_candidate_hands",
-       return_value=[{"id": 10, "hand_id": "WN-10", "tournament_number": "T1",
-                      "tournament_name": "ODYSSEY #013", "site": "Winamax",
-                      "played_at": CAP}])
-@patch("app.routers.table_ss.query")
-def test_relink_no_persist_when_site_already_correct(mq, _find, mlink, mbump, mpersist, _mcorrect):
-    # _correct_site identidade (site já correcta) → não persiste (idempotente).
-    mq.return_value = [_orphan_row(site="Winamax")]
-    table_ss.relink_orphan_table_ss()
-    mpersist.assert_not_called()
+# back-compat: o nome antigo do trigger delega no reconcile.
+@patch("app.routers.table_ss.reconcile_table_ss", return_value={"checked": 0})
+def test_relink_alias_delegates_to_reconcile(mrec):
+    table_ss.relink_orphan_table_ss(hand_ids=[1, 2])
+    mrec.assert_called_once_with([1, 2])
 
 
 @patch("app.routers.table_ss.get_conn")
-def test_persist_corrected_site_guarded_update(mock_get_conn):
+def test_persist_match_updates_fields_and_links(mock_get_conn):
+    """_persist_table_ss_match grava os campos de match + reconcilia o link."""
     mock_conn = MagicMock()
     mock_cur = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value = mock_cur
     mock_get_conn.return_value = mock_conn
-    table_ss._persist_corrected_site_table_ss(1, "Winamax")
-    sql = " ".join(mock_cur.execute.call_args[0][0].split())
-    assert "UPDATE table_ss_processing_log SET site = %s" in sql
-    # #FIX-B1 (pt50): guard cobre os dois estados órfãos (idempotência/escopo).
-    assert "result IN ('no_match_to_hand', 'tm_ambiguous')" in sql
-    assert mock_cur.execute.call_args[0][1] == ("Winamax", 1)
+    desired = {"result": "success", "reason_detail": "single_tn", "site": "Winamax",
+               "tournament_number": "T1", "matched_hand_id": "WN-10",
+               "matched_hand_db_id": 10}
+    changed = table_ss._persist_table_ss_match(
+        5, desired, prev_result="no_match_to_hand", prev_matched_hand_id=None)
+    assert changed is True   # mudou de no_match→success
+    sqls = [" ".join(c[0][0].split()) for c in mock_cur.execute.call_args_list]
+    assert any("UPDATE table_ss_processing_log SET result = %s" in s for s in sqls)
+    assert any("SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
     mock_conn.commit.assert_called_once()

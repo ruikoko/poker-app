@@ -53,16 +53,19 @@ export default function TableSSPage() {
   const inputRef = useRef(null)
   const keyRef = useRef(0)
 
-  async function refreshRecent() {
-    setLoadingRecent(true)
+  // silent=true: actualiza a tabela sem mexer no spinner (refresh ao vivo após
+  // cada upload — #23, fecha o "ainda a processar" preso mostrando já o
+  // resultado reconciliado pelo R).
+  async function refreshRecent(silent = false) {
+    if (!silent) setLoadingRecent(true)
     setRecentError(null)
     try {
       const out = await tableSs.recent()
       setRecent(out?.items || [])
     } catch (e) {
-      setRecentError(String(e.message || e))
+      if (!silent) setRecentError(String(e.message || e))
     } finally {
-      setLoadingRecent(false)
+      if (!silent) setLoadingRecent(false)
     }
   }
 
@@ -78,7 +81,9 @@ export default function TableSSPage() {
       key: ++keyRef.current, name: f.name, file: f, status: 'pending', result: null,
     }))
     setItems(prev => [...entries, ...prev])
-    // Sequencial — evita martelar a Vision em paralelo.
+    // Sequencial — evita martelar a Vision em paralelo. O upload já devolve o
+    // match final (R corre síncrono), por isso o estado por ficheiro nunca fica
+    // preso em "a processar"; refrescamos a tabela ao vivo a cada ficheiro.
     for (const e of entries) {
       patch(e.key, { status: 'processing' })
       try {
@@ -87,6 +92,7 @@ export default function TableSSPage() {
       } catch (err) {
         patch(e.key, { status: 'error', result: { reason_detail: String(err.message || err) } })
       }
+      refreshRecent(true)   // refresh ao vivo, sem flicker do spinner
     }
     refreshRecent()
   }, [])

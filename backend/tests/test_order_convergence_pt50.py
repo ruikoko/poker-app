@@ -47,66 +47,79 @@ def test_fix_a_hm3_both_write_paths_guard_gg_enrich():
     assert "ELSE %s END" in norm
 
 
-# ── FIX B.1 — convergência table-SS: ordem (SS antes vs depois) → mesma mão ───
+# ── FIX B.3 — reconcile R: match converge em qualquer ordem + auto-corrige ───
 
-def test_fix_b1_table_ss_before_vs_after_converge_to_same_hand():
-    """(A) SS DEPOIS da mão: casa directo no upload (_resolve_match).
-    (B) SS ANTES da mão: upload não acha (orfã) e o relink liga quando a mão
-    chega. As duas ordens convergem para a MESMA mão."""
+def _ss_row(rid, result, matched, name="ODYSSEY #013"):
+    return {"id": rid, "captured_at": CAP, "site": "Winamax",
+            "vision_json": {"tournament_name": name},
+            "result": result, "matched_hand_id": matched}
+
+
+def test_b3_table_ss_converges_same_match_regardless_of_order():
+    """A MESMA função R produz o mesmo match independentemente da ordem:
+    (A) SS DEPOIS da mão → R casa directo no upload (compute).
+    (B) SS ANTES da mão → gravada órfã; quando a mão chega, o reconcile recalcula
+        de raiz e liga à MESMA mão (hand_db_id 10)."""
     ss_vj = {"tournament_name": "ODYSSEY #013"}
 
-    # (A) ordem "depois" — match directo.
-    m_after = table_ss._resolve_match(CAP, ss_vj, "Winamax", [HAND])
-    assert m_after["matched"]["hand_id"] == "WN-10"
-    assert m_after["reason"] == "single_tn"
-
-    # (B) ordem "antes" — orfã + relink.
-    orphan = {"id": 1, "captured_at": CAP, "site": "Winamax", "vision_json": ss_vj}
+    # (A) ordem "depois" — R no upload.
     with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
-         patch("app.routers.table_ss._bump_attempt_table_ss"), \
-         patch("app.routers.table_ss._link_orphan_table_ss", return_value=True) as mlink, \
-         patch("app.routers.table_ss._find_candidate_hands", return_value=[HAND]), \
-         patch("app.routers.table_ss.query", return_value=[orphan]):
-        res = table_ss.relink_orphan_table_ss()
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[HAND]):
+        d_after = table_ss.compute_table_ss_match(CAP, "Winamax", ss_vj)
+    assert d_after["matched_hand_id"] == "WN-10"
+    assert d_after["matched_hand_db_id"] == 10
 
-    assert res["linked"] == 1
-    linked_hand = mlink.call_args[0][1]
-    # Convergência: a ordem (B) liga à MESMA mão que a ordem (A) casou.
-    assert linked_hand["hand_id"] == m_after["matched"]["hand_id"] == "WN-10"
-
-
-def test_fix_b1_previously_ambiguous_ss_is_now_relinkable():
-    """Uma SS que ficou `tm_ambiguous` no upload (resolver sem desambiguador na
-    altura) tem de poder ser resgatada pelo relink quando o desambiguador chega
-    — antes do FIX B.1 ficava presa para sempre (relink só via no_match_to_hand).
-
-    Prova: o SELECT do relink e a UPDATE de link cobrem `tm_ambiguous`, e uma
-    orfã ambígua que agora resolve para 1 mão é ligada."""
-    # 1) O SELECT do relink inclui tm_ambiguous.
-    with patch("app.routers.table_ss._find_candidate_hands"), \
-         patch("app.routers.table_ss.query", return_value=[]) as mq:
-        table_ss.relink_orphan_table_ss()
-    select_sql = " ".join(mq.call_args[0][0].split())
-    assert "result IN ('no_match_to_hand', 'tm_ambiguous')" in select_sql
-
-    # 2) Uma orfã (que tinha ficado tm_ambiguous) cuja janela agora resolve para
-    #    1 mão → relink liga (end-to-end sobre conn mockada).
-    orphan = {"id": 5, "captured_at": CAP, "site": "Winamax",
-              "vision_json": {"tournament_name": "ODYSSEY #013"}}
-    conn = MagicMock()
-    cur = MagicMock()
-    cur.rowcount = 1
+    # (B) ordem "antes" — órfã na BD; reconcile recalcula e liga.
+    orphan = _ss_row(1, "no_match_to_hand", None)
+    conn = MagicMock(); cur = MagicMock()
     conn.cursor.return_value.__enter__.return_value = cur
     with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
          patch("app.routers.table_ss.get_conn", return_value=conn), \
          patch("app.routers.table_ss._find_candidate_hands", return_value=[HAND]), \
          patch("app.routers.table_ss.query", return_value=[orphan]):
-        res = table_ss.relink_orphan_table_ss()
-    assert res["linked"] == 1
-    sqls = [" ".join(c[0][0].split()) for c in cur.execute.call_args_list]
-    # A UPDATE de link aceita a transição a partir de tm_ambiguous.
-    assert any("result IN ('no_match_to_hand', 'tm_ambiguous')" in s for s in sqls)
-    assert any("UPDATE hands SET context_table_ss_id = %s" in s for s in sqls)
+        res = table_ss.reconcile_table_ss()
+
+    assert res["success"] == 1 and res["changed"] == 1
+    link = [(" ".join(c[0][0].split()), c[0][1]) for c in cur.execute.call_args_list]
+    # Convergência: a ordem (B) liga à MESMA mão (ss_id=1 → hand_db_id=10) que (A).
+    assert any("SET context_table_ss_id = %s WHERE id = %s" in s and p == (1, 10)
+               for s, p in link)
+
+
+def test_b3_corrects_previous_wrong_match_after_reconcile():
+    """SS gravada `success` ligada à mão ERRADA (WN-99); quando uma mão melhor
+    existe, o reconcile recalcula → desliga a obsoleta e liga a correcta (vai
+    além do B.1: re-avalia mesmo as já success)."""
+    wrong = _ss_row(1, "success", "WN-99")
+    conn = MagicMock(); cur = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
+         patch("app.routers.table_ss.get_conn", return_value=conn), \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[HAND]), \
+         patch("app.routers.table_ss.query", return_value=[wrong]):
+        res = table_ss.reconcile_table_ss()
+
+    assert res["changed"] == 1   # corrigiu WN-99 → WN-10
+    sqls = [(" ".join(c[0][0].split()), c[0][1]) for c in cur.execute.call_args_list]
+    # desliga a mão obsoleta (id <> match) e liga a correcta (id 10).
+    assert any("SET context_table_ss_id = NULL WHERE context_table_ss_id = %s AND id <> %s" in s
+               for s, _ in sqls)
+    assert any("SET context_table_ss_id = %s WHERE id = %s" in s and p == (1, 10)
+               for s, p in sqls)
+
+
+def test_b3_reconcile_idempotent_no_change_when_same():
+    """Reconcile com o MESMO estado da BD → não muda nada (changed=0)."""
+    same = _ss_row(1, "success", "WN-10")
+    conn = MagicMock(); cur = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
+         patch("app.routers.table_ss.get_conn", return_value=conn), \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[HAND]), \
+         patch("app.routers.table_ss.query", return_value=[same]):
+        res = table_ss.reconcile_table_ss()
+    assert res["checked"] == 1
+    assert res["changed"] == 0   # match idêntico → sem churn
 
 
 # ── Discord — SS antes da HH (placeholder) preserva os dados Vision ──────────

@@ -123,6 +123,36 @@ def ensure_table_ss_processing_log_schema():
         conn.close()
 
 
+# ── Link da mão (hands.context_table_ss_id) ──────────────────────────────────
+
+def _apply_hand_link(cur, ss_id: int, matched_hand_db_id: Optional[int]) -> None:
+    """Reconcilia `hands.context_table_ss_id` para esta SS (id=ss_id), DENTRO da
+    transacção do `cur`. Invariante: depois disto, APENAS a mão casada (ou
+    nenhuma) aponta para a SS — desliga qualquer mão obsoleta que ainda aponte
+    para ela e liga a nova. Idempotente: re-correr com o mesmo match não muda
+    nada. É a primitiva única de (des)ligação usada pelo upload e pelo reconcile
+    (#FIX-B3 pt50)."""
+    if matched_hand_db_id is None:
+        # Sem match → desliga qualquer mão que ainda aponte para esta SS.
+        cur.execute(
+            "UPDATE hands SET context_table_ss_id = NULL "
+            "WHERE context_table_ss_id = %s",
+            (ss_id,),
+        )
+        return
+    # Desliga mãos obsoletas (apontavam para esta SS mas já não são o match)…
+    cur.execute(
+        "UPDATE hands SET context_table_ss_id = NULL "
+        "WHERE context_table_ss_id = %s AND id <> %s",
+        (ss_id, matched_hand_db_id),
+    )
+    # …e liga a mão casada.
+    cur.execute(
+        "UPDATE hands SET context_table_ss_id = %s WHERE id = %s",
+        (ss_id, matched_hand_db_id),
+    )
+
+
 # ── UPSERT (+ atomic link em hands) ──────────────────────────────────────────
 
 def _upsert_table_ss_log(
@@ -143,9 +173,10 @@ def _upsert_table_ss_log(
     vision_json: Optional[dict] = None,
     matched_hand_db_id: Optional[int] = None,
 ) -> Optional[int]:
-    """UPSERT por file_hash; incrementa attempt_count em conflito. Quando
-    result='success' e matched_hand_db_id presente, liga a mão na MESMA
-    transacção (hands.context_table_ss_id = <id da log row>). Devolve o id."""
+    """UPSERT por file_hash; incrementa attempt_count em conflito. Reconcilia o
+    link da mão na MESMA transacção via `_apply_hand_link` (#FIX-B3 pt50): liga a
+    mão casada (matched_hand_db_id, só presente em success) e desliga obsoletas.
+    Devolve o id."""
     if result not in _VALID_RESULTS:
         raise ValueError(f"invalid result {result!r}")
     try:
@@ -192,15 +223,12 @@ def _upsert_table_ss_log(
             )
             row = cur.fetchone()
             ss_id = row["id"] if row else None
-            if (
-                ss_id is not None
-                and result == "success"
-                and matched_hand_db_id is not None
-            ):
-                cur.execute(
-                    "UPDATE hands SET context_table_ss_id = %s WHERE id = %s",
-                    (ss_id, matched_hand_db_id),
-                )
+            # #FIX-B3 (pt50): reconcilia o link da mão SEMPRE (não só em success),
+            # via a primitiva única: liga a mão casada e desliga qualquer mão
+            # obsoleta que ainda aponte para esta SS. matched_hand_db_id só vem
+            # != None quando R devolveu success.
+            if ss_id is not None:
+                _apply_hand_link(cur, ss_id, matched_hand_db_id)
         conn.commit()
         return ss_id
     except Exception as e:
@@ -304,92 +332,99 @@ def _resolve_match(
             "reason": f"multi_tn_unresolved:{len(tns)}"}
 
 
-# ── Re-link pós-import (peça em falta da Fase A) ─────────────────────────────
+# ── R — função determinística única de match (#FIX-B3 pt50) ──────────────────
 
-def _bump_attempt_table_ss(log_id: int) -> None:
-    """Incrementa attempt_count sem mudar o result (continua orfão:
-    no_match_to_hand ou tm_ambiguous — #FIX-B1 pt50)."""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE table_ss_processing_log SET attempt_count = attempt_count + 1 "
-                "WHERE id = %s AND result IN ('no_match_to_hand', 'tm_ambiguous')",
-                (log_id,),
-            )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"[table_ss_relink] bump attempt falhou id={log_id}: {e}")
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+def compute_table_ss_match(
+    captured_at: Optional[datetime], site: Optional[str], vj: dict
+) -> dict:
+    """R — a ÚNICA função de match da SS de mesa. Dado o read guardado da SS
+    (captured_at UTC, site, vision_json) + o conjunto ACTUAL de mãos na BD,
+    calcula o match. Mesmos inputs + mesmo estado da BD → mesmo output, sem
+    depender de quando a SS entrou nem de qualquer resultado anterior (recalcula
+    sempre de raiz). Usada IGUALMENTE pelo upload e pelo reconcile.
+
+    Pura quanto a escritas (só lê `hands` via `_find_candidate_hands` e o
+    resolver). Devolve {result, reason_detail, site, tournament_number,
+    matched_hand_id, matched_hand_db_id}; result ∈ {success, tm_ambiguous,
+    no_match_to_hand}.
+    """
+    # Self-healing de site ANTES de qualquer match (determinístico, idempotente).
+    site = tv._correct_site(vj.get("tournament_name"), site)
+    base = {
+        "result": "no_match_to_hand", "reason_detail": None, "site": site,
+        "tournament_number": None, "matched_hand_id": None,
+        "matched_hand_db_id": None,
+    }
+
+    if captured_at is None:
+        # Sem âncora temporal não há match a uma mão; resolve tn p/ limbo.
+        _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
+        tn, _c = resolve_tournament_number(
+            site, vj.get("tournament_name") or "", None,
+            buy_in=_bi, buy_in_currency=_cur,
+        )
+        base["reason_detail"] = "sem captured_at (filename sem YYYYMMDDHHMMSS)"
+        base["tournament_number"] = tn
+        return base
+
+    candidates = _find_candidate_hands(captured_at, site)
+    m = _resolve_match(captured_at, vj, site, candidates)
+    if m["matched"]:
+        return {
+            "result": "success", "reason_detail": m["reason"], "site": site,
+            "tournament_number": m["tn"],
+            "matched_hand_id": m["matched"]["hand_id"],
+            "matched_hand_db_id": m["matched"]["id"],
+        }
+    if m["ambiguous"]:
+        base["result"] = "tm_ambiguous"
+        base["reason_detail"] = m["reason"]
+        return base
+    # no_hands_in_window — resolve tn p/ limbo linkável.
+    _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
+    tn, _c = resolve_tournament_number(
+        site, vj.get("tournament_name") or "", None,
+        posted_at_hint=captured_at, buy_in=_bi, buy_in_currency=_cur,
+    )
+    base["reason_detail"] = m["reason"]
+    base["tournament_number"] = tn
+    return base
 
 
-def _persist_corrected_site_table_ss(log_id: int, new_site: str) -> None:
-    """#TABLE-SS-VISION-SITE-MISCLASS self-healing: grava a site corrigida numa
-    row órfã. Guard `result IN ('no_match_to_hand','tm_ambiguous')` = idempotência
-    + escopo (nunca toca rows já `success`; #FIX-B1 pt50 cobre ambíguos)."""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE table_ss_processing_log SET site = %s "
-                "WHERE id = %s AND result IN ('no_match_to_hand', 'tm_ambiguous')",
-                (new_site, log_id),
-            )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"[table_ss_relink] persistir site corrigida falhou id={log_id}: {e}")
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-
-def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
-    """Liga uma SS órfã à mão agora encontrada, em 1 transacção. O guard
-    `WHERE result IN ('no_match_to_hand','tm_ambiguous')` garante idempotência
-    (no-op se já success ou corrida concorrente) e, desde #FIX-B1 (pt50), permite
-    resgatar rows que ficaram ambíguas no upload (ex.: o TS desambiguador chegou
-    depois). Devolve True sse ligou."""
+def _persist_table_ss_match(
+    ss_id: int, desired: dict, *, prev_result=None, prev_matched_hand_id=None,
+) -> bool:
+    """Persiste o output de R numa row JÁ existente (o read Vision não muda):
+    actualiza os campos de match e reconcilia o link da mão (`_apply_hand_link`:
+    desliga obsoletas, liga a nova) — tudo em 1 transacção. NÃO confia em estado
+    anterior. Devolve True se o match mudou (telemetria)."""
+    changed = (
+        desired["result"] != prev_result
+        or desired["matched_hand_id"] != prev_matched_hand_id
+    )
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE table_ss_processing_log
-                   SET result = 'success',
+                   SET result = %s,
+                       reason_detail = %s,
+                       site = %s,
+                       tournament_number = %s,
                        matched_hand_id = %s,
-                       tournament_number = COALESCE(tournament_number, %s),
-                       attempt_count = attempt_count + 1,
-                       reason_detail = 'relinked_post_import'
-                 WHERE id = %s AND result IN ('no_match_to_hand', 'tm_ambiguous')
+                       attempt_count = attempt_count + 1
+                 WHERE id = %s
                 """,
-                (matched_hand["hand_id"], matched_hand.get("tournament_number"), log_id),
+                (desired["result"], desired["reason_detail"], desired["site"],
+                 desired["tournament_number"], desired["matched_hand_id"], ss_id),
             )
-            if cur.rowcount == 0:
-                conn.rollback()
-                return False
-            cur.execute(
-                "UPDATE hands SET context_table_ss_id = %s WHERE id = %s",
-                (log_id, matched_hand["id"]),
-            )
+            _apply_hand_link(cur, ss_id, desired["matched_hand_db_id"])
         conn.commit()
-        return True
+        return changed
     except Exception as e:
         logger.error(
-            f"[table_ss_relink] link falhou id={log_id}: {type(e).__name__}: {e}"
+            f"[table_ss_reconcile] persist falhou id={ss_id}: {type(e).__name__}: {e}"
         )
         try:
             conn.rollback()
@@ -403,62 +438,60 @@ def _link_orphan_table_ss(log_id: int, matched_hand: dict) -> bool:
             pass
 
 
-def relink_orphan_table_ss(hand_ids=None) -> dict:
-    """Re-tenta linkar SSs de mesa órfãs (`no_match_to_hand` ou `tm_ambiguous`)
-    a mãos agora presentes (tipicamente recém-importadas). Disparado
-    fire-and-forget no fim de import_hm3 / import GG zip.
+# ── Reconcile pós-import (R sobre TODAS as SS) ───────────────────────────────
 
-    `hand_ids` é o sinal do trigger (que mãos chegaram); o match re-corre pela
-    janela temporal (`_find_candidate_hands`), por isso serve só para
-    curto-circuitar quando nada foi importado e para logging.
+def reconcile_table_ss(hand_ids=None) -> dict:
+    """Corre R sobre TODAS as SS de mesa com read utilizável (já passaram
+    Vision+parse+site-gate: result ∈ {success, no_match_to_hand, tm_ambiguous} e
+    vision_json presente), recalculando o match de raiz e re-persistindo —
+    INCLUINDO as já `success`, para CORRIGIR um match anterior errado quando
+    chega uma mão melhor (vai além do relink B.1, que só re-tentava órfãs).
 
-    Idempotente: só selecciona rows órfãs com captured_at; rows já `success`
-    nunca são tocadas. #FIX-B1 (pt50): inclui `tm_ambiguous` para que uma SS que
-    ficou ambígua no upload (resolver sem TS/meta na altura) seja re-avaliada
-    quando o desambiguador chega — convergência independente da ordem. Devolve
-    {checked, linked, still_orphan}.
+    Determinístico e idempotente: re-correr sem dados novos não muda nada (o
+    link só é tocado quando o match muda de facto). Disparado fire-and-forget
+    após cada import. `hand_ids=[]` → curto-circuita (nada importado). Devolve
+    {checked, changed, success, orphan, ambiguous}.
     """
     if hand_ids is not None and len(hand_ids) == 0:
-        return {"checked": 0, "linked": 0, "still_orphan": 0}
+        return {"checked": 0, "changed": 0, "success": 0,
+                "orphan": 0, "ambiguous": 0}
 
     rows = query(
-        """SELECT id, captured_at, site, vision_json
+        """SELECT id, captured_at, site, vision_json, result, matched_hand_id
              FROM table_ss_processing_log
-            WHERE result IN ('no_match_to_hand', 'tm_ambiguous')
-              AND captured_at IS NOT NULL"""
+            WHERE result IN ('success', 'no_match_to_hand', 'tm_ambiguous')
+              AND vision_json IS NOT NULL"""
     )
-    checked = linked = still = 0
+    checked = changed = n_success = n_orphan = n_amb = 0
     for r in rows:
         checked += 1
-        site = r.get("site")
-        captured_at = r.get("captured_at")
-        if not site or captured_at is None:
-            _bump_attempt_table_ss(r["id"])
-            still += 1
-            continue
         vj = r.get("vision_json") or {}
-        # #TABLE-SS-VISION-SITE-MISCLASS self-healing: corrige a site já gravada
-        # quando o nome a contradiz, ANTES do match; persiste a correcção no log.
-        corrected = tv._correct_site(vj.get("tournament_name"), site)
-        if corrected != site:
-            logger.info(
-                "[table_ss_relink] site corrigida id=%s %s -> %s | name=%r",
-                r["id"], site, corrected, vj.get("tournament_name"),
-            )
-            _persist_corrected_site_table_ss(r["id"], corrected)
-            site = corrected
-        candidates = _find_candidate_hands(captured_at, site)
-        m = _resolve_match(captured_at, vj, site, candidates)
-        if m["matched"] and _link_orphan_table_ss(r["id"], m["matched"]):
-            linked += 1
+        desired = compute_table_ss_match(r.get("captured_at"), r.get("site"), vj)
+        if _persist_table_ss_match(
+            r["id"], desired,
+            prev_result=r.get("result"),
+            prev_matched_hand_id=r.get("matched_hand_id"),
+        ):
+            changed += 1
+        if desired["result"] == "success":
+            n_success += 1
+        elif desired["result"] == "tm_ambiguous":
+            n_amb += 1
         else:
-            _bump_attempt_table_ss(r["id"])
-            still += 1
+            n_orphan += 1
     logger.info(
-        "[table_ss_relink] checked=%d linked=%d still_orphan=%d",
-        checked, linked, still,
+        "[table_ss_reconcile] checked=%d changed=%d success=%d orphan=%d ambiguous=%d",
+        checked, changed, n_success, n_orphan, n_amb,
     )
-    return {"checked": checked, "linked": linked, "still_orphan": still}
+    return {"checked": checked, "changed": changed, "success": n_success,
+            "orphan": n_orphan, "ambiguous": n_amb}
+
+
+def relink_orphan_table_ss(hand_ids=None) -> dict:
+    """Back-compat: os triggers de import (import_.py, hm3.py) chamam este nome.
+    Agora delega no reconcile completo (R sobre TODAS as SS). Ver
+    `reconcile_table_ss`."""
+    return reconcile_table_ss(hand_ids)
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
@@ -576,42 +609,18 @@ async def _process_table_ss(
         return _finalize(out, source=source, original_filename=filename,
                          file_size=fsize, captured_at=captured_at)
 
-    # 5. Match temporal mão → resolver-desambigua.
-    matched_db_id = None
-    if captured_at is None:
-        out["result"] = "no_match_to_hand"
-        out["reason_detail"] = "sem captured_at (filename sem YYYYMMDDHHMMSS)"
-        _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
-        tn, _c = resolve_tournament_number(
-            site, vj.get("tournament_name") or "", None,
-            buy_in=_bi, buy_in_currency=_cur,
-        )
-        out["tournament_number"] = tn
-    else:
-        candidates = _find_candidate_hands(captured_at, site)
-        m = _resolve_match(captured_at, vj, site, candidates)
-        if m["matched"]:
-            out["result"] = "success"
-            out["reason_detail"] = m["reason"]
-            out["tournament_number"] = m["tn"]
-            out["hand_matched"] = m["matched"]["hand_id"]
-            matched_db_id = m["matched"]["id"]
-        elif m["ambiguous"]:
-            out["result"] = "tm_ambiguous"
-            out["reason_detail"] = m["reason"]
-        else:  # no_hands_in_window — tenta resolver p/ guardar tn (limbo linkável)
-            out["result"] = "no_match_to_hand"
-            out["reason_detail"] = m["reason"]
-            _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
-            tn, _c = resolve_tournament_number(
-                site, vj.get("tournament_name") or "", None,
-                posted_at_hint=captured_at, buy_in=_bi, buy_in_currency=_cur,
-            )
-            out["tournament_number"] = tn
+    # 5. Match — função determinística ÚNICA R (a MESMA que o reconcile corre).
+    #    O upload deixa de ter caminho de match próprio: grava o read e chama R.
+    desired = compute_table_ss_match(captured_at, site, vj)
+    out["site"] = desired["site"]          # R pode ter re-corrigido a site
+    out["result"] = desired["result"]
+    out["reason_detail"] = desired["reason_detail"]
+    out["tournament_number"] = desired["tournament_number"]
+    out["hand_matched"] = desired["matched_hand_id"]
 
     return _finalize(out, source=source, original_filename=filename,
                      file_size=fsize, captured_at=captured_at,
-                     matched_hand_db_id=matched_db_id)
+                     matched_hand_db_id=desired["matched_hand_db_id"])
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
