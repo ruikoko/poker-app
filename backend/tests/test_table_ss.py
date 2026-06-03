@@ -156,6 +156,22 @@ def test_resolve_match_multi_tn_disambiguated_by_name(_mock_res):
     assert m["reason"] == "disambiguated_by_name"
 
 
+def test_resolve_match_multi_tn_direct_name_disambiguation():
+    """pt54 (caso GALACTICA #034): 2 torneios na janela (GALACTICA + HIGHROLLER),
+    SS = 'GALACTICA' → desambigua DIRECTO pelo nome contra os candidatos, sem
+    precisar do resolver (cuja janela excluía o torneio iniciado <30min antes)."""
+    cands = [
+        _candn(1, "1103534384", "GALACTICA"),    # mais próxima
+        _candn(2, "1103534384", "GALACTICA"),
+        _candn(3, "1103131976", "HIGHROLLER"),
+    ]
+    # resolver NÃO mockado de propósito — o directo tem de resolver sozinho.
+    m = table_ss._resolve_match(CAP, {"tournament_name": "GALACTICA"}, "Winamax", cands)
+    assert m["matched"]["id"] == 1
+    assert m["tn"] == "1103534384"
+    assert m["reason"] == "disambiguated_by_name_direct"
+
+
 @patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, []))
 def test_resolve_match_multi_tn_resolver_none_ambiguous(_mock_res):
     cands = [_cand(10, "T1"), _cand(20, "T2")]

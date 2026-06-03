@@ -318,9 +318,23 @@ def _resolve_match(
         return {"matched": c, "tn": c["tournament_number"], "ambiguous": False,
                 "reason": "single_tn"}
     # Multi-tabling: desambiguar pelo nome lido nesta SS.
+    ss_name = vj.get("tournament_name")
+    # pt54: desambiguação DIRECTA pelo nome (limpo) contra os candidatos que já
+    # temos na janela. Mais robusta que o resolver, cuja janela própria
+    # (posted−30min) exclui um torneio iniciado <30min antes da SS — era o que
+    # deixava o GALACTICA #034 ambíguo apesar de só haver 1 GALACTICA na janela.
+    # Se exactamente UM torneio entre os candidatos bate o nome → é esse.
+    if ss_name and site in _NAME_RELIABLE_SITES:
+        name_hit = [c for c in candidates
+                    if name_tokens_subset(ss_name, c.get("tournament_name"))]
+        hit_tns = {c["tournament_number"] for c in name_hit}
+        if len(hit_tns) == 1:
+            return {"matched": name_hit[0], "tn": name_hit[0]["tournament_number"],
+                    "ambiguous": False, "reason": "disambiguated_by_name_direct"}
+    # Fallback: resolver-por-nome (TS/meta/hands) quando o directo não resolve.
     _bi, _cur = _parse_buy_in_str(vj.get("tournament_buy_in"))
     tn, _cands = resolve_tournament_number(
-        site, vj.get("tournament_name") or "", None,
+        site, ss_name or "", None,
         posted_at_hint=captured_at, buy_in=_bi, buy_in_currency=_cur,
     )
     if tn and tn in tns:
