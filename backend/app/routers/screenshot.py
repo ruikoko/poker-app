@@ -986,11 +986,14 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
     """
     try:
         async with _vision_sem:
-            vision_text = await asyncio.to_thread(_extract_hand_data_from_image, content, mime_type)
-        # pt52: _extract_hand_data_from_image devolve None quando a Vision FALHA
-        # (ex.: 429 quota, timeout, excepção). NÃO marcar vision_done=true nesse
-        # caso — deixa a entry retry-able. Antes marcava done com TM=None (falso
-        # "Vision OK"), encravando a recuperação (250 entries presas em pt51).
+            # pt53 PASSO 2: leitura ao vivo via CLAUDE (claude-sonnet-4-6). O
+            # caminho OpenAI (_extract_hand_data_from_image) fica disponível como
+            # rede até confirmarmos em produção; OPENAI_API_KEY mantida.
+            vision_text = await asyncio.to_thread(_extract_hand_data_from_image_claude, content, mime_type)
+        # pt52: a função de Vision devolve None quando FALHA (ex.: 429 quota,
+        # timeout, excepção). NÃO marcar vision_done=true nesse caso — deixa a
+        # entry retry-able. Antes marcava done com TM=None (falso "Vision OK"),
+        # encravando a recuperação (250 entries presas em pt51).
         if vision_text is None:
             logger.warning(
                 f"[bg] Vision FALHOU entry {entry_id} — não marca vision_done "

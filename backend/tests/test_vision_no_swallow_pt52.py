@@ -11,8 +11,9 @@ from app.routers.screenshot import _run_vision_for_entry
 
 
 def test_vision_failure_does_not_touch_db_nor_mark_done():
-    """_extract devolve None (falha) → o worker sai sem escrever na BD."""
-    with patch("app.routers.screenshot._extract_hand_data_from_image", return_value=None), \
+    """Vision devolve None (falha) → o worker sai sem escrever na BD. pt53: o
+    live chama a versão Claude (_extract_hand_data_from_image_claude)."""
+    with patch("app.routers.screenshot._extract_hand_data_from_image_claude", return_value=None), \
          patch("app.routers.screenshot.get_conn") as mgc, \
          patch("app.routers.screenshot.query") as mq:
         asyncio.run(_run_vision_for_entry(
@@ -28,7 +29,7 @@ def test_vision_success_marks_done():
     from unittest.mock import MagicMock
     conn = MagicMock()
     conn.cursor.return_value.__enter__.return_value = MagicMock()
-    with patch("app.routers.screenshot._extract_hand_data_from_image", return_value="TM: None\nPLAYERS:"), \
+    with patch("app.routers.screenshot._extract_hand_data_from_image_claude", return_value="TM: None\nPLAYERS:"), \
          patch("app.routers.screenshot._parse_vision_response", return_value={"tm": None, "players_list": []}), \
          patch("app.routers.screenshot._compress_image", return_value=("Yg==", "image/jpeg")), \
          patch("app.routers.screenshot.get_conn", return_value=conn):
