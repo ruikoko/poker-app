@@ -188,11 +188,11 @@ def _parse_filename(filename: str) -> dict:
 # ── Vision: extrair jogadores, SB/BB do painel, stacks ───────────────────────
 
 def _build_gg_vision_prompt() -> str:
-    """Prompt ÚNICO da Vision do replayer GG, partilhado pelo caminho OpenAI
-    (live) e pelo caminho Claude (#pt53 migração). Injecta a lista dinâmica de
-    heroes GG (Rui + FRIEND_HEROES) e preserva os detalhes sensíveis: VPIP%
-    (badge laranja) vs bounty USD (coroa dourada), e os nomes SB/BB lidos do
-    painel esquerdo. Saída em LINHAS (parseada por _parse_vision_response)."""
+    """Prompt ÚNICO da Vision do replayer GG (#pt53; a leitura corre em Claude).
+    Injecta a lista dinâmica de heroes GG (Rui + FRIEND_HEROES) e preserva os
+    detalhes sensíveis: VPIP% (badge laranja) vs bounty USD (coroa dourada), e os
+    nomes SB/BB lidos do painel esquerdo. Saída em LINHAS (parseada por
+    _parse_vision_response)."""
     # Lista dinâmica de heroes GG (Rui + FRIEND_HEROES aplicáveis a GG).
     # 4 nicks — pequeno o suficiente para não confundir o modelo.
     gg_heroes = sorted(n.title() for n in ALL_NICKS_BY_SITE.get("GGPoker", []))
@@ -257,12 +257,10 @@ _REPLAYER_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
 def _extract_hand_data_from_image_claude(image_bytes: bytes, mime_type: str = "image/png") -> str | None:
-    """Versão CLAUDE da leitura do replayer GG (#pt53 migração OpenAI→Claude).
-    Mesmo prompt e mesmo formato de saída em LINHAS que o caminho OpenAI (para
-    _parse_vision_response ficar intacto). Mesmo padrão de imagem base64 dos 3
-    pipelines Claude existentes. Devolve o texto em linhas, ou None em falha de
-    API (não engole: o caller decide retry-able). NÃO está ligada à pipeline
-    live no passo 1 — só validação contra o baseline OpenAI."""
+    """Leitura LIVE do replayer GG via Claude (claude-sonnet-4-6) — #pt53. Saída
+    em LINHAS (parseada por _parse_vision_response); padrão de imagem base64 dos
+    3 outros pipelines Claude. Devolve o texto, ou None em falha de API (não
+    engole: o caller (_run_vision_for_entry) deixa a entry retry-able)."""
     try:
         from anthropic import Anthropic  # lazy
     except ImportError:
@@ -297,47 +295,6 @@ def _extract_hand_data_from_image_claude(image_bytes: bytes, mime_type: str = "i
         return text
     except Exception as e:
         logger.error(f"[claude] Vision error: {type(e).__name__}: {e}")
-        return None
-
-
-def _extract_hand_data_from_image(image_bytes: bytes, mime_type: str = "image/png") -> str | None:
-    """
-    Usa Vision para extrair dados do screenshot do replayer GG.
-
-    Estratégia validada por testes (10 mesas, 77 jogadores):
-    - SB e BB: lidos do PAINEL ESQUERDO (Blind/Ante section) — 100% fiável
-    - Nomes + stacks: lidos da mesa para cada jogador
-    - Posições visuais: NÃO confiáveis — o match real é feito por stack
-    """
-    try:
-        from openai import OpenAI
-        client = OpenAI()
-
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
-        data_url = f"data:{mime_type};base64,{b64}"
-
-        prompt = _build_gg_vision_prompt()
-
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
-            max_tokens=700,
-        )
-
-        text = response.choices[0].message.content.strip()
-        logger.info(f"Vision response: {text}")
-        return text
-
-    except Exception as e:
-        logger.error(f"Vision error: {e}")
         return None
 
 
@@ -986,9 +943,8 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
     """
     try:
         async with _vision_sem:
-            # pt53 PASSO 2: leitura ao vivo via CLAUDE (claude-sonnet-4-6). O
-            # caminho OpenAI (_extract_hand_data_from_image) fica disponível como
-            # rede até confirmarmos em produção; OPENAI_API_KEY mantida.
+            # pt53: leitura ao vivo via CLAUDE (claude-sonnet-4-6). Toda a Vision
+            # da app está na conta Anthropic — caminho OpenAI removido no passo 3.
             vision_text = await asyncio.to_thread(_extract_hand_data_from_image_claude, content, mime_type)
         # pt52: a função de Vision devolve None quando FALHA (ex.: 429 quota,
         # timeout, excepção). NÃO marcar vision_done=true nesse caso — deixa a
