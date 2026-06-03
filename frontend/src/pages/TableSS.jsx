@@ -23,7 +23,7 @@ const RESULT_COLOR = {
 
 function fmtTs(iso) {
   if (!iso) return '—'
-  return iso.replace('T', ' ').slice(0, 16)  // ISO UTC → "YYYY-MM-DD HH:MM"
+  return iso.replace('T', ' ').slice(0, 16)  // já é Lisboa naive → "YYYY-MM-DD HH:MM"
 }
 
 function Chip({ children, color }) {
@@ -223,7 +223,7 @@ export default function TableSSPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
-                  {['captura (UTC)', 'site', 'torneio', 'left', 'entries', 'mão', 'resultado', 'tent.'].map(h => (
+                  {['captura (Lisboa)', 'site', 'torneio', 'left', 'entries', 'mão', 'resultado', 'tent.'].map(h => (
                     <th key={h} style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr>

@@ -32,7 +32,7 @@ from app.db import get_conn, query
 from app.services.image_utils import detect_image_mime
 from app.services import table_ss_vision as tv
 from app.services.tournament_resolver import (
-    resolve_tournament_number, name_tokens_subset,
+    resolve_tournament_number, name_tokens_subset, clean_winamax_tournament_name,
 )
 
 router = APIRouter(prefix="/api/table-ss", tags=["table-ss"])
@@ -350,6 +350,12 @@ def compute_table_ss_match(
     """
     # Self-healing de site ANTES de qualquer match (determinístico, idempotente).
     site = tv._correct_site(vj.get("tournament_name"), site)
+    # pt54: Winamax → nome canónico para o matching (idempotente; cobre rows com
+    # vision_json ainda por-limpar no reconcile). Não muta o vj do caller.
+    if site == "Winamax":
+        _cl = clean_winamax_tournament_name(vj.get("tournament_name"))[0]
+        if _cl != vj.get("tournament_name"):
+            vj = {**vj, "tournament_name": _cl}
     base = {
         "result": "no_match_to_hand", "reason_detail": None, "site": site,
         "tournament_number": None, "matched_hand_id": None,
@@ -595,6 +601,11 @@ async def _process_table_ss(
     # contradiz (Regra A `#NNN` trailing + Regra B cross-check BD), ANTES de
     # gravar a site no log e de filtrar candidatos por site.
     vj["site"] = tv._correct_site(vj.get("tournament_name"), vj.get("site"))
+    # pt54: Winamax → nome canónico (remove '#NNN' nº de mesa + '(ID)' do nome).
+    # Limpo na coluna/vision_json (display) E no matching (compute re-limpa,
+    # idempotente). O '#NNN' varia por mesa dentro do mesmo torneio.
+    if vj.get("site") == "Winamax":
+        vj["tournament_name"] = clean_winamax_tournament_name(vj.get("tournament_name"))[0]
     out["vision_json"] = vj
     out["site"] = vj.get("site")
     out["tournament_name"] = vj.get("tournament_name")
@@ -641,6 +652,15 @@ async def upload_table_ss(
     return await _process_table_ss(
         content, fname, captured_at_override=captured_at, source=source,
     )
+
+
+@router.post("/reconcile")
+def trigger_reconcile_table_ss(current_user=Depends(require_auth)):
+    """Corre o reconcile R sobre TODAS as SS de mesa (recalcula match de raiz,
+    re-persiste, inclui as `tm_ambiguous`/`no_match_to_hand`). Síncrono mas leve
+    (consultas + updates, sem Vision). Usado p.ex. após backfill de nomes para
+    re-ligar as SS já importadas (#FIX-B3 + pt54). Devolve o tally."""
+    return reconcile_table_ss(hand_ids=None)
 
 
 @router.get("/recent")

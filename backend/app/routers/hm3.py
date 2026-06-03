@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 from app.utils.tournament_format import detect_tournament_format
 from app.utils.timezones import lisbon_naive_verbatim, utc_to_lisbon_naive
+from app.services.tournament_resolver import clean_winamax_tournament_name
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from app.auth import require_auth
 from app.db import get_conn, query
@@ -325,11 +326,16 @@ def _parse_hand(hh_text, site_name):
         m = re.search(r'Tournament\s+"([^"]+)"', hh_text)
         if m:
             name = m.group(1).strip()
-            # tournament_name: nome real limpo, sem buyin suffix.
-            # stakes: mantem o padrao legacy "NAME (buyin)" para retro-compat
-            # com callers que ainda leem stakes (HandRow, HM3, Hands, etc.).
-            result["tournament_name"] = name
-            result["stakes"] = name
+            # pt54: nome canónico WN limpo (#NNN/(ID) fora); o ID, se aparecer no
+            # nome, preserva-se em tournament_number antes de sair. O nome do
+            # header já costuma vir limpo → idempotente.
+            clean_name, wid = clean_winamax_tournament_name(name)
+            result["tournament_name"] = clean_name
+            if wid and not result.get("tournament_number"):
+                result["tournament_number"] = wid
+            # stakes: mantem o padrao legacy para retro-compat com callers que
+            # ainda leem stakes (HandRow, HM3, Hands, etc.).
+            result["stakes"] = clean_name
         buyin_m = re.search(r'buyIn:\s*([\d\u20ac$,.]+(?:\s*\+\s*[\d\u20ac$,.]+)?)', hh_text)
         if buyin_m and result["stakes"]:
             result["stakes"] += f" ({buyin_m.group(1).strip()})"

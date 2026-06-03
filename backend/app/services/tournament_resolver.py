@@ -80,6 +80,39 @@ def clean_tournament_name(name: Optional[str]) -> Optional[str]:
     return _TABLE_SUFFIX_RE.sub("", name).strip()
 
 
+# pt54 (#WN-TOURNAMENT-NAME-NORMALIZE) — nome canónico Winamax = só o NOME.
+# '#NNN' é o nº de MESA (varia por mesa dentro do MESMO torneio — provado:
+# "EXPLORER 150K #076" e "#235" têm o mesmo ID 1104093788). '(NNNNNNN)' é o ID
+# do torneio. Removem-se ambos; garantias sem '#' ("150K", "80K") preservam-se.
+_WN_ID_PARENS_RE = re.compile(r"\(\s*(\d+)\s*\)")
+_WN_TABLE_NUM_RE = re.compile(r"#\s*\d+")
+
+
+def clean_winamax_tournament_name(
+    name: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Winamax: devolve (nome_limpo, tournament_id).
+
+    Remove '#NNN' (nº de mesa) e '(NNNNNNN)' (ID do torneio) de qualquer posição.
+    PRESERVA garantias sem '#' ('150K', '80K') e o resto do nome. O ID extraído
+    (ou None) é para PRESERVAR em ``tournament_number`` ANTES de sair do nome —
+    nunca se perde. None / '' → (name, None).
+
+    Ex.: 'EXPLORER 150K #076 (1104093788)' → ('EXPLORER 150K', '1104093788')
+         'GALACTICA #034'                  → ('GALACTICA', None)
+         'GRAVITY 80K #0006'               → ('GRAVITY 80K', None)
+         'MAIN EVENT SPACE KO 120K'        → ('MAIN EVENT SPACE KO 120K', None)
+    """
+    if not name:
+        return name, None
+    m = _WN_ID_PARENS_RE.search(name)
+    tid = m.group(1) if m else None
+    cleaned = _WN_ID_PARENS_RE.sub(" ", name)
+    cleaned = _WN_TABLE_NUM_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, tid
+
+
 def _tokenize_name(name: Optional[str]) -> list[str]:
     """Quebra um nome de torneio em tokens prontos para ILIKE match.
 
