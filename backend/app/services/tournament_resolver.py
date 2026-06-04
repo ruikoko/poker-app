@@ -359,7 +359,8 @@ def resolve_tournament_number(
     prize_pool: Optional[float] = None,
     total_players: Optional[int] = None,
     anchor_mode: str = "during_play",
-) -> tuple[Optional[str], list[dict]]:
+    return_tier: bool = False,
+):
     """Cascata em 3 tiers: tournament_summaries -> tournaments_meta -> hands.
 
     Args:
@@ -383,11 +384,19 @@ def resolve_tournament_number(
         (tn, []) se 1 match unico em qualquer tier (paragem imediata).
         (None, [candidates]) se 2+ matches no 1o tier nao-vazio (curto-circuita
             tiers seguintes). (None, []) se todos os tiers vazios.
+
+        return_tier=True (opt-in, não-default — não parte callers existentes):
+            devolve um 3º elemento `tier` ∈ {'summaries','meta','hands',None}
+            indicando ONDE matchou (ou onde ficou ambíguo). None se nenhum tier
+            produziu candidatos. Usado pela página Lobbys (detalhe "como resolveu").
     """
+    def _ret(tn, cands, tier):
+        return (tn, cands, tier) if return_tier else (tn, cands)
+
     tokens = _tokenize_name(clean_tournament_name(tournament_name))
     if not tokens:
         logger.warning("[tournament_resolver] FAIL name_empty")
-        return (None, [])
+        return _ret(None, [], None)
 
     patterns = [f"%{t}%" for t in tokens]
     window = _decide_window(start_time_iso, posted_at_hint, window_hours, anchor_mode)
@@ -413,12 +422,12 @@ def resolve_tournament_number(
             logger.info(
                 f"[tournament_resolver] OK tier=summaries tn={tn} site={site}"
             )
-            return (tn, [])
+            return _ret(tn, [], "summaries")
         logger.info(
             f"[tournament_resolver] AMBIG tier=summaries "
             f"n={len(candidates_summaries)} site={site}"
         )
-        return (None, candidates_summaries)
+        return _ret(None, candidates_summaries, "summaries")
 
     # TIER 1 — tournaments_meta
     candidates_meta = [dict(r) for r in _query_meta(site, patterns, window)]
@@ -428,12 +437,12 @@ def resolve_tournament_number(
             logger.info(
                 f"[tournament_resolver] OK tier=meta tn={tn} site={site}"
             )
-            return (tn, [])
+            return _ret(tn, [], "meta")
         logger.info(
             f"[tournament_resolver] AMBIG tier=meta "
             f"n={len(candidates_meta)} site={site}"
         )
-        return (None, candidates_meta)
+        return _ret(None, candidates_meta, "meta")
 
     # TIER 2 — hands fallback
     candidates_hands = [dict(r) for r in _query_hands(site, patterns, window)]
@@ -442,10 +451,11 @@ def resolve_tournament_number(
         logger.info(
             f"[tournament_resolver] OK tier=hands tn={tn} site={site}"
         )
-        return (tn, [])
+        return _ret(tn, [], "hands")
     if candidates_hands:
         logger.info(
             f"[tournament_resolver] AMBIG tier=hands "
             f"n={len(candidates_hands)} site={site}"
         )
-    return (None, candidates_hands)
+        return _ret(None, candidates_hands, "hands")
+    return _ret(None, [], None)

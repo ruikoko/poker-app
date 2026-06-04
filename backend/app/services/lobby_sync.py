@@ -184,9 +184,12 @@ async def process_lobby_message(
     base = {
         "result": "", "reason_detail": None,
         "site": None, "tournament_name": None, "tournament_number": None,
-        "vision_json": None, "prizes_count": 0,
+        "vision_json": None, "prizes_count": 0, "players_left": None,
         "candidates": [], "bounty_type": None, "progressive_factor": None,
         "action": None,
+        # detalhe de import (página Lobbys): como resolveu + precedência + o que
+        # ficou escrito em tournament_payouts.
+        "resolver_tier": None, "existing_source": None, "payouts_blob": None,
     }
 
     if is_pre_2026(posted_at):
@@ -238,6 +241,7 @@ async def process_lobby_message(
     base["tournament_name"] = name
     base["vision_json"] = vj
     base["prizes_count"] = len(vj.get("prizes") or {})
+    base["players_left"] = players_left
 
     if site not in ("GGPoker", "PokerStars", "Winamax"):
         if log_on_failure:
@@ -256,14 +260,17 @@ async def process_lobby_message(
     if tn_override:
         tn = tn_override
         candidates: list = []
+        resolver_tier = "caption_override"  # bypass do resolver via caption #TM<n>
     else:
-        tn, candidates = await asyncio.to_thread(
+        tn, candidates, resolver_tier = await asyncio.to_thread(
             tournament_resolver.resolve_tournament_number,
             site, name, vj.get("start_time_iso"),
             posted_at_hint=posted_at,
             buy_in=vj.get("buy_in"),
             anchor_mode="prestart",  # pt41 Track A — lobby SS é pré-start
+            return_tier=True,
         )
+    base["resolver_tier"] = resolver_tier
 
     if tn is None:
         result = "tm_ambiguous" if candidates else "tm_not_found"
@@ -307,6 +314,7 @@ async def process_lobby_message(
             base["result"] = "skipped_precedence"
             base["reason_detail"] = f"existing source={cur_src!r}"
             base["tournament_number"] = tn
+            base["existing_source"] = cur_src
             return base
 
     blob = lobby_vision.build_hrc_payouts_blob(vj)
@@ -349,6 +357,9 @@ async def process_lobby_message(
     base["bounty_type"] = bounty_type
     base["progressive_factor"] = progressive_factor
     base["action"] = action
+    base["payouts_blob"] = blob   # o que ficou escrito em tournament_payouts
+    # se o torneio já existia, regista a source anterior (overwrite same-source)
+    base["existing_source"] = (existing[0].get("source") if existing else None)
     return base
 
 

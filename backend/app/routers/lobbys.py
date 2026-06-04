@@ -24,6 +24,10 @@ _VALID_FAILURE_TYPES = frozenset({
     "tm_not_found", "tm_ambiguous", "no_attachments", "upsert_error",
 })
 
+# Resultados que NÃO são lobby (Vision não leu um lobby de torneio). Tudo o resto
+# é lobby (mesmo tm_not_found/tm_ambiguous: leu lobby, só não resolveu o número).
+_NON_LOBBY = frozenset({"json_invalid", "site_undetected", "vision_failed", "pre_2026_skip"})
+
 
 class SyncRecentBody(BaseModel):
     since: Optional[datetime] = None
@@ -78,30 +82,57 @@ async def upload_lobby_ss(
 
     file_hash = hashlib.sha256(content).hexdigest()
 
-    # Rede de segurança: este conteúdo já foi processado como lobby? (dedup)
+    # Rede de segurança: este conteúdo já foi processado como lobby? (dedup).
+    # Devolve o detalhe guardado no log para a página Lobbys o poder mostrar
+    # (extração via vision_json; o import já está em BD, não se re-deriva).
     existing = query(
-        "SELECT result, tournament_number FROM lobby_processing_log "
-        "WHERE discord_message_id = %s",
+        "SELECT result, reason_detail, site, tournament_name, tournament_number, "
+        "       vision_json, players_left, attempt_count "
+        "FROM lobby_processing_log WHERE discord_message_id = %s",
         (file_hash,),
     )
     if existing:
         e = existing[0]
-        return {"is_lobby": True, "dedup": True, "result": e.get("result"),
-                "tournament_number": e.get("tournament_number")}
+        vj = e.get("vision_json") or {}
+        return {
+            "is_lobby": e.get("result") not in _NON_LOBBY, "dedup": True,
+            "result": e.get("result"), "reason_detail": e.get("reason_detail"),
+            "site": e.get("site"),
+            "tournament_name": e.get("tournament_name"),
+            "tournament_number": e.get("tournament_number"),
+            "vision_json": vj, "players_left": e.get("players_left"),
+            "prizes_count": len(vj.get("prizes") or {}),
+            "attempt_count": e.get("attempt_count"),
+            # import não re-derivado no dedup (já persistido):
+            "resolver_tier": None, "candidates": [], "existing_source": None,
+            "bounty_type": None, "progressive_factor": None,
+            "payouts_blob": None, "action": None,
+        }
 
     res = await process_lobby_message(
         content, mime, message_id=file_hash, channel_id=None,
         posted_at=posted_at, source_prefix="file_lobby_vision",
         log_on_failure=False,  # não-lobby (falha de Vision) → não persiste nada
     )
-    _NON_LOBBY = {"json_invalid", "site_undetected", "vision_failed", "pre_2026_skip"}
     is_lobby = res.get("result") not in _NON_LOBBY
     return {
         "is_lobby": is_lobby, "dedup": False,
-        "result": res.get("result"), "site": res.get("site"),
+        "result": res.get("result"), "reason_detail": res.get("reason_detail"),
+        "site": res.get("site"),
         "tournament_name": res.get("tournament_name"),
         "tournament_number": res.get("tournament_number"),
-        "action": res.get("action"), "reason_detail": res.get("reason_detail"),
+        "action": res.get("action"),
+        # extração (Vision)
+        "vision_json": res.get("vision_json"),
+        "players_left": res.get("players_left"),
+        "prizes_count": res.get("prizes_count"),
+        # import (backend)
+        "resolver_tier": res.get("resolver_tier"),
+        "candidates": res.get("candidates"),
+        "existing_source": res.get("existing_source"),
+        "bounty_type": res.get("bounty_type"),
+        "progressive_factor": res.get("progressive_factor"),
+        "payouts_blob": res.get("payouts_blob"),
     }
 
 

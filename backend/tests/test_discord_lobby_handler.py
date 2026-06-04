@@ -76,7 +76,7 @@ def test_lobby_success_inserted():
          patch("app.services.lobby_vision.build_hrc_payouts_blob",
                return_value=_GOOD_BLOB), \
          patch("app.services.tournament_resolver.resolve_tournament_number",
-               return_value=("281416137", [])), \
+               return_value=("281416137", [], "summaries")), \
          patch("app.services.payouts_service.upsert_payout",
                return_value=upsert_result) as m_upsert, \
          patch("app.services.lobby_sync.query", return_value=[]):
@@ -130,7 +130,7 @@ def test_lobby_tm_ambiguous_lists_candidates():
          patch("app.services.lobby_vision.parse_and_validate_lobby_json",
                return_value=_GOOD_VJ), \
          patch("app.services.tournament_resolver.resolve_tournament_number",
-               return_value=(None, candidates)):
+               return_value=(None, candidates, "summaries")):
         asyncio.run(bot._handle_lobby_message(msg))
     reply = msg.reply.call_args[0][0]
     assert "❌" in reply
@@ -147,7 +147,7 @@ def test_lobby_tm_not_found_replies_error():
          patch("app.services.lobby_vision.parse_and_validate_lobby_json",
                return_value=_GOOD_VJ), \
          patch("app.services.tournament_resolver.resolve_tournament_number",
-               return_value=(None, [])):
+               return_value=(None, [], None)):
         asyncio.run(bot._handle_lobby_message(msg))
     reply = msg.reply.call_args[0][0]
     assert "❌" in reply

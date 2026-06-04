@@ -72,7 +72,7 @@ def _mock_bot_with_channel(history_msgs, channel_name="lobbys"):
                                      "bountyType": "PKO",
                                      "progressiveFactor": 0.5}]})
 @patch("app.services.tournament_resolver.resolve_tournament_number",
-       return_value=("12345", []))
+       return_value=("12345", [], "summaries"))
 @patch("app.services.lobby_vision.parse_and_validate_lobby_json",
        return_value={"site": "GGPoker", "tournament_name": "X",
                      "prizes": {"1": 1.0}})
@@ -97,7 +97,7 @@ def test_process_success_writes_log_and_returns_success(
 
 @patch("app.services.lobby_sync._upsert_lobby_log")
 @patch("app.services.tournament_resolver.resolve_tournament_number",
-       return_value=(None, []))
+       return_value=(None, [], None))
 @patch("app.services.lobby_vision.parse_and_validate_lobby_json",
        return_value={"site": "Winamax", "tournament_name": "EXPLORER",
                      "prizes": {"1": 1}})
@@ -137,7 +137,7 @@ def _PREC_PATCHES():
                             "structures": [{"name": "X", "bountyType": "PKO",
                                             "progressiveFactor": 0.5}]}),
         patch("app.services.tournament_resolver.resolve_tournament_number",
-              return_value=("12345", [])),
+              return_value=("12345", [], "summaries")),
         patch("app.services.lobby_vision.parse_and_validate_lobby_json",
               return_value={"site": "GGPoker", "tournament_name": "X",
                             "prizes": {"1": 1.0}}),

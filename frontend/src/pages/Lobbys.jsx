@@ -48,6 +48,117 @@ function lastModifiedToLisbonNaiveISO(ms) {
          `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+function money(v) {
+  if (v == null || v === '') return '—'
+  return typeof v === 'number' ? v.toLocaleString('pt-PT') : String(v)
+}
+
+// Linha label/valor do painel de detalhe.
+function KV({ k, children }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.7 }}>
+      <span style={{ color: 'var(--muted)', flex: '0 0 140px' }}>{k}</span>
+      <span style={{ color: 'var(--text)', minWidth: 0, wordBreak: 'break-word' }}>{children}</span>
+    </div>
+  )
+}
+
+const ladderChip = {
+  fontSize: 11, fontFamily: 'monospace', color: 'var(--text)',
+  background: 'rgba(148,163,184,0.12)', padding: '1px 6px', borderRadius: 4,
+}
+
+// Escada de prémios: prizes {pos: valor} + prize_ranges [{rank_from,rank_to,amount}].
+function PrizeLadder({ vj }) {
+  const prizes = vj?.prizes || {}
+  const ranges = vj?.prize_ranges || []
+  const pos = Object.entries(prizes).sort((a, b) => Number(a[0]) - Number(b[0]))
+  if (!pos.length && !ranges.length) return <span style={{ color: 'var(--muted)' }}>—</span>
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+      {pos.map(([p, amt]) => <span key={p} style={ladderChip}>{p}: {money(amt)}</span>)}
+      {ranges.map((r, i) => (
+        <span key={`r${i}`} style={ladderChip}>{r.rank_from}~{r.rank_to}: {money(r.amount)}</span>
+      ))}
+    </div>
+  )
+}
+
+function RawJson({ label, data }) {
+  if (data == null) return null
+  return (
+    <details style={{ marginTop: 6 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>{label}</summary>
+      <pre style={{
+        margin: '6px 0 0', padding: 10, fontSize: 11, lineHeight: 1.5,
+        background: 'rgba(15,23,42,0.55)', border: '1px solid var(--border)',
+        borderRadius: 6, overflowX: 'auto', maxHeight: 280,
+      }}>{JSON.stringify(data, null, 2)}</pre>
+    </details>
+  )
+}
+
+// Estado de duplicado/precedência em prosa, a partir da resposta do backend.
+function importStateText(r) {
+  if (r.dedup) return 'já processado antes (dedup por conteúdo) — nada reescrito'
+  if (r.result === 'skipped_precedence')
+    return `NÃO sobrescreveu (precedência) — fonte existente: ${r.existing_source || '—'}`
+  if (r.action === 'inserted')
+    return r.existing_source ? `escrito (substituiu fonte ${r.existing_source})` : 'inserido (torneio novo)'
+  if (r.action === 'updated')
+    return `actualizado${r.existing_source ? ` (fonte anterior: ${r.existing_source})` : ''}`
+  return '—'
+}
+
+// Painel de detalhe completo por ficheiro: EXTRAÇÃO (Vision) + IMPORT (backend).
+function Detail({ r }) {
+  const vj = r.vision_json || {}
+  const s0 = (r.payouts_blob?.structures || [])[0] || {}
+  return (
+    <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+      {/* EXTRAÇÃO */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 6 }}>
+          EXTRAÇÃO — o que a Vision leu
+        </div>
+        <KV k="torneio">{vj.tournament_name || r.tournament_name || '—'}</KV>
+        <KV k="tournament_number">{vj.tournament_number || '—'}</KV>
+        <KV k="prize pool">{money(vj.prize_pool)}</KV>
+        <KV k="buy-in">{money(vj.buy_in)}</KV>
+        <KV k="bounty (texto)">{vj.bounty_type_text || '—'}</KV>
+        <KV k="players left">{r.players_left ?? vj.players_left ?? '—'}</KV>
+        <KV k="prémios"><PrizeLadder vj={vj} /></KV>
+        <RawJson label="JSON cru da Vision" data={r.vision_json} />
+      </div>
+      {/* IMPORT */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 6 }}>
+          IMPORT — o que o backend fez
+        </div>
+        <KV k="result">{r.result || '—'}</KV>
+        {r.reason_detail && <KV k="detalhe">{r.reason_detail}</KV>}
+        <KV k="site">{r.site || '—'}</KV>
+        <KV k="tournament_number">{r.tournament_number || '—'}</KV>
+        <KV k="resolvido por">{r.resolver_tier ? `tier ${r.resolver_tier}` : '—'}</KV>
+        <KV k="estado">{importStateText(r)}</KV>
+        {Array.isArray(r.candidates) && r.candidates.length > 0 && (
+          <KV k="candidatos">{r.candidates.length} (ambíguo)</KV>
+        )}
+        {r.payouts_blob && (
+          <>
+            <KV k="payouts escrito">
+              {s0.name || r.payouts_blob.name || '—'}
+              {s0.bountyType ? ` · ${s0.bountyType}` : ''}
+              {s0.progressiveFactor != null ? ` · pf ${s0.progressiveFactor}` : ''}
+            </KV>
+            <RawJson label="blob escrito em tournament_payouts" data={r.payouts_blob} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function LobbysPage() {
   const [items, setItems] = useState([])      // uploads desta sessão
   const [dragging, setDragging] = useState(false)
@@ -93,6 +204,7 @@ export default function LobbysPage() {
         Carrega SSs de <b>lobby de torneio</b> (2ª via, fora do Discord). A Vision lê o
         lobby e, se for mesmo um lobby, entra em <code>tournament_payouts</code> pela mesma
         pipeline do sync. Um print qualquer que não seja lobby é <b>ignorado</b> (nada gravado).
+        Cada ficheiro abre para o detalhe completo da extração e do import.
       </div>
 
       {/* Drop zone */}
@@ -121,7 +233,7 @@ export default function LobbysPage() {
         />
       </div>
 
-      {/* Resultado por ficheiro (sessão actual) */}
+      {/* Resultado por ficheiro (sessão actual) — linha-resumo expansível */}
       {items.length > 0 && (
         <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Nesta sessão</div>
@@ -129,39 +241,40 @@ export default function LobbysPage() {
             {items.map(it => {
               const st = STATUS[it.status] || STATUS.pending
               const r = it.result || {}
+              const terminal = ['lobby', 'ignored', 'transient', 'error'].includes(it.status)
               return (
-                <div key={it.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                  padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8,
-                  fontSize: 12,
+                <details key={it.key} style={{
+                  border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px',
                 }}>
-                  <span style={{ fontFamily: 'monospace', flex: '0 0 auto' }}>{it.name}</span>
-                  <Chip color={st.color}>{st.label}</Chip>
-                  {it.status === 'lobby' && (
-                    <span style={{ color: 'var(--muted)' }}>
-                      {r.site || '—'} · {r.tournament_name || '—'}
-                      {r.tournament_number && (
-                        <> {' → '}<b style={{ color: 'var(--text)' }}>tn {r.tournament_number}</b></>
-                      )}
-                      <span style={{ opacity: 0.7 }}> ({r.result}){r.dedup ? ' · dedup' : ''}</span>
-                    </span>
-                  )}
-                  {it.status === 'ignored' && (
-                    <span style={{ color: 'var(--muted)', opacity: 0.85 }}>
-                      ignorado (não-lobby: {r.result || '—'})
-                    </span>
-                  )}
-                  {it.status === 'transient' && (
-                    <span style={{ color: 'var(--muted)', opacity: 0.85 }}>
-                      Vision falhou (transitório) — volta a arrastar para tentar de novo
-                    </span>
-                  )}
-                  {it.status === 'error' && (
-                    <span style={{ color: 'var(--muted)', opacity: 0.85 }}>
-                      {r.reason_detail || r.result || '—'}
-                    </span>
-                  )}
-                </div>
+                  <summary style={{
+                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                    fontSize: 12, cursor: terminal ? 'pointer' : 'default', listStyle: 'revert',
+                  }}>
+                    <span style={{ fontFamily: 'monospace' }}>{it.name}</span>
+                    <Chip color={st.color}>{st.label}</Chip>
+                    {it.status === 'lobby' && (
+                      <span style={{ color: 'var(--muted)' }}>
+                        {r.site || '—'} · {r.tournament_name || '—'}
+                        {r.tournament_number && (
+                          <> {' → '}<b style={{ color: 'var(--text)' }}>tn {r.tournament_number}</b></>
+                        )}
+                        <span style={{ opacity: 0.7 }}> ({r.result}){r.dedup ? ' · dedup' : ''}</span>
+                      </span>
+                    )}
+                    {it.status === 'ignored' && (
+                      <span style={{ color: 'var(--muted)', opacity: 0.85 }}>ignorado (não-lobby: {r.result || '—'})</span>
+                    )}
+                    {it.status === 'transient' && (
+                      <span style={{ color: 'var(--muted)', opacity: 0.85 }}>
+                        Vision falhou (transitório) — volta a arrastar para tentar de novo
+                      </span>
+                    )}
+                    {it.status === 'error' && (
+                      <span style={{ color: 'var(--muted)', opacity: 0.85 }}>{r.reason_detail || r.result || '—'}</span>
+                    )}
+                  </summary>
+                  {terminal && it.result && <Detail r={r} />}
+                </details>
               )
             })}
           </div>
