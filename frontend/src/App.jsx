@@ -17,6 +17,7 @@ import HRCQueuePage from './pages/HRCQueue'
 import HRCSessionsPage from './pages/HRCSessions'
 import HRCSessionDetailPage from './pages/HRCSessionDetail'
 import TableSSPage from './pages/TableSS'
+import LobbysPage from './pages/Lobbys'
 import { StudyTimerProvider } from './contexts/StudyTimerContext'
 
 function RequireAuth({ children }) {
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="hands" element={<HandsPage />} />
           <Route path="hm3" element={<HM3Page />} />
           <Route path="table-ss" element={<TableSSPage />} />
+          <Route path="lobbys" element={<LobbysPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="villains" element={<VillainsPage />} />
           <Route path="pnl" element={<PnlPage />} />

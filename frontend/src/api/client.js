@@ -164,9 +164,25 @@ export const imports = {
   logs: () => req('GET', '/import/logs'),
 }
 
-// ── Lobbys (sync-recent) ──────────────────────────────────────────────────
+// ── Lobbys (sync-recent + upload manual) ──────────────────────────────────
 export const lobbys = {
   syncRecent: (body = {}) => req('POST', '/lobbys/sync-recent', body),
+  // Upload de 1 SS de lobby → gate "é lobby?" no backend (não-lobby ignorado).
+  // captured_at = hora local (Lisboa naive) do File.lastModified — ver Lobbys.jsx.
+  upload: (file, opts = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts.captured_at) form.append('captured_at', opts.captured_at)
+    return fetch(`${BASE}/lobbys/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(async (r) => {
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.detail || `Erro ${r.status}`)
+      return data
+    })
+  },
 }
 
 // ── Tournament Results (backoffice GG SS) ────────────────────────────────

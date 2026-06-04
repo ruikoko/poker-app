@@ -9,6 +9,7 @@ const NAV = [
   { to: '/hands',       label: 'Estudo' },
   { to: '/discord',     label: 'Discord' },
   { to: '/tournaments', label: 'Torneios' },
+  { to: '/lobbys',      label: 'Lobbys' },
   { to: '/hm3',         label: 'HM3' },
   { to: '/table-ss',    label: 'SS Mesa' },
   { to: '/villains',    label: 'Vilões' },
