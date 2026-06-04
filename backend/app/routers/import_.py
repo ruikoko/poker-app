@@ -499,6 +499,25 @@ async def import_file(
 
         asyncio.create_task(_table_ss_relink_async())
 
+        # ── Trigger reconcile de lobbys pendentes (tm_not_found/tm_ambiguous) ──
+        # As mãos recém-importadas (TIER 2) podem tornar resolvível um lobby que
+        # ficou por resolver. Re-corre o resolver sobre o vision_json guardado e
+        # escreve o payout. Sem Vision; idempotente. Fire-and-forget.
+        from app.services.lobby_sync import reconcile_lobby_logs
+
+        async def _lobby_reconcile_async():
+            try:
+                res = await asyncio.to_thread(reconcile_lobby_logs)
+                logger.info(
+                    f"[import_] lobby reconcile: resolved={res['resolved']} "
+                    f"written={res['written']} skipped_prec={res['skipped_precedence']} "
+                    f"still={res['still_unresolved']} (scanned={res['scanned']})"
+                )
+            except Exception as exc:
+                logger.error(f"[import_] lobby reconcile falhou: {exc}")
+
+        asyncio.create_task(_lobby_reconcile_async())
+
         return {
             "import_type": "hands",
             "entry_id": entry_id,

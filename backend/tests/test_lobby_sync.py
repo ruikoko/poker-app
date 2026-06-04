@@ -463,3 +463,116 @@ def test_gather_candidates_passes_limit_none_not_capped_at_100():
 
     assert "limit" in captured and captured["limit"] is None   # fix: limit=None explícito
     assert len(out) == 200                                     # cap = max_messages, não 100
+
+
+# ── 4. reconcile_lobby_logs ─────────────────────────────────────────────────
+
+def _pending_row(mid="m1", site="GGPoker", name="HIGHROLLER", result="tm_not_found"):
+    return {
+        "discord_message_id": mid, "site": site, "tournament_name": name,
+        "posted_at": datetime(2026, 6, 3, 22, 17),  # Lisboa naive
+        "vision_json": {"site": site, "tournament_name": name, "buy_in": 250.0,
+                        "start_time_iso": "2026-06-03T18:00:00Z",
+                        "players_left": 26, "prizes": {"1": 1.0}},
+        "result": result,
+    }
+
+
+def _make_query(rows, precedence):
+    """side_effect para lobby_sync.query: SELECT do log -> rows; SELECT de
+    tournament_payouts (precedência) -> precedence."""
+    def fake(sql, params=None):
+        if "lobby_processing_log" in sql:
+            return rows
+        if "tournament_payouts" in sql:
+            return precedence
+        return []
+    return fake
+
+
+@patch("app.services.lobby_sync._upsert_lobby_log")
+@patch("app.services.payouts_service.upsert_payout", return_value={"action": "inserted"})
+@patch("app.services.lobby_vision.build_hrc_payouts_blob",
+       return_value={"name": "/", "folders": [], "structures": [{"name": "X"}]})
+@patch("app.services.tournament_resolver.resolve_tournament_number",
+       return_value=("12345", [], "summaries"))
+@patch("app.services.lobby_sync.query")
+def test_reconcile_written(mock_query, _resolve, _blob, mock_upsert, mock_log):
+    mock_query.side_effect = _make_query([_pending_row()], precedence=[])
+    res = lobby_sync.reconcile_lobby_logs()
+    assert res["scanned"] == 1 and res["resolved"] == 1 and res["written"] == 1
+    assert res["skipped_precedence"] == 0 and res["still_unresolved"] == 0
+    mock_upsert.assert_called_once()
+    kw = mock_upsert.call_args.kwargs
+    assert kw["tournament_number"] == "12345"
+    assert kw["source"] == "reconcile_lobby_vision:m1"   # source acordado
+    mock_log.assert_called_once()
+    assert mock_log.call_args.kwargs["result"] == "success"
+    assert res["items"][0]["action"] == "written"
+
+
+@patch("app.services.lobby_sync._upsert_lobby_log")
+@patch("app.services.payouts_service.upsert_payout")
+@patch("app.services.lobby_vision.build_hrc_payouts_blob")
+@patch("app.services.tournament_resolver.resolve_tournament_number",
+       return_value=("999", [], "summaries"))
+@patch("app.services.lobby_sync.query")
+def test_reconcile_skipped_precedence(mock_query, _resolve, mock_blob, mock_upsert, mock_log):
+    mock_query.side_effect = _make_query([_pending_row()], precedence=[{"source": "manual:x"}])
+    res = lobby_sync.reconcile_lobby_logs()
+    assert res["resolved"] == 1 and res["skipped_precedence"] == 1 and res["written"] == 0
+    mock_upsert.assert_not_called()   # precedência manual: não sobrescreve
+    mock_blob.assert_not_called()
+    mock_log.assert_called_once()
+    assert mock_log.call_args.kwargs["result"] == "skipped_precedence"
+    assert res["items"][0]["action"] == "skipped_precedence"
+
+
+@patch("app.services.lobby_sync._upsert_lobby_log")
+@patch("app.services.payouts_service.upsert_payout")
+@patch("app.services.tournament_resolver.resolve_tournament_number",
+       return_value=(None, [], None))
+@patch("app.services.lobby_sync.query")
+def test_reconcile_still_unresolved(mock_query, _resolve, mock_upsert, mock_log):
+    mock_query.side_effect = _make_query([_pending_row()], precedence=[])
+    res = lobby_sync.reconcile_lobby_logs()
+    assert res["still_unresolved"] == 1 and res["resolved"] == 0 and res["written"] == 0
+    mock_upsert.assert_not_called()
+    mock_log.assert_not_called()   # no-op total: não toca o log
+    assert res["items"][0]["action"] == "still_unresolved"
+
+
+@patch("app.services.lobby_sync._upsert_lobby_log")
+@patch("app.services.payouts_service.upsert_payout", return_value={"action": "inserted"})
+@patch("app.services.lobby_vision.build_hrc_payouts_blob",
+       return_value={"name": "/", "folders": [], "structures": [{"name": "X"}]})
+@patch("app.services.tournament_resolver.resolve_tournament_number",
+       return_value=("12345", [], "summaries"))
+@patch("app.services.lobby_sync.query")
+def test_reconcile_dry_run_writes_nothing(mock_query, _resolve, _blob, mock_upsert, mock_log):
+    mock_query.side_effect = _make_query([_pending_row()], precedence=[])
+    res = lobby_sync.reconcile_lobby_logs(dry_run=True)
+    # conta o que FARIA, mas não escreve nada
+    assert res["resolved"] == 1 and res["written"] == 1 and res["dry_run"] is True
+    mock_upsert.assert_not_called()
+    mock_log.assert_not_called()
+
+
+def test_reconcile_idempotent_second_run_is_noop():
+    # 1ª run resolve+escreve; 2ª run: a row já não está em tm_*, SELECT devolve []
+    with patch("app.services.lobby_sync._upsert_lobby_log"), \
+         patch("app.services.payouts_service.upsert_payout", return_value={"action": "inserted"}), \
+         patch("app.services.lobby_vision.build_hrc_payouts_blob",
+               return_value={"name": "/", "folders": [], "structures": [{"name": "X"}]}), \
+         patch("app.services.tournament_resolver.resolve_tournament_number",
+               return_value=("12345", [], "summaries")), \
+         patch("app.services.lobby_sync.query") as mq:
+        mq.side_effect = _make_query([_pending_row()], precedence=[])
+        r1 = lobby_sync.reconcile_lobby_logs()
+        assert r1["written"] == 1
+        # 2ª run: SELECT agora vazio (row passou a success)
+        mq.side_effect = _make_query([], precedence=[])
+        r2 = lobby_sync.reconcile_lobby_logs()
+        assert r2 == {"scanned": 0, "resolved": 0, "written": 0,
+                      "skipped_precedence": 0, "still_unresolved": 0,
+                      "dry_run": False, "items": []}

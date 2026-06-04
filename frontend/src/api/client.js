@@ -183,6 +183,10 @@ export const lobbys = {
       return data
     })
   },
+  // Re-resolve lobbys pendentes (tm_not_found/tm_ambiguous) contra o estado
+  // actual da BD. dry_run=true → preview por torneio sem escrever.
+  reconcile: (dryRun = false) =>
+    req('POST', `/lobbys/reconcile?dry_run=${dryRun ? 'true' : 'false'}`),
 }
 
 // ── Tournament Results (backoffice GG SS) ────────────────────────────────

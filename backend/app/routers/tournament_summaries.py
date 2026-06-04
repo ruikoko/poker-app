@@ -517,7 +517,29 @@ async def import_tournament_summaries(
         files = _extract_txt_files(content, filename)
     except zipfile.BadZipFile:
         raise HTTPException(400, "ZIP corrompido")
-    return persist_tournament_summaries(files)
+    result = persist_tournament_summaries(files)
+
+    # ── Trigger reconcile de lobbys pendentes (tm_not_found/tm_ambiguous) ──
+    # Os TS recém-importados (TIER 0) podem tornar resolvível um lobby que ficou
+    # por resolver. Re-corre o resolver sobre o vision_json guardado e escreve o
+    # payout (precedência respeitada). Sem Vision; idempotente. Fire-and-forget.
+    import asyncio
+    from app.services.lobby_sync import reconcile_lobby_logs
+
+    async def _lobby_reconcile_async():
+        try:
+            res = await asyncio.to_thread(reconcile_lobby_logs)
+            logger.info(
+                "[ts_import] lobby reconcile: resolved=%d written=%d skipped_prec=%d "
+                "still=%d (scanned=%d)",
+                res["resolved"], res["written"], res["skipped_precedence"],
+                res["still_unresolved"], res["scanned"],
+            )
+        except Exception as exc:
+            logger.error(f"[ts_import] lobby reconcile falhou: {exc}")
+
+    asyncio.create_task(_lobby_reconcile_async())
+    return result
 
 
 def _extract_txt_files(content: bytes, filename: str) -> list[tuple[str, bytes]]:

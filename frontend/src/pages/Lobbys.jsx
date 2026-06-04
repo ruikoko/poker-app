@@ -110,6 +110,100 @@ function importStateText(r) {
   return '—'
 }
 
+// Cor do chip de acção de reconcile por item.
+const RECON_ACTION = {
+  written:            { label: 'escrito',           color: '#22c55e' },
+  skipped_precedence: { label: 'precedência',       color: '#f97316' },
+  still_unresolved:   { label: 'ainda sem match',   color: '#64748b' },
+  still_ambiguous:    { label: 'ainda ambíguo',     color: '#eab308' },
+}
+
+// Secção "religar pendentes" — re-resolve lobbys tm_not_found/tm_ambiguous.
+// Fluxo: pré-visualizar (dry-run) → se houver resolúveis, aplicar (escreve).
+function ReconcilePanel() {
+  const [recon, setRecon] = useState(null)   // última resposta (dry ou aplicada)
+  const [busy, setBusy] = useState(false)
+
+  async function run(dryRun) {
+    setBusy(true)
+    try {
+      const r = await lobbys.reconcile(dryRun)
+      setRecon({ ...r, applied: !dryRun })
+    } catch (e) {
+      setRecon({ error: String(e.message || e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const canApply = recon && !recon.applied && !recon.error && recon.resolved > 0
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Religar pendentes</div>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+          re-resolve lobbys sem número (tm_not_found / ambíguo) contra a BD actual — sem Vision
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button onClick={() => run(true)} disabled={busy} style={{
+            padding: '5px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6,
+            background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)',
+            cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1,
+          }}>{busy ? '…' : 'Pré-visualizar'}</button>
+          {canApply && (
+            <button onClick={() => run(false)} disabled={busy} style={{
+              padding: '5px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6,
+              background: 'var(--accent)', border: 'none', color: '#fff',
+              cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1,
+            }}>Aplicar — escrever {recon.resolved} payout(s)</button>
+          )}
+        </div>
+      </div>
+
+      {recon?.error && (
+        <div style={{ marginTop: 10, fontSize: 12, color: '#ef4444' }}>Erro: {recon.error}</div>
+      )}
+
+      {recon && !recon.error && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+            {recon.applied ? 'Aplicado' : 'Pré-visualização'} · {recon.scanned} pendente(s) ·{' '}
+            <b style={{ color: 'var(--text)' }}>{recon.resolved}</b> resolúvel(is) ·{' '}
+            {recon.applied ? `${recon.written} escrito(s)` : `${recon.resolved} a escrever`} ·{' '}
+            {recon.skipped_precedence} precedência · {recon.still_unresolved} sem match
+          </div>
+          {recon.scanned === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Nenhum lobby pendente.</div>
+          )}
+          {(recon.items || []).map((it, i) => {
+            const a = RECON_ACTION[it.action] || { label: it.action, color: '#64748b' }
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                fontSize: 12, padding: '4px 0', borderTop: i ? '1px solid rgba(255,255,255,0.04)' : 'none',
+              }}>
+                <span>{it.site} · <b>{it.tournament_name || '—'}</b></span>
+                <Chip color={a.color}>{a.label}</Chip>
+                {it.resolved_tn && (
+                  <span style={{ color: 'var(--muted)' }}>
+                    → tn {it.resolved_tn}{it.resolver_tier ? ` (tier ${it.resolver_tier})` : ''}
+                  </span>
+                )}
+                {it.action === 'skipped_precedence' && it.existing_source && (
+                  <span style={{ color: 'var(--muted)', opacity: 0.8 }}>fonte: {it.existing_source}</span>
+                )}
+                {it.action === 'still_ambiguous' && (
+                  <span style={{ color: 'var(--muted)', opacity: 0.8 }}>{it.n_candidates} candidatos</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Painel de detalhe completo por ficheiro: EXTRAÇÃO (Vision) + IMPORT (backend).
 function Detail({ r }) {
   const vj = r.vision_json || {}
@@ -232,6 +326,9 @@ export default function LobbysPage() {
           onChange={(e) => { if (e.target.files.length) addFiles(e.target.files); e.target.value = '' }}
         />
       </div>
+
+      {/* Religar pendentes (re-resolve lobbys tm_not_found/ambíguo) */}
+      <ReconcilePanel />
 
       {/* Resultado por ficheiro (sessão actual) — linha-resumo expansível */}
       {items.length > 0 && (

@@ -575,3 +575,133 @@ async def run_sync(
         "failures": failures,
         "rate_limit_pauses": rate_limit_pauses,
     }
+
+
+# ── Reconcile: re-resolver lobbys pendentes contra o estado ACTUAL da BD ──────
+
+def _coerce_players_left(vj: dict) -> Optional[int]:
+    """Mesma coerção defensiva de process_lobby_message: só int positivo."""
+    v = (vj or {}).get("players_left")
+    return v if isinstance(v, int) and v > 0 else None
+
+
+def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = False) -> dict:
+    """Re-corre o resolver sobre lobbys que ficaram `tm_not_found`/`tm_ambiguous`,
+    usando o `vision_json` JÁ GUARDADO no log — SEM chamar a Vision. Quando o
+    torneio se tornou resolvível (chegaram mãos/TS), escreve o payout (respeitando
+    a precedência D11 manual/backoffice) e actualiza o log para `success`
+    (ou `skipped_precedence`).
+
+    Idempotente: ao resolver, a row deixa de estar em ('tm_not_found','tm_ambiguous')
+    e sai da selecção; `upsert_payout` é upsert; re-correr sem dados novos é no-op.
+    Determinístico: só toca a BD quando o resolver passa a casar.
+
+    Disparado fire-and-forget após os imports de HH/TS e on-demand via
+    `POST /api/lobbys/reconcile`. `dry_run=True` → calcula e devolve o preview
+    por torneio, sem escrever. `message_ids=[]` → curto-circuita.
+
+    Devolve {scanned, resolved, written, skipped_precedence, still_unresolved,
+    dry_run, items:[...]}.
+    """
+    if message_ids is not None and len(message_ids) == 0:
+        return {"scanned": 0, "resolved": 0, "written": 0, "skipped_precedence": 0,
+                "still_unresolved": 0, "dry_run": dry_run, "items": []}
+
+    sql = (
+        "SELECT discord_message_id, site, tournament_name, posted_at, "
+        "       vision_json, result "
+        "FROM lobby_processing_log "
+        "WHERE result IN ('tm_not_found', 'tm_ambiguous') "
+        "  AND vision_json IS NOT NULL"
+    )
+    if message_ids is not None:
+        rows = query(sql + " AND discord_message_id = ANY(%s)", (list(message_ids),))
+    else:
+        rows = query(sql)
+
+    scanned = resolved = written = skipped_prec = still = 0
+    items: list[dict] = []
+
+    for r in rows:
+        scanned += 1
+        vj = r.get("vision_json") or {}
+        site = r.get("site") or vj.get("site")
+        name = r.get("tournament_name") or vj.get("tournament_name")
+        posted_at = r.get("posted_at")
+        # anchor prestart, convenção pt51 (Lisboa naive) — descarta tz se vier
+        anchor = posted_at
+        if anchor is not None and getattr(anchor, "tzinfo", None) is not None:
+            anchor = anchor.replace(tzinfo=None)
+
+        tn, candidates, tier = tournament_resolver.resolve_tournament_number(
+            site, name, vj.get("start_time_iso"),
+            posted_at_hint=anchor, buy_in=vj.get("buy_in"),
+            anchor_mode="prestart", return_tier=True,
+        )
+
+        item = {
+            "message_id": r["discord_message_id"], "site": site,
+            "tournament_name": name, "prev_result": r.get("result"),
+            "resolved_tn": tn, "resolver_tier": tier, "n_candidates": len(candidates),
+        }
+
+        if tn is None:
+            still += 1
+            item["action"] = "still_ambiguous" if candidates else "still_unresolved"
+            items.append(item)
+            continue
+
+        resolved += 1
+        # Precedência D11: lobby é a fonte de menor prioridade — NÃO sobrescreve
+        # manual:/backoffice_vision: já presentes. Espelha process_lobby_message.
+        existing = query(
+            "SELECT source FROM tournament_payouts WHERE site = %s AND tournament_number = %s",
+            (site, tn),
+        )
+        cur_src = (existing[0].get("source") or "") if existing else ""
+
+        if cur_src.startswith("manual:") or cur_src.startswith("backoffice_vision:"):
+            skipped_prec += 1
+            item["action"] = "skipped_precedence"
+            item["existing_source"] = cur_src
+            if not dry_run:
+                _upsert_lobby_log(
+                    message_id=r["discord_message_id"], channel_id=None,
+                    result="skipped_precedence",
+                    reason_detail=f"reconcile: existing source={cur_src!r} >= lobby",
+                    site=site, tournament_name=name, tournament_number=tn,
+                    vision_json=vj, posted_at=posted_at,
+                    players_left=_coerce_players_left(vj),
+                )
+            items.append(item)
+            continue
+
+        item["action"] = "written"
+        item["existing_source"] = cur_src or None
+        if not dry_run:
+            blob = lobby_vision.build_hrc_payouts_blob(vj)
+            upsert_res = payouts_service.upsert_payout(
+                site=site, tournament_number=tn, payouts_json=blob,
+                source=f"reconcile_lobby_vision:{r['discord_message_id']}",
+            )
+            item["payout_action"] = (upsert_res or {}).get("action")
+            _upsert_lobby_log(
+                message_id=r["discord_message_id"], channel_id=None,
+                result="success",
+                site=site, tournament_name=name, tournament_number=tn,
+                vision_json=vj, posted_at=posted_at,
+                players_left=_coerce_players_left(vj),
+            )
+        written += 1
+        items.append(item)
+
+    logger.info(
+        "[lobby_reconcile] scanned=%d resolved=%d written=%d skipped_precedence=%d "
+        "still_unresolved=%d dry_run=%s",
+        scanned, resolved, written, skipped_prec, still, dry_run,
+    )
+    return {
+        "scanned": scanned, "resolved": resolved, "written": written,
+        "skipped_precedence": skipped_prec, "still_unresolved": still,
+        "dry_run": dry_run, "items": items,
+    }
