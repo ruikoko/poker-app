@@ -18,3 +18,7 @@ LOGIN_PASS = "PREENCHER_AQUI"
 # decide o que é lobby (não-lobby é ignorado). Comenta/remove para desligar.
 # Default típico Windows: a pasta "Capturas de ecrã" dentro de Imagens.
 LOBBY_DIR = r"C:\Users\User\Pictures\Screenshots"
+
+# (OPCIONAL) Só processa lobbys com captura (mtime) >= esta data. Evita gastar
+# Vision na história toda na 1ª corrida e mantém o scope (o Rui só estuda 2026+).
+LOBBY_SINCE = "2026-05-30"

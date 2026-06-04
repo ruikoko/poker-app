@@ -72,10 +72,20 @@ Para importar SS de **lobby de torneio** sem as separar dos outros screenshots:
 3. O **backend decide se é lobby**: corre a Vision de lobby; se a imagem não for
    um lobby de torneio (um print qualquer), é **ignorada** (nada gravado). Se for
    lobby → entra em `tournament_payouts` pela mesma pipeline do sync do Discord.
+4. **`LOBBY_SINCE`** (opcional, ex. `"2026-05-30"`): só processa capturas com
+   data (mtime) **>= essa data**. Evita correr Vision em meses de history na 1ª
+   corrida e mantém o scope. Ficheiros mais antigos são saltados todas as corridas
+   (sem Vision, sem marcar).
 
 > O `captured_at` enviado é a hora de modificação do ficheiro (= quando a SS foi
 > tirada), usada como âncora do torneio. Custo: 1 leitura Vision por screenshot
 > novo da pasta (uma vez — fica no manifesto).
+
+> **Falha transitória ≠ não-lobby.** Se a Vision falhar por soluço de API
+> (`vision_failed`), o ficheiro **não** é marcado no manifesto → **retry** na
+> próxima corrida. Só um não-lobby genuíno (`json_invalid`/`site_undetected`) ou
+> um lobby processado é que ficam marcados. Um lobby real nunca se perde em
+> silêncio por um erro transitório.
 
 ## Endpoints usados (os MESMOS do upload manual da UI / sync)
 | Fonte | Endpoint | O que faz a app |

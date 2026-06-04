@@ -41,6 +41,13 @@ try:
 except ImportError:
     LOBBY_DIR = None
 
+# (OPCIONAL) Só processa lobbys com captura (mtime) >= esta data — evita correr
+# Vision na história toda na 1ª corrida e mantém o scope (ex.: "2026-05-30").
+try:
+    from config_local import LOBBY_SINCE
+except ImportError:
+    LOBBY_SINCE = None
+
 POKER_APP_URL = "https://poker-app-production-34a7.up.railway.app"
 
 # (subpasta, endpoint, extensões aceites, mime por extensão)
@@ -171,19 +178,33 @@ def process_lobby_dir(session):
     if not os.path.isdir(LOBBY_DIR):
         print(f"\n── lobby: LOBBY_DIR não existe ({LOBBY_DIR}) — salto")
         return None
+    # LOBBY_SINCE: só capturas (mtime) >= esta data. Evita Vision na história toda.
+    since = None
+    if LOBBY_SINCE:
+        try:
+            since = datetime.fromisoformat(LOBBY_SINCE)
+        except (ValueError, TypeError):
+            print(f"   (aviso: LOBBY_SINCE inválido {LOBBY_SINCE!r} — ignorado)")
     mpath = _lobby_manifest_path()
     sent = _read_manifest(mpath)
-    files = [f for f in sorted(os.listdir(LOBBY_DIR))
-             if os.path.isfile(os.path.join(LOBBY_DIR, f))
-             and os.path.splitext(f)[1].lower() in _IMG
-             and f not in sent]
-    print(f"\n── lobby/  (pasta de Capturas, lida directa, sem mover)  — {len(files)} novo(s)")
+    candidates = [f for f in sorted(os.listdir(LOBBY_DIR))
+                  if os.path.isfile(os.path.join(LOBBY_DIR, f))
+                  and os.path.splitext(f)[1].lower() in _IMG
+                  and f not in sent]
+    files, skipped_old = [], 0
+    for f in candidates:
+        mt = datetime.fromtimestamp(os.path.getmtime(os.path.join(LOBBY_DIR, f)))
+        if since and mt < since:
+            skipped_old += 1          # fora do scope — NÃO marca (re-filtra por data)
+        else:
+            files.append((f, mt))
+    extra = f"  (fora de LOBBY_SINCE: {skipped_old})" if skipped_old else ""
+    print(f"\n── lobby/  (pasta de Capturas, lida directa, sem mover)  — {len(files)} novo(s){extra}")
     lobby = nonlobby = failed = 0
-    for fname in files:
+    for fname, mt in files:
         path = os.path.join(LOBBY_DIR, fname)
         mime = _IMG[os.path.splitext(fname)[1].lower()]
-        # captured_at = mtime do ficheiro (hora local = Lisboa) → âncora prestart.
-        cap = datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
+        cap = mt.isoformat()          # captured_at = mtime (Lisboa) → âncora prestart
         try:
             with open(path, "rb") as fh:
                 r = session.post(
@@ -193,25 +214,33 @@ def process_lobby_dir(session):
                 )
         except Exception as e:
             failed += 1
-            print(f"   ✗ {fname}: EXC {type(e).__name__}: {e}")
+            print(f"   ⟳ {fname}: EXC {type(e).__name__}: {e} → retry depois")
             continue
-        if 200 <= r.status_code < 300:
-            j = {}
-            try:
-                j = r.json()
-            except Exception:
-                pass
-            if j.get("is_lobby"):
-                lobby += 1
-                print(f"   ✓ {fname}: LOBBY {j.get('site')} {j.get('tournament_name')!r} "
-                      f"→ tn={j.get('tournament_number')} ({j.get('result')})")
-            else:
-                nonlobby += 1
-                print(f"   · {fname}: ignorado (não-lobby: {j.get('result')})")
-            _append_manifest(mpath, fname)   # processado → não re-Vision
-        else:
+        if not (200 <= r.status_code < 300):
             failed += 1
-            print(f"   ✗ {fname}: HTTP {r.status_code} {r.text[:120]}")
+            print(f"   ⟳ {fname}: HTTP {r.status_code} {r.text[:100]} → retry depois")
+            continue
+        j = {}
+        try:
+            j = r.json()
+        except Exception:
+            pass
+        result = j.get("result")
+        # Falha TRANSITÓRIA da Vision (vision_failed) → NÃO marca → retry na próxima
+        # corrida. Distinto de não-lobby genuíno (json_invalid/site_undetected →
+        # ignora + marca). Um soluço transitório nunca perde um lobby real.
+        if result == "vision_failed":
+            failed += 1
+            print(f"   ⟳ {fname}: Vision falhou (transitório) → retry depois (não marcado)")
+            continue
+        if j.get("is_lobby"):
+            lobby += 1
+            print(f"   ✓ {fname}: LOBBY {j.get('site')} {j.get('tournament_name')!r} "
+                  f"→ tn={j.get('tournament_number')} ({result})")
+        else:
+            nonlobby += 1
+            print(f"   · {fname}: ignorado (não-lobby: {result})")
+        _append_manifest(mpath, fname)   # lobby OU não-lobby genuíno → não re-Vision
     return (lobby, nonlobby, failed)
 
 
