@@ -147,6 +147,9 @@ export const discord = {
   },
   sync:           ()  => req('POST', '/discord/sync'),
   syncAndProcess: (body)  => req('POST', '/discord/sync-and-process', body),
+  // Recompute N/M/K do último sync contra o estado actual da BD (números
+  // assentes após Vision/match em background). `since` = last_sync.started_at.
+  syncCounters:   (since)  => req('GET', `/discord/sync-counters?since=${encodeURIComponent(since)}`),
 }
 
 // ── Import ────────────────────────────────────────────────────────────────────

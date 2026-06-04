@@ -389,10 +389,24 @@ export default function DiscordPage() {
       : { window: windowKey }
     try {
       const r = await discord.syncAndProcess(body)
-      setLastSync(r.last_sync ? { ...r.last_sync, receivedAt: Date.now() } : null)
+      const ls = r.last_sync
+      setLastSync(ls ? { ...ls, receivedAt: Date.now() } : null)
       setLastSyncDismissed(false)
       loadStatus(); loadHands()
-      setTimeout(() => { loadStatus(); loadHands() }, 30000)
+      // O K do sync é uma foto precoce (Vision corre em background). Aos 30s
+      // recalcula sobre a MESMA janela (ls.started_at) e assenta os números —
+      // só sobrescreve se o banner ainda for desta sync (não de outra entretanto).
+      setTimeout(() => {
+        loadStatus(); loadHands()
+        if (ls?.started_at) {
+          discord.syncCounters(ls.started_at)
+            .then(c => setLastSync(prev =>
+              (prev && prev.started_at === ls.started_at)
+                ? { ...prev, n_links: c.n_links, m_canais: c.m_canais, k_match_hh: c.k_match_hh }
+                : prev))
+            .catch(() => {})
+        }
+      }, 30000)
     } catch (e) {
       setError(`Erro: ${e.message}`)
     } finally {

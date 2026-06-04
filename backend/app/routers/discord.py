@@ -38,6 +38,54 @@ _RECOVERY_REPLAYER_SQL = """
     LIMIT 500
 """
 
+# Contadores N/M/K do sync, partilhados entre o POST /sync-and-process (foto
+# inicial, tirada antes da Vision em background acabar) e o GET /sync-counters
+# (recompute no refresh, números já assentes). Janela = entries Discord criadas
+# desde `since` (= sync_started_at do último sync) — a MESMA definição que o
+# contador inline sempre usou.
+#
+# k_match_hh usa o predicado canónico "casou com HH real": match_method não-nulo
+# e fora do espaço de placeholders Discord — idêntico ao STUDY_VIEW_GG_MATCH_FILTER
+# em routers/hands.py:453 (cobre anchors_stack_elimination_v2, mtt_promote_v2,
+# mtt_import_v3, refix; corta só discord_placeholder_%). Substitui o EXISTS por
+# raw, que era equivalente em estado estável mas conceptualmente errado. A ligação
+# entry→mão continua hand_id = 'GG-'||replace(tm,'TM',''); só contam entries cujo
+# tm já foi extraído pela Vision (tm IS NOT NULL).
+_SYNC_COUNTERS_SQL = """
+    WITH new_entries AS (
+        SELECT id, discord_channel, raw_json->>'tm' AS tm
+        FROM entries
+        WHERE source = 'discord'
+          AND entry_type IN ('replayer_link', 'image')
+          AND created_at >= %s
+    )
+    SELECT
+        COUNT(*) AS n_links,
+        COUNT(DISTINCT discord_channel) AS m_canais,
+        COUNT(*) FILTER (
+            WHERE tm IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM hands h
+                WHERE h.hand_id = 'GG-' || REPLACE(new_entries.tm, 'TM', '')
+                  AND (h.player_names->>'match_method') IS NOT NULL
+                  AND (h.player_names->>'match_method') NOT LIKE 'discord_placeholder_%%'
+              )
+        ) AS k_match_hh
+    FROM new_entries
+"""
+
+
+def _compute_sync_counters(since_dt: datetime) -> dict:
+    """Recompute N/M/K para a janela do sync (entries criadas desde `since_dt`)
+    contra o estado ACTUAL da BD. Read-only. Ver _SYNC_COUNTERS_SQL."""
+    rows = query(_SYNC_COUNTERS_SQL, (since_dt,))
+    c = dict(rows[0]) if rows else {"n_links": 0, "m_canais": 0, "k_match_hh": 0}
+    return {
+        "n_links": int(c["n_links"]),
+        "m_canais": int(c["m_canais"]),
+        "k_match_hh": int(c["k_match_hh"]),
+    }
+
 # Mapeamento window pré-definida → (timedelta, label PT-PT para UI/banner).
 # Regra de negócio: "1 semana"=7d, "1 mês"=30d (calendar-aware não é pedido,
 # 30d é approximation aceite). Janelas curtas (24h/72h) cobrem pós-sessão
@@ -367,37 +415,20 @@ async def sync_and_process(
         _attachments_async("T2:delay-90s", delay=ATTACHMENTS_DELAYED_RETRY_SECONDS)
     )
 
-    # Contadores N/M/K para UI:
+    # Contadores N/M/K para UI (foto inicial):
     #   N links     = entries Discord (replayer_link OR image) criados desde
     #                 sync_started_at — conteúdo útil trazido por esta sync
     #   M canais    = COUNT(DISTINCT discord_channel) sobre os N entries
-    #   K match HH  = dos N entries, quantos têm TM number que corresponde a
-    #                 hands.hand_id ('GG-<tm>') com raw HH não-vazio em BD
+    #   K match HH  = dos N entries, quantos casaram com HH real (match_method
+    #                 canónico; ver _SYNC_COUNTERS_SQL)
     # Ignora hand_history text (raro pelo Discord). Idempotente: re-sync da
     # mesma janela retorna N=0 (entries dedupadas via discord_message_id UNIQUE).
-    counters = query("""
-        WITH new_entries AS (
-            SELECT id, discord_channel, raw_json->>'tm' AS tm
-            FROM entries
-            WHERE source = 'discord'
-              AND entry_type IN ('replayer_link', 'image')
-              AND created_at >= %s
-        )
-        SELECT
-            COUNT(*) AS n_links,
-            COUNT(DISTINCT discord_channel) AS m_canais,
-            COUNT(*) FILTER (
-                WHERE tm IS NOT NULL
-                  AND EXISTS (
-                    SELECT 1 FROM hands h
-                    WHERE h.hand_id = 'GG-' || REPLACE(new_entries.tm, 'TM', '')
-                      AND h.raw IS NOT NULL
-                      AND length(h.raw) > 0
-                  )
-            ) AS k_match_hh
-        FROM new_entries
-    """, (sync_started_at,))
-    c = dict(counters[0]) if counters else {"n_links": 0, "m_canais": 0, "k_match_hh": 0}
+    #
+    # ATENÇÃO: este K é uma FOTO precoce — corre ~10s após despachar a Vision em
+    # background (Semaphore 2), por isso a maioria dos entries ainda tem tm=NULL
+    # e sub-reporta. O número que "assenta" vem do GET /sync-counters chamado pela
+    # UI no refresh (~30s). Mesma janela (sync_started_at), mesma SQL.
+    c = _compute_sync_counters(sync_started_at)
 
     return {
         "ok": True,
@@ -416,6 +447,31 @@ async def sync_and_process(
         },
         "note": "Vision corre em background. Actualizar a página daqui a ~30s para ver resultados finais.",
     }
+
+
+@router.get("/sync-counters")
+def sync_counters(
+    since: str = Query(
+        ...,
+        description="last_sync.started_at (ISO 8601 UTC) devolvido por /sync-and-process",
+    ),
+    current_user=Depends(require_auth),
+):
+    """Recompute dos contadores N/M/K do ÚLTIMO sync contra o estado ACTUAL da BD.
+
+    O K inline de /sync-and-process é uma foto tirada ~10s após despachar a Vision
+    em background (Semaphore 2): a maioria dos entries ainda tem tm=NULL, por isso
+    sub-reporta (ex.: mostra k=2 quando o real assenta em 22). A UI chama este
+    endpoint no refresh (~30s depois) — recalcula sobre a MESMA janela (entries
+    criadas desde `since` = sync_started_at) já com Vision/enrich assentes. O
+    predicado de match é o canónico (match_method, ver _SYNC_COUNTERS_SQL).
+    Read-only.
+    """
+    try:
+        since_dt = datetime.fromisoformat(since)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="param `since` ISO 8601 inválido")
+    return {"ok": True, "since": since, **_compute_sync_counters(since_dt)}
 
 
 @router.get("/stats")
