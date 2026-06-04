@@ -953,6 +953,8 @@ de garantia (sem nome real) · PS NULL de propósito. Detalhe em `docs/JOURNAL_2
 
 ## pt49 — table-SS site-misclass + descoberta e fix do bug de fuso GG/PS (2–3 Junho 2026)
 
+> ⚠️ **A rota de fuso desta secção (`#GG-PLAYED-AT-LOCAL-NOT-UTC`, GG+PS → UTC) está SUPERSEDED pela convenção Lisboa-naive (pt51) — ver secção pt50–pt58. A "validação de Inverno" dissolveu-se (já não convertemos GG/PS; gravam verbatim em Lisboa).** O resto da secção fica como registo histórico.
+
 Sessão longa (seguiu de pt47/pt48 no mesmo dia). 5 commits em main; suite
 **818 → 840 PASSED**. Journal completo: `docs/JOURNAL_2026-06-02-pt49.md`.
 
