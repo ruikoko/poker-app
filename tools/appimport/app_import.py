@@ -1,7 +1,7 @@
 """Import por pasta local → Poker App (#pt55). Estilo apphm3: corre no PC do Rui,
 SÓ a pedido (duplo-clique depois da sessão de poker), nunca em background.
 
-Varre 4 subpastas (uma por tipo) sob uma pasta-mãe configurável e envia para a
+Varre 5 subpastas (uma por tipo) sob uma pasta-mãe configurável e envia para a
 app SÓ o que é novo. A app faz o resto (Vision, matching). Reutiliza os MESMOS
 endpoints do upload manual da UI — o agente é só um cliente HTTP autenticado.
 
@@ -12,7 +12,10 @@ duplo-clique. O nome original é SEMPRE preservado no upload (as SS do IT/manual
 tiram o captured_at/TM do nome).
 
 Routing é pela SUBPASTA (determinístico — nunca adivinha imagem IT vs SS manual).
-HM3 fica de fora (tem o seu .bat); Discord/lobby ficam de fora (sync de rede).
+A 5ª subpasta `lobby` é uma porta deliberada drop-only-these para SS de lobby
+(POST /api/lobbys/upload, captured_at = mtime do ficheiro) — distinta da fonte
+LOBBY_DIR, que continua a ler uma pasta EXTERNA directa sem mover (coexistem).
+HM3 fica de fora (tem o seu .bat); o sync do Discord #lobbys é via rede, à parte.
 """
 import os
 import sys
@@ -60,6 +63,11 @@ TYPES = [
     ("manual", "/api/screenshots",                   _IMG, "SS manual do replayer GG (imagem)"),
 ]
 
+# 5ª subpasta, fora de TYPES (endpoint + mecânica próprios: captured_at = mtime,
+# gate 'é lobby?' no backend, mover só quando confirmado/processado). Ver
+# process_lobby_subdir. Drop-only-these: só processa o que está cá dentro.
+LOBBY_SUB = "lobby"
+
 
 def login(session):
     r = session.post(
@@ -78,6 +86,9 @@ def scaffold():
     for sub, *_ in TYPES:
         os.makedirs(os.path.join(PARENT_DIR, sub), exist_ok=True)
         os.makedirs(os.path.join(PARENT_DIR, "done", sub), exist_ok=True)
+    # subpasta dedicada 'lobby' (não está em TYPES — mecânica própria).
+    os.makedirs(os.path.join(PARENT_DIR, LOBBY_SUB), exist_ok=True)
+    os.makedirs(os.path.join(PARENT_DIR, "done", LOBBY_SUB), exist_ok=True)
 
 
 def _dest_no_clobber(done_dir, fname):
@@ -148,6 +159,78 @@ def process_type(session, sub, endpoint, exts, label):
             failed += 1
             print(f"   ✗ {fname}: HTTP {r.status_code} {r.text[:120]}")
     return sent, failed, skipped
+
+
+# ── Subpasta dedicada "lobby" (drop-only-these) — porta deliberada gémea do 'it' ─
+
+def process_lobby_subdir(session):
+    """Subpasta PARENT_DIR/lobby: SÓ processa o que está cá dentro (drop-only-
+    these) — nunca varre mais nada. É a porta gémea do 'it', mas para SS de lobby.
+    Cada ficheiro → POST /api/lobbys/upload com captured_at = mtime do ficheiro
+    (os nomes Windows "Captura de ecrã YYYY-MM-DD HHMMSS" não trazem o
+    YYYYMMDDHHMMSS que a via table-SS lê; a hora vem do timestamp do ficheiro,
+    igual ao process_lobby_dir). O backend faz o gate 'é lobby?'.
+
+    Mover (preserva o original; mover ≠ apagar):
+      • is_lobby ............................ move → done/lobby (confirmado)
+      • não-lobby genuíno (json_invalid/
+        site_undetected) .................... move → done/lobby (foi processado)
+      • vision_failed (transitório) ........ NÃO move, FICA → retry
+      • erro de transporte / HTTP não-2xx .. NÃO move, FICA → retry
+
+    Mesma distinção transitório-vs-não-lobby do process_lobby_dir: um soluço da
+    Vision nunca perde um lobby real. Devolve (lobbies, nao_lobbies, falhas)."""
+    src = os.path.join(PARENT_DIR, LOBBY_SUB)
+    done = os.path.join(PARENT_DIR, "done", LOBBY_SUB)
+    files = [f for f in sorted(os.listdir(src))
+             if os.path.isfile(os.path.join(src, f))
+             and os.path.splitext(f)[1].lower() in _IMG]
+    skipped = len([f for f in os.listdir(src)
+                   if os.path.isfile(os.path.join(src, f))
+                   and os.path.splitext(f)[1].lower() not in _IMG])
+    extra = f"  (ignorados por extensão: {skipped})" if skipped else ""
+    print(f"── {LOBBY_SUB}/  (SS de lobby, drop-only-these)  — {len(files)} ficheiro(s) novo(s){extra}")
+    lobby = nonlobby = failed = 0
+    for fname in files:
+        path = os.path.join(src, fname)
+        mime = _IMG[os.path.splitext(fname)[1].lower()]
+        cap = datetime.fromtimestamp(os.path.getmtime(path)).isoformat()  # captured_at = mtime (Lisboa)
+        try:
+            with open(path, "rb") as fh:
+                r = session.post(
+                    f"{POKER_APP_URL}/api/lobbys/upload",
+                    files={"file": (fname, fh, mime)},
+                    data={"captured_at": cap}, timeout=300,
+                )
+        except Exception as e:
+            failed += 1
+            print(f"   ⟳ {fname}: EXC {type(e).__name__}: {e} → retry depois")
+            continue
+        if not (200 <= r.status_code < 300):
+            failed += 1
+            print(f"   ⟳ {fname}: HTTP {r.status_code} {r.text[:100]} → retry depois")
+            continue
+        j = {}
+        try:
+            j = r.json()
+        except Exception:
+            pass
+        result = j.get("result")
+        # Falha TRANSITÓRIA da Vision (vision_failed) → NÃO move → retry. Distinto
+        # de não-lobby genuíno (json_invalid/site_undetected → processado, move).
+        if result == "vision_failed":
+            failed += 1
+            print(f"   ⟳ {fname}: Vision falhou (transitório) → retry depois (não movido)")
+            continue
+        if j.get("is_lobby"):
+            lobby += 1
+            print(f"   ✓ {fname}: LOBBY {j.get('site')} {j.get('tournament_name')!r} "
+                  f"→ tn={j.get('tournament_number')} ({result})")
+        else:
+            nonlobby += 1
+            print(f"   · {fname}: não-lobby ({result}) — processado")
+        shutil.move(path, _dest_no_clobber(done, fname))   # confirmado/processado → move
+    return (lobby, nonlobby, failed)
 
 
 # ── Fonte "lobby" — pasta externa lida directa (sem mover), dedup por manifesto ─
@@ -260,7 +343,8 @@ def main():
     for sub, endpoint, exts, label in TYPES:
         totals[sub] = process_type(session, sub, endpoint, exts, label)
 
-    lobby_res = process_lobby_dir(session)
+    lobby_sub_res = process_lobby_subdir(session)   # subpasta dedicada (drop-only-these)
+    lobby_res = process_lobby_dir(session)           # pasta externa LOBBY_DIR (sem mover)
 
     print("\n" + "═" * 56)
     print("RESUMO")
@@ -272,10 +356,14 @@ def main():
         tot_fail += failed
         extra = f"  (ignorados por extensão: {skipped})" if skipped else ""
         print(f"  {sub:8} enviados={sent}  falhas={failed}{extra}")
+    lob_s, nonlob_s, lfail_s = lobby_sub_res
+    tot_sent += lob_s
+    tot_fail += lfail_s
+    print(f"  {'lobby':8} lobbies={lob_s}  não-lobby(ignorados)={nonlob_s}  falhas={lfail_s}")
     if lobby_res is not None:
         lob, nonlob, lfail = lobby_res
         tot_fail += lfail
-        print(f"  {'lobby':8} lobbies={lob}  não-lobby(ignorados)={nonlob}  falhas={lfail}")
+        print(f"  {'lobby*':8} lobbies={lob}  não-lobby(ignorados)={nonlob}  falhas={lfail}   (LOBBY_DIR externa)")
     print("─" * 56)
     print(f"  TOTAL enviados={tot_sent}  falhas={tot_fail}")
     if tot_fail:

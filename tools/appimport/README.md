@@ -1,15 +1,18 @@
 # appimport — import por pasta local → Poker App
 
 Um "um toque" para importar **GG hand history**, **GG tournament summaries**,
-**SS do Intuitive Tables** e **SS manuais do replayer** a partir de uma pasta
-local — sem upload manual na UI. Corre no PC do Rui (o mesmo que joga), **só a
-pedido** (duplo-clique depois da sessão), nunca em background.
+**SS do Intuitive Tables**, **SS manuais do replayer** e **SS de lobby** a partir
+de uma pasta local — sem upload manual na UI. Corre no PC do Rui (o mesmo que
+joga), **só a pedido** (duplo-clique depois da sessão), nunca em background.
 
 Mesmo estilo do `apphm3`: script Python standalone + `.bat` de duplo-clique,
 credenciais/caminho fora do git (`config_local.py`).
 
 > **HM3** fica de fora (tem o seu próprio `.bat` em `tools/apphm3/`).
-> **Discord / lobby** ficam de fora (são sync de rede, não ficheiros).
+> O **sync do Discord `#lobbys`** fica de fora (é sync de rede, não ficheiros).
+> Para lobbys há duas vias por ficheiro: a subpasta dedicada **`lobby`**
+> (drop-only-these, move) e a pasta **externa `LOBBY_DIR`** (lê directa, sem
+> mover) — ver abaixo. Coexistem.
 
 ## ⚠️ Restrição GG (crítica)
 O PC de jogo = PC de dev. Corre o `.bat` **só com as salas fechadas, depois da
@@ -42,6 +45,7 @@ sessão**. É um envio único e termina — não há processo a correr durante o
      gg_ts\     ← põe aqui os .zip/.txt de tournament summaries GG
      it\        ← põe aqui as imagens de SS do Intuitive Tables
      manual\    ← põe aqui as imagens de SS manuais do replayer
+     lobby\     ← põe aqui as imagens de SS de lobby de torneio
      done\      ← os enviados com sucesso são MOVIDOS para cá (por tipo)
    ```
 
@@ -62,7 +66,27 @@ sessão**. É um envio único e termina — não há processo a correr durante o
   duplo-clique. Re-enviar é seguro mesmo que algo escape: a app deduplica
   (HH por `hand_id`, SS de mesa por `file_hash`, TS por upsert).
 
-## Fonte "lobby" (opcional) — pasta de Capturas do Windows
+## Subpasta `lobby` — porta dedicada drop-only-these (gémea do `it`)
+Para importar SS de **lobby de torneio** largando-as numa subpasta (como o `it`),
+em vez de varrer a pasta de Capturas inteira:
+1. Põe as imagens em `<PARENT_DIR>\lobby\`. **Só** se processa o que está cá
+   dentro — nada mais é varrido.
+2. Cada ficheiro → `POST /api/lobbys/upload`, com `captured_at` = **hora de
+   modificação do ficheiro** (mtime). Os nomes do Windows ("Captura de ecrã
+   `YYYY-MM-DD HHMMSS`") **não** trazem o `YYYYMMDDHHMMSS` que a via `it`/table-SS
+   lê do nome — por isso a hora vem do timestamp do ficheiro (igual à `LOBBY_DIR`).
+3. O **backend decide se é lobby** (mesmo gate). Mover (preserva o original):
+   - **lobby confirmado** (`is_lobby`) → movido para `done\lobby\`.
+   - **não-lobby genuíno** (`json_invalid`/`site_undetected`) → foi processado →
+     movido para `done\lobby\`.
+   - **falha transitória** da Vision (`vision_failed`) → **NÃO** move → **retry**
+     no próximo duplo-clique. Um lobby real nunca se perde por um soluço de API.
+
+> Diferença para a `LOBBY_DIR` (abaixo): a subpasta **move** ficheiros (drop-only-
+> these, igual às 4 genéricas); a `LOBBY_DIR` lê uma pasta **externa** directa, sem
+> mover, com manifesto + `LOBBY_SINCE`. As duas usam o **mesmo** endpoint e gate.
+
+## Fonte "lobby" (opcional) — pasta EXTERNA de Capturas do Windows (`LOBBY_DIR`)
 Para importar SS de **lobby de torneio** sem as separar dos outros screenshots:
 1. Em `config_local.py` define **`LOBBY_DIR`** = a pasta de Capturas de Ecrã
    (ex.: `C:\Users\User\Pictures\Screenshots`). Para desligar, comenta a linha.
@@ -94,6 +118,7 @@ Para importar SS de **lobby de torneio** sem as separar dos outros screenshots:
 | `gg_ts` | `POST /api/tournament-summaries/import` | parse TS GG → `tournament_summaries` |
 | `it` | `POST /api/table-ss/upload` | Vision (Claude) → `players_left` + match |
 | `manual` | `POST /api/screenshots` | Vision (Claude) → enriquecimento/placeholder |
-| `lobby` (LOBBY_DIR) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` |
+| `lobby` (subpasta) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` (move p/ `done\lobby\`) |
+| `lobby` (LOBBY_DIR externa) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` (sem mover; manifesto) |
 
 Auth = cookie de sessão via `POST /api/auth/login` (igual ao apphm3).
