@@ -46,9 +46,11 @@ Complementa `docs/VISAO_PRODUTO.md` (visão alta) e `docs/MAPA_ACOPLAMENTO.md` (
 
 Lê o input cru e extrai info estruturada:
 - Hand histories texto → mãos + acções + jogadores.
-- Screenshots (Vision GPT-4o-mini) → seats + nicks + stacks; identifica o Hero (centro-baixo).
+- Screenshots (Vision **Claude `claude-sonnet-4-6`** — desde pt53; antes OpenAI) → seats + nicks + stacks; identifica o Hero (centro-baixo). **Todo** o pipeline Vision (replayer GG, table-SS, #lobbys, backoffice) corre Claude.
 - Replayer-links Discord → screenshot embebida na URL.
 - Imagens Discord/Gyazo → ficam como anexos (não viram mãos).
+
+> **Convenção de fuso (pt51):** todas as horas-de-evento (`played_at`, `discord_posted_at`, `start_time`, `captured_at`) são **hora de LISBOA wall-clock**, guardadas `timestamp` **naive** (sem tz). **GG/PS gravam verbatim** (a string da HH já está em Lisboa); **Winamax/WPN/Discord convertem UTC→Lisboa uma vez**. O ponto de encontro é Lisboa porque o Rui joga sempre de Portugal — mata a ambiguidade DST na origem.
 
 ### 2.2. Match
 
@@ -60,6 +62,10 @@ Tenta unir peças que pertencem juntas:
   - Append discord_tags via helper centralizado `append_discord_channel_to_hand` (#B12 fix pt9).
 - **Imagem ↔ mão (galeria):**
   - Manual. Rui escolhe via UI.
+- **SS de mesa (Intuitive Tables) ↔ mão (por tempo):** desde pt50 o match vive numa **função determinística R** (`compute_table_ss_match`, pura), separada do upload. `reconcile_table_ss()` re-avalia **todas** as rows (não só órfãs) e converge sempre para o mesmo estado (idempotente, independente da ordem); exposto em `POST /api/table-ss/reconcile`.
+  - **Site = nome do ficheiro** (pt56), **não** a Vision: `_site_from_filename` lê `<Site>` de `Shot<N>-<Site>-<ts>` (autoritativo). Token não-reconhecido → fallback Vision + log.
+  - **Desambiguação multi-tn** (vários candidatos na janela): compara o **nome fiel da imagem** com cada candidato (`name_tokens_subset`); liga só se **exactamente 1** `tournament_number` bater (`disambiguated_by_name_direct`, pt54). `name_tokens_subset` tolera o **título GG truncado** (`…`) por prefix-match do último token, restantes exactos (pt58).
+  - **Validação de nome só em GG/Winamax** (`_NAME_RELIABLE_SITES`): WPN/PS têm nomes genéricos → casam **só por tempo** (ver tech-debt `#WPN-PS-TABLE-SS-TIME-ONLY-MATCH`).
 
 ### 2.3. Enriquecimento
 
@@ -188,6 +194,8 @@ Exemplo: `3983883171 - €50.00 - Mystery KO`.
 
 **Igual ao PokerStars** (mesmo formato de buy_in, mesma regra de bounty nas stacks).
 
+**Nome canónico (pt54):** o Winamax mete sufixos no nome — `#NNN` (nº de mesa) e `(ID)`. `clean_winamax_tournament_name(name) -> (clean, id)` (`tournament_resolver.py`) apara `#NNN` + `(ID)` e **preserva** tokens legítimos como `150K`/`80K`. Aplicado no import (`hm3.py`) e no compute do table-SS. A UI mostra só o nome.
+
 ### 5.3. WPN
 
 **Nome construído:** `<número_torneio> + <GTD garantido>`.
@@ -304,13 +312,16 @@ No canal `#lobbys` o Rui pode bypassar o resolver escrevendo `#12345678` ou `TM1
 
 Adicionado em pt20 (Commit E + endpoint backoffice).
 
-### 12.1. Três caminhos para `tournament_payouts`
+### 12.1. Caminhos para `tournament_payouts`
 
 | Caminho | Como entra | `source` na row |
 |---|---|---|
 | **Manual** (raro) | `POST /api/payouts` ou INSERT directo | `manual:<rotulo>` (ex: `manual:rui_backoffice_ss_pt20_correction`) |
 | **Lobby Vision** (real-time + sync) | SS no `#lobbys` Discord → Vision → resolver TIER 0/1/2 | `discord_lobby_vision:<msg_id>` |
 | **Backoffice import** (pt20) | Upload imagem do backoffice GG via `Tournaments.jsx` → Vision → resolver TIER 0 | `backoffice_vision:<filename>` |
+| **Lobby por pasta** (pt57) | SS de lobby na pasta de Capturas → `POST /api/lobbys/upload` → mesma pipeline `process_lobby_message` | `file_lobby_vision:<file_hash>` |
+
+**Gate "é lobby?" (pt57):** tanto o `#lobbys` Discord como o upload por pasta passam pela **mesma** `process_lobby_message`. O **backend decide** se a imagem é um lobby de torneio — não-lobby (`json_invalid`/`site_undetected`) é **ignorado** (nada gravado). Uma falha **transitória** da Vision (`vision_failed`) **não** é tratada como não-lobby: o agente de pasta não a marca no manifesto → **retry** na corrida seguinte (nunca perde um lobby real em silêncio). `file_lobby_vision:` entra na precedência D11 ao mesmo nível do `discord_lobby_vision:`.
 
 ### 12.2. Precedência (D11 pt20)
 
