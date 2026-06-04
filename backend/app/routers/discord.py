@@ -858,33 +858,41 @@ async def process_replayer_links(
 @router.post("/revision-replayers")
 async def revision_replayers(
     limit: int = 1000,
+    force: bool = False,
     current_user=Depends(require_auth),
 ):
     """Re-corre a Vision sobre entries replayer_link GG do Discord que JÁ têm
-    `img_b64` mas ainda NÃO têm Vision concluída (`vision_done` != 'true'). Usa o
-    `img_b64` guardado (não re-extrai og:image). Dispara `_backfill_worker` em
-    BACKGROUND e responde de imediato → não bloqueia o pedido HTTP (recuperação
-    sem rebentar o frontend com 'Failed to fetch'). pt52: usar depois de repor a
-    quota OpenAI + reset das entries presas. Acompanhar via GET /sync-state ou logs.
+    `img_b64`. Por defeito só os que ainda NÃO têm Vision concluída
+    (`vision_done` != 'true'). Usa o `img_b64` guardado (não re-extrai og:image).
+    Dispara `_backfill_worker` em BACKGROUND e responde de imediato → não bloqueia
+    o pedido HTTP. pt52: usar depois de repor a quota OpenAI + reset das entries
+    presas. Acompanhar via GET /sync-state ou logs.
+
+    `force=true` (pt-crown): re-corre TAMBÉM em entries com `vision_done='true'`.
+    Útil sempre que o prompt da Vision melhorar (ex.: leitura da coroa/bounty) —
+    re-lê os 23 replayers e refresca `bounty_value_usd` nas mãos já casadas SEM
+    re-derivar o anon_map (só metadata por-jogador; ver _enrich_hand_from_orphan_entry).
     """
     import asyncio
     from app.routers.screenshot import _backfill_worker
 
     def _fetch():
+        done_filter = "" if force else "AND (raw_json->>'vision_done') IS DISTINCT FROM 'true'"
         return query(
-            """SELECT id FROM entries
+            f"""SELECT id FROM entries
                 WHERE source='discord' AND entry_type='replayer_link'
                   AND (raw_json->>'img_b64') IS NOT NULL
-                  AND (raw_json->>'vision_done') IS DISTINCT FROM 'true'
+                  {done_filter}
                 ORDER BY id ASC LIMIT %s""",
             (limit,),
         )
     rows = await asyncio.to_thread(_fetch)
     entry_ids = [r["id"] for r in rows]
     if entry_ids:
-        asyncio.create_task(_backfill_worker(entry_ids))
+        asyncio.create_task(_backfill_worker(entry_ids, force=force))
     return {
         "queued": len(entry_ids),
+        "force": force,
         "first": entry_ids[:3],
         "last": entry_ids[-3:],
         "note": "Vision corre em background (sequencial). Acompanha por logs / contagem de TM extraído.",

@@ -207,13 +207,20 @@ def _build_gg_vision_prompt() -> str:
         "- Player names can appear in different colors: white, yellow, purple/lilac, green.\n"
         "- Players with 'WIN' overlay on their avatar must still be included.\n"
         "- Players who went all-in may show stack 0.\n"
-        "- Each player has TWO distinct badges, do NOT confuse them:\n"
-        "    * ORANGE FLAME (small circle next to nickname) -> VPIP percentage (an integer,\n"
-        "      e.g. '28', '23', '0'). This represents how often the player voluntarily puts\n"
-        "      money in the pot.\n"
-        "    * GOLDEN CROWN (icon above the nickname) -> bounty value in USD\n"
-        "      (e.g. '$50', '$75', '$100', '$112.50', '$125'). This is the dollar prize\n"
-        "      awarded to whoever knocks this player out.\n\n"
+        "- Each player avatar shows TWO SEPARATE pieces of info — do NOT confuse them\n"
+        "  (see #FIELD-BOUNTY-PCT-MISNAMED):\n"
+        "    * VPIP: a small dark CIRCLE holding a plain integer right next to the avatar\n"
+        "      (e.g. '34', '26', '40', '0'), usually with a tiny orange flame. It has NO\n"
+        "      dollar sign. It is how often the player enters pots — it is NOT the bounty.\n"
+        "    * BOUNTY (the PKO knockout prize): a DOLLAR amount shown in the GOLDEN/TAN\n"
+        "      BANNER (plate) at the very TOP of the avatar, ABOVE the nickname — e.g.\n"
+        "      '$268.18', '$57.03', '$142.20', '$81.25', '$303.33'. It ALWAYS has a '$'\n"
+        "      and usually 2 decimals; a small golden crown/trophy icon may sit beside it.\n"
+        "      ⚠️ This is a BOUNTY tournament: EVERY active player has this $ banner at the\n"
+        "      top of their avatar — read it for each one. It is almost never 0. Only use 0\n"
+        "      if a player genuinely has no $ banner (e.g. already busted, stack 0).\n"
+        "      If the banner shows two amounts like '$344.65 +$151.67' (Hero with a pending\n"
+        "      knockout), take ONLY the FIRST amount ('344.65').\n\n"
         "YOUR TASKS:\n"
         "1. Read the title bar for TM number and tournament name.\n"
         "2. Read the LEFT PANEL to identify the SB and BB player names.\n"
@@ -222,8 +229,10 @@ def _build_gg_vision_prompt() -> str:
         "   (a) Nickname.\n"
         "   (b) Chip stack — the colored number shown directly below each player's name.\n"
         "   (c) VPIP percentage — the integer inside the ORANGE FLAME badge (use 0 if not shown).\n"
-        "   (d) Bounty USD value — the dollar amount inside the GOLDEN CROWN above the name\n"
-        "       (output the number ONLY, no '$' or commas; use 0 if not shown).\n"
+        "   (d) Bounty USD value — the dollar amount in the GOLDEN/TAN BANNER at the TOP of\n"
+        "       the avatar (above the name). Output the number ONLY (no '$' or commas). If\n"
+        "       two amounts are shown, take the FIRST. Use 0 ONLY if there is genuinely no\n"
+        "       $ banner for that player.\n"
         "   (e) Country code from the flag (2 letters, or NONE).\n\n"
         "Reply in EXACTLY this format (no extra text, no markdown):\n"
         "TM: <TM number, e.g. TM5672663145>\n"
@@ -241,9 +250,13 @@ def _build_gg_vision_prompt() -> str:
         "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
         "- If a player's stack shows 0, write 0\n"
         "- vpip_pct is the integer in the ORANGE FLAME badge (e.g. '28' for 28%); use 0 if not visible\n"
-        "- bounty_value_usd is the dollar amount in the GOLDEN CROWN above the nickname\n"
-        "  (e.g. '125' for $125, '112.50' for $112.50). NEVER include '$' or commas. Use 0 if not visible.\n"
-        "- DO NOT confuse VPIP (orange flame, integer like '28') with Bounty (golden crown, dollar like '$125'). They are TWO DIFFERENT badges in DIFFERENT positions on the avatar.\n"
+        "- bounty_value_usd is the DOLLAR amount in the golden/tan banner at the TOP of the\n"
+        "  avatar (e.g. '268.18' for $268.18, '57.03' for $57.03). NEVER include '$' or\n"
+        "  commas. In this bounty tournament it is almost never 0 — look carefully at the\n"
+        "  top plate of EVERY avatar before writing 0.\n"
+        "- DO NOT confuse VPIP (a small plain integer in a circle, e.g. '34', NO '$') with\n"
+        "  Bounty (a dollar amount in the TOP banner, e.g. '$268.18'). They are DIFFERENT\n"
+        "  badges in DIFFERENT positions. See #FIELD-BOUNTY-PCT-MISNAMED.\n"
         "- Country is the 2-letter code from the flag, or NONE\n"
         "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
         "- Include ALL players visible at the table, even if eliminated\n"
@@ -937,7 +950,8 @@ def _link_second_discord_entry_to_existing_hand(
 
 
 async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
-                                tm_number: str, file_meta: dict, img_b64: str):
+                                tm_number: str, file_meta: dict, img_b64: str,
+                                force: bool = False):
     """
     Processa Vision em background para um entry já guardado na BD.
     Vision recebe imagem ORIGINAL (resolução máxima) para melhor extracção.
@@ -1024,7 +1038,7 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
                         "vision_sb": vision_sb,
                         "vision_bb": vision_bb,
                         "file_meta": file_meta,
-                    })
+                    }, force=force)
                     logger.info(f"[bg] Match entry {entry_id} -> hand {hand_rows[0]['id']}: {result}")
                 
                 # 2. Tentar match na tabela mtt_hands (auto-rematch bidirecional)
@@ -1348,12 +1362,18 @@ async def upload_screenshot(
     }
 
 
-def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dict) -> dict:
+def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dict,
+                                   force: bool = False) -> dict:
     """
     Dado um entry de screenshot e o id da mão na BD,
     aplica o enriquecimento completo (nomes reais, bounty, country)
     e preenche campos básicos da mão a partir dos dados Vision.
     Marca o entry como 'resolved'.
+
+    force=True (pt-crown): em mãos JÁ enriquecidas (que caem no guard de
+    idempotência), refresca a metadata por-jogador (bounty_value_usd / bounty_pct /
+    country) em player_names.players_list a partir da nova leitura Vision, SEM
+    re-derivar o anon_map nem o apa. Usado pelo backfill de coroa (prompt novo).
     """
     hero_name = raw_json.get("hero")
     file_meta = raw_json.get("file_meta", {})
@@ -1423,6 +1443,34 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
                     "UPDATE entries SET status = 'resolved' WHERE id = %s",
                     (entry_id,),
                 )
+                # pt-crown: refresh da metadata por-jogador (coroa/bounty/vpip/país)
+                # a partir da nova leitura Vision, SEM tocar anon_map/apa/match_method.
+                # Faz o backfill de coroa funcionar nas mãos já enriquecidas.
+                if force:
+                    fresh_by_name = {}
+                    for fp in (raw_json.get("players_list") or []):
+                        if isinstance(fp, dict):
+                            nm = (fp.get("name") or "").strip().lower()
+                            if nm:
+                                fresh_by_name[nm] = fp
+                    pl = pn_existing.get("players_list") or []
+                    changed = False
+                    for p in pl:
+                        if not isinstance(p, dict):
+                            continue
+                        fp = fresh_by_name.get((p.get("name") or "").strip().lower())
+                        if not fp:
+                            continue
+                        for k in ("bounty_value_usd", "bounty_pct", "country"):
+                            if fp.get(k) is not None:
+                                p[k] = fp.get(k)
+                        changed = True
+                    if changed:
+                        pn_existing["players_list"] = pl
+                        cur.execute(
+                            "UPDATE hands SET player_names = %s WHERE id = %s",
+                            (json.dumps(pn_existing), hand_db_id),
+                        )
             conn.commit()
         finally:
             conn.close()
@@ -1764,8 +1812,10 @@ def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     return dict(rows[0])
 
 
-async def _backfill_worker(entry_ids: list):
-    """Worker assíncrono que processa entries 1 a 1 sequencialmente."""
+async def _backfill_worker(entry_ids: list, force: bool = False):
+    """Worker assíncrono que processa entries 1 a 1 sequencialmente.
+    force=True → re-Vision mesmo em entries já feitos e refresca os crowns nas
+    mãos já enriquecidas (propaga para _run_vision_for_entry)."""
     for eid in entry_ids:
         try:
             def _fetch_entry(entry_id):
@@ -1786,7 +1836,7 @@ async def _backfill_worker(entry_ids: list):
             tm_number = raw.get("tm")
             file_meta = raw.get("file_meta", {})
 
-            await _run_vision_for_entry(eid, content, mime_type, tm_number, file_meta, img_b64)
+            await _run_vision_for_entry(eid, content, mime_type, tm_number, file_meta, img_b64, force=force)
             await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"[backfill] Error entry {eid}: {e}")
