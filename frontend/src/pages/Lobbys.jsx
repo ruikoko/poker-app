@@ -182,6 +182,9 @@ function ReconcilePanel() {
                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                 fontSize: 12, padding: '4px 0', borderTop: i ? '1px solid rgba(255,255,255,0.04)' : 'none',
               }}>
+                {it.lobby_date && (
+                  <span style={{ fontFamily: 'monospace', color: 'var(--muted)', fontSize: 11 }}>{it.lobby_date}</span>
+                )}
                 <span>{it.site} · <b>{it.tournament_name || '—'}</b></span>
                 <Chip color={a.color}>{a.label}</Chip>
                 {it.resolved_tn && (

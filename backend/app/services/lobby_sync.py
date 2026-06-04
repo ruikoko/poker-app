@@ -643,6 +643,9 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
             "message_id": r["discord_message_id"], "site": site,
             "tournament_name": name, "prev_result": r.get("result"),
             "resolved_tn": tn, "resolver_tier": tier, "n_candidates": len(candidates),
+            # data da captura/post (Lisboa wall-clock) — deixa claro que um pendente
+            # está à espera dos dados do PRÓPRIO dia, não avariado.
+            "lobby_date": posted_at.date().isoformat() if posted_at else None,
         }
 
         if tn is None:
