@@ -141,11 +141,25 @@ def name_tokens_subset(short_name: Optional[str], full_name: Optional[str]) -> b
     ``table_ss._resolve_match`` antes de aceitar a mão. Conservador:
     ``short_name`` vazio/None / só-sufixo → False (o caller decide a leniência
     quando não há nome lido).
+
+    pt58 — tolerância a TRUNCAÇÃO: o cliente GG corta títulos longos na SS de
+    mesa (ex.: '… [Mystery Bo...]'). Se o ÚLTIMO token vier cortado (contém
+    '...'), trata-se como PREFIXO: os tokens RESTANTES têm de bater EXACTAMENTE
+    (substring) e o prefixo (>=2 chars) como substring. Nunca se relaxam os
+    restantes → a unicidade (1 só candidato) é garantida pelo caller, sem falsos
+    matches. (Um corte sem parênteses '… Bo...' já fica 'bo' no tokenizer e bate
+    pela via normal — esta é só para o caso com bracket onde o '...' sobrevive.)
     """
     toks = _tokenize_name(clean_tournament_name(short_name))
     if not toks:
         return False
     full = (clean_tournament_name(full_name) or "").lower()
+    last = toks[-1]
+    if "..." in last:
+        if not all(t in full for t in toks[:-1]):
+            return False
+        prefix = last.split("...", 1)[0].strip("[]()")
+        return len(prefix) < 2 or prefix in full
     return all(tok in full for tok in toks)
 
 

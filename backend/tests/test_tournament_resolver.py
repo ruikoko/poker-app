@@ -707,6 +707,30 @@ def test_name_tokens_subset_empty_short_is_false():
     assert name_tokens_subset("#000", "ZENITH") is False  # só sufixo → 0 tokens
 
 
+# ── pt58: tolerância a truncação do título (cliente GG corta títulos longos) ──
+
+def test_name_tokens_subset_truncated_last_token_prefix_match():
+    """'… [Mystery Bo...]' (id=134): restantes batem exacto + 'bo' como prefixo
+    de 'bounty' → bate o título completo."""
+    ss = "268-M: $150 Saturday Secret KO [Mystery Bo...]"
+    assert name_tokens_subset(ss, "268-M: $150 Saturday Secret KO [Mystery Bounty]") is True
+
+
+def test_name_tokens_subset_truncated_does_not_match_unrelated():
+    """Os tokens RESTANTES continuam exactos — truncação não relaxa o resto."""
+    ss = "268-M: $150 Saturday Secret KO [Mystery Bo...]"
+    assert name_tokens_subset(ss, "Saturday Session: GGMasters Bounty $108") is False
+    assert name_tokens_subset(ss, "Bounty Hunters Deepstack Turbo $54") is False
+
+
+def test_name_tokens_subset_truncated_prefixes_two_tournaments():
+    """'Bounty Hunters Deepstack Tu...' prefixa Turbo $54 E Turbo $88 → bate
+    ambos (o caller fica ambíguo, não inventa match)."""
+    ss = "Bounty Hunters Deepstack Tu..."
+    assert name_tokens_subset(ss, "Bounty Hunters Deepstack Turbo $54") is True
+    assert name_tokens_subset(ss, "Bounty Hunters Deepstack Turbo $88") is True
+
+
 def test_name_tokens_subset_w_series_suffix_and_case():
     # sufixo de mesa #007 cai; prefixo #220 casa; case-insensitive.
     assert name_tokens_subset("#220 - W SERIES #007",

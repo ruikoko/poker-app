@@ -172,6 +172,37 @@ def test_resolve_match_multi_tn_direct_name_disambiguation():
     assert m["reason"] == "disambiguated_by_name_direct"
 
 
+def test_resolve_match_truncated_title_links_unique_candidate():
+    """pt58 (caso id=134): título truncado '[Mystery Bo...]'; só o 268-M na janela
+    bate os tokens restantes → liga (sem inventar)."""
+    cands = [
+        _candn(1, "286729346", "268-M: $150 Saturday Secret KO [Mystery Bounty]"),
+        _candn(2, "287027219", "Bounty Hunters Deepstack Turbo $54"),
+        _candn(3, "287017027", "Saturday Session: GGMasters Bounty $108"),
+    ]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "268-M: $150 Saturday Secret KO [Mystery Bo...]"},
+        "GGPoker", cands)
+    assert m["matched"]["id"] == 1
+    assert m["tn"] == "286729346"
+    assert m["reason"] == "disambiguated_by_name_direct"
+
+
+@patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, []))
+def test_resolve_match_truncated_prefixing_two_stays_ambiguous(_res):
+    """pt58: título truncado 'Tu...' prefixa Turbo $54 E $88 (2 torneios) → NÃO
+    inventa match, FICA ambíguo."""
+    cands = [
+        _candn(1, "A", "Bounty Hunters Deepstack Turbo $54"),
+        _candn(2, "B", "Bounty Hunters Deepstack Turbo $88"),
+    ]
+    m = table_ss._resolve_match(
+        CAP, {"tournament_name": "Bounty Hunters Deepstack Tu..."}, "GGPoker", cands)
+    assert m["matched"] is None
+    assert m["ambiguous"] is True
+    assert m["reason"].startswith("multi_tn_unresolved")
+
+
 @patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, []))
 def test_resolve_match_multi_tn_resolver_none_ambiguous(_mock_res):
     cands = [_cand(10, "T1"), _cand(20, "T2")]
