@@ -50,6 +50,28 @@ _VALID_RESULTS = frozenset({
     "tm_not_found", "tm_ambiguous", "no_match_to_hand", "upsert_error",
 })
 
+# pt56 (#TABLE-SS-SITE-FROM-FILENAME) — o SITE vem do NOME do ficheiro, que é
+# determinístico: "Shot<N>-<Site>-<YYYYMMDDHHMMSS>". Token [1] após split '-'.
+# Fonte AUTORITÁRIA do site (a Vision mislê PS/WPN como GG/WN). Único alias:
+# 'Stars' → PokerStars; os outros são identidade.
+_FILENAME_SITE_MAP = {
+    "GGPoker": "GGPoker",
+    "Winamax": "Winamax",
+    "WPN": "WPN",
+    "Stars": "PokerStars",
+}
+
+
+def _site_from_filename(filename: Optional[str]) -> Optional[str]:
+    """Site a partir do token [1] do nome ('Shot1-Stars-...' → 'PokerStars').
+    None se o nome não traz token reconhecível (→ fallback Vision)."""
+    if not filename:
+        return None
+    parts = filename.split("-")
+    if len(parts) < 2:
+        return None
+    return _FILENAME_SITE_MAP.get(parts[1].strip())
+
 # pt39 — o buy_in da SS de mesa vem como string com moeda ("€50", "$108"),
 # ao contrário do lobby (float). Parse para (total_float, currency) p/ alimentar
 # o discriminador buy_in do TIER 0 do resolver.
@@ -362,8 +384,10 @@ def compute_table_ss_match(
     matched_hand_id, matched_hand_db_id}; result ∈ {success, tm_ambiguous,
     no_match_to_hand}.
     """
-    # Self-healing de site ANTES de qualquer match (determinístico, idempotente).
-    site = tv._correct_site(vj.get("tournament_name"), site)
+    # pt56: o `site` já é AUTORITÁRIO (vem do nome do ficheiro, decidido na
+    # ingestão/backfill) — compute confia nele e NÃO re-corrige por nome (evita
+    # que a Regra B sobrescreva um site correcto do nome cujo torneio coincide
+    # com o de outra sala). O self-heal Vision fica só no upload-fallback.
     # pt54: Winamax → nome canónico para o matching (idempotente; cobre rows com
     # vision_json ainda por-limpar no reconcile). Não muta o vj do caller.
     if site == "Winamax":
@@ -614,10 +638,19 @@ async def _process_table_ss(
     # #TABLE-SS-VISION-SITE-MISCLASS: corrige a site lida quando o nome a
     # contradiz (Regra A `#NNN` trailing + Regra B cross-check BD), ANTES de
     # gravar a site no log e de filtrar candidatos por site.
-    vj["site"] = tv._correct_site(vj.get("tournament_name"), vj.get("site"))
+    # pt56: o NOME do ficheiro é a fonte AUTORITÁRIA do site (determinístico).
+    # Se o nome dá token → ignora o que a Vision leu. Senão → fallback Vision
+    # (+ _correct_site) e loga (para vermos quantos).
+    _fsite = _site_from_filename(filename)
+    if _fsite:
+        vj["site"] = _fsite
+    else:
+        vj["site"] = tv._correct_site(vj.get("tournament_name"), vj.get("site"))
+        logger.info(
+            "[table_ss_site] nome sem token reconhecível (%r) → fallback Vision=%s",
+            filename, vj.get("site"),
+        )
     # pt54: Winamax → nome canónico (remove '#NNN' nº de mesa + '(ID)' do nome).
-    # Limpo na coluna/vision_json (display) E no matching (compute re-limpa,
-    # idempotente). O '#NNN' varia por mesa dentro do mesmo torneio.
     if vj.get("site") == "Winamax":
         vj["tournament_name"] = clean_winamax_tournament_name(vj.get("tournament_name"))[0]
     out["vision_json"] = vj

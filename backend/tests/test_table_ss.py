@@ -277,7 +277,8 @@ def test_process_json_invalid(_q, _ex, _up):
        return_value='{"site":"PartyPoker","tournament_name":"X","players_left":50}')
 @patch("app.routers.table_ss.query", return_value=[])
 def test_process_site_undetected(_q, _ex, _up, _mcorrect):
-    out = _run_process()
+    # pt56: nome SEM token de site → fallback Vision ('PartyPoker', não suportado).
+    out = asyncio.run(table_ss._process_table_ss(b"\x89PNGx", "screenshot.png"))
     assert out["result"] == "site_undetected"
     assert out["site"] == "PartyPoker"
 
@@ -446,19 +447,57 @@ def test_compute_match_no_hands_resolves_tn_for_limbo():
     assert d["tournament_number"] == "T9"
 
 
-def test_compute_match_corrects_site_before_matching():
-    """R aplica _correct_site ANTES de procurar candidatos (self-healing)."""
+def test_compute_match_trusts_passed_site():
+    """pt56: o site já é autoritário (do nome) — compute confia nele e procura
+    candidatos nesse site, SEM re-corrigir (_correct_site não é chamado)."""
     seen = {}
     def fake_find(captured_at, site):
         seen["site"] = site
         return []
-    with patch("app.routers.table_ss.tv._correct_site", return_value="Winamax"), \
+    with patch("app.routers.table_ss.tv._correct_site") as mcorrect, \
          patch("app.routers.table_ss._find_candidate_hands", side_effect=fake_find), \
          patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, [])):
         d = table_ss.compute_table_ss_match(
-            CAP, "GGPoker", {"tournament_name": "ODYSSEY #013"})
-    assert d["site"] == "Winamax"
-    assert seen["site"] == "Winamax"   # procura no site corrigido, não no gravado
+            CAP, "PokerStars", {"tournament_name": "Sunday Bounty"})
+    assert d["site"] == "PokerStars"          # usa o site passado, intacto
+    assert seen["site"] == "PokerStars"
+    mcorrect.assert_not_called()               # já não re-corrige no matching
+
+
+# ── pt56: site a partir do NOME do ficheiro (determinístico) ────────────────
+
+def test_site_from_filename_all_sites_and_stars_alias():
+    assert table_ss._site_from_filename("Shot1-GGPoker-20260601174446.png") == "GGPoker"
+    assert table_ss._site_from_filename("Shot2-Winamax-20260523170400.png") == "Winamax"
+    assert table_ss._site_from_filename("Shot25-WPN-20260601223005.png") == "WPN"
+    # único alias: Stars → PokerStars
+    assert table_ss._site_from_filename("Shot12-Stars-20260531182134.png") == "PokerStars"
+
+
+def test_site_from_filename_unrecognized_or_malformed_returns_none():
+    assert table_ss._site_from_filename("Shot29-CoinPoker-20260526212332.png") is None
+    assert table_ss._site_from_filename("semtraco.png") is None
+    assert table_ss._site_from_filename(None) is None
+    assert table_ss._site_from_filename("") is None
+
+
+@patch("app.routers.table_ss.tv._correct_site", return_value="GGPoker")
+@patch("app.routers.table_ss.compute_table_ss_match",
+       return_value={"result": "no_match_to_hand", "reason_detail": "x", "site": "PokerStars",
+                     "tournament_number": None, "matched_hand_id": None, "matched_hand_db_id": None})
+@patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
+@patch("app.routers.table_ss.tv.extract_table_ss_json",
+       return_value='{"site":"GGPoker","tournament_name":"Sunday Bounty €100","players_left":92}')
+@patch("app.routers.table_ss.query", return_value=[])
+def test_upload_filename_site_overrides_vision(_q, _ex, _up, _comp, _mcorrect):
+    """A Vision leu GGPoker, mas o nome diz Stars → grava PokerStars (autoritário)
+    e NÃO chama _correct_site (caminho do nome)."""
+    out = asyncio.run(table_ss._process_table_ss(
+        b"\x89PNGx", "Shot12-Stars-20260531182134.png"))
+    assert out["site"] == "PokerStars"
+    _mcorrect.assert_not_called()
+    # compute foi chamado com o site do nome.
+    assert _comp.call_args[0][1] == "PokerStars"
 
 
 def test_compute_match_no_captured_at_resolves_tn():
