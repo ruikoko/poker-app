@@ -208,6 +208,9 @@ def _build_candidates(hand: dict) -> list[dict]:
             "nick": name,
             "position": pdata.get("position"),
             "stack": vinfo.get("stack") or pdata.get("stack"),
+            # ⚠️ bounty_pct = VPIP (chama laranja 🔥), NÃO o bounty. O bounty
+            # (coroa dourada 👑 em $) é `bounty_value_usd`. Nome enganador —
+            # ver #FIELD-BOUNTY-PCT-MISNAMED / topo do CLAUDE.md.
             "bounty_pct": vinfo.get("bounty_pct"),
             "country": vinfo.get("country"),
             "has_cards": has_cards,

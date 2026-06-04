@@ -249,6 +249,8 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
                 <span style={{ fontSize: 15, color: '#64748b', fontFamily: 'monospace', minWidth: 90, textAlign: 'right' }}>
                   {stackDisplay}
                 </span>
+                {/* ⚠️ bounty_pct = VPIP (chama laranja 🔥), NÃO bounty. O bounty
+                    (coroa 👑 $) é bounty_value_usd. Nome enganador — #FIELD-BOUNTY-PCT-MISNAMED. */}
                 {p.bounty_pct != null && p.bounty_pct > 0 && (
                   <span style={{
                     fontSize: 14, color: '#7dd3fc', fontWeight: 700,

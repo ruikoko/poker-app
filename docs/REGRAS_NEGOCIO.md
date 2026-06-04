@@ -288,6 +288,15 @@ Campos opcionais que faltam no TS resultam em `NULL`/`None`. Apenas `tournament_
 
 Adicionado em pt19. Pivot deliberado de vocabulário para reduzir ambiguidade com a linguagem do Rui.
 
+### ⚠️ Chama laranja (VPIP) vs coroa dourada (bounty) — armadilha recorrente
+
+Nas screenshots/replayer da GGPoker, cada jogador tem dois badges distintos:
+
+- **🔥 Chama LARANJA = VPIP** (uma percentagem de frequência de entrada em pote). **NÃO é bounty.**
+- **👑 Coroa DOURADA = bounty em $** (PKO/KO). É este o bounty.
+
+No código o campo **`bounty_pct` contém o VPIP (a chama laranja), NÃO o bounty** — o nome é histórico e enganador (mantido por backward-compat; `#FIELD-BOUNTY-PCT-MISNAMED`). O bounty real é **`bounty_value_usd`** (a coroa). Toda a matemática de bounty (IRE, `ko_units`, etc.) usa `bounty_value_usd`; usar `bounty_pct` para bounty está **errado**. Erro já cometido várias vezes — daí este aviso explícito (ver também o topo do `CLAUDE.md`).
+
 ### Tags HM3 / canais Discord
 
 - **`GTw` descontinuada** (pt19, commit `a4a9595`). Tag canónica para "posição em torneios não-KO (vanilla, sem bounty)" é **`pos-nko`** (originalmente nome de canal Discord — `discord_tags`). Continua listada em `HM3_REAL_TAGS` com id sintético `9999` para que UI/admin a reconheçam; o importer `import_hm3` aplica `apply_hm3_tag_aliases()` (`backend/app/services/hm3_tag_aliases.py`) pré-INSERT a re-imports do `.bat` que ainda trazem `GTw`.

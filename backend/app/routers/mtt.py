@@ -67,7 +67,7 @@ MTT_SCHEMA_STATEMENTS = [
         player_name TEXT NOT NULL,
         position TEXT,
         stack REAL,
-        bounty_pct TEXT,
+        bounty_pct TEXT,   -- ⚠️ guarda o VPIP (chama laranja), NÃO o bounty; nome enganador #FIELD-BOUNTY-PCT-MISNAMED
         country TEXT,
         vpip_action TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -16,6 +16,15 @@ Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro este
 
 Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no GTO Brain), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
 
+## ⚠️ ARMADILHA RECORRENTE — chama laranja ≠ bounty
+
+**Nas screenshots/replayer da GGPoker há DOIS badges por jogador. NÃO os confundas (já se confundiu várias vezes):**
+
+- **🔥 Chama LARANJA = VPIP do jogador (uma %).** NÃO é bounty, NÃO é "percentagem de bounty". É a frequência com que o jogador entra em pote.
+- **👑 Coroa DOURADA = bounty, valor em $.** É ISTO o bounty (PKO/KO).
+
+**No código o campo `bounty_pct` guarda a CHAMA LARANJA = o VPIP — o NOME É ENGANADOR.** O bounty real (coroa) está em **`bounty_value_usd`**. Qualquer cálculo de bounty (IRE, ko_units, etc.) usa `bounty_value_usd`, **nunca** `bounty_pct`. Rename do campo deferido por backward-compat — ver `#FIELD-BOUNTY-PCT-MISNAMED` (`screenshot.py`). Se vês `bounty_pct` e pensas "bounty", pára: é VPIP.
+
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
 **O PC onde este projecto é desenvolvido é o mesmo onde o utilizador joga poker.** As salas (GGPoker, PokerStars, Winamax, WPN, iPoker, 888) têm anti-cheat agressivo que scanneia processos activos. Qualquer processo "suspeito" (editores, terminais, ferramentas de análise, scripts Python a correr) pode gerar falsos positivos e prejudicar a conta.

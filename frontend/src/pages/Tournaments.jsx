@@ -238,6 +238,7 @@ function VillainRow({ v }) {
           {Number(v.stack).toLocaleString()}
         </span>
       )}
+      {/* ⚠️ bounty_pct = VPIP (chama laranja), NÃO bounty (= bounty_value_usd, coroa $). #FIELD-BOUNTY-PCT-MISNAMED */}
       {v.bounty_pct && (
         <span style={{ fontSize: 11, color: '#f59e0b' }}>{v.bounty_pct}</span>
       )}

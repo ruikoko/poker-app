@@ -438,10 +438,13 @@ def _parse_vision_response(text: str) -> dict:
                     except ValueError:
                         stack_value = 0.0
 
-                # VPIP % (orange flame badge). Field key keeps `bounty_pct` para backward-compat
-                # com 4 consumidores: villain_rules.py, mtt.py (incl. coluna BD hand_villains.bounty_pct),
-                # ire.py (gate), screenshot.py _replace_hashes_in_actions. Rename para `vpip_pct`
-                # deferido — ver #FIELD-BOUNTY-PCT-MISNAMED.
+                # ⚠️ ARMADILHA RECORRENTE: isto é o VPIP do jogador (a CHAMA LARANJA 🔥),
+                # NÃO o bounty. O bounty (PKO/KO) é a COROA DOURADA 👑 em $ =
+                # `bounty_value_usd` (abaixo). O nome do campo `bounty_pct` é histórico
+                # e ENGANADOR — guarda o VPIP %. Backward-compat com 4 consumidores:
+                # villain_rules.py, mtt.py (incl. coluna BD hand_villains.bounty_pct),
+                # ire.py (gate), screenshot.py _replace_hashes_in_actions. Rename para
+                # `vpip_pct` deferido — ver #FIELD-BOUNTY-PCT-MISNAMED.
                 bounty_pct = 0
                 vpip_m = re.search(r'(\d+)', vpip_str)
                 if vpip_m:
