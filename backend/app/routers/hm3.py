@@ -811,7 +811,9 @@ async def import_hm3(
     inserted = 0
     skipped = 0
     errors = []
-    villains_created = 0
+    villains_created = 0          # rows hand_villains inseridas (instâncias vilão-mão)
+    villain_hand_ids = []         # ids das mãos NOVAS deste import (p/ contar nicks únicos)
+    villains_unique = 0           # nicks distintos entre as mãos novas deste import
     reclassified = 0
     rejected_pre_2026 = 0
 
@@ -1091,6 +1093,18 @@ async def import_hm3(
                 # #B28 fix (pt14): captar return — ver comentario no path skipped acima.
                 _avr = apply_villain_rules(hand_db_id, conn=conn)
                 villains_created += _avr.get("n_villains_created", 0)
+                villain_hand_ids.append(hand_db_id)
+
+            # Cosmético (não toca a lógica/dados dos vilões): nicks DISTINTOS entre
+            # as mãos novas deste import — distingue instâncias (rows) de vilões
+            # únicos no resumo. Lê dentro da mesma transacção (mãos já persistidas).
+            if villain_hand_ids:
+                cur.execute(
+                    "SELECT COUNT(DISTINCT player_name) AS n FROM hand_villains "
+                    "WHERE hand_db_id = ANY(%s)",
+                    (villain_hand_ids,),
+                )
+                villains_unique = cur.fetchone()["n"]
 
         conn.commit()
     except Exception as e:
@@ -1185,7 +1199,8 @@ async def import_hm3(
         "skipped_date_filter": skipped_date,
         "skipped_nota_filter": skipped_nota,
         "rejected_pre_2026": rejected_pre_2026,
-        "villains_created": villains_created,
+        "villains_created": villains_created,   # instâncias vilão-mão (rows)
+        "villains_unique": villains_unique,     # nicks distintos (mãos novas deste import)
         "site_reclassified": reclassified,
         "errors": len(errors),
         "error_log": errors[:20],

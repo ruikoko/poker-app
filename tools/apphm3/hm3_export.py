@@ -249,7 +249,8 @@ def main():
         print(f"Inseridas: {result.get('inserted', 0)}")
         print(f"Duplicados: {result.get('skipped_duplicates', 0)}")
         print(f"Filtradas por data: {result.get('skipped_date_filter', 0)}")
-        print(f"Vilões criados: {result.get('villains_created', 0)}")
+        print(f"Linhas de vilão criadas: {result.get('villains_created', 0)}"
+              f" · vilões únicos: {result.get('villains_unique', 0)}")
         print(f"Erros: {result.get('errors', 0)}")
         error_log = result.get('error_log') or []
         if error_log:

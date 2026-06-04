@@ -92,7 +92,7 @@ function formatResult(type, result) {
         result.inserted && `${result.inserted} mãos inseridas`,
         result.skipped_duplicates && `${result.skipped_duplicates} duplicados`,
         result.skipped_date_filter && `${result.skipped_date_filter} fora do período`,
-        result.villains_created && `${result.villains_created} vilões`,
+        result.villains_created && `${result.villains_created} linhas de vilão${result.villains_unique != null ? ` · ${result.villains_unique} únicos` : ''}`,
         result.migrated_to_study > 0 && `${result.migrated_to_study} → Estudo`,
         result.rejected_pre_2026 > 0 && `${result.rejected_pre_2026} <2026 rejeitadas`,
         result.errors && `${result.errors} erros`,

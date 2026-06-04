@@ -1001,8 +1001,11 @@ async def import_mtt(
     inserted = 0
     skipped = 0
     matched = 0
-    villains_created = 0
-    
+    villains_created = 0          # rows hand_villains inseridas (instâncias vilão-mão)
+    villain_hand_ids = []         # ids (hand_db_id) das mãos com vilão criado neste import
+    villain_mtt_ids = []          # ids (mtt_hand_id) do branch legacy
+    villains_unique = 0           # nicks distintos entre as mãos deste import
+
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -1187,15 +1190,36 @@ async def import_mtt(
                     # archive). Branch hand_db_id migra para apply_villain_rules.
                     if mtt_hand_id:
                         n = _create_villains_for_hand(conn, h, screenshot, mtt_hand_id=mtt_hand_id)
+                        villain_mtt_ids.append(mtt_hand_id)
                     else:
                         from app.services.villain_rules import apply_villain_rules
                         result = apply_villain_rules(hands_id, conn=conn)
                         n = result["n_villains_created"]
+                        villain_hand_ids.append(hands_id)
                     villains_created += n
                     if n > 0:
                         matched += 1
-        
+
         conn.commit()
+
+        # Cosmético (não toca a lógica/dados dos vilões): nicks DISTINTOS entre as
+        # mãos deste import — distingue instâncias (rows) de vilões únicos no resumo.
+        # Cobre os dois caminhos de storage (hand_db_id e mtt_hand_id legacy).
+        _vu_clauses, _vu_params = [], []
+        if villain_hand_ids:
+            _vu_clauses.append("hand_db_id = ANY(%s)")
+            _vu_params.append(villain_hand_ids)
+        if villain_mtt_ids:
+            _vu_clauses.append("mtt_hand_id = ANY(%s)")
+            _vu_params.append(villain_mtt_ids)
+        if _vu_clauses:
+            from app.db import query as _q
+            _vu = _q(
+                "SELECT COUNT(DISTINCT player_name) AS n FROM hand_villains "
+                f"WHERE {' OR '.join(_vu_clauses)}",
+                tuple(_vu_params),
+            )
+            villains_unique = _vu[0]["n"] if _vu else 0
     except Exception as e:
         conn.rollback()
         logger.error(f"Erro ao importar MTT: {e}")
@@ -1218,7 +1242,8 @@ async def import_mtt(
         "inserted": inserted,
         "skipped": skipped,
         "matched_with_screenshots": matched,
-        "villains_created": villains_created,
+        "villains_created": villains_created,   # instâncias vilão-mão (rows)
+        "villains_unique": villains_unique,     # nicks distintos (mãos deste import)
         "errors": len(all_errors),
         "error_log": all_errors[:20],
     }

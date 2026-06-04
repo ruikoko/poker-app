@@ -143,9 +143,10 @@ function ImportPanel({ onImported }) {
         inserted: a.inserted + (r.inserted || 0),
         skipped: a.skipped + (r.skipped || 0),
         matched: a.matched + (r.matched_with_screenshots || 0),
-        villains: a.villains + (r.villains_created || 0),
+        villains: a.villains + (r.villains_created || 0),         // instâncias vilão-mão (rows)
+        villainsUnique: a.villainsUnique + (r.villains_unique || 0), // nicks distintos
         errors: a.errors + (r.errors || 0),
-      }), { inserted: 0, skipped: 0, matched: 0, villains: 0, errors: 0 })
+      }), { inserted: 0, skipped: 0, matched: 0, villains: 0, villainsUnique: 0, errors: 0 })
       setResult(total)
       if (total.inserted > 0) onImported?.()
     } catch (e) {
@@ -186,7 +187,7 @@ function ImportPanel({ onImported }) {
           <span style={{ color: '#22c55e' }}>{result.inserted} mãos</span>
           {result.skipped > 0 && <span style={{ color: '#f59e0b' }}>{result.skipped} dup</span>}
           <span style={{ color: '#6366f1' }}>{result.matched} com SS</span>
-          <span style={{ color: '#8b5cf6' }}>{result.villains} villains</span>
+          <span style={{ color: '#8b5cf6' }}>{result.villains} linhas de vilão · {result.villainsUnique} únicos</span>
         </div>
       )}
       {result?.error && (

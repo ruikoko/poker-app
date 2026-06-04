@@ -464,8 +464,9 @@ function HM3ImportPanel({ onImported }) {
         skipped: a.skipped + (r.skipped_duplicates || 0),
         skippedDate: a.skippedDate + (r.skipped_date_filter || 0),
         skippedNota: a.skippedNota + (r.skipped_nota_filter || 0),
-        villains: a.villains + (r.villains_created || 0),
-      }), { inserted: 0, skipped: 0, skippedDate: 0, skippedNota: 0, villains: 0 })
+        villains: a.villains + (r.villains_created || 0),         // instâncias vilão-mão (rows)
+        villainsUnique: a.villainsUnique + (r.villains_unique || 0), // nicks distintos
+      }), { inserted: 0, skipped: 0, skippedDate: 0, skippedNota: 0, villains: 0, villainsUnique: 0 })
       setImportResult(total)
       if (total.inserted > 0) onImported?.()
     } catch (e) {
@@ -520,7 +521,7 @@ function HM3ImportPanel({ onImported }) {
           {importResult.skipped > 0 && <span style={{ color: '#f59e0b' }}>{importResult.skipped} duplicadas</span>}
           {importResult.skippedDate > 0 && <span style={{ color: '#64748b' }}>{importResult.skippedDate} fora do prazo</span>}
           {importResult.skippedNota > 0 && <span style={{ color: '#64748b' }}>{importResult.skippedNota} sem nota</span>}
-          {importResult.villains > 0 && <span style={{ color: '#8b5cf6' }}>{importResult.villains} vilões</span>}
+          {importResult.villains > 0 && <span style={{ color: '#8b5cf6' }}>{importResult.villains} linhas de vilão · {importResult.villainsUnique} únicos</span>}
         </div>
       )}
       {importResult?.error && (
