@@ -1,15 +1,19 @@
 """Endpoint POST /api/lobbys/sync-recent — re-processa SSs lobby
 não persistidas em tournament_payouts."""
 from __future__ import annotations
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth import require_auth
-from app.services.lobby_sync import run_sync
+from app.db import query
+from app.services.image_utils import detect_image_mime
+from app.services.lobby_sync import run_sync, process_lobby_message
 
 router = APIRouter(prefix="/api/lobbys", tags=["lobbys"])
 logger = logging.getLogger("lobbys")
@@ -40,6 +44,65 @@ class SyncRecentBody(BaseModel):
         if bad:
             raise ValueError(f"invalid failure_types: {sorted(bad)}")
         return v
+
+
+@router.post("/upload")
+async def upload_lobby_ss(
+    file: UploadFile = File(...),
+    captured_at: Optional[str] = Form(None),
+    current_user=Depends(require_auth),
+):
+    """2ª via de lobby (fora do Discord) — 1 SS da pasta de Capturas do Windows,
+    misturada com outros screenshots. GATE 'é lobby?': corre a MESMA Vision de
+    lobby; sem torneio (json_invalid/site_undetected/vision_failed) → NÃO é lobby
+    → ignora, grava NADA. Lobby (Vision leu torneio) → reutiliza a pipeline
+    `process_lobby_message` (→ tournament_payouts + lobby_processing_log), com
+    `source=file_lobby_vision:`. Dedup server-side por hash(conteúdo). pt57."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Ficheiro vazio")
+    mime = detect_image_mime(content)
+
+    # posted_at = captured_at (mtime do ficheiro = hora local de Lisboa, naive),
+    # usado como âncora prestart do resolver. Fallback: agora (Lisboa naive).
+    posted_at: Optional[datetime] = None
+    if captured_at:
+        try:
+            posted_at = datetime.fromisoformat(captured_at)
+        except (ValueError, TypeError):
+            posted_at = None
+    if posted_at is None:
+        posted_at = datetime.now(ZoneInfo("Europe/Lisbon"))
+    if posted_at.tzinfo is not None:  # convenção pt51: Lisboa naive
+        posted_at = posted_at.replace(tzinfo=None)
+
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    # Rede de segurança: este conteúdo já foi processado como lobby? (dedup)
+    existing = query(
+        "SELECT result, tournament_number FROM lobby_processing_log "
+        "WHERE discord_message_id = %s",
+        (file_hash,),
+    )
+    if existing:
+        e = existing[0]
+        return {"is_lobby": True, "dedup": True, "result": e.get("result"),
+                "tournament_number": e.get("tournament_number")}
+
+    res = await process_lobby_message(
+        content, mime, message_id=file_hash, channel_id=None,
+        posted_at=posted_at, source_prefix="file_lobby_vision",
+        log_on_failure=False,  # não-lobby (falha de Vision) → não persiste nada
+    )
+    _NON_LOBBY = {"json_invalid", "site_undetected", "vision_failed", "pre_2026_skip"}
+    is_lobby = res.get("result") not in _NON_LOBBY
+    return {
+        "is_lobby": is_lobby, "dedup": False,
+        "result": res.get("result"), "site": res.get("site"),
+        "tournament_name": res.get("tournament_name"),
+        "tournament_number": res.get("tournament_number"),
+        "action": res.get("action"), "reason_detail": res.get("reason_detail"),
+    }
 
 
 @router.post("/sync-recent")

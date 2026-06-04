@@ -12,3 +12,9 @@ PARENT_DIR = r"C:\Users\User\Desktop\poker_import"
 # as MESMAS do apphm3.
 LOGIN_EMAIL = "rui@example.com"
 LOGIN_PASS = "PREENCHER_AQUI"
+
+# (OPCIONAL) Fonte "lobby": pasta de Capturas de Ecrã do Windows, lida
+# DIRECTAMENTE (sem mover ficheiros), misturada com outros screenshots. O backend
+# decide o que é lobby (não-lobby é ignorado). Comenta/remove para desligar.
+# Default típico Windows: a pasta "Capturas de ecrã" dentro de Imagens.
+LOBBY_DIR = r"C:\Users\User\Pictures\Screenshots"

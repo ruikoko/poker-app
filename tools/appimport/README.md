@@ -62,12 +62,28 @@ sessão**. É um envio único e termina — não há processo a correr durante o
   duplo-clique. Re-enviar é seguro mesmo que algo escape: a app deduplica
   (HH por `hand_id`, SS de mesa por `file_hash`, TS por upsert).
 
-## Endpoints usados (os MESMOS do upload manual da UI)
-| Subpasta | Endpoint | O que faz a app |
+## Fonte "lobby" (opcional) — pasta de Capturas do Windows
+Para importar SS de **lobby de torneio** sem as separar dos outros screenshots:
+1. Em `config_local.py` define **`LOBBY_DIR`** = a pasta de Capturas de Ecrã
+   (ex.: `C:\Users\User\Pictures\Screenshots`). Para desligar, comenta a linha.
+2. O agente lê essa pasta **directamente** (NÃO move ficheiros, NÃO é subpasta)
+   e envia os **novos** (dedup por nome via `lobby_sent.txt` na pasta-mãe — o
+   nome do Windows traz data+hora, é único).
+3. O **backend decide se é lobby**: corre a Vision de lobby; se a imagem não for
+   um lobby de torneio (um print qualquer), é **ignorada** (nada gravado). Se for
+   lobby → entra em `tournament_payouts` pela mesma pipeline do sync do Discord.
+
+> O `captured_at` enviado é a hora de modificação do ficheiro (= quando a SS foi
+> tirada), usada como âncora do torneio. Custo: 1 leitura Vision por screenshot
+> novo da pasta (uma vez — fica no manifesto).
+
+## Endpoints usados (os MESMOS do upload manual da UI / sync)
+| Fonte | Endpoint | O que faz a app |
 |---|---|---|
 | `gg_hh` | `POST /api/import` | parse HH GG → `hands` |
 | `gg_ts` | `POST /api/tournament-summaries/import` | parse TS GG → `tournament_summaries` |
 | `it` | `POST /api/table-ss/upload` | Vision (Claude) → `players_left` + match |
 | `manual` | `POST /api/screenshots` | Vision (Claude) → enriquecimento/placeholder |
+| `lobby` (LOBBY_DIR) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` |
 
 Auth = cookie de sessão via `POST /api/auth/login` (igual ao apphm3).

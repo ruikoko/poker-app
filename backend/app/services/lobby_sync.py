@@ -171,6 +171,8 @@ async def process_lobby_message(
     tn_override: Optional[str] = None,
     *,
     throttle_seconds: float = 0.0,
+    source_prefix: str = "discord_lobby_vision",
+    log_on_failure: bool = True,
 ) -> dict:
     """Vision → parse → resolver → upsert payouts → log.
 
@@ -199,24 +201,26 @@ async def process_lobby_message(
             await asyncio.sleep(throttle_seconds)
 
     if raw is None:
-        _upsert_lobby_log(
-            message_id=message_id, channel_id=channel_id,
-            result="vision_failed",
-            reason_detail="extract_lobby_payout_json returned None",
-            posted_at=posted_at,
-        )
+        if log_on_failure:
+            _upsert_lobby_log(
+                message_id=message_id, channel_id=channel_id,
+                result="vision_failed",
+                reason_detail="extract_lobby_payout_json returned None",
+                posted_at=posted_at,
+            )
         base["result"] = "vision_failed"
         base["reason_detail"] = "vision_returned_none"
         return base
 
     vj = lobby_vision.parse_and_validate_lobby_json(raw)
     if vj is None:
-        _upsert_lobby_log(
-            message_id=message_id, channel_id=channel_id,
-            result="json_invalid",
-            reason_detail=f"raw_head={raw[:200]!r}",
-            posted_at=posted_at,
-        )
+        if log_on_failure:
+            _upsert_lobby_log(
+                message_id=message_id, channel_id=channel_id,
+                result="json_invalid",
+                reason_detail=f"raw_head={raw[:200]!r}",
+                posted_at=posted_at,
+            )
         base["result"] = "json_invalid"
         base["reason_detail"] = f"raw_head={raw[:80]!r}"
         return base
@@ -236,14 +240,15 @@ async def process_lobby_message(
     base["prizes_count"] = len(vj.get("prizes") or {})
 
     if site not in ("GGPoker", "PokerStars", "Winamax"):
-        _upsert_lobby_log(
-            message_id=message_id, channel_id=channel_id,
-            result="site_undetected",
-            reason_detail=f"vision_site={site!r}",
-            site=site, tournament_name=name,
-            vision_json=vj, posted_at=posted_at,
-            players_left=players_left,
-        )
+        if log_on_failure:
+            _upsert_lobby_log(
+                message_id=message_id, channel_id=channel_id,
+                result="site_undetected",
+                reason_detail=f"vision_site={site!r}",
+                site=site, tournament_name=name,
+                vision_json=vj, posted_at=posted_at,
+                players_left=players_left,
+            )
         base["result"] = "site_undetected"
         base["reason_detail"] = f"vision_site={site!r}"
         return base
@@ -310,7 +315,7 @@ async def process_lobby_message(
             payouts_service.upsert_payout,
             site=site, tournament_number=tn,
             payouts_json=blob,
-            source=f"discord_lobby_vision:{message_id}",
+            source=f"{source_prefix}:{message_id}",
         )
         action = (upsert_res or {}).get("action")
     except Exception as e:

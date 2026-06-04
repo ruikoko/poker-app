@@ -17,6 +17,7 @@ HM3 fica de fora (tem o seu .bat); Discord/lobby ficam de fora (sync de rede).
 import os
 import sys
 import shutil
+from datetime import datetime
 
 try:
     import requests
@@ -32,6 +33,13 @@ except ImportError:
     print("Copia config_local.example.py para config_local.py e preenche")
     print("com a pasta-mãe + credenciais da poker app.")
     sys.exit(1)
+
+# Fonte "lobby" (opcional): pasta EXTERNA (ex.: Capturas de Ecrã do Windows),
+# lida DIRECTAMENTE, sem mover ficheiros. None se não configurada.
+try:
+    from config_local import LOBBY_DIR
+except ImportError:
+    LOBBY_DIR = None
 
 POKER_APP_URL = "https://poker-app-production-34a7.up.railway.app"
 
@@ -135,6 +143,78 @@ def process_type(session, sub, endpoint, exts, label):
     return sent, failed, skipped
 
 
+# ── Fonte "lobby" — pasta externa lida directa (sem mover), dedup por manifesto ─
+
+def _lobby_manifest_path():
+    return os.path.join(PARENT_DIR, "lobby_sent.txt")
+
+
+def _read_manifest(path):
+    if not os.path.exists(path):
+        return set()
+    with open(path, encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def _append_manifest(path, name):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(name + "\n")
+
+
+def process_lobby_dir(session):
+    """Lê a pasta de Capturas (LOBBY_DIR) DIRECTAMENTE — misturada com outros
+    screenshots, NÃO se movem ficheiros. Dedup pelo nome (Windows traz data+hora
+    = único) via manifesto `lobby_sent.txt`. O backend faz o gate 'é lobby?'
+    (não-lobby → ignorado). Devolve (lobbies, nao_lobbies, falhas) ou None."""
+    if not LOBBY_DIR:
+        return None
+    if not os.path.isdir(LOBBY_DIR):
+        print(f"\n── lobby: LOBBY_DIR não existe ({LOBBY_DIR}) — salto")
+        return None
+    mpath = _lobby_manifest_path()
+    sent = _read_manifest(mpath)
+    files = [f for f in sorted(os.listdir(LOBBY_DIR))
+             if os.path.isfile(os.path.join(LOBBY_DIR, f))
+             and os.path.splitext(f)[1].lower() in _IMG
+             and f not in sent]
+    print(f"\n── lobby/  (pasta de Capturas, lida directa, sem mover)  — {len(files)} novo(s)")
+    lobby = nonlobby = failed = 0
+    for fname in files:
+        path = os.path.join(LOBBY_DIR, fname)
+        mime = _IMG[os.path.splitext(fname)[1].lower()]
+        # captured_at = mtime do ficheiro (hora local = Lisboa) → âncora prestart.
+        cap = datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
+        try:
+            with open(path, "rb") as fh:
+                r = session.post(
+                    f"{POKER_APP_URL}/api/lobbys/upload",
+                    files={"file": (fname, fh, mime)},
+                    data={"captured_at": cap}, timeout=300,
+                )
+        except Exception as e:
+            failed += 1
+            print(f"   ✗ {fname}: EXC {type(e).__name__}: {e}")
+            continue
+        if 200 <= r.status_code < 300:
+            j = {}
+            try:
+                j = r.json()
+            except Exception:
+                pass
+            if j.get("is_lobby"):
+                lobby += 1
+                print(f"   ✓ {fname}: LOBBY {j.get('site')} {j.get('tournament_name')!r} "
+                      f"→ tn={j.get('tournament_number')} ({j.get('result')})")
+            else:
+                nonlobby += 1
+                print(f"   · {fname}: ignorado (não-lobby: {j.get('result')})")
+            _append_manifest(mpath, fname)   # processado → não re-Vision
+        else:
+            failed += 1
+            print(f"   ✗ {fname}: HTTP {r.status_code} {r.text[:120]}")
+    return (lobby, nonlobby, failed)
+
+
 def main():
     if not os.path.isdir(PARENT_DIR):
         print(f"A criar a pasta-mãe: {PARENT_DIR}")
@@ -151,6 +231,8 @@ def main():
     for sub, endpoint, exts, label in TYPES:
         totals[sub] = process_type(session, sub, endpoint, exts, label)
 
+    lobby_res = process_lobby_dir(session)
+
     print("\n" + "═" * 56)
     print("RESUMO")
     print("═" * 56)
@@ -161,6 +243,10 @@ def main():
         tot_fail += failed
         extra = f"  (ignorados por extensão: {skipped})" if skipped else ""
         print(f"  {sub:8} enviados={sent}  falhas={failed}{extra}")
+    if lobby_res is not None:
+        lob, nonlob, lfail = lobby_res
+        tot_fail += lfail
+        print(f"  {'lobby':8} lobbies={lob}  não-lobby(ignorados)={nonlob}  falhas={lfail}")
     print("─" * 56)
     print(f"  TOTAL enviados={tot_sent}  falhas={tot_fail}")
     if tot_fail:
