@@ -1,0 +1,4 @@
+# O appmaster NÃO tem config_local próprio (reutiliza o do appimport/apphm3).
+# Cache Python.
+__pycache__/
+*.pyc
