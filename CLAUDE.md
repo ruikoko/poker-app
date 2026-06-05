@@ -16,6 +16,10 @@ Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro este
 
 Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no GTO Brain), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
 
+## 📖 Referência de terminologia de poker
+
+`docs/GLOSSARIO_POKER.md` — glossário canónico de termos de poker (fonte: GTO Wizard), para as máquinas. **Não é leitura obrigatória**; é dicionário de consulta: quando aparecer um termo de poker não óbvio numa mão, regra ou pedido, consultar aí antes de assumir o significado.
+
 ## ⚠️ ARMADILHA RECORRENTE — chama laranja ≠ bounty
 
 **Nas screenshots/replayer da GGPoker há DOIS badges por jogador. NÃO os confundas (já se confundiu várias vezes):**
