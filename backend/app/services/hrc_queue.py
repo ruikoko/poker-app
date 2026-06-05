@@ -56,7 +56,14 @@ DEFAULT_TAGS = [
     "speed-racer-ft",
 ]
 DEFAULT_STUDY_STATES = ["new"]
-ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax"]
+ALLOWED_SITES = ["GGPoker", "PokerStars", "Winamax", "WPN"]
+
+# #WPN-ICM-TAG-GATE — a WPN é gateada pela TAG do Rui (a SUA classificação), NÃO
+# por formato. A HH WPN não traz marcador de bounty (sem sinal estrutural), por
+# isso um gate por formato (nome) tinha leak (#WPN-KO-NAME-ONLY-GATE, descartado).
+# Em vez disso, a WPN só entra na fila se a mão tiver uma tag de estudo ICM — é o
+# Rui que classifica. Normalizadas como o basket (normalize_tag_key).
+WPN_ALLOWED_TAGS = ["ICM", "ICM FT"]
 
 # SQL aplica a mesma normalização de `normalize_tag_key` a cada elemento de
 # hm3_tags/discord_tags antes de comparar com o basket (idiom de /api/hands).
@@ -129,6 +136,8 @@ def select_andar1_rows(
     `export_queue`; o painel passa `True` para listar do mais recente.
     """
     order = "DESC" if played_desc else "ASC"
+    # #WPN-ICM-TAG-GATE: tags ICM da WPN normalizadas como o basket.
+    wpn_tags_norm = normalize_tags_basket(WPN_ALLOWED_TAGS)
     return query(
         f"""
         SELECT id, hand_id, site, tournament_number, tournament_name,
@@ -171,6 +180,21 @@ def select_andar1_rows(
                             AND ts.tournament_number = hands.tournament_number
                             AND ts.buy_in_bounty IS NOT NULL)
                )
+           -- #WPN-ICM-TAG-GATE: a WPN é gateada pela TAG do Rui (a SUA
+           -- classificação), NÃO por formato — sem sinal estrutural na HH WPN, o
+           -- gate por formato (nome) tinha leak (#WPN-KO-NAME-ONLY-GATE,
+           -- descartado). A WPN só entra se a mão tiver uma tag de estudo ICM
+           -- (WPN_ALLOWED_TAGS, normalizada como o basket). Qualquer outra (incl.
+           -- PKO) fica de fora. Mystery continua excluído acima (todas as salas);
+           -- o gate GG continua GG-only. GG/PS/WN imunes (a cláusula só morde
+           -- quando site='WPN').
+           AND (
+                 site <> 'WPN'
+              OR EXISTS (SELECT 1 FROM unnest(COALESCE(hm3_tags, '{{}}'::text[]))
+                                AS t WHERE {_NORM_SQL} = ANY(%s))
+              OR EXISTS (SELECT 1 FROM unnest(COALESCE(discord_tags, '{{}}'::text[]))
+                                AS t WHERE {_NORM_SQL} = ANY(%s))
+               )
            -- #SERVER-FILTER-HRC-STATUS (pt43): excluir mãos já calculadas
            -- (hrc_jobs.status='done'). Reduz bandwidth do GET /api/queue/hrc
            -- (adapter) e tira-as do painel /hrc — ambos partilham esta fonte.
@@ -182,7 +206,9 @@ def select_andar1_rows(
          ORDER BY played_at {order}
         """,
         (ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm,
-         list(MYSTERY_FORMATS), list(TS_GATED_FORMATS)),
+         list(MYSTERY_FORMATS),      # exclusão Mystery (todas as salas)
+         list(TS_GATED_FORMATS),     # gate KO GG (exige TS com buy_in_bounty)
+         wpn_tags_norm, wpn_tags_norm),  # #WPN-ICM-TAG-GATE: WPN só com tag ICM (hm3+discord)
     )
 
 
