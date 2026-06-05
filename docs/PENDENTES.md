@@ -233,6 +233,29 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    - **Esforço (do estudo):** motor ICM **~2-3 dias** + termo bounty **+1-2** +
      híbrido HRC (parse `equity.json` no ingest do robot) **+1-2**.
 
+16. **`#CONTEXT-IMAGE-MKO-BOUNTY-AVG` (FEATURE FUTURA — NÃO implementar sem OK).**
+   Aproveitar **imagens de contexto não-reconhecidas** (lobbys + Intuitive Tables)
+   que hoje caem em `no_match_to_hand`/`vision_failed`/ignoradas e **perdem-se** —
+   tratar as que são contexto útil.
+   - **Caso-bandeira: Mystery KO.** Foto dos **KOs restantes** numa mão → obter o
+     **valor MÉDIO do bounty restante** → alimentar o **HRC em KO mode** para essa
+     mão (o MKO é não-progressivo, `instant_fraction=1.0`; a média é o input que
+     falta para modelar o bounty).
+   - **Extracção POR SALA** (a média pode ou não vir já calculada — mesmo padrão
+     por-sala que o `ire.py` tem para GG vs Winamax):
+     - **PokerStars, Winamax:** já mostram a média → Vision lê o número directo.
+     - **WPN, GG:** NÃO calculam → Vision extrai o **breakdown** dos bounties
+       restantes (nº × valor por tier) e calcula a média (total restante ÷ nº de
+       bounties).
+   - **Modelo:** irmão do **table-SS** (`context → players_left`); aqui
+     `context → média bounty MKO → HRC KO mode`. **Mesma família HRC** do bubble
+     factor (`#BUBBLE-FACTOR-PER-PLAYER`) e do IRE.
+   - **A confirmar ao implementar:** como a imagem se prende à mão (timestamp, à la
+     table-SS); **nova categoria de imagem** na pipeline (hoje só lobby / table-SS /
+     manual / replayer); **formato do breakdown** em WPN/GG. Nota: as imagens do
+     table-SS não são guardadas (`#TABLE-SS-IMAGE-NOT-STORED`) — se este fluxo
+     precisar de re-Vision retroactiva, ter isso em conta.
+
 ---
 
 ## Baixo prazo / qualidade
