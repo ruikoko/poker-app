@@ -1009,7 +1009,17 @@ Arco longo e contínuo (14 commits `81255b2`…`eddca4d`, todos em main e deploy
 
 **Outras peças:** **Página Lobbys** in-app (upload + detalhe extração/import + data do lobby) (`38a62e4`/`9c91bd9`/`27fdb73`); subpasta **`lobby`** no appimport (`422d1ee`); **`tools/appmaster`** — bat-mestre que orquestra appimport+apphm3+Discord num clique com menu de janelas (`34d886e`); etiqueta de vilões honesta `villains_unique` (`eede8d6`). 2 features futuras em `docs/PENDENTES.md`: `#BUBBLE-FACTOR-PER-PLAYER` (`8229a45`), `#CONTEXT-IMAGE-MKO-BOUNTY-AVG` (`5980f09`).
 
-Última sessão fechada: **pt59** (4–5 Junho 2026 — página Lobbys + auto-reconcile + fallback de sala ancorado no Hero + appmaster + coroa GG; suite **886 PASSED**; HEAD `16a435b`). Journal: `docs/JOURNAL_2026-06-05-pt59.md`. Antecedida por pt58 (`docs/JOURNAL_2026-06-04-pt50-pt58.md`).
+## pt60 — table-SS por tn do filename + WPN na fila HRC por tag (5 Junho 2026)
+
+Ronda curta pós-pt59. 2 commits em main (`a184767`, `46b05fb`), deployed. Suite **886 → 897 PASSED**. Journal: `docs/JOURNAL_2026-06-05-pt60.md`.
+
+**Mudanças de fluxo/pipeline:**
+
+1. **table-SS lê o `tournament_number` do NOME do ficheiro (`a184767`).** O formato NOVO do Intuitive Tables traz o tn no nome (`<Site>-<Title>(<tn>)(#<mesa>)-<YYYYMMDDHHMMSS>-<idx>`) → **fonte AUTORITÁRIA do torneio**. Parser robusto `parse_table_ss_filename` (regex, não split posicional). Branch novo em `compute_table_ss_match(filename_tn=...)`: match por **site + tn + hora mais próxima** (`_find_closest_hand_by_tn`, sem janela nem resolver-por-nome) → **mata o tm_ambiguous**; filename ganha à Vision. A **Vision continua a correr** (players_left/total_entries) — só deixa de decidir a identidade. Upload parseia site+tn; reconcile re-parseia o tn de `original_filename`. Back-compat: `Shot<N>-…` antigo / novo-sem-tn → `filename_tn=None` → fluxo actual inalterado. `_FILENAME_SITE_MAP` += `PokerStars` (nome completo; site novo está em `parts[0]`, não `parts[1]`).
+
+2. **WPN na fila HRC, gateada por TAG ICM (`46b05fb`).** `ALLOWED_SITES` += `WPN`. A HH WPN **não traz marcador de bounty** (sem sinal estrutural) → um gate por formato (nome) tinha leak (`#WPN-KO-NAME-ONLY-GATE`, **tentado e abandonado**: ex. `$10,000 GTD` PKO entraria como Vanilla). Em vez disso, **`#WPN-ICM-TAG-GATE`**: `WPN_ALLOWED_TAGS = {ICM, ICM FT}` (final; `pos-*` é pós-flop → não vai ao HRC). Cláusula `site<>'WPN' OR mão tem tag ICM/ICM FT`. GG/PS/WN imunes; Mystery e gate GG inalterados.
+
+Última sessão fechada: **pt60** (5 Junho 2026 — table-SS por tn do filename + WPN na fila HRC por tag ICM; suite **897 PASSED**; HEAD `46b05fb`). Journal: `docs/JOURNAL_2026-06-05-pt60.md`. Antecedida por pt59 (`docs/JOURNAL_2026-06-05-pt59.md`).
 
 ⚠️ **Pendente herdado:** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
 
