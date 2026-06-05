@@ -207,6 +207,32 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    WPN/PS na janela. Mitigado pelo site determinístico (filename, pt56). Reavaliar
    se aparecerem falsos matches reais. Ver `TECH_DEBTS_INVENTARIO.md` (pt50–pt58).
 
+15. **`#BUBBLE-FACTOR-PER-PLAYER` (FEATURE FUTURA — estudo de viabilidade feito,
+   NÃO implementar sem OK).** Mostrar um **bubble factor por jogador, ajustado a
+   bounty**, ao lado de cada jogador na vista da mão.
+   - **Âmbito:** **só as mãos que vão ao HRC**, onde o `players_left` **já é exacto**
+     via o mecanismo que alimenta o watcher (`_resolve_players_left` / a SS de
+     `players_left` associada à mão). **NÃO estimar `players_left`** — usar o exacto
+     dessas SS. *(Corrige a conclusão do estudo: o "furo de players_left" NÃO se
+     aplica a estas mãos — só apareceria se quiséssemos BF em qualquer mão.)*
+   - **Motor:** **próprio**, ICM **Malmuth-Harville** (mesa ≤9 exacta + resto do
+     campo colapsado em stacks médios; ~ms/mão, on-demand). O **HRC NÃO serve como
+     fonte primária** — só dá BF **pós-processamento** e cobre ~0 mãos (`hrc_jobs`
+     vazio); fica como **cruzamento v2**: parsear `bubbleFactors` (matriz NxN) +
+     `preHandEquity` do `equity.json` do HRC quando a mão já passou pelo robot
+     (formato confirmado em `services/hrc_import.py`; hoje só se extrai o `meta.json`).
+   - **Bounty (PKO):** reutilizar a matemática do **`ire.py`** (`ko_units`,
+     `constant = KOP_fraction × instant_fraction`, coroas `bounty_value_usd`) para o
+     **termo de bounty**; combina (multiplicativo no risk premium) com o termo
+     **ICM-regular** do motor próprio. Já temos metade (o lado bounty).
+   - **Dados já presentes por mão:** stacks (apa), coroas (`bounty_value_usd`),
+     escada de prémios completa (`tournament_payouts.payouts_json.structures[0].prizes`,
+     ex.: 912 ranks), field size (`tournament_summaries.total_players`), split
+     `buy_in_entry`/`buy_in_bounty`, `starting_stack`. (Não falta nada para as mãos
+     do âmbito.)
+   - **Esforço (do estudo):** motor ICM **~2-3 dias** + termo bounty **+1-2** +
+     híbrido HRC (parse `equity.json` no ingest do robot) **+1-2**.
+
 ---
 
 ## Baixo prazo / qualidade
