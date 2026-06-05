@@ -576,3 +576,73 @@ def test_reconcile_idempotent_second_run_is_noop():
         assert r2 == {"scanned": 0, "resolved": 0, "written": 0,
                       "skipped_precedence": 0, "still_unresolved": 0,
                       "dry_run": False, "items": []}
+
+
+# ── 5. _resolve_via_hero_anchor (fallback ancorado no Hero) ──────────────────
+
+_HA_ANCHOR = datetime(2026, 6, 1, 21, 51, 0)
+
+
+def _ha_query(hands_rows, ts_pp=None):
+    """side_effect para lobby_sync.query: SELECT FROM hands -> hands_rows;
+    SELECT FROM tournament_summaries -> [{'prize_pool': ts_pp}] (ou [])."""
+    def fake(sql, params=None):
+        if "FROM hands" in sql:
+            return hands_rows
+        if "FROM tournament_summaries" in sql:
+            return [{"prize_pool": ts_pp}] if ts_pp is not None else []
+        return []
+    return fake
+
+
+@patch("app.services.lobby_sync.query")
+def test_hero_anchor_buyin_plus_name_resolves(mock_q):
+    # buy_in igual + nome subset -> resolve (corrige sala GG->Winamax)
+    mock_q.side_effect = _ha_query([
+        {"site": "Winamax", "tournament_number": "1104612626",
+         "stakes": "HIGHROLLER (232€ + 18€)", "buy_in": 250.0},
+    ])
+    vj = {"buy_in": 250.0, "tournament_name": "HIGHROLLER", "prize_pool": 20000.0}
+    assert lobby_sync._resolve_via_hero_anchor(vj, _HA_ANCHOR, "GGPoker") == ("1104612626", "Winamax")
+
+
+@patch("app.services.lobby_sync.query")
+def test_hero_anchor_buyin_plus_prizepool_no_name_resolves(mock_q):
+    # nome NÃO bate, mas prize_pool dentro de tolerância -> resolve (caminho fraco)
+    mock_q.side_effect = _ha_query(
+        [{"site": "GGPoker", "tournament_number": "777",
+          "stakes": "NOME TOTALMENTE DIFERENTE", "buy_in": 250.0}],
+        ts_pp=20000.0)
+    vj = {"buy_in": 250.0, "tournament_name": "HIGHROLLER", "prize_pool": 20100.0}  # ~0.5% diff
+    assert lobby_sync._resolve_via_hero_anchor(vj, _HA_ANCHOR, "GGPoker") == ("777", "GGPoker")
+
+
+@patch("app.services.lobby_sync.query")
+def test_hero_anchor_no_name_pp_out_of_tol_none(mock_q):
+    # buy_in igual, mas nome não bate E prize_pool fora de tolerância -> None
+    mock_q.side_effect = _ha_query(
+        [{"site": "GGPoker", "tournament_number": "777",
+          "stakes": "NOME TOTALMENTE DIFERENTE", "buy_in": 250.0}],
+        ts_pp=30000.0)  # 50% off
+    vj = {"buy_in": 250.0, "tournament_name": "HIGHROLLER", "prize_pool": 20000.0}
+    assert lobby_sync._resolve_via_hero_anchor(vj, _HA_ANCHOR, "GGPoker") is None
+
+
+@patch("app.services.lobby_sync.query")
+def test_hero_anchor_tie_two_candidates_none(mock_q):
+    # 2 candidatos a passar (1)+(2) -> empate -> None (não adivinha)
+    mock_q.side_effect = _ha_query([
+        {"site": "Winamax", "tournament_number": "A", "stakes": "HIGHROLLER x", "buy_in": 250.0},
+        {"site": "GGPoker", "tournament_number": "B", "stakes": "HIGHROLLER y", "buy_in": 250.0},
+    ])
+    vj = {"buy_in": 250.0, "tournament_name": "HIGHROLLER", "prize_pool": 20000.0}
+    assert lobby_sync._resolve_via_hero_anchor(vj, _HA_ANCHOR, "GGPoker") is None
+
+
+@patch("app.services.lobby_sync.query")
+def test_hero_anchor_no_buyin_none(mock_q):
+    # lobby sem buy_in -> None imediato (nem chega a consultar hands)
+    mock_q.side_effect = _ha_query([])
+    vj = {"tournament_name": "HIGHROLLER", "prize_pool": 20000.0}
+    assert lobby_sync._resolve_via_hero_anchor(vj, _HA_ANCHOR, "GGPoker") is None
+    mock_q.assert_not_called()

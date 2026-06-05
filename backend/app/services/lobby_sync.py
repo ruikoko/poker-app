@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from app.db import get_conn, query
@@ -161,6 +161,85 @@ def _upsert_lobby_log(
             pass
 
 
+# ── Fallback ancorado no Hero (corrige sala mal lida pela Vision) ────────────
+# pt — #LOBBY-SITE-MISCLASS-HERO-ANCHOR. Quando o resolver primário (site + nome +
+# tempo) dá tm_not_found, este fallback usa as mãos do HERO à volta do captured_at
+# para encontrar o torneio REAL — mesmo noutra sala (corrige WN lido como GG).
+
+_HERO_ANCHOR_WINDOW_MIN = 45     # ±min à volta do captured_at p/ apanhar mãos do Hero
+_HA_BUY_IN_TOL = 0.01            # buy_in TEM de bater (igualdade pelo total)
+_HA_PRIZE_POOL_TOL = 0.02        # tolerância do sinal secundário prize_pool (±2%)
+
+
+def _ha_float(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ha_prize_pool_match(cand_site, cand_tn, lobby_pp) -> bool:
+    """Sinal SECUNDÁRIO (fraco): prize_pool do candidato (de tournament_summaries,
+    GG-only) dentro de ±_HA_PRIZE_POOL_TOL do prize_pool do lobby. False quando não
+    há TS (ex.: Winamax) ou inputs inválidos. Tolerância apertada porque o pool
+    live (lobby) ≠ pool final (TS) na maioria dos casos."""
+    if lobby_pp is None or lobby_pp <= 0 or not cand_tn:
+        return False
+    rows = query(
+        "SELECT prize_pool FROM tournament_summaries WHERE site=%s AND tournament_number=%s",
+        (cand_site, cand_tn),
+    )
+    pp = _ha_float(rows[0]["prize_pool"]) if rows else None
+    if not pp or pp <= 0:
+        return False
+    return abs(pp - lobby_pp) / lobby_pp <= _HA_PRIZE_POOL_TOL
+
+
+def _resolve_via_hero_anchor(vision_json: dict, anchor, primary_site,
+                             window_min: int = _HERO_ANCHOR_WINDOW_MIN):
+    """Fallback SITE-AGNÓSTICO para tm_not_found do resolver primário. Identifica o
+    torneio real pelas mãos do HERO à volta do captured_at do lobby, podendo
+    corrigir a SALA (ex.: Vision leu GG mas é Winamax).
+
+    GUARD RAILS — sinal forte OBRIGATÓRIO (sem isto devolve None, NUNCA adivinha):
+      (1) buy_in do lobby == buy_in do candidato, pelo TOTAL (±_HA_BUY_IN_TOL).
+          O `hands.buy_in` é o total (ex.: WN 'HIGHROLLER (232€+18€)' → 250).
+      (2) E confirmação: nome do lobby ⊆ nome do candidato (name_tokens_subset,
+          o mesmo do resolver) OU prize_pool em tolerância (_ha_prize_pool_match).
+      (3) E EXACTAMENTE 1 torneio (tn, site) distinto a passar (1)+(2) — unicidade.
+          0 candidatos, empate (≥2), ou lobby sem buy_in → None (fica tm_not_found).
+
+    Só lê a tabela `hands` (cobre todas as salas; as mãos são do Hero). Devolve
+    (tournament_number, real_site) ou None. `real_site` pode diferir de
+    `primary_site` (= correcção de sala)."""
+    lobby_bi = _ha_float(vision_json.get("buy_in"))
+    if not lobby_bi or lobby_bi <= 0 or anchor is None:
+        return None
+    a = anchor.replace(tzinfo=None) if getattr(anchor, "tzinfo", None) is not None else anchor
+    lo, hi = a - timedelta(minutes=window_min), a + timedelta(minutes=window_min)
+    rows = query(
+        "SELECT DISTINCT site, tournament_number, stakes, buy_in FROM hands "
+        "WHERE played_at >= %s AND played_at <= %s "
+        "  AND tournament_number IS NOT NULL AND buy_in IS NOT NULL",
+        (lo, hi),
+    )
+    lobby_name = vision_json.get("tournament_name") or ""
+    lobby_pp = _ha_float(vision_json.get("prize_pool"))
+    hits = set()
+    for r in rows:
+        cand_bi = _ha_float(r.get("buy_in"))
+        if cand_bi is None or abs(cand_bi - lobby_bi) > _HA_BUY_IN_TOL:
+            continue   # (1) buy_in TEM de bater pelo total — sinal forte
+        name_ok = tournament_resolver.name_tokens_subset(lobby_name, r.get("stakes"))
+        pp_ok = _ha_prize_pool_match(r.get("site"), r.get("tournament_number"), lobby_pp)
+        if not (name_ok or pp_ok):
+            continue   # (2) confirmação por nome OU prize_pool
+        hits.add((r["tournament_number"], r["site"]))
+    if len(hits) == 1:    # (3) unicidade — senão NÃO adivinha
+        return next(iter(hits))
+    return None
+
+
 async def process_lobby_message(
     image_bytes: bytes,
     mime_type: str,
@@ -271,6 +350,22 @@ async def process_lobby_message(
             return_tier=True,
         )
     base["resolver_tier"] = resolver_tier
+
+    # Fallback ancorado no Hero — SÓ quando o primário dá tm_not_found (sem
+    # candidatos; NUNCA em tm_ambiguous). Pode corrigir a sala. Ver
+    # _resolve_via_hero_anchor (guard rails). Se resolver, tn fica não-None e cai
+    # no caminho normal de precedência + upsert abaixo, com a sala corrigida.
+    if tn is None and not candidates:
+        fb = await asyncio.to_thread(_resolve_via_hero_anchor, vj, posted_at, site)
+        if fb is not None:
+            tn, real_site = fb
+            resolver_tier = "hero_anchor_fallback"
+            base["resolver_tier"] = resolver_tier
+            if real_site != site:
+                logger.info("[lobby] site corrigido %s->%s via hero-anchor "
+                            "(tn=%s msg=%s)", site, real_site, tn, message_id)
+                site = real_site
+                base["site"] = site
 
     if tn is None:
         result = "tm_ambiguous" if candidates else "tm_not_found"
@@ -647,6 +742,20 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
             # está à espera dos dados do PRÓPRIO dia, não avariado.
             "lobby_date": posted_at.date().isoformat() if posted_at else None,
         }
+
+        # Fallback ancorado no Hero (mesmo guard rails do live path) — corrige a
+        # sala mal lida sem re-Vision, usando o vision_json + as mãos do Hero já
+        # em BD. Só quando tm_not_found (sem candidatos).
+        if tn is None and not candidates:
+            fb = _resolve_via_hero_anchor(vj, anchor, site)
+            if fb is not None:
+                tn, real_site = fb
+                tier = "hero_anchor_fallback"
+                item["resolved_tn"] = tn
+                item["resolver_tier"] = tier
+                if real_site != site:
+                    item["site_corrected"] = f"{site}->{real_site}"
+                    site = real_site   # sala corrigida na precedência + write + log
 
         if tn is None:
             still += 1
