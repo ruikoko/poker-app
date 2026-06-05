@@ -50,27 +50,72 @@ _VALID_RESULTS = frozenset({
     "tm_not_found", "tm_ambiguous", "no_match_to_hand", "upsert_error",
 })
 
-# pt56 (#TABLE-SS-SITE-FROM-FILENAME) — o SITE vem do NOME do ficheiro, que é
-# determinístico: "Shot<N>-<Site>-<YYYYMMDDHHMMSS>". Token [1] após split '-'.
-# Fonte AUTORITÁRIA do site (a Vision mislê PS/WPN como GG/WN). Único alias:
-# 'Stars' → PokerStars; os outros são identidade.
+# pt56 (#TABLE-SS-SITE-FROM-FILENAME) — o SITE vem do NOME do ficheiro
+# (determinístico; a Vision mislê PS/WPN como GG/WN). 'Stars' é o token do formato
+# ANTIGO (Shot<N>-Stars-…); 'PokerStars' o nome completo do formato NOVO. Os outros
+# (GGPoker/Winamax/WPN) são iguais nos dois formatos.
 _FILENAME_SITE_MAP = {
     "GGPoker": "GGPoker",
     "Winamax": "Winamax",
     "WPN": "WPN",
-    "Stars": "PokerStars",
+    "Stars": "PokerStars",        # antigo: Shot<N>-Stars-…
+    "PokerStars": "PokerStars",   # novo: nome completo
 }
+
+# #TABLE-SS-FILENAME-TN — o formato NOVO do Intuitive Tables traz o
+# tournament_number no nome → fonte AUTORITÁRIA do torneio (mata o tm_ambiguous).
+#   <Site>-<Title>(<tn>)(#<mesa>)-<YYYYMMDDHHMMSS>-<idx>
+#   ex.: 'Winamax-Winamax ODYSSEY(1106616980)(#011)-20260605170038-1'
+# Robusto (regex, não split posicional): o título pode ter hífens/espaços/$/(...).
+# O `tn` é o parêntese SÓ-DÍGITOS imediatamente antes do (#<mesa>); o (#NNN) tem
+# '#' (é a mesa, não o tn). O `(#` é a âncora única que fixa a mesa; por isso o
+# `.+` ganancioso do título recua até ao tn certo mesmo com '(123)' no nome.
+# Formato ANTIGO (sem tn): 'Shot<N>-<Site>-<YYYYMMDDHHMMSS>' — distingue-se pelo
+# 1º token ('Shot').
+_IT_NEW_RE = re.compile(
+    r"^(?P<site>[A-Za-z]+)-"
+    r"(?P<title>.+)"
+    r"\((?P<tn>\d+)\)"
+    r"\(#(?P<table>\d+)\)-"
+    r"(?P<ts>\d{14})-"
+    r"(?P<idx>\d+)$"
+)
+
+
+def parse_table_ss_filename(filename: Optional[str]) -> dict:
+    """Parser robusto do nome de ficheiro do Intuitive Tables. Devolve
+    {site, tournament_number, tournament_name, table} (None quando ausente).
+    Formato NOVO traz `tn` (autoritário); ANTIGO ('Shot<N>-…') não. Ver _IT_NEW_RE."""
+    out = {"site": None, "tournament_number": None,
+           "tournament_name": None, "table": None}
+    if not filename:
+        return out
+    base = filename.rsplit(".", 1)[0] if "." in filename else filename
+    first = base.split("-", 1)[0].strip()
+    if first.lower().startswith("shot"):
+        # ANTIGO: site no token [1]; sem tn.
+        parts = base.split("-")
+        if len(parts) >= 2:
+            out["site"] = _FILENAME_SITE_MAP.get(parts[1].strip())
+        return out
+    # NOVO: regex completa (com tn).
+    m = _IT_NEW_RE.match(base)
+    if m:
+        out["site"] = _FILENAME_SITE_MAP.get(m.group("site").strip())
+        out["tournament_number"] = m.group("tn")
+        out["tournament_name"] = m.group("title").strip()
+        out["table"] = m.group("table")
+        return out
+    # NOVO-ish mas sem tn (regex não bateu) → só o site do 1º token; tn None
+    # → cai no fluxo ACTUAL (Vision + resolver), sem regressão.
+    out["site"] = _FILENAME_SITE_MAP.get(first)
+    return out
 
 
 def _site_from_filename(filename: Optional[str]) -> Optional[str]:
-    """Site a partir do token [1] do nome ('Shot1-Stars-...' → 'PokerStars').
-    None se o nome não traz token reconhecível (→ fallback Vision)."""
-    if not filename:
-        return None
-    parts = filename.split("-")
-    if len(parts) < 2:
-        return None
-    return _FILENAME_SITE_MAP.get(parts[1].strip())
+    """Site a partir do nome (ambos os formatos). Back-compat — delega no
+    `parse_table_ss_filename`. None → fallback Vision."""
+    return parse_table_ss_filename(filename)["site"]
 
 # pt39 — o buy_in da SS de mesa vem como string com moeda ("€50", "$108"),
 # ao contrário do lobby (float). Parse para (total_float, currency) p/ alimentar
@@ -294,6 +339,27 @@ def _find_candidate_hands(captured_at: datetime, site: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _find_closest_hand_by_tn(
+    captured_at: datetime, site: str, tn: str
+) -> Optional[dict]:
+    """#TABLE-SS-FILENAME-TN — a mão (de estudo) do mesmo site + tournament_number
+    mais próxima de captured_at. `tn` AUTORITÁRIO (do filename) → SEM janela
+    temporal nem resolver-por-nome (a hora só escolhe QUAL mão do torneio). Guard
+    rails iguais (2026+, sem mtt_archive). None se não há mão desse tn."""
+    rows = query(
+        """SELECT id, hand_id, tournament_number, tournament_name, site, played_at
+             FROM hands
+            WHERE played_at >= '2026-01-01'
+              AND site = %s
+              AND tournament_number = %s
+              AND study_state != 'mtt_archive'
+            ORDER BY ABS(EXTRACT(EPOCH FROM (played_at - %s)))
+            LIMIT 1""",
+        (site, tn, captured_at),
+    )
+    return dict(rows[0]) if rows else None
+
+
 # #FIX-B2 (pt50): salas cuja HH traz o NOME REAL do torneio (validável por nome
 # token-a-token). GG e Winamax gravam o nome real; a Winamax pode trazer o nº de
 # mesa #NNN (aparado por clean_tournament_name). WPN grava string de garantia
@@ -371,7 +437,8 @@ def _resolve_match(
 # ── R — função determinística única de match (#FIX-B3 pt50) ──────────────────
 
 def compute_table_ss_match(
-    captured_at: Optional[datetime], site: Optional[str], vj: dict
+    captured_at: Optional[datetime], site: Optional[str], vj: dict,
+    filename_tn: Optional[str] = None,
 ) -> dict:
     """R — a ÚNICA função de match da SS de mesa. Dado o read guardado da SS
     (captured_at UTC, site, vision_json) + o conjunto ACTUAL de mãos na BD,
@@ -399,6 +466,27 @@ def compute_table_ss_match(
         "tournament_number": None, "matched_hand_id": None,
         "matched_hand_db_id": None,
     }
+
+    # #TABLE-SS-FILENAME-TN — formato NOVO: o tn vem do NOME do ficheiro e é
+    # AUTORITÁRIO. Match por site + tn + hora mais próxima, SEM passar pelo
+    # resolver-por-nome da Vision → mata o tm_ambiguous; o filename ganha à Vision
+    # se discordarem. (A Vision continua a correr no upload para players_left/
+    # total_entries — só deixamos de a usar para a IDENTIDADE do torneio.)
+    if filename_tn:
+        base["tournament_number"] = filename_tn
+        if captured_at is not None:
+            best = _find_closest_hand_by_tn(captured_at, site, filename_tn)
+            if best:
+                return {
+                    "result": "success", "reason_detail": "filename_tn", "site": site,
+                    "tournament_number": filename_tn,
+                    "matched_hand_id": best["hand_id"],
+                    "matched_hand_db_id": best["id"],
+                }
+            base["reason_detail"] = f"filename_tn:{filename_tn}:no_hand_for_tn"
+            return base
+        base["reason_detail"] = "filename_tn: sem captured_at"
+        return base
 
     if captured_at is None:
         # Sem âncora temporal não há match a uma mão; resolve tn p/ limbo.
@@ -501,7 +589,8 @@ def reconcile_table_ss(hand_ids=None) -> dict:
                 "orphan": 0, "ambiguous": 0}
 
     rows = query(
-        """SELECT id, captured_at, site, vision_json, result, matched_hand_id
+        """SELECT id, captured_at, site, vision_json, result, matched_hand_id,
+                  original_filename
              FROM table_ss_processing_log
             WHERE result IN ('success', 'no_match_to_hand', 'tm_ambiguous')
               AND vision_json IS NOT NULL"""
@@ -510,7 +599,10 @@ def reconcile_table_ss(hand_ids=None) -> dict:
     for r in rows:
         checked += 1
         vj = r.get("vision_json") or {}
-        desired = compute_table_ss_match(r.get("captured_at"), r.get("site"), vj)
+        # #TABLE-SS-FILENAME-TN: re-parseia o tn do nome guardado (autoritário).
+        _ftn = parse_table_ss_filename(r.get("original_filename"))["tournament_number"]
+        desired = compute_table_ss_match(
+            r.get("captured_at"), r.get("site"), vj, filename_tn=_ftn)
         if _persist_table_ss_match(
             r["id"], desired,
             prev_result=r.get("result"),
@@ -641,7 +733,8 @@ async def _process_table_ss(
     # pt56: o NOME do ficheiro é a fonte AUTORITÁRIA do site (determinístico).
     # Se o nome dá token → ignora o que a Vision leu. Senão → fallback Vision
     # (+ _correct_site) e loga (para vermos quantos).
-    _fsite = _site_from_filename(filename)
+    _parsed_fn = parse_table_ss_filename(filename)
+    _fsite = _parsed_fn["site"]
     if _fsite:
         vj["site"] = _fsite
     else:
@@ -669,7 +762,9 @@ async def _process_table_ss(
 
     # 5. Match — função determinística ÚNICA R (a MESMA que o reconcile corre).
     #    O upload deixa de ter caminho de match próprio: grava o read e chama R.
-    desired = compute_table_ss_match(captured_at, site, vj)
+    #    #TABLE-SS-FILENAME-TN: passa o tn do filename (autoritário) quando existe.
+    desired = compute_table_ss_match(
+        captured_at, site, vj, filename_tn=_parsed_fn["tournament_number"])
     out["site"] = desired["site"]          # R pode ter re-corrigido a site
     out["result"] = desired["result"]
     out["reason_detail"] = desired["reason_detail"]

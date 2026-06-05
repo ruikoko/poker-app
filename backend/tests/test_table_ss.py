@@ -616,3 +616,82 @@ def test_persist_match_updates_fields_and_links(mock_get_conn):
     assert any("UPDATE table_ss_processing_log SET result = %s" in s for s in sqls)
     assert any("SET context_table_ss_id = %s WHERE id = %s" in s for s in sqls)
     mock_conn.commit.assert_called_once()
+
+
+# ── #TABLE-SS-FILENAME-TN — parser do nome + match autoritário por tn ─────────
+
+def test_parse_filename_new_winamax_with_tn():
+    out = table_ss.parse_table_ss_filename(
+        "Winamax-Winamax ODYSSEY(1106616980)(#011)-20260605170038-1")
+    assert out["site"] == "Winamax"
+    assert out["tournament_number"] == "1106616980"
+    assert out["tournament_name"] == "Winamax ODYSSEY"
+    assert out["table"] == "011"
+
+
+def test_parse_filename_new_with_extension():
+    out = table_ss.parse_table_ss_filename(
+        "Winamax-Winamax ODYSSEY(1106616980)(#011)-20260605170038-1.png")
+    assert out["tournament_number"] == "1106616980"
+
+
+def test_parse_filename_name_with_hyphen_and_dollar_keeps_tn():
+    out = table_ss.parse_table_ss_filename(
+        "GGPoker-W SERIES - DAY 1 $215(287872812)(#02)-20260603183000-3")
+    assert out["site"] == "GGPoker"
+    assert out["tournament_number"] == "287872812"
+    assert out["tournament_name"] == "W SERIES - DAY 1 $215"
+
+
+def test_parse_filename_digits_paren_in_title_picks_tn_before_table():
+    # tn = parêntese só-dígitos imediatamente antes do (#mesa), não o (123) do nome
+    out = table_ss.parse_table_ss_filename(
+        "Winamax-FOO (123) BAR(999888777)(#05)-20260605170038-1")
+    assert out["tournament_number"] == "999888777"
+    assert out["tournament_name"] == "FOO (123) BAR"
+
+
+def test_parse_filename_pokerstars_full_name_new():
+    out = table_ss.parse_table_ss_filename(
+        "PokerStars-Sunday Million(555444)(#01)-20260605170038-1")
+    assert out["site"] == "PokerStars"
+    assert out["tournament_number"] == "555444"
+
+
+def test_parse_filename_old_shot_no_tn_fallback():
+    out = table_ss.parse_table_ss_filename("Shot1-Stars-20260603221723.png")
+    assert out["site"] == "PokerStars"
+    assert out["tournament_number"] is None
+
+
+def test_parse_filename_new_without_tn_fallback():
+    out = table_ss.parse_table_ss_filename("Winamax-Algo Sem Tn-20260605170038-1")
+    assert out["site"] == "Winamax"
+    assert out["tournament_number"] is None
+
+
+@patch("app.routers.table_ss.query")
+def test_compute_filename_tn_authoritative_resolves(mock_q):
+    """Novo Winamax com tn → resolve por tn (sem resolver-por-nome → sem ambíguo)."""
+    mock_q.return_value = [{
+        "id": 42, "hand_id": "WN-x", "tournament_number": "1106616980",
+        "tournament_name": "ODYSSEY", "site": "Winamax",
+        "played_at": datetime(2026, 6, 5, 17, 0, 40),
+    }]
+    cap = datetime(2026, 6, 5, 17, 0, 38)
+    out = table_ss.compute_table_ss_match(
+        cap, "Winamax", {"tournament_name": "ODYSSEY"}, filename_tn="1106616980")
+    assert out["result"] == "success"
+    assert out["tournament_number"] == "1106616980"
+    assert out["matched_hand_db_id"] == 42
+    assert out["reason_detail"] == "filename_tn"
+
+
+@patch("app.routers.table_ss.query", return_value=[])
+def test_compute_filename_tn_no_hand_for_tn(mock_q):
+    cap = datetime(2026, 6, 5, 17, 0, 38)
+    out = table_ss.compute_table_ss_match(
+        cap, "Winamax", {"tournament_name": "ODYSSEY"}, filename_tn="9999999999")
+    assert out["result"] == "no_match_to_hand"
+    assert out["tournament_number"] == "9999999999"
+    assert "no_hand_for_tn" in out["reason_detail"]
