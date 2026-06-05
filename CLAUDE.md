@@ -993,7 +993,23 @@ Arco longo e contínuo (14 commits `81255b2`…`eddca4d`, todos em main e deploy
 
 **Outras peças do arco:** match do table-SS desacoplado do upload numa função R determinística (`compute_table_ss_match`/`reconcile_table_ss`/`POST /api/table-ss/reconcile`, pt50 `6578f63`); nome canónico Winamax (`clean_winamax_tournament_name`, pt54); desambiguação directa do table-SS pelo nome (pt54 `901e965`); tolerância a truncação do título GG (`name_tokens_subset`, pt58); **`tools/appimport`** — import por pasta local GG HH/TS + IT + SS manual (pt55) + **2ª via de lobby pela pasta de Capturas** (`POST /api/lobbys/upload`, pt57) com `LOBBY_SINCE` + retry de falha transitória (pt57b). Fase 3 (Discord 30/Mai+) verificada read-only: enriquecimento **limpo** (76/76 match_method real, discord_tags propagadas, 24 vilões Regra C, posted_at Lisboa naive).
 
-Última sessão fechada: **pt58** (3–4 Junho 2026 — re-import end-to-end + fuso Lisboa-naive + Vision Claude-only + `tools/appimport` + lobby por pasta; suite **876 PASSED**; HEAD `eddca4d`). Journal: `docs/JOURNAL_2026-06-04-pt50-pt58.md`. Antecedida por pt49 (`docs/JOURNAL_2026-06-02-pt49.md`).
+## pt59 — Lobbys (página + reconcile + fallback de sala), appmaster, coroa GG, balanços (4–5 Junho 2026)
+
+13 commits em main (`554f7b3`…`16a435b`), todos deployed. Suite **876 → 886 PASSED**. Journal: `docs/JOURNAL_2026-06-05-pt59.md`. As operações em produção (2 wipes backup-verificados, crown backfill, reconcile) **não deixam commit** — ver §PROCESSO do journal.
+
+**Mudanças de fluxo/pipeline (LER):**
+
+1. **Contador do banner Discord = recompute no refresh (`554f7b3`).** O "K match HH" era uma foto tirada antes da Vision em background acabar (mostrava 3 quando o real era 22). Agora a UI chama `GET /api/discord/sync-counters?since=<sync_started_at>` no refresh; predicado canónico `match_method` (não mais `raw`). Helper partilhado `_compute_sync_counters`.
+
+2. **Auto-reconcile de lobbys (`ad27c80`).** `reconcile_lobby_logs` (sem Vision) re-resolve lobbys `tm_not_found`/`tm_ambiguous` usando o `vision_json` guardado, **disparado fire-and-forget após import de HH (`import_`) e de TS (`tournament_summaries`)** + on-demand `POST /api/lobbys/reconcile?dry_run=`. Escreve payout (precedência D11 respeitada), source `reconcile_lobby_vision:`.
+
+3. **Resolver de lobbys — fallback ancorado no Hero (`16a435b`).** Quando o primário (site+nome+tempo) dá `tm_not_found`, dispara `_resolve_via_hero_anchor`: usa as mãos do **Hero** à volta do `captured_at` (±45 min) para achar o torneio real e **corrigir a sala**. Guard rails: buy_in-igual-pelo-total **obrigatório** + (nome ⊆ OU prize_pool ±2%) + **unicidade** (senão None, não adivinha). Em `process_lobby_message` E no reconcile. *Causa-raiz HIGHROLLER: o lobby confiava na Vision para a sala (≠ table-SS, que usa o token do filename desde pt56) — Winamax lido como GG.*
+
+4. **Vision do replayer GG lê a coroa ($ bounty) (`13ef90d`).** Prompt reescrito: o bounty é o **valor em $ no banner dourado no topo do avatar** (não "ícone de coroa"). Flag **`force=true`** no `revision-replayers` re-corre a Vision mesmo em `vision_done='true'` e **refresca `player_names` sem re-derivar o anon_map**. Backfill das 23 replayer entries → IRE volta a aparecer no GG-via-replayer. ⚠️ Armadilha registada (`cc0bf7c`): **chama laranja = VPIP** (campo `bounty_pct`, nome enganador), **coroa dourada = bounty** (`bounty_value_usd`) — ver topo do CLAUDE.md.
+
+**Outras peças:** **Página Lobbys** in-app (upload + detalhe extração/import + data do lobby) (`38a62e4`/`9c91bd9`/`27fdb73`); subpasta **`lobby`** no appimport (`422d1ee`); **`tools/appmaster`** — bat-mestre que orquestra appimport+apphm3+Discord num clique com menu de janelas (`34d886e`); etiqueta de vilões honesta `villains_unique` (`eede8d6`). 2 features futuras em `docs/PENDENTES.md`: `#BUBBLE-FACTOR-PER-PLAYER` (`8229a45`), `#CONTEXT-IMAGE-MKO-BOUNTY-AVG` (`5980f09`).
+
+Última sessão fechada: **pt59** (4–5 Junho 2026 — página Lobbys + auto-reconcile + fallback de sala ancorado no Hero + appmaster + coroa GG; suite **886 PASSED**; HEAD `16a435b`). Journal: `docs/JOURNAL_2026-06-05-pt59.md`. Antecedida por pt58 (`docs/JOURNAL_2026-06-04-pt50-pt58.md`).
 
 ⚠️ **Pendente herdado:** **Smoke real Beelink pt42d** (`#WN-BOUNTY-NULL-IN-HRC-PIPELINE` v2) — uvicorn local + cópia `.exe` SHA cdfc7247...3262 + `payouts_helpers.py` para o Beelink; validar HRC Instant=50%. Continua por fazer.
 
