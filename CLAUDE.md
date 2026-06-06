@@ -20,6 +20,10 @@ Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no 
 
 `docs/GLOSSARIO_POKER.md` — glossário canónico de termos de poker (fonte: GTO Wizard), para as máquinas. **Não é leitura obrigatória**; é dicionário de consulta: quando aparecer um termo de poker não óbvio numa mão, regra ou pedido, consultar aí antes de assumir o significado.
 
+## 🤖 Fluxo desejado do watcher HRC
+
+`docs/WATCHER_FLUXO.md` — spec canónico de como o watcher DEVE processar cada mão (configurar → Finish/1ª run → seleccionar nó da 1ª ação não-fold + Selected Subtree + CI=10 → 2ª run → exportar; **sem prune, sem run redundante**). **Referência obrigatória antes de mexer em `tools/watcher_src` ou de diagnosticar o watcher.** Em caso de dúvida sobre o que o watcher deve fazer, manda este documento — não o que o código atual faz. Cross-ref `#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` (o build `cdfc7247`/pt42d diverge: faz prune + run redundante).
+
 ## ⚠️ ARMADILHA RECORRENTE — chama laranja ≠ bounty
 
 **Nas screenshots/replayer da GGPoker há DOIS badges por jogador. NÃO os confundas (já se confundiu várias vezes):**

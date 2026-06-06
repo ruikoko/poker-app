@@ -112,6 +112,14 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    do HRC. Suporta PKO 25% e Mystery KO correctamente. Ver
    `TECH_DEBTS_INVENTARIO.md` e `WORKFLOW_OPERACIONAL.md` §4.2.
 
+3. **`#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` (🔴 HIGH, registado pt61).** A 2ª
+   fase do watcher **diverge** do spec `docs/WATCHER_FLUXO.md`: a seguir à 1ª run
+   faz um **Prune (errado)** + uma **run intermédia com configs antigas
+   (redundante)** antes da run boa. Devia ir DIRETO a: seleccionar o nó da **1ª
+   ação não-fold** → Selected Subtree → CI=10 → OK → esperar → exportar (sem prune,
+   exatamente 2 runs). **Fix = `tools/watcher_src` + reconstruir `.exe`, sessão
+   dedicada.** Spec canónico: `docs/WATCHER_FLUXO.md`.
+
 4. **Uniformização de tags Discord ↔ HM3.** Urgente — fragmentação visual
    no Estudo (o mesmo conceito aparece com nomes diferentes consoante a
    fonte). 3 opções já levantadas: renomear canais, dict de aliases

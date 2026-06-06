@@ -6,6 +6,19 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt61 (6 Junho 2026 — adaptador HRC instalado no Beelink; spec do watcher)
+
+Sessão operacional (Beelink). Sem código no repo excepto docs. Journal: `docs/JOURNAL_2026-06-06-pt61.md`.
+
+### Novos abertos
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS** | 🔴 HIGH | A **2ª fase do watcher diverge** de `docs/WATCHER_FLUXO.md` (spec canónico do comportamento desejado). No build atual (`.exe` `cdfc7247`/pt42d), a parte "configurar → Finish → 1ª run" está **correta**, mas a seguir à 1ª run o watcher faz um **Prune (errado)** + uma **run intermédia com configurações antigas (redundante)** antes da run boa. **Devia** ir DIRETO a: seleccionar o nó da **1ª ação não-fold** (1ª ação voluntária da mão) → Scope = **Selected Subtree** → **CI=10** → OK → esperar → exportar. **Sem prune. Exatamente DUAS runs** (1ª lançada pelo Finish; 2ª Selected Subtree). **Fix = código do watcher (`tools/watcher_src`) + reconstruir o `.exe`, sessão dedicada.** Spec: `docs/WATCHER_FLUXO.md`. *(Registado em pt61; o tag tinha sido mencionado em sessão anterior mas nunca chegou ao repo.)* |
+| **#HRC-EXPORT-WRITES-BUT-FINALIZE-HANGS** | 🔴 HIGH | O export **grava o zip** em `done\Exports\<hand_id>.zip` (confirmado: gravado às 9:31), mas o passo de **finalização** ("Bloco 1 → finalize Bloco 2") **não completa** → a mão fica em **"Activas" indefinidamente** → o watcher (**serial**) **não arquiva nem passa à mão seguinte**, **bloqueando a fila toda**. **Observado em pt61:** zip de `GG-6027751209` gravado **9:31**, mão ainda **"Activas" às 9:58** (27 min depois). Relacionado com o **"Bloco 2" incompleto** do build `cdfc7247`/pt42d. **Fix na sessão de código do watcher** (`tools/watcher_src` + reconstruir `.exe`). Spec: `docs/WATCHER_FLUXO.md`. |
+
+---
+
 ## pt50–pt58 (3–4 Junho 2026 — re-import end-to-end + fuso Lisboa + Vision Claude + import por pasta)
 
 Arco contínuo. Suite **840 → 876 PASSED**. Journal: `docs/JOURNAL_2026-06-04-pt50-pt58.md`.
