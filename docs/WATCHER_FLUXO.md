@@ -31,3 +31,6 @@ documento — não o que o código atual faz.
 - A seguir à 1ª run o build faz um Prune (errado) + uma run intermédia com configurações
   antigas (redundante) antes da run boa. Correção: a seguir à 1ª run, ir DIRETO a
   seleccionar o nó (1ª ação não-fold) + Selected Subtree + CI=10 + OK + esperar + exportar.
+- O `meta.json` de cada mão JÁ traz o que a 2ª run precisa: `target_node_offset` (o nó a
+  seleccionar) + `aggressor_real_action` (type/size_bb/position da 1ª ação não-fold). O
+  watcher só tem de USAR o `target_node_offset` — não precisa de recalcular nem de prune.
