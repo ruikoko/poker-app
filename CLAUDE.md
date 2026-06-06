@@ -24,6 +24,14 @@ Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no 
 
 `docs/WATCHER_FLUXO.md` — spec canónico de como o watcher DEVE processar cada mão (configurar → Finish/1ª run → seleccionar nó da 1ª ação não-fold + Selected Subtree + CI=10 → 2ª run → exportar; **sem prune, sem run redundante**). **Referência obrigatória antes de mexer em `tools/watcher_src` ou de diagnosticar o watcher.** Em caso de dúvida sobre o que o watcher deve fazer, manda este documento — não o que o código atual faz. Cross-ref `#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` (o build `cdfc7247`/pt42d diverge: faz prune + run redundante).
 
+## ⚠️ REGRA PERMANENTE — 1 só watcher exe no Beelink, SEMPRE
+
+O Beelink tem **SEMPRE exatamente 1** watcher exe — o **activo**. Nunca dois, nunca um "backup por segurança".
+
+- **`instala_ptXX.bat`**: **NÃO faz backup** do exe antigo. Em vez disso, **apaga TODOS** os watcher exes existentes (`C:\Users\riand\HRCWatch\`, Desktop, e quaisquer cópias/backups `*.exe` do watcher) e instala **APENAS** o exe novo. Verifica SHA. Sai com **1 só exe** no Beelink, zero outros.
+- **Rollback/histórico NÃO vive no Beelink** — vive no **PC principal + git** (builds reproduzíveis da fonte). **Nunca** deixar exes antigos no Beelink "por segurança" (foi a causa de confundir qual exe corre — ver pt61: o SHA do exe activo no Beelink ficou por confirmar e a provenance do `cdfc7247` desalinhou).
+- **Provenance antes de recompilar:** confirmar **sempre** o SHA do exe que **corre no Beelink** (correr o check **no Beelink**, não no PC principal) antes de assumir que versão está lá.
+
 ## ⚠️ ARMADILHA RECORRENTE — chama laranja ≠ bounty
 
 **Nas screenshots/replayer da GGPoker há DOIS badges por jogador. NÃO os confundas (já se confundiu várias vezes):**
@@ -540,7 +548,7 @@ Documento `HRC_ANATOMIA_OPERACIONAL.md` atualizado para v4 com 3 factos novos de
 
 1 tech debt novo: `#HRC-BOUNTY-HARDCODED-50PCT` (robot tem PKO 50% hardcoded; precisa de ler do `tournament_format` parsed do TS para suportar PKO 25% e Mystery KO).
 
-**Mecânica de entrega de exes ao Rui:** Code constrói exe em `_local_only/watcher_decompile/build_pyi/dist/hrc_watcher.exe` no PC principal; Rui transfere para Beelink por qualquer canal; Web fornece `instala_ptXX.bat` via outputs; duplo-clique no .bat faz SHA-check + backup do exe antigo + instalação automática.
+**Mecânica de entrega de exes ao Rui:** Code constrói exe em `_local_only/watcher_decompile/build_pyi/dist/hrc_watcher.exe` no PC principal; Rui transfere para Beelink por qualquer canal; Web fornece `instala_ptXX.bat` via outputs; duplo-clique no .bat faz SHA-check + instalação automática. ⚠️ **Actualizado (pt61):** o `.bat` **já não faz backup** do exe antigo — **apaga todos** os watcher exes e instala **só o novo** (1 exe activo, zero cópias). Ver «⚠️ REGRA PERMANENTE — 1 só watcher exe no Beelink» no topo do CLAUDE.md.
 
 ## pt30-pt34 — Fecho da cadeia da 2ª run do HRC (22 Maio 2026)
 
