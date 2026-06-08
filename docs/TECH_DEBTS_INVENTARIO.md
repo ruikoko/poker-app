@@ -34,6 +34,20 @@ Re-smoke com restart limpo do exe **`cdfc7247`** (SHA do exe ATIVO no Beelink, H
 
 **Plano (sessão de build, NÃO recompilar antes da recalibração):** (a) Rui corre `get_calibrate_coords.py` no Beelink com o popup Nash aberto (436×230) e aponta os elementos reais → captura rel offsets de: dropdown Scope, opção Selected Subtree, campo CI no popup, nó-alvo na Strategy Table, botão Calculate; (b) meto offsets na fonte + **read-back** (ler o texto do combo Scope **e** o nó seleccionado antes de avançar); (c) fix do adaptador (move-to-`replied/` + `prune_replied`); (d) escrevo `instala_ptXX.bat` (**parar o processo do watcher** antes de trocar + **apagar todos** os exes + instalar **só o novo**, regra 1-exe) + build + deploy; (e) re-smoke com **watcher E adaptador a correr** → esperar 2ª run a aterrar + avanço da fila.
 
+### Fixes pt61 — EM BUFFER (escritos, suite verde; NÃO built/pushed)
+
+A re-smoke (acima) re-diagnosticou; estes fixes implementam o plano. **Diffs em buffer**, suite **897 PASSED**; `.exe` **NÃO** recompilado (pós-recalibração de coords no Beelink).
+
+| ID | Estado | Resumo |
+|---|---|---|
+| **#HRC-NODE-OFFSET-SB-JAM-OFFBY1** | ✅ FIXED (buffer) | `offset_within_bucket` (`backend/app/services/hrc_node_offset.py`) deixou de depender de all-in: o nó-alvo é a acção ORIGINAL = **1ª opção** do array (`_array_for_raise`) → 1º nó de raise da posição (non-SB=0; SB=1 após Complete). A convenção 0/1/2 antiga fazia +1 em jams (SB jam 2→1; non-SB jam 1→0). Regressão `GG-6027751209` (SB-vs-BB jam ~4.5bb): offset **8→7**. +1 teste, 4 corrigidos. |
+| **#HRC-2ND-RUN-BLIND-CLICKS** | ✅ FIXED (buffer) | A 2ª run clicava Scope/opção/CI ÀS CEGAS (pyautogui) no popup SWT e logava sucesso pelo ENVIO, não pelo efeito → Full-Tree disfarçado de Selected Subtree. Fix (`tools/watcher_src/patched_funcs.py`): **Scope via Win32** (`CB_SETCURSEL`+`CBN_SELCHANGE`+`CB_GETCURSEL` read-back; combo achado pelo item "Selected Subtree"; reusa padrão `export_strategies` pt35), **CI via Win32** (`WM_SETTEXT`+`WM_GETTEXT`, Edit único). **Scope não confirmado → ABORTA** a mão (`_cancel_nash_popup`, sem OK/export; `setup_hand` devolve None → `.failed` + avança, sem loop). CI não confirmado → WARN-e-segue (não muda Full-vs-Subtree). Baseline coords (fallback) recalibrados 436×230. Falha SINALIZADA, nunca fingida. +Win32 helpers; testes Win32+fallback+abort (watcher 45). |
+| **#HRC-EXPORT-WRITES-BUT-FINALIZE-HANGS** | ✅ FIXED (buffer) | Adaptador (`tools/hrc_adapter/hrc_adapter.py`): `reconcile_done` após POST OK **move** o zip `done/Exports/<hand>.zip` → `<parent>/replied/` (= `dirname(export)/replied/` que o `zip_is_ready` Baltazar observa) em vez de `_safe_unlink` → desbloqueia arquivar+avançar. Guardrails: (i) sem loop (`detect_done_zips` não varre `replied/`; `RESERVED_NAMES`); (ii) `prune_replied(≥1h)` por idade no main loop (unlink puro, nunca POST). +4 testes. |
+| **#HRC-NAV-TABLE-READBACK-PENDING** | 🟢 LOW (aberto) | O `navigate_to_target_node` loga o nó ESPERADO (de `aggressor_real_action`, dinâmico) mas **não lê o conteúdo** da Strategy Table (widget SWT) para confirmar a aterragem — falta um **snapshot do controlo no Beelink** (à imagem dos child-windows do popup em pt33). Até lá: **verificação visual** na re-smoke. Decisão Rui aceite. |
+| **#OPEN-COUNT-DRIFT-HRC-NODE-OFFSET-LATENT** | 🟢 LOW (aberto, **realçado pt61**) | `count_lines_for_position` (posições ANTES do agressor) ainda usa constantes (`_TEMPLATE_DEFAULT_OPEN_COUNT`), não as arrays geradas. Não morde a mão pt61 (preceding=6 correcto). **Se OUTRA mão aterrar no nó errado na re-smoke, é a suspeita nº1** (não o `within_bucket`, já corrigido). |
+
+**Navigate (pt61):** foco-click no nó-raiz `(221,131)` MAIN rel + setas×offset (primário, independente de geometria); **direct-click** `(222, 131+offset×18.71)` como reserva (`_NAV_USE_DIRECT_CLICK`, Rui alterna ao vivo). `instala_pt61.bat` em `_local_only/` (regra 1-exe). **Pendente:** recalibração interactiva das coords + build + smoke.
+
 ---
 
 ## pt50–pt58 (3–4 Junho 2026 — re-import end-to-end + fuso Lisboa + Vision Claude + import por pasta)

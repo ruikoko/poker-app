@@ -105,8 +105,10 @@ def test_offset_within_bucket_non_sb_small_raise():
 
 
 def test_offset_within_bucket_non_sb_all_in_effective():
+    # pt61 (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): um open-jam non-SB é o 1º nó do
+    # bucket (a acção original é sempre a 1ª opção do array) → within 0, NÃO 1.
     action = {"type": "raise", "size_bb": 30.0, "position": "UTG"}
-    assert offset_within_bucket(action, raiser_stack_bb=30.0) == 1
+    assert offset_within_bucket(action, raiser_stack_bb=30.0) == 0
 
 
 def test_offset_within_bucket_sb_complete():
@@ -125,14 +127,20 @@ def test_offset_within_bucket_sb_small_raise():
 
 
 def test_offset_within_bucket_sb_all_in_effective():
+    # pt61 (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): quando o raise SB É o jam não há
+    # nó small-raise separado — a SB tem 2 nós (Complete + jam) → within 1, NÃO
+    # 2. (A convenção antiga assumia Complete+small+all-in = 3 sub-nós.)
     action = {"type": "raise", "size_bb": 30.0, "position": "SB"}
-    assert offset_within_bucket(action, raiser_stack_bb=30.0) == 2
+    assert offset_within_bucket(action, raiser_stack_bb=30.0) == 1
 
 
 # ── compute_target_node_offset: positions × N-max ──────────────────────
 
 def test_compute_target_node_offset_5max_each_position_small_raise():
-    """5-max default: HJ@0, CO@2, BTN@4, SB-complete@6, SB-raise@7, SB-jam@8."""
+    """5-max default: HJ@0, CO@2, BTN@4, SB-complete@6, SB-raise@7.
+
+    pt61: o alvo é sempre o 1º nó de raise da posição → SB-raise e SB-jam caem
+    AMBOS @7 (o jam É o 1º raise quando é a acção original; não há nó @8)."""
     base = {"type": "raise", "size_bb": 2.0}
     assert compute_target_node_offset(
         {**base, "position": "HJ"}, 5, {}, raiser_stack_bb=50.0,
@@ -151,10 +159,25 @@ def test_compute_target_node_offset_5max_each_position_small_raise():
         {"type": "raise", "size_bb": 3.5, "position": "SB"}, 5, {},
         raiser_stack_bb=50.0,
     ) == 7
+    # SB jam (size ≈ stack): o jam é o 1º (e único) nó de raise → @7, NÃO @8.
     assert compute_target_node_offset(
         {"type": "raise", "size_bb": 50.0, "position": "SB"}, 5, {},
         raiser_stack_bb=50.0,
-    ) == 8
+    ) == 7
+
+
+def test_compute_target_node_offset_GG6027751209_sb_jam_offby1_regression():
+    """#HRC-NODE-OFFSET-SB-JAM-OFFBY1 — mão real pt61. SB-vs-BB, 5 seats reais
+    (HJ/CO/BTN/SB/BB). Nível 600/1200, SB stack 5547 → jam 5397 ≈ 4.5bb ≈ stack
+    (all-in efectivo). Strategy Table = 8 nós principais (HJ R2.0, HJ jam, CO
+    R2.0, CO R4.32, BU R2.0, BU jam, SB C0.5, SB R4.5-jam); alvo = SB R4.5 = 8º
+    nó = offset 7 (= 7 setas-baixo do 1º nó).
+
+    O código ANTIGO devolvia 8 (convenção SB all-in = 2): preceding 6 + 2. O fix
+    devolve 7 (within SB = 1). `raiser_stack_bb=4.5` (≈ size) garante que o ramo
+    all-in antigo disparava — é a reprodução fiel do bug."""
+    sb_jam = {"type": "raise", "size_bb": 4.5, "position": "SB"}
+    assert compute_target_node_offset(sb_jam, 5, {}, raiser_stack_bb=4.5) == 7
 
 
 def test_compute_target_node_offset_6max():
@@ -199,11 +222,13 @@ def test_compute_target_node_offset_8max_UTG1_MP():
 
 
 def test_compute_target_node_offset_all_in_effective_within_bucket():
-    """HJ jam @ stack 50 (1ª posição em 5-max) → 0 + 1 = 1."""
+    """pt61 (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): HJ jam @ stack 50 (1ª posição em
+    5-max) → 0 + 0 = 0. O open-jam é a acção original = 1º nó do bucket HJ
+    (within 0). Antes do fix a convenção non-SB all-in devolvia 1 (off-by-one)."""
     assert compute_target_node_offset(
         {"type": "raise", "size_bb": 50.0, "position": "HJ"}, 5, {},
         raiser_stack_bb=50.0,
-    ) == 1
+    ) == 0
 
 
 def test_compute_target_node_offset_override_eff_above_25_collapses_buckets():

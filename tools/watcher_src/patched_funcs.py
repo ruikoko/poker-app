@@ -82,6 +82,18 @@ CBN_SELCHANGE = 1       # notificação ao diálogo após mudar a selecção do 
 # actualizar este índice.
 EXPORT_MODE_COMPLETE_INDEX = 1
 
+# ── pt61 (#HRC-2ND-RUN-BLIND-CLICKS) — Scope/CI via Win32 (não pyautogui) ──
+# O popup Nash (#32770) tem os widgets como child windows nativas (pt33). Os
+# cliques pyautogui de Scope/opção/CI não registam de forma fiável neste popup
+# SWT/Java (só o OK via BM_CLICK funcionava). Passa-se Scope e CI a Win32, à
+# imagem do combo do export_strategies (pt35), com read-back de verificação.
+CB_GETCOUNT = 0x0146       # nº de itens no ComboBox
+CB_GETLBTEXT = 0x0148      # texto do item i (para achar o combo "Selected Subtree")
+CB_GETLBTEXTLEN = 0x0149   # comprimento do texto do item i
+WM_SETTEXT = 0x000C        # escrever texto num Edit (CI Target)
+WM_GETTEXT = 0x000D        # ler texto de um Edit (read-back do CI)
+WM_GETTEXTLENGTH = 0x000E
+
 _FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou)
 _FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
 _FINISH_WAIT_POLL_S = 0.1
@@ -871,28 +883,41 @@ def set_ci_target_refine(wpos, value=10.0):
 # ~13px X quando o popup cresce. Pixels-rel preservam directamente a
 # medição empírica do smoke 18 Maio.
 #
-# Smoke devagar 2026-05-18 com Rui no Beelink contra popup Nash 416×214:
-#   - Dropdown abs (944, 439); top-left popup (666, 372) -> rel (278, 67).
-#   - "Selected Subtree" opção abs (940, 480); rel (274, 108) — highlight
-#     visualmente confirmado pelo Rui.
-#   - Popup tinha exactamente 2 opções no menu (Full Tree / Selected Subtree).
+# ⚠️ pt61: estes pixels-rel são apenas BASELINE/FALLBACK. O caminho activo do
+# Scope e do CI passou a ser **Win32** (CB_SETCURSEL / WM_SETTEXT + read-back),
+# que NÃO depende de coords (ver `_set_scope_in_popup` / `_fill_ci_target_in_popup`).
+# A calibração pt61 (popup 436×230) mostrou que mesmo com as coords certas o
+# clique pyautogui não selecciona neste popup → o fix real é o método, não a
+# coord. Estes valores ficam só para o fallback pyautogui se o Win32 falhar.
 #
+# Calibração pt61 (Rui, Beelink, popup Nash 436×230):
+#   - Dropdown Scope: rel (308, 69)        [era (278, 67) @416×214]
+#   - "Selected Subtree" opção: rel (290, 107)  [era (274, 108)]
+#   - CI Target: rel (297, 108)            [era (270, 109)]
 # Defensive return: se algum REL for 0 OU se `popup_rect` for None.
-# Pós-calibração os defensivos ficam dormant em produção mas regridem-se
-# via tests.
-SCOPE_DROPDOWN_REL_X = 278
-SCOPE_DROPDOWN_REL_Y = 67
-SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 274
-SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 108
+SCOPE_DROPDOWN_REL_X = 308
+SCOPE_DROPDOWN_REL_Y = 69
+SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 290
+SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 107
 
 
-# pt25e Bloco 2 piece 2 — CI Target dentro do popup Nash.
-# Pixels-rel derivados das fracções legacy `start_calculation` (Baltazar
-# pt25d): `rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)` ×
-# popup 416×214 = (270, 109). Migrado para REL em pt26 pelo mesmo motivo
-# do dropdown Scope acima (popup com tamanho variável).
-CI_TARGET_POPUP_REL_X = 270
-CI_TARGET_POPUP_REL_Y = 109
+# pt25e Bloco 2 piece 2 — CI Target dentro do popup Nash. BASELINE/FALLBACK
+# (caminho activo = Win32 WM_SETTEXT; ver nota acima). Calibração pt61 436×230.
+CI_TARGET_POPUP_REL_X = 297
+CI_TARGET_POPUP_REL_Y = 108
+
+
+# pt61 — Strategy Table (janela PRINCIPAL do HRC, não o popup): nó-raiz (offset 0)
+# + pitch entre linhas, para o clique de foco/início do navigate. Calibração pt61
+# (Rui, MAIN rel): 1º nó (HJ R2.0) @ (221, 131); alvo (SB R4.5, 8º nó) @ (222, 262)
+# → pitch = (262−131)/7 = 18.71 px/linha. Direct-click do alvo: (222, 131+off×pitch).
+STRATEGY_TABLE_ROOT_REL_X = 221
+STRATEGY_TABLE_ROOT_REL_Y = 131
+STRATEGY_TABLE_ROW_PITCH_PX = 18.71
+# Método do navigate: False = foco-no-raiz + setas×offset (primário, independente
+# de geometria); True = direct-click no alvo (reserva, se as setas falharem na
+# re-smoke). Flag para o Rui alternar ao vivo sem rebuild.
+_NAV_USE_DIRECT_CLICK = False
 
 
 # pt26 Bloco 2 piece 2 — Botão verde Calculate (Play) no main UI HRC.
@@ -1031,37 +1056,47 @@ def _click_calculate_button(wpos=None):
 
 
 def _fill_ci_target_in_popup(popup_rect, ci_target):
-    """Preenche CI Target dentro do popup Nash. Pixels-rel ao top-left do
-    popup (convenção pt26; bloco de constantes acima). Valores derivados
-    das fracções legacy `start_calculation` (Baltazar pt25d) sobre o popup
-    416×214 do smoke 18 Maio.
+    """Preenche o CI Target no popup Nash — pt61: via Win32 (WM_SETTEXT) com
+    read-back (WM_GETTEXT). Conservador: só usa Win32 se houver EXACTAMENTE 1
+    controlo Edit no popup (= o CI Target, inequívoco); senão cai no fallback
+    pyautogui (baseline coords pt61). NÃO depende de coords no caminho activo.
 
-    pt28-v1 reordering: agora **passo 3** do flow (após `_set_scope_in_popup`).
-    Pré-condição: popup Nash aberto + Scope já = "Selected Subtree". Pôr CI
-    depois do Scope garante que se o popup re-renderiza ao mudar Scope, o CI
-    é escrito sobre o estado já estabilizado.
-
-    Defensive: `popup_rect=None` -> early-return.
-
-    Logging defensivo (pt28-v1): coord absoluta do click registada antes
-    para permitir diagnóstico cruzado com screenshot pós-smoke.
+    Passo 3 do flow (após `_set_scope_in_popup`). Devolve `True` SÓ se o
+    read-back confirmar o valor; `False` caso contrário (Win32 falhou e fallback
+    pyautogui não é confirmável). `popup_rect` é usado SÓ pelo fallback.
     """
-    if popup_rect is None:
-        print('   [WARN] _fill_ci_target_in_popup: popup_rect ausente — fill ignorado')
-        return
-    left, top, _width, _height = popup_rect
-    abs_x = left + CI_TARGET_POPUP_REL_X
-    abs_y = top + CI_TARGET_POPUP_REL_Y
-    print(f'   _fill_ci_target_in_popup: field click @ ({abs_x},{abs_y}) '
-          f'[popup_rect=({left},{top},{_width},{_height}), '
-          f'rel=({CI_TARGET_POPUP_REL_X},{CI_TARGET_POPUP_REL_Y})]')
-    pyautogui.click(abs_x, abs_y)
+    # Inteiro sem ".0" (o Edit do HRC aceita "10"); fracção preserva o float.
+    target = (str(int(ci_target)) if float(ci_target).is_integer()
+              else str(float(ci_target)))
+    hwnd_popup = _find_nash_popup_hwnd()
+    edit = _find_single_edit(hwnd_popup) if hwnd_popup else None
+    if edit:
+        sbuf = ctypes.create_unicode_buffer(target)
+        _pt30_user32.SendMessageW(edit, WM_SETTEXT, 0, ctypes.addressof(sbuf))
+        time.sleep(0.2)
+        got = _read_edit_text(edit).strip()
+        if got == target:
+            print('   [ci] Win32 WM_SETTEXT "%s" confirmado (read-back)' % target)
+            return True
+        print('   [WARN] [ci] read-back não bate (got=%r != %r) '
+              '— fallback pyautogui' % (got, target))
+    else:
+        print('   [WARN] [ci] Edit único do CI não identificado '
+              '— fallback pyautogui')
+    # Fallback pyautogui (baseline coords pt61) — best-effort, NÃO confirmável.
+    if popup_rect is None or CI_TARGET_POPUP_REL_X == 0:
+        print('   [WARN] [ci] fallback indisponível (popup_rect/coords) '
+              '— CI NÃO confirmado')
+        return False
+    left, top, _w, _h = popup_rect
+    pyautogui.click(left + CI_TARGET_POPUP_REL_X, top + CI_TARGET_POPUP_REL_Y)
     time.sleep(0.3)
     pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.1)
-    clipboard_safe_paste(str(float(ci_target)))  # pt29: set+verify+Ctrl+V atómico
-    time.sleep(0.2)                              # preserva timing legacy pós-paste
-    print(f'   CI Target (popup): {ci_target}')
+    clipboard_safe_paste(target)  # pt29: set+verify+Ctrl+V atómico
+    time.sleep(0.2)
+    print('   [ci] fallback pyautogui aplicado (NÃO confirmado por read-back)')
+    return False
 
 
 def _find_nash_popup_hwnd():
@@ -1153,72 +1188,145 @@ def _click_ok_in_popup(popup_rect=None):
     time.sleep(0.3)
 
 
+def _cancel_nash_popup():
+    """pt61: fecha o popup Nash SEM disparar a run (Cancel via BM_CLICK). Usado
+    no ABORT quando o Scope não confirma — evita deixar o popup aberto a pendurar
+    a mão seguinte. Reusa `_find_export_button` (acha Button por label normalizado).
+    Best-effort: se não houver Cancel, WARN (a mão já vai marcada falhada)."""
+    hwnd_popup = _find_nash_popup_hwnd()
+    if not hwnd_popup:
+        print('   [WARN] [cancel] popup Nash hwnd não encontrado')
+        return
+    btn = _find_export_button(hwnd_popup, "cancel")
+    if not btn:
+        print('   [WARN] [cancel] Button Cancel não encontrado '
+              '— popup pode ficar aberto')
+        return
+    _pt30_user32.SendMessageW(btn, BM_CLICK, 0, 0)
+    print('   [cancel] popup Nash cancelado (BM_CLICK hwnd=%d)' % btn)
+    time.sleep(0.3)
+
+
+def _find_combo_with_item(hwnd_popup, item_text_lower):
+    """pt61: enumera os ComboBox filhos do popup Nash e devolve `(hwnd, idx)` do
+    PRIMEIRO combo que contém um item cujo texto normalizado == `item_text_lower`.
+
+    No popup Nash há >1 ComboBox (CFR Algorithm, Scope, ...) — por isso achamos o
+    Scope pelo CONTEÚDO ("Selected Subtree"), não pela ordem. `(None, None)` se
+    nenhum combo tiver o item. Read-only (não muda selecção). Buffers passados a
+    `CB_GETLBTEXT*` via `addressof` (lParam = LONG_PTR aceita o endereço)."""
+    if not hwnd_popup:
+        return (None, None)
+    result = [None, None]
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value.lower() != "combobox":
+            return True
+        count = _pt30_user32.SendMessageW(ch, CB_GETCOUNT, 0, 0)
+        count = count if isinstance(count, int) and count > 0 else 0
+        for i in range(count):
+            n = _pt30_user32.SendMessageW(ch, CB_GETLBTEXTLEN, i, 0)
+            if not isinstance(n, int) or n <= 0:
+                continue
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.SendMessageW(ch, CB_GETLBTEXT, i, ctypes.addressof(buf))
+            if buf.value.strip().lower() == item_text_lower:
+                result[0] = ch
+                result[1] = i
+                return False
+        return True
+
+    _pt30_user32.EnumChildWindows(hwnd_popup, _PT30_WNDENUMPROC(_enum), 0)
+    return (result[0], result[1])
+
+
+def _find_single_edit(hwnd_popup):
+    """pt61: hwnd do ÚNICO controlo Edit do popup Nash (= o campo CI Target),
+    ou None se houver 0 ou >1 Edits (ambíguo → caller cai no fallback pyautogui).
+    Conservador de propósito: só usa Win32 no CI quando é inequívoco."""
+    if not hwnd_popup:
+        return None
+    edits = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value.lower() == "edit":
+            edits.append(ch)
+        return True
+
+    _pt30_user32.EnumChildWindows(hwnd_popup, _PT30_WNDENUMPROC(_enum), 0)
+    return edits[0] if len(edits) == 1 else None
+
+
+def _read_edit_text(hwnd_edit):
+    """Texto actual de um Edit via WM_GETTEXT (read-back). '' se vazio/erro."""
+    if not hwnd_edit:
+        return ""
+    n = _pt30_user32.SendMessageW(hwnd_edit, WM_GETTEXTLENGTH, 0, 0)
+    n = n if isinstance(n, int) and n > 0 else 0
+    if n == 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(n + 1)
+    _pt30_user32.SendMessageW(hwnd_edit, WM_GETTEXT, n + 1, ctypes.addressof(buf))
+    return buf.value
+
+
 def _set_scope_in_popup(popup_rect):
-    """Muda o dropdown Scope no popup Nash de "Full Tree" -> "Selected Subtree".
+    """Muda o Scope no popup Nash para "Selected Subtree" — pt61: via Win32.
 
-    Layout do popup Nash (validado por Rui em smokes pt25e/pt26):
-      6 campos editáveis: CFR Algorithm, Scope, Run Sampling, CI Target,
-      Reset Regret, Reset Strategies. 2 botões: OK | Cancel.
-    O robot interage com apenas 2 campos (Scope, CI Target) + 1 botão (OK).
-    Os outros 4 campos ficam nos defaults do HRC, que são apropriados para
-    o nosso flow (CFR Algorithm = default; Run Sampling = default; Reset
-    Regret/Strategies não-marcados — preservam estado da 1ª run para
-    refinement em Selected Subtree).
+    Caminho activo (pt61, #HRC-2ND-RUN-BLIND-CLICKS): Win32. Acha o ComboBox do
+    Scope pelo CONTEÚDO (item "Selected Subtree"), seta por índice via
+    `CB_SETCURSEL`, notifica o popup (`WM_COMMAND`/`CBN_SELCHANGE`) e CONFIRMA
+    por read-back (`CB_GETCURSEL`). NÃO depende de coords — o clique pyautogui
+    não registava de forma fiável neste popup SWT (só o OK por `BM_CLICK`
+    funcionava). Mesmo padrão do combo de `export_strategies` (pt35).
 
-    pt28-v1 reordering: esta função passa a ser o **passo 2** do flow
-    (`start_calculation_selected_subtree`), ANTES de
-    `_fill_ci_target_in_popup`. Razão: ao mudar Scope o popup pode
-    re-renderizar e resetar campos editáveis ao default do scope novo;
-    com Scope primeiro, qualquer reset acontece antes de escrevermos o
-    CI Target.
+    Devolve `True` SÓ se o read-back confirmar "Selected Subtree". Em falha do
+    Win32 (popup/combo não encontrados ou read-back não bate) tenta o fallback
+    pyautogui (baseline coords pt61, best-effort) e devolve `False` — o caller
+    deve abortar a 2ª run em vez de a correr em Full Tree silenciosamente.
 
-    Pré-condição: popup Nash já aberto. Pós-condição: Scope = "Selected
-    Subtree", pronto para fill CI + OK.
-
-    `popup_rect` é `(left, top, width, height)` do popup Nash; caller é
-    responsável pela detecção do rect. Coord absoluta de cada click é
-    `(left + REL_X, top + REL_Y)` — pixels-rel ao top-left do popup
-    (convenção pt26; ver bloco de constantes acima).
-
-    Defensivos:
-      - Qualquer REL == 0 -> coords não-calibrados -> early-return WARN.
-      - popup_rect is None -> caller ainda não detecta popup -> early-return WARN.
-
-    Logging defensivo (pt28-v1): regista coords absolutas de cada click
-    no stdout. Permite diagnóstico cirúrgico em smoke real sem precisar
-    de re-calibrar especulativamente as REL — basta cruzar as coords
-    com screenshot do popup pós-smoke.
-
-    Implementação: 2 clicks sequenciais com `pyautogui.click(abs_x, abs_y)`
-    (NÃO `click_rel`, porque os REL aplicam-se ao popup_rect, não ao main
-    HRC window).
+    `popup_rect` (left, top, w, h) é usado SÓ pelo fallback pyautogui.
     """
-    if (SCOPE_DROPDOWN_REL_X == 0 or SCOPE_DROPDOWN_REL_Y == 0
-            or SCOPE_OPTION_SELECTED_SUBTREE_REL_X == 0
-            or SCOPE_OPTION_SELECTED_SUBTREE_REL_Y == 0):
-        print('   [WARN] _set_scope_in_popup: pixels-rel não calibrados '
-              '— set ignorado, scope fica Full Tree')
-        return
-    if popup_rect is None:
-        print('   [WARN] _set_scope_in_popup: popup_rect não fornecido '
-              '— set ignorado, scope fica Full Tree')
-        return
-    left, top, _width, _height = popup_rect
-    dropdown_x = left + SCOPE_DROPDOWN_REL_X
-    dropdown_y = top + SCOPE_DROPDOWN_REL_Y
-    print(f'   _set_scope_in_popup: dropdown click @ ({dropdown_x},{dropdown_y}) '
-          f'[popup_rect=({left},{top},{_width},{_height}), '
-          f'rel=({SCOPE_DROPDOWN_REL_X},{SCOPE_DROPDOWN_REL_Y})]')
-    pyautogui.click(dropdown_x, dropdown_y)
+    hwnd_popup = _find_nash_popup_hwnd()
+    if hwnd_popup:
+        combo, idx = _find_combo_with_item(hwnd_popup, "selected subtree")
+        if combo and idx is not None:
+            _pt30_user32.SendMessageW(combo, CB_SETCURSEL, idx, 0)
+            ctrl_id = _pt30_user32.GetDlgCtrlID(combo)
+            _pt30_user32.SendMessageW(
+                hwnd_popup, WM_COMMAND,
+                (CBN_SELCHANGE << 16) | (ctrl_id & 0xFFFF), combo)
+            time.sleep(0.3)
+            now = _pt30_user32.SendMessageW(combo, CB_GETCURSEL, 0, 0)
+            if now == idx:
+                print('   [scope] Win32 CB_SETCURSEL idx=%d confirmado '
+                      '(read-back) — Scope: Selected Subtree' % idx)
+                return True
+            print('   [WARN] [scope] read-back falhou (now=%r != %d) '
+                  '— fallback pyautogui' % (now, idx))
+        else:
+            print('   [WARN] [scope] ComboBox com item "Selected Subtree" '
+                  'não encontrado — fallback pyautogui')
+    else:
+        print('   [WARN] [scope] popup Nash hwnd não encontrado '
+              '— fallback pyautogui')
+    # Fallback pyautogui (baseline coords pt61) — best-effort, NÃO confirmável.
+    if popup_rect is None or SCOPE_DROPDOWN_REL_X == 0:
+        print('   [WARN] [scope] fallback indisponível (popup_rect/coords) '
+              '— scope NÃO confirmado')
+        return False
+    left, top, _w, _h = popup_rect
+    pyautogui.click(left + SCOPE_DROPDOWN_REL_X, top + SCOPE_DROPDOWN_REL_Y)
     time.sleep(0.3)
-    option_x = left + SCOPE_OPTION_SELECTED_SUBTREE_REL_X
-    option_y = top + SCOPE_OPTION_SELECTED_SUBTREE_REL_Y
-    print(f'   _set_scope_in_popup: option click @ ({option_x},{option_y}) '
-          f'[rel=({SCOPE_OPTION_SELECTED_SUBTREE_REL_X},'
-          f'{SCOPE_OPTION_SELECTED_SUBTREE_REL_Y})]')
-    pyautogui.click(option_x, option_y)
+    pyautogui.click(left + SCOPE_OPTION_SELECTED_SUBTREE_REL_X,
+                    top + SCOPE_OPTION_SELECTED_SUBTREE_REL_Y)
     time.sleep(0.3)
-    print('   Scope: Selected Subtree')
+    print('   [scope] fallback pyautogui aplicado (NÃO confirmado por read-back)')
+    return False
 
 
 def start_calculation_selected_subtree(wpos, ci_target):
@@ -1274,12 +1382,25 @@ def start_calculation_selected_subtree(wpos, ci_target):
         print(f'   [WARN] start_calculation_selected_subtree(ci={ci_target}): '
               'popup não detectado; flow degrada para no-op')
         return False
-    _set_scope_in_popup(popup_rect)                       # passo 2 (pt28-v1: era passo 3)
-    _fill_ci_target_in_popup(popup_rect, ci_target)       # passo 3 (pt28-v1: era passo 2)
-    _click_ok_in_popup(popup_rect)                        # passo 4
-
-    print(f'   start_calculation_selected_subtree(ci={ci_target}) — '
-          '2ª run em Selected Subtree disparada')
+    # pt61: Scope por Win32 com read-back. Se NÃO confirmar, ABORTA a 2ª run
+    # (não clica OK). Um OK com Scope=Full Tree geraria um Full-Tree DISFARÇADO
+    # de Selected Subtree que iria parar à biblioteca de estudo como se fosse
+    # bom — pior que falhar. Devolve "scope_unconfirmed"; o caller marca a mão
+    # falhada e avança (sem export).
+    scope_ok = _set_scope_in_popup(popup_rect)            # passo 2 (Win32 + read-back)
+    if not scope_ok:
+        print('   [ABORT] [calc] Scope NÃO confirmado em "Selected Subtree" — '
+              '2ª run ABORTADA (sem OK, sem export). Cancela o popup.')
+        _cancel_nash_popup()
+        return "scope_unconfirmed"
+    # CI: não confirmar NÃO aborta (a run continua em Selected Subtree; só a
+    # precisão pode ficar no default do HRC). Sinaliza e segue.
+    ci_ok = _fill_ci_target_in_popup(popup_rect, ci_target)  # passo 3 (Win32 + read-back)
+    if not ci_ok:
+        print('   [WARN] [calc] CI Target NÃO confirmado — segue com o default do HRC')
+    _click_ok_in_popup(popup_rect)                        # passo 4 (BM_CLICK)
+    print('   start_calculation_selected_subtree(ci=%s) — 2ª run disparada '
+          '(scope_ok=True ci_ok=%s)' % (ci_target, ci_ok))
     return True
 
 
@@ -1347,45 +1468,73 @@ def _focus_strategy_table(wpos):
     time.sleep(0.2)
 
 
-def navigate_to_target_node(wpos, target_node_offset):
-    """pt25e Bloco 2 piece 2 — preme seta-para-baixo `target_node_offset`
-    vezes para mover o cursor da Strategy Table HRC do default (1ª linha)
-    até à linha do raiser real.
+def navigate_to_target_node(wpos, target_node_offset, aggressor_real_action=None):
+    """pt61: leva o cursor da Strategy Table até ao nó do raiser real.
 
-    `target_node_offset` é o campo `meta.json.target_node_offset` calculado
-    pelo backend (`hrc_node_offset.compute_target_node_offset`).
+    Dois fixes (ambos necessários — descobertos na re-smoke pt61):
+      1. FOCO/INÍCIO: clica o nó-raiz (1ª linha) da Strategy Table na janela
+         PRINCIPAL do HRC ANTES de navegar — fixa o ponto de partida. As setas
+         sozinhas (pt28-pt35), sem foco nem início conhecido, aterravam no nó
+         errado (o foco default pós-1ª-run afinal não era fiável).
+      2. OFFSET certo: vem do backend já no espaço dos nós principais
+         (#HRC-NODE-OFFSET-SB-JAM-OFFBY1 corrigido em pt61).
 
-    Defensive:
-      - `None` ou `0` -> skip (cursor fica na 1ª linha; sem foco set
-        para evitar interacções desnecessárias).
-      - Inteiro negativo -> log WARN, skip.
-      - Inteiro > 100 -> log WARN, skip (sanity; tabela com 100+ linhas
-        é improvável e indica bug no compute).
+    Método (flag de módulo `_NAV_USE_DIRECT_CLICK`):
+      - False (PRIMÁRIO): foco-no-raiz + `offset` setas-baixo. Independente da
+        geometria (só precisa do nó-raiz + foco).
+      - True (RESERVA): direct-click no alvo em
+        `(ROOT_X, ROOT_Y + offset × PITCH)`. Calibração pt61: pitch 18.71 px/linha
+        ((262−131)/7 do par 1º-nó/alvo medido). Sidestepa setas/foco mas depende
+        de pitch/topo estáveis.
 
-    Comportamento empírico da Strategy Table (validado em smoke):
-      - Cursor por defeito na 1ª linha após 1ª run.
-      - Seta-baixo move 1 linha (não cycles no fim).
-      - Pequeno delay entre presses evita key drops em ambientes
-        com input throttling.
+    Read-back: loga o nó ESPERADO (`aggressor_real_action`: position+type+size)
+    para verificação **visual** na re-smoke. A leitura do CONTEÚDO da Strategy
+    Table (widget SWT) não está disponível sem um snapshot do controlo no Beelink
+    (à imagem dos snapshots de child-windows do popup em pt33) → fica como
+    `#HRC-NAV-TABLE-READBACK-PENDING`; até lá, verificação visual.
+
+    `target_node_offset` = `meta.json.target_node_offset` (backend). `None` →
+    skip; non-int / <0 / >100 → WARN skip; `0` → foca a raiz (0 setas).
     """
-    if target_node_offset is None or target_node_offset == 0:
-        print('   navigate_to_target_node: offset is None/0 — skip')
+    if target_node_offset is None:
+        print('   navigate_to_target_node: offset None — skip')
         return
     if not isinstance(target_node_offset, int):
-        print(f'   [WARN] navigate_to_target_node: offset não-int '
-              f'({type(target_node_offset).__name__}) — skip')
+        print('   [WARN] navigate_to_target_node: offset não-int (%s) — skip'
+              % type(target_node_offset).__name__)
         return
     if target_node_offset < 0 or target_node_offset > 100:
-        print(f'   [WARN] navigate_to_target_node: offset {target_node_offset} '
-              'fora de [1, 100] — skip')
+        print('   [WARN] navigate_to_target_node: offset %d fora de [0, 100] '
+              '— skip' % target_node_offset)
         return
-    # pt28: SEM call a _focus_strategy_table — Strategy Table já tem foco
-    # por default pós-1ª-run (validado por Rui no .exe pt26). Ver docstring
-    # DEPRECATED em `_focus_strategy_table`.
-    for _ in range(target_node_offset):
-        pyautogui.press('down')
-        time.sleep(0.05)
-    print(f'   navigate_to_target_node: {target_node_offset} (down) presses')
+    hrc = find_hrc()
+    if not hrc:
+        print('   [WARN] navigate_to_target_node: HRC não encontrado — skip')
+        return
+    exp = ''
+    if isinstance(aggressor_real_action, dict):
+        exp = ' (esperado: %s %s %sbb)' % (
+            aggressor_real_action.get('position'),
+            aggressor_real_action.get('type'),
+            aggressor_real_action.get('size_bb'))
+    root_x = hrc.left + STRATEGY_TABLE_ROOT_REL_X
+    root_y = hrc.top + STRATEGY_TABLE_ROOT_REL_Y
+    if _NAV_USE_DIRECT_CLICK:
+        ty = int(round(root_y + target_node_offset * STRATEGY_TABLE_ROW_PITCH_PX))
+        print('   navigate_to_target_node: DIRECT-CLICK alvo @ (%d,%d) offset=%d%s'
+              % (root_x, ty, target_node_offset, exp))
+        pyautogui.click(root_x, ty)
+        time.sleep(0.2)
+    else:
+        print('   navigate_to_target_node: foco-raiz @ (%d,%d) + %d setas%s'
+              % (root_x, root_y, target_node_offset, exp))
+        pyautogui.click(root_x, root_y)   # foco + selecciona o nó-raiz (offset 0)
+        time.sleep(0.2)
+        for _ in range(target_node_offset):
+            pyautogui.press('down')
+            time.sleep(0.05)
+    print('   navigate_to_target_node: concluído — VERIFICAR visualmente o nó na '
+          're-smoke%s' % exp)
 
 
 def finalize_after_second_run(wpos, export_zip):
@@ -1984,11 +2133,23 @@ def setup_hand(hand_name, hand_path):
         #     prune_action_on_line(wpos, line_coords)
 
         # Navegação até linha do raiser real (#WATCHER-BUG-G-NAV).
-        navigate_to_target_node(wpos, target_node_offset)
+        # pt61: passa aggressor_real_action p/ log do nó esperado (read-back visual).
+        navigate_to_target_node(wpos, target_node_offset, aggressor_real_action)
 
         # 2ª run em Selected Subtree (popup Nash gere fill CI + scope + OK).
         print('   A calcular (2ª run, Selected Subtree)...')
         second_run_dispatched = start_calculation_selected_subtree(wpos, 10.0)
+
+        # pt61: Scope não confirmado → ABORTA a mão (sem OK, sem export) para
+        # não gerar um Full-Tree disfarçado de Selected Subtree na biblioteca de
+        # estudo. `return None` → `try_setup` (main loop) marca a pasta `.failed`
+        # e avança para a mão seguinte; o adaptador posta o failed e limpa a
+        # pasta (sem loop). NÃO bloqueia a fila.
+        if second_run_dispatched == "scope_unconfirmed":
+            print('   [ABORT] %s: Scope não confirmado — 2ª run abortada, mão '
+                  'marcada FALHADA (sem export). Avança para a seguinte.'
+                  % hand_name)
+            return None
 
     # pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): se a 2ª run foi tentada mas
     # falhou (popup Nash não detectado), avisar antes do finalize — o zip

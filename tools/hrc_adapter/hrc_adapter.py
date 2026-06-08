@@ -528,7 +528,9 @@ def reconcile_done(session: requests.Session, api_base: str,
             "result_zip_size": size,
             "error": None,
         }
-        _safe_unlink(zip_path)
+        # pt61: MOVE para replied/ (não unlink) → desbloqueia o arquivar+avançar
+        # do watcher Baltazar (#HRC-EXPORT-WRITES-BUT-FINALIZE-HANGS).
+        _move_to_replied(zip_path)
 
 
 def reconcile_failed(session: requests.Session, api_base: str,
@@ -567,6 +569,56 @@ def _safe_rmtree(p: Path) -> None:
         logger.info("rmtree %s OK", p)
     except OSError as e:
         logger.warning("rmtree %s falhou: %s", p, e)
+
+
+# pt61 (#HRC-EXPORT-WRITES-BUT-FINALIZE-HANGS): após POST OK o adaptador MOVE o
+# zip para `<dir_do_zip>/replied/` em vez de o apagar. O main loop do watcher
+# Baltazar (`zip_is_ready`) só arquiva a mão + avança quando o zip aparece em
+# `os.path.dirname(export_zip)/replied/<basename>` (EXPORT_WAIT_TIMEOUT=24h). Sem
+# isto o watcher serial ficava preso em "Activas" por mão. Guardrails:
+#  (i)  sem loop — `detect_done_zips` só varre `done/*.zip`+`done/Exports/*.zip`
+#       (não `replied/`, que está em RESERVED_NAMES) → o zip sai do radar, 0 re-POST.
+#  (ii) `replied/` não acumula — `prune_replied` apaga por idade (≥ RETENTION,
+#       bem depois de o watcher ter consumido o zip; unlink puro, NUNCA POST).
+REPLIED_RETENTION_S = 3600  # 1h: o watcher arquiva em segundos/minutos
+
+
+def _move_to_replied(zip_path: Path) -> None:
+    """Move `zip_path` → `<parent>/replied/<name>` (a pasta que o `zip_is_ready`
+    do watcher observa). Cobre os 2 layouts (`done/Exports/...` e `done/...`)
+    porque usa o parent real do zip. Fallback unlink se o move falhar."""
+    replied_dir = zip_path.parent / REPLIED_SUBDIR
+    try:
+        replied_dir.mkdir(parents=True, exist_ok=True)
+        dest = replied_dir / zip_path.name
+        if dest.exists():
+            dest.unlink()
+        shutil.move(str(zip_path), str(dest))
+        logger.info("move %s -> %s OK", zip_path.name, replied_dir)
+    except OSError as e:
+        logger.warning("move %s -> replied falhou: %s — fallback unlink",
+                       zip_path.name, e)
+        _safe_unlink(zip_path)
+
+
+def prune_replied(queue_dir: Path, max_age_s: int = REPLIED_RETENTION_S) -> None:
+    """Apaga zips em `replied/` mais velhos que `max_age_s` (retention; o watcher
+    já os consumiu). Unlink puro — NUNCA POST nem re-scan p/ POST (guardrail ii).
+    Cobre `done/replied/` e `done/Exports/replied/`."""
+    done_dir = queue_dir / DONE_SUBDIR
+    candidates = [done_dir / REPLIED_SUBDIR, done_dir / "Exports" / REPLIED_SUBDIR]
+    now = time.time()
+    for rdir in candidates:
+        if not rdir.is_dir():
+            continue
+        for zp in rdir.glob("*.zip"):
+            try:
+                if now - zp.stat().st_mtime >= max_age_s:
+                    zp.unlink()
+                    logger.info("prune_replied: unlink %s (idade > %ds)",
+                                zp.name, max_age_s)
+            except OSError as e:
+                logger.warning("prune_replied: %s falhou: %s", zp.name, e)
 
 
 # ============================================================
@@ -622,6 +674,7 @@ def main() -> int:
             n = pull_queue(session, api_base, queue_dir, state)
             reconcile_done(session, api_base, queue_dir, state)
             reconcile_failed(session, api_base, queue_dir, state)
+            prune_replied(queue_dir)  # pt61: retention do replied/ (sem POST)
             save_state(state)
             if n:
                 logger.info("tick: %d nova(s) puxada(s)", n)

@@ -17,15 +17,20 @@ SB tem +1 linha extra de Complete (limp) antes das suas opens — o template
 `canFlatCallPreflop` permite SB-only complete em bets==1.
 
 Algoritmo:
-1. `positions = strategy_table_positions(max_players)` — lista sem BB.
+1. `positions = strategy_table_positions(seats_at_table)` — lista sem BB.
 2. `raiser_idx = positions.index(aggressor.position)`.
 3. Soma `count_lines_for_position` para todas as posições antes do raiser.
-4. Adiciona `offset_within_bucket` da acção do raiser.
+4. Adiciona `offset_within_bucket` da acção do raiser (0 non-SB / 1 SB).
 
-All-in efectivo: `size_bb >= raiser_stack_bb * ALL_IN_EFFECTIVE_THRESHOLD`.
-Threshold = 0.95 (estratégia: cobrir antes-shove com micro-call do BB +
-ante chips no pot, casos onde o raiser já não tem ALLIN realista — qualquer
-"raise > 95% stack" é tratado como ALLIN pela árvore HRC).
+pt61 (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): o `offset_within_bucket` deixou de
+depender de all-in. O alvo é a acção ORIGINAL da HH, que `build_sizings_
+overrides` põe sempre como 1ª opção do array → é o 1º nó de raise da posição
+(within 0 non-SB; 1 SB, após o nó Complete). A convenção antiga 0/1/2 fazia
++1 em jams (SB jam dava 2, devia 1; non-SB jam dava 1, devia 0). Confirmado
+na mão real `GG-6027751209` (SB-vs-BB, SB jam ~4.5bb: offset 8 → 7).
+
+`_is_all_in_effective` (threshold 0.95) mantém-se definido mas já NÃO é usado
+no cálculo do offset (era a fonte do off-by-one).
 """
 from __future__ import annotations
 import logging
@@ -119,25 +124,31 @@ def _is_all_in_effective(
 
 def offset_within_bucket(
     action: dict,
-    raiser_stack_bb: Optional[float],
+    raiser_stack_bb: Optional[float] = None,
 ) -> int:
-    """Offset dentro do bucket do raiser (0..2).
+    """Offset do nó do raiser DENTRO do seu bucket na Strategy Table (0 ou 1).
 
-    Convenção da Strategy Table HRC:
-      - Non-SB: small raise = 0; all-in = 1.
-      - SB: Complete = 0; small raise = 1; all-in = 2.
+    O nó-alvo é a acção REAL do agressor — e `build_sizings_overrides` põe
+    SEMPRE a acção original da HH como **1ª opção** do array de sizes da
+    posição (`_array_for_raise`). Logo o alvo é o **1º nó de raise** da
+    posição, seja small raise ou jam:
+      - non-SB raise: 0 (o array começa na acção original).
+      - SB raise:     1 (a SB tem 1 nó Complete/limp prepended antes dos raises).
+      - SB Complete/limp/call: 0 (é o próprio nó Complete).
+
+    pt61 fix (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): a convenção antiga 0/1/2
+    assumia 3 sub-nós SB (Complete + small + all-in) e devolvia **2** para um
+    SB all-in — mas quando o raise É o jam não há nó small-raise separado: a
+    SB tem só 2 nós (Complete + jam), within = 1. O mesmo erro afectava o
+    non-SB jam (devolvia 1, devia ser 0). Como o alvo é sempre o 1º nó de
+    raise, o offset NÃO depende de all-in. `raiser_stack_bb` deixou de ser
+    usado (mantido por compat de assinatura — caller em `queue_export`).
     """
     pos = (action.get("position") or "").upper()
-    size_bb = action.get("size_bb")
     action_type = (action.get("type") or "").lower()
-
     if pos == "SB":
         if action_type in ("complete", "limp", "call"):
             return 0
-        if _is_all_in_effective(size_bb, raiser_stack_bb):
-            return 2  # SB Complete (0) + small raise (1) + all-in (2)
-        return 1
-    if _is_all_in_effective(size_bb, raiser_stack_bb):
         return 1
     return 0
 

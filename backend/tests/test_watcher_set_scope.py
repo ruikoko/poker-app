@@ -92,28 +92,52 @@ def test_set_scope_in_popup_early_returns_when_popup_rect_is_none(pf, capsys):
     assert "popup_rect" in out
 
 
-def test_set_scope_in_popup_early_returns_when_all_rels_zero(pf, capsys):
-    """Regressão: se um dia voltarmos a 0 (rollback de calibração),
-    defensive return continua a disparar."""
-    pf.SCOPE_DROPDOWN_REL_X = 0
-    pf.SCOPE_DROPDOWN_REL_Y = 0
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 0
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 0
+def test_set_scope_in_popup_win32_setcursel_and_readback_confirms(pf, capsys):
+    """pt61: caminho activo Win32. Acha o combo pelo item "Selected Subtree",
+    seta por CB_SETCURSEL, notifica CBN_SELCHANGE e confirma por read-back
+    (CB_GETCURSEL == idx) → devolve True, SEM pyautogui."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_combo_with_item = MagicMock(return_value=(8484, 1))
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.GetDlgCtrlID.return_value = 55
+    # CB_GETCURSEL (read-back) devolve o idx setado (1) → confirmado.
+    pf._pt30_user32.SendMessageW.return_value = 1
 
-    pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
 
-    pf.pyautogui.click.assert_not_called()
+    assert ok is True
+    pf._find_combo_with_item.assert_called_once_with(4242, "selected subtree")
+    # CB_SETCURSEL(combo, 1) foi enviado.
+    pf._pt30_user32.SendMessageW.assert_any_call(8484, pf.CB_SETCURSEL, 1, 0)
+    pf.pyautogui.click.assert_not_called()  # Win32: sem clique pyautogui
     out = capsys.readouterr().out
-    assert "[WARN]" in out
-    assert "pixels-rel não calibrados" in out
+    assert "Selected Subtree" in out and "[WARN]" not in out
 
 
-def test_set_scope_in_popup_early_returns_when_single_rel_zero(pf):
-    """Regressão: qualquer 1 dos 4 RELs a 0 → defensive (não calibrar
-    parcial)."""
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 0  # rollback parcial
-    pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+def test_set_scope_in_popup_win32_readback_mismatch_falls_back_to_pyautogui(pf, capsys):
+    """Win32 não confirma (read-back != idx) → fallback pyautogui (baseline
+    coords) + devolve False (não confirmado = caller aborta)."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_combo_with_item = MagicMock(return_value=(8484, 1))
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.GetDlgCtrlID.return_value = 55
+    pf._pt30_user32.SendMessageW.return_value = 0  # read-back devolve 0 != 1
+
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+
+    assert ok is False
+    assert pf.pyautogui.click.call_count == 2  # fallback: dropdown + opção
+    out = capsys.readouterr().out
+    assert "[WARN]" in out and "read-back" in out
+
+
+def test_set_scope_in_popup_fallback_unavailable_when_rect_none_and_no_popup(pf, capsys):
+    """Sem popup Win32 E sem popup_rect → fallback indisponível → False, 0 clicks."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=None)
+    ok = pf._set_scope_in_popup(popup_rect=None)
+    assert ok is False
     pf.pyautogui.click.assert_not_called()
+    assert "[WARN]" in capsys.readouterr().out
 
 
 # ── _set_scope_in_popup: click flow real ────────────────────────────────
@@ -129,23 +153,19 @@ def test_set_scope_in_popup_constants_are_calibrated_after_smoke(pf):
     assert 0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y < 400
 
 
-def test_set_scope_in_popup_clicks_at_smoke_absolute_coords(pf):
-    """Com `popup_rect` real do smoke 18 Maio (666, 372, 416, 214), os
-    pixels-rel calibrados produzem clicks dentro de ±2 px dos valores
-    absolutos medidos pelo Rui (944, 439) e (940, 480). Por construção
-    pixels-rel não introduzem rounding; tolerância ±2 px é folga para
-    variação inter-render do Qt no smoke."""
+def test_set_scope_in_popup_fallback_clicks_at_baseline_rel(pf):
+    """pt61: quando o Win32 não está disponível (sem popup hwnd), o FALLBACK
+    pyautogui clica nos baseline coords (left+REL). Self-consistente com as
+    constantes actuais (popup 436×230)."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=None)
+    left, top, _w, _h = _SMOKE_POPUP_RECT
     pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
 
-    # Deve haver exactamente 2 clicks, na ordem dropdown → opção.
-    assert pf.pyautogui.click.call_count == 2
-    (drop_x, drop_y), _ = pf.pyautogui.click.call_args_list[0]
-    (opt_x, opt_y), _ = pf.pyautogui.click.call_args_list[1]
-
-    assert abs(drop_x - _SMOKE_DROPDOWN_ABS[0]) <= 2
-    assert abs(drop_y - _SMOKE_DROPDOWN_ABS[1]) <= 2
-    assert abs(opt_x - _SMOKE_OPTION_SELECTED_SUBTREE_ABS[0]) <= 2
-    assert abs(opt_y - _SMOKE_OPTION_SELECTED_SUBTREE_ABS[1]) <= 2
+    assert pf.pyautogui.click.call_args_list == [
+        call(left + pf.SCOPE_DROPDOWN_REL_X, top + pf.SCOPE_DROPDOWN_REL_Y),
+        call(left + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X,
+             top + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y),
+    ]
 
 
 def test_set_scope_in_popup_uses_pyautogui_click_not_click_rel(pf):
@@ -202,43 +222,59 @@ def test_set_scope_in_popup_sleeps_between_clicks(pf):
     assert pf.time.sleep.call_count == 2
 
 
-def test_set_scope_in_popup_logs_success_after_clicks(pf, capsys):
-    """Após clicks, log positivo (não-WARN) confirma scope set."""
-    pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+def test_set_scope_in_popup_fallback_logs_not_confirmed(pf, capsys):
+    """pt61: o fallback pyautogui é best-effort e NÃO confirmável → loga
+    explicitamente que não foi confirmado por read-back (não simula sucesso)."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=None)
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
     out = capsys.readouterr().out
-    assert "Scope: Selected Subtree" in out
-    assert "[WARN]" not in out
+    assert ok is False
+    assert "NÃO confirmado" in out
 
 
 # ── start_calculation_selected_subtree (wiring) ─────────────────────────
 
 def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
-    """Piece 2 end-to-end: com popup detectado, todos os passos disparam na
-    ordem pt28-v1: Calculate → wait popup → set scope → fill CI → OK Enter.
-
-    A ordem scope-antes-de-CI é validada com mais rigor em
-    `test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1`.
-    Aqui só validamos o sumário (Calculate + 3 popup clicks + OK invocado).
-    """
-    # Mock _wait_for_nash_popup to return a fake rect (popup detected).
-    fake_rect = (666, 372, 416, 214)
-    pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
-    # pt33 v1: OK via BM_CLICK (coberto em teste dedicado) — aqui mockado.
+    """Piece 2 end-to-end: com popup detectado E Scope confirmado, todos os
+    passos disparam na ordem pt28-v1: Calculate → wait popup → scope → CI → OK.
+    pt61: Scope/CI são Win32 (mockados a True aqui); só validamos o fluxo +
+    que o OK é invocado quando o Scope confirma."""
+    pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
+    pf._set_scope_in_popup = MagicMock(return_value=True)   # pt61: Win32 confirmou
+    pf._fill_ci_target_in_popup = MagicMock(return_value=True)
     pf._click_ok_in_popup = MagicMock()
-    wpos = (10, 10, 1024, 768)  # pt32 v2: ignorado por _click_calculate_button
+    wpos = (10, 10, 1024, 768)
 
-    pf.start_calculation_selected_subtree(wpos, ci_target=10.0)
+    result = pf.start_calculation_selected_subtree(wpos, ci_target=10.0)
 
-    # pt32 v2: Calculate clicado via pyautogui.click na origem find_hrc()
-    # (default da fixture left=300, top=70) -> (300+204, 70+64) = (504, 134).
+    # pt32 v2: Calculate via pyautogui.click na origem find_hrc() (504, 134).
     pf.pyautogui.click.assert_any_call(504, 134)
-    pf.click_rel.assert_not_called()  # pt32 v2: Calculate já não usa click_rel
-    # Popup detection invoked.
+    pf.click_rel.assert_not_called()
     pf._wait_for_nash_popup.assert_called_once()
-    # Pyautogui clicks: 1 Calculate + 2 scope + 1 fill CI = 4 clicks total.
-    assert pf.pyautogui.click.call_count == 4
-    # pt33 v1: OK confirmado via _click_ok_in_popup (BM_CLICK no teste dedicado).
-    pf._click_ok_in_popup.assert_called_once()
+    pf._set_scope_in_popup.assert_called_once()
+    pf._fill_ci_target_in_popup.assert_called_once()
+    pf._click_ok_in_popup.assert_called_once()       # OK só porque Scope confirmou
+    assert result is True
+
+
+def test_start_calculation_selected_subtree_aborts_when_scope_unconfirmed(pf, capsys):
+    """pt61 (#HRC-2ND-RUN-BLIND-CLICKS): popup detectado mas Scope NÃO confirma
+    (_set_scope_in_popup → False) → ABORTA: NÃO clica OK, NÃO preenche CI, cancela
+    o popup, devolve "scope_unconfirmed". Evita Full-Tree disfarçado de Selected
+    Subtree na biblioteca de estudo."""
+    pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
+    pf._set_scope_in_popup = MagicMock(return_value=False)  # NÃO confirma
+    pf._fill_ci_target_in_popup = MagicMock()
+    pf._click_ok_in_popup = MagicMock()
+    pf._cancel_nash_popup = MagicMock()
+
+    result = pf.start_calculation_selected_subtree((10, 10, 1024, 768), ci_target=10.0)
+
+    assert result == "scope_unconfirmed"
+    pf._fill_ci_target_in_popup.assert_not_called()   # não chega ao CI
+    pf._click_ok_in_popup.assert_not_called()         # NÃO clica OK
+    pf._cancel_nash_popup.assert_called_once()        # cancela o popup
+    assert "[ABORT]" in capsys.readouterr().out
 
 
 def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf):
@@ -259,11 +295,12 @@ def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf
     pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
 
     call_order = []
+    # pt61: scope/ci devolvem True (confirmado) p/ o flow prosseguir até ao OK.
     pf._set_scope_in_popup = MagicMock(
-        side_effect=lambda *a, **kw: call_order.append("scope")
+        side_effect=lambda *a, **kw: (call_order.append("scope"), True)[1]
     )
     pf._fill_ci_target_in_popup = MagicMock(
-        side_effect=lambda *a, **kw: call_order.append("ci")
+        side_effect=lambda *a, **kw: (call_order.append("ci"), True)[1]
     )
     pf._click_ok_in_popup = MagicMock(
         side_effect=lambda *a, **kw: call_order.append("ok")
@@ -276,53 +313,40 @@ def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf
     )
 
 
-def test_set_scope_in_popup_logs_absolute_dropdown_coords_pt28v1(pf, capsys):
-    """pt28-v1: logging defensivo regista coord absoluta do dropdown click
-    antes do click. Permite diagnóstico cruzado com screenshot pós-smoke
-    sem re-calibrar especulativamente as REL."""
-    pf._set_scope_in_popup(popup_rect=(666, 372, 416, 214))
+def test_fill_ci_target_win32_settext_and_readback_confirms(pf, capsys):
+    """pt61: CI via Win32. Acha o Edit único, WM_SETTEXT "10" e confirma por
+    read-back (WM_GETTEXT == "10") → True, sem pyautogui. CI inteiro = "10"
+    (sem ".0")."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_single_edit = MagicMock(return_value=9999)
+    pf._read_edit_text = MagicMock(return_value="10")  # read-back bate
+    pf._pt30_user32 = MagicMock()
+
+    ok = pf._fill_ci_target_in_popup(popup_rect=_SMOKE_POPUP_RECT, ci_target=10.0)
+
+    assert ok is True
+    pf._find_single_edit.assert_called_once_with(4242)
+    # WM_SETTEXT enviado ao Edit (wParam 0, lParam = endereço do buffer).
+    sent = [c for c in pf._pt30_user32.SendMessageW.call_args_list
+            if c.args[1] == pf.WM_SETTEXT]
+    assert len(sent) == 1 and sent[0].args[0] == 9999
+    pf.pyautogui.click.assert_not_called()
+    assert "[WARN]" not in capsys.readouterr().out
+
+
+def test_fill_ci_target_win32_readback_mismatch_falls_back(pf, capsys):
+    """Read-back do CI não bate → fallback pyautogui + False."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_single_edit = MagicMock(return_value=9999)
+    pf._read_edit_text = MagicMock(return_value="")  # não confirma
+    pf._pt30_user32 = MagicMock()
+
+    ok = pf._fill_ci_target_in_popup(popup_rect=_SMOKE_POPUP_RECT, ci_target=10.0)
+
+    assert ok is False
+    assert pf.pyautogui.click.call_count == 1  # fallback: 1 click no campo
     out = capsys.readouterr().out
-
-    # Dropdown abs = 666 + 278 = 944, 372 + 67 = 439 (REL pt26)
-    expected_dropdown_x = 666 + pf.SCOPE_DROPDOWN_REL_X
-    expected_dropdown_y = 372 + pf.SCOPE_DROPDOWN_REL_Y
-    assert "dropdown click @" in out
-    assert f"({expected_dropdown_x},{expected_dropdown_y})" in out
-
-
-def test_set_scope_in_popup_logs_absolute_option_coords_pt28v1(pf, capsys):
-    """pt28-v1: logging da option (Selected Subtree) click @ coords absolutas."""
-    pf._set_scope_in_popup(popup_rect=(666, 372, 416, 214))
-    out = capsys.readouterr().out
-
-    expected_option_x = 666 + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X
-    expected_option_y = 372 + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y
-    assert "option click @" in out
-    assert f"({expected_option_x},{expected_option_y})" in out
-
-
-def test_set_scope_in_popup_logs_include_popup_rect_for_diagnostics(pf, capsys):
-    """pt28-v1: log inclui o popup_rect completo + as REL aplicadas.
-    Permite reproduzir a aritmética sem assumir o rect do smoke."""
-    pf._set_scope_in_popup(popup_rect=(100, 200, 416, 214))
-    out = capsys.readouterr().out
-
-    # popup_rect aparece em formato legível
-    assert "popup_rect=(100,200,416,214)" in out
-    # REL aparecem para cruzar com constantes
-    assert (f"rel=({pf.SCOPE_DROPDOWN_REL_X},{pf.SCOPE_DROPDOWN_REL_Y})") in out
-
-
-def test_fill_ci_target_in_popup_logs_absolute_field_coord_pt28v1(pf, capsys):
-    """pt28-v1: `_fill_ci_target_in_popup` regista coord absoluta do field
-    click antes do click. Mesma razão que `_set_scope_in_popup`."""
-    pf._fill_ci_target_in_popup(popup_rect=(666, 372, 416, 214), ci_target=10.0)
-    out = capsys.readouterr().out
-
-    expected_x = 666 + pf.CI_TARGET_POPUP_REL_X
-    expected_y = 372 + pf.CI_TARGET_POPUP_REL_Y
-    assert "field click @" in out
-    assert f"({expected_x},{expected_y})" in out
+    assert "[WARN]" in out and "read-back" in out
 
 
 def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, capsys):
@@ -536,12 +560,12 @@ def test_wait_for_nash_popup_survives_getAllWindows_exception(pf):
 
 # ── _fill_ci_target_in_popup ────────────────────────────────────────────
 
-def test_fill_ci_target_in_popup_clicks_then_pastes_value(pf):
-    """popup_rect=(666,372,416,214) + pixels-rel (270, 109) → click em
-    (666+270, 372+109)=(936, 481). Depois ctrl+a + paste + ctrl+v."""
+def test_fill_ci_target_fallback_clicks_then_pastes_value(pf):
+    """pt61: sem Edit Win32 identificável → fallback pyautogui. Click no baseline
+    coord + ctrl+a + paste. CI inteiro = "10" (sem ".0"; o Edit do HRC aceita)."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=None)  # força fallback
     pf._fill_ci_target_in_popup(popup_rect=(666, 372, 416, 214), ci_target=10.0)
 
-    # 1 click + 2 hotkeys (ctrl+a, ctrl+v) + 1 pyperclip.copy
     assert pf.pyautogui.click.call_count == 1
     (click_x, click_y), _ = pf.pyautogui.click.call_args
     assert (click_x, click_y) == (666 + pf.CI_TARGET_POPUP_REL_X,
@@ -549,7 +573,7 @@ def test_fill_ci_target_in_popup_clicks_then_pastes_value(pf):
     assert pf.pyautogui.hotkey.call_args_list == [
         call('ctrl', 'a'), call('ctrl', 'v'),
     ]
-    pf.pyperclip.copy.assert_called_once_with("10.0")
+    pf.pyperclip.copy.assert_called_once_with("10")
 
 
 def test_fill_ci_target_in_popup_defensive_on_none_rect(pf, capsys):
@@ -619,18 +643,23 @@ def test_navigate_to_target_node_none_skips(pf, capsys):
     assert "skip" in capsys.readouterr().out.lower()
 
 
-def test_navigate_to_target_node_zero_skips(pf):
-    """`target_node_offset=0` → 0 presses (cursor já na 1ª linha)."""
+def test_navigate_to_target_node_zero_focuses_root(pf):
+    """pt61: offset 0 = o alvo É o nó-raiz → foco-click na raiz + 0 setas
+    (find_hrc mock left=300,top=70 + ROOT_REL)."""
     pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=0)
+    pf.pyautogui.click.assert_called_once_with(
+        300 + pf.STRATEGY_TABLE_ROOT_REL_X, 70 + pf.STRATEGY_TABLE_ROOT_REL_Y)
     pf.pyautogui.press.assert_not_called()
 
 
-def test_navigate_to_target_node_presses_down_N_times(pf):
-    """pt28 (#FOCUS-CLICK-REMOVAL): `target_node_offset=5` → 5 ↓ presses,
-    SEM focus click (Strategy Table tem foco por default pós-1ª-run no
-    .exe pt26; ver docstring DEPRECATED em `_focus_strategy_table`)."""
+def test_navigate_to_target_node_focus_root_then_presses_down_N(pf):
+    """pt61 (#FOCO + offset): `target_node_offset=5` → foco-click no nó-raiz
+    (fix do foco/início descoberto na re-smoke) + 5 ↓ presses. Usa
+    pyautogui.click (janela principal via find_hrc), não click_rel."""
     pf.navigate_to_target_node(wpos=(0, 0, 1024, 768), target_node_offset=5)
-    pf.click_rel.assert_not_called()  # pt28: SEM focus click
+    pf.click_rel.assert_not_called()
+    pf.pyautogui.click.assert_called_once_with(
+        300 + pf.STRATEGY_TABLE_ROOT_REL_X, 70 + pf.STRATEGY_TABLE_ROOT_REL_Y)
     assert pf.pyautogui.press.call_count == 5
     for call_args in pf.pyautogui.press.call_args_list:
         assert call_args == call('down')
@@ -696,10 +725,14 @@ def test_navigate_to_target_node_never_calls_focus_strategy_table_after_pt28(pf)
 def test_start_calculation_selected_subtree_returns_true_when_popup_detected(pf):
     """pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): retorno bool.
 
-    Popup detectado (passos 1-4 completam) → `True`. Caller (`setup_hand`)
-    interpreta como "2ª run em curso — finalize exporta zip pós-2ª-run".
+    Popup detectado + Scope confirmado (passos 1-4 completam) → `True`. Caller
+    (`setup_hand`) interpreta como "2ª run em curso — finalize exporta zip".
+    pt61: Scope/CI Win32 mockados a True (sem popup real no test machine).
     """
     pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
+    pf._set_scope_in_popup = MagicMock(return_value=True)
+    pf._fill_ci_target_in_popup = MagicMock(return_value=True)
+    pf._click_ok_in_popup = MagicMock()
 
     result = pf.start_calculation_selected_subtree(
         wpos=(10, 10, 1024, 768), ci_target=10.0
