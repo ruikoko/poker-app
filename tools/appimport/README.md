@@ -32,6 +32,14 @@ nome**, não por subpasta:
 O **site** sai do 1º token do nome (mapa único, apara `.exe` — `GGnet.exe`→GGPoker,
 `Winamax.exe`→Winamax; prefixos limpos passam tal e qual).
 
+> **Hints do filename para o lobby (pt63).** No `LOBBY`, o agente manda ao
+> `/api/lobbys/upload` o **site** (do nome) e, quando existir (caso GG), o **nome
+> do torneio** (do título no nome) como `site_hint`/`name_hint`. O backend dá-lhes
+> **precedência sobre a Vision** — rede de segurança contra capturas
+> cortadas/desenquadradas, em que a Vision inventa site/nome. Espelha o table-ss
+> (que decide o site pelo filename). As vias legadas (`lobby`/`LOBBY_DIR`) **não**
+> mandam hints → comportamento de sempre.
+
 > Para lobbys há ainda duas vias legadas: a subpasta dedicada **`lobby`**
 > (drop-only-these, move) e a pasta **externa `LOBBY_DIR`** — agora **2ª via
 > MANUAL**, só lida com **`--lobby-dir`** (ver abaixo).

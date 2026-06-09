@@ -146,6 +146,28 @@ def classify_it_file(filename):
     return ("MESA" if is_table else "LOBBY", site, captured)
 
 
+def lobby_name_hint(filename):
+    """Nome do torneio a partir de um filename de LOBBY do IT, ou None (pt63).
+
+    O lobby do IT chama-se `<SiteToken>-<Título>-<YYYYMMDDHHMMSS>-<NN>.ext`. No GG
+    o `<Título>` é o nome real do torneio (ex.: `Bounty Hunters Hyper Special $108`);
+    na Winamax é só a palavra da app (`Winamax`) → sem hint útil. Devolvido ao
+    backend como precedência/desempate sobre o nome lido pela Vision. None quando
+    não há cauda do IT, não há título, ou o título é só o nome da sala/app."""
+    base = filename.rsplit(".", 1)[0] if "." in filename else filename
+    m = _IT_TAIL_RE.search(base)
+    if not m:
+        return None
+    parts = base[:m.start()].split("-", 1)   # [site_token, título]
+    if len(parts) < 2:
+        return None
+    title = parts[1].strip()
+    # título vazio ou que é só a palavra da sala/app (ex.: 'Winamax') → sem hint
+    if not title or normalize_site(title) is not None:
+        return None
+    return title
+
+
 # ── HTTP / utils ──────────────────────────────────────────────────────────────
 
 def login(session):
@@ -224,16 +246,25 @@ def _post_table_ss(session, path, fname):
     return (False, f"HTTP {r.status_code} {r.text[:120]}")
 
 
-def _post_lobby(session, path, fname, captured_iso):
+def _post_lobby(session, path, fname, captured_iso, site_hint=None, name_hint=None):
     """POST /api/lobbys/upload. Devolve (status, resumo); status ∈
     {'lobby', 'nonlobby', 'retry'}. 'retry' = transitório (NÃO mover — um lobby
-    real nunca se perde por um soluço de Vision)."""
+    real nunca se perde por um soluço de Vision).
+
+    pt63 — `site_hint`/`name_hint` (do NOME do ficheiro, fonte `it`) viajam como
+    form fields opcionais; o backend dá-lhes precedência sobre a Vision. A 2ª via
+    LOBBY_DIR / subpasta `lobby` não os passam (None) → comportamento de sempre."""
     mime = _IMG[os.path.splitext(fname)[1].lower()]
+    data = {"captured_at": captured_iso}
+    if site_hint:
+        data["site_hint"] = site_hint
+    if name_hint:
+        data["name_hint"] = name_hint
     try:
         with open(path, "rb") as fh:
             r = session.post(f"{POKER_APP_URL}/api/lobbys/upload",
                              files={"file": (fname, fh, mime)},
-                             data={"captured_at": captured_iso}, timeout=300)
+                             data=data, timeout=300)
     except Exception as e:
         return ("retry", f"EXC {type(e).__name__}: {e}")
     if not (200 <= r.status_code < 300):
@@ -319,10 +350,13 @@ def process_it_mixed(session, live):
             continue
         cap = captured or _mtime_iso(path)   # fallback: mtime do ficheiro
         endpoint = "/api/table-ss/upload" if kind == "MESA" else "/api/lobbys/upload"
+        # pt63 — hint de nome do torneio (GG), só relevante p/ LOBBY
+        name_hint = lobby_name_hint(fname) if kind == "LOBBY" else None
 
         if not live:
+            hint = f" name_hint={name_hint!r}" if name_hint else ""
             print(f"   [dry] {kind:5} site={site or '?':9} captured_at={cap}  "
-                  f"→ {endpoint}  ({fname})")
+                  f"→ {endpoint}{hint}  ({fname})")
             c["mesa" if kind == "MESA" else "lobby"] += 1
             continue
 
@@ -335,8 +369,9 @@ def process_it_mixed(session, live):
             else:
                 c["fail"] += 1
                 print(f"   ✗ MESA   {fname}: {msg} → retry depois")
-        else:  # LOBBY
-            status, msg = _post_lobby(session, path, fname, cap)
+        else:  # LOBBY — passa site (do filename) + name_hint (GG) como precedência
+            status, msg = _post_lobby(session, path, fname, cap,
+                                      site_hint=site, name_hint=name_hint)
             if status == "retry":
                 c["retry"] += 1
                 print(f"   ⟳ LOBBY  {fname}: {msg} → retry depois (não movido)")

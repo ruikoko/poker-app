@@ -252,6 +252,8 @@ async def process_lobby_message(
     throttle_seconds: float = 0.0,
     source_prefix: str = "discord_lobby_vision",
     log_on_failure: bool = True,
+    site_hint: Optional[str] = None,
+    name_hint: Optional[str] = None,
 ) -> dict:
     """Vision → parse → resolver → upsert payouts → log.
 
@@ -309,6 +311,22 @@ async def process_lobby_message(
 
     site = vj.get("site")
     name = vj.get("tournament_name")
+    # pt63 — precedência do FILENAME (Intuitive Tables) sobre a Vision. Capturas
+    # cortadas/desenquadradas fazem a Vision inventar site/nome (ex.: um lobby
+    # Winamax lido como GGPoker 'TRICKNELLEN'); o nome do ficheiro do IT traz o
+    # site fiável (e, no GG, o nome do torneio). Espelha o table-ss, que decide o
+    # site pelo filename desde pt56/pt60. Discord e a 2ª via LOBBY_DIR não mandam
+    # hints → comportamento inalterado. Log INFO quando discordam (auditoria).
+    if site_hint:
+        if site and site_hint != site:
+            logger.info("[lobby] site do filename %r tem precedência sobre Vision %r (msg=%s)",
+                        site_hint, site, message_id)
+        site = site_hint
+    if name_hint:
+        if name and name_hint != name:
+            logger.info("[lobby] nome do filename %r tem precedência sobre Vision %r (msg=%s)",
+                        name_hint, name, message_id)
+        name = name_hint
     # pt25: players_left lido do prompt extension; pode ser None se Vision
     # não encontrou o número (e.g. campo invisível em alguns layouts).
     # Coerce defensiva: aceita só int positivo, descarta None/0/strings.

@@ -54,6 +54,8 @@ class SyncRecentBody(BaseModel):
 async def upload_lobby_ss(
     file: UploadFile = File(...),
     captured_at: Optional[str] = Form(None),
+    site_hint: Optional[str] = Form(None),
+    name_hint: Optional[str] = Form(None),
     current_user=Depends(require_auth),
 ):
     """2ª via de lobby (fora do Discord) — 1 SS da pasta de Capturas do Windows,
@@ -61,11 +63,20 @@ async def upload_lobby_ss(
     lobby; sem torneio (json_invalid/site_undetected/vision_failed) → NÃO é lobby
     → ignora, grava NADA. Lobby (Vision leu torneio) → reutiliza a pipeline
     `process_lobby_message` (→ tournament_payouts + lobby_processing_log), com
-    `source=file_lobby_vision:`. Dedup server-side por hash(conteúdo). pt57."""
+    `source=file_lobby_vision:`. Dedup server-side por hash(conteúdo). pt57.
+
+    pt63 — `site_hint`/`name_hint` (opcionais): o appimport, ao rotear a pasta
+    única do Intuitive Tables, deriva o site do NOME do ficheiro (e, no GG, o nome
+    do torneio). Esses hints têm PRECEDÊNCIA sobre a Vision em
+    `process_lobby_message` (rede de segurança p/ capturas cortadas). Sem os campos
+    (Discord, LOBBY_DIR), o comportamento é o de sempre."""
     content = await file.read()
     if not content:
         raise HTTPException(400, "Ficheiro vazio")
     mime = detect_image_mime(content)
+    # vazio → None (a precedência só dispara com hint real)
+    site_hint = (site_hint or "").strip() or None
+    name_hint = (name_hint or "").strip() or None
 
     # posted_at = captured_at (mtime do ficheiro = hora local de Lisboa, naive),
     # usado como âncora prestart do resolver. Fallback: agora (Lisboa naive).
@@ -113,6 +124,7 @@ async def upload_lobby_ss(
         content, mime, message_id=file_hash, channel_id=None,
         posted_at=posted_at, source_prefix="file_lobby_vision",
         log_on_failure=False,  # não-lobby (falha de Vision) → não persiste nada
+        site_hint=site_hint, name_hint=name_hint,   # pt63 — precedência do filename
     )
     is_lobby = res.get("result") not in _NON_LOBBY
     return {

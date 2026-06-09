@@ -81,3 +81,28 @@ def test_normalize_site_exe_and_clean():
     assert ai.normalize_site("Stars") == "PokerStars"
     assert ai.normalize_site("CoinPoker") is None
     assert ai.normalize_site(None) is None
+
+
+# ── lobby_name_hint (pt63) ────────────────────────────────────────────────────
+
+def test_lobby_name_hint_gg():
+    # GG: o título no filename é o nome real do torneio → hint útil.
+    assert ai.lobby_name_hint(
+        "GGnet.exe-Bounty Hunters Hyper Special $108-20260608231449-58.png"
+    ) == "Bounty Hunters Hyper Special $108"
+
+
+def test_lobby_name_hint_gg_clean_prefix():
+    assert ai.lobby_name_hint(
+        "GGPoker-Daily Hyper $50-20260608231449-58.png"
+    ) == "Daily Hyper $50"
+
+
+def test_lobby_name_hint_winamax_is_none():
+    # Winamax lobby: título é só a palavra da app ('Winamax') → sem hint.
+    assert ai.lobby_name_hint("Winamax.exe-Winamax-20260608223716-50.png") is None
+
+
+def test_lobby_name_hint_legacy_none():
+    # Sem a cauda nova do IT → None (não é ficheiro de lobby do IT).
+    assert ai.lobby_name_hint("Shot21-GGPoker-20260604205243.png") is None
