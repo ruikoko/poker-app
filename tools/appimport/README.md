@@ -10,9 +10,31 @@ credenciais/caminho fora do git (`config_local.py`).
 
 > **HM3** fica de fora (tem o seu próprio `.bat` em `tools/apphm3/`).
 > O **sync do Discord `#lobbys`** fica de fora (é sync de rede, não ficheiros).
-> Para lobbys há duas vias por ficheiro: a subpasta dedicada **`lobby`**
-> (drop-only-these, move) e a pasta **externa `LOBBY_DIR`** (lê directa, sem
-> mover) — ver abaixo. Coexistem.
+
+## ⚠️ MODO DE TESTE (dry-run) é o defeito
+Correr o `.bat` **sem flags** = **dry-run**: imprime o plano (para cada ficheiro
+`MESA|LOBBY|SKIP` + site + `captured_at` + endpoint-alvo) **sem enviar e sem
+mover** nada. Confirma o plano e só depois corre **com `--ao-vivo`** para enviar
+a sério. (`python app_import.py --ao-vivo`.)
+
+## Pasta única `it` — routing por NOME (mesa vs lobby)
+O Intuitive Tables passou a usar **uma só pasta** para SS de **mesa** e de
+**lobby** (o nome da janela vai no ficheiro). O `it` é roteado pela **análise do
+nome**, não por subpasta:
+- **MESA** → o miolo tem marcador de mesa (GG: `" - Blinds "` ou `" - Table "`;
+  Winamax: `(#<dígitos>)`) → `POST /api/table-ss/upload` (move → `done/it`).
+- **LOBBY** → qualquer outro ficheiro com a cauda nova do IT
+  (`-YYYYMMDDHHMMSS-NN`), com `captured_at` derivado desse timestamp →
+  `POST /api/lobbys/upload` (move → `done/lobby`).
+- **SKIP** → sem a cauda nova do IT (legado, ex. `Shot21-GGPoker-…`): **fica no
+  sítio**, log `skip: formato não-IT`.
+
+O **site** sai do 1º token do nome (mapa único, apara `.exe` — `GGnet.exe`→GGPoker,
+`Winamax.exe`→Winamax; prefixos limpos passam tal e qual).
+
+> Para lobbys há ainda duas vias legadas: a subpasta dedicada **`lobby`**
+> (drop-only-these, move) e a pasta **externa `LOBBY_DIR`** — agora **2ª via
+> MANUAL**, só lida com **`--lobby-dir`** (ver abaixo).
 
 ## ⚠️ Restrição GG (crítica)
 O PC de jogo = PC de dev. Corre o `.bat` **só com as salas fechadas, depois da
@@ -43,20 +65,23 @@ sessão**. É um envio único e termina — não há processo a correr durante o
    <PARENT_DIR>\
      gg_hh\     ← põe aqui os .zip/.txt de hand history GG
      gg_ts\     ← põe aqui os .zip/.txt de tournament summaries GG
-     it\        ← põe aqui as imagens de SS do Intuitive Tables
+     it\        ← põe aqui as imagens do Intuitive Tables (mesa E lobby; routing por nome)
      manual\    ← põe aqui as imagens de SS manuais do replayer
-     lobby\     ← põe aqui as imagens de SS de lobby de torneio
+     lobby\     ← (legado, opcional) SS de lobby drop-only-these
      done\      ← os enviados com sucesso são MOVIDOS para cá (por tipo)
    ```
 
 ## Uso (sempre que quiseres importar)
-1. Põe os ficheiros na **subpasta do tipo certo** (o routing é pela subpasta —
-   determinístico, sem adivinhar). **Mantém o nome original** dos ficheiros (as
-   SS do IT/manual tiram o `captured_at`/TM do nome — o agente nunca renomeia no
-   envio).
-2. Duplo-clique no `Import.bat`. Ele faz login, envia **só o que está nas
-   subpastas** (= ainda não enviado) e a app trata do resto (Vision, matching).
-3. Lê o resumo no fim (enviados/falhas por tipo) e carrega numa tecla.
+1. Põe os ficheiros na **subpasta certa** (`gg_hh`/`gg_ts`/`manual` pela
+   subpasta; `it` é a pasta única do Intuitive Tables, roteada pelo nome).
+   **Mantém o nome original** dos ficheiros (o `captured_at`/TM/site vêm do nome
+   — o agente nunca renomeia no envio).
+2. Duplo-clique no `Import.bat` → **dry-run**: lê o plano (`MESA|LOBBY|SKIP` +
+   site + `captured_at` + endpoint) sem enviar nem mover. **Confirma**.
+3. Para enviar a sério, corre **com `--ao-vivo`** (`python app_import.py
+   --ao-vivo`). Ele faz login, envia só o que é novo e a app trata do resto
+   (Vision, matching).
+4. Lê o resumo no fim (mesa/lobby/skip/falhas) e carrega numa tecla.
 
 ## Incremental + idempotente
 - **Ficheiro na subpasta = ainda por enviar.**
@@ -86,8 +111,10 @@ em vez de varrer a pasta de Capturas inteira:
 > these, igual às 4 genéricas); a `LOBBY_DIR` lê uma pasta **externa** directa, sem
 > mover, com manifesto + `LOBBY_SINCE`. As duas usam o **mesmo** endpoint e gate.
 
-## Fonte "lobby" (opcional) — pasta EXTERNA de Capturas do Windows (`LOBBY_DIR`)
-Para importar SS de **lobby de torneio** sem as separar dos outros screenshots:
+## Fonte "lobby" (opcional, 2ª via MANUAL) — pasta EXTERNA `LOBBY_DIR`
+> **Desde pt62 só é lida com a flag `--lobby-dir`** (deixou de correr nas
+> corridas normais). Para importar SS de **lobby de torneio** sem as separar dos
+> outros screenshots:
 1. Em `config_local.py` define **`LOBBY_DIR`** = a pasta de Capturas de Ecrã
    (ex.: `C:\Users\User\Pictures\Screenshots`). Para desligar, comenta a linha.
 2. O agente lê essa pasta **directamente** (NÃO move ficheiros, NÃO é subpasta)
@@ -116,9 +143,10 @@ Para importar SS de **lobby de torneio** sem as separar dos outros screenshots:
 |---|---|---|
 | `gg_hh` | `POST /api/import` | parse HH GG → `hands` |
 | `gg_ts` | `POST /api/tournament-summaries/import` | parse TS GG → `tournament_summaries` |
-| `it` | `POST /api/table-ss/upload` | Vision (Claude) → `players_left` + match |
+| `it` (MESA) | `POST /api/table-ss/upload` | Vision (Claude) → `players_left` + match |
+| `it` (LOBBY) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` (move p/ `done\lobby\`) |
 | `manual` | `POST /api/screenshots` | Vision (Claude) → enriquecimento/placeholder |
 | `lobby` (subpasta) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` (move p/ `done\lobby\`) |
-| `lobby` (LOBBY_DIR externa) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` (sem mover; manifesto) |
+| `lobby` (LOBBY_DIR externa, `--lobby-dir`) | `POST /api/lobbys/upload` | gate "é lobby?" → `tournament_payouts` (sem mover; manifesto) |
 
 Auth = cookie de sessão via `POST /api/auth/login` (igual ao apphm3).

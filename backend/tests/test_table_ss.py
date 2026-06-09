@@ -670,6 +670,50 @@ def test_parse_filename_new_without_tn_fallback():
     assert out["tournament_number"] is None
 
 
+# ── pt62: prefixo do EXECUTÁVEL do IT (GGnet.exe / Winamax.exe) ─────────────
+
+def test_normalize_site_token_exe_and_clean_prefixes():
+    # prefixos limpos (qualquer caixa) passam tal e qual
+    assert table_ss._normalize_site_token("GGPoker") == "GGPoker"
+    assert table_ss._normalize_site_token("Winamax") == "Winamax"
+    assert table_ss._normalize_site_token("WPN") == "WPN"
+    assert table_ss._normalize_site_token("PokerStars") == "PokerStars"
+    assert table_ss._normalize_site_token("Stars") == "PokerStars"
+    # prefixos do executável do IT → site canónico (sufixo .exe aparado)
+    assert table_ss._normalize_site_token("GGnet.exe") == "GGPoker"
+    assert table_ss._normalize_site_token("Winamax.exe") == "Winamax"
+    # desconhecido / vazio → None (cai no fallback Vision a jusante)
+    assert table_ss._normalize_site_token("CoinPoker") is None
+    assert table_ss._normalize_site_token(None) is None
+    assert table_ss._normalize_site_token("") is None
+
+
+def test_parse_filename_gg_table_exe_prefix_no_tn():
+    """MESA GG do IT com prefixo GGnet.exe (sem '(tn)(#mesa)') → site GGPoker,
+    tn None (cai no fluxo Vision+resolver, como qualquer MESA GG)."""
+    out = table_ss.parse_table_ss_filename(
+        "GGnet.exe-Bounty Hunters Hyper Special $108 _ Buy-in $108 - Blinds 250 "
+        "_ 500 - Table 24_!)@(#_$&%^_6057220262-20260608223525-49.png")
+    assert out["site"] == "GGPoker"
+    assert out["tournament_number"] is None
+
+
+def test_parse_filename_gg_table_clean_prefix_no_tn():
+    out = table_ss.parse_table_ss_filename(
+        "GGPoker-Bounty Hunters Hyper Special $108 _ Buy-in $108 - Blinds 1,000 "
+        "_ 2,000 - Table 2_!)@(#_$&%^_60564155-20260608231443-57.png")
+    assert out["site"] == "GGPoker"
+    assert out["tournament_number"] is None
+
+
+def test_parse_filename_new_winamax_exe_prefix_keeps_tn():
+    """O regex tolera o sufixo .exe no token de site e ainda extrai o tn."""
+    out = table_ss.parse_table_ss_filename(
+        "Winamax.exe-Winamax HIGHROLLER(1108710761)(#001)-20260609002319-68.png")
+    assert out["site"] == "Winamax"
+    assert out["tournament_number"] == "1108710761"
+
+
 @patch("app.routers.table_ss.query")
 def test_compute_filename_tn_authoritative_resolves(mock_q):
     """Novo Winamax com tn → resolve por tn (sem resolver-por-nome → sem ambíguo)."""

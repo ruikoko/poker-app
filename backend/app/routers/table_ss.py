@@ -54,13 +54,32 @@ _VALID_RESULTS = frozenset({
 # (determinístico; a Vision mislê PS/WPN como GG/WN). 'Stars' é o token do formato
 # ANTIGO (Shot<N>-Stars-…); 'PokerStars' o nome completo do formato NOVO. Os outros
 # (GGPoker/Winamax/WPN) são iguais nos dois formatos.
+# pt62 (#TABLE-SS-IT-EXE-PREFIX) — o Intuitive Tables passou a usar o nome do
+# EXECUTÁVEL como 1º token (ex.: 'GGnet.exe', 'Winamax.exe'). PONTO ÚNICO de
+# token→site: chaves em minúsculas, o sufixo '.exe' é aparado antes do lookup
+# (ver `_normalize_site_token`). Para acrescentar PS/WPN/CoinPoker basta uma
+# linha aqui.
 _FILENAME_SITE_MAP = {
-    "GGPoker": "GGPoker",
-    "Winamax": "Winamax",
-    "WPN": "WPN",
-    "Stars": "PokerStars",        # antigo: Shot<N>-Stars-…
-    "PokerStars": "PokerStars",   # novo: nome completo
+    "ggpoker": "GGPoker",
+    "ggnet": "GGPoker",           # IT: GGnet.exe
+    "winamax": "Winamax",         # IT: Winamax.exe (sufixo aparado antes do lookup)
+    "wpn": "WPN",
+    "stars": "PokerStars",        # antigo: Shot<N>-Stars-…
+    "pokerstars": "PokerStars",   # novo: nome completo
 }
+
+
+def _normalize_site_token(token: Optional[str]) -> Optional[str]:
+    """Token do 1º campo do nome → site canónico. Único ponto de verdade do
+    mapeamento. Case-insensitive; apara um sufixo '.exe' (prefixo do IT, ex.
+    'GGnet.exe'→GGPoker). None quando o token não é reconhecido (→ fallback
+    Vision a jusante)."""
+    if not token:
+        return None
+    t = token.strip()
+    if t.lower().endswith(".exe"):
+        t = t[:-4]
+    return _FILENAME_SITE_MAP.get(t.lower())
 
 # #TABLE-SS-FILENAME-TN — o formato NOVO do Intuitive Tables traz o
 # tournament_number no nome → fonte AUTORITÁRIA do torneio (mata o tm_ambiguous).
@@ -73,7 +92,7 @@ _FILENAME_SITE_MAP = {
 # Formato ANTIGO (sem tn): 'Shot<N>-<Site>-<YYYYMMDDHHMMSS>' — distingue-se pelo
 # 1º token ('Shot').
 _IT_NEW_RE = re.compile(
-    r"^(?P<site>[A-Za-z]+)-"
+    r"^(?P<site>[A-Za-z]+(?:\.exe)?)-"
     r"(?P<title>.+)"
     r"\((?P<tn>\d+)\)"
     r"\(#(?P<table>\d+)\)-"
@@ -96,19 +115,21 @@ def parse_table_ss_filename(filename: Optional[str]) -> dict:
         # ANTIGO: site no token [1]; sem tn.
         parts = base.split("-")
         if len(parts) >= 2:
-            out["site"] = _FILENAME_SITE_MAP.get(parts[1].strip())
+            out["site"] = _normalize_site_token(parts[1])
         return out
     # NOVO: regex completa (com tn).
     m = _IT_NEW_RE.match(base)
     if m:
-        out["site"] = _FILENAME_SITE_MAP.get(m.group("site").strip())
+        out["site"] = _normalize_site_token(m.group("site"))
         out["tournament_number"] = m.group("tn")
         out["tournament_name"] = m.group("title").strip()
         out["table"] = m.group("table")
         return out
     # NOVO-ish mas sem tn (regex não bateu) → só o site do 1º token; tn None
-    # → cai no fluxo ACTUAL (Vision + resolver), sem regressão.
-    out["site"] = _FILENAME_SITE_MAP.get(first)
+    # → cai no fluxo ACTUAL (Vision + resolver), sem regressão. É por aqui que
+    # passam as SS de MESA GG do IT (ex. 'GGnet.exe-… - Blinds … - Table …'),
+    # cujo formato não tem '(tn)(#mesa)'.
+    out["site"] = _normalize_site_token(first)
     return out
 
 
