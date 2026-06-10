@@ -35,10 +35,15 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 > `players_left = 3179` numa mesa GG (escala ICM). Detalhe: `TECH_DEBTS_INVENTARIO.md`
 > (pt62–pt64).
 
-> **★ Verificar Bounty Mode (era "implementar", passou a "verificar").** Decompile
-> (`_local_only/`) + 1 caso real: o `payouts.json` HRC-native (pt42d) põe o modo no
-> sítio para os 3 casos (PKO fator X / Mystery / sem KO)? `import_prizes` vs
-> `select_bounty_mode` — qual ganha. Fecha/rebaixa ou reabre `#HRC-BOUNTY-HARDCODED-50PCT`.
+> **★ Bounty Mode — VERIFICADO pt65 (decompile): confirma-se como bug; pt66 GANHA o
+> bounty-fix.** Veredicto: `import_prizes` **só carrega** a `payouts.json`; é o HRC que
+> põe o modo no sítio ao ler a estrutura (o que o Rui observou). Mas `select_bounty_mode`
+> corre **a seguir** e, **só em KO** (gate `is_ko_tournament`), **esmaga** o modo da
+> estrutura para um **PKO 50% cego**. Não-KO ✅; PKO 50% redundante; **PKO 25% / KO ≠50%
+> = errado**. **Fix (no mesmo `.exe`/rebuild do pt66):** remover a chamada
+> `select_bounty_mode` + o gate (o modo da estrutura prevalece em todos os formatos);
+> validar 1 caso KO ≠50% na re-smoke (+ KO-T$/KO-P$ ≠0 numa PKO real). Detalhe em
+> `TECH_DEBTS_INVENTARIO.md` (pt62–pt64, `#HRC-BOUNTY-HARDCODED-50PCT`).
 
 > **★ pt58 — RE-IMPORT de scope ABRIL é o PRÓXIMO GRANDE PASSO operacional.**
 > O re-import end-to-end **já foi feito** (pt50, Fases 1+2) mas só com a **janela
