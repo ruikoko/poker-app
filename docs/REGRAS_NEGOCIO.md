@@ -566,43 +566,37 @@ GG-6039094225 (8-max, herói BB, âncora SB) = 2 ✓; **GG-6029013400 (8-max, he
 Antes da **2ª run** (Selected Subtree, CI=10) o watcher navega na Strategy Table até
 ao **nó-alvo** (`target_node_offset` = nº de setas-baixo desde o 1º nó), calculado pelo
 backend (`hrc_node_offset.py` → `meta.json`) e premido por
-`navigate_to_target_node` no watcher. **Que nó deve ser o alvo?** Há duas leis em jogo:
+`navigate_to_target_node` no watcher.
 
-- **LEI PROVISÓRIA (em vigor, pt67) — âncora = SIZING REAL.** O nó-alvo é a **acção
-  REAL do agressor** na Strategy Table (a posição-âncora **e** o sizing exacto que ele
-  jogou). Um small-raise → o nó do small; um **jam** (all-in efectivo, ≥95% da stack) →
-  o nó **ALLIN** (o maior sizing = o **último** do bucket da posição, porque o HRC lista
-  os sizings por ordem ascendente). É esta a convenção do `offset_within_bucket`
-  (non-SB: small=0/jam=1 · SB: Complete=0/small=1/jam=2). **Segura sob ambas as
-  semânticas** do Selected Subtree (refina sempre o nó da decisão que o herói tomou de
-  facto).
+**LEI (definitiva, confirmada na 4ª volta pt67 — 3 fotos do Rui) — âncora = a POSIÇÃO
+certa; a LINHA é indiferente.** O nó-alvo é a **posição-âncora** (a mesma da §15: regra 1
+herói-foldou antes de acção voluntária → posição do herói; regra 2 → posição da 1ª acção
+voluntária). **Qualquer linha dessa posição serve** — incluindo o 1º nó (a **LEI B** que
+o Rui propôs).
 
-- **LEI B DO RUI (preferida, PENDENTE de desempate empírico) — âncora = 1º NÓ DA
-  POSIÇÃO.** O nó-alvo seria o **primeiro nó** (1ª linha) da **posição-âncora** (a
-  mesma âncora da §15: regra 1 herói-foldou → posição do herói; regra 2 → posição da 1ª
-  acção voluntária), independente do sizing real. **Racional do Rui:** se o Selected
-  Subtree do HRC calcular do nó **para a frente incluindo as linhas-irmãs abaixo**,
-  então o 1º nó da posição cobre **todos** os sizings dessa posição com custo ≈ igual e
-  é robusto a erros de contagem de offset.
+**Porquê (semântica do Selected Subtree, provada visualmente — `HRC_ANATOMIA §14.2`):**
+um Selected Subtree numa linha **recalcula o ponto de decisão INTEIRO da posição-âncora
+(todas as suas linhas de sizing, porque a estratégia é uma distribuição mista única sobre
+fold/sizings) + tudo a JUSANTE; as posições anteriores ficam congeladas**. Logo o âmbito
+não depende de QUE linha da posição se escolhe — só de acertar na **posição**.
+(Prova nas fotos: âncora R9.01 HJ → a linha-irmã `HJ 2.00` mudou `5.3%→1.2%` e o jam
+`17.0%→20.6%`; CO/BU/SB a jusante mudaram; UTG/EP/MP congelados.)
 
-**Porque está a lei B estacionada (com consentimento do Rui, pt67):** a lei B assenta
-na premissa de que **o Selected Subtree de um nó inclui as linhas-irmãs (outros sizings
-da mesma posição) abaixo dele**. A verificação dos zips de hoje **não conseguiu provar
-isso** (o Complete Export é a árvore inteira, sem marcador de "nó refinado" — ver
-`HRC_ANATOMIA §14`), e o **modelo** da Strategy Table do HRC diz o contrário (os sizings
-de uma posição são **linhas-irmãs** da mesma decisão; refinar o subtree de uma **não**
-refina o da irmã). Como o ponto não está provado, fica a lei provisória (segura) até ao
-**desempate empírico**.
+**Consequências:**
+- O **off-by-one WITHIN-bucket** (jam vs small-raise — o foco do pt67) é **inofensivo**:
+  ambas as linhas caem na posição certa → mesmo âmbito. O fix
+  `#HRC-NODE-OFFSET-OFFBY1-REVERT-PT61` mantém-se (aterra na acção real, mais limpo) mas
+  **não era a causa de lixo**.
+- **O veneno real é a POSIÇÃO ERRADA** — `#HRC-NODE-OFFSET-IMPLICIT-LINES`: quando a
+  contagem de linhas erra, o offset salta para **outra posição** → âmbito errado = lixo
+  genuíno. **17/70 mãos** da fila expostas. É aqui que o trabalho deve ir.
+- **Reavaliar apagados/quarentenados:** a 3ª volta do #400 (âncora R2.00) e o #225 job 9
+  (apagado sob a leitura errada dos "irmãos disjuntos") **não eram lixo** — âmbito
+  equivalente. Rever também `GG-6028190109`/`GG-6027751209`: off-by-one within-bucket
+  **não** justifica quarentena; só posição errada justifica.
 
-**DESEMPATE EMPÍRICO (desenhado para a 4ª volta — `JOURNAL pt67` + `RUNBOOK`):** com a
-âncora no **jam** (lei provisória), o Rui observa/fotografa se os valores do **irmão
-small-raise** (a linha de sizing menor da mesma posição) **se alteram durante/após a 2ª
-run**:
-- **Alteram-se → semântica do Rui confirmada** (o subtree inclui os irmãos) → a **lei B
-  reactiva-se** (mudança de offset trivial: alvo = 1º nó da posição) e os resultados
-  "lixo" de hoje **reavaliam-se** (podem afinal conter o alvo).
-- **Não se alteram → semântica dos irmãos disjuntos confirmada** → **âncora = sizing
-  real** vira **lei definitiva** e o off-by-one de hoje era **lixo genuíno** (refinou o
-  small-raise, não o jam).
-
-Registar o veredicto em `HRC_ANATOMIA §14` e nesta secção quando a 4ª volta correr.
+**Correcção de registo:** a versão anterior desta secção (lei provisória "sizing real" +
+lei B "estacionada" por supostos "irmãos disjuntos") estava **errada na semântica** —
+corrigida pela observação visual da 4ª volta. Implementação do offset pode passar a
+LEI B literal (1º nó da posição, `offset_within_bucket=0`) num fix futuro, sidestepando o
+within-bucket; o gate de qualidade fica em **acertar a posição** (`#IMPLICIT-LINES`).
