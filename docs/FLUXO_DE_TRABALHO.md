@@ -28,3 +28,6 @@ O Rui joga e dorme tarde; o tempo dele entre sessões é escasso. Trabalho que p
 
 ## 9. Auditoria contínua
 Qualquer operador que detete violação destas regras (própria ou alheia) regista-a no journal da sessão com a correção aplicada. O Rui tem autoridade para parar qualquer fluxo que as viole.
+
+## 10. Fix de backend valida-se DEPLOYADO (regra do objeto-de-teste)
+A regra "push no fecho" (commit local, push só no fim) **NÃO se aplica quando a produção é o objeto do teste**. Um fix de backend só vale quando a **Railway fez o deploy** dele — caso contrário a smoke corre contra o backend **antigo** e o resultado é falso. Nasceu da frustração real do pt67: a re-smoke das 18:09 regenerou os packs com a derivação **antiga** (Max=2) porque os commits nunca tinham sido pushed/deployados; só a metade do watcher (visão/2 runs/CI) ficou validada. **Antes de uma smoke que depende de backend novo:** (1) push; (2) **esperar o deploy ficar LIVE** (`railway status --json` → `latestDeployment.status=SUCCESS` no commit certo); (3) **verificar a derivação no backend deployado** (ex.: `GET /api/queue/hrc/hand/<id>` e inspecionar o `meta.json`). Só depois se corre a smoke.
