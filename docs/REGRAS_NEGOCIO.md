@@ -600,3 +600,26 @@ lei B "estacionada" por supostos "irmãos disjuntos") estava **errada na semânt
 corrigida pela observação visual da 4ª volta. Implementação do offset pode passar a
 LEI B literal (1º nó da posição, `offset_within_bucket=0`) num fix futuro, sidestepando o
 within-bucket; o gate de qualidade fica em **acertar a posição** (`#IMPLICIT-LINES`).
+
+## §17. Regra dos sizings por stack efetiva (gerador do script HRC) — LEI do Rui (11 Jun 2026)
+
+**Confirmada pelo Rui** (escavação pt67) — é a regra que ele definiu. Para cada **raise
+pré-flop não-all-in** do agressor, o gerador (`hrc_script_gen.py:51,60` —
+`_OPEN_ALLIN_THRESHOLD_BB = 25`, `_NON_ALL_IN_OPEN_MIN_EFF_BB = 8.0`) emite:
+
+- **`eff ≤ 25 BB`** → `[sizing_real, "ALLIN"]` (o tamanho jogado **+** o all-in).
+- **`eff > 25 BB`** → `[sizing_real]` (só o tamanho; **sem** all-in modelado).
+- Open "pequeno" default 2 BB só quando a acção original foi all-in **e** `eff > 8 BB`
+  e a posição **não** é SB/BB.
+
+**Stack efetiva (definição validada pelo Rui):** `eff = min(stack do raiser, stack do
+MAIOR adversário ainda ACTIVO) / BB`, **recalculada por acção** (o conjunto de activos
+encolhe a cada fold). É esta a `eff` que decide o limiar dos 25 BB acima.
+
+**Cruzamento com `#HRC-NODE-OFFSET-IMPLICIT-LINES`:** o limiar dos 25 BB é o que faz um
+override sair com **1 entrada** (`[sizing]`, eff>25) vs **2** (`[sizing, ALLIN]`, eff≤25).
+A `count_lines_for_position` (offset) conta `len(override)` → **sub-conta** o caso de 1
+entrada porque o HRC acrescenta uma **linha ALLIN implícita** que não está no array.
+Com a regra agora **confirmada**, o gate do `#IMPLICIT-LINES` está **aberto deste lado**:
+o fix robusto é `count_lines = (nº de sizings não-allin) + 1 ALLIN implícito` (ou ler o
+`script.js` renderizado). Cross-ref `HRC_ANATOMIA §14` + `REGISTO_CONCEITO.md`.
