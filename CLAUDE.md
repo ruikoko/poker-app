@@ -36,6 +36,8 @@ O Beelink tem **SEMPRE exatamente 1** watcher exe — o **activo**. Nunca dois, 
 - **Rollback/histórico NÃO vive no Beelink** — vive no **PC principal + git** (builds reproduzíveis da fonte). **Nunca** deixar exes antigos no Beelink "por segurança" (foi a causa de confundir qual exe corre — ver pt61: o SHA do exe activo no Beelink ficou por confirmar e a provenance do `cdfc7247` desalinhou).
 - **Provenance antes de recompilar:** confirmar **sempre** o SHA do exe que **corre no Beelink** (correr o check **no Beelink**, não no PC principal) antes de assumir que versão está lá.
 
+**⚠️ REGRA (pt68) — o Desktop do Beelink (`riand`) é ZONA LIMPA.** Só pode ter o **atalho do HRC** e o que o **runbook** listar explicitamente. **Nada** de runtime vive no Desktop: o **watcher** vive em `C:\Users\riand\HRCWatch\`, o **adapter** em `C:\hrc\adapter\`, e os **templates/scripts** chegam **dentro dos packs** (`script.js` por mão). Detritos típicos a apagar (escaparam à vassoura por extensão): `instala_pt*.bat` antigos, `*.bak`, `*.exe.backup-*`, `smoke_*.txt`, `diag_*.bat`, `.py`/`.js` avulsos, zips de mãos antigas (`H-*.zip`). **O `instala_ptXX.bat` passa a varrer também `*.bak` e `*.exe.backup-*`** (além dos `*.exe`) em `HRCWatch\` + Desktop + Downloads. Lição pt68: 3+ exes-backup renomeados (`~13 MB`) sobreviveram no Desktop por terem extensão `.bak`/`.backup` — violam a regra «1 só exe».
+
 ## ⚠️ ARMADILHA RECORRENTE — chama laranja ≠ bounty
 
 **Nas screenshots/replayer da GGPoker há DOIS badges por jogador. NÃO os confundas (já se confundiu várias vezes):**
