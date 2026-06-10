@@ -1,0 +1,3 @@
+
+# pt67: .bat tem de ser CRLF (cmd.exe rebenta com LF)
+*.bat text eol=crlf
