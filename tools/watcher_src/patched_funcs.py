@@ -94,6 +94,22 @@ WM_SETTEXT = 0x000C        # escrever texto num Edit (CI Target)
 WM_GETTEXT = 0x000D        # ler texto de um Edit (read-back do CI)
 WM_GETTEXTLENGTH = 0x000E
 
+# ── pt64 (#HRC-SCOPE-CCOMBO-SWT) — Scope via SysListView32 do dropdown ──────
+# Diag pt64 (Beelink, popup Nash 436×230): o controlo Scope é um SWT CCombo —
+# canvas opaco SWT_Window0, SEM ComboBox/Edit nativo nem pattern UIA. MAS ao
+# abrir cria uma janela top-level nova (#32770, ~250×40) com uma SysListView32
+# NATIVA cujos itens são 'Full Tree' (idx 0) e 'Selected Subtree' (idx 1).
+# Conduzimo-lo por imitação humana (foco + F4 + setas/typing + Enter) e fazemos
+# read-back BARATO via LVM_GETNEXTITEM (int, sem buffer cross-process, sem
+# comtypes). Mapa idx→texto (0=Full Tree, 1=Selected Subtree) é a calibração
+# pt64; se uma futura versão do HRC reordenar/adicionar itens, re-correr
+# diag_nash_popup.py (modo dropdown) e actualizar o índice/gate.
+LVM_FIRST = 0x1000
+LVM_GETITEMCOUNT = LVM_FIRST + 4    # 0x1004 — nº de itens (int, sem buffer)
+LVM_GETNEXTITEM = LVM_FIRST + 12    # 0x100C — devolve índice do item seleccionado
+LVNI_SELECTED = 0x0002             # flag p/ LVM_GETNEXTITEM = item seleccionado
+SCOPE_LIST_SELECTED_SUBTREE_INDEX = 1   # calibração pt64 (Full Tree=0, Sel.Subtree=1)
+
 _FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou)
 _FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
 _FINISH_WAIT_POLL_S = 0.1
@@ -1274,59 +1290,156 @@ def _read_edit_text(hwnd_edit):
     return buf.value
 
 
-def _set_scope_in_popup(popup_rect):
-    """Muda o Scope no popup Nash para "Selected Subtree" — pt61: via Win32.
+def _find_scope_dropdown_listview():
+    """pt64: hwnd da `SysListView32` do dropdown do CCombo do Scope, ou None.
 
-    Caminho activo (pt61, #HRC-2ND-RUN-BLIND-CLICKS): Win32. Acha o ComboBox do
-    Scope pelo CONTEÚDO (item "Selected Subtree"), seta por índice via
-    `CB_SETCURSEL`, notifica o popup (`WM_COMMAND`/`CBN_SELCHANGE`) e CONFIRMA
-    por read-back (`CB_GETCURSEL`). NÃO depende de coords — o clique pyautogui
-    não registava de forma fiável neste popup SWT (só o OK por `BM_CLICK`
-    funcionava). Mesmo padrão do combo de `export_strategies` (pt35).
-
-    Devolve `True` SÓ se o read-back confirmar "Selected Subtree". Em falha do
-    Win32 (popup/combo não encontrados ou read-back não bate) tenta o fallback
-    pyautogui (baseline coords pt61, best-effort) e devolve `False` — o caller
-    deve abortar a 2ª run em vez de a correr em Full Tree silenciosamente.
-
-    `popup_rect` (left, top, w, h) é usado SÓ pelo fallback pyautogui.
+    Quando o Scope abre, nasce uma janela top-level NOVA (#32770) que contém uma
+    SysListView32 nativa (diag pt64). O popup Nash (também #32770) NÃO tem
+    SysListView32, por isso "a janela top-level que contém uma SysListView32" é
+    inequivocamente o dropdown. Read-only. None se o dropdown não estiver aberto.
     """
+    found = [None]
+
+    def _enum_lv(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value == "SysListView32":
+            found[0] = ch
+            return False
+        return True
+
+    def _enum_top(hwnd, lparam):
+        if not _pt30_user32.IsWindowVisible(hwnd):
+            return True
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(hwnd, cls_buf, 256)
+        if cls_buf.value == "#32770":
+            _pt30_user32.EnumChildWindows(hwnd, _PT30_WNDENUMPROC(_enum_lv), 0)
+            if found[0] is not None:
+                return False  # achámos a listview do dropdown — para
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum_top), 0)
+    return found[0]
+
+
+def _lv_item_count(hwnd_lv):
+    """pt64: nº de itens da SysListView32 (LVM_GETITEMCOUNT — int, sem buffer)."""
+    if not hwnd_lv:
+        return None
+    n = _pt30_user32.SendMessageW(hwnd_lv, LVM_GETITEMCOUNT, 0, 0)
+    return n if isinstance(n, int) else None
+
+
+def _lv_selected_index(hwnd_lv):
+    """pt64: índice do item SELECCIONADO (LVM_GETNEXTITEM/LVNI_SELECTED — int,
+    sem buffer cross-process). Devolve -1 se nada seleccionado, None se sem hwnd.
+
+    É o read-back BARATO que substitui o `CB_GETCURSEL` (o CCombo não responde a
+    CB_*): confirma a selecção no dropdown ABERTO antes do commit, sem precisar
+    de ler o texto do item (que exigiria VirtualAllocEx cross-process)."""
+    if not hwnd_lv:
+        return None
+    # wParam = -1 (começar do início da lista); devolve o índice (ou -1).
+    return _pt30_user32.SendMessageW(hwnd_lv, LVM_GETNEXTITEM, -1, LVNI_SELECTED)
+
+
+def _set_scope_in_popup(popup_rect):
+    """Muda o Scope no popup Nash para "Selected Subtree" — pt64: SysListView32.
+
+    O Scope é um SWT CCombo: canvas opaco, sem ComboBox/Edit nativo nem pattern
+    UIA (Caso 3 do diag pt64) — por isso o caminho Win32 CB_* de pt61 não pegava
+    (`_find_combo_with_item` devolvia (None,None) → abort). MAS ao abrir, o
+    CCombo cria uma janela top-level com uma **SysListView32 nativa** (itens
+    'Full Tree' idx0 / 'Selected Subtree' idx1). Conduzimo-lo por imitação
+    humana, com read-back barato por LVM (int, sem buffer, sem comtypes):
+
+      1. foreground do popup + foco-click no campo Scope (rel pt61);
+      2. abrir o dropdown por F4 (retry 1×);
+      3. confirmar a abertura achando a SysListView32 do dropdown;
+      4. seleccionar 'Selected Subtree': type-search "Selected" (text-driven) com
+         fallback determinístico Home→Down (Full Tree 0 → 1);
+      5. READ-BACK: LVM_GETNEXTITEM(LVNI_SELECTED) confirma idx==1 (≠ default 0)
+         numa lista de 2 itens — ANTES do commit;
+      6. Enter confirma o item destacado.
+
+    Devolve `True` só com a confirmação do passo 5; em qualquer falha fecha a
+    lista (Esc) e devolve `False` — o caller ABORTA a 2ª run (inalterado), nunca
+    corre Full Tree disfarçado de Selected Subtree.
+    """
+    if popup_rect is None:
+        print('   [WARN] [scope] popup_rect None — scope NÃO confirmado')
+        return False
     hwnd_popup = _find_nash_popup_hwnd()
-    if hwnd_popup:
-        combo, idx = _find_combo_with_item(hwnd_popup, "selected subtree")
-        if combo and idx is not None:
-            _pt30_user32.SendMessageW(combo, CB_SETCURSEL, idx, 0)
-            ctrl_id = _pt30_user32.GetDlgCtrlID(combo)
-            _pt30_user32.SendMessageW(
-                hwnd_popup, WM_COMMAND,
-                (CBN_SELCHANGE << 16) | (ctrl_id & 0xFFFF), combo)
-            time.sleep(0.3)
-            now = _pt30_user32.SendMessageW(combo, CB_GETCURSEL, 0, 0)
-            if now == idx:
-                print('   [scope] Win32 CB_SETCURSEL idx=%d confirmado '
-                      '(read-back) — Scope: Selected Subtree' % idx)
-                return True
-            print('   [WARN] [scope] read-back falhou (now=%r != %d) '
-                  '— fallback pyautogui' % (now, idx))
-        else:
-            print('   [WARN] [scope] ComboBox com item "Selected Subtree" '
-                  'não encontrado — fallback pyautogui')
-    else:
+    if not hwnd_popup:
         print('   [WARN] [scope] popup Nash hwnd não encontrado '
-              '— fallback pyautogui')
-    # Fallback pyautogui (baseline coords pt61) — best-effort, NÃO confirmável.
-    if popup_rect is None or SCOPE_DROPDOWN_REL_X == 0:
-        print('   [WARN] [scope] fallback indisponível (popup_rect/coords) '
               '— scope NÃO confirmado')
         return False
+    if SCOPE_DROPDOWN_REL_X == 0:
+        print('   [WARN] [scope] coord de foco não calibrada — scope NÃO confirmado')
+        return False
+
     left, top, _w, _h = popup_rect
-    pyautogui.click(left + SCOPE_DROPDOWN_REL_X, top + SCOPE_DROPDOWN_REL_Y)
+    focus_x, focus_y = left + SCOPE_DROPDOWN_REL_X, top + SCOPE_DROPDOWN_REL_Y
+    try:
+        _pt30_user32.SetForegroundWindow(hwnd_popup)
+    except Exception as e:
+        print('   [WARN] [scope] SetForegroundWindow falhou (%s) — continua'
+              % type(e).__name__)
+    time.sleep(0.2)
+
+    # Passos 1-3: foco no campo Scope + abrir dropdown (F4) + achar a listview.
+    lv = None
+    for attempt in (1, 2):
+        pyautogui.click(focus_x, focus_y)        # foco no campo Scope
+        time.sleep(0.25)
+        pyautogui.press('f4')                    # abre o dropdown do CCombo
+        time.sleep(0.4)
+        lv = _find_scope_dropdown_listview()
+        if lv:
+            break
+        print('   [WARN] [scope] dropdown não abriu (tentativa %d/2)' % attempt)
+    if not lv:
+        print('   [WARN] [scope] SysListView32 do dropdown não encontrada '
+              '— scope NÃO confirmado')
+        return False
+
+    count = _lv_item_count(lv)
+    if not isinstance(count, int) or count != 2:
+        # diag pt64: a lista do Scope tem exactamente 2 itens. count≠2 = UI mudou
+        # → sem confiança no mapa idx→texto → abort (não adivinha).
+        print('   [WARN] [scope] lista com count=%r (esperado 2) — abort '
+              '(re-correr diag se o HRC mudou)' % count)
+        pyautogui.press('escape')
+        return False
+
+    before = _lv_selected_index(lv)              # default no open = 0 (Full Tree)
+    # Passo 4: selecção text-driven, com fallback determinístico.
+    pyautogui.typewrite('Selected', interval=0.04)
     time.sleep(0.3)
-    pyautogui.click(left + SCOPE_OPTION_SELECTED_SUBTREE_REL_X,
-                    top + SCOPE_OPTION_SELECTED_SUBTREE_REL_Y)
+    sel = _lv_selected_index(lv)
+    if sel != SCOPE_LIST_SELECTED_SUBTREE_INDEX:
+        # fallback determinístico: normaliza ao topo e desce 1 (Full Tree→Sel.Sub.)
+        pyautogui.press('home')
+        time.sleep(0.1)
+        pyautogui.press('down')
+        time.sleep(0.2)
+        sel = _lv_selected_index(lv)
+
+    # Passo 5: read-back barato (int) — gate do abort.
+    if sel != SCOPE_LIST_SELECTED_SUBTREE_INDEX:
+        print('   [WARN] [scope] read-back falhou (sel=%r, before=%r, '
+              'esperado %d) — scope NÃO confirmado' %
+              (sel, before, SCOPE_LIST_SELECTED_SUBTREE_INDEX))
+        pyautogui.press('escape')
+        return False
+
+    # Passo 6: commit do item destacado.
+    pyautogui.press('enter')
     time.sleep(0.3)
-    print('   [scope] fallback pyautogui aplicado (NÃO confirmado por read-back)')
-    return False
+    print('   [scope] SysListView32 idx=%d confirmado (read-back LVM) '
+          '— Scope: Selected Subtree' % sel)
+    return True
 
 
 def start_calculation_selected_subtree(wpos, ci_target):

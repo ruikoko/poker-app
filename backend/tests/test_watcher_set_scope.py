@@ -80,156 +80,122 @@ def pf():
     yield _pf
 
 
-# ── _set_scope_in_popup: defensive returns ──────────────────────────────
+# ── _set_scope_in_popup (pt64: SysListView32 do dropdown) ───────────────
+#
+# Helpers mockados como o antigo `_find_combo_with_item`: `_find_nash_popup_hwnd`,
+# `_find_scope_dropdown_listview`, `_lv_item_count`, `_lv_selected_index`. O
+# `pf.pyautogui` mock captura click/press/typewrite. O índice do read-back é
+# 1 (Full Tree=0, Selected Subtree=1 — calibração pt64).
 
-def test_set_scope_in_popup_early_returns_when_popup_rect_is_none(pf, capsys):
-    """`popup_rect=None` → caller ainda não detecta popup (peça 2 wiring
-    pendente). Função faz early-return com WARN; zero clicks."""
-    pf._set_scope_in_popup(popup_rect=None)
+def _wire_scope(pf, lv=7777, count=2, sel_seq=(0, 1)):
+    """Configura os mocks comuns do happy/abort path do `_set_scope_in_popup`."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_scope_dropdown_listview = MagicMock(return_value=lv)
+    pf._lv_item_count = MagicMock(return_value=count)
+    pf._lv_selected_index = MagicMock(side_effect=list(sel_seq))
+    pf._pt30_user32 = MagicMock()
+
+
+def test_set_scope_none_rect_returns_false_no_click(pf, capsys):
+    """`popup_rect=None` → WARN + early-return False, zero clicks/presses."""
+    ok = pf._set_scope_in_popup(popup_rect=None)
+    assert ok is False
     pf.pyautogui.click.assert_not_called()
     out = capsys.readouterr().out
-    assert "[WARN]" in out
-    assert "popup_rect" in out
+    assert "[WARN]" in out and "popup_rect" in out
 
 
-def test_set_scope_in_popup_win32_setcursel_and_readback_confirms(pf, capsys):
-    """pt61: caminho activo Win32. Acha o combo pelo item "Selected Subtree",
-    seta por CB_SETCURSEL, notifica CBN_SELCHANGE e confirma por read-back
-    (CB_GETCURSEL == idx) → devolve True, SEM pyautogui."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
-    pf._find_combo_with_item = MagicMock(return_value=(8484, 1))
-    pf._pt30_user32 = MagicMock()
-    pf._pt30_user32.GetDlgCtrlID.return_value = 55
-    # CB_GETCURSEL (read-back) devolve o idx setado (1) → confirmado.
-    pf._pt30_user32.SendMessageW.return_value = 1
-
-    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
-
-    assert ok is True
-    pf._find_combo_with_item.assert_called_once_with(4242, "selected subtree")
-    # CB_SETCURSEL(combo, 1) foi enviado.
-    pf._pt30_user32.SendMessageW.assert_any_call(8484, pf.CB_SETCURSEL, 1, 0)
-    pf.pyautogui.click.assert_not_called()  # Win32: sem clique pyautogui
-    out = capsys.readouterr().out
-    assert "Selected Subtree" in out and "[WARN]" not in out
-
-
-def test_set_scope_in_popup_win32_readback_mismatch_falls_back_to_pyautogui(pf, capsys):
-    """Win32 não confirma (read-back != idx) → fallback pyautogui (baseline
-    coords) + devolve False (não confirmado = caller aborta)."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
-    pf._find_combo_with_item = MagicMock(return_value=(8484, 1))
-    pf._pt30_user32 = MagicMock()
-    pf._pt30_user32.GetDlgCtrlID.return_value = 55
-    pf._pt30_user32.SendMessageW.return_value = 0  # read-back devolve 0 != 1
-
-    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
-
-    assert ok is False
-    assert pf.pyautogui.click.call_count == 2  # fallback: dropdown + opção
-    out = capsys.readouterr().out
-    assert "[WARN]" in out and "read-back" in out
-
-
-def test_set_scope_in_popup_fallback_unavailable_when_rect_none_and_no_popup(pf, capsys):
-    """Sem popup Win32 E sem popup_rect → fallback indisponível → False, 0 clicks."""
+def test_set_scope_no_popup_hwnd_returns_false(pf, capsys):
+    """popup Nash hwnd não encontrado → False, sem abrir dropdown."""
     pf._find_nash_popup_hwnd = MagicMock(return_value=None)
-    ok = pf._set_scope_in_popup(popup_rect=None)
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
     assert ok is False
     pf.pyautogui.click.assert_not_called()
     assert "[WARN]" in capsys.readouterr().out
 
 
-# ── _set_scope_in_popup: click flow real ────────────────────────────────
+def test_set_scope_happy_path_typesearch_confirms(pf, capsys):
+    """Dropdown abre, count=2, type-search 'Selected' move a selecção 0→1, o
+    read-back LVM confirma idx==1 → Enter (commit) → True, sem fallback Down."""
+    _wire_scope(pf, sel_seq=(0, 1))   # before=0, após typewrite=1
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+    assert ok is True
+    # foco-click no campo Scope (rel pt61) + F4 p/ abrir
+    left, top, _w, _h = _SMOKE_POPUP_RECT
+    pf.pyautogui.click.assert_any_call(left + pf.SCOPE_DROPDOWN_REL_X,
+                                       top + pf.SCOPE_DROPDOWN_REL_Y)
+    presses = [c.args[0] for c in pf.pyautogui.press.call_args_list]
+    assert "f4" in presses and "enter" in presses
+    assert "down" not in presses          # type-search bastou, sem fallback
+    pf.pyautogui.typewrite.assert_called_once()
+    assert "Selected Subtree" in capsys.readouterr().out
 
-def test_set_scope_in_popup_constants_are_calibrated_after_smoke(pf):
-    """Sanity: depois do smoke 2026-05-18, os 4 RELs estão != 0 e dentro de
-    bounds plausíveis para um popup Nash típico (popup width/height
-    observados nos smokes ficam entre ~400 e ~450 px; valores acima de 400
-    seriam suspeitos)."""
+
+def test_set_scope_fallback_arrow_when_typesearch_misses(pf):
+    """type-search não move (fica 0); fallback determinístico Home→Down leva a
+    idx 1; read-back confirma → True, com 'home'+'down'+'enter'."""
+    _wire_scope(pf, sel_seq=(0, 0, 1))    # before=0, pós-type=0, pós-down=1
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+    assert ok is True
+    presses = [c.args[0] for c in pf.pyautogui.press.call_args_list]
+    assert presses.count("home") == 1 and presses.count("down") == 1
+    assert "enter" in presses
+
+
+def test_set_scope_aborts_when_dropdown_never_opens(pf, capsys):
+    """`_find_scope_dropdown_listview` devolve None nas 2 tentativas → False,
+    NÃO faz Enter (não commita nada)."""
+    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
+    pf._find_scope_dropdown_listview = MagicMock(return_value=None)
+    pf._pt30_user32 = MagicMock()
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+    assert ok is False
+    presses = [c.args[0] for c in pf.pyautogui.press.call_args_list]
+    assert presses.count("f4") == 2 and "enter" not in presses
+    assert "[WARN]" in capsys.readouterr().out
+
+
+def test_set_scope_aborts_when_count_not_two(pf, capsys):
+    """count≠2 (UI mudou) → Esc + False, sem ler selecção nem Enter."""
+    _wire_scope(pf, count=3)
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+    assert ok is False
+    presses = [c.args[0] for c in pf.pyautogui.press.call_args_list]
+    assert "escape" in presses and "enter" not in presses
+    pf._lv_selected_index.assert_not_called()
+    out = capsys.readouterr().out
+    assert "[WARN]" in out and "count" in out
+
+
+def test_set_scope_aborts_when_readback_never_reaches_target(pf, capsys):
+    """A selecção nunca chega a idx 1 (type-search e fallback falham) → Esc +
+    False, sem Enter — o caller aborta a 2ª run."""
+    _wire_scope(pf, sel_seq=(0, 0, 0))    # nunca sai do 0
+    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
+    assert ok is False
+    presses = [c.args[0] for c in pf.pyautogui.press.call_args_list]
+    assert "escape" in presses and "enter" not in presses
+    out = capsys.readouterr().out
+    assert "[WARN]" in out and "read-back" in out
+
+
+def test_set_scope_target_index_constant_is_calibrated_pt64(pf):
+    """Calibração pt64: Full Tree=0, Selected Subtree=1. Guarda contra um
+    rollback acidental do mapa idx→texto."""
+    assert pf.SCOPE_LIST_SELECTED_SUBTREE_INDEX == 1
+    # os RELs de foco do campo Scope continuam calibrados (reusados como ponto
+    # de foco-click antes do F4).
     assert 0 < pf.SCOPE_DROPDOWN_REL_X < 400
     assert 0 < pf.SCOPE_DROPDOWN_REL_Y < 400
-    assert 0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X < 400
-    assert 0 < pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y < 400
 
 
-def test_set_scope_in_popup_fallback_clicks_at_baseline_rel(pf):
-    """pt61: quando o Win32 não está disponível (sem popup hwnd), o FALLBACK
-    pyautogui clica nos baseline coords (left+REL). Self-consistente com as
-    constantes actuais (popup 436×230)."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=None)
-    left, top, _w, _h = _SMOKE_POPUP_RECT
-    pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
-
-    assert pf.pyautogui.click.call_args_list == [
-        call(left + pf.SCOPE_DROPDOWN_REL_X, top + pf.SCOPE_DROPDOWN_REL_Y),
-        call(left + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X,
-             top + pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y),
-    ]
-
-
-def test_set_scope_in_popup_uses_pyautogui_click_not_click_rel(pf):
-    """Padrão correcto para clicks no popup Nash: `pyautogui.click(abs_x,
-    abs_y)` (mesmo padrão pt25d para CI Target). `click_rel` opera sobre
-    main HRC window rect e não é apropriado aqui."""
+def test_set_scope_uses_pyautogui_not_click_rel_pt64(pf):
+    """O foco-click é `pyautogui.click(abs)`, nunca `click_rel` (que opera sobre
+    a janela principal do HRC, não o popup)."""
+    _wire_scope(pf, sel_seq=(0, 1))
     pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
     pf.click_rel.assert_not_called()
-    assert pf.pyautogui.click.call_count == 2
-
-
-def test_set_scope_in_popup_computes_coords_from_popup_rect_with_rels(pf):
-    """Confirmação algébrica: `abs = left + REL_X, top + REL_Y`. Pixels-rel
-    são invariantes a `width`/`height` do popup — propriedade chave que
-    motivou a migração de fracções em pt26."""
-    pf.SCOPE_DROPDOWN_REL_X = 200
-    pf.SCOPE_DROPDOWN_REL_Y = 50
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 200
-    pf.SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 150
-
-    pf._set_scope_in_popup(popup_rect=(100, 200, 400, 200))
-    # Dropdown: (100 + 200, 200 + 50)  = (300, 250)
-    # Opção:    (100 + 200, 200 + 150) = (300, 350)
-    assert pf.pyautogui.click.call_args_list == [
-        call(300, 250),
-        call(300, 350),
-    ]
-
-
-def test_set_scope_in_popup_invariant_to_popup_size(pf):
-    """Propriedade chave da convenção pt26: o mesmo REL produz o mesmo
-    OFFSET ao top-left, independente de o popup crescer (416×214 → 436×230
-    em smokes consecutivos). Fracções driftavam ~13px X neste cenário."""
-    rects = [
-        (666, 372, 416, 214),   # smoke 18 Maio
-        (590, 337, 436, 230),   # smoke 19 Maio
-        (100, 100, 600, 400),   # sintético maior ainda
-    ]
-    for rect in rects:
-        pf.pyautogui.click.reset_mock()
-        pf._set_scope_in_popup(popup_rect=rect)
-        left, top, _w, _h = rect
-        (drop_x, drop_y), _ = pf.pyautogui.click.call_args_list[0]
-        assert (drop_x, drop_y) == (
-            left + pf.SCOPE_DROPDOWN_REL_X,
-            top + pf.SCOPE_DROPDOWN_REL_Y,
-        )
-
-
-def test_set_scope_in_popup_sleeps_between_clicks(pf):
-    """Padrão click+wait idêntico a `set_equity_model`: sleep depois de
-    cada click (2 sleeps no total)."""
-    pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
-    assert pf.time.sleep.call_count == 2
-
-
-def test_set_scope_in_popup_fallback_logs_not_confirmed(pf, capsys):
-    """pt61: o fallback pyautogui é best-effort e NÃO confirmável → loga
-    explicitamente que não foi confirmado por read-back (não simula sucesso)."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=None)
-    ok = pf._set_scope_in_popup(popup_rect=_SMOKE_POPUP_RECT)
-    out = capsys.readouterr().out
-    assert ok is False
-    assert "NÃO confirmado" in out
+    assert pf.pyautogui.click.called
 
 
 # ── start_calculation_selected_subtree (wiring) ─────────────────────────
