@@ -18,13 +18,15 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 > validado): (a) run intermédia **removida** — exatamente 2 runs, sem prune; (b)
 > run-wait robusto (`#HRC-RUN-WAIT-FALSE-TRIVIAL`); (c') CI **não escrito** (default
 > do popup = 10.0) + salvaguarda só-leitura; (d) `select_bounty_mode` removido
-> (`#HRC-BOUNTY-HARDCODED-50PCT`) → o modo vem da estrutura. **Próximo passo: a
-> RE-SMOKE de 2 mãos** (1 KO **não-WN** com fator **≠0.5** + 1 **não-KO**) — guia com
-> as **linhas literais da consola** em `docs/JOURNAL_2026-06-10-pt66.md`. Precede a
-> re-smoke: **query de distribuição** `bountyType`/`progressiveFactor` das mãos
-> elegíveis (após `railway login` do Rui) → escolher as 2 mãos com o Web+Rui.
-> **⚠️ A fila completa (~49 em `queue_hold`) SÓ se solta após a re-smoke passar, e
-> só com OK do Rui.** Detalhe: `TECH_DEBTS_INVENTARIO.md` (pt66) + journal pt66.
+> (`#HRC-BOUNTY-HARDCODED-50PCT`) → o modo vem da estrutura. **Próximo passo: a RE-SMOKE** (query feita — 48 elegíveis: 14 GG PKO 0.5, 9
+> GG Vanilla, 25 WN PKO; **zero 0.75/0.40, zero Mystery**). Mãos escolhidas:
+> **`GG-6029013400`** (Bounty Hunters, PKO **0.5**) + **`GG-6039094225`** (Daily
+> Special $88, **não-KO**) — guia com linhas literais + benchmark visual em
+> `docs/JOURNAL_2026-06-10-pt66.md`. **⚠️ Cobertura do fix (d) PARCIAL:** sem mão
+> ≠0.5 na fila, a re-smoke valida (a)(b)(c') + PKO 50%-via-estrutura, mas a **prova
+> do ≠50% fica DEFERIDA** até entrar uma monster (0.75) / super ko (0.40) — **flag:
+> confirm one-off quando aparecer**. **A fila completa (~49) SÓ se solta após as 2
+> mãos passarem + OK do Rui.** Detalhe: `TECH_DEBTS_INVENTARIO.md` (pt66) + journal pt66.
 
 > **★ Quarentena de 2 resultados HRC (recalcular pós-pt66).** `GG-6028190109`
 > (smoke pt64, corridas sobrepostas) e `GG-6027751209` (STALE, postado no arranque

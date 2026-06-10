@@ -30,6 +30,12 @@ re-smoke** com as linhas literais da consola).
   (`backend/app/services/lobby_vision.py`) — **fonte única**: `0.75`/`0.50`/`0.40`/`0.33`/`0.0`.
   **Não existe `0.25`** no pipeline HRC (já corrigido em `135be97`; a cópia stale do
   `PENDENTES.md` foi corrigida aqui). Os `0.25`/`0.33` doutras notas são do `ire.py`.
+- ⚠️ **Cobertura do fix (d) na re-smoke = PARCIAL.** A fila pt66 (48 elegíveis) não
+  tem mãos PKO **≠0.5** (todas as KO são 0.5: 14 GG structure-driven + 25 WN forçadas
+  a 0.5 no export) nem Mystery. Numa mão 0.5 o antigo e o novo são indistinguíveis →
+  a re-smoke (`GG-6029013400` KO + `GG-6039094225` não-KO) valida (a)(b)(c') + o modo
+  PKO 50%-via-estrutura, mas a **prova do ≠50% fica DEFERIDA** até entrar uma monster
+  (0.75) / super ko (0.40). **Flag:** confirm one-off quando aparecer.
 - 🟢 **#HRC-NAV-TABLE-READBACK-PENDING** (LOW) continua aberto — read-back visual do nó é manual.
 - 🟢 **Salvaguarda do CI** — o formato do título "Target CI < X" (foto pt64) **não está
   verificado em código** → fail-safe **sem alarme** se diferir; re-confirmar na re-smoke e
