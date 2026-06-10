@@ -20,17 +20,16 @@ Algoritmo:
 1. `positions = strategy_table_positions(seats_at_table)` — lista sem BB.
 2. `raiser_idx = positions.index(aggressor.position)`.
 3. Soma `count_lines_for_position` para todas as posições antes do raiser.
-4. Adiciona `offset_within_bucket` da acção do raiser (0 non-SB / 1 SB).
+4. Adiciona `offset_within_bucket` da acção do raiser (all-in-dependent:
+   small=0 / jam=1 non-SB; Complete=0 / small=1 / jam=2 SB).
 
-pt61 (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): o `offset_within_bucket` deixou de
-depender de all-in. O alvo é a acção ORIGINAL da HH, que `build_sizings_
-overrides` põe sempre como 1ª opção do array → é o 1º nó de raise da posição
-(within 0 non-SB; 1 SB, após o nó Complete). A convenção antiga 0/1/2 fazia
-+1 em jams (SB jam dava 2, devia 1; non-SB jam dava 1, devia 0). Confirmado
-na mão real `GG-6027751209` (SB-vs-BB, SB jam ~4.5bb: offset 8 → 7).
-
-`_is_all_in_effective` (threshold 0.95) mantém-se definido mas já NÃO é usado
-no cálculo do offset (era a fonte do off-by-one).
+pt67 (#HRC-NODE-OFFSET-OFFBY1-REVERT-PT61): `offset_within_bucket` voltou a
+DEPENDER de all-in. O nó **ALLIN** (= stack) é o **maior** → o **último** do
+bucket (ordem ascendente do HRC). Um jam aponta para esse último nó. O pt61
+(#HRC-NODE-OFFSET-SB-JAM-OFFBY1) tinha colapsado o offset para "1º nó" (0/1),
+assumindo o alvo no início — mas a 1ª smoke REAL da navegação (pt67, provas
+visuais do Rui) mostrou o jam no **último** nó. O pt61 era "EM BUFFER", nunca
+validado em smoke. `_is_all_in_effective` (threshold 0.95) volta a ser usado.
 """
 from __future__ import annotations
 import logging
@@ -126,31 +125,40 @@ def offset_within_bucket(
     action: dict,
     raiser_stack_bb: Optional[float] = None,
 ) -> int:
-    """Offset do nó do raiser DENTRO do seu bucket na Strategy Table (0 ou 1).
+    """Offset do nó do raiser DENTRO do seu bucket na Strategy Table (0, 1 ou 2).
 
-    O nó-alvo é a acção REAL do agressor — e `build_sizings_overrides` põe
-    SEMPRE a acção original da HH como **1ª opção** do array de sizes da
-    posição (`_array_for_raise`). Logo o alvo é o **1º nó de raise** da
-    posição, seja small raise ou jam:
-      - non-SB raise: 0 (o array começa na acção original).
-      - SB raise:     1 (a SB tem 1 nó Complete/limp prepended antes dos raises).
-      - SB Complete/limp/call: 0 (é o próprio nó Complete).
+    A Strategy Table HRC mostra, por posição, os sizings por ordem ASCENDENTE
+    de tamanho — e o nó **ALLIN** (= stack do jogador) é sempre o **maior**, logo
+    o **ÚLTIMO** do bucket:
+      - non-SB:  `[small/min-raise, ALLIN]`            → small=0 ; **jam=1**
+      - SB:      `[Complete, small/min-raise, ALLIN]`  → Complete=0 ; small=1 ; **jam=2**
+    O nó-alvo é a acção REAL do agressor: um small-raise é o 1º nó de raise; um
+    **jam** (all-in efectivo, `_is_all_in_effective`) é o nó **ALLIN** (último).
 
-    pt61 fix (#HRC-NODE-OFFSET-SB-JAM-OFFBY1): a convenção antiga 0/1/2
-    assumia 3 sub-nós SB (Complete + small + all-in) e devolvia **2** para um
-    SB all-in — mas quando o raise É o jam não há nó small-raise separado: a
-    SB tem só 2 nós (Complete + jam), within = 1. O mesmo erro afectava o
-    non-SB jam (devolvia 1, devia ser 0). Como o alvo é sempre o 1º nó de
-    raise, o offset NÃO depende de all-in. `raiser_stack_bb` deixou de ser
-    usado (mantido por compat de assinatura — caller em `queue_export`).
+    pt67 (#HRC-NODE-OFFSET-OFFBY1-REVERT-PT61): REVERTE o pt61
+    (#HRC-NODE-OFFSET-SB-JAM-OFFBY1), que colapsara isto para `0` (non-SB) / `1`
+    (SB raise) — assumindo que o alvo é sempre o 1º nó. A 1ª smoke REAL da
+    navegação (3ª volta pt67, provas visuais do Rui) desmentiu-o: o jam é o
+    **último** nó (ALLIN), não o primeiro. O pt61 era teoria "EM BUFFER" nunca
+    validada em smoke. Cross-check (offsets confirmados visualmente / packs de
+    6 Jun): GG-6029013400 (HJ jam 9.01/stack 9.16) → 7; GG-6039094225 (SB jam
+    6.35/stack 6.47) → 14; GG-6028190109 (HJ small 2.0/stack 34.5) → 2.
+
+    ⚠️ Latente (#HRC-NODE-OFFSET-IMPLICIT-LINES, LOW): a convenção assume 2 nós
+    non-SB / 3 SB. Se um open-jam de stack muito curto não tiver nó small
+    separado, o within podia ficar +1 comprido. A `count_lines_for_position`
+    tem a assunção-irmã (linhas implícitas ALLIN/min do HRC). Por isso a
+    confirmação VISUAL do nó é critério OBRIGATÓRIO de toda a smoke de navegação.
     """
     pos = (action.get("position") or "").upper()
     action_type = (action.get("type") or "").lower()
+    is_jam = _is_all_in_effective(action.get("size_bb"), raiser_stack_bb)
     if pos == "SB":
+        # SB tem o nó Complete (limp) prepended antes dos raises.
         if action_type in ("complete", "limp", "call"):
             return 0
-        return 1
-    return 0
+        return 2 if is_jam else 1
+    return 1 if is_jam else 0
 
 
 # ── Aggressor stack derivation ──────────────────────────────────────────
