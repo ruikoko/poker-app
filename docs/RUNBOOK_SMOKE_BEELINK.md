@@ -104,11 +104,12 @@ HRC (isso está em `docs/HRC_ANATOMIA_OPERACIONAL.md`).
     backup**) e instala **só** o novo em `HRCWatch`; no fim re-verifica a SHA
     e confirma que há **exactamente 1** exe.
   - Se a SHA não bate, o `.bat` **aborta** — não instala um ficheiro errado.
-  - **Versão actual (pt64):** SHA256
-    `3FB1B5127085B1E19A09D8A262223AAF2EF228AD290FF9BAD908804DFAA8F8E6` — é o
-    robot com o **scope da 2ª run via SysListView32** (smoke pt64 ✓ Complete
-    Export, ver §5). Se a SHA instalada não for esta, estás a correr um robot
-    anterior.
+  - **Versão actual (pt66):** SHA256
+    `9EA51CE4572FF90698F9D3E67CF415EC752481B1E8C35963126F050B5C103BD4` — é o
+    robot com as 4 correcções pt66: **sem run intermédia** (exatamente 2 runs),
+    run-wait robusto, **CI não escrito** (default 10.0), `select_bounty_mode`
+    removido (o modo vem da estrutura). Release `watcher-pt66`. Se a SHA instalada
+    não for esta, estás a correr um robot anterior (pt64 `3FB1B512…` ou anterior).
   - *Modelo source-controlled do instalador:
     `tools/watcher_src/instala_watcher_TEMPLATE.bat` — o Web copia-o por
     build e preenche VERSION/EXE_URL/EXPECTED_SHA.*
@@ -154,6 +155,19 @@ desliga, na medida do possível:
   tags/estado que o pedido usa. (A mão `GG-5944816316` foi preparada
   para isto nas sessões pt27-pt29.)
 
+### 2.6 Não mexer no CI à mão (regra operacional pt66)
+
+A partir do pt66 o robot **já não escreve o CI Target** — confia no **default do
+popup Nash, que é sempre 10.0** (= o alvo). O HRC é *sticky*: guarda o último valor
+de CI usado. Por isso:
+
+- **Ninguém altera o CI à mão** no HRC do Beelink.
+- Qualquer diagnóstico que mexa no CI **repõe 10.0** antes de fechar.
+
+Se o default tiver sido mudado à mão, o robot herdá-lo-ia em silêncio — mas há uma
+**salvaguarda só-leitura** que avisa: se vires `[WARN] [ci] Target CI lido = X
+(esperado 10.0)!` na consola, repõe 10.0 no popup e re-corre.
+
 ---
 
 ## 3. Sequência passo-a-passo
@@ -193,18 +207,25 @@ desliga, na medida do possível:
    pasta, abre/usa o HRC, e começa a configurar a mão. A partir daqui é
    só observar (secção 4).
 
-### 3.1 O que o robot faz na 2ª run (Selected Subtree)
+### 3.1 O que o robot faz na 2ª run (Selected Subtree) — pt66
 
-Para contexto — é a parte que ficou funcional em pt30-pt34. O robot replica
-a sequência manual que o Rui fazia à mão:
+A **1ª run é lançada pelo próprio Finish** (não há run intermédia — pt66). Quando
+ela acaba, o robot faz a 2ª run, replicando a sequência manual:
 
 1. A 1ª run acaba; a Strategy Table fica com a 1ª linha (UTG) seleccionada.
-2. O robot desce até à linha do **agressor real** (seta-baixo × N).
+2. O robot desce até à linha do **agressor real** (seta-baixo × N, via
+   `target_node_offset` do `meta.json`).
 3. Clica o **Play** (abre o popup "Nash Calculation").
-4. No popup: **Scope = Selected Subtree** + **CI = 10.0** → **OK** (via
-   BM_CLICK, porque o Enter não funciona no popup).
-5. A 2ª run arranca; o robot espera-a terminar (janela "Monte Carlo
-   Sampling") e exporta o `.zip`.
+4. No popup: **Scope = Selected Subtree** (via SysListView32 + read-back, pt64) →
+   **OK** (via BM_CLICK, porque o Enter não funciona no popup). **O CI NÃO é
+   escrito** (pt66) — fica no default do popup, que é sempre **10.0** (= o alvo).
+5. A 2ª run arranca; o robot espera-a terminar (janela "Monte Carlo Sampling") e
+   exporta o `.zip`. Há uma **salvaguarda só-leitura** que avisa se o "Target CI"
+   da run ≠ 10.
+
+> ⚠️ **São exatamente 2 runs** (1ª do Finish, 2ª Selected Subtree). Builds antigos
+> (≤pt64) faziam uma run intermédia redundante *durante* a 1ª run — se vires duas
+> janelas Monte Carlo em simultâneo, estás num robot antigo.
 
 Detalhe técnico completo em `docs/HRC_ANATOMIA_OPERACIONAL.md` §4.1 e §6.
 
@@ -249,22 +270,36 @@ seguir, por ordem:
   calcular o tamanho da árvore; o Finish já pode ser clicado (pt30).
 - `Finish...` → `[finish-diag pos-click] OK — wizard fechou.` — o Finish
   funcionou (slow-click).
-- `A calcular (1ª run)...` → `A aguardar fim da 1ª run...` →
-  `[run-wait] 1ª run: janela detectada title='Hand Setup'` →
+- **pt66 — a 1ª run é lançada pelo Finish** (já NÃO há `A calcular (1ª run)...`
+  nem run intermédia):
+  `A aguardar fim da 1ª run (lançada pelo Finish)...` →
+  `[run-wait] 1ª run: janela detectada title='Hand Setup'` (ou
+  `'...: Monte Carlo Sampling'`) →
   `[run-wait] 1ª run: run terminou em Xs (Y.Y min)` → `1ª run terminou.`
-- `navigate_to_target_node: N (down) presses` — navegou na tabela até à
-  linha do agressor real.
+  - ⚠️ **NUNCA** deves ver duas janelas "Monte Carlo Sampling" em simultâneo (1
+    *running* + 1 *Waiting*). Se vires, é um robot antigo com a run intermédia.
+- `navigate_to_target_node: foco-raiz @ (...) + N setas` — navegou até à linha do
+  agressor real (via `target_node_offset`).
 - `A calcular (2ª run, Selected Subtree)...` →
   `[calc-diag pre-click] coord=(...) hrc_window=(...)` →
   `_wait_for_nash_popup: matched title='Nash Calculation' ...` →
-  `Scope: Selected Subtree` → `CI Target (popup): 10.0` →
-  `[ok-click] hwnd=... result=BM_CLICK_sent` — popup configurado e
-  confirmado (pt32/pt33).
+  `[scope] SysListView32 idx=1 confirmado (read-back LVM) — Scope: Selected Subtree`
+  → `[ok-click] hwnd=... result=BM_CLICK_sent` →
+  `start_calculation_selected_subtree(ci=10.0) — 2ª run disparada (scope_ok=True;
+  CI no default do popup, sem escrita)`.
+  - **pt66:** já NÃO há linha de **escrita** do CI (a antiga `CI Target (popup):
+    10.0` / `[ci] Win32 WM_SETTEXT...` desapareceu). O CI fica no default (10.0).
+- **pt66 — salvaguarda SÓ-LEITURA do CI:**
+  `[ci] Target CI = 10.0 confirmado por leitura (sem escrita)` — OU
+  `[ci] (salvaguarda) "Target CI" não lido em 20s — sem verificação (fail-safe,
+  sem alarme)` (esperado se o título não tiver o formato). ⚠️ Se vires
+  `[WARN] [ci] Target CI lido = X (esperado 10.0)!` → repõe 10.0 no popup (ver §2.6).
 - `A aguardar fim da 2ª run...` →
   `[run-wait] 2ª run: janela detectada title='H-...: Monte Carlo Sampling'`
   → `[run-wait] 2ª run: run terminou em Xs` → `2ª run terminou.` (pt34).
-- `A fazer queue do export (finalize após 2ª run)...` →
-  `[QUEUED] <mão> -> <mão>.zip`.
+- `[QUEUED] <mão> -> <mão>.zip (Bloco 1 — finalize Bloco 2)`.
+  - ⚠️ **pt66:** NÃO deves ver `KO detetado — a selecionar Bounty Mode PKO 50%...`
+    nem `Bounty Mode: PKO 50%` (removidos; o modo vem da estrutura importada).
 
 > Esta consola **não grava ficheiro de log** — o que vês é só na janela.
 > Se a janela fechar perde-se. Por isso o `.bat` de arranque tem `pause`

@@ -82,17 +82,15 @@ CBN_SELCHANGE = 1       # notificação ao diálogo após mudar a selecção do 
 # actualizar este índice.
 EXPORT_MODE_COMPLETE_INDEX = 1
 
-# ── pt61 (#HRC-2ND-RUN-BLIND-CLICKS) — Scope/CI via Win32 (não pyautogui) ──
-# O popup Nash (#32770) tem os widgets como child windows nativas (pt33). Os
-# cliques pyautogui de Scope/opção/CI não registam de forma fiável neste popup
-# SWT/Java (só o OK via BM_CLICK funcionava). Passa-se Scope e CI a Win32, à
-# imagem do combo do export_strategies (pt35), com read-back de verificação.
-CB_GETCOUNT = 0x0146       # nº de itens no ComboBox
-CB_GETLBTEXT = 0x0148      # texto do item i (para achar o combo "Selected Subtree")
-CB_GETLBTEXTLEN = 0x0149   # comprimento do texto do item i
-WM_SETTEXT = 0x000C        # escrever texto num Edit (CI Target)
-WM_GETTEXT = 0x000D        # ler texto de um Edit (read-back do CI)
-WM_GETTEXTLENGTH = 0x000E
+# ── pt61/pt64/pt66 — Scope da 2ª run via Win32 ─────────────────────────────
+# O popup Nash (#32770) tem widgets SWT opacos; os cliques pyautogui de
+# Scope/opção não registam de forma fiável. O Scope passou a Win32 via a
+# SysListView32 do dropdown (pt64, ver bloco abaixo). pt66: o antigo caminho
+# Edit/ComboBox do CI/Scope (CB_GETCOUNT/GETLBTEXT/GETLBTEXTLEN + WM_SETTEXT/
+# GETTEXT/GETTEXTLENGTH + `_find_combo_with_item` + `_fill_ci_target_in_popup`)
+# foi REMOVIDO — o watcher já NÃO escreve o CI (o default do popup é sempre
+# 10.0 = o alvo). (CB_SETCURSEL/CB_GETCURSEL ficam — usados pelo
+# export_strategies, ver topo.)
 
 # ── pt64 (#HRC-SCOPE-CCOMBO-SWT) — Scope via SysListView32 do dropdown ──────
 # Diag pt64 (Beelink, popup Nash 436×230): o controlo Scope é um SWT CCombo —
@@ -133,8 +131,7 @@ _FINISH_WAIT_POLL_S = 0.1
 # corrida).
 #
 # Call sites cobertos por este patch: `paste_hh`, `paste_path` (swap dos
-# legacy do Baltazar), `_set_ci_target_common`, `_fill_ci_target_in_popup`
-# (já em patched_funcs). O `start_calculation` legacy (1ª run, dentro do
+# legacy do Baltazar). O `start_calculation` legacy (1ª run, dentro do
 # .pyc Baltazar, fora do nosso source-side) também tem o vector mas fica
 # como tech debt residual sob #PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE
 # — a 1ª run tem funcionado consistentemente em produção pelo que o swap
@@ -550,15 +547,17 @@ _RUN_WAIT_PROGRESS_LOG_S = 60.0
 
 
 def _find_progress_window_title(match_substring=None):
-    """pt34 v1: devolve o titulo COMPLETO da janela de progresso do HRC, ou
+    """pt34/pt66: devolve o titulo COMPLETO da janela de progresso do HRC, ou
     None se nao existir.
 
     - `match_substring=None` -> match exacto "Hand Setup" via FindWindowW
-      (comportamento pt31, usado pela 1a run cujo titulo de progresso e'
-      "Hand Setup").
-    - `match_substring` preenchido -> substring case-insensitive sobre os
-      titulos top-level via EnumWindows (2a run: o HRC mostra
-      "H-<hand_id>: Monte Carlo Sampling", nao "Hand Setup").
+      (comportamento pt31 legado).
+    - `match_substring` str -> substring case-insensitive sobre os titulos
+      top-level via EnumWindows (2a run: "H-<hand_id>: Monte Carlo Sampling").
+    - `match_substring` tuple/list de str -> QUALQUER um dos substrings (pt66):
+      a 1a run pode mostrar "Hand Setup" OU "Monte Carlo Sampling"; passar os
+      dois torna o run-wait robusto ao titulo exacto (que varia entre
+      runs/versoes do HRC) -> deixa de declarar "trivial" por nao reconhecer.
 
     Devolve o titulo (str) em vez de bool para logging diagnostico (o titulo
     pode mudar entre versoes do HRC).
@@ -567,7 +566,9 @@ def _find_progress_window_title(match_substring=None):
         if _pt30_user32.FindWindowW(None, "Hand Setup"):
             return "Hand Setup"
         return None
-    needle = match_substring.lower()
+    needles = ((match_substring,) if isinstance(match_substring, str)
+               else tuple(match_substring))
+    needles = tuple(s.lower() for s in needles)
     found = []
 
     def _enum_top(hwnd, lparam):
@@ -575,7 +576,8 @@ def _find_progress_window_title(match_substring=None):
         if n > 0:
             buf = ctypes.create_unicode_buffer(n + 1)
             _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
-            if needle in buf.value.lower():
+            low = buf.value.lower()
+            if any(nd in low for nd in needles):
                 found.append(buf.value)
                 return False  # encontrado — para a enumeracao
         return True
@@ -584,34 +586,31 @@ def _find_progress_window_title(match_substring=None):
     return found[0] if found else None
 
 
-def _wait_for_run_completion(timeout_appear_s=30, timeout_total_s=7200,
+def _wait_for_run_completion(timeout_appear_s=180, timeout_total_s=7200,
                              run_label="run", match_substring=None):
-    """pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE-MEMORY-HEURISTIC): aguarda
-    uma run do HRC terminar via polling Win32 da janela top-level de PROGRESSO
-    (a que o HRC mostra durante o calculo). Sinal binario, sem heuristica —
-    substitui `wait_for_calculation` (memoria), que dava falso positivo (smoke
-    pt30: declarou fim aos 48s mas a run ainda corria).
+    """pt31/pt66 (#HRC-RUN-WAIT-FALSE-TRIVIAL): aguarda uma run do HRC terminar
+    via polling Win32 da janela top-level de PROGRESSO. Sinal binario, sem
+    heuristica de memoria (que dava falso positivo no pt30).
 
-    pt34 v1: `match_substring` distingue 1a vs 2a run. A 1a run usa o titulo
-    exacto "Hand Setup" (match_substring=None); a 2a run usa substring
-    "Monte Carlo Sampling" porque a janela de progresso da 2a run tem titulo
-    "H-<hand_id>: Monte Carlo Sampling", nao "Hand Setup" (confirmado visual
-    no Beelink, smoke pt33 v1: sem isto a fase 1 dava falso negativo aos 30s e
-    o robot avancava para o Save As com a 2a run ainda a correr).
+    `match_substring` (ver `_find_progress_window_title`): None -> exacto
+    "Hand Setup"; str -> substring; tuple -> qualquer-um. A 1a run (lancada
+    pelo Finish) pode mostrar "Hand Setup" OU "Monte Carlo Sampling" -> passa-se
+    a tuple ("Hand Setup", "Monte Carlo Sampling"); a 2a run usa
+    "Monte Carlo Sampling".
 
     IMPORTANTE — assume que o wizard 'Hand Setup' de CONFIGURACAO ja fechou
-    (chamada apos `start_calculation`). Para a 1a run, a janela de progresso
-    reutiliza o titulo 'Hand Setup' do wizard; se esta funcao for chamada com
-    o wizard ainda aberto, o polling detecta-o falsamente. Sequencia correcta:
-        Finish -> wizard fecha -> Sleep(30) -> set_ci_initial ->
-        start_calculation -> _wait_for_run_completion AQUI.
+    (chamada apos o Finish + Sleep(30)). Se a 1a run reutilizar o titulo
+    'Hand Setup', o substring apanha-o na mesma (wizard ja fechado).
 
-    Fase 1 (timeout_appear_s, default 30s): aguardar a janela aparecer
-      (run arrancou). Se nao aparecer = run trivial ou erro; WARN e devolve
-      graceful (mesmo padrao do pt30).
+    Fase 1 (timeout_appear_s, default 180s): aguardar a janela aparecer (run
+      arrancou). pt66: o default subiu de 30s -> 180s porque a run e SEMPRE
+      esperada (1a = ~10M iteracoes, 2a = Selected Subtree) e NUNCA e trivial —
+      se nao aparecer em 30s estava so lenta a arrancar/enfileirada (era o que
+      gerava o falso "run trivial" no smoke pt64). Se mesmo assim nao aparecer,
+      WARN FORTE (nao "trivial") e continua (o export revela se ficou partido).
     Fase 2 (timeout_total_s): pollar enquanto a janela existir; quando
-      desaparecer = run terminou. Log periodico de minuto-a-minuto. Timeout
-      = run preso; raise RuntimeError.
+      desaparecer = run terminou. Log minuto-a-minuto. Timeout = run preso;
+      raise RuntimeError.
     """
     # Fase 1: aguardar a janela de progresso aparecer.
     appear_deadline = time.time() + timeout_appear_s
@@ -622,9 +621,10 @@ def _wait_for_run_completion(timeout_appear_s=30, timeout_total_s=7200,
             break
         time.sleep(_RUN_WAIT_POLL_S)
     if appeared_title is None:
-        print('   [WARN] [run-wait] %s: janela de progresso nao apareceu em '
-              '%ds — run trivial ou erro; a continuar'
-              % (run_label, timeout_appear_s))
+        print('   [WARN] [run-wait] %s: a janela de progresso nao apareceu em '
+              '%ds. ESPERAVA uma run (nunca e trivial) — provavelmente lenta a '
+              'arrancar/enfileirada, ou o titulo mudou. A continuar; CONFIRMAR '
+              'no export.' % (run_label, timeout_appear_s))
         return
     print('   [run-wait] %s: janela detectada title=%r'
           % (run_label, appeared_title))
@@ -650,6 +650,50 @@ def _wait_for_run_completion(timeout_appear_s=30, timeout_total_s=7200,
         'RUN_NEVER_COMPLETED: %s nao terminou em %ds'
         % (run_label, timeout_total_s)
     )
+
+
+# pt66 — salvaguarda SÓ-LEITURA do CI (o watcher já não escreve o CI).
+_CI_READBACK_TIMEOUT_S = 20.0
+_CI_TARGET_RE = re.compile(r'Target\s*CI\s*[<:=]?\s*([0-9]+(?:\.[0-9]+)?)', re.I)
+
+
+def _ci_target_readback_warn(expected_ci=10.0):
+    """pt66 (#HRC-RUN-WAIT... / CI): SALVAGUARDA SÓ-LEITURA do CI Target. O
+    watcher já NÃO escreve o CI (o default do popup Nash é sempre 10.0 = o
+    alvo). Esta função apenas LÊ o "Target CI" da janela de progresso da run
+    (Monte Carlo) e emite WARN FORTE se o valor lido ≠ `expected_ci`. Protege
+    contra o único risco real: o default do HRC é sticky (último valor usado) —
+    se alguém o mudou à mão, o robot herdaria um CI errado em silêncio. Pura
+    detecção, ZERO interação.
+
+    ⚠️ O formato do título ("MC-CFR [Target CI < X]", de uma foto pt64) NÃO está
+    verificado no código. Se o título diferir, esta função falha em SILÊNCIO
+    (não acha o número → sem WARN) — nunca um falso alarme. Re-confirmar na
+    re-smoke pt66 e ajustar `_CI_TARGET_RE` se preciso. Regra operacional:
+    ninguém altera o CI à mão no HRC do Beelink.
+    """
+    deadline = time.time() + _CI_READBACK_TIMEOUT_S
+    while time.time() < deadline:
+        title = _find_progress_window_title(("Target CI",))
+        if title:
+            m = _CI_TARGET_RE.search(title)
+            if m:
+                try:
+                    got = float(m.group(1))
+                except ValueError:
+                    return
+                if abs(got - float(expected_ci)) > 1e-6:
+                    print('   [WARN] [ci] Target CI lido = %s (esperado %s)! O '
+                          'default do HRC pode ter sido mudado à mão — REPOR %s '
+                          'no popup Nash.' % (got, expected_ci, expected_ci))
+                else:
+                    print('   [ci] Target CI = %s confirmado por leitura '
+                          '(sem escrita)' % got)
+                return
+        time.sleep(_RUN_WAIT_POLL_S)
+    # Janela com "Target CI" não lida no tempo -> fail-safe, sem alarme.
+    print('   [ci] (salvaguarda) "Target CI" não lido em %ds — sem verificação '
+          '(fail-safe, sem alarme)' % int(_CI_READBACK_TIMEOUT_S))
 
 
 def _do_paste_hh_attempt(wpos, hh_text, label):
@@ -801,86 +845,13 @@ def setup_scripting(wpos, script_path):
     paste_path(script_path or SCRIPT_FILE)
 
 
-# pt25e Bug F (#WATCHER-BUG-F-CI-TARGET-2ND-RUN): coords do campo CI Target
-# no main UI HRC pós-finish do wizard.
-#
-# IMPORTANTE — coords NÃO são herdadas de pt25d:
-# Em pt25d, `start_calculation` (Baltazar original, não-patched) fazia set CI
-# DENTRO da Nash dialog popup — coords computadas relativas ao `rect` do
-# popup (`rect.left + int(w * 0.65)`, `rect.top + int(h * 0.51)`), não no
-# main UI. Os helpers novos abaixo apontam para conceito diferente: campo
-# CI Target no main UI antes de clicar Calculate. Nunca houve coords
-# calibrados para este campo — daí placeholder (0,0) + early-return
-# defensivo. Bloco 2 calibra com smoke devagar do Rui.
-#
-# `start_calculation` original continua a correr depois e ainda lida com a
-# Nash dialog que aparece (seu próprio set CI no popup). Os 2 sets podem
-# coexistir até que o Bloco 2 decida se mantém só um.
-CI_TARGET_FIELD_X = 0  # TODO pt25e Bloco 2: calibrar (não-herdado de pt25d)
-CI_TARGET_FIELD_Y = 0  # TODO pt25e Bloco 2: calibrar (não-herdado de pt25d)
-
-
-def _set_ci_target_common(wpos, value, label):
-    """Helper privado partilhado por `set_ci_target_initial` /
-    `set_ci_target_refine`: estrutura click+wait idêntica, diferindo apenas
-    no valor e no label de log.
-
-    Defensiva: se coords ainda não foram calibrados (ambos == 0), faz
-    early-return com WARN em vez de clicar (0, 0) — evita race conditions
-    com outras janelas e mantém o flow seguro até Bloco 2 calibrar.
-    """
-    if CI_TARGET_FIELD_X == 0 and CI_TARGET_FIELD_Y == 0:
-        print(f'   [WARN] CI Target {label}: coords não calibrados '
-              f'(pt25e Bloco 2 pendente) — set ignorado, value={value}')
-        return
-    click_rel(wpos, CI_TARGET_FIELD_X, CI_TARGET_FIELD_Y)
-    time.sleep(0.3)
-    pyautogui.hotkey('ctrl', 'a')
-    time.sleep(0.1)
-    clipboard_safe_paste(str(float(value)))  # pt29: set+verify+Ctrl+V atómico
-    time.sleep(0.2)                          # preserva timing legacy pós-paste
-    pyautogui.press('tab')  # commit edit + leave focus
-    time.sleep(0.3)
-    print(f'   CI Target {label}: {value}')
-
-
-def set_ci_target_initial(wpos, value=5.0):
-    """pt25e Bug F — set do CI Target no main UI HRC para a 1ª run.
-
-    Default 5.0 = exploração rápida da árvore (configuração canónica do
-    flow do Baltazar). Chamado em `setup_hand` antes do 1º Calculate.
-
-    Era parte do flow monolítico de `start_calculation`; split aqui para
-    permitir 2 sets distintos (initial pre-1ª run, refine pre-2ª run após
-    Prune Action manual + Scope=Selected Subtree). Ver Bug F em
-    `docs/TECH_DEBTS_INVENTARIO.md`.
-
-    DEPRECATED (Bloco 2 piece 1): o popup Nash gere o CI internamente
-    (`start_calculation` original do Baltazar faz set CI relativo ao rect
-    do popup). Esta função era um experimento de mover o set para o main UI
-    antes de Calculate. Não calibrada (coords = 0). Mantida no source
-    apenas para preservar a slot do marshal swap até peça 2 confirmar
-    in-popup CI suficiente; remoção planeada após validação.
-    """
-    _set_ci_target_common(wpos, value, 'initial')
-
-
-def set_ci_target_refine(wpos, value=10.0):
-    """pt25e Bug F — set do CI Target para a 2ª run em Selected Subtree.
-
-    Default 10.0 = refinamento de precisão útil (vs 5.0 da 1ª run que é
-    para exploração rápida). Chamado em Bloco 2 entre Prune Action + Scope
-    selection e o 2º Calculate.
-
-    Não é chamado em Bloco 1 — fica disponível para a wiring de Bloco 2
-    (ver stubs em `setup_hand`).
-
-    DEPRECATED (Bloco 2 piece 1): mesma razão que `set_ci_target_initial`.
-    O refinamento de CI para a 2ª run deve passar a ser feito dentro do
-    popup Nash pela própria `start_calculation_selected_subtree`. Mantida
-    até peça 2 confirmar.
-    """
-    _set_ci_target_common(wpos, value, 'refine')
+# pt66 — set do CI Target no main UI REMOVIDO. As funções `set_ci_target_initial`
+# / `set_ci_target_refine` / `_set_ci_target_common` + as coords
+# `CI_TARGET_FIELD_*` eram do flow Bloco 2 (nunca calibradas, coords 0 →
+# no-op). Já não há lugar para elas: a 1ª run é lançada pelo Finish (sem set CI
+# no main UI) e a 2ª run usa o CI default do popup Nash, que é SEMPRE 10.0 (= o
+# alvo) — o watcher deixou de escrever o CI (ver `start_calculation_selected_subtree`
+# e a regra operacional "ninguém altera o CI à mão no Beelink" no runbook).
 
 
 # pt25e Bloco 2 piece 1 (#WATCHER-BUG-G-SCOPE-SELECTED-SUBTREE):
@@ -899,12 +870,12 @@ def set_ci_target_refine(wpos, value=10.0):
 # ~13px X quando o popup cresce. Pixels-rel preservam directamente a
 # medição empírica do smoke 18 Maio.
 #
-# ⚠️ pt61: estes pixels-rel são apenas BASELINE/FALLBACK. O caminho activo do
-# Scope e do CI passou a ser **Win32** (CB_SETCURSEL / WM_SETTEXT + read-back),
-# que NÃO depende de coords (ver `_set_scope_in_popup` / `_fill_ci_target_in_popup`).
-# A calibração pt61 (popup 436×230) mostrou que mesmo com as coords certas o
-# clique pyautogui não selecciona neste popup → o fix real é o método, não a
-# coord. Estes valores ficam só para o fallback pyautogui se o Win32 falhar.
+# ⚠️ pt61/pt64: estes pixels-rel do Scope são apenas BASELINE/FALLBACK. O
+# caminho activo do Scope é Win32 (foco + F4 + SysListView32 do dropdown +
+# read-back LVM, pt64), que NÃO depende de coords. A calibração pt61 (popup
+# 436×230) mostrou que mesmo com as coords certas o clique pyautogui não
+# selecciona neste popup → o fix real é o método, não a coord. Estes valores
+# ficam só para o foco-click inicial do Scope.
 #
 # Calibração pt61 (Rui, Beelink, popup Nash 436×230):
 #   - Dropdown Scope: rel (308, 69)        [era (278, 67) @416×214]
@@ -916,11 +887,8 @@ SCOPE_DROPDOWN_REL_Y = 69
 SCOPE_OPTION_SELECTED_SUBTREE_REL_X = 290
 SCOPE_OPTION_SELECTED_SUBTREE_REL_Y = 107
 
-
-# pt25e Bloco 2 piece 2 — CI Target dentro do popup Nash. BASELINE/FALLBACK
-# (caminho activo = Win32 WM_SETTEXT; ver nota acima). Calibração pt61 436×230.
-CI_TARGET_POPUP_REL_X = 297
-CI_TARGET_POPUP_REL_Y = 108
+# pt66: CI_TARGET_POPUP_REL_* removido — o watcher já não escreve o CI no popup
+# (default = 10.0); ver `start_calculation_selected_subtree`.
 
 
 # pt61 — Strategy Table (janela PRINCIPAL do HRC, não o popup): nó-raiz (offset 0)
@@ -1071,48 +1039,12 @@ def _click_calculate_button(wpos=None):
     time.sleep(0.3)
 
 
-def _fill_ci_target_in_popup(popup_rect, ci_target):
-    """Preenche o CI Target no popup Nash — pt61: via Win32 (WM_SETTEXT) com
-    read-back (WM_GETTEXT). Conservador: só usa Win32 se houver EXACTAMENTE 1
-    controlo Edit no popup (= o CI Target, inequívoco); senão cai no fallback
-    pyautogui (baseline coords pt61). NÃO depende de coords no caminho activo.
-
-    Passo 3 do flow (após `_set_scope_in_popup`). Devolve `True` SÓ se o
-    read-back confirmar o valor; `False` caso contrário (Win32 falhou e fallback
-    pyautogui não é confirmável). `popup_rect` é usado SÓ pelo fallback.
-    """
-    # Inteiro sem ".0" (o Edit do HRC aceita "10"); fracção preserva o float.
-    target = (str(int(ci_target)) if float(ci_target).is_integer()
-              else str(float(ci_target)))
-    hwnd_popup = _find_nash_popup_hwnd()
-    edit = _find_single_edit(hwnd_popup) if hwnd_popup else None
-    if edit:
-        sbuf = ctypes.create_unicode_buffer(target)
-        _pt30_user32.SendMessageW(edit, WM_SETTEXT, 0, ctypes.addressof(sbuf))
-        time.sleep(0.2)
-        got = _read_edit_text(edit).strip()
-        if got == target:
-            print('   [ci] Win32 WM_SETTEXT "%s" confirmado (read-back)' % target)
-            return True
-        print('   [WARN] [ci] read-back não bate (got=%r != %r) '
-              '— fallback pyautogui' % (got, target))
-    else:
-        print('   [WARN] [ci] Edit único do CI não identificado '
-              '— fallback pyautogui')
-    # Fallback pyautogui (baseline coords pt61) — best-effort, NÃO confirmável.
-    if popup_rect is None or CI_TARGET_POPUP_REL_X == 0:
-        print('   [WARN] [ci] fallback indisponível (popup_rect/coords) '
-              '— CI NÃO confirmado')
-        return False
-    left, top, _w, _h = popup_rect
-    pyautogui.click(left + CI_TARGET_POPUP_REL_X, top + CI_TARGET_POPUP_REL_Y)
-    time.sleep(0.3)
-    pyautogui.hotkey('ctrl', 'a')
-    time.sleep(0.1)
-    clipboard_safe_paste(target)  # pt29: set+verify+Ctrl+V atómico
-    time.sleep(0.2)
-    print('   [ci] fallback pyautogui aplicado (NÃO confirmado por read-back)')
-    return False
+# pt66: `_fill_ci_target_in_popup` REMOVIDO — o watcher já NÃO escreve o CI no
+# popup Nash. O default do popup é sempre 10.0 (= o alvo), por isso escrever era
+# uma interação a mais (e o campo é um Caso-3 SWT sem Edit nativo → o read-back
+# Win32 nunca confirmava). A salvaguarda passou a ser SÓ-LEITURA: ver
+# `_ci_target_readback_warn` (lê o "Target CI" da janela de progresso e avisa se
+# ≠ 10). Regra operacional: ninguém altera o CI à mão no HRC do Beelink.
 
 
 def _find_nash_popup_hwnd():
@@ -1223,71 +1155,9 @@ def _cancel_nash_popup():
     time.sleep(0.3)
 
 
-def _find_combo_with_item(hwnd_popup, item_text_lower):
-    """pt61: enumera os ComboBox filhos do popup Nash e devolve `(hwnd, idx)` do
-    PRIMEIRO combo que contém um item cujo texto normalizado == `item_text_lower`.
-
-    No popup Nash há >1 ComboBox (CFR Algorithm, Scope, ...) — por isso achamos o
-    Scope pelo CONTEÚDO ("Selected Subtree"), não pela ordem. `(None, None)` se
-    nenhum combo tiver o item. Read-only (não muda selecção). Buffers passados a
-    `CB_GETLBTEXT*` via `addressof` (lParam = LONG_PTR aceita o endereço)."""
-    if not hwnd_popup:
-        return (None, None)
-    result = [None, None]
-
-    def _enum(ch, lparam):
-        cls_buf = ctypes.create_unicode_buffer(256)
-        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
-        if cls_buf.value.lower() != "combobox":
-            return True
-        count = _pt30_user32.SendMessageW(ch, CB_GETCOUNT, 0, 0)
-        count = count if isinstance(count, int) and count > 0 else 0
-        for i in range(count):
-            n = _pt30_user32.SendMessageW(ch, CB_GETLBTEXTLEN, i, 0)
-            if not isinstance(n, int) or n <= 0:
-                continue
-            buf = ctypes.create_unicode_buffer(n + 1)
-            _pt30_user32.SendMessageW(ch, CB_GETLBTEXT, i, ctypes.addressof(buf))
-            if buf.value.strip().lower() == item_text_lower:
-                result[0] = ch
-                result[1] = i
-                return False
-        return True
-
-    _pt30_user32.EnumChildWindows(hwnd_popup, _PT30_WNDENUMPROC(_enum), 0)
-    return (result[0], result[1])
-
-
-def _find_single_edit(hwnd_popup):
-    """pt61: hwnd do ÚNICO controlo Edit do popup Nash (= o campo CI Target),
-    ou None se houver 0 ou >1 Edits (ambíguo → caller cai no fallback pyautogui).
-    Conservador de propósito: só usa Win32 no CI quando é inequívoco."""
-    if not hwnd_popup:
-        return None
-    edits = []
-
-    def _enum(ch, lparam):
-        cls_buf = ctypes.create_unicode_buffer(256)
-        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
-        if cls_buf.value.lower() == "edit":
-            edits.append(ch)
-        return True
-
-    _pt30_user32.EnumChildWindows(hwnd_popup, _PT30_WNDENUMPROC(_enum), 0)
-    return edits[0] if len(edits) == 1 else None
-
-
-def _read_edit_text(hwnd_edit):
-    """Texto actual de um Edit via WM_GETTEXT (read-back). '' se vazio/erro."""
-    if not hwnd_edit:
-        return ""
-    n = _pt30_user32.SendMessageW(hwnd_edit, WM_GETTEXTLENGTH, 0, 0)
-    n = n if isinstance(n, int) and n > 0 else 0
-    if n == 0:
-        return ""
-    buf = ctypes.create_unicode_buffer(n + 1)
-    _pt30_user32.SendMessageW(hwnd_edit, WM_GETTEXT, n + 1, ctypes.addressof(buf))
-    return buf.value
+# pt66: `_find_combo_with_item` (CB_* do Scope — caminho morto desde o pt64
+# SysListView32), `_find_single_edit` e `_read_edit_text` (Edit do CI) REMOVIDOS
+# — o Scope usa a SysListView32 do dropdown e o CI já não é escrito.
 
 
 def _find_scope_dropdown_listview():
@@ -1457,29 +1327,24 @@ def start_calculation_selected_subtree(wpos, ci_target):
     se peça 2 tiver bugs nos passos 1/2/5, o Full Tree path original
     continua a funcionar.
 
-    Sequência alvo dentro do popup Nash:
+    Sequência alvo dentro do popup Nash (pt66):
       1. Click Calculate (abre popup).
-      2. _set_scope_in_popup(popup_rect)            [pt28-v1: Scope PRIMEIRO]
-      3. Fill CI Target no popup.                   [pt28-v1: CI DEPOIS]
-      4. Click OK / Enter.
-
-    pt28-v1 reordering: Scope -> CI -> OK (era CI -> Scope -> OK). Razão:
-    suspeita de que ao mudar Scope DEPOIS de fill CI, o re-render do
-    popup ao seleccionar "Selected Subtree" pode resetar o CI Target
-    para o default do scope novo (10.0 vs 5.0). Pôr Scope primeiro
-    garante que o re-render acontece antes do CI ser escrito, eliminando
-    o vector. Sem mexer em coords — fix puramente de ordem. O smoke
-    real seguinte valida; logging defensivo em `_set_scope_in_popup`
-    regista coords absolutas para diagnóstico se ainda falhar.
+      2. _set_scope_in_popup(popup_rect)  — Scope = Selected Subtree (Win32).
+      3. Click OK (BM_CLICK).
+    O CI já NÃO é escrito (pt66): o default do popup é sempre 10.0 (= `ci_target`),
+    por isso o passo de fill CI foi removido — menos uma interação no popup SWT.
+    A confirmação do CI passou a ser SÓ-LEITURA, feita pós-dispatch pelo caller
+    (`_ci_target_readback_warn`, lê o "Target CI" da janela de progresso e avisa
+    se ≠ 10).
 
     `wpos` é o win_pos do main HRC window (mesmo objecto que
-    `start_calculation` recebe via globals). `ci_target` é o CI a usar na
-    2ª run (default product: 10.0).
+    `start_calculation` recebe via globals). `ci_target` é o CI alvo da 2ª run
+    (10.0); agora só informa o log e a salvaguarda de leitura — não é escrito.
 
     Defensive em cada passo: se `_click_calculate_button` não tem coords
     (placeholder), `_wait_for_nash_popup` devolve None por timeout, e os
-    helpers downstream (scope / fill CI / OK) fazem early-return. O flow
-    inteiro degrada para no-op com WARN logs em vez de cliques errantes.
+    helpers downstream (scope / OK) fazem early-return. O flow inteiro degrada
+    para no-op com WARN logs em vez de cliques errantes.
 
     pt28 (#FINALIZE-NEVER-FIRES-ON-NO-OP): devolve `bool`:
       - `True` se passos 1-4 completaram (popup detectado + set scope +
@@ -1506,14 +1371,12 @@ def start_calculation_selected_subtree(wpos, ci_target):
               '2ª run ABORTADA (sem OK, sem export). Cancela o popup.')
         _cancel_nash_popup()
         return "scope_unconfirmed"
-    # CI: não confirmar NÃO aborta (a run continua em Selected Subtree; só a
-    # precisão pode ficar no default do HRC). Sinaliza e segue.
-    ci_ok = _fill_ci_target_in_popup(popup_rect, ci_target)  # passo 3 (Win32 + read-back)
-    if not ci_ok:
-        print('   [WARN] [calc] CI Target NÃO confirmado — segue com o default do HRC')
-    _click_ok_in_popup(popup_rect)                        # passo 4 (BM_CLICK)
+    # pt66: o CI já NÃO é escrito — o default do popup Nash é sempre 10.0 (= o
+    # alvo `ci_target`). Menos uma interação no popup SWT. A salvaguarda é
+    # só-leitura, feita pós-dispatch pelo caller (`_ci_target_readback_warn`).
+    _click_ok_in_popup(popup_rect)                        # passo 3 (BM_CLICK)
     print('   start_calculation_selected_subtree(ci=%s) — 2ª run disparada '
-          '(scope_ok=True ci_ok=%s)' % (ci_target, ci_ok))
+          '(scope_ok=True; CI no default do popup, sem escrita)' % (ci_target,))
     return True
 
 
@@ -2093,10 +1956,14 @@ def setup_hand(hand_name, hand_path):
 
     if prize_path:
         print(f'   Prizes: {os.path.basename(prize_path)}')
+        # pt66 (#HRC-BOUNTY-HARDCODED-50PCT): import_prizes carrega a estrutura
+        # payouts.json e é o HRC que põe o Bounty Mode (PKO factor X / Mystery /
+        # sem KO) a partir dela. O `select_bounty_mode` legacy corria A SEGUIR e
+        # ESMAGAVA-o para um PKO 50% cego (só em KO) — errado para PKO 25%, Super
+        # KO, etc. Removido: o modo da estrutura passa a prevalecer em todos os
+        # formatos. is_ko_tournament/select_bounty_mode (Baltazar, no .pyc) ficam
+        # órfãos no fluxo. Ver TECH_DEBTS pt62-pt64.
         import_prizes(wpos, prize_path)
-        if is_ko_tournament(prize_path):
-            print('   KO detetado — a selecionar Bounty Mode PKO 50%...')
-            select_bounty_mode(wpos)
 
     if stage == 'MTT' and total_chips:
         print(f'   Total Chips: {total_chips:,}')
@@ -2196,25 +2063,29 @@ def setup_hand(hand_name, hand_path):
     print('   A aguardar carregamento da mão (30s)...')
     time.sleep(30)
 
-    # pt25e Bug F: set CI Target inicial (5.0) ANTES do 1º Calculate.
-    # Split do flow monolítico antigo (start_calculation fazia tudo numa
-    # call: click Calculate + Nash dialog + set CI + OK). Agora o set CI
-    # acontece primeiro no main UI, e `start_calculation` continua a
-    # dispatch o 1º cálculo (Nash dialog ainda aparece + confirma via Enter
-    # se nash_found, ou fallback Enter).
-    print('   Set CI Target inicial...')
-    set_ci_target_initial(wpos, value=ci_target)
-
-    print('   A calcular (1ª run)...')
-    start_calculation(ci_target)
-
-    # pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE-MEMORY-HEURISTIC): esperar a
-    # 1a run terminar via polling da janela 'Hand Setup' de progresso (sinal
-    # binario), em vez de wait_for_calculation (memoria, falso positivo no
-    # smoke pt30). start_calculation apenas DISPARA; nao bloqueia. Timeout 2h
-    # (1a run = ~10M iteracoes + preparacao).
-    print('   A aguardar fim da 1ª run...')
-    _wait_for_run_completion(timeout_total_s=7200, run_label="1ª run")
+    # pt66 (#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS): a 1ª run é lançada pelo
+    # próprio Finish (slow-click acima) — é o spec canónico (WATCHER_FLUXO:
+    # "É o Finish que lança a 1ª run") e foi confirmado ao vivo no smoke pt64.
+    # O `start_calculation(ci_target)` que aqui corria clicava Calculate outra
+    # vez → abria um 2º popup Nash → disparava uma run INTERMÉDIA redundante
+    # (Full Tree, SEM navegar ao nó) ENQUANTO a 1ª run ainda corria (o HRC
+    # enfileirava-as → 3 runs, 2 janelas Monte Carlo). Removido: a seguir ao
+    # Finish, esperamos só a 1ª run e vamos DIRETO ao navigate + Selected
+    # Subtree (exatamente 2 runs, sem prune). O `set_ci_target_initial` (no-op,
+    # coords 0) também sai. `start_calculation` (Baltazar, no .pyc) fica órfão.
+    #
+    # pt31/pt66 (#HRC-RUN-WAIT-FALSE-TRIVIAL): esperar o fim da 1ª run via
+    # polling da janela de progresso (sinal binário). A 1ª run pós-Finish pode
+    # mostrar "Hand Setup" (reuso do título do wizard) OU "Monte Carlo
+    # Sampling"; passamos os dois candidatos para o run-wait não a declarar
+    # "trivial" por não reconhecer o título. Timeout de aparição generoso
+    # (default 180s — uma run de 10M iterações nunca é trivial). Timeout total
+    # 2h.
+    print('   A aguardar fim da 1ª run (lançada pelo Finish)...')
+    _wait_for_run_completion(
+        timeout_total_s=7200, run_label="1ª run",
+        match_substring=("Hand Setup", "Monte Carlo Sampling"),
+    )
     print('   1ª run terminou.')
 
     exports_dir = os.path.join(DONE_DIR, 'Exports')
@@ -2280,6 +2151,9 @@ def setup_hand(hand_name, hand_path):
         # a 2a run foi de facto disparada (True) — em False (popup nao abriu)
         # ou None (sem aggressor) o estado vigente e o da 1a run, ja terminada
         # pelo wait acima. Timeout 8h (Selected Subtree pode demorar horas).
+        # pt66: salvaguarda SÓ-LEITURA do CI (o watcher já não o escreve) —
+        # avisa se o "Target CI" da run ≠ 10 (default do HRC mudado à mão).
+        _ci_target_readback_warn(10.0)
         print('   A aguardar fim da 2ª run...')
         # pt34 v1: a 2a run tem janela de progresso "H-<hand_id>: Monte Carlo
         # Sampling" (nao "Hand Setup"); match por substring.

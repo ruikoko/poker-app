@@ -705,3 +705,94 @@ def test_setup_hand_calls_wait_for_run_completion_pt31(pf, tmp_path):
     # legacy nao e chamado.
     assert pf._wait_for_run_completion.called
     pf.wait_for_calculation.assert_not_called()
+
+
+# == pt66: run-wait tuple match + CI read-only safeguard + no intermediate run ==
+
+def test_find_progress_window_title_tuple_match_pt66(pf):
+    """pt66: match_substring tuple -> casa QUALQUER um dos candidatos (any-of).
+    A 1a run pode mostrar 'Hand Setup' OU 'Monte Carlo Sampling' -> passar os
+    dois torna o run-wait robusto ao titulo exacto."""
+    pf._pt30_user32 = MagicMock()
+    windows = {
+        201: "Random Window",
+        202: "H-GG-1: Monte Carlo Sampling",
+    }
+
+    def _enum_windows(cb, lparam):
+        for hwnd in windows:
+            if cb(hwnd, lparam) == 0:
+                break
+        return True
+
+    pf._pt30_user32.EnumWindows.side_effect = _enum_windows
+    pf._pt30_user32.GetWindowTextLengthW.side_effect = lambda h: len(windows[h])
+
+    def _get_text(h, buf, cch):
+        buf.value = windows[h]
+        return len(windows[h])
+
+    pf._pt30_user32.GetWindowTextW.side_effect = _get_text
+
+    title = pf._find_progress_window_title(
+        match_substring=("Hand Setup", "Monte Carlo Sampling")
+    )
+    assert title == "H-GG-1: Monte Carlo Sampling"
+    # caminho substring -> nao usa FindWindowW exacto
+    pf._pt30_user32.FindWindowW.assert_not_called()
+
+
+def test_ci_target_readback_warn_warns_when_not_10_pt66(pf, capsys):
+    """pt66: leitura do 'Target CI' != 10 -> WARN forte (deteccao, sem
+    interacao)."""
+    pf._find_progress_window_title = MagicMock(
+        return_value="H-GG-1: MC-CFR [Target CI < 12.00]"
+    )
+    pf._ci_target_readback_warn(10.0)
+    out = capsys.readouterr().out
+    assert "[WARN]" in out and "Target CI" in out and "12" in out
+
+
+def test_ci_target_readback_warn_silent_when_10_pt66(pf, capsys):
+    """pt66: 'Target CI' == 10 -> confirma por leitura, SEM WARN."""
+    pf._find_progress_window_title = MagicMock(
+        return_value="H-GG-1: MC-CFR [Target CI < 10.00]"
+    )
+    pf._ci_target_readback_warn(10.0)
+    out = capsys.readouterr().out
+    assert "[WARN]" not in out
+    assert "confirmado por leitura" in out
+
+
+def test_ci_target_readback_warn_failsafe_when_no_window_pt66(pf, capsys):
+    """pt66: janela 'Target CI' nao encontrada -> fail-safe, SEM WARN/alarme
+    (o formato do titulo nao esta verificado; nunca um falso alarme)."""
+    pf._find_progress_window_title = MagicMock(return_value=None)
+    pf._CI_READBACK_TIMEOUT_S = 0.0  # nao entra no loop de polling
+    pf._ci_target_readback_warn(10.0)
+    out = capsys.readouterr().out
+    assert "[WARN]" not in out
+    assert "fail-safe" in out
+
+
+def test_setup_hand_no_intermediate_run_no_bounty_pt66(pf, tmp_path):
+    """pt66: setup_hand JA NAO chama start_calculation (run intermedia removida
+    — a 1a run e' lancada pelo Finish) nem select_bounty_mode / is_ko_tournament
+    (o Bounty Mode vem da estrutura importada). import_prizes continua a correr."""
+    import json
+    _stub_setup_hand_globals(pf, str(tmp_path))
+    pf._set_clipboard_with_verify = MagicMock()
+    pf._detect_hand_import_error_popup = MagicMock(return_value=None)
+    pf._wizard_window_present = MagicMock(return_value=False)
+
+    hand_path = Path(_make_minimal_hand_dir(tmp_path))
+    (hand_path / "payouts.json").write_text(
+        json.dumps({"CompletedTournament": {"@flags": "B"}}), encoding="utf-8"
+    )
+
+    pf.setup_hand("GG-TEST-99999", str(hand_path))
+
+    pf.start_calculation.assert_not_called()     # (a) run intermedia removida
+    pf.select_bounty_mode.assert_not_called()    # (d) bounty hardcode removido
+    pf.is_ko_tournament.assert_not_called()      # (d) gate removido
+    pf.import_prizes.assert_called_once()        # estrutura importada (modo vem dai)

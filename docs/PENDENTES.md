@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 10 Junho 2026 (pt64 — ★ **smoke real Beelink PASSOU**, ciclo HRC ponta-a-ponta fechado [`GG-6028190109`]; housekeeping de docs + quarentenas). Antes: pt62/pt63 (lobby-IT por nome/filename); pt50–pt58 (RE-IMPORT end-to-end + fuso Lisboa-naive + Vision Claude-only + `tools/appimport`). Journal: `docs/JOURNAL_2026-06-10-pt64.md`.
+**Última actualização:** 10 Junho 2026 (pt66 — cirurgia ao watcher HRC: 4 fixes [run intermédia removida; run-wait robusto; CI não escrito; `select_bounty_mode` removido]; backend 911 PASSED; `.exe` `9ea51ce4` na Release `watcher-pt66`; **re-smoke real pendente**). Antes: pt64 (★ smoke real PASSOU, ciclo HRC ponta-a-ponta) + pt65 (bounty-verify); pt62/pt63 (lobby-IT). Journal: `docs/JOURNAL_2026-06-10-pt66.md`.
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,20 +12,19 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **★ pt66 — sessão dedicada do watcher (GATE da fila completa).** A smoke pt64
-> PASSOU o ciclo HRC ponta-a-ponta (`GG-6028190109`), mas expôs ao vivo que o
-> watcher ainda faz **3 runs** (a intermédia Full-Tree redundante dispara
-> **enquanto a 1ª run corre** — o HRC enfileira-as). Numa só sessão (mesmo
-> ficheiro, mesmo build): (a) remover a run intermédia redundante — ir DIRETO de
-> fim-da-1ª-run para navigate + Selected Subtree + CI (o `meta.json` já tem
-> `target_node_offset` + `aggressor_real_action`; spec `docs/WATCHER_FLUXO.md`);
-> (b) endurecer o run-wait contra o **falso-trivial** (`#HRC-RUN-WAIT-FALSE-TRIVIAL`);
-> (c) **CI via lista/read-back** (SysListView32, como o scope pt64) + limpar `CB_*`
-> morto; (d) `.exe` novo + **GitHub Release** (regra 4 do FLUXO) + re-smoke.
-> **⚠️ A fila completa (~49 mãos em `queue_hold`) SÓ se solta após a re-smoke pt66
-> passar** — decisão do Rui pendente, mas o gate fica registado. Debts:
-> `#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` (🔴 HIGH), `#HRC-RUN-WAIT-FALSE-TRIVIAL`,
-> `#CI-TARGET-INITIAL-NOT-CALIBRATED`. Detalhe: `TECH_DEBTS_INVENTARIO.md` (pt62–pt64).
+> **★ pt66 — watcher CORRIGIDO; falta a RE-SMOKE real (gate da fila).** Os 4 fixes
+> estão em código (backend **911 PASSED** + in-process smoke **ALL OK**) e o `.exe`
+> **`9ea51ce4…c103bd4`** está na Release **`watcher-pt66`** (SHA round-trip
+> validado): (a) run intermédia **removida** — exatamente 2 runs, sem prune; (b)
+> run-wait robusto (`#HRC-RUN-WAIT-FALSE-TRIVIAL`); (c') CI **não escrito** (default
+> do popup = 10.0) + salvaguarda só-leitura; (d) `select_bounty_mode` removido
+> (`#HRC-BOUNTY-HARDCODED-50PCT`) → o modo vem da estrutura. **Próximo passo: a
+> RE-SMOKE de 2 mãos** (1 KO **não-WN** com fator **≠0.5** + 1 **não-KO**) — guia com
+> as **linhas literais da consola** em `docs/JOURNAL_2026-06-10-pt66.md`. Precede a
+> re-smoke: **query de distribuição** `bountyType`/`progressiveFactor` das mãos
+> elegíveis (após `railway login` do Rui) → escolher as 2 mãos com o Web+Rui.
+> **⚠️ A fila completa (~49 em `queue_hold`) SÓ se solta após a re-smoke passar, e
+> só com OK do Rui.** Detalhe: `TECH_DEBTS_INVENTARIO.md` (pt66) + journal pt66.
 
 > **★ Quarentena de 2 resultados HRC (recalcular pós-pt66).** `GG-6028190109`
 > (smoke pt64, corridas sobrepostas) e `GG-6027751209` (STALE, postado no arranque
@@ -34,16 +33,6 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 > nenhuma UI hoje (`hrc_jobs` ≠ `/hrc-sessions`). Suspeito a investigar:
 > `players_left = 3179` numa mesa GG (escala ICM). Detalhe: `TECH_DEBTS_INVENTARIO.md`
 > (pt62–pt64).
-
-> **★ Bounty Mode — VERIFICADO pt65 (decompile): confirma-se como bug; pt66 GANHA o
-> bounty-fix.** Veredicto: `import_prizes` **só carrega** a `payouts.json`; é o HRC que
-> põe o modo no sítio ao ler a estrutura (o que o Rui observou). Mas `select_bounty_mode`
-> corre **a seguir** e, **só em KO** (gate `is_ko_tournament`), **esmaga** o modo da
-> estrutura para um **PKO 50% cego**. Não-KO ✅; PKO 50% redundante; **PKO 25% / KO ≠50%
-> = errado**. **Fix (no mesmo `.exe`/rebuild do pt66):** remover a chamada
-> `select_bounty_mode` + o gate (o modo da estrutura prevalece em todos os formatos);
-> validar 1 caso KO ≠50% na re-smoke (+ KO-T$/KO-P$ ≠0 numa PKO real). Detalhe em
-> `TECH_DEBTS_INVENTARIO.md` (pt62–pt64, `#HRC-BOUNTY-HARDCODED-50PCT`).
 
 > **★ pt58 — RE-IMPORT de scope ABRIL é o PRÓXIMO GRANDE PASSO operacional.**
 > O re-import end-to-end **já foi feito** (pt50, Fases 1+2) mas só com a **janela
@@ -138,20 +127,26 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
    > passam a refinar a raiz da Strategy Table na 2ª run. (Detalhe +
    > `#PARSER-SEATS-FAILURES` em `docs/TECH_DEBTS_INVENTARIO.md` pt36.)
 
-2. **`#HRC-BOUNTY-HARDCODED-50PCT`.** O robot mete sempre `Bounty Mode PKO
-   50%` (via `select_bounty_mode` legacy). Fazer ler o `progressiveFactor`
-   do `payouts.json` (já é data-driven: 0.5/0.33/0.25/0.0) ou o
-   `tournament_format`, e seleccionar a opção correspondente no dropdown
-   do HRC. Suporta PKO 25% e Mystery KO correctamente. Ver
-   `TECH_DEBTS_INVENTARIO.md` e `WORKFLOW_OPERACIONAL.md` §4.2.
+2. **`#HRC-BOUNTY-HARDCODED-50PCT` — RESOLVIDO em pt66 (em buffer; pendente
+   build + re-smoke).** O robot metia sempre `Bounty Mode PKO 50%` (via
+   `select_bounty_mode` legacy, que corria **depois** do import da estrutura e a
+   **esmagava**, só em KO). **Fix pt66:** remover `select_bounty_mode` + o gate
+   `is_ko_tournament` → é o **HRC** que põe o modo a partir da estrutura
+   importada (`payouts.json`); **não** se constrói mapa→dropdown.
+   **⚠️ Correcção factual (3ª vez — a cópia stale aqui voltou a infetar):
+   NÃO existe `progressiveFactor=0.25` no pipeline HRC.** Os factores vêm do
+   **`LOBBY_RATIO_LOOKUP`** (`backend/app/services/lobby_vision.py`, por nome do
+   torneio) — **fonte única**: `0.75` monster, `0.50` bounty
+   hunters/builder/knockout/[bounty], `0.40` super ko, `0.33` mystery (`KO`),
+   `0.0` resto. (Os `0.25`/`0.33` doutras notas são constantes do `ire.py` —
+   coisa **diferente**.) Já corrigido no TECH_DEBTS em `135be97` (22 Mai); esta
+   era a cópia stale que sobreviveu. Ver `TECH_DEBTS_INVENTARIO.md` (pt66).
 
-3. **`#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` (🔴 HIGH, registado pt61).** A 2ª
-   fase do watcher **diverge** do spec `docs/WATCHER_FLUXO.md`: a seguir à 1ª run
-   faz um **Prune (errado)** + uma **run intermédia com configs antigas
-   (redundante)** antes da run boa. Devia ir DIRETO a: seleccionar o nó da **1ª
-   ação não-fold** → Selected Subtree → CI=10 → OK → esperar → exportar (sem prune,
-   exatamente 2 runs). **Fix = `tools/watcher_src` + reconstruir `.exe`, sessão
-   dedicada.** Spec canónico: `docs/WATCHER_FLUXO.md`.
+3. **`#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` ✅ RESOLVIDO em pt66** (código +
+   exe `9ea51ce4` na Release `watcher-pt66`; pendente re-smoke real). Removido o
+   `start_calculation` do `setup_hand` → a 1ª run é lançada pelo Finish e vai-se
+   direto a navigate → Selected Subtree (exatamente 2 runs, sem prune). Ver o
+   bloco ★ pt66 acima + `TECH_DEBTS_INVENTARIO.md` (pt66).
 
 4. **Uniformização de tags Discord ↔ HM3.** Urgente — fragmentação visual
    no Estudo (o mesmo conceito aparece com nomes diferentes consoante a
@@ -209,11 +204,10 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 
 ## Médio prazo
 
-10. **`#CI-TARGET-INITIAL-NOT-CALIBRATED` (pt25e Bloco 2).** Calibrar a coord
-   do campo CI Target inicial da 1ª run no main UI. Actualmente
-   `CI_TARGET_FIELD_X/Y = 0` → `_set_ci_target_common` degrada para Enter
-   (funciona, mas é menos limpo). Smoke devagar com o Rui para medir a
-   coord.
+10. **`#CI-TARGET-INITIAL-NOT-CALIBRATED` ✅ DISSOLVIDO em pt66.** Já não há set
+   do CI no main UI: o watcher deixou de escrever o CI (default do popup = 10.0);
+   `set_ci_target_initial/refine` + `_set_ci_target_common` + `CI_TARGET_FIELD_*`
+   removidos. Salvaguarda só-leitura `_ci_target_readback_warn`. Ver bloco ★ pt66.
 
 11. **`#WIZARD-FINISH-FALSE-POSITIVE-STATE-CHECK`.** `verify_wizard_finished`
    (state check WARN-only pós-Finish, pt29-v1) verifica **cedo demais** — o

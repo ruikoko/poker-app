@@ -6,6 +6,38 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt66 (10 Junho 2026 — cirurgia ao watcher: 4 fixes, exe `9ea51ce4`, gate da fila)
+
+Sessão dedicada ao watcher (âmbito fechado pelo Rui, diffs aprovados pelo Web).
+**Backend 911 PASSED + in-process smoke ALL OK (a–m)**; `.exe` recompilado
+(`9ea51ce4…c103bd4`, 12,89 MB) e publicado na **Release `watcher-pt66`** (SHA
+round-trip validado). **Push da fonte pendente do OK do Rui; re-smoke real
+pendente (2 mãos).** Journal: `docs/JOURNAL_2026-06-10-pt66.md` (inclui o **guia de
+re-smoke** com as linhas literais da consola).
+
+### Fechados (em código; pendente re-smoke real)
+
+| ID | Como fechou |
+|---|---|
+| **#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS** ✅ | Removido `start_calculation` do `setup_hand` — a 1ª run é lançada pelo Finish; vai-se DIRETO a navigate → Selected Subtree (**exatamente 2 runs, sem prune**). Smoke (m): ordem `nav→start_ss→finalize`, **sem `start_1st`**. |
+| **#HRC-RUN-WAIT-FALSE-TRIVIAL** ✅ | `_wait_for_run_completion`: `timeout_appear` 30→180s; WARN sem "trivial"; `_find_progress_window_title` aceita **tuple** de candidatos (1ª run casa "Hand Setup" OU "Monte Carlo Sampling"). |
+| **#HRC-BOUNTY-HARDCODED-50PCT** ✅ | Removido `select_bounty_mode` + gate `is_ko_tournament`; o **HRC** põe o Bounty Mode a partir da **estrutura importada** (`import_prizes`). |
+| **#CI-TARGET-INITIAL-NOT-CALIBRATED** ✅ (dissolvido) | O CI deixou de ser **escrito** (default do popup = **10.0** sempre). Removidos `_fill_ci_target_in_popup`/`_find_single_edit`/`_read_edit_text` + consts CB_*/WM_* mortos + `set_ci_target_initial/refine`. Salvaguarda nova **só-leitura** `_ci_target_readback_warn`. |
+
+### Notas / abertos
+
+- **Correcção factual (3ª vez):** os fatores de bounty vêm do **`LOBBY_RATIO_LOOKUP`**
+  (`backend/app/services/lobby_vision.py`) — **fonte única**: `0.75`/`0.50`/`0.40`/`0.33`/`0.0`.
+  **Não existe `0.25`** no pipeline HRC (já corrigido em `135be97`; a cópia stale do
+  `PENDENTES.md` foi corrigida aqui). Os `0.25`/`0.33` doutras notas são do `ire.py`.
+- 🟢 **#HRC-NAV-TABLE-READBACK-PENDING** (LOW) continua aberto — read-back visual do nó é manual.
+- 🟢 **Salvaguarda do CI** — o formato do título "Target CI < X" (foto pt64) **não está
+  verificado em código** → fail-safe **sem alarme** se diferir; re-confirmar na re-smoke e
+  ajustar `_CI_TARGET_RE` se preciso.
+- **Quarentenas** `GG-6028190109` + `GG-6027751209`: recalcular pós-re-smoke (re-POST sobrescreve).
+
+---
+
 ## pt62–pt64 (9–10 Junho 2026 — lobby-IT por nome/filename; ★ smoke pt64 PASSOU [ciclo HRC ponta-a-ponta])
 
 **pt62** (`edb47cc`) e **pt63** (`cf1401f`) — entrada do lobby pelo Intuitive Tables (pasta única, classificação determinística por **nome**; o **filename tem precedência sobre a Vision**, alinhado com o table-ss). Sessões de feature, **sem tech debts novos**. Detalhe nos journals `JOURNAL_2026-06-09-pt62.md` / `-pt63.md`.

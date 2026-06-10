@@ -1,6 +1,11 @@
 # Anatomia operacional do HRC
 
-**Estado:** rascunho v6, 22 Maio 2026 (pt35).
+**Estado:** rascunho v6, 22 Maio 2026 (pt35). **Nota pt66 (10 Jun 2026):** o robot
+deixou de fazer a run intermédia (exatamente 2 runs), deixou de **escrever** o CI
+(default do popup = 10.0; salvaguarda só-leitura), e removeu o `select_bounty_mode`
+hardcoded (o modo vem da estrutura importada). Detalhe + guia de re-smoke em
+`docs/JOURNAL_2026-06-10-pt66.md`; regra operacional "não mexer no CI à mão" no
+`RUNBOOK_SMOKE_BEELINK.md §2.6`.
 **Origem:** consolidação dos factos espalhados pelos journals + observações
 directas do Rui durante pt28 + smoke tests pt29 + cadeia da 2ª run pt30-pt34
 + Fase 1 GTO Brain pt35 (Complete Export).
@@ -1025,6 +1030,32 @@ não muda HRC). Source HH crua via `_extract_winamax_seat_bounties`.
 | Winamax / Mystery KO | Excluído | — | — |
 | PokerStars (todos) | passthrough | Não (PS lobby vision já classifica correctamente) | Sim |
 | WPN | passthrough (no /hrc, mas WPN não está em `ALLOWED_SITES`) | — | — |
+
+---
+
+## 13. Modos de bounty no HRC (referência) — PKO vs Mystery
+
+Fonte: observação directa do Rui (screenshots da página *Basic Hand Data*, pt66). O
+HRC tem **dois** modos de bounty distintos, com UI e modelação diferentes:
+
+| | **PKO (progressivo)** | **Mystery KO (não-progressivo)** |
+|---|---|---|
+| **Bounty Mode (dropdown)** | `PKO` | `KO` |
+| **Campo de valor** | `Instant(%)` = a fração instantânea (= `progressiveFactor` da estrutura: 0.75/0.50/0.40) | `KO Size($)` **único** = o bounty **MÉDIO** restante (valor absoluto) |
+| **Colunas por jogador** | `KO-T$` (total) e `KO-P$` (progressivo) **preenchidas por jogador**; razão `P$/T$` = o Instant% (a 50% → `P$ = T$/2`) | **vazias** (não há split por jogador — o bounty é um valor médio único) |
+| **Modelação** | parte instantânea + parte progressiva acumulada na stack | tudo instantâneo (`instant_fraction = 1.0`); o valor é o **médio** do pool restante |
+| **Fonte do valor no pipeline** | `LOBBY_RATIO_LOOKUP` (`lobby_vision.py`) → `progressiveFactor` na estrutura → o HRC põe o modo ao importar | **não modelado hoje** — precisa do bounty médio (ver `#CONTEXT-IMAGE-MKO-BOUNTY-AVG`) |
+
+**Implicações:**
+
+- **pt66 (fix d):** o robot deixou de forçar `PKO 50%`; o modo vem da **estrutura
+  importada**. Numa mão PKO monster/super ko, a prova visual é `Instant% = 75/40`
+  (≠50) + as colunas `KO-T$/KO-P$` com razão coerente.
+- **Mystery** está **excluído do /hrc** (gate `MYSTERY_FORMATS`, desde pt41) — o
+  par `("KO", 0.33)` do `LOBBY_RATIO_LOOKUP` fica **flagged** para a sessão futura
+  de suporte Mystery. Ver **`#MYSTERY-KO-DUAL-SUPPORT`** (modo `KO` + `KO Size($)`
+  com o bounty médio) e **`#CONTEXT-IMAGE-MKO-BOUNTY-AVG`** (extrair a média dos KOs
+  restantes de uma imagem de contexto para alimentar o `KO Size($)`).
 
 ---
 

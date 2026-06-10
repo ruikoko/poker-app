@@ -26,11 +26,21 @@ documento — não o que o código atual faz.
   (Selected Subtree, CI=10, focada no nó da 1ª ação não-fold). Nenhuma run intermédia
   com configurações antigas.
 
-## Estado atual do build (cdfc7247 / pt42d) — a corrigir
-- A parte "configurar → Finish → 1ª run" está CORRETA.
-- A seguir à 1ª run o build faz um Prune (errado) + uma run intermédia com configurações
-  antigas (redundante) antes da run boa. Correção: a seguir à 1ª run, ir DIRETO a
-  seleccionar o nó (1ª ação não-fold) + Selected Subtree + CI=10 + OK + esperar + exportar.
-- O `meta.json` de cada mão JÁ traz o que a 2ª run precisa: `target_node_offset` (o nó a
-  seleccionar) + `aggressor_real_action` (type/size_bb/position da 1ª ação não-fold). O
-  watcher só tem de USAR o `target_node_offset` — não precisa de recalcular nem de prune.
+## Estado do build (pt66 `9ea51ce4`) — RESOLVIDO
+
+O build pt66 implementa este spec (em buffer/release; pendente **re-smoke real** —
+ver `docs/JOURNAL_2026-06-10-pt66.md`):
+
+- A **run intermédia redundante foi REMOVIDA** (`#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS`):
+  a 1ª run é lançada pelo **Finish**; a seguir vai-se **DIRETO** a seleccionar o nó (via
+  `target_node_offset` do `meta.json`) → Selected Subtree → OK → esperar → exportar.
+  São **exatamente 2 runs, sem prune**.
+- O **CI já NÃO é escrito** pelo watcher: o default do popup Nash é sempre **10.0** (= o
+  alvo); há uma **salvaguarda só-leitura** que avisa se ≠ 10 (regra operacional: ninguém
+  altera o CI à mão no Beelink).
+- O **Bounty Mode** vem da **estrutura importada** (`import_prizes`), não de um hardcode.
+
+> **Builds anteriores** (`cdfc7247`/pt42d, `3fb1b512`/pt64) **faziam** a run intermédia
+> (disparada *durante* a 1ª run, que o HRC enfileirava → 3 runs). O `meta.json` já trazia
+> `target_node_offset` + `aggressor_real_action`; faltava o watcher consumi-los sem a run
+> a mais. pt66 fá-lo.

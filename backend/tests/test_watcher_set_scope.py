@@ -45,9 +45,9 @@ def pf():
     das funções resolve via LOAD_GLOBAL contra o module namespace.
 
     pt29 (#PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE): `pyperclip` precisa
-    de ser stateful (paste devolve o último copy) porque
-    `_fill_ci_target_in_popup` e `_set_ci_target_common` passaram a usar
-    `clipboard_safe_paste`, que faz set + read-back de verificação. Com
+    de ser stateful (paste devolve o último copy) porque `paste_hh` /
+    `paste_path` usam `clipboard_safe_paste`, que faz set + read-back de
+    verificação. Com
     `pyperclip` como `MagicMock` puro, `paste()` devolve outro MagicMock
     (!= target) → mismatch → n_retries → RuntimeError. Stateful mock evita
     isto sem perder a capacidade de `pyperclip.copy.assert_called_once_with(...)`.
@@ -201,13 +201,12 @@ def test_set_scope_uses_pyautogui_not_click_rel_pt64(pf):
 # ── start_calculation_selected_subtree (wiring) ─────────────────────────
 
 def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
-    """Piece 2 end-to-end: com popup detectado E Scope confirmado, todos os
-    passos disparam na ordem pt28-v1: Calculate → wait popup → scope → CI → OK.
-    pt61: Scope/CI são Win32 (mockados a True aqui); só validamos o fluxo +
-    que o OK é invocado quando o Scope confirma."""
+    """Piece 2 end-to-end (pt66): com popup detectado E Scope confirmado, os
+    passos disparam na ordem Calculate → wait popup → scope → OK. O CI já NÃO é
+    escrito (default do popup = 10.0). Validamos o fluxo + que o OK é invocado
+    quando o Scope confirma."""
     pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
     pf._set_scope_in_popup = MagicMock(return_value=True)   # pt61: Win32 confirmou
-    pf._fill_ci_target_in_popup = MagicMock(return_value=True)
     pf._click_ok_in_popup = MagicMock()
     wpos = (10, 10, 1024, 768)
 
@@ -218,55 +217,43 @@ def test_start_calculation_selected_subtree_full_flow_with_popup(pf):
     pf.click_rel.assert_not_called()
     pf._wait_for_nash_popup.assert_called_once()
     pf._set_scope_in_popup.assert_called_once()
-    pf._fill_ci_target_in_popup.assert_called_once()
     pf._click_ok_in_popup.assert_called_once()       # OK só porque Scope confirmou
     assert result is True
 
 
 def test_start_calculation_selected_subtree_aborts_when_scope_unconfirmed(pf, capsys):
     """pt61 (#HRC-2ND-RUN-BLIND-CLICKS): popup detectado mas Scope NÃO confirma
-    (_set_scope_in_popup → False) → ABORTA: NÃO clica OK, NÃO preenche CI, cancela
-    o popup, devolve "scope_unconfirmed". Evita Full-Tree disfarçado de Selected
-    Subtree na biblioteca de estudo."""
+    (_set_scope_in_popup → False) → ABORTA: NÃO clica OK, cancela o popup,
+    devolve "scope_unconfirmed". Evita Full-Tree disfarçado de Selected Subtree
+    na biblioteca de estudo."""
     pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
     pf._set_scope_in_popup = MagicMock(return_value=False)  # NÃO confirma
-    pf._fill_ci_target_in_popup = MagicMock()
     pf._click_ok_in_popup = MagicMock()
     pf._cancel_nash_popup = MagicMock()
 
     result = pf.start_calculation_selected_subtree((10, 10, 1024, 768), ci_target=10.0)
 
     assert result == "scope_unconfirmed"
-    pf._fill_ci_target_in_popup.assert_not_called()   # não chega ao CI
     pf._click_ok_in_popup.assert_not_called()         # NÃO clica OK
     pf._cancel_nash_popup.assert_called_once()        # cancela o popup
     assert "[ABORT]" in capsys.readouterr().out
 
 
-def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf):
-    """pt28-v1: regressão para a nova ordem Scope → CI → OK.
+def test_start_calculation_selected_subtree_calls_scope_before_ok_pt66(pf):
+    """pt66: ordem Scope → OK (o passo de CI foi removido — o watcher já não
+    escreve o CI; default do popup = 10.0).
 
-    Em pt27 a ordem era CI → Scope → OK. Mudar Scope DEPOIS do CI pode
-    causar re-render do popup ao seleccionar "Selected Subtree" e
-    resetar o campo CI para o default do scope novo. pt28-v1 inverte
-    para Scope PRIMEIRO; o re-render acontece antes do CI ser escrito.
-
-    Verifica a ordem via spies em `_set_scope_in_popup` +
-    `_fill_ci_target_in_popup` + `_click_ok_in_popup`. A primeira call
-    a `_set_scope_in_popup` deve preceder a primeira a
-    `_fill_ci_target_in_popup`, que deve preceder a primeira a
-    `_click_ok_in_popup`.
+    Verifica a ordem via spies em `_set_scope_in_popup` + `_click_ok_in_popup`.
+    A primeira call a `_set_scope_in_popup` deve preceder a primeira a
+    `_click_ok_in_popup` (o OK só dispara porque o Scope confirmou).
     """
     fake_rect = (666, 372, 416, 214)
     pf._wait_for_nash_popup = MagicMock(return_value=fake_rect)
 
     call_order = []
-    # pt61: scope/ci devolvem True (confirmado) p/ o flow prosseguir até ao OK.
+    # Scope devolve True (confirmado) p/ o flow prosseguir até ao OK.
     pf._set_scope_in_popup = MagicMock(
         side_effect=lambda *a, **kw: (call_order.append("scope"), True)[1]
-    )
-    pf._fill_ci_target_in_popup = MagicMock(
-        side_effect=lambda *a, **kw: (call_order.append("ci"), True)[1]
     )
     pf._click_ok_in_popup = MagicMock(
         side_effect=lambda *a, **kw: call_order.append("ok")
@@ -274,50 +261,20 @@ def test_start_calculation_selected_subtree_calls_scope_before_ci_fill_pt28v1(pf
 
     pf.start_calculation_selected_subtree((10, 10, 1024, 768), ci_target=10.0)
 
-    assert call_order == ["scope", "ci", "ok"], (
-        f"pt28-v1 requer ordem Scope→CI→OK; got {call_order}"
+    assert call_order == ["scope", "ok"], (
+        f"pt66 requer ordem Scope→OK (sem CI); got {call_order}"
     )
 
 
-def test_fill_ci_target_win32_settext_and_readback_confirms(pf, capsys):
-    """pt61: CI via Win32. Acha o Edit único, WM_SETTEXT "10" e confirma por
-    read-back (WM_GETTEXT == "10") → True, sem pyautogui. CI inteiro = "10"
-    (sem ".0")."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
-    pf._find_single_edit = MagicMock(return_value=9999)
-    pf._read_edit_text = MagicMock(return_value="10")  # read-back bate
-    pf._pt30_user32 = MagicMock()
-
-    ok = pf._fill_ci_target_in_popup(popup_rect=_SMOKE_POPUP_RECT, ci_target=10.0)
-
-    assert ok is True
-    pf._find_single_edit.assert_called_once_with(4242)
-    # WM_SETTEXT enviado ao Edit (wParam 0, lParam = endereço do buffer).
-    sent = [c for c in pf._pt30_user32.SendMessageW.call_args_list
-            if c.args[1] == pf.WM_SETTEXT]
-    assert len(sent) == 1 and sent[0].args[0] == 9999
-    pf.pyautogui.click.assert_not_called()
-    assert "[WARN]" not in capsys.readouterr().out
-
-
-def test_fill_ci_target_win32_readback_mismatch_falls_back(pf, capsys):
-    """Read-back do CI não bate → fallback pyautogui + False."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=4242)
-    pf._find_single_edit = MagicMock(return_value=9999)
-    pf._read_edit_text = MagicMock(return_value="")  # não confirma
-    pf._pt30_user32 = MagicMock()
-
-    ok = pf._fill_ci_target_in_popup(popup_rect=_SMOKE_POPUP_RECT, ci_target=10.0)
-
-    assert ok is False
-    assert pf.pyautogui.click.call_count == 1  # fallback: 1 click no campo
-    out = capsys.readouterr().out
-    assert "[WARN]" in out and "read-back" in out
+# pt66: testes de `_fill_ci_target_in_popup` (Win32 WM_SETTEXT + read-back e
+# mismatch→fallback) REMOVIDOS — o watcher já não escreve o CI (função removida;
+# o default do popup é sempre 10.0). A salvaguarda passou a ser só-leitura
+# (`_ci_target_readback_warn`, testada em test_watcher_hand_import_popup.py).
 
 
 def test_start_calculation_selected_subtree_aborts_if_popup_not_detected(pf, capsys):
     """Popup detection devolve None (timeout) → early-return WARN, sem
-    fill CI / scope / OK."""
+    scope / OK."""
     pf._wait_for_nash_popup = MagicMock(return_value=None)
 
     pf.start_calculation_selected_subtree(wpos=(0, 0, 1024, 768), ci_target=10.0)
@@ -524,31 +481,6 @@ def test_wait_for_nash_popup_survives_getAllWindows_exception(pf):
     assert rect is None
 
 
-# ── _fill_ci_target_in_popup ────────────────────────────────────────────
-
-def test_fill_ci_target_fallback_clicks_then_pastes_value(pf):
-    """pt61: sem Edit Win32 identificável → fallback pyautogui. Click no baseline
-    coord + ctrl+a + paste. CI inteiro = "10" (sem ".0"; o Edit do HRC aceita)."""
-    pf._find_nash_popup_hwnd = MagicMock(return_value=None)  # força fallback
-    pf._fill_ci_target_in_popup(popup_rect=(666, 372, 416, 214), ci_target=10.0)
-
-    assert pf.pyautogui.click.call_count == 1
-    (click_x, click_y), _ = pf.pyautogui.click.call_args
-    assert (click_x, click_y) == (666 + pf.CI_TARGET_POPUP_REL_X,
-                                   372 + pf.CI_TARGET_POPUP_REL_Y)
-    assert pf.pyautogui.hotkey.call_args_list == [
-        call('ctrl', 'a'), call('ctrl', 'v'),
-    ]
-    pf.pyperclip.copy.assert_called_once_with("10")
-
-
-def test_fill_ci_target_in_popup_defensive_on_none_rect(pf, capsys):
-    pf._fill_ci_target_in_popup(popup_rect=None, ci_target=10.0)
-    pf.pyautogui.click.assert_not_called()
-    out = capsys.readouterr().out
-    assert "[WARN]" in out
-
-
 # ── _click_ok_in_popup (pt33 v1: BM_CLICK Win32) ───────────────────────
 
 def test_click_ok_popup_nash_uses_bm_click_pt33(pf):
@@ -697,7 +629,6 @@ def test_start_calculation_selected_subtree_returns_true_when_popup_detected(pf)
     """
     pf._wait_for_nash_popup = MagicMock(return_value=(666, 372, 416, 214))
     pf._set_scope_in_popup = MagicMock(return_value=True)
-    pf._fill_ci_target_in_popup = MagicMock(return_value=True)
     pf._click_ok_in_popup = MagicMock()
 
     result = pf.start_calculation_selected_subtree(
