@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ LEITURA OBRIGATÓRIA DE INÍCIO DE SESSÃO — TODOS OS OPERADORES
+
+**`docs/FLUXO_DE_TRABALHO.md`** — regras de eficiência entre operadores (paralelo, recados completos, operador certo, canal único de binários, fonte, logging, fecho de sessão, horário do Rui, auditoria). **Leitura obrigatória no início de CADA sessão, por TODOS os operadores (Web e Code)**, independentemente de há quanto tempo trabalham no projecto. Lê isto **antes** da lista técnica abaixo. Quem violar uma regra, corrige e regista no journal.
+
 ## ⚠️ LEITURA OBRIGATÓRIA ANTES DE TUDO
 
 Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro estes 5 documentos, por esta ordem:
