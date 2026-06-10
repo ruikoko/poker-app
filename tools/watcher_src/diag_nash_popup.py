@@ -49,6 +49,11 @@ CB_GETCOUNT = 0x0146
 CB_GETLBTEXTLEN = 0x0149
 CB_GETLBTEXT = 0x0148
 CB_GETCURSEL = 0x0147
+# ListBox (caso o dropdown aberto do CCombo seja uma List nativa)
+LB_GETCOUNT = 0x018B
+LB_GETTEXT = 0x0189
+LB_GETTEXTLEN = 0x018A
+LB_GETCURSEL = 0x0188
 GWL_STYLE = -16
 
 
@@ -188,7 +193,107 @@ def uia_probe(popup, out):
     walk(ctrl, 0)
 
 
+def _listbox_items(hwnd):
+    """Se o controlo responder a LB_GETCOUNT (>0), devolve itens — apanha a List
+    nativa que o dropdown do CCombo possa criar quando abre."""
+    cnt = u32.SendMessageW(hwnd, LB_GETCOUNT, 0, 0)
+    if not isinstance(cnt, int) or cnt <= 0 or cnt > 200:
+        return None
+    items = []
+    for i in range(cnt):
+        ln = u32.SendMessageW(hwnd, LB_GETTEXTLEN, i, 0)
+        if not isinstance(ln, int) or ln <= 0:
+            items.append("")
+            continue
+        b = ctypes.create_unicode_buffer(ln + 1)
+        u32.SendMessageW(hwnd, LB_GETTEXT, i, ctypes.addressof(b))
+        items.append(b.value)
+    cur = u32.SendMessageW(hwnd, LB_GETCURSEL, 0, 0)
+    return {"count": cnt, "items": items, "cursel": cur}
+
+
+def _snapshot_toplevels():
+    """{hwnd: (class, text, rect)} de todas as janelas top-level visíveis."""
+    snap = {}
+
+    def _enum(h, _l):
+        if u32.IsWindowVisible(h):
+            snap[h] = (_cls(h), _text(h), _rect(h))
+        return True
+
+    u32.EnumWindows(WNDENUMPROC(_enum), 0)
+    return snap
+
+
+def mode_dropdown(out):
+    """Diag-2 (pt64): captura a JANELA do dropdown do CCombo do Scope quando abre.
+    Hipótese do Rui: ao abrir, o CCombo cria uma Shell de topo nova (a lista). Se
+    for enumerável (LB_*/CB_*/UIA), desbloqueia selecção por rect + read-back real."""
+    out.append("\n=== DIAG-2 — janela do dropdown do Scope (aberto) ===")
+    before = _snapshot_toplevels()
+    print("\n>>> DIAG-2: ABRE AGORA o dropdown do Scope (clica na seta) e DEIXA-O "
+          "ABERTO.\n    Tens 10s; a lista tem de estar visível ao fim da contagem.")
+    for s in range(10, 0, -1):
+        print(f"  a capturar o dropdown em {s}s...", end="\r")
+        time.sleep(1)
+    print(" " * 44, end="\r")
+    after = _snapshot_toplevels()
+
+    new = [h for h in after if h not in before]
+    if not new:
+        out.append("[nada] nenhuma janela top-level nova apareceu. O dropdown pode "
+                   "ser um child do popup (não top-level) ou não abriu. Vê os "
+                   "descendentes do popup na Secção A / corre o modo normal com a "
+                   "lista aberta.")
+    for h in new:
+        cls, txt, rect = after[h]
+        out.append(f"\n+++ JANELA NOVA hwnd={h} class={cls!r} text={txt!r} rect={rect} +++")
+        # enumerar descendentes desta janela nova + probes LB_/CB_
+        kids = []
+        u32.EnumChildWindows(h, WNDENUMPROC(lambda c, _l: (kids.append(c) or True)), 0)
+        out.append(f"   {len(kids)} descendentes:")
+        for k in [h] + kids:
+            kc, kt, kr = _cls(k), _text(k), _rect(k)
+            line = f"   hwnd={k} class={kc!r} text={kt!r} rect={kr}"
+            lb = _listbox_items(k)
+            cb = _combo_items(k)
+            if lb is not None:
+                line += f"\n        >>> LISTBOX: cursel={lb['cursel']} items={lb['items']}"
+            if cb is not None:
+                line += f"\n        >>> COMBO: cursel={cb['cursel']} items={cb['items']}"
+            out.append(line)
+    # UIA da janela nova (se houver e uiautomation existir)
+    if new:
+        try:
+            import uiautomation as auto
+            out.append("\n   --- UIA da(s) janela(s) nova(s) ---")
+            for h in new:
+                c = auto.ControlFromHandle(h)
+                def walk(x, d):
+                    if d > 6:
+                        return
+                    try:
+                        out.append("   " + "  " * d +
+                                   f"[{x.ControlTypeName}] name={x.Name!r} class={x.ClassName!r}")
+                    except Exception:
+                        return
+                    for ch in x.GetChildren():
+                        walk(ch, d + 1)
+                walk(c, 0)
+        except Exception as e:
+            out.append(f"   [UIA skip] {e}")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("dropdown", "2", "--dropdown"):
+        out = [f"== DIAG-2 pt64 — dropdown do Scope ({time.strftime('%Y-%m-%d %H:%M:%S')}) =="]
+        mode_dropdown(out)
+        text = "\n".join(out)
+        with open("nash_dropdown_dump.txt", "w", encoding="utf-8") as f:
+            f.write(text)
+        print(text)
+        print("\n\n>>> Escrito tambem em nash_dropdown_dump.txt (cola-me esse).")
+        return
     print("Abre o popup Nash Calculation no HRC e deixa-o à frente.")
     for s in range(8, 0, -1):
         print(f"  a enumerar em {s}s...", end="\r")
