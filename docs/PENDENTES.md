@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 10 Junho 2026 (pt67 — Max Players span+teto6 [backend, LEI], run-window detection + CI child-controls [watcher]; 916 PASSED; `.exe` `a9554427` na Release `watcher-pt67`; DELETE dos 2 hrc_jobs feito; **re-smoke real pendente**). Antes: pt66 (re-smoke PASSOU, 4 fixes watcher); pt64 (★ smoke real); pt62/pt63 (lobby-IT). Journal: `docs/JOURNAL_2026-06-10-pt67.md`.
+**Última actualização:** 10 Junho 2026 (**pt67 FECHADO — pipeline HRC CERTIFICADO ponta-a-ponta**, `#225 hrc_job 10`). 4ª volta de smoke provou (3 fotos do Rui) a semântica do Selected Subtree → **LEI B da âncora** (posição certa; linha indiferente). **Fila travada** pelo veneno real **`#HRC-NODE-OFFSET-IMPLICIT-LINES` (🔴 HIGH, posição errada, 17/70)**; o off-by-one within-bucket é inofensivo. Backend tudo deployado (offset 7/14, pin 3.12, cap 200 MB interino). #400 cancelado pelo Rui (sem job). Registos novos: `REGISTO_CONCEITO.md` + `LICOES.md`. Antes: pt66 (re-smoke PASSOU, 4 fixes watcher); pt64 (★ smoke real). Journal: `docs/JOURNAL_2026-06-10-pt67.md`.
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.

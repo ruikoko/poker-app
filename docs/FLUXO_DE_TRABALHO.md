@@ -23,6 +23,12 @@ Todo o processo observável grava para ficheiro POR DEFEITO, sem depender de o o
 ## 7. Fechar sempre a sessão (regra do journal)
 Nenhuma sessão termina sem: journal committado + push + lista "pendente à entrada da próxima sessão" com o PRÓXIMO PASSO CONCRETO de cada frente. Um chat novo tem de conseguir arrancar só com o repo.
 
+**Checklist de fecho — dois registos cumulativos append-only (ordem do Rui, pt67):**
+- **`docs/REGISTO_CONCEITO.md`** — se a sessão **alterou o conceito da app ou um elemento** (regra de negócio, lei, semântica de um conceito, fonte de input, decisão de arquitectura), **APPENDA** uma linha datada (resumo + motivo + referência). Não substituir entradas antigas.
+- **`docs/LICOES.md`** — APPENDA as lições **problema→solução→êxito** da sessão (uma linha cada, com link ao journal).
+
+Quem mexeu em conceito/elemento e não apendou ao `REGISTO_CONCEITO.md`, **não fechou a sessão**.
+
 ## 8. Janelas de Rui são ouro (regra do horário)
 O Rui joga e dorme tarde; o tempo dele entre sessões é escasso. Trabalho que precise do Rui presente é preparado ANTES (tudo pronto a colar/clicar); trabalho que não precise dele é feito SEM ele (Web+Code decidem engenharia sozinhos, como mandam os PAPEIS). Se passar da 01:00 e a tarefa não for crítica, propõe-se fecho — o cansaço produz erros que custam mais que a pausa.
 
