@@ -544,6 +544,12 @@ def _wait_for_finish_ready(hwnd_wizard):
 
 _RUN_WAIT_POLL_S = 0.5
 _RUN_WAIT_PROGRESS_LOG_S = 60.0
+# pt67 (#HRC-RUN-WINDOW-DETECTION-BLIND): grace de ARRANQUE. Se a janela de
+# progresso nunca for vista durante este tempo de ecrã limpo, a run foi muito
+# curta (terminou entre polls) ou não arrancou — a navegação seguinte confirma.
+# É o ÚNICO parâmetro de tempo e NÃO decide a duração da run; calibrável na
+# re-smoke (logging incluído).
+_RUN_WAIT_GRACE_CLEAN_S = 30.0
 
 
 def _find_progress_window_title(match_substring=None):
@@ -586,64 +592,98 @@ def _find_progress_window_title(match_substring=None):
     return found[0] if found else None
 
 
-def _wait_for_run_completion(timeout_appear_s=180, timeout_total_s=7200,
-                             run_label="run", match_substring=None):
-    """pt31/pt66 (#HRC-RUN-WAIT-FALSE-TRIVIAL): aguarda uma run do HRC terminar
-    via polling Win32 da janela top-level de PROGRESSO. Sinal binario, sem
-    heuristica de memoria (que dava falso positivo no pt30).
+def _find_progress_window_hwnd(match_substring=None):
+    """pt67: HWND da 1ª janela top-level de progresso cujo título casa, ou None.
 
-    `match_substring` (ver `_find_progress_window_title`): None -> exacto
-    "Hand Setup"; str -> substring; tuple -> qualquer-um. A 1a run (lancada
-    pelo Finish) pode mostrar "Hand Setup" OU "Monte Carlo Sampling" -> passa-se
-    a tuple ("Hand Setup", "Monte Carlo Sampling"); a 2a run usa
-    "Monte Carlo Sampling".
-
-    IMPORTANTE — assume que o wizard 'Hand Setup' de CONFIGURACAO ja fechou
-    (chamada apos o Finish + Sleep(30)). Se a 1a run reutilizar o titulo
-    'Hand Setup', o substring apanha-o na mesma (wizard ja fechado).
-
-    Fase 1 (timeout_appear_s, default 180s): aguardar a janela aparecer (run
-      arrancou). pt66: o default subiu de 30s -> 180s porque a run e SEMPRE
-      esperada (1a = ~10M iteracoes, 2a = Selected Subtree) e NUNCA e trivial —
-      se nao aparecer em 30s estava so lenta a arrancar/enfileirada (era o que
-      gerava o falso "run trivial" no smoke pt64). Se mesmo assim nao aparecer,
-      WARN FORTE (nao "trivial") e continua (o export revela se ficou partido).
-    Fase 2 (timeout_total_s): pollar enquanto a janela existir; quando
-      desaparecer = run terminou. Log minuto-a-minuto. Timeout = run preso;
-      raise RuntimeError.
+    Igual a `_find_progress_window_title` mas devolve o HWND (para tracking).
+    `match_substring`: None -> 'Hand Setup' exacto (FindWindowW); str -> substring;
+    tuple -> qualquer-um (EnumWindows). Tracking por hwnd é robusto ao morph
+    wizard→run (que mantém o mesmo título).
     """
-    # Fase 1: aguardar a janela de progresso aparecer.
-    appear_deadline = time.time() + timeout_appear_s
-    appeared_title = None
-    while time.time() < appear_deadline:
-        appeared_title = _find_progress_window_title(match_substring)
-        if appeared_title is not None:
+    if match_substring is None:
+        h = _pt30_user32.FindWindowW(None, "Hand Setup")
+        return h or None
+    needles = ((match_substring,) if isinstance(match_substring, str)
+               else tuple(match_substring))
+    needles = tuple(s.lower() for s in needles)
+    found = []
+
+    def _enum_top(hwnd, lparam):
+        n = _pt30_user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
+            if any(nd in buf.value.lower() for nd in needles):
+                found.append(hwnd)
+                return False
+        return True
+
+    _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum_top), 0)
+    return found[0] if found else None
+
+
+def _wait_for_run_completion(timeout_total_s=7200, run_label="run",
+                             match_substring=None,
+                             grace_clean_s=_RUN_WAIT_GRACE_CLEAN_S):
+    """pt67 (#HRC-RUN-WINDOW-DETECTION-BLIND): vigia a janela de progresso do HRC
+    **DESDE a chamada** (o caller já NÃO faz sleep cego). Invariante (Rui):
+    corrida a decorrer ⇔ janela de progresso no ecrã.
+
+    Fase A (captar): poll 0.5s à procura da janela; capta o **HWND** quando a vê.
+      Se NUNCA aparecer durante `grace_clean_s` consecutivos de ecrã limpo → a
+      run foi muito curta (terminou entre polls) OU não arrancou; loga e devolve
+      (fail-open; a navegação seguinte confirma o 2º caso).
+    Fase B (esperar fim): espera o HWND captado desaparecer. "Desapareceu" =
+      `IsWindow(hwnd)` falso **E** não há já nenhuma janela de progresso pelo
+      título (defesa contra morph para um hwnd novo). Log minuto-a-minuto.
+      Timeout total → RuntimeError (backstop; a mão falha e a fila avança).
+
+    pt66 → pt67: o run-wait antigo assumia o wizard fechado + um sleep(30) cego
+    antes da chamada → engolia runs curtas (~5s): a janela aparecia e morria
+    durante o sleep e a fase 1 declarava "nunca apareceu". Agora vigia desde o
+    Finish. O título "Hand Setup" da 1ª run mantém-se do início ao fim (morfa da
+    config para a run sem fechar) — por isso o tracking é por hwnd.
+
+    ⚠️ `grace_clean_s` é o ÚNICO parâmetro de tempo e é só um GRACE de arranque —
+    NÃO decide a duração da run. Sem heurísticas de desempenho/memória.
+    ⚠️ NUNCA marcar "Always run in background" no HRC — esconde as janelas e cega
+    este polling (runbook §2.7).
+
+    `match_substring`: tuple ("Hand Setup","Monte Carlo Sampling") p/ a 1ª run;
+    str "Monte Carlo Sampling" p/ a 2ª.
+    """
+    # Fase A — captar a janela (vigia desde já).
+    a_start = time.time()
+    hwnd = None
+    while time.time() - a_start < grace_clean_s:
+        hwnd = _find_progress_window_hwnd(match_substring)
+        if hwnd:
             break
         time.sleep(_RUN_WAIT_POLL_S)
-    if appeared_title is None:
-        print('   [WARN] [run-wait] %s: a janela de progresso nao apareceu em '
-              '%ds. ESPERAVA uma run (nunca e trivial) — provavelmente lenta a '
-              'arrancar/enfileirada, ou o titulo mudou. A continuar; CONFIRMAR '
-              'no export.' % (run_label, timeout_appear_s))
+    if not hwnd:
+        print('   [run-wait] %s: janela de progresso NUNCA vista em %.0fs de ecrã '
+              'limpo — run muito curta (terminou entre polls) ou não arrancou; a '
+              'continuar (a navegação confirma).' % (run_label, grace_clean_s))
         return
-    print('   [run-wait] %s: janela detectada title=%r'
-          % (run_label, appeared_title))
+    print('   [run-wait] %s: janela detectada (hwnd=%d) — a aguardar fim...'
+          % (run_label, hwnd))
 
-    # Fase 2: aguardar a janela desaparecer (run terminou).
-    f2_start = time.time()
-    deadline = f2_start + timeout_total_s
-    next_log = f2_start + _RUN_WAIT_PROGRESS_LOG_S
+    # Fase B — esperar o hwnd captado desaparecer (run terminou).
+    b_start = time.time()
+    deadline = b_start + timeout_total_s
+    next_log = b_start + _RUN_WAIT_PROGRESS_LOG_S
     while time.time() < deadline:
-        if _find_progress_window_title(match_substring) is None:
-            elapsed = time.time() - f2_start
+        gone = (not _pt30_user32.IsWindow(hwnd)
+                and _find_progress_window_hwnd(match_substring) is None)
+        if gone:
+            elapsed = time.time() - b_start
             print('   [run-wait] %s: run terminou em %.0fs (%.1f min)'
                   % (run_label, elapsed, elapsed / 60.0))
             return
         now = time.time()
         if now >= next_log:
-            mins = int((now - f2_start) / 60.0)
             print('   [run-wait] %s: ainda a correr ha %d minutos'
-                  % (run_label, mins))
+                  % (run_label, int((now - b_start) / 60.0)))
             next_log = now + _RUN_WAIT_PROGRESS_LOG_S
         time.sleep(_RUN_WAIT_POLL_S)
     raise RuntimeError(
@@ -652,46 +692,83 @@ def _wait_for_run_completion(timeout_appear_s=180, timeout_total_s=7200,
     )
 
 
-# pt66 — salvaguarda SÓ-LEITURA do CI (o watcher já não escreve o CI).
+# pt66/pt67 — salvaguarda SÓ-LEITURA do CI (o watcher já não escreve o CI).
+# pt67: WM_GETTEXT/WM_GETTEXTLENGTH re-adicionados (removidos em pt66 com o Edit
+# do CI) para ler CHILD CONTROLS — o "Target CI" vive num label interior.
+WM_GETTEXT = 0x000D
+WM_GETTEXTLENGTH = 0x000E
 _CI_READBACK_TIMEOUT_S = 20.0
 _CI_TARGET_RE = re.compile(r'Target\s*CI\s*[<:=]?\s*([0-9]+(?:\.[0-9]+)?)', re.I)
 
 
+def _read_hwnd_text(hwnd):
+    """pt67: texto de uma janela/controlo via WM_GETTEXT. '' se vazio/erro."""
+    if not hwnd:
+        return ""
+    n = _pt30_user32.SendMessageW(hwnd, WM_GETTEXTLENGTH, 0, 0)
+    n = n if isinstance(n, int) and n > 0 else 0
+    if n == 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(n + 1)
+    _pt30_user32.SendMessageW(hwnd, WM_GETTEXT, n + 1, ctypes.addressof(buf))
+    return buf.value
+
+
+def _scan_target_ci_in_window(hwnd):
+    """pt67 (#HRC-CI-SAFEGUARD-CHILD-CONTROLS): procura "Target CI < X" no título
+    E nos CHILD CONTROLS (labels interiores) de `hwnd`. Devolve o float X ou None.
+
+    Diagnóstico pt66: o "MC-CFR [Target CI < 10.00]" vive num **label INTERIOR**
+    do dialog de progresso, NÃO no título — por isso enumeramos os filhos."""
+    texts = [_read_hwnd_text(hwnd)]  # o próprio título/texto da janela
+
+    def _enum_child(child, lparam):
+        texts.append(_read_hwnd_text(child))
+        return True
+
+    try:
+        _pt30_user32.EnumChildWindows(hwnd, _PT30_WNDENUMPROC(_enum_child), 0)
+    except Exception:
+        pass
+    for t in texts:
+        if not t:
+            continue
+        m = _CI_TARGET_RE.search(t)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return None
+    return None
+
+
 def _ci_target_readback_warn(expected_ci=10.0):
-    """pt66 (#HRC-RUN-WAIT... / CI): SALVAGUARDA SÓ-LEITURA do CI Target. O
-    watcher já NÃO escreve o CI (o default do popup Nash é sempre 10.0 = o
-    alvo). Esta função apenas LÊ o "Target CI" da janela de progresso da run
-    (Monte Carlo) e emite WARN FORTE se o valor lido ≠ `expected_ci`. Protege
-    contra o único risco real: o default do HRC é sticky (último valor usado) —
-    se alguém o mudou à mão, o robot herdaria um CI errado em silêncio. Pura
+    """pt66/pt67: SALVAGUARDA SÓ-LEITURA do CI. O watcher já NÃO escreve o CI (o
+    default do popup Nash é sempre 10.0 = o alvo). Lê o "Target CI" da janela de
+    progresso da run (Monte Carlo) — pt67: pelos **child controls** (label
+    interior), não só pelo título — e emite WARN FORTE se ≠ `expected_ci`. Pura
     detecção, ZERO interação.
 
-    ⚠️ O formato do título ("MC-CFR [Target CI < X]", de uma foto pt64) NÃO está
-    verificado no código. Se o título diferir, esta função falha em SILÊNCIO
-    (não acha o número → sem WARN) — nunca um falso alarme. Re-confirmar na
-    re-smoke pt66 e ajustar `_CI_TARGET_RE` se preciso. Regra operacional:
-    ninguém altera o CI à mão no HRC do Beelink.
+    Protege contra o default sticky do HRC mudado à mão. **Fail-safe:** se não
+    achar o "Target CI" (formato diferente / janela ausente), NÃO alarma. Regra
+    operacional: ninguém altera o CI à mão no HRC do Beelink (runbook §2.6).
     """
     deadline = time.time() + _CI_READBACK_TIMEOUT_S
     while time.time() < deadline:
-        title = _find_progress_window_title(("Target CI",))
-        if title:
-            m = _CI_TARGET_RE.search(title)
-            if m:
-                try:
-                    got = float(m.group(1))
-                except ValueError:
-                    return
+        hwnd = _find_progress_window_hwnd(("Monte Carlo", "MC-CFR", "Hand Setup"))
+        if hwnd:
+            got = _scan_target_ci_in_window(hwnd)
+            if got is not None:
                 if abs(got - float(expected_ci)) > 1e-6:
                     print('   [WARN] [ci] Target CI lido = %s (esperado %s)! O '
                           'default do HRC pode ter sido mudado à mão — REPOR %s '
                           'no popup Nash.' % (got, expected_ci, expected_ci))
                 else:
                     print('   [ci] Target CI = %s confirmado por leitura '
-                          '(sem escrita)' % got)
+                          '(child controls; sem escrita)' % got)
                 return
         time.sleep(_RUN_WAIT_POLL_S)
-    # Janela com "Target CI" não lida no tempo -> fail-safe, sem alarme.
+    # "Target CI" não lido no tempo -> fail-safe, sem alarme.
     print('   [ci] (salvaguarda) "Target CI" não lido em %ds — sem verificação '
           '(fail-safe, sem alarme)' % int(_CI_READBACK_TIMEOUT_S))
 
@@ -820,7 +897,10 @@ def get_player_count_from_hh(hh_text):
     pelo dis manual. Esta versão usa `re.search` correcto.
     """
     pre_summary = hh_text.split('*** SUMMARY ***')[0]
-    seats = re.findall(r'^Seat \d+: \S+ \(\d+ in chips', pre_summary, re.MULTILINE)
+    # pt67 (#WATCHER-PLAYER-COUNT-SPACE-NICKS): `.+?` (lazy) em vez de `\S+` —
+    # o `\S+` saltava nicks com espaços (nomes reais GG, ex.: "Andrii Novak") →
+    # "In hand: 4" numa mão de 8. Alinha com o `_SEAT_ALL_RE` (`.+?`) do backend.
+    seats = re.findall(r'^Seat \d+: .+? \(\d+ in chips', pre_summary, re.MULTILINE)
     if seats:
         return len(seats)
     m = re.search(r'(\d+)-max', hh_text)
@@ -2049,39 +2129,22 @@ def setup_hand(hand_name, hand_path):
     pyautogui.mouseDown(button='left')
     time.sleep(0.15)  # janela Java tem tempo para registar o press
     pyautogui.mouseUp(button='left')
-    time.sleep(5)
-
-    # WARN-only state check pos-click (pt29). Sem raise nesta versao: o smoke
-    # mostra no log se o activate resolveu (sem WARN) ou se Finish ainda falha
-    # (WARN -> hipotese de foco descartada, investigar greyed/timing).
-    if _wizard_window_present():
-        print('   [WARN] verify_wizard_finished: janela "Hand Setup" ainda presente '
-              'apos click + activate — Finish ainda falhou. Hipotese de foco descartada.')
-    else:
-        print('   [finish-diag pos-click] OK — wizard fechou.')
-
-    print('   A aguardar carregamento da mão (30s)...')
-    time.sleep(30)
+    time.sleep(1)  # pt67: settle mínimo p/ o slow-click registar (NÃO o sleep cego)
 
     # pt66 (#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS): a 1ª run é lançada pelo
-    # próprio Finish (slow-click acima) — é o spec canónico (WATCHER_FLUXO:
-    # "É o Finish que lança a 1ª run") e foi confirmado ao vivo no smoke pt64.
-    # O `start_calculation(ci_target)` que aqui corria clicava Calculate outra
-    # vez → abria um 2º popup Nash → disparava uma run INTERMÉDIA redundante
-    # (Full Tree, SEM navegar ao nó) ENQUANTO a 1ª run ainda corria (o HRC
-    # enfileirava-as → 3 runs, 2 janelas Monte Carlo). Removido: a seguir ao
-    # Finish, esperamos só a 1ª run e vamos DIRETO ao navigate + Selected
-    # Subtree (exatamente 2 runs, sem prune). O `set_ci_target_initial` (no-op,
-    # coords 0) também sai. `start_calculation` (Baltazar, no .pyc) fica órfão.
+    # próprio Finish (slow-click acima) — spec canónico (WATCHER_FLUXO). O
+    # `start_calculation(ci_target)` redundante foi removido em pt66: vamos
+    # DIRETO do fim da 1ª run ao navigate + Selected Subtree (exatamente 2 runs).
     #
-    # pt31/pt66 (#HRC-RUN-WAIT-FALSE-TRIVIAL): esperar o fim da 1ª run via
-    # polling da janela de progresso (sinal binário). A 1ª run pós-Finish pode
-    # mostrar "Hand Setup" (reuso do título do wizard) OU "Monte Carlo
-    # Sampling"; passamos os dois candidatos para o run-wait não a declarar
-    # "trivial" por não reconhecer o título. Timeout de aparição generoso
-    # (default 180s — uma run de 10M iterações nunca é trivial). Timeout total
-    # 2h.
-    print('   A aguardar fim da 1ª run (lançada pelo Finish)...')
+    # pt67 (#HRC-RUN-WINDOW-DETECTION-BLIND): SEM sleep cego. O sleep(30) antigo
+    # engolia runs curtas (~5s): a janela "Hand Setup" pós-Finish MORFA na run
+    # (mesmo título/hwnd) sem fechar, aparecia e morria durante o sleep, e o
+    # run-wait declarava "nunca apareceu". Agora vigiamos DESDE o Finish (poll
+    # 0.5s, tracking por hwnd) — ver `_wait_for_run_completion`. Também removido
+    # o check `_wizard_window_present` ("wizard fechou") — com o morph a janela
+    # NÃO fecha, o check era enganador. ⚠️ NUNCA "Always run in background" no
+    # HRC (esconde as janelas; runbook §2.7).
+    print('   A aguardar fim da 1ª run (lançada pelo Finish; vigia desde o Finish)...')
     _wait_for_run_completion(
         timeout_total_s=7200, run_label="1ª run",
         match_substring=("Hand Setup", "Monte Carlo Sampling"),

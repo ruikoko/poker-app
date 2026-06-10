@@ -6,15 +6,15 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
-## pt67 (PLANEADO — desenho fechado Rui+Web, 10 Jun 2026; implementação next session)
+## pt67 (IMPLEMENTADO — em buffer + Release `watcher-pt67`; re-smoke real pendente)
 
-**★ Re-smoke pt66 PASSOU** (Beelink, 10 Jun ~15:00–15:17, `GG-6029013400` KO +
-`GG-6039094225` não-KO): 2 runs exatas sem intermédia, `[scope] idx=1` sem `[ABORT]`,
-sem `select_bounty_mode`, bounty validado via `settings.json` (handdata.bounties por
-jogador no KO, ausente no não-KO), posts `done`/arquivados. **(a)(c')(d-50%) validados;
-(b) validou o fail-open.** Detalhe: `JOURNAL_2026-06-10-pt66.md`.
+3 debts FIXADOS (backend 916 PASSED + 102 watcher pytest + in-process smoke ALL OK;
+diffs validados pelo Web antes do build). `.exe` `a9554427…b3bc931` + Release
+`watcher-pt67`. **DELETE dos 2 hrc_jobs (job 6,7) feito** → as 2 mãos voltaram a
+elegíveis (= recalc da quarentena). Re-smoke real das 2 mãos pendente (Beelink).
+Journal: `JOURNAL_2026-06-10-pt67.md`.
 
-### Novos abertos (fix em pt67)
+### Fixados (em buffer/Release; re-smoke real pendente)
 
 | ID | Sev | Resumo |
 |---|---|---|

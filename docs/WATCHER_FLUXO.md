@@ -33,7 +33,8 @@ O **Max Players** que entra no HRC (campo "Hand Mode → Max Players") conta-se 
    BU, SB, BB = 5.
 
 É um **span POSICIONAL** âncora→BB (inclui os folders entre a âncora e a BB), **não** uma
-contagem de quem meteu dinheiro. Clamp 2..9. Derivação no backend
+contagem de quem meteu dinheiro. **Teto 6** (emenda Rui): `max = min(span, 6)`, clamp
+**2..6** — mesmo 9-max UTG all-in → 6. Derivação no backend
 (`derive_max_players.py`, escrito em `meta.json`). **⚠️ Bug aberto até pt67**
 (`#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS`): o código atual conta participantes, não o
 span → subconta quando o herói é tardio (ex.: BB) e há folders no meio.

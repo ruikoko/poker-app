@@ -581,46 +581,44 @@ def test_setup_hand_calls_wait_for_finish_ready_pt30(pf, tmp_path):
 
 # == pt31 (#WAIT-FOR-CALCULATION-FALSE-POSITIVE): _wait_for_run_completion ==
 
-def test_wait_for_run_completion_normal(pf):
-    """Janela de progresso aparece (fase 1) e depois desaparece (fase 2) ->
-    return sem raise."""
-    state = {"n": 0}
-
-    def _fw(cls, title):
-        state["n"] += 1
-        if state["n"] == 1:
-            return 12345   # fase 1: apareceu
-        if state["n"] <= 3:
-            return 12345   # fase 2: ainda existe
-        return 0           # fase 2: desapareceu (run terminou)
-
+def test_wait_for_run_completion_normal_pt67(pf):
+    """pt67: janela vista (fase A capta hwnd) -> desaparece (IsWindow falso +
+    sem janela de progresso) -> termina sem raise."""
     pf._pt30_user32 = MagicMock()
-    pf._pt30_user32.FindWindowW.side_effect = _fw
+    find_calls = {"n": 0}
 
-    pf._wait_for_run_completion(timeout_appear_s=5, timeout_total_s=10,
-                                run_label="1ª run")
-    assert state["n"] >= 4
+    def _find(*a, **k):
+        find_calls["n"] += 1
+        return 12345 if find_calls["n"] == 1 else None  # A: capta; B: já não há
+
+    pf._find_progress_window_hwnd = MagicMock(side_effect=_find)
+    pf._pt30_user32.IsWindow.return_value = False  # hwnd captado já não é janela
+
+    pf._wait_for_run_completion(timeout_total_s=10, run_label="1ª run",
+                                grace_clean_s=5)
+    assert find_calls["n"] >= 2  # 1 captura (A) + ≥1 confirmação de fim (B)
 
 
-def test_wait_for_run_completion_never_appears_graceful(pf, capsys):
-    """Janela nunca aparece (run trivial / erro) -> WARN, sem raise."""
+def test_wait_for_run_completion_never_appears_grace_pt67(pf, capsys):
+    """pt67: janela NUNCA vista no grace -> fail-open ('NUNCA vista'), sem raise."""
     pf._pt30_user32 = MagicMock()
-    pf._pt30_user32.FindWindowW.return_value = 0  # nunca aparece
+    pf._find_progress_window_hwnd = MagicMock(return_value=None)
 
-    pf._wait_for_run_completion(timeout_appear_s=0.2, timeout_total_s=10,
-                                run_label="1ª run")
+    pf._wait_for_run_completion(timeout_total_s=10, run_label="1ª run",
+                                grace_clean_s=0.2)
     out = capsys.readouterr().out
-    assert "nao apareceu" in out
+    assert "NUNCA vista" in out
 
 
-def test_wait_for_run_completion_never_disappears_raises(pf):
-    """Janela aparece mas nunca desaparece (run preso) -> raise."""
+def test_wait_for_run_completion_never_disappears_raises_pt67(pf):
+    """pt67: janela vista mas NUNCA desaparece (IsWindow sempre True) -> raise."""
     pf._pt30_user32 = MagicMock()
-    pf._pt30_user32.FindWindowW.return_value = 12345  # sempre presente
+    pf._find_progress_window_hwnd = MagicMock(return_value=12345)  # sempre presente
+    pf._pt30_user32.IsWindow.return_value = True  # nunca fecha
 
     with pytest.raises(RuntimeError, match="RUN_NEVER_COMPLETED"):
-        pf._wait_for_run_completion(timeout_appear_s=5, timeout_total_s=0.2,
-                                    run_label="2ª run")
+        pf._wait_for_run_completion(timeout_total_s=0.2, run_label="2ª run",
+                                    grace_clean_s=5)
 
 
 # == pt34 v1 (#START-CALC...-2A-RUN-PROGRESS-TITLE): substring match ==
@@ -670,23 +668,20 @@ def test_find_progress_window_title_exact_match_pt34(pf):
     assert pf._find_progress_window_title() is None
 
 
-def test_wait_for_run_completion_uses_substring_match_pt34(pf):
-    """pt34 v1: a 2a run delega em _find_progress_window_title com o substring
-    'Monte Carlo Sampling' (aparece -> desaparece), sem timeout."""
-    titles = iter([
-        "H-GG-123: Monte Carlo Sampling",  # fase 1: detectada
-        "H-GG-123: Monte Carlo Sampling",  # fase 2: ainda a correr
-        None,                               # fase 2: terminou
-    ])
-    pf._find_progress_window_title = MagicMock(side_effect=lambda ms: next(titles))
+def test_wait_for_run_completion_uses_hwnd_match_pt67(pf):
+    """pt67: o run-wait delega em _find_progress_window_hwnd com o match certo
+    ('Monte Carlo Sampling' p/ a 2a run); aparece -> desaparece."""
+    seq = iter([777, 777, None])  # A: capta 777; B: 777 (a correr) -> None (fim)
+    pf._find_progress_window_hwnd = MagicMock(side_effect=lambda ms: next(seq))
+    pf._pt30_user32 = MagicMock()
+    pf._pt30_user32.IsWindow.return_value = False  # fim depende do título (None)
 
     pf._wait_for_run_completion(
-        timeout_appear_s=30, timeout_total_s=28800,
-        run_label="2ª run", match_substring="Monte Carlo Sampling",
+        timeout_total_s=28800, run_label="2ª run",
+        match_substring="Monte Carlo Sampling", grace_clean_s=30,
     )
 
-    assert pf._find_progress_window_title.call_count == 3
-    for c in pf._find_progress_window_title.call_args_list:
+    for c in pf._find_progress_window_hwnd.call_args_list:
         assert c.args == ("Monte Carlo Sampling",)
 
 
@@ -742,37 +737,74 @@ def test_find_progress_window_title_tuple_match_pt66(pf):
     pf._pt30_user32.FindWindowW.assert_not_called()
 
 
-def test_ci_target_readback_warn_warns_when_not_10_pt66(pf, capsys):
-    """pt66: leitura do 'Target CI' != 10 -> WARN forte (deteccao, sem
-    interacao)."""
-    pf._find_progress_window_title = MagicMock(
-        return_value="H-GG-1: MC-CFR [Target CI < 12.00]"
-    )
+def test_ci_target_readback_warn_warns_when_not_10_pt67(pf, capsys):
+    """pt67: 'Target CI' != 10 (lido dos child controls) -> WARN forte."""
+    pf._find_progress_window_hwnd = MagicMock(return_value=999)
+    pf._scan_target_ci_in_window = MagicMock(return_value=12.0)
     pf._ci_target_readback_warn(10.0)
     out = capsys.readouterr().out
     assert "[WARN]" in out and "Target CI" in out and "12" in out
+    pf._scan_target_ci_in_window.assert_called_once_with(999)
 
 
-def test_ci_target_readback_warn_silent_when_10_pt66(pf, capsys):
-    """pt66: 'Target CI' == 10 -> confirma por leitura, SEM WARN."""
-    pf._find_progress_window_title = MagicMock(
-        return_value="H-GG-1: MC-CFR [Target CI < 10.00]"
-    )
+def test_ci_target_readback_warn_silent_when_10_pt67(pf, capsys):
+    """pt67: 'Target CI' == 10 -> confirma por leitura (child controls), SEM WARN."""
+    pf._find_progress_window_hwnd = MagicMock(return_value=999)
+    pf._scan_target_ci_in_window = MagicMock(return_value=10.0)
     pf._ci_target_readback_warn(10.0)
     out = capsys.readouterr().out
     assert "[WARN]" not in out
     assert "confirmado por leitura" in out
 
 
-def test_ci_target_readback_warn_failsafe_when_no_window_pt66(pf, capsys):
-    """pt66: janela 'Target CI' nao encontrada -> fail-safe, SEM WARN/alarme
-    (o formato do titulo nao esta verificado; nunca um falso alarme)."""
-    pf._find_progress_window_title = MagicMock(return_value=None)
-    pf._CI_READBACK_TIMEOUT_S = 0.0  # nao entra no loop de polling
+def test_ci_target_readback_warn_failsafe_when_no_window_pt67(pf, capsys):
+    """pt67: janela de progresso não encontrada -> fail-safe, SEM WARN/alarme."""
+    pf._find_progress_window_hwnd = MagicMock(return_value=None)
+    pf._CI_READBACK_TIMEOUT_S = 0.0  # não entra no loop de polling
     pf._ci_target_readback_warn(10.0)
     out = capsys.readouterr().out
     assert "[WARN]" not in out
     assert "fail-safe" in out
+
+
+def test_scan_target_ci_reads_child_controls_pt67(pf):
+    """pt67: _scan_target_ci_in_window lê o título E os child controls; o
+    'Target CI' vive num label interior."""
+    pf._pt30_user32 = MagicMock()
+    # título da janela = sem Target CI; um child tem-no.
+    texts = {500: "H-GG-1: Monte Carlo Sampling", 600: "MC-CFR [Target CI < 10.00]"}
+    pf._pt30_user32.GetWindowTextLengthW.side_effect = lambda h: len(texts.get(h, ""))
+
+    def _get_text(h, buf, cch):
+        buf.value = texts.get(h, "")
+        return len(texts.get(h, ""))
+
+    # _read_hwnd_text usa SendMessageW(WM_GETTEXTLENGTH/WM_GETTEXT). Simulamos via
+    # GetWindowTextLengthW/W? Não — _read_hwnd_text usa SendMessageW. Mockamos isso.
+    def _send(h, msg, wparam, lparam):
+        if msg == pf.WM_GETTEXTLENGTH:
+            return len(texts.get(h, ""))
+        if msg == pf.WM_GETTEXT:
+            # lparam = endereço do buffer; escrevemos via ctypes.
+            import ctypes
+            buf = (ctypes.c_wchar * (len(texts.get(h, "")) + 1)).from_address(lparam)
+            s = texts.get(h, "")
+            for i, ch in enumerate(s):
+                buf[i] = ch
+            buf[len(s)] = "\x00"
+            return len(s)
+        return 0
+
+    pf._pt30_user32.SendMessageW.side_effect = _send
+
+    def _enum_child(hwnd, cb, lparam):
+        cb(600, lparam)  # 1 child com o Target CI
+        return True
+
+    pf._pt30_user32.EnumChildWindows.side_effect = _enum_child
+
+    got = pf._scan_target_ci_in_window(500)
+    assert got == 10.0
 
 
 def test_setup_hand_no_intermediate_run_no_bounty_pt66(pf, tmp_path):

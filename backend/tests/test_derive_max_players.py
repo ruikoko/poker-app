@@ -1,150 +1,201 @@
-"""Tests para services/derive_max_players (pt23 fix Bug B)."""
+"""Tests para services/derive_max_players — pt67: SPAN âncora→BB (LEI, REGRAS_NEGOCIO §15).
+
+A derivação usa `derive_seats_in_preflop_order` (posições a partir do BOTÃO), por
+isso o helper coloca o botão em `Seat #(N−2)` (n≥3) → seat `i` = posição preflop `i`
+(seat 1 = UTG/first-to-act, seat N = BB). Assim os nicks podem ser nomeados pela
+posição e a `hrc_idx` de cada um = (índice no `order` − 0).
+
+Regra (Rui): `max = N − idx_âncora`, onde a âncora é (1) a posição do herói se ele
+foldou antes de qualquer ação voluntária, ou (2) a 1ª ação voluntária (call/raise/bet).
+"""
 from app.services.derive_max_players import derive_max_players
 
 
-# Helpers para construir HHs PS-compat. Não usamos blinds/buttons reais —
-# `derive_max_players` infere ordem do log de acções, não da posição de seats.
-
-def _hh(seats: list[str], hero: str, preflop_actions: list[tuple[str, str]]) -> str:
-    """Constrói uma HH minimal PS-compat com `seats` nicks, hero=`hero`,
-    e acções preflop na ordem dada (lista de (nick, action_line)).
+def _hh(order: list[str], hero: str, actions: list[tuple[str, str]]) -> str:
+    """HH minimal PS-compat. `order` = nicks em ORDEM PREFLOP (idx 0 = UTG/
+    first-to-act, último = BB). Botão em Seat #(N−2) p/ que seat i = posição i.
+    `actions` = [(nick, action_line)] na ordem em que aparecem.
     """
+    n = len(order)
+    btn_seat = (n - 2) if n >= 3 else 1
     lines = [
-        "Poker Hand #TM1: Tournament #100, Test Tourney - Level5 (200/400) - 2026/05/01 12:00:00",
-        f"Table 'A' {len(seats)}-max Seat #1 is the button",
+        "Poker Hand #TM1: Tournament #100, Test - Level5 (200/400) - 2026/05/01 12:00:00",
+        f"Table 'A' {n}-max Seat #{btn_seat} is the button",
     ]
-    for i, nick in enumerate(seats, start=1):
+    for i, nick in enumerate(order, start=1):
         lines.append(f"Seat {i}: {nick} (10000 in chips)")
     lines.append("*** HOLE CARDS ***")
     lines.append(f"Dealt to {hero} [As Kd]")
-    for nick, action in preflop_actions:
+    for nick, action in actions:
         lines.append(f"{nick}: {action}")
     lines.append("*** SUMMARY ***")
     return "\n".join(lines) + "\n"
 
 
-# ── Casos exigidos pelo spec ────────────────────────────────────────────────
+# ── Regra 2 (âncora = 1ª ação voluntária) ───────────────────────────────────
 
-def test_a_walk_to_BB_returns_2():
-    """(a) UTG raise, fold até BB. Hero = BB, dobra. Vol={UTG}, atrás=0 → 2."""
-    seats = ["UTG", "MP", "CO", "BTN", "SB", "Hero"]  # 6-max, Hero=BB
-    hh = _hh(seats, "Hero", [
+def test_utg_opens_folds_to_bb_anchor_utg_6max_returns_6():
+    """UTG abre, folda à volta até à BB. Âncora=UTG (idx0) → span UTG→BB = 6."""
+    order = ["UTG", "MP", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BB", [
         ("UTG", "raises 800 to 1200"),
-        ("MP",  "folds"),
-        ("CO",  "folds"),
-        ("BTN", "folds"),
-        ("SB",  "folds"),
-        ("Hero", "folds"),
+        ("MP", "folds"), ("CO", "folds"), ("BTN", "folds"), ("SB", "folds"),
+        ("BB", "folds"),
     ])
-    assert derive_max_players(hh) == 2
+    assert derive_max_players(hh) == 6
 
 
-def test_b_UTG_raise_fold_to_hero_CO_with_3_behind_returns_5():
-    """(b) UTG raise, foldados até hero CO + 3 atrás (BTN, SB, BB) → 5."""
-    seats = ["UTG", "MP", "Hero", "BTN", "SB", "BB"]  # 6-max, Hero=CO
-    hh = _hh(seats, "Hero", [
-        ("UTG", "raises 800 to 1200"),
-        ("MP",  "folds"),
-        ("Hero", "calls 1200"),  # hero acts, 3 still to come (BTN/SB/BB)
+def test_gg6029013400_shape_hero_bb_anchor_hj_8max_returns_5():
+    """Cross-check GG-6029013400: 8-max, herói BB, 1ª ação no HJ (idx3).
+    span HJ→BB = HJ,CO,BTN,SB,BB = 5. (O código antigo dava 2.)"""
+    order = ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BB", [
+        ("UTG", "folds"), ("UTG1", "folds"), ("MP", "folds"),
+        ("HJ", "raises 800 to 1200"),
+        ("CO", "folds"), ("BTN", "folds"), ("SB", "folds"),
+        ("BB", "calls 1200"),
     ])
     assert derive_max_players(hh) == 5
 
 
-def test_c_open_call_call_hero_BTN_2_behind_returns_6():
-    """(c) UTG raise, MP call, CO call, hero BTN + 2 atrás (SB/BB) → 6."""
-    seats = ["UTG", "MP", "CO", "Hero", "SB", "BB"]  # 6-max, Hero=BTN
-    hh = _hh(seats, "Hero", [
-        ("UTG", "raises 800 to 1200"),
-        ("MP",  "calls 1200"),
-        ("CO",  "calls 1200"),
-        ("Hero", "calls 1200"),
-    ])
-    assert derive_max_players(hh) == 6
-
-
-def test_d_hero_UTG_raise_9max_returns_9():
-    """(d) Hero UTG raise + 8 atrás 9-max → 9. Hero é primeiro a agir."""
-    seats = ["Hero", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"]
-    hh = _hh(seats, "Hero", [
-        ("Hero", "raises 800 to 1200"),
-        # restantes ainda não agiram → still_to_act = 8
-    ])
-    assert derive_max_players(hh) == 9
-
-
-def test_e_UTG_raise_hero_BB_3bet_intermediate_folds_returns_2():
-    """(e) UTG raise, MP/CO/BTN/SB fold, hero BB 3-bet → 2."""
-    seats = ["UTG", "MP", "CO", "BTN", "SB", "Hero"]  # 6-max, Hero=BB
-    hh = _hh(seats, "Hero", [
-        ("UTG", "raises 800 to 1200"),
-        ("MP",  "folds"),
-        ("CO",  "folds"),
-        ("BTN", "folds"),
-        ("SB",  "folds"),
-        ("Hero", "raises 3200 to 4400"),
+def test_gg6039094225_shape_hero_bb_anchor_sb_8max_returns_2():
+    """Cross-check GG-6039094225: 8-max, herói BB, 1ª ação no SB (idx6).
+    span SB→BB = 2."""
+    order = ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BB", [
+        ("UTG", "folds"), ("UTG1", "folds"), ("MP", "folds"), ("HJ", "folds"),
+        ("CO", "folds"), ("BTN", "folds"),
+        ("SB", "raises 800 to 1200"),
+        ("BB", "folds"),
     ])
     assert derive_max_players(hh) == 2
 
 
-def test_f_UTG_limp_MP_limp_hero_CO_3_behind_returns_6():
-    """(f) UTG limp, MP limp, hero CO + 3 atrás → 6 (2 vol + hero + 3 atrás)."""
-    seats = ["UTG", "MP", "Hero", "BTN", "SB", "BB"]
-    hh = _hh(seats, "Hero", [
-        ("UTG", "calls 400"),   # limp
-        ("MP",  "calls 400"),   # limp
-        ("Hero", "calls 400"),  # hero limps too
+def test_gg6028190109_shape_hero_bu_anchor_hj_6max_returns_5():
+    """Cross-check GG-6028190109: 6-max, herói BU(BTN), 1ª ação no HJ (idx1).
+    span HJ→BB = HJ,CO,BTN,SB,BB = 5."""
+    order = ["MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BTN", [
+        ("MP", "folds"),
+        ("HJ", "raises 800 to 1200"),
+        ("CO", "folds"),
+        ("BTN", "calls 1200"),
+        ("SB", "folds"), ("BB", "folds"),
+    ])
+    assert derive_max_players(hh) == 5
+
+
+def test_cap_at_6_hero_utg_opens_9max_returns_6():
+    """TETO 6 (emenda Rui): herói abre de UTG (idx0) numa 9-max → span 9, mas
+    `min(9, 6) = 6`."""
+    order = ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB", "UTG2"]
+    hh = _hh(order, "UTG", [("UTG", "raises 800 to 1200")])
+    assert derive_max_players(hh) == 6
+
+
+def test_fold_to_co_who_limps_anchor_co_6max_returns_4():
+    """Foldado até ao CO (idx2) que faz limp (voluntário) → span CO→BB = 4."""
+    order = ["UTG", "MP", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BB", [
+        ("UTG", "folds"), ("MP", "folds"),
+        ("CO", "calls 400"),
+        ("BTN", "folds"), ("SB", "folds"), ("BB", "checks"),
+    ])
+    assert derive_max_players(hh) == 4
+
+
+def test_voluntary_before_hero_fold_is_rule2_not_rule1():
+    """Herói folda, MAS o UTG já abriu antes → regra 2 (âncora UTG), NÃO regra 1.
+    span UTG→BB = 6 (o herói foldar não muda a âncora)."""
+    order = ["UTG", "MP", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BB", [
+        ("UTG", "raises 800 to 1200"),
+        ("MP", "folds"), ("CO", "folds"), ("BTN", "folds"), ("SB", "folds"),
+        ("BB", "raises 3200 to 4400"),
     ])
     assert derive_max_players(hh) == 6
 
 
-# ── Defensivos ──────────────────────────────────────────────────────────────
+# ── Regra 1 (herói foldou ANTES de qualquer ação voluntária) ─────────────────
+
+def test_rule1_hero_folds_unopened_co_8max_returns_4():
+    """Pote por abrir até ao herói (CO, idx4) que folda → âncora=herói.
+    span CO→BB = CO,BTN,SB,BB = 4. (Regra 1 — antes nunca exercitada.)"""
+    order = ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "CO", [
+        ("UTG", "folds"), ("UTG1", "folds"), ("MP", "folds"), ("HJ", "folds"),
+        ("CO", "folds"),
+    ])
+    assert derive_max_players(hh) == 4
+
+
+def test_rule1_hero_folds_unopened_utg1_8max_capped_at_6():
+    """Pote por abrir até ao herói UTG1 (idx1) que folda → span UTG1→BB = 7,
+    mas o TETO 6 corta para 6."""
+    order = ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "UTG1", [
+        ("UTG", "folds"),
+        ("UTG1", "folds"),
+    ])
+    assert derive_max_players(hh) == 6
+
+
+# ── Degenerados / defensivos ────────────────────────────────────────────────
+
+def test_walk_to_bb_no_voluntary_returns_2():
+    """Foldado até à BB, sem ação voluntária e a BB não folda (walk) →
+    convenção SB-vs-BB = 2."""
+    order = ["UTG", "MP", "CO", "BTN", "SB", "BB"]
+    hh = _hh(order, "BB", [
+        ("UTG", "folds"), ("MP", "folds"), ("CO", "folds"), ("BTN", "folds"),
+        ("SB", "folds"), ("BB", "checks"),
+    ])
+    assert derive_max_players(hh) == 2
+
 
 def test_empty_hh_returns_2():
     assert derive_max_players("") == 2
     assert derive_max_players(None) == 2  # type: ignore[arg-type]
 
 
-def test_no_hole_cards_marker_falls_back_to_seat_count():
-    """Sem '*** HOLE CARDS ***' não há sinal de preflop. Fallback ao
-    número de seats (clamped 2..9)."""
+def test_no_preflop_marker_returns_2():
+    """Sem '*** HOLE CARDS ***'/'*** PRE-FLOP ***' não há bloco preflop → 2."""
     hh = (
         "Poker Hand #TM1: Tournament #100 ...\n"
-        "Table 'A' 6-max Seat #1 is the button\n"
+        "Table 'A' 6-max Seat #4 is the button\n"
         "Seat 1: UTG (10000 in chips)\n"
         "Seat 2: MP (10000 in chips)\n"
-        "Seat 3: CO (10000 in chips)\n"
-        "Seat 4: BTN (10000 in chips)\n"
-        "Seat 5: SB (10000 in chips)\n"
-        "Seat 6: Hero (10000 in chips)\n"
-        "Dealt to Hero [As Kd]\n"
+        "Seat 6: BB (10000 in chips)\n"
     )
-    assert derive_max_players(hh) == 6
-
-
-def test_clamp_over_9_caps_at_9():
-    """11 seats (impossivel real, mas defensivo) → clamp a 9."""
-    seats = [f"P{i}" for i in range(1, 12)]  # 11 nicks
-    seats[0] = "Hero"
-    hh = _hh(seats, "Hero", [("Hero", "raises 800 to 1200")])
-    assert derive_max_players(hh) == 9
-
-
-def test_clamp_under_2_floors_at_2():
-    """1 seat (impossivel real) → clamp a 2."""
-    seats = ["Hero"]
-    hh = _hh(seats, "Hero", [])
     assert derive_max_players(hh) == 2
 
 
-def test_gg_pos_convert_multiple_dealt_lines_picks_real_hero():
-    """pt27 regressão: HH GG após `_replace_hashes` tem `Dealt to <nick>` em
-    todos os seats (não só Hero). Antes do fix, `_HERO_RE` apanhava o
-    primeiro `Dealt to` (Seat 1) em vez do Hero real, gerando
-    `max_players=4` em vez de 6 para `GG-5944816316`.
+def test_clamp_under_2_floors_at_2():
+    """< 2 seats → 2."""
+    hh = _hh(["Hero"], "Hero", [])
+    assert derive_max_players(hh) == 2
 
-    Reproduz a forma exacta do HH PS-compat para essa mão: 8-handed, 2
-    folds, MP open, Hero (HJ) 3-bet jam, depois 3 folds pós-Hero.
-    """
+
+def test_nicks_with_spaces_counted():
+    """Nicks com espaços (nomes reais GG) são contados — `derive_seats` usa
+    `.+?`, não `\\S+`. 6-max, foldado até ao HJ ('Andrii Novak', idx1) que abre
+    → span HJ→BB = 5 (discrimina: se o nick com espaço fosse saltado, N e
+    posições mudavam)."""
+    order = ["MP", "Andrii Novak", "CO", "BTN", "SB", "Hero Two"]
+    hh = _hh(order, "Hero Two", [
+        ("MP", "folds"),
+        ("Andrii Novak", "raises 800 to 1200"),
+        ("CO", "folds"), ("BTN", "folds"), ("SB", "folds"), ("Hero Two", "folds"),
+    ])
+    assert derive_max_players(hh) == 5
+
+
+# ── Regressão real (mantida de pt27) — bate com o SPAN: âncora MP → 6 ────────
+
+def test_gg5944816316_real_8max_anchor_mp_returns_6():
+    """GG-5944816316 real: 8-handed, button=Seat8. 2 folds (Qyl_SH, Vermejo20),
+    MP open (Pinduca77, idx2), Hero=HJ 3-bet jam. span MP→BB = 6.
+    (Coincide com o resultado pt27 antigo — mantém-se.)"""
     hh = (
         "Poker Hand #TM5944816316: Tournament #283300918, "
         "97-H: $525 Bounty Hunters Daily Main [Deepstack] Hold'em No Limit"
@@ -179,8 +230,4 @@ def test_gg_pos_convert_multiple_dealt_lines_picks_real_hero():
         "malamirca: folds\n"
         "*** SUMMARY ***\n"
     )
-    # Pre-Hero: 2 folds + 1 voluntary (Pinduca77). Hero=BB? Não — Hero=HJ no
-    # seat 6, button=8 → ordem preflop UTG=Seat 3 ... HJ=Seat 6. Hero é o 4º
-    # a agir. voluntary_before={Pinduca77}, still_to_act={CO,BU,SB,BB}=4.
-    # Resultado esperado: 1 + 1 + 4 = 6.
     assert derive_max_players(hh) == 6

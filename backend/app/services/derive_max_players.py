@@ -1,120 +1,110 @@
-"""Derive HRC `max_players` hint from a PS-compatible hand history.
+"""Derive HRC `max_players` hint — SPAN âncora→BB (LEI do Rui, REGRAS_NEGOCIO §15).
 
-Conta apenas jogadores **relevantes à decisão do hero** preflop:
-  - Open agressor (raise/limp/bet)
-  - Jogadores que entraram voluntariamente no pot antes de hero
-    (calls, raises, limps, 3-bets)
-  - Hero
-  - Jogadores em posições atrás de hero que ainda não agiram preflop
+Conta-se de uma **ÂNCORA, inclusivé, até à BB** — span POSICIONAL (inclui os
+folders entre a âncora e a BB), NÃO uma contagem de participantes:
 
-Foldados (antes do agressor ou entre agressor↔hero) NÃO contam — o HRC
-ignora-os do solver, evitando que a árvore exploda com seats vazios.
+  1. Herói foldou ANTES de qualquer ação voluntária (pote por abrir até ele):
+     âncora = posição do **HERÓI**.
+  2. Caso contrário: âncora = posição da **1ª AÇÃO VOLUNTÁRIA** (call/limp/raise/bet).
 
-Saída clamped a 2..9 (range aceite pelo HRC).
+`max = (índice da BB − índice da âncora + 1)` na ordem preflop. A BB é o último
+seat na ordem (`hrc_idx = N−1`), logo `max = N − idx_âncora`. **Teto 6** (emenda de
+produto do Rui, 10 Jun): `max = min(span, 6)`, mínimo 2 — mesmo 9-max com UTG
+all-in (span 9) → 6. Clamp final **2..6**.
 
-Fonte: pt23 fix Bug B do watcher. O caller (`setup_hand` no watcher
-patched) lê `max_players` do payouts.json e passa a `set_hand_mode_players`.
+pt67 (#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS): substitui a contagem antiga de
+PARTICIPANTES (`voluntary_before + hero + still_to_act`), que **descartava os
+folders entre a âncora e o herói** → subcontava quando o herói era tardio (ex.: BB
+com folds no meio). Cross-check pt66: GG-6028190109 (6-max, herói BU, âncora HJ)=5;
+GG-6039094225 (8-max, herói BB, âncora SB)=2; GG-6029013400 (8-max, herói BB,
+âncora HJ)=5 (o código antigo dava 2).
+
+Reusa `derive_seats_in_preflop_order` (fonte única do mapping nick↔hrc_idx↔position
+do pipeline HRC) — qualquer mudança de convenção fica centralizada lá. Import lazy
+(`queue_export` importa este módulo → evita ciclo).
+
+O caller (`build_queue_zip` em `queue_export.py`) escreve o resultado em `meta.json`
+como `max_players`; o watcher lê-o e passa a `set_hand_mode_players`.
 """
 from __future__ import annotations
 import re
 from typing import Optional
 
-
-# Seat: `Seat N: NICK (X in chips...)`. NICK pode conter espaços (GG nicks
-# tipo "Andrii Novak") — usamos lazy `.+?` até " (" + digit, em vez de `\S+`
-# que truncava em nicks com espaços.
-_SEAT_RE = re.compile(r"^Seat (\d+): (.+?) \(\d", re.MULTILINE)
-# Hero é identificado pela linha `Dealt to <nick> [<cards>]` — só o Hero
-# tem hole cards visíveis em PS HH standard. Em GG HH pós-`_replace_hashes`
-# todos os seats têm `Dealt to <nick>` (sem brackets), por isso exigimos
-# os brackets para apanhar o Hero verdadeiro e não o primeiro seat.
-# `.+?` em vez de `\S+` para tolerar nicks com espaços (consistente com
-# `_SEAT_RE`).
+# Hero é a linha `Dealt to <nick> [<cards>]` — só o Hero tem brackets de cartas
+# em PS HH standard (em GG pós-`_replace_hashes` todos os seats têm `Dealt to`
+# sem brackets, por isso exigimos `[`). `.+?` tolera nicks com espaços.
 _HERO_RE = re.compile(r"^Dealt to (.+?) \[", re.MULTILINE)
-# Action lines: "<nick>: folds" / "calls X" / "raises X to Y" / "bets X" / "checks".
-# `\b` after the verb evita capturar "raised" no SUMMARY.
-# `.+?` em vez de `\S+` para tolerar nicks com espaços.
+# Action lines: "<nick>: folds|calls|raises|bets|checks". `\b` evita "raised" no
+# SUMMARY. `.+?` (não `\S+`) tolera nicks com espaços.
 _ACTION_RE = re.compile(
     r"^(.+?): (folds|calls|raises|bets|checks)\b",
     re.MULTILINE,
 )
+# Dinheiro voluntário no pote (limp/call/raise/bet). Folds e checks NÃO contam.
+_VOLUNTARY = {"calls", "raises", "bets"}
 
 
 def _clamp(n: int) -> int:
-    return min(max(n, 2), 9)
+    # Emenda Rui (10 Jun): teto 6 em qualquer situação (mínimo 2 mantém-se).
+    return min(max(n, 2), 6)
 
 
 def derive_max_players(hh_text: Optional[str]) -> int:
-    """Devolve o nº de jogadores relevantes à decisão do hero, em [2, 9].
-
-    Regra detalhada no docstring do módulo. Defensivo: parsing erro,
-    HH vazio, hero não encontrado, etc. → devolve 2.
-    """
+    """Span âncora→BB em [2, 9]. Defensivo (parsing erro / degenerate) → 2."""
     if not hh_text:
         return 2
 
-    # 1. parse seats — restringido ao header (antes de `*** HOLE CARDS ***`)
-    # para evitar match em linhas SUMMARY tipo `Seat 6: Hero collected (X)`
-    # que sobrescrevem o nick do seat com "Hero collected".
-    hole_cards_pos = hh_text.find("*** HOLE CARDS ***")
-    header = hh_text[:hole_cards_pos] if hole_cards_pos > 0 else hh_text
-    seats: dict[int, str] = {}
-    for m in _SEAT_RE.finditer(header):
-        seats[int(m.group(1))] = m.group(2)
-    if len(seats) < 2:
+    # Import lazy: `queue_export` importa este módulo (ciclo a nível de módulo).
+    from app.services.queue_export import (
+        derive_seats_in_preflop_order,
+        find_preflop_marker,
+    )
+
+    # Ordem preflop canónica: hrc_idx 0 = first-to-act (UTG), hrc_idx N−1 = BB.
+    order = derive_seats_in_preflop_order(hh_text)
+    if len(order) < 2:
         return 2
+    n = len(order)
+    nick_to_idx = {e["nick"]: e["hrc_idx"] for e in order}
 
-    # 2. find hero
+    # Hero (para a regra 1).
     hero_m = _HERO_RE.search(hh_text)
-    if not hero_m:
-        return _clamp(len(seats))
-    hero = hero_m.group(1)
+    hero = hero_m.group(1).strip() if hero_m else None
+    hero_idx = nick_to_idx.get(hero) if hero else None
 
-    # 3. extract preflop block
-    start = hh_text.find("*** HOLE CARDS ***")
-    if start < 0:
-        return _clamp(len(seats))
-    candidates = [
-        hh_text.find("*** FLOP ***", start),
-        hh_text.find("*** SUMMARY ***", start),
+    # Bloco preflop (cross-site, via marker canónico).
+    start = find_preflop_marker(hh_text)
+    if start is None:
+        return 2
+    ends = [
+        e for e in (
+            hh_text.find("*** FLOP ***", start),
+            hh_text.find("*** SUMMARY ***", start),
+        ) if e > 0
     ]
-    candidates = [c for c in candidates if c > 0]
-    end = min(candidates) if candidates else len(hh_text)
+    end = min(ends) if ends else len(hh_text)
     preflop = hh_text[start:end]
 
-    # 4. ordered list of preflop actions, filtered to known players
-    nicks = set(seats.values())
-    actions: list[tuple[str, str]] = []
+    # Âncora: percorre as ações por ordem. O 1º de:
+    #   (a) ação voluntária  → regra 2 (âncora = essa posição); OU
+    #   (b) fold do herói    → regra 1 (âncora = herói)
+    # determina a âncora.
+    anchor_idx: Optional[int] = None
     for m in _ACTION_RE.finditer(preflop):
-        nick, kind = m.group(1), m.group(2)
-        if nick in nicks:
-            actions.append((nick, kind))
-
-    # 5. find hero's first preflop action
-    hero_idx: Optional[int] = None
-    for i, (nick, _) in enumerate(actions):
-        if nick == hero:
-            hero_idx = i
+        nick, kind = m.group(1).strip(), m.group(2)
+        if nick not in nick_to_idx:
+            continue
+        if kind in _VOLUNTARY:
+            anchor_idx = nick_to_idx[nick]          # regra 2
+            break
+        if kind == "folds" and nick == hero:
+            anchor_idx = hero_idx                   # regra 1
             break
 
-    # 6. classify others by what happened before hero's turn
-    slice_end = hero_idx if hero_idx is not None else len(actions)
-    voluntary_before: set[str] = set()
-    acted_before: set[str] = set()
-    for nick, kind in actions[:slice_end]:
-        if nick == hero:
-            continue
-        acted_before.add(nick)
-        if kind != "folds":
-            voluntary_before.add(nick)
-
-    # Walk-to-BB (ou HH cortado cedo sem acção voluntária) → degenerate.
-    # Por convenção, HRC modela este spot como SB-vs-BB (2 jogadores).
-    if hero_idx is None and not voluntary_before:
+    if anchor_idx is None:
+        # Walk-to-BB / sem ação voluntária / herói desconhecido → SB-vs-BB (2)
+        # por convenção (HRC modela este spot degenerate como heads-up).
         return 2
 
-    # Quem ainda não agiu = todos os seats menos os que já agiram menos hero.
-    still_to_act = nicks - acted_before - {hero}
-
-    count = len(voluntary_before) + 1 + len(still_to_act)
-    return _clamp(count)
+    # Span âncora→BB inclusive: BB = hrc_idx (n−1) → (n−1) − anchor_idx + 1 = n − anchor_idx.
+    return _clamp(n - anchor_idx)

@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 10 Junho 2026 (pt66 — cirurgia ao watcher HRC: 4 fixes [run intermédia removida; run-wait robusto; CI não escrito; `select_bounty_mode` removido]; backend 911 PASSED; `.exe` `9ea51ce4` na Release `watcher-pt66`; **re-smoke real pendente**). Antes: pt64 (★ smoke real PASSOU, ciclo HRC ponta-a-ponta) + pt65 (bounty-verify); pt62/pt63 (lobby-IT). Journal: `docs/JOURNAL_2026-06-10-pt66.md`.
+**Última actualização:** 10 Junho 2026 (pt67 — Max Players span+teto6 [backend, LEI], run-window detection + CI child-controls [watcher]; 916 PASSED; `.exe` `a9554427` na Release `watcher-pt67`; DELETE dos 2 hrc_jobs feito; **re-smoke real pendente**). Antes: pt66 (re-smoke PASSOU, 4 fixes watcher); pt64 (★ smoke real); pt62/pt63 (lobby-IT). Journal: `docs/JOURNAL_2026-06-10-pt67.md`.
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -12,28 +12,23 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
-> **★ pt66 FECHADO (re-smoke PASSOU); ★ pt67 é o PRÓXIMO (gate da fila).** Os 4 fixes
-> pt66 estão em `main` + Release `watcher-pt66` (`9ea51ce4`); a **re-smoke real PASSOU**
-> (10 Jun, `GG-6029013400` + `GG-6039094225`): 2 runs sem intermédia, scope idx=1, sem
-> `select_bounty_mode`, bounty validado via `settings.json`. **(a)(c')(d-50%)
-> validados; (b) validou o fail-open.** Cobertura (d) **parcial** — prova ≠50% deferida
-> (sem 0.75/0.40 na fila).
+> **★ pt67 IMPLEMENTADO (em buffer + Release `watcher-pt67`); falta a RE-SMOKE real
+> (gate da fila).** 3 fixes em código (**916 PASSED** + 102 watcher + in-process smoke
+> ALL OK; diffs validados pelo Web): **#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS** (backend
+> — span âncora→BB, **teto 6** [LEI `REGRAS_NEGOCIO §15`]; GG-6029013400 agora 5),
+> **#HRC-RUN-WINDOW-DETECTION-BLIND** (watcher — vigia desde o Finish por hwnd, sem sleep
+> cego), **#HRC-CI-SAFEGUARD-CHILD-CONTROLS** (watcher — "Target CI" nos child controls).
+> + In-hand `\S+`→`.+?`. `.exe` **`a9554427`**.
 >
-> **pt67 (desenho fechado Rui+Web; implementação next session):**
-> 1. **`#HRC-RUN-WINDOW-DETECTION-BLIND`** (🔴 watcher) — o sleep cego de 30s pós-Finish
->    engole runs curtas; vigiar desde o Finish por hwnd (sem heurística de tempo).
-> 2. **`#HRC-CI-SAFEGUARD-CHILD-CONTROLS`** (🟡 watcher) — ler o "Target CI" por child
->    controls (vive num label interior, não no título).
-> 3. **`#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS`** (🔴 **backend** `derive_max_players.py`)
->    — contar o **span posicional âncora→BB** (LEI, `REGRAS_NEGOCIO §15`), não
->    participantes. `GG-6029013400` saiu com Max=2, devia 5.
-> 4. **Regra operacional** (runbook §2.7) — **NUNCA "Always run in background"** no HRC.
-> 5. **Re-smoke pt67 = as MESMAS 2 mãos** (GG-6029013400 → Max=5 + recalc quarentena;
->    GG-6039094225 → regressão).
+> **Re-smoke pt67 = as MESMAS 2 mãos.** **DELETE dos 2 hrc_jobs (job 6,7) FEITO** → ambas
+> voltaram a elegíveis (recalc da quarentena dessas 2). Beelink: instala_pt67 →
+> `requeue_pt67.bat` (asset da Release, self-fetch do `requeue_state.py`) → adapter →
+> watcher → packs novos (Max=5). **Critérios:** GG-6029013400 com **Max=5** + 1ª run
+> DETECTADA (sem WARN "NUNCA vista"); GG-6039094225 regressão.
 >
-> **⚠️ FILA (~49) TRAVADA** até o pt67 + fix Max Players + re-smoke passar; depois
-> lote(s) ao ritmo do Rui. **Quarentenas:** `GG-6028190109` + `GG-6027751209` +
-> **`GG-6029013400`** (recalcular pós-pt67). Detalhe: `TECH_DEBTS_INVENTARIO.md` (pt67/pt66) + journal pt66.
+> **⚠️ FILA (~49) TRAVADA** até a re-smoke pt67 passar; depois lote(s) ao ritmo do Rui.
+> **Quarentenas restantes:** `GG-6028190109` + `GG-6027751209` (recalc no 1º lote).
+> Detalhe: `JOURNAL_2026-06-10-pt67.md` + `TECH_DEBTS_INVENTARIO.md` (pt67).
 
 > **★ Quarentena de 2 resultados HRC (recalcular pós-pt66).** `GG-6028190109`
 > (smoke pt64, corridas sobrepostas) e `GG-6027751209` (STALE, postado no arranque

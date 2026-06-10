@@ -545,8 +545,13 @@ O **Max Players** enviado ao HRC (campo "Hand Mode → Max Players") conta-se de
    all-in → contar do CO; 6-max UTG all-in → do UTG; 8-max âncora HJ → HJ, CO, BU, SB,
    BB = **5**.
 
-Clamp 2..9. Derivação: **backend** `derive_max_players.py` → `meta.json` →
-`set_hand_mode_players` no watcher.
+**⚠️ TETO 6 (emenda de produto do Rui, 10 Jun 2026):** `max = min(span, 6)`, mínimo 2
+mantém-se. **Em qualquer situação o máximo é 6** — mesmo numa 9-max com UTG all-in
+(span 9) → **6**. Clamp final **2..6**. (O limite do Hand Mode do HRC fica dissolvido:
+6 está dentro do que o HRC já aceitou nas smokes — 5 validado.)
+
+Derivação: **backend** `derive_max_players.py` → `meta.json` → `set_hand_mode_players`
+no watcher.
 
 **⚠️ Bug aberto (`#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS`, registado pt66, fix pt67):**
 o código atual conta `voluntary_before + hero + still_to_act` (participantes), não o
