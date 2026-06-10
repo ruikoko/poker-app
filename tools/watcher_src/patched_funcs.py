@@ -1567,9 +1567,17 @@ def navigate_to_target_node(wpos, target_node_offset, aggressor_real_action=None
     if not hrc:
         print('   [WARN] navigate_to_target_node: HRC não encontrado — skip')
         return
+    # pt67 (#HRC-NAV-LABEL-MISLEADING): o label mostra o ALVO REAL da navegação
+    # — posição + sizing + Nº DA LINHA (offset) — não só a acção do agressor. O
+    # label antigo "(esperado: HJ raise 9.01bb)" descrevia a acção e lia-se como
+    # "o nó esperado", mascarando o offset (a verdadeira variável de navegação);
+    # foi o que induziu o off-by-one da 3ª volta a passar despercebido. A linha é
+    # 1-based (linha 1 = offset 0). A acção real do agressor = o nó-alvo sob a lei
+    # provisória "sizing real" (REGRAS_NEGOCIO §16).
     exp = ''
     if isinstance(aggressor_real_action, dict):
-        exp = ' (esperado: %s %s %sbb)' % (
+        exp = ' [ALVO nav: linha %d (offset %d) | accao real do agressor: %s %s %sbb]' % (
+            target_node_offset + 1, target_node_offset,
             aggressor_real_action.get('position'),
             aggressor_real_action.get('type'),
             aggressor_real_action.get('size_bb'))

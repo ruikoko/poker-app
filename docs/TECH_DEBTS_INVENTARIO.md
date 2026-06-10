@@ -33,6 +33,17 @@ com **Max=2** quando a regra manda **5**).
 Re-smoke pt67 = **as mesmas 2 mãos**: `GG-6029013400` tem de sair com **Max=5** (+ recalc
 da quarentena); `GG-6039094225` = regressão (Max=2). Só depois: lote(s) ao ritmo do Rui.
 
+### pt67b — off-by-one do nó (3ª volta) + label + lei da âncora
+
+A 3ª volta validou **Max=5** mas expôs **nó de navegação errado** (off-by-one). Fixes:
+
+| ID | Sev | Resumo |
+|---|---|---|
+| **#HRC-NODE-OFFSET-OFFBY1-REVERT-PT61** | 🔴 HIGH → ✅ FIXED (`9b772ce`) | `offset_within_bucket` (`hrc_node_offset.py`): o **pt61** (`940bf36`, "EM BUFFER" nunca smoke) colapsara o within-bucket p/ "1º nó" (0/1); a **1ª smoke real** mostrou o **jam** no nó **ALLIN = último** do bucket. Revertido p/ all-in-dependent (non-SB small=0/jam=1; SB Complete=0/small=1/jam=2). Cross-check (visual + `build_queue_zip` local vs prod): GG-6029013400→**7**, GG-6039094225→**14**, GG-6028190109→**2**. Suite **919 PASSED**. **Deploy:** 1ª build Railway falhou (infra) → re-trigger por push; verificar `meta.target_node_offset` no endpoint antes da 4ª volta. |
+| **#HRC-NODE-OFFSET-IMPLICIT-LINES** | 🟢 LOW | A convenção assume 2 linhas non-SB / 3 SB (`count_lines_for_position` tem a assunção-irmã das linhas implícitas ALLIN/min do HRC). Open-jam de stack muito curto podia sair **+1 comprido** (alvo abaixo). Mitigação: **confirmação visual do nó obrigatória** em toda a smoke de navegação. Elevar só se a 4ª volta mostrar erro comprido. |
+| **#HRC-NAV-LABEL-MISLEADING** | 🟢 LOW → ✅ FIXED (watcher source; Release `watcher-pt67b`) | O label `navigate_to_target_node: …(esperado: HJ raise 9.01bb)` mostrava a **acção do agressor**, não o **alvo da navegação** → mascarou o offset e deixou o off-by-one passar. Corrigido p/ `[ALVO nav: linha N (offset K) \| accao real: …]`. Exige recompilação do `.exe`. |
+| **#HRC-2ND-RUN-ANCHOR-LAW** | 🟡 MED (aberto, pendente desempate) | Âncora da 2ª run: **lei provisória = sizing real** (segura sob ambas as semânticas); **lei B do Rui = 1º nó da posição** estacionada (premissa "Selected Subtree inclui irmãos" não provada — `HRC_ANATOMIA §14.2`). **Desempate empírico na 4ª volta** (irmão small-raise muda? → §16). |
+
 ---
 
 ## pt66 (10 Junho 2026 — cirurgia ao watcher: 4 fixes, exe `9ea51ce4`, gate da fila)

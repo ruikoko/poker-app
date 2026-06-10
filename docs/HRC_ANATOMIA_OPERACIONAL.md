@@ -1066,6 +1066,60 @@ HRC tem **dois** modos de bounty distintos, com UI e modelação diferentes:
 
 ---
 
+## 14. Semântica do Selected Subtree + nó-alvo da 2ª run (pt67)
+
+### 14.1 O que é o nó-alvo e como se navega
+
+Antes da 2ª run (Scope = Selected Subtree, CI=10) o watcher posiciona-se num **nó da
+Strategy Table** — o **nó-alvo** — e dispara a corrida só desse nó. O backend calcula
+`target_node_offset` (nº de setas-baixo desde o 1º nó da tabela) em
+`hrc_node_offset.py`, injecta-o em `meta.json`, e `navigate_to_target_node`
+(`patched_funcs.py`) preme as setas. A **âncora** (que nó) é a **§16 das
+REGRAS_NEGOCIO** — em vigor a **lei provisória "sizing real"** (o nó da acção exacta do
+agressor), com a **lei B do Rui** (1º nó da posição) pendente do desempate abaixo.
+
+A Strategy Table lista, por posição, os sizings por **ordem ascendente**; o nó **ALLIN**
+(= stack do jogador) é o **maior** → o **último** do bucket. Um **jam** (all-in efectivo,
+≥95% da stack) aponta para esse último nó; um small-raise para o primeiro nó de raise.
+Convenção `offset_within_bucket` (pt67, all-in-dependent): **non-SB** small=0/jam=1;
+**SB** Complete=0/small=1/jam=2.
+
+### 14.2 ⚠️ O Complete Export NÃO marca o nó refinado (verificação auditável)
+
+**Método de verificação (pt67, auditável):** abriram-se os zips de resultado das mãos
+de nó-errado (ex.: `GG-6039094225`, job 9) e inspeccionou-se a estrutura. Achado:
+
+- O zip é um **Complete Export da árvore inteira** (`settings.json.treeconfig.mode =
+  "scripted"`; `nodes/0.json` tem `sequence: []` = raiz; 141 nós para um spot SB-vs-BB
+  8-max). **Não** é um zip "enraizado" no nó seleccionado.
+- **Zero** marcadores `selected`/`subtree`/`accuracy`/`target` em qualquer ficheiro do
+  zip (busca exaustiva). Não há flag por-nó de "refinado pela 2ª run".
+
+**Conclusão honesta:** o zip **sozinho NÃO prova** qual o nó que a 2ª run refinou →
+**não prova** a exclusão (que o subtree do small-raise não refina o jam). A afirmação de
+exclusão assenta no **modelo** da Strategy Table (os sizings de uma posição são
+**linhas-irmãs** da mesma decisão; refinar o subtree de uma não refina o da irmã), que é
+**plausível mas não verificado a partir do artefacto**. (Correcção de registo: uma
+afirmação intermédia de "os zips demonstram exclusão" foi um **excesso** — corrigida
+aqui pela regra "não especular".)
+
+### 14.3 Desempate empírico (4ª volta) — o teste que decide
+
+Com a âncora no **jam** (lei provisória), o Rui observa/fotografa, **durante/após a 2ª
+run**, se os valores do **irmão small-raise** (a linha de sizing menor da mesma posição)
+**mudam**:
+
+| Observação | Semântica confirmada | Consequência |
+|---|---|---|
+| Valores do irmão small-raise **mudam** | Selected Subtree **inclui os irmãos abaixo** (premissa do Rui) | **Lei B reactiva** (alvo = 1º nó da posição; mudança de offset trivial). Os resultados "lixo" de hoje **reavaliam-se** (podem conter o alvo). |
+| Valores do irmão small-raise **não mudam** | Irmãos **disjuntos** (modelo Strategy Table) | **Âncora = sizing real** vira **lei definitiva**. O off-by-one de hoje era **lixo genuíno** (refinou o small-raise, não o jam). |
+
+Registar o **veredicto** aqui e na `REGRAS_NEGOCIO §16` quando a 4ª volta correr. Critério
+de fecho do pt67: **nó EXACTO confirmado visualmente** (não por interpretação do label —
+ver `#HRC-NODE-OFFSET-IMPLICIT-LINES`, e a correcção do label do log na pt67).
+
+---
+
 ## Anexo A: Convenção de índices HRC scripting
 
 Confirmado nos docs oficiais HRC, validado empiricamente em pt25d:
