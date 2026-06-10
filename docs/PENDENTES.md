@@ -1,6 +1,6 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 4 Junho 2026 (pt50–pt58 — RE-IMPORT end-to-end **feito** [Fases 1+2, janela de 3 dias]; fuso **Lisboa-naive** [substitui a rota UTC da pt49]; Vision **Claude-only**; `tools/appimport`; lobby por pasta. Suite **876 PASSED**, HEAD `eddca4d`). Journal: `docs/JOURNAL_2026-06-04-pt50-pt58.md`.
+**Última actualização:** 10 Junho 2026 (pt64 — ★ **smoke real Beelink PASSOU**, ciclo HRC ponta-a-ponta fechado [`GG-6028190109`]; housekeeping de docs + quarentenas). Antes: pt62/pt63 (lobby-IT por nome/filename); pt50–pt58 (RE-IMPORT end-to-end + fuso Lisboa-naive + Vision Claude-only + `tools/appimport`). Journal: `docs/JOURNAL_2026-06-10-pt64.md`.
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
@@ -11,6 +11,34 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 ---
 
 ## Alta prioridade (atacar a seguir)
+
+> **★ pt66 — sessão dedicada do watcher (GATE da fila completa).** A smoke pt64
+> PASSOU o ciclo HRC ponta-a-ponta (`GG-6028190109`), mas expôs ao vivo que o
+> watcher ainda faz **3 runs** (a intermédia Full-Tree redundante dispara
+> **enquanto a 1ª run corre** — o HRC enfileira-as). Numa só sessão (mesmo
+> ficheiro, mesmo build): (a) remover a run intermédia redundante — ir DIRETO de
+> fim-da-1ª-run para navigate + Selected Subtree + CI (o `meta.json` já tem
+> `target_node_offset` + `aggressor_real_action`; spec `docs/WATCHER_FLUXO.md`);
+> (b) endurecer o run-wait contra o **falso-trivial** (`#HRC-RUN-WAIT-FALSE-TRIVIAL`);
+> (c) **CI via lista/read-back** (SysListView32, como o scope pt64) + limpar `CB_*`
+> morto; (d) `.exe` novo + **GitHub Release** (regra 4 do FLUXO) + re-smoke.
+> **⚠️ A fila completa (~49 mãos em `queue_hold`) SÓ se solta após a re-smoke pt66
+> passar** — decisão do Rui pendente, mas o gate fica registado. Debts:
+> `#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` (🔴 HIGH), `#HRC-RUN-WAIT-FALSE-TRIVIAL`,
+> `#CI-TARGET-INITIAL-NOT-CALIBRATED`. Detalhe: `TECH_DEBTS_INVENTARIO.md` (pt62–pt64).
+
+> **★ Quarentena de 2 resultados HRC (recalcular pós-pt66).** `GG-6028190109`
+> (smoke pt64, corridas sobrepostas) e `GG-6027751209` (STALE, postado no arranque
+> do adapter a 9 Jun). **Invalidar = re-POSTar pós-pt66** (o `upsert_hrc_job_result`
+> sobrescreve por `hand_db_id`); não é preciso mexer na BD. Não estão visíveis em
+> nenhuma UI hoje (`hrc_jobs` ≠ `/hrc-sessions`). Suspeito a investigar:
+> `players_left = 3179` numa mesa GG (escala ICM). Detalhe: `TECH_DEBTS_INVENTARIO.md`
+> (pt62–pt64).
+
+> **★ Verificar Bounty Mode (era "implementar", passou a "verificar").** Decompile
+> (`_local_only/`) + 1 caso real: o `payouts.json` HRC-native (pt42d) põe o modo no
+> sítio para os 3 casos (PKO fator X / Mystery / sem KO)? `import_prizes` vs
+> `select_bounty_mode` — qual ganha. Fecha/rebaixa ou reabre `#HRC-BOUNTY-HARDCODED-50PCT`.
 
 > **★ pt58 — RE-IMPORT de scope ABRIL é o PRÓXIMO GRANDE PASSO operacional.**
 > O re-import end-to-end **já foi feito** (pt50, Fases 1+2) mas só com a **janela
@@ -189,8 +217,10 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    antes de verificar, ou retirar o WARN. Não-bloqueante.
 
 12. **`#CURSOR-ANOMALY-POST-SAVE-AS`.** Após o Save As, o cursor da Strategy
-   Table cai na 2ª linha (EP). Origem desconhecida. Não bloqueia o flow,
-   mas investigar (pode afectar uma futura 3ª run ou navegação encadeada).
+   Table cai na 2ª linha (EP). **Refinado pt64: é DETERMINÍSTICO** — o Rui
+   confirma "sempre o 2º nó" na fase de guardar estratégias (já não é anomalia
+   de origem desconhecida; há padrão reproduzível). Não bloqueia o flow, mas
+   investigar (pode afectar uma futura 3ª run ou navegação encadeada).
 
 13. **`#PARSER-SEATS-FAILURES` (🟡 MED, aberto pt36).** `build_queue_zip`
    passou a skipar mãos cujo `derive_seats_in_preflop_order` devolve `[]`

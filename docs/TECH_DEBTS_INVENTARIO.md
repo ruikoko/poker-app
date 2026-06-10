@@ -6,6 +6,44 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt62–pt64 (9–10 Junho 2026 — lobby-IT por nome/filename; ★ smoke pt64 PASSOU [ciclo HRC ponta-a-ponta])
+
+**pt62** (`edb47cc`) e **pt63** (`cf1401f`) — entrada do lobby pelo Intuitive Tables (pasta única, classificação determinística por **nome**; o **filename tem precedência sobre a Vision**, alinhado com o table-ss). Sessões de feature, **sem tech debts novos**. Detalhe nos journals `JOURNAL_2026-06-09-pt62.md` / `-pt63.md`.
+
+**pt64** — **smoke real no Beelink (10 Jun, `GG-6028190109`, Hyper) PASSOU** no objetivo central: a cadeia HRC fechou ponta-a-ponta. Sinais: scope da 2ª run via **SysListView32** do dropdown (CCombo SWT) com read-back LVM (idx=1) **sem [ABORT]**; navigate foco-raiz + 2 setas → nó **HJ raise 2.0bb** (confirmado visualmente + painel Range), a bater com o `meta.json`; **Complete Export 6.78 MB / 2646 ficheiros / 2644 nós** (nó 0 = árvore completa, settings/equity coerentes — **não** é export de 1 nó); adapter `post done OK action=inserted`, move → `done\Exports\replied`; mão saiu de "Activas" (advance-hang **não** reapareceu). Commits do watcher pt64 já em main (`7f7d7ff` scope via SysListView32 + diag `77db441`/`6ba34e9`). Journal: `docs/JOURNAL_2026-06-10-pt64.md`.
+
+### Validados AO VIVO no smoke pt64 (fixes em buffer pt61 → confirmados)
+
+- **#HRC-2ND-RUN-BLIND-CLICKS** ✅ — scope da 2ª run lido/escrito pela lista nativa do dropdown (SysListView32 do CCombo SWT, fix pt64 `7f7d7ff`), read-back idx=1, **sem [ABORT]**; navigate parou no nó certo.
+- **#HRC-EXPORT-WRITES-BUT-FINALIZE-HANGS** ✅ — adapter move `done\Exports\<hand>.zip` → `done\Exports\replied`; mão saiu de "Activas", `Total processados: 1`. O advance-hang **não** reapareceu.
+
+### Novos abertos / refinados (smoke pt64)
+
+| ID | Severidade | Resumo |
+|---|---|---|
+| **#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS** | 🔴 HIGH (refinado pt64 — **GATE da fila completa**) | Confirmado **ao vivo** no build pt64, com **correção à descrição**: a run intermédia (Full Tree, configs antigas, **sem** navegar ao nó) é disparada **ENQUANTO a 1ª run ainda corre** (não "a seguir"). O HRC **enfileira-as** (2 janelas Monte Carlo: 1 *running* + 1 *Waiting*, fotos do Rui). Cadeia observada: Finish → 1ª run arranca → watcher abre popup e dispara intermédia → watcher navega e dispara a boa (Selected Subtree) = **3 runs no total**. Devia ser exatamente **2** (1ª do Finish; 2ª Selected Subtree após navigate). Fix = `tools/watcher_src` + rebuild `.exe` (**pt66**, ir DIRETO de fim-da-1ª-run para navigate+Selected Subtree+CI; o `meta.json` já tem `target_node_offset`+`aggressor_real_action`). Spec: `docs/WATCHER_FLUXO.md`. **A fila completa (~49 mãos em `queue_hold`) só se solta após a re-smoke pt66 passar** (decisão do Rui pendente). |
+| **#HRC-RUN-WAIT-FALSE-TRIVIAL** | 🟡 MED (novo pt64, sub-item de #HRC-REDUNDANT-…) | `[WARN] [run-wait] "1ª run: janela de progresso nao apareceu em 30s — run trivial"` é um **FALSO TRIVIAL**: a janela não apareceu porque a run estava **lenta a arrancar / enfileirada**, não porque acabou. O wait posterior (2ª run, **778s**) provavelmente **cobriu todas as runs enfileiradas** (mesmo título de janela) — foi o que salvou o export. Endurecer a heurística run-wait contra runs enfileiradas com título idêntico. Fix junto com #HRC-REDUNDANT-… em pt66. |
+| **#CURSOR-ANOMALY-POST-SAVE-AS** | 🟡 MED (refinado pt64 — agora **DETERMINÍSTICO**) | Era "origem desconhecida" (PENDENTES item 12). O Rui confirma padrão **reproduzível**: **"sempre o 2º nó"** na fase de guardar estratégias. Já não é anomalia aleatória — há padrão a investigar/corrigir. |
+| **#CI-TARGET-INITIAL-NOT-CALIBRATED** | 🟡 MED (refinado pt64 — "pt65 CI") | pt65 exercitou o CI: `[ci]` fallback `pyautogui` **NÃO confirmado**, `ci_ok=False`; seguiu com o **default do HRC** (que era 10.0 no popup — **inócuo hoje, não garantido**). Confirma a necessidade do tratamento **SysListView32 / read-back** para o campo CI (mesma técnica do scope pt64) + limpar `CB_*` morto. Fix em pt66. |
+| **#HRC-BOUNTY-HARDCODED-50PCT** | 🟡 MED (a **VERIFICAR**, refinado pt64) | Observação ao vivo: o wizard mostrou **Bounty Mode = PKO/Instant 50%** a meio do preenchimento numa mão **NÃO-KO**; o Rui observou que ao **importar a estrutura de pagamentos** o modo "vai ao sítio". **A verificar (decompile `_local_only/` + 1 caso real):** o `payouts.json` HRC-native (pt42d) define o modo final para os 3 casos (PKO fator X, Mystery, sem KO)? Ordem `import_prizes` vs `select_bounty_mode` (`patched_funcs.py:2098`, gated em `is_ko_tournament`) — **qual corre por último e qual ganha** (podem ser as duas verdade: hardcode ativo + correção posterior pela estrutura). Se a estrutura ganha → **fechar/rebaixar** com explicação; se não → reabre como fix (mapa `payouts.json`→dropdown + read-back). Confirmar também as colunas **KO-T$/KO-P$** em mãos PKO reais (na não-KO estavam **0.0** — esperado?). |
+
+### Quarentena de resultados HRC (integridade de dados — registo consultável)
+
+Dois `hrc_jobs` ficam **QUARENTENADOS** — **não confiar no zip**, recalcular após o fix pt66:
+
+| hand_id | Estado em `hrc_jobs` | Porquê |
+|---|---|---|
+| **GG-6028190109** | `inserted` 10 Jun 12:18 (smoke pt64) | Resultado de **corridas sobrepostas** (3 runs enfileiradas, #HRC-REDUNDANT-…); o export pode não refletir a 2ª run boa **isolada**. |
+| **GG-6027751209** | `done`, postado no **arranque** do adaptador (9 Jun) | **STALE** — postado antes da lousa limpa; pode já não bater com o pipeline atual. |
+
+**Mecânica de invalidação (descoberta pt64 — sem DELETE necessário):** re-POSTar a mão pós-pt66 **sobrescreve** — `upsert_hrc_job_result` faz `ON CONFLICT (hand_db_id) DO UPDATE` (`backend/app/services/hrc_jobs.py:124`), preservando `submitted_at`. Basta a mão voltar ao robot e o adapter re-POSTar; **não é preciso mexer na BD à mão**. (Apagar de vez, se se quiser: `DELETE FROM hrc_jobs WHERE hand_db_id = (SELECT id FROM hands WHERE hand_id = '<…>')`.) **Nota:** estes jobs **não estão visíveis em nenhuma UI hoje** (`hrc_jobs` ≠ `/hrc-sessions`; ver runbook §4.3 corrigido em pt64) → a quarentena é só de dados, sem limpeza de ecrã. O zip de `GG-6028190109` está **preservado na app** (`hrc_jobs.result_zip` BYTEA) independentemente do prune do disco do Beelink.
+
+### Suspeito a investigar (read-only, sem ação)
+
+- **`players_left = 3179` numa mesa GG** (smoke pt64) — valor suspeito (demasiado alto para "players left" duma mesa). Investigar a origem (`_resolve_players_left` / table-ss / lobby) antes de confiar no ICM dessa mão. Pode distorcer a escala ICM (cross-ref **#HRC-TOTAL-CHIPS-NULL**, pt61).
+
+---
+
 ## pt61 (6 Junho 2026 — adaptador HRC instalado no Beelink; spec do watcher)
 
 Sessão operacional (Beelink). Sem código no repo excepto docs. Journal: `docs/JOURNAL_2026-06-06-pt61.md`.

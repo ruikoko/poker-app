@@ -50,13 +50,18 @@ Beelink. Loop contínuo em background.
 
 ## Arrancar (interactive, 1ª corrida)
 
-Numa **nova** sessão PowerShell:
+**Recomendado: duplo-clique no `arranca_adapter.bat`** (copia-o para
+`C:\hrc\adapter\`, ao lado deste README). Chama o Python da venv
+diretamente, liga `PYTHONUNBUFFERED`, e a janela fica aberta no fim.
 
-```powershell
-cd C:\hrc\adapter
-.\venv\Scripts\activate
-python hrc_adapter.py
-```
+> ⚠️ **Não uses `.\venv\Scripts\activate`** — a *execution policy* do
+> PowerShell no Beelink bloqueia-o (visto em pt64). Se quiseres arrancar à
+> mão, chama o Python da venv **diretamente** (sem `activate`):
+>
+> ```powershell
+> cd C:\hrc\adapter
+> .\venv\Scripts\python.exe hrc_adapter.py
+> ```
 
 Imprime banner com paths e entra em loop. `Ctrl+C` para parar limpo (faz
 save do state antes de sair).

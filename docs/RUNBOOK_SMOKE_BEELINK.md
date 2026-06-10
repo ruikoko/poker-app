@@ -41,13 +41,13 @@ Fluxo resumido de uma mão:
 app web (Railway)
    │  (1) Entregador faz pedido GET e descarrega as mãos novas
    ▼
-C:\Users\riand\Documents\Teste completo\<mão>\   ← pasta da fila (perfil riand)
+C:\Users\Administrator\Documents\Teste completo\<mão>\   ← pasta da fila (QUEUE_DIR do entregador)
    │  (2) Robot vê a pasta nova, abre o HRC, cola a mão, calcula
    ▼
 ...\Teste completo\done\Exports\<mão>.zip   ← resultado do robot
    │  (3) Entregador vê o .zip, faz pedido POST e devolve à app
    ▼
-app web: hrc_jobs.status = 'done'   ← visível em /hrc-sessions
+app web: hrc_jobs.status = 'done'   ← gravado em hrc_jobs (NÃO em /hrc-sessions — ver §4.3)
 ```
 
 O **robot só lê e escreve ficheiros locais** — não fala com a app web.
@@ -79,28 +79,39 @@ HRC (isso está em `docs/HRC_ANATOMIA_OPERACIONAL.md`).
 ### 2.1 Mini PC e contas
 
 - Beelink ligada e com sessão iniciada no perfil **`riand` (elevated,
-  UAC)** — é aqui que o robot pt30-pt34 correu o smoke real. A pasta da
-  fila é `C:\Users\riand\Documents\Teste completo\`.
+  UAC)** — é aqui que o robot pt30-pt34 correu o smoke real. **A pasta da
+  fila, porém, é a do perfil `Administrator`:**
+  `C:\Users\Administrator\Documents\Teste completo\` — é o `QUEUE_DIR`
+  default do entregador, confirmado pelo banner do `hrc_adapter.py` em pt61.
+  O robot **corre como `riand` mas lê e escreve a pasta do `Administrator`**.
   - *(Nota histórica: a documentação pt22 falava do perfil `Administrator`
-    legacy + junctions. Fica superseded — o smoke validado correu sob
-    `riand`. Se a pasta no teu Beelink estiver noutro perfil, é o caminho
-    configurado no entregador (`DONE_DIR`) que manda.)*
+    legacy + junctions; a v2 (pt30-pt34) corrigiu o perfil de sessão para
+    `riand`, mas enganou-se na **pasta da fila** — o smoke pt61 confirmou
+    que a fila vive em `Administrator\Documents`, não em `riand\Documents`.
+    Se a pasta no teu Beelink estiver noutro perfil, é o caminho configurado
+    no entregador (`QUEUE_DIR`/`DONE_DIR`) que manda.)*
 - As subpastas `done\`, `arquivo\`, `replied\` existem dentro de
   `Teste completo\`.
 
 ### 2.2 O robot certo instalado
 
-- O `hrc_watcher.exe` no Desktop tem de ser a versão que queres testar.
-  Confirma a impressão digital (SHA256 — número único que identifica o
-  ficheiro) com o `.bat` de instalação que o Web te deu:
-  - Duplo-clique no `instala_ptXX.bat` (no Desktop) → ele compara a SHA,
-    faz backup do robot antigo, e instala o novo.
-  - Se a SHA não bate, o `.bat` aborta — não instala um ficheiro errado.
-  - **Versão actual (pt35):** SHA256
-    `33eae43aa0e4ab0f331b880ee217efe6d52369b4190cc07fb3be7fb647c53c4f` — é o
-    robot que exporta em **Complete Export** (ver §5). Se a SHA instalada não
-    for esta, estás a correr um robot anterior (ex: pt34, que exportava só
-    1 nó).
+- O `hrc_watcher.exe` vive em `C:\Users\riand\HRCWatch\` — **1 só exe,
+  sempre** (regra permanente no `CLAUDE.md`). Instala-se com o
+  `instala_ptXX.bat` que o Web te dá (duplo-clique no Beelink):
+  - **DESCARREGA** o exe novo da GitHub Release (canal único, FLUXO regra 4)
+    para `%TEMP%`, **verifica a SHA256**, **pára** o processo do watcher,
+    **apaga TODOS** os exes antigos (HRCWatch + Desktop + Downloads — **sem
+    backup**) e instala **só** o novo em `HRCWatch`; no fim re-verifica a SHA
+    e confirma que há **exactamente 1** exe.
+  - Se a SHA não bate, o `.bat` **aborta** — não instala um ficheiro errado.
+  - **Versão actual (pt64):** SHA256
+    `3FB1B5127085B1E19A09D8A262223AAF2EF228AD290FF9BAD908804DFAA8F8E6` — é o
+    robot com o **scope da 2ª run via SysListView32** (smoke pt64 ✓ Complete
+    Export, ver §5). Se a SHA instalada não for esta, estás a correr um robot
+    anterior.
+  - *Modelo source-controlled do instalador:
+    `tools/watcher_src/instala_watcher_TEMPLATE.bat` — o Web copia-o por
+    build e preenche VERSION/EXE_URL/EXPECTED_SHA.*
 
 ### 2.3 A chave de acesso do entregador
 
@@ -168,17 +179,10 @@ desliga, na medida do possível:
    `instala_ptXX.bat` no Desktop. Lê a mensagem: tem de dizer que a SHA
    bate e que instalou.
 
-5. **Arranca o entregador.** Abre uma janela **nova** de PowerShell e:
-
-   ```powershell
-   cd C:\hrc\adapter
-   .\venv\Scripts\activate
-   python hrc_adapter.py
-   ```
-
-   Aparece um banner com os caminhos e entra em ciclo. Deixa esta janela
-   aberta. `Ctrl+C` pára-o de forma limpa (grava o registo antes de
-   sair).
+5. **Arranca o entregador.** A forma fácil é **duplo-clique no
+   `arranca_adapter.bat`** dentro de `C:\hrc\adapter\` (ver §3.5). Aparece
+   um banner com os caminhos e entra em ciclo. Deixa a janela aberta;
+   `Ctrl+C` pára-o de forma limpa (grava o registo antes de sair).
 
 6. **Arranca o robot.** Duplo-clique no `hrc_watcher.exe` no Desktop.
    Abre uma janela preta (consola) com o cabeçalho
@@ -203,6 +207,28 @@ a sequência manual que o Rui fazia à mão:
    Sampling") e exporta o `.zip`.
 
 Detalhe técnico completo em `docs/HRC_ANATOMIA_OPERACIONAL.md` §4.1 e §6.
+
+### 3.5 Arrancar o entregador com o `.bat` (forma recomendada)
+
+O passo 5 da sequência usava `cd C:\hrc\adapter` → `.\venv\Scripts\activate`
+→ `python hrc_adapter.py` à mão. **Em pt64 isto falhou no Beelink:** a
+*execution policy* do PowerShell bloqueia o `activate`. O caminho que
+funciona é chamar o Python da venv **diretamente**
+(`C:\hrc\adapter\venv\Scripts\python.exe hrc_adapter.py`).
+
+Para o Rui não ter de fazer isto à mão (regra 3 do FLUXO — trabalho de
+máquina é scriptado), há o **`arranca_adapter.bat`** em
+`tools/hrc_adapter/` no repo. Copia-o para `C:\hrc\adapter\` (ao lado do
+`hrc_adapter.py` e da `venv\`) e basta **duplo-clique**:
+
+- chama o `python.exe` da venv diretamente (não usa `activate`);
+- liga `PYTHONUNBUFFERED` (consola em tempo real, regra 6);
+- a janela **fica aberta** no fim (`pause`) — não perdes o que aconteceu;
+- se a venv não existir, diz exatamente o que fazer.
+
+O adapter grava sempre o seu próprio log em
+`C:\hrc\adapter\logs\hrc_adapter.log` (rotação diária, 14 dias),
+independentemente da consola.
 
 ---
 
@@ -267,9 +293,16 @@ Mostra os pedidos à app. E grava também em ficheiro:
 
 ### 4.3 App web
 
-- Página `/hrc-sessions` no site mostra o estado das mãos no pipeline
-  (HRC Import Pipeline v1, pt25e). É onde aparece quando uma mão fica
-  `done`.
+- Quando o entregador faz o POST do resultado, a app grava-o na tabela
+  `hrc_jobs` (`status='done'` + o zip). **Atenção: hoje isto NÃO aparece em
+  nenhuma página do site.** A página `/hrc-sessions` é um pipeline
+  **separado** (HRC Import Pipeline v1, pt25e) que lê a tabela
+  `hrc_sessions`, populada **só** por upload manual de um zip arrastado para
+  essa página — não tem ponte com `hrc_jobs`. Para inspecionar o resultado
+  de uma mão que passou pelo robot: descarrega o zip (botão "⬇ HRC" no
+  painel `/hrc`, Track B) e arrasta-o para `/hrc-sessions`. A ponte
+  automática `hrc_jobs` → `hrc_sessions`/GTO é a Fase 2 do GTO Brain, ainda
+  por construir (`#GTO-IMPORT-AUTOMATICO-AUSENTE`).
 
 ### 4.4 Pastas no disco
 
@@ -289,13 +322,21 @@ Critérios objectivos, por ordem da cadeia:
 1. **Robot:** a consola mostra `[QUEUED] <mão> → <mão>.zip` sem nenhum
    `[WARN]`/`[ERROR]` pelo meio.
 2. **Disco:** aparece `Teste completo\done\Exports\<mão>.zip`. Com o robot
-   pt35 (Complete Export) o `.zip` deve ter **dezenas de MB** (faixa empírica
-   **40-70 MB**; smoke `GG-5944816316` = 44 MB). Um `.zip` de poucos KB =
-   robot antigo a exportar 1 nó → falhou.
+   pt35 (Complete Export) o `.zip` deve ter **milhares de nós**. **O critério
+   duro é o nº de nós (milhares), não os MB** — o tamanho em MB depende do
+   tamanho da árvore: torneios Hyper / poucos jogadores na mão dão árvores
+   pequenas (ex.: smoke pt64 `GG-6028190109`, Hyper 4-in-hand = **6.78 MB /
+   2644 nós**, abaixo da faixa mas correcto), torneios deep dão árvores
+   grandes (faixa empírica **40-70 MB**; smoke `GG-5944816316` = 44 MB). Um
+   `.zip` de **poucos KB** (1 nó) = robot antigo → falhou; um zip com milhares
+   de nós = export completo, mesmo que tenha "só" alguns MB.
 3. **Entregador:** o log mostra um `POST .../api/queue/hrc/results` a
    devolver `200` (sucesso) para essa mão, com `status=done`.
-4. **App web:** em `/hrc-sessions` a mão fica `done` (e o resultado fica
-   guardado — `hrc_jobs.status='done'` com o zip).
+4. **App web:** o log do entregador mostra `post <mão> done OK ...
+   action=inserted/updated` — é a própria resposta da API a confirmar que
+   gravou em `hrc_jobs` (com o zip). **Não procures a mão em `/hrc-sessions`,
+   não aparece lá** (ver §4.3). Este é o sinal real de sucesso do lado da
+   app hoje.
 5. **Tempo das contas:** os `[CALC] Terminado em Xs` da 1ª e 2ª corridas
    dão-te uma ideia de quanto demorou cada uma — útil para comparar a 2ª
    corrida (que devia ser mais rápida, por ser focada).
