@@ -50,7 +50,18 @@ _normalize_tags_basket = normalize_tags_basket
 # Cap de upload do zip de resultados (D-G2-4: 50 MB defensivo). Samples reais
 # do HRC Complete Export ficam tipicamente em KB-MB; cap protege contra
 # accident/abuse sem rejeitar uso legítimo.
-_MAX_RESULT_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB
+#
+# pt67 INTERINO (#HRC-RESULT-ZIP-413): subido 50 → 200 MB. Árvores Max=5
+# (Complete Export = árvore inteira) chegam a ~112 MB e batiam no cap antigo
+# (413 → adapter em retry-loop). O edge da Railway aceita ≥120 MB (provado:
+# POST de 120 MB chega ao uvicorn e devolve a mensagem da app). 200 MB
+# desbloqueia a 4ª volta SEM perder o bookkeeping de hrc_jobs.
+# ⚠️ NÃO é a solução definitiva: 72 mãos × ~112 MB ≈ 8 GB em BYTEA é
+# insustentável para a fila inteira — isso fica para a definitiva A/B/C
+# (chunked / compressão / poda) em avaliação. Rede de salvação manual:
+# upload via /hrc-sessions (POST /api/hrc/import, sem cap) → estudo OK,
+# sem hrc_jobs.
+_MAX_RESULT_ZIP_BYTES = 200 * 1024 * 1024  # 200 MB (pt67 interino; era 50 MB)
 
 
 @router.get("/hrc")
