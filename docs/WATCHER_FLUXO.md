@@ -20,6 +20,24 @@ documento — não o que o código atual faz.
    - Esperar que a 2ª run termine.
 4. Exportar no fim da 2ª run (o save é feito quando a 2ª run acaba).
 
+## Max Players (regra de produto do Rui — LEI)
+
+O **Max Players** que entra no HRC (campo "Hand Mode → Max Players") conta-se de uma
+**ÂNCORA, inclusivé, até à BB**:
+
+1. **Herói foldou antes de qualquer ação voluntária** (pote por abrir até ele):
+   âncora = posição do **HERÓI**. Ex.: 8-max, herói CO, foldado até ele → contar do CO
+   (CO, BU, SB, BB = 4).
+2. **Caso contrário:** âncora = posição da **1ª AÇÃO VOLUNTÁRIA**. Ex.: foldado até CO
+   all-in → contar do CO; 6-max UTG all-in → contar do UTG; 8-max âncora HJ → HJ, CO,
+   BU, SB, BB = 5.
+
+É um **span POSICIONAL** âncora→BB (inclui os folders entre a âncora e a BB), **não** uma
+contagem de quem meteu dinheiro. Clamp 2..9. Derivação no backend
+(`derive_max_players.py`, escrito em `meta.json`). **⚠️ Bug aberto até pt67**
+(`#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS`): o código atual conta participantes, não o
+span → subconta quando o herói é tardio (ex.: BB) e há folders no meio.
+
 ## O que NÃO se faz
 - Sem Prune. O watcher não corta linhas na árvore (procedimento antigo, abandonado).
 - Sem run redundante. São exatamente DUAS runs: a 1ª (lançada pelo Finish) e a 2ª

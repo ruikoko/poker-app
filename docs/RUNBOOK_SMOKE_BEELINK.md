@@ -168,6 +168,19 @@ Se o default tiver sido mudado à mão, o robot herdá-lo-ia em silêncio — ma
 **salvaguarda só-leitura** que avisa: se vires `[WARN] [ci] Target CI lido = X
 (esperado 10.0)!` na consola, repõe 10.0 no popup e re-corre.
 
+### 2.7 Janelas do HRC visíveis — NUNCA "Always run in background" (pt67)
+
+O robot deteta o início/fim de cada corrida pela **janela de progresso** que o HRC
+mostra no ecrã (invariante: corrida a decorrer ⇔ janela no ecrã). Se a opção do HRC
+**"Always run in background"** estiver **marcada**, as janelas de progresso ficam
+escondidas e o robot **fica cego** (não sabe quando a run começou/acabou).
+
+- **NUNCA marcar "Always run in background"** no HRC do Beelink.
+- **Verificar que está DESMARCADO** antes de cada smoke.
+
+(Aberto em pt66; o robot pt67 endurece a detecção, mas a janela visível continua a ser
+o sinal — `#HRC-RUN-WINDOW-DETECTION-BLIND`.)
+
 ---
 
 ## 3. Sequência passo-a-passo

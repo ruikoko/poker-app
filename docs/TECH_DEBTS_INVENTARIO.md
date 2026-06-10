@@ -6,6 +6,35 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt67 (PLANEADO — desenho fechado Rui+Web, 10 Jun 2026; implementação next session)
+
+**★ Re-smoke pt66 PASSOU** (Beelink, 10 Jun ~15:00–15:17, `GG-6029013400` KO +
+`GG-6039094225` não-KO): 2 runs exatas sem intermédia, `[scope] idx=1` sem `[ABORT]`,
+sem `select_bounty_mode`, bounty validado via `settings.json` (handdata.bounties por
+jogador no KO, ausente no não-KO), posts `done`/arquivados. **(a)(c')(d-50%) validados;
+(b) validou o fail-open.** Detalhe: `JOURNAL_2026-06-10-pt66.md`.
+
+### Novos abertos (fix em pt67)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| **#HRC-RUN-WINDOW-DETECTION-BLIND** | 🔴 HIGH | O **sleep cego de 30s pós-Finish engole runs curtas** (~5s a 10M iter @ ~1.9M/s). A janela da 1ª run é **"Hand Setup" do início ao fim** (o popup pós-Finish MORFA na run sem fechar/retitular). Fix pt67 (watcher): eliminar o sleep cego; vigiar desde o Finish (poll ~0.5s, tracking por **hwnd**); nunca-vista + N s de ecrã limpo → acabou rápida OU não arrancou (a navegação denuncia). **Sem heurísticas de tempo/memória.** Invariante: corrida ⇔ janela no ecrã → **NUNCA "Always run in background"** (runbook §2.7). |
+| **#HRC-CI-SAFEGUARD-CHILD-CONTROLS** | 🟡 MED | A salvaguarda só-leitura do CI (pt66) lê o **título** da janela, mas o "MC-CFR [Target CI < 10.00]" vive num **label INTERIOR** do dialog → nunca pega (cai no fail-safe). Fix pt67 (watcher): ler **child controls** (WM_GETTEXT/UIA); plano B: barra de estado do HRC. |
+| **#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS** | 🔴 HIGH | `derive_max_players` (**backend** `derive_max_players.py`) conta **participantes** (`voluntary_before + hero + still_to_act`), **não** o **span posicional âncora→BB** que a regra do Rui exige (LEI — `REGRAS_NEGOCIO §15`, `WATCHER_FLUXO`). Descarta os **folders entre a âncora e o herói** → **subconta** com herói tardio (BB). Cross-check: GG-6028190109 (6-max, BU, âncora HJ)=5 ✓; GG-6039094225 (8-max, BB, âncora SB)=2 ✓; **GG-6029013400 (8-max, BB, âncora HJ)=2 ✗ (devia 5)**. Fix pt67 (**backend**): reescrever como span âncora→BB inclusive (usar `derive_seats_in_preflop_order`); cobrir regra 1 (herói foldou unopened → âncora=herói) **e** regra 2; testes. **Regra 1 nunca exercitada** nas 3 mãos (coincide hoje por sorte). |
+| **#WATCHER-PLAYER-COUNT-SPACE-NICKS** | 🟢 LOW | `get_player_count_from_hh` (`patched_funcs.py:811`, o diagnóstico "In hand: X") usa `\S+` p/ o nick → **salta nicks com espaços** (nomes reais GG): GG-6039094225 (8 entrantes) → "In hand: 4". **Cosmético** (não é o Max enviado ao HRC — esse vem do hint backend). Alinhar a `.+?` (como `derive_max_players` em pt27). |
+
+### Quarentenas (recalcular pós-pt67 — re-POST sobrescreve)
+
+`GG-6028190109` + `GG-6027751209` (anteriores) + **`GG-6029013400`** (nova: calculada
+com **Max=2** quando a regra manda **5**).
+
+### Fila ~49 — TRAVADA até pt67 + fix Max Players (decisão do Rui)
+
+Re-smoke pt67 = **as mesmas 2 mãos**: `GG-6029013400` tem de sair com **Max=5** (+ recalc
+da quarentena); `GG-6039094225` = regressão (Max=2). Só depois: lote(s) ao ritmo do Rui.
+
+---
+
 ## pt66 (10 Junho 2026 — cirurgia ao watcher: 4 fixes, exe `9ea51ce4`, gate da fila)
 
 Sessão dedicada ao watcher (âmbito fechado pelo Rui, diffs aprovados pelo Web).

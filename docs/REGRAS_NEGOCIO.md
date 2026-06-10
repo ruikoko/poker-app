@@ -531,3 +531,27 @@ Sem tags FT, **toda a mão é tratada como mid-MTT** (FGS) — comportamento con
 | `e` HRC behaviour | ⏸ valida-se em smoke |
 
 Tech debt master: `#HRC-WATCHER-EQUITY-MODEL-FIXO`. Sub-tech-debts: `#HRC-WATCHER-DECOMPILE-REQUIRED` (bloqueador hard). Plano de execução: `docs/PLAN_PT23.md` §Passo 5.
+
+## §15. Max Players para o HRC (regra do Rui — LEI, 10 Jun 2026)
+
+O **Max Players** enviado ao HRC (campo "Hand Mode → Max Players") conta-se de uma
+**ÂNCORA, inclusivé, até à BB**. É um **span POSICIONAL** (inclui os folders entre a
+âncora e a BB), **não** uma contagem de quem meteu dinheiro voluntário.
+
+1. **Herói foldou antes de qualquer ação voluntária** (pote por abrir até ele):
+   âncora = posição do **herói**. Ex.: 8-max, herói CO, foldado até ele → CO, BU, SB,
+   BB = **4**.
+2. **Caso contrário:** âncora = posição da **1ª ação voluntária**. Ex.: foldado até CO
+   all-in → contar do CO; 6-max UTG all-in → do UTG; 8-max âncora HJ → HJ, CO, BU, SB,
+   BB = **5**.
+
+Clamp 2..9. Derivação: **backend** `derive_max_players.py` → `meta.json` →
+`set_hand_mode_players` no watcher.
+
+**⚠️ Bug aberto (`#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS`, registado pt66, fix pt67):**
+o código atual conta `voluntary_before + hero + still_to_act` (participantes), não o
+span → **subconta** quando o herói é tardio (ex.: BB) e há folders entre a âncora e a
+BB. Cross-check pt66: GG-6028190109 (6-max, herói BU, âncora HJ) = 5 ✓;
+GG-6039094225 (8-max, herói BB, âncora SB) = 2 ✓; **GG-6029013400 (8-max, herói BB,
+âncora HJ) = 2 ✗ (devia ser 5)**. Detalhe: `JOURNAL_2026-06-10-pt66.md`,
+`TECH_DEBTS_INVENTARIO.md` (pt66).

@@ -5,7 +5,14 @@ deixou de fazer a run intermédia (exatamente 2 runs), deixou de **escrever** o 
 (default do popup = 10.0; salvaguarda só-leitura), e removeu o `select_bounty_mode`
 hardcoded (o modo vem da estrutura importada). Detalhe + guia de re-smoke em
 `docs/JOURNAL_2026-06-10-pt66.md`; regra operacional "não mexer no CI à mão" no
-`RUNBOOK_SMOKE_BEELINK.md §2.6`.
+`RUNBOOK_SMOKE_BEELINK.md §2.6`. **Achados pt66 → pt67:** (1) a janela da **1ª run**
+intitula-se **"Hand Setup" do início ao fim** — o popup pós-Finish ("Calculating Equity
+Model") **morfa** na run (header interno "MC-CFR …%") sem fechar nem mudar de título; o
+**sleep cego de 30s pós-Finish engole runs curtas** (`#HRC-RUN-WINDOW-DETECTION-BLIND`,
+fix pt67). (2) **Invariante:** corrida a decorrer ⇔ janela de progresso no ecrã →
+**NUNCA marcar "Always run in background" no HRC** (esconde as janelas e cega o robot;
+ver `RUNBOOK §2.7`). (3) o "Target CI < X" da salvaguarda vive num **label interior** do
+dialog, não no título → ler **child controls** (`#HRC-CI-SAFEGUARD-CHILD-CONTROLS`).
 **Origem:** consolidação dos factos espalhados pelos journals + observações
 directas do Rui durante pt28 + smoke tests pt29 + cadeia da 2ª run pt30-pt34
 + Fase 1 GTO Brain pt35 (Complete Export).
