@@ -44,6 +44,13 @@ A 3ª volta validou **Max=5** mas expôs **nó de navegação errado** (off-by-o
 | **#HRC-NAV-LABEL-MISLEADING** | 🟢 LOW → ✅ FIXED (watcher source; Release `watcher-pt67b`) | O label `navigate_to_target_node: …(esperado: HJ raise 9.01bb)` mostrava a **acção do agressor**, não o **alvo da navegação** → mascarou o offset e deixou o off-by-one passar. Corrigido p/ `[ALVO nav: linha N (offset K) \| accao real: …]`. Exige recompilação do `.exe`. |
 | **#HRC-2ND-RUN-ANCHOR-LAW** | 🟡 MED (aberto, pendente desempate) | Âncora da 2ª run: **lei provisória = sizing real** (segura sob ambas as semânticas); **lei B do Rui = 1º nó da posição** estacionada (premissa "Selected Subtree inclui irmãos" não provada — `HRC_ANATOMIA §14.2`). **Desempate empírico na 4ª volta** (irmão small-raise muda? → §16). |
 
+### pt67b — descobertos via os logs de runtime (Beelink live; NÃO resolver agora)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| **#HRC-RESULT-ZIP-413** | 🔴 HIGH (aberto) | O `POST /api/queue/hrc/results` da `GG-6029013400` devolve **413 Content Too Large** — o zip do Complete Export de uma árvore **Max=5** excede o limite de upload. O adapter fica em **retry-loop** (de 60 em 60s; não corrompe nada — 413 = sem escrita na BD). **Blocker REAL da fila:** muitas das ~72 mãos são span 5 → árvores grandes → 413 → não entram. **Investigar:** onde é o limite (proxy Railway? body-size do FastAPI/Starlette? cap 50 MB do endpoint pt21?); **fix:** subir limite / upload por chunks / compressão extra. **+ desenhar backoff/desistência** no adapter (não loop infinito). Sem isto, a fila **não solta**. Contraste: pt35 entregou 44 MB OK → o limite está algalgures entre 44 MB e o tamanho desta árvore. |
+| **#QUEUE-NO-SERVER-SIDE-GATE** | 🟡 MED (aberto) | A "fila travada" era **só procedimental** (estado do `state.json` do adapter + disciplina do Rui de não arrancar). O servidor serve **72 mãos** a quem pedir (`GET /api/queue/hrc`). Em pt67 o adapter ficou ligado e a fila não estava travada de facto. **Propor gate server-side** (flag de pausa da fila — env var ou tabela — que faz o GET devolver vazio/403). Prioridade a definir pelo Rui. |
+
 ---
 
 ## pt66 (10 Junho 2026 — cirurgia ao watcher: 4 fixes, exe `9ea51ce4`, gate da fila)
