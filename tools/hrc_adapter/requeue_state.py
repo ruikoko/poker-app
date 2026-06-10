@@ -53,8 +53,18 @@ def clean_folders(hands):
             if os.path.isdir(d):
                 shutil.rmtree(d, ignore_errors=True)
                 print(f"apagada pasta: {d}")
-        for z in (os.path.join(QUEUE, "done", "Exports", h + ".zip"),
-                  os.path.join(QUEUE, "done", "Exports", "replied", h + ".zip")):
+        # pt67 INTERINO (#HRC-RESULT-ZIP-413): com o cap a 200 MB, um zip de
+        # resultado ANTIGO (offset errado) que tenha ficado em done\ deixa de
+        # dar 413 e o adapter ENTREGA-O -> resultado errado entra em hrc_jobs.
+        # Por isso limpamos TODOS os layouts plausiveis de done\ para a mao,
+        # nao so done\Exports\.
+        zips = (
+            os.path.join(QUEUE, "done", h + ".zip"),
+            os.path.join(QUEUE, "done", "replied", h + ".zip"),
+            os.path.join(QUEUE, "done", "Exports", h + ".zip"),
+            os.path.join(QUEUE, "done", "Exports", "replied", h + ".zip"),
+        )
+        for z in zips:
             if os.path.isfile(z):
                 try:
                     os.remove(z)
