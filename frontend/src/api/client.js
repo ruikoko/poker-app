@@ -392,6 +392,9 @@ export const queue = {
     a.remove()
     URL.revokeObjectURL(url)
   },
+  // Gate da fila HRC (pt68 — disparo manual)
+  gate: () => req('GET', '/queue/hrc/gate'),
+  trigger: (count) => req('POST', `/queue/hrc/trigger${count ? `?count=${count}` : ''}`),
 }
 
 // ── SS de mesa (contexto players_left p/ HRC) ───────────────────────────────

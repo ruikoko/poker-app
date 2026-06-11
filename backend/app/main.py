@@ -277,6 +277,8 @@ async def lifespan(app: FastAPI):
     ensure_context_table_ss_column()
     ensure_hrc_jobs_schema()
     ensure_hrc_schema()
+    from app.routers.queue import ensure_hrc_queue_release_schema
+    ensure_hrc_queue_release_schema()
     ensure_study_state_check_constraint()
 
     # Arrancar bot Discord em background

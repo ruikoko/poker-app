@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import require_auth_or_api_key
-from app.db import query
+from app.db import query, execute
 from app.services.hrc_jobs import (
     extract_meta_from_result_zip,
     upsert_hrc_job_result,
@@ -64,6 +64,29 @@ _normalize_tags_basket = normalize_tags_basket
 _MAX_RESULT_ZIP_BYTES = 200 * 1024 * 1024  # 200 MB (pt67 interino; era 50 MB)
 
 
+# ── Gate server-side da fila HRC com disparo manual (pt68, #QUEUE-NO-SERVER-SIDE-GATE) ──
+# A fila nasce FECHADA: GET /hrc só serve mãos LIBERTADAS (em hrc_queue_release) e
+# não-done. O Rui liberta lotes via POST /hrc/trigger ("Disparar"). Auto-fecha quando
+# o lote é consumido (todas done → caem do filtro NOT EXISTS de hrc_jobs). O adapter
+# não muda: fila fechada → zip vazio → fica idle. O download per-mão (/hrc/hand/{id})
+# NÃO é gated. Ver REGISTO_CONCEITO / PENDENTES.
+
+def ensure_hrc_queue_release_schema():
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS hrc_queue_release (
+            hand_db_id  INTEGER PRIMARY KEY REFERENCES hands(id) ON DELETE CASCADE,
+            released_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            batch_id    TEXT
+        )
+        """
+    )
+
+
+def _released_ids() -> set:
+    return {r["hand_db_id"] for r in query("SELECT hand_db_id FROM hrc_queue_release")}
+
+
 @router.get("/hrc")
 def export_queue(
     tags: Optional[str] = Query(None, description="CSV de tags (hm3+discord)"),
@@ -81,6 +104,9 @@ def export_queue(
     hands = [dict(r) for r in select_andar1_rows(
         f["tags_norm"], f["states_list"], f["after_dt"], f["before_dt"],
     )]
+    # Gate (pt68): só servir mãos LIBERTADAS. Fila fechada (nada libertado) → vazio.
+    released = _released_ids()
+    hands = [h for h in hands if h["id"] in released]
     payouts_by_key = lookup_payouts(hands)
     bounty_by_key = lookup_bounties(hands)
 
@@ -110,6 +136,59 @@ def export_queue(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+def _eligible_rows():
+    f = resolve_filters(None, None, None, None)
+    return [dict(r) for r in select_andar1_rows(
+        f["tags_norm"], f["states_list"], f["after_dt"], f["before_dt"],
+    )]
+
+
+@router.get("/hrc/gate")
+def queue_gate(current_user=Depends(require_auth_or_api_key)):
+    """Estado do gate da fila HRC (pt68). `gate` = 'open' se há lote libertado
+    por consumir, senão 'closed'."""
+    eligible = _eligible_rows()
+    elig_ids = {h["id"] for h in eligible}
+    released = _released_ids()
+    pending = elig_ids & released            # libertadas E ainda elegíveis (não-done)
+    return {
+        "gate": "open" if pending else "closed",
+        "eligible_total": len(elig_ids),      # elegíveis não-done (todas)
+        "released_pending": len(pending),     # do lote, ainda por consumir (em curso)
+        "not_released": len(elig_ids - released),  # elegíveis à espera de disparo
+        "released_total": len(released),
+        "done_of_released": len(released - elig_ids),  # libertadas já consumidas (done)
+    }
+
+
+@router.post("/hrc/trigger")
+def queue_trigger(
+    count: Optional[int] = Query(None, description="nº de mãos a libertar (omitir = todas)"),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """Liberta um lote para o adapter ('Disparar'). Liberta as `count` mãos
+    elegíveis ainda-não-libertadas mais ANTIGAS (por `played_at`); sem `count`,
+    liberta TODAS. Idempotente (ON CONFLICT DO NOTHING)."""
+    if count is not None and count <= 0:
+        raise HTTPException(400, "count deve ser > 0")
+    eligible = _eligible_rows()
+    released = _released_ids()
+    to_release = [h for h in eligible if h["id"] not in released]
+    to_release.sort(key=lambda h: (h.get("played_at") is None, h.get("played_at")))
+    if count is not None:
+        to_release = to_release[:count]
+    batch_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for h in to_release:
+        execute(
+            "INSERT INTO hrc_queue_release (hand_db_id, batch_id) VALUES (%s, %s) "
+            "ON CONFLICT (hand_db_id) DO NOTHING",
+            (h["id"], batch_id),
+        )
+    logger.info("queue/hrc trigger: released=%d batch=%s", len(to_release), batch_id)
+    return {"released": len(to_release), "batch_id": batch_id,
+            "remaining_not_released": len(eligible) - len(released) - len(to_release)}
 
 
 # Colunas que `build_queue_zip` consome — espelham `select_andar1_rows`
