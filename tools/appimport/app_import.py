@@ -103,6 +103,14 @@ _SITE_TOKEN_MAP = {
 _IT_TAIL_RE = re.compile(r"-(\d{14})-\d+$")
 # Marcador de MESA da Winamax no miolo do nome: `(#<dígitos>)` (nº de mesa).
 _WN_TABLE_RE = re.compile(r"\(#\d+\)")
+# pt68 — formato ANTIGO do Intuitive Tables: `Shot<N>-<Site>-<YYYYMMDDHHMMSS>`
+# (sem cauda `-NN`, sem torneio/blinds no nome). O site é o token APÓS `Shot<N>-`.
+# Roteamos como MESA (era a captura da mesa do IT antigo); o site + captured_at
+# saem do nome e o match à mão faz-se pela janela temporal do backend (sem tn,
+# que o formato antigo não tem). O backend já suporta este formato
+# (`parse_table_ss_filename` Shot<N>- → site[1]; `derive_captured_at` \d{14};
+# `compute_table_ss_match` filename_tn=None → janela). Coexiste com o NOVO.
+_OLD_SHOT_RE = re.compile(r"^Shot\d+-(?P<site>.+)-(?P<ts>\d{14})$", re.IGNORECASE)
 
 
 def normalize_site(token):
@@ -125,15 +133,26 @@ def classify_it_file(filename):
       • captured_at_iso = timestamp do nome (`-YYYYMMDDHHMMSS-NN`) em ISO, ou None
 
     Regras:
-      • SKIP  — sem a cauda nova do IT (`-YYYYMMDDHHMMSS-NN`): legado/desconhecido
-                (ex. `Shot21-GGPoker-20260604205243.png`). Fica no sítio.
+      • MESA (antigo, pt68) — `Shot<N>-<Site>-<YYYYMMDDHHMMSS>` (sem cauda `-NN`):
+                site do token APÓS `Shot<N>-`, captured_at do timestamp; sem tn
+                (o backend casa pela janela temporal). Ver `_OLD_SHOT_RE`.
       • MESA  — miolo com marcador de mesa: GG `" - Blinds "`/`" - Table "`, ou
                 Winamax `(#<dígitos>)`.
       • LOBBY — qualquer outro ficheiro com cauda nova do IT.
+      • SKIP  — sem cauda nova do IT E não é `Shot<N>-…` (desconhecido). Fica no sítio.
     """
     base = filename.rsplit(".", 1)[0] if "." in filename else filename
     m = _IT_TAIL_RE.search(base)
     if not m:
+        # pt68 — formato ANTIGO `Shot<N>-<Site>-<YYYYMMDDHHMMSS>` → MESA.
+        mo = _OLD_SHOT_RE.match(base)
+        if mo:
+            try:
+                captured = datetime.strptime(
+                    mo.group("ts"), "%Y%m%d%H%M%S").isoformat()
+            except ValueError:
+                captured = None
+            return ("MESA", normalize_site(mo.group("site")), captured)
         return ("SKIP", None, None)
     try:
         captured = datetime.strptime(m.group(1), "%Y%m%d%H%M%S").isoformat()

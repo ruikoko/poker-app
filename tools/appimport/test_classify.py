@@ -59,16 +59,58 @@ def test_winamax_lobby():
     assert cap == "2026-06-08T22:37:16"
 
 
-# ── SKIP (legado / sem cauda nova do IT) ──────────────────────────────────────
+# ── MESA — formato ANTIGO `Shot<N>-<Site>-<YYYYMMDDHHMMSS>` (pt68) ─────────────
+# Coexiste com o NOVO. Site do token APÓS `Shot<N>-`; captured do timestamp; sem
+# tn (backend casa por janela temporal). Sites não-mapeados → site None (Vision).
 
-def test_shot_legacy_skip():
+def test_shot_legacy_gg_mesa():
     k, site, cap = ai.classify_it_file("Shot21-GGPoker-20260604205243.png")
-    assert k == "SKIP"          # tem timestamp mas não tem o sufixo `-NN`
+    assert k == "MESA"
+    assert site == "GGPoker"
+    assert cap == "2026-06-04T20:52:43"
+
+
+def test_shot_legacy_wpn_mesa():
+    k, site, cap = ai.classify_it_file("Shot18-WPN-20260601202136.png")
+    assert k == "MESA"
+    assert site == "WPN"
+    assert cap == "2026-06-01T20:21:36"
+
+
+def test_shot_legacy_stars_mesa():
+    k, site, cap = ai.classify_it_file("Shot7-Stars-20260605193012.png")
+    assert k == "MESA"
+    assert site == "PokerStars"     # token antigo 'Stars' → PokerStars
+    assert cap == "2026-06-05T19:30:12"
+
+
+def test_shot_legacy_winamax_mesa():
+    k, site, cap = ai.classify_it_file("Shot3-Winamax-20260604210000.png")
+    assert k == "MESA"
+    assert site == "Winamax"
+    assert cap == "2026-06-04T21:00:00"
+
+
+def test_shot_legacy_coinpoker_mesa_site_none():
+    # CoinPoker não está no mapa de sites → site None (backend usa Vision p/ site).
+    # Roteia na mesma como MESA (o formato antigo é sempre captura de mesa).
+    k, site, cap = ai.classify_it_file("Shot5-CoinPoker-20260605194501.png")
+    assert k == "MESA"
+    assert site is None
+    assert cap == "2026-06-05T19:45:01"
+
+
+# ── SKIP (verdadeiramente desconhecido: nem cauda nova nem `Shot<N>-…`) ────────
+
+def test_unknown_format_skip():
+    k, site, cap = ai.classify_it_file("captura_aleatoria.png")
+    assert k == "SKIP"
     assert (site, cap) == (None, None)
 
 
-def test_shot_wpn_legacy_skip():
-    k, _site, _cap = ai.classify_it_file("Shot18-WPN-20260601202136.png")
+def test_shot_without_timestamp_skip():
+    # 'Shot<N>-<Site>' sem os 14 dígitos → não é o formato antigo válido → SKIP.
+    k, _site, _cap = ai.classify_it_file("Shot9-GGPoker.png")
     assert k == "SKIP"
 
 
