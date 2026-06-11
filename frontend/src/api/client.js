@@ -433,3 +433,8 @@ export const gto = {
     return req('GET', `/gto/trees?${qs}`)
   },
 }
+
+// ── Saúde do Import (pt68) ──────────────────────────────────────────────────
+export const importHealth = {
+  get: (day) => req('GET', `/import-health${day ? `?day=${day}` : ''}`),
+}

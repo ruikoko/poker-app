@@ -6,6 +6,7 @@ import { useStudyTimer } from '../contexts/StudyTimerContext'
 
 const NAV = [
   { to: '/',            label: 'Dashboard' },
+  { to: '/import-health', label: 'Saúde Import' },
   { to: '/hands',       label: 'Estudo' },
   { to: '/discord',     label: 'Discord' },
   { to: '/tournaments', label: 'Torneios' },

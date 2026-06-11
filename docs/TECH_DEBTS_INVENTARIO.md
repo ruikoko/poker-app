@@ -6,6 +6,17 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt68 (11 Jun 2026 — wipe total + re-teste faseado + Saúde do Import)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| **#DISCORD-SYNC-SYNCHRONOUS-TIMEOUT** | 🟡 MED (aberto) | `POST /api/discord/sync-and-process` é **síncrono e pesado** → o cliente estoura aos **300s (ReadTimeout)** em janelas largas, mas o **servidor completa** (provado pt68: ReadTimeout no Import Mestre janela 04-06 Jun, mas 127 entradas replayer + mãos GGDiscord inseridas). **Idempotente** (cursor `discord_sync_state` + `lobby_processing_log` PK `discord_message_id`) → re-correr é seguro. **Fix (rever):** job em **background** + endpoint devolve cedo com handle de progresso. |
+| **#IMPORT-HEALTH-LOGGING-HOLES** | 🟢 LOW (aberto) | A Saúde do Import v1 (`/import-health`) só cobre o que já é queryable (table_ss/lobby/import_logs/entries). **Falhas sem rasto na BD** (a tapar em v2): (1) **HM3** (.bat) não persiste log — só o resumo na resposta; (2) **Vision do replayer GG** falha em log de **consola**, não em tabela; (3) ficheiros **rejeitados/SKIP no appimport** (client-side); (4) **parse de HH por mão** — erros agregados em `import_logs.log`, sem detalhe por mão. |
+
+**★ Saúde do Import v1 (`/import-health`)** — página nova (nav "Saúde Import") + `GET /api/import-health?day=YYYY-MM-DD` (janela dia-de-jogo 15:00→15:00). Por pipeline (hands/mesa/lobby/hh_ts/inbox): contagens + lista de falhas/sem-match (motivo + timestamp). Instrumento de validação da Etapa 1. Read-only sobre os logs existentes; buracos acima.
+
+---
+
 ## pt67 (IMPLEMENTADO — em buffer + Release `watcher-pt67`; re-smoke real pendente)
 
 3 debts FIXADOS (backend 916 PASSED + 102 watcher pytest + in-process smoke ALL OK;
