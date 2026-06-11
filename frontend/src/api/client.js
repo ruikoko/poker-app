@@ -441,3 +441,9 @@ export const gto = {
 export const importHealth = {
   get: (day) => req('GET', `/import-health${day ? `?day=${day}` : ''}`),
 }
+
+// ── Multi-select "Enviar ao HRC" (pt68) — reusa o gate ──────────────────────
+Object.assign(queue, {
+  release: (handIds) => req('POST', '/queue/hrc/release', { hand_ids: handIds }),
+  states:  (handIds) => req('POST', '/queue/hrc/states',  { hand_ids: handIds }),
+})

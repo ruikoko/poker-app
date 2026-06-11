@@ -14,7 +14,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import require_auth_or_api_key
@@ -143,6 +143,99 @@ def _eligible_rows():
     return [dict(r) for r in select_andar1_rows(
         f["tags_norm"], f["states_list"], f["after_dt"], f["before_dt"],
     )]
+
+
+def _hand_exportable_quick(site, raw):
+    """Guarda leve (point 4) para a UI: site suportado + raw presente. O guard
+    PROFUNDO (seats/payout/bounty) corre no /release via build_queue_zip."""
+    if site not in ALLOWED_SITES:
+        return False, "site não suportado (%s)" % (site or "?")
+    if not (raw or "").strip():
+        return False, "sem HH (raw vazio)"
+    return True, None
+
+
+@router.post("/hrc/release")
+def queue_release(payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Release FORÇADO (multi-select da Estudo, pt68): liberta as mãos `hand_ids`
+    escolhidas para a fila, **independente do cabaz/janela** (o gesto é "eu quero
+    ESTAS"). Salta as não-exportáveis com motivo (build_queue_zip per-mão).
+    Idempotente (ON CONFLICT). Body: {hand_ids: [...]}."""
+    hand_ids = payload.get("hand_ids") or []
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    if len(hand_ids) > 500:
+        raise HTTPException(400, "máximo 500 mãos por envio")
+    batch_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    released, skipped = [], []
+    for hid in hand_ids:
+        rows = query(f"SELECT {_HAND_COLS} FROM hands WHERE hand_id = %s LIMIT 1",
+                     (hid,))
+        if not rows:
+            skipped.append({"hand_id": hid, "reason": "mão não encontrada"})
+            continue
+        h = dict(rows[0])
+        ok, reason = _hand_exportable_quick(h.get("site"), h.get("raw"))
+        if not ok:
+            skipped.append({"hand_id": hid, "reason": reason})
+            continue
+        try:  # guard profundo: o pack é gerável?
+            pk = lookup_payouts([h])
+            bk = lookup_bounties([h])
+            zb = build_queue_zip([h], pk, include_no_payout=True,
+                                 filters_meta={"single_hand": hid}, bounty_by_key=bk)
+            with zipfile.ZipFile(io.BytesIO(zb)) as zf:
+                man = json.loads(zf.read("manifest.json"))
+            if man.get("total_in_zip", 0) == 0:
+                sk = man.get("skipped") or []
+                skipped.append({"hand_id": hid,
+                                "reason": (sk[0].get("reason") if sk else "não exportável")})
+                continue
+        except Exception as e:
+            skipped.append({"hand_id": hid,
+                            "reason": "erro ao gerar pack: %s" % type(e).__name__})
+            continue
+        execute("INSERT INTO hrc_queue_release (hand_db_id, batch_id) VALUES (%s,%s) "
+                "ON CONFLICT (hand_db_id) DO NOTHING", (h["id"], batch_id))
+        released.append(hid)
+    logger.info("queue/hrc release forçado: released=%d skipped=%d batch=%s",
+                len(released), len(skipped), batch_id)
+    return {"released": released, "skipped": skipped, "batch_id": batch_id}
+
+
+@router.post("/hrc/states")
+def queue_hand_states(payload: dict = Body(...),
+                      current_user=Depends(require_auth_or_api_key)):
+    """Estado HRC por mão (badges da Estudo): nada / na fila / concluída / falhou
+    + exportável? (guarda leve). Body: {hand_ids: [...]}."""
+    hand_ids = payload.get("hand_ids") or []
+    if not isinstance(hand_ids, list):
+        raise HTTPException(400, "hand_ids (lista) obrigatório")
+    if not hand_ids:
+        return {"states": {}}
+    rows = query(
+        "SELECT h.hand_id, h.site, (h.raw IS NULL OR h.raw='') AS no_raw, "
+        "(r.hand_db_id IS NOT NULL) AS released, j.status AS job_status "
+        "FROM hands h "
+        "LEFT JOIN hrc_queue_release r ON r.hand_db_id = h.id "
+        "LEFT JOIN hrc_jobs j ON j.hand_db_id = h.id "
+        "WHERE h.hand_id = ANY(%s)", (list(hand_ids),))
+    out = {}
+    for r in rows:
+        if r["job_status"] == "done":
+            state = "concluída"
+        elif r["job_status"] == "failed":
+            state = "falhou"
+        elif r["released"]:
+            state = "na fila"
+        else:
+            state = "nada"
+        exportable = (r["site"] in ALLOWED_SITES) and not r["no_raw"]
+        reason = (None if exportable else
+                  ("site não suportado" if r["site"] not in ALLOWED_SITES else "sem HH"))
+        out[r["hand_id"]] = {"state": state, "exportable": exportable, "reason": reason}
+    return {"states": out}
 
 
 @router.get("/hrc/gate")
