@@ -12,6 +12,17 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
+> **★ FEATURE FUTURA (desenho aprovado-pendente) — GATE SERVER-SIDE DA FILA HRC COM
+> DISPARO MANUAL** (`#QUEUE-NO-SERVER-SIDE-GATE`). A fila nasce FECHADA no servidor
+> (`GET /api/queue/hrc` devolve vazio); só serve mãos após o Rui carregar em **"Disparar"**
+> na página HRC Queue. **Modelo proposto:** tabela `hrc_queue_release` + filtro no GET (só
+> mãos libertadas e não-done) + `POST /api/queue/hrc/trigger?count=N` + `GET …/gate` (estado:
+> fechada/aberta/N em curso). **Auto-fecho** quando o lote é consumido. **Disparo:** "tudo"
+> (v1) ou "lote de N" (v2). **Per-mão `…/hand/{id}` NÃO gated** (pedido explícito do Rui).
+> **Zero alterações no adapter/Beelink** (o adapter já idle em vazio). **Esforço:** v1 ~1 dia
+> (tabela+filtro+trigger+gate+botão "Disparar tudo"); v2 lote-de-N + histórico. Entra em
+> vigor quando construído; a corrida de 11 Jun à noite mantém-se. Detalhe: `REGISTO_CONCEITO`.
+>
 > **★ pt67 IMPLEMENTADO (em buffer + Release `watcher-pt67`); falta a RE-SMOKE real
 > (gate da fila).** 3 fixes em código (**916 PASSED** + 102 watcher + in-process smoke
 > ALL OK; diffs validados pelo Web): **#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS** (backend
