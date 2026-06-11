@@ -1917,6 +1917,220 @@ def export_strategies(export_path):
     return None
 
 
+# ── pt68 — higiene do HRC (incidente madrugada 11 Jun) ──────────────────────
+# Degradação progressiva: acumulação de tabs/memória do HRC ao longo da fornada
+# (setup-failed 02:14 cold start → 3 OK → derail ~02:35). 3 correções (ordem Rui):
+#  1. fechar a tab da mão após export (_close_hand_tab); 2. reiniciar o HRC a
+#  cada N mãos (_restart_hrc) + health-check pós-arranque (_wait_hrc_responsive,
+#  mitiga o cold start); 3. log a ficheiro com rotação (_ensure_file_logging).
+_HANDS_DONE_SINCE_RESTART = 0
+_RESTART_EVERY_N_HANDS = 5
+_HRC_COLDSTART_GRACE_S = 8
+_CLOSE_TAB_AFTER_EXPORT = True
+_FILE_LOGGING_READY = False
+_WATCHER_LOG_DIR = r'C:\hrc\watcher_logs'
+
+
+class _Tee:
+    """Escreve em vários streams (consola + ficheiro). Robusto a falhas."""
+    def __init__(self, *streams):
+        self._streams = [s for s in streams if s is not None]
+    def write(self, data):
+        for s in self._streams:
+            try:
+                s.write(data); s.flush()
+            except Exception:
+                pass
+    def flush(self):
+        for s in self._streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+    def isatty(self):
+        return False
+
+
+def _ensure_file_logging():
+    """change 3 (#WATCHER-LOG-TO-FILE): espelha stdout/stderr para um ficheiro
+    por sessão em _WATCHER_LOG_DIR (fim das consolas perdidas). Corre 1x;
+    mantém os últimos 14 ficheiros."""
+    global _FILE_LOGGING_READY
+    if _FILE_LOGGING_READY:
+        return
+    _FILE_LOGGING_READY = True
+    try:
+        import sys
+        os.makedirs(_WATCHER_LOG_DIR, exist_ok=True)
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        path = os.path.join(_WATCHER_LOG_DIR, 'hrc_watcher_%s.log' % ts)
+        f = open(path, 'a', encoding='utf-8', buffering=1)
+        sys.stdout = _Tee(getattr(sys, '__stdout__', None) or sys.stdout, f)
+        sys.stderr = _Tee(getattr(sys, '__stderr__', None) or sys.stderr, f)
+        try:
+            logs = sorted(x for x in os.listdir(_WATCHER_LOG_DIR)
+                          if x.startswith('hrc_watcher_') and x.endswith('.log'))
+            for old in logs[:-14]:
+                try:
+                    os.remove(os.path.join(_WATCHER_LOG_DIR, old))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        print('   [log] a gravar em %s' % path)
+    except Exception as e:
+        print('   [WARN] _ensure_file_logging falhou (%s) — só consola' % e)
+
+
+def _running_hrc_path():
+    """Path do hrc.exe a correr (robusto — não hardcode; o HRC mudou de path
+    entre instalações). None se não encontrar."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['powershell', '-NoProfile', '-Command',
+             "(Get-Process hrc -ErrorAction SilentlyContinue | "
+             "Select-Object -First 1 -ExpandProperty Path)"],
+            capture_output=True, text=True, timeout=15)
+        p = (out.stdout or '').strip()
+        return p or None
+    except Exception:
+        return None
+
+
+def _restart_hrc():
+    """change 2 (#HRC-WATCHER-TAB-ACCUMULATION): mata o hrc.exe e relança-o do
+    MESMO path (capturado antes do kill; fallback ao HRC_EXE do módulo). Higiene
+    de memória — a cada _RESTART_EVERY_N_HANDS mãos."""
+    import subprocess
+    exe = _running_hrc_path()
+    print('   [HRC-RESTART] hrc.exe path=%r — a matar...' % exe)
+    try:
+        subprocess.run(['taskkill', '/F', '/IM', 'hrc.exe'],
+                       capture_output=True, text=True, timeout=20)
+    except Exception as e:
+        print('   [WARN] taskkill hrc.exe: %s' % e)
+    time.sleep(4)
+    launch = exe or globals().get('HRC_EXE')
+    if not launch:
+        print('   [WARN] _restart_hrc: sem path do HRC — ensure_hrc tentará abrir')
+        return
+    try:
+        subprocess.Popen([launch])
+        print('   [HRC-RESTART] relançado: %s' % launch)
+    except Exception as e:
+        print('   [WARN] _restart_hrc relançar (%s): %s' % (launch, e))
+
+
+def _wait_hrc_responsive(stable_cycles=3, timeout_s=45):
+    """change 2b (mitigação cold start — o setup-failed das 02:14): esperar o HRC
+    responsivo — find_hrc() com wpos ESTÁVEL N ciclos — + grace antes do 1º
+    setup. Cobre cold start e pós-reinício."""
+    last = None
+    stable = 0
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        try:
+            hrc = find_hrc()
+        except Exception:
+            hrc = None
+        if hrc:
+            pos = (hrc.left, hrc.top, hrc.width, hrc.height)
+            if pos == last and all(pos):
+                stable += 1
+            else:
+                stable = 1
+                last = pos
+            if stable >= stable_cycles:
+                time.sleep(_HRC_COLDSTART_GRACE_S)
+                print('   [HRC] responsivo (wpos estável) + grace %ds.'
+                      % _HRC_COLDSTART_GRACE_S)
+                return True
+        time.sleep(1)
+    print('   [WARN] _wait_hrc_responsive: timeout %ds — sigo na mesma' % timeout_s)
+    return False
+
+
+def _find_button_by_text(hwnd_dialog, pred):
+    """Botão (class 'Button') cujo texto normalizado (sem '&', lower, strip)
+    satisfaz `pred`. None se não encontrar. Mesma anatomia que `_find_ok_button`
+    (pt33)."""
+    if not hwnd_dialog:
+        return None
+    found = []
+
+    def _enum(ch, lparam):
+        cls_buf = ctypes.create_unicode_buffer(256)
+        _pt30_user32.GetClassNameW(ch, cls_buf, 256)
+        if cls_buf.value == "Button":
+            n = _pt30_user32.GetWindowTextLengthW(ch)
+            if n > 0:
+                txt_buf = ctypes.create_unicode_buffer(n + 1)
+                _pt30_user32.GetWindowTextW(ch, txt_buf, n + 1)
+                t = txt_buf.value.replace("&", "").strip().lower()
+                if pred(t):
+                    found.append(ch)
+                    return False
+        return True
+
+    _pt30_user32.EnumChildWindows(hwnd_dialog, _PT30_WNDENUMPROC(_enum), 0)
+    return found[0] if found else None
+
+
+def _click_dont_save_dialog(timeout_s=6):
+    """Espera o diálogo SWT "Save Resource — Save 'Hand N'?" (após Ctrl+F4) e
+    clica **Don't Save** via Win32 BM_CLICK (como o OK do popup Nash, pt33). O
+    export zip já tem tudo; gravar = lixo no workspace. True se clicou."""
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        dlg = _find_top_by_substr('save resource', "save '", 'save ‘')
+        if dlg:
+            btn = _find_button_by_text(
+                dlg[0], lambda t: 'don' in t and 'save' in t)  # "Don't Save"
+            if btn:
+                _pt30_user32.SendMessageW(btn, BM_CLICK, 0, 0)
+                print('   [tab] "Don\'t Save" clicado (hwnd=%d, dlg=%r)'
+                      % (btn, dlg[1]))
+                return True
+            print('   [WARN] [tab] diálogo %r sem botão Don\'t Save' % (dlg[1],))
+        time.sleep(0.4)
+    return False
+
+
+def _close_hand_tab():
+    """change 1 (#HRC-WATCHER-TAB-ACCUMULATION, fix de raiz): fecha a tab da mão
+    após o export (anti-acumulação). **Ctrl+F4** (o Ctrl+W no HRC é chord de
+    nova-mão — NUNCA usar) → diálogo SWT "Save Resource" → **Don't Save**.
+    Guard: se o HRC desaparecer, avisa LOUD (o ensure_hrc da mão seguinte
+    relança). O reinício a cada N limita a acumulação mesmo que isto falhe."""
+    if not _CLOSE_TAB_AFTER_EXPORT:
+        return
+    try:
+        hrc = find_hrc()
+        if not hrc:
+            print('   [tab] HRC não encontrado — skip close')
+            return
+        try:
+            hrc.activate()
+        except Exception:
+            pass
+        time.sleep(0.4)
+        pyautogui.hotkey('ctrl', 'f4')
+        clicked = _click_dont_save_dialog()
+        time.sleep(0.6)
+        if find_hrc() is None:
+            print('   [WARN] [tab] o HRC desapareceu após Ctrl+F4! '
+                  'ensure_hrc relança na próxima mão.')
+        elif clicked:
+            print('   [tab] tab da mão fechada (Ctrl+F4 + Don\'t Save).')
+        else:
+            print('   [WARN] [tab] diálogo Save Resource não tratado — a tab pode '
+                  'ter ficado aberta (o reinício a cada %d limita a acumulação).'
+                  % _RESTART_EVERY_N_HANDS)
+    except Exception as e:
+        print('   [WARN] _close_hand_tab: %s' % e)
+
+
 def setup_hand(hand_name, hand_path):
     """Fase 1 do watcher: wizard -> calcular -> queue export.
 
@@ -1928,7 +2142,11 @@ def setup_hand(hand_name, hand_path):
     despacha para `set_equity_model`/`set_hand_mode_players`/`setup_scripting`.
     Restante fluxo idêntico ao original — confirmado linha-a-linha contra
     `setup_hand_dis.txt` (665 linhas bytecode).
+
+    pt68: + log a ficheiro (change 3) + reinício do HRC a cada N mãos com
+    health-check (change 2) + fecho da tab após export (change 1).
     """
+    _ensure_file_logging()  # pt68 change 3 — espelha consola para ficheiro
     print('\n==================================================')
     print(f'  [SETUP] {hand_name}')
     print('==================================================')
@@ -1998,10 +2216,22 @@ def setup_hand(hand_name, hand_path):
     # === end pt23 (pt42d revisto) ===
 
     # arrancar HRC
+    # pt68 change 2 — reiniciar o HRC a cada N mãos (higiene de memória contra a
+    # acumulação de tabs). O reinício corre ANTES do ensure_hrc, que depois
+    # encontra (ou relança) o HRC fresco.
+    if _HANDS_DONE_SINCE_RESTART >= _RESTART_EVERY_N_HANDS:
+        print('   [HRC-RESTART] %d mãos desde o último reinício (>= %d) — a '
+              'reiniciar o HRC...' % (_HANDS_DONE_SINCE_RESTART,
+                                      _RESTART_EVERY_N_HANDS))
+        _restart_hrc()
+        globals()['_HANDS_DONE_SINCE_RESTART'] = 0
     hrc = ensure_hrc()
     if not hrc:
         print('   ERRO: HRC Pro não iniciou!')
         return False
+    # pt68 change 2b — health-check (mitiga o cold-start race do setup-failed
+    # 02:14): esperar o HRC responsivo + grace ANTES do 1º setup.
+    _wait_hrc_responsive()
 
     # pt28-v3 (#PASTE-FAILED-HRC-REJECTED-CLIPBOARD root cause):
     # Smoke pt28-v2 expos que o HRC le o clipboard automaticamente quando
@@ -2238,6 +2468,13 @@ def setup_hand(hand_name, hand_path):
     # ou após WARN se 2ª run falhou em pt28).
     finalize_after_second_run(wpos, export_zip)
     # === FIM Bloco 2 piece 2 ===
+
+    # pt68 change 1 — fechar a tab/janela da mão após o export (anti-acumulação).
+    _close_hand_tab()
+    # pt68 change 2 — contar a mão processada (gatilho do reinício a cada N).
+    globals()['_HANDS_DONE_SINCE_RESTART'] = _HANDS_DONE_SINCE_RESTART + 1
+    print('   [hrc-hygiene] mãos desde o último reinício: %d/%d'
+          % (_HANDS_DONE_SINCE_RESTART, _RESTART_EVERY_N_HANDS))
 
     print(f'   [QUEUED] {hand_name} -> {os.path.basename(export_zip)} '
           f'(Bloco 1 — finalize Bloco 2)')
