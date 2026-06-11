@@ -12,6 +12,17 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 ## Alta prioridade (atacar a seguir)
 
+> **★ FEATURE FUTURA (registar; desenho quando chegar a vez) — AVALIAÇÃO AUTOMÁTICA
+> HERÓI vs HRC.** Ao receber o zip de estratégias, avaliar a decisão do herói: localizar
+> na árvore o(s) nó(s) da linha real, ler a estratégia do solver para o **combo exacto**
+> do herói (freq + EVs por ação) e comparar com a ação tomada → **veredicto** (em linha /
+> mix / desvio) + **custo em EV** (ação tomada vs melhor). Output no Estudo + badge/filtro
+> **"mãos onde desviei"**. **Questões para o desenho:** (1) mapear a acção real aos sizings
+> da árvore (ex.: raise 2.2bb real vs linha 2.0 do solver); (2) herói com **múltiplos nós**
+> de decisão na linha; (3) **onde guardar** o veredicto (coluna na mão? tabela própria?);
+> (4) badge/filtro no Estudo. Constrói sobre a infra do **GTO Brain** (matching + navegação
+> a nó). Reusa o zip que já entra em `hrc_jobs`/`hrc_sessions`.
+>
 > **★ FEATURE FUTURA (desenho aprovado-pendente) — GATE SERVER-SIDE DA FILA HRC COM
 > DISPARO MANUAL** (`#QUEUE-NO-SERVER-SIDE-GATE`). A fila nasce FECHADA no servidor
 > (`GET /api/queue/hrc` devolve vazio); só serve mãos após o Rui carregar em **"Disparar"**
