@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import TagEditor from './TagEditor'
 import { dateTimeLisbon } from '../utils/datetime'
+import { useHrcSelection, RowCheckbox, HrcStateBadge } from './HrcSelection'
 
 // ── Constantes (cópia de Hands.jsx para auto-conteúdo) ──────────────────────
 
@@ -138,13 +140,20 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
   // GG.gl link (se existir em raw ou notes)
   const ggMatch = (hand.raw || '').match(/https?:\/\/gg\.gl\/\S+/) || (hand.notes || '').match(/https?:\/\/gg\.gl\/\S+/)
 
+  // Multi-select HRC (pt69) — só activo na Estudo (HrcSelectionProvider). Em
+  // Discord/HM3/Tournaments o contexto é null → sem coluna de checkbox.
+  const hrc = useHrcSelection()
+  useEffect(() => {
+    if (hrc && hand.hand_id) hrc.ensureStates([hand.hand_id])
+  }, [hrc, hand.hand_id])
+
   return (
     <div
       onClick={onClick}
       style={{
         display: 'grid',
         gridTemplateColumns:
-          '5.6% 5.6% 5.6% 5.6% 3.9% 18.3% 5% 7.9% 8.3% 1fr',
+          (hrc ? '22px ' : '') + '5.6% 5.6% 5.6% 5.6% 3.9% 18.3% 5% 7.9% 8.3% 1fr',
         alignItems: 'center',
         padding: '7px 8px',
         background: zebra,
@@ -155,6 +164,13 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.06)' }}
       onMouseLeave={e => { e.currentTarget.style.background = zebra }}
     >
+      {/* 0. Checkbox HRC (só na Estudo, via HrcSelectionProvider) */}
+      {hrc && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <RowCheckbox handId={hand.hand_id} />
+        </div>
+      )}
+
       {/* 1. Estado (badge unificado: matchState tem prioridade quando ≠ matched) */}
       <div><StateBadge state={hand.study_state} matchState={hand.match_state} /></div>
 
@@ -217,6 +233,8 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       <div style={{
         display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end',
       }}>
+        {/* Estado HRC (pt69) — Na fila / Concluída / Falhou (nada → nada) */}
+        <HrcStateBadge handId={hand.hand_id} />
         {/* Anexos imagem (Bucket 1) — discreto, só aparece se >0 */}
         {hand.attachment_count > 0 && (
           <span

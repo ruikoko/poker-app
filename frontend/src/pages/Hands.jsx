@@ -4,6 +4,7 @@ import Replayer from '../components/Replayer'
 import { isHero } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import HandRow from '../components/HandRow'
+import { HrcSelectionProvider, HrcActionBar, GroupSelectAll, useHrcSelection } from '../components/HrcSelection'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
 import TournamentHeader, { SiteWatermark } from '../components/TournamentHeader'
@@ -874,6 +875,16 @@ function TmSpan({ tournamentNumber }) {
 function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onDeleteHand, showHrcButton = false, tournamentNumber = null, siHero = null, nameColWidth = 240 }) {
   const [open, setOpen] = useState(false)
 
+  // Multi-select HRC (pt69) — "selecionar todas do torneio". Pré-carrega os
+  // estados para o checkbox tri-estado refletir exportabilidade já no header.
+  const hrcSel = useHrcSelection()
+  const groupHandIds = hands.map(h => h.hand_id).filter(Boolean)
+  const groupIdsKey = groupHandIds.join(',')
+  useEffect(() => {
+    if (hrcSel && groupHandIds.length) hrcSel.ensureStates(groupHandIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hrcSel, groupIdsKey])
+
   // Hands ordenadas cronologicamente. Primeira hand alimenta site/data; restantes
   // procuradas para buy_in (não-null).
   const sortedAsc = [...hands].sort((a, b) =>
@@ -907,10 +918,15 @@ function TournamentGroup({ name, hands, wins, losses, totalBB, onOpenDetail, onD
   const customTitle = (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: `90px ${nameColWidth}px 70px 60px 70px 80px 1fr`,
+      gridTemplateColumns: `${hrcSel ? '22px ' : ''}90px ${nameColWidth}px 70px 60px 70px 80px 1fr`,
       gap: 8,
       alignItems: 'center',
     }}>
+      {hrcSel && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <GroupSelectAll handIds={groupHandIds} title={`Selecionar todas as mãos exportáveis de ${name}`} />
+        </div>
+      )}
       <div>
         {tournamentNumber ? <TmSpan tournamentNumber={tournamentNumber} /> : <Dash />}
       </div>
@@ -1016,6 +1032,16 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
   const [tagHands, setTagHands] = useState([])
   const [loadingHands, setLoadingHands] = useState(false)
 
+  // Multi-select HRC (pt69) — "selecionar todas do grupo" (todas as mãos
+  // carregadas desta tag). Só aparece quando expandido (hands carregadas).
+  const hrcSel = useHrcSelection()
+  const tagHandIds = tagHands.map(h => h.hand_id).filter(Boolean)
+  const tagIdsKey = tagHandIds.join(',')
+  useEffect(() => {
+    if (hrcSel && tagHandIds.length) hrcSel.ensureStates(tagHandIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hrcSel, tagIdsKey])
+
   async function expand() {
     if (!open && tagHands.length === 0) {
       setLoadingHands(true)
@@ -1087,6 +1113,13 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
             transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
             transition: 'transform 0.2s',
           }}>&#9654;</span>
+
+          {/* Selecionar todas do grupo (pt69) — só com hands carregadas */}
+          {hrcSel && open && tagHandIds.length > 0 && (
+            <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <GroupSelectAll handIds={tagHandIds} title="Selecionar todas as mãos exportáveis deste grupo" />
+            </span>
+          )}
 
           {/* Tag — display_name unificado (#B17) */}
           <span
@@ -1530,7 +1563,7 @@ export default function HandsPage() {
   const totalHands = viewMode === 'tags' ? tagGroupsData.total : data.total
 
   return (
-    <>
+    <HrcSelectionProvider>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
@@ -1945,7 +1978,10 @@ export default function HandsPage() {
           onUpdate={() => { setSelected(null); loadTagGroups(); loadList() }}
         />
       )}
-    </>
+
+      {/* Barra fixa "Enviar N ao HRC" (pt69) — auto-oculta quando nada selecionado */}
+      <HrcActionBar />
+    </HrcSelectionProvider>
   )
 }
 
