@@ -1,12 +1,35 @@
 # Pendentes — backlog vivo
 
-**Última actualização:** 10 Junho 2026 (**pt67 FECHADO — pipeline HRC CERTIFICADO ponta-a-ponta**, `#225 hrc_job 10`). 4ª volta de smoke provou (3 fotos do Rui) a semântica do Selected Subtree → **LEI B da âncora** (posição certa; linha indiferente). **Fila travada** pelo veneno real **`#HRC-NODE-OFFSET-IMPLICIT-LINES` (🔴 HIGH, posição errada, 17/70)**; o off-by-one within-bucket é inofensivo. Backend tudo deployado (offset 7/14, pin 3.12, cap 200 MB interino). #400 cancelado pelo Rui (sem job). Registos novos: `REGISTO_CONCEITO.md` + `LICOES.md`. Antes: pt66 (re-smoke PASSOU, 4 fixes watcher); pt64 (★ smoke real). Journal: `docs/JOURNAL_2026-06-10-pt67.md`.
+**Última actualização:** 11 Junho 2026 (**pt68 FECHADO**). Wipe total + Etapa 1 (sessão dia 4, 6 canos validados, ~5044 mãos, 123/127 órfãos); 502 do `/api/import` = timeout síncrono com import COMPLETO (4710 mãos 4-9 Jun verificadas); incidente do watcher (degradação progressiva por acumulação de abas, confirmada na fonte; 3 done VERDES na mini-auditoria); **★ Saúde do Import v1** (`/import-health`); **★ Gate da fila v1** (fila fechada + disparo manual/lote); **★ exe watcher pt68** (3 fixes: fechar aba Ctrl+F4+Don't Save, reiniciar/5+health-check, log-em-ficheiro) — **Release publicada+validada, instalação no Beelink PENDENTE**; **★ multi-select "Enviar ao HRC" backend LIVE** (frontend = 1º da próxima). Journal: `docs/JOURNAL_2026-06-11-pt68.md`. Antes: pt67 (pipeline certificado).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
 estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 
 > Manutenção: quando um item for feito, mover para o journal/tech debts e
 > remover daqui. Quando aparecer um item novo, colocar na categoria certa.
+
+---
+
+## ★ Fila de arranque da pt69 (ordem do Rui no fecho pt68)
+
+1. **Frontend do multi-select "Enviar ao HRC"** (1º item) — backend **LIVE** à espera
+   (`POST /api/queue/hrc/release` + `/states`). Estudo (`Hands.jsx` 2001 linhas + `HandRow`):
+   checkboxes + "selecionar todas do torneio/grupo" + barra "Enviar N" + badges de estado +
+   checkbox desabilitado nas não-exportáveis (com motivo).
+2. **Instalar o exe pt68 no Beelink** (`irm` do `instala_pt68.bat`, Release `watcher-pt68`,
+   SHA `222fc48d…3f57`) + **smoke do reinício-a-cada-5 e do fecho de abas** (Ctrl+F4 +
+   Don't Save) + confirmar o log em `C:\hrc\watcher_logs\`.
+3. **Etapa 2** = importar **dias 5 + 8 + 9** (re-teste com volume, à luz da Etapa 1).
+4. **Fix `#HRC-NODE-OFFSET-IMPLICIT-LINES`** (gate da fila grande; regra 25 BB confirmada).
+5. **Política CI/tempo da 2ª run** (`#HRC-2ND-RUN-CI-TIME-DISCREPANCY`) — **decisão de
+   produto** do Rui (reiniciar a cada N? alvo de CI? tempo-limite?).
+6. **4 órfãos Discord** (dias 5/8/9) sem match — investigar.
+7. **2 lobbys com Vision de site trocado** — corrigir.
+8. **Limpeza física do Beelink** (`C:\hrc\queue_hold\`, `stale_done`, Desktop riand) — as
+   linhas dry-run + apagar já foram desenhadas no chat; correr quando o Rui puder.
+9. **Mão do derail** (a seguir à `GG-6041861838`) — **forense opcional** (precisa do
+   `state.json`/ordem de pick do Beelink).
+10. **Gate por botão** (`#QUEUE-NO-SERVER-SIDE-GATE`) — ✅ **ENTREGUE pt68** (riscado).
 
 ---
 
@@ -23,8 +46,10 @@ estado de cada debt) — aqui é só a **fila de trabalho**, ordenada.
 > (4) badge/filtro no Estudo. Constrói sobre a infra do **GTO Brain** (matching + navegação
 > a nó). Reusa o zip que já entra em `hrc_jobs`/`hrc_sessions`.
 >
-> **★ FEATURE FUTURA (desenho aprovado-pendente) — GATE SERVER-SIDE DA FILA HRC COM
-> DISPARO MANUAL** (`#QUEUE-NO-SERVER-SIDE-GATE`). A fila nasce FECHADA no servidor
+> **★ ✅ ENTREGUE (pt68, `c10e303`) — GATE SERVER-SIDE DA FILA HRC COM DISPARO MANUAL**
+> (`#QUEUE-NO-SERVER-SIDE-GATE`). Construído: tabela `hrc_queue_release` + filtro no GET +
+> `POST /trigger?count=N` + `GET /gate` + página HRC Queue. ~~Desenho:~~ feito.
+> A fila nasce FECHADA no servidor
 > (`GET /api/queue/hrc` devolve vazio); só serve mãos após o Rui carregar em **"Disparar"**
 > na página HRC Queue. **Modelo proposto:** tabela `hrc_queue_release` + filtro no GET (só
 > mãos libertadas e não-done) + `POST /api/queue/hrc/trigger?count=N` + `GET …/gate` (estado:

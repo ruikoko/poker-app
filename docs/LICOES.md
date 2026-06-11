@@ -21,3 +21,17 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
 - 2026-06-10 — **ÊXITO:** **1ª mão certificada ponta-a-ponta** (`#225`, `hrc_job 10`) — `app → adapter → watcher → 2 runs → resultado na BD`.
 - 2026-06-10 — **ÊXITO:** deploy de binários por **GitHub Release de 1 clique** (SHA-check, 1 exe no Beelink) consolidado.
 - 2026-06-10 — **ÊXITO:** **verificação visual do nó** promovida a **critério permanente** de toda a smoke de navegação (o que apanhou o off-by-one e desbloqueou a semântica).
+
+## 2026-06-11 (pt68) — → `docs/JOURNAL_2026-06-11-pt68.md`
+
+- 2026-06-11 — **Problema:** 502 "Application failed to respond" no `/api/import` parecia crash. → **Solução:** diagnosticar pela BD ANTES de re-tentar — as 4710 mãos estavam TODAS lá (import completo, **resposta perdida por timeout síncrono**, não memória/crash). Idempotente → re-try seguro mas desnecessário.
+- 2026-06-11 — **Problema:** `Ctrl+W` para fechar a aba da mão no HRC. → **Solução (achado do Rui na fonte):** `Ctrl+W` é **chord de nova-mão** (Ctrl+W,E/M/H/S) — **NUNCA usar**; o fecho de aba é **`Ctrl+F4` + diálogo "Save Resource" → Don't Save** (Win32 BM_CLICK).
+- 2026-06-11 — **Problema:** o watcher derailou de madrugada (avaria "súbita"?). → **Solução:** o padrão (setup-failed cold start → 3 OK → derail; ritmo 3→9 min) é **degradação PROGRESSIVA** por **acumulação de abas** (HRC não fecha a anterior — confirmado na fonte). Fix: fechar aba + reiniciar a cada N + health-check de cold start.
+- 2026-06-11 — **Problema:** consola do watcher perdida → sem root-cause do incidente. → **Solução:** `#WATCHER-LOG-TO-FILE` subido a prioridade + entregue no exe pt68 (Tee → ficheiro com rotação). Esta noite provou o custo.
+- 2026-06-11 — **Problema:** o Code andou a vasculhar o disco (Documents\Poker\GG…) à procura da GG. → **Solução (regra `FLUXO §11`):** só os paths listados; **a GG vem do BACKOFFICE do Rui** — pede-se, não se vasculha.
+- 2026-06-11 — **Problema:** mtime das zips GG sugeria "sessão 04-05" (era 3-4 Jun). → **Solução:** espreitar o **conteúdo** (horas reais das mãos), não confiar no mtime.
+- 2026-06-11 — **Problema:** `gh` ausente → "não consigo publicar a Release". → **Solução (correcção do Rui):** publicar pela **API REST do GitHub** com as mesmas credenciais do push (`git credential fill` → POST releases + upload assets). Validar: download anónimo 200 + SHA round-trip.
+- 2026-06-11 — **Problema:** wipe irreversível. → **Solução:** backup logical **restore-verificado** ANTES (COPY → schema scratch → assert contagens) + cross-check de cobertura vs `information_schema` (zero gaps) + TRUNCATE atómico com assert-zero/rollback.
+- 2026-06-11 — **ÊXITO:** **Saúde do Import v1** (`/import-health`) — instrumento de validação da própria Etapa 1.
+- 2026-06-11 — **ÊXITO:** **Gate da fila v1** + **multi-select backend** (release forçado + states) — controlo de lotes do Rui sobre o robot.
+- 2026-06-11 — **ÊXITO:** **exe watcher pt68** construído (swap_and_smoke ALL OK) + **Release publicada via API REST + validada** (SHA round-trip).
