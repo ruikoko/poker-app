@@ -6,6 +6,15 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt69 (11 Jun 2026 — frontend multi-select HRC + diagnóstico da deadlock "Activas")
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#HRC-CLOSE-TAB-BREAKS-CHORD-FOCUS` | 🔴 HIGH | ✅ **FIX em buffer** (pendente validação Web + build do exe). O `_close_hand_tab` (pt68) dispensa o "Save Resource" via `BM_CLICK` (mensagem, não foca) e retornava **sem repor o foreground/foco** na janela principal. O `open_wizard()` OG (`_local_only/.../hrc_watcher.py:128-163`) abre o wizard via **chord `Ctrl+W,M`** e **assume a janela principal focada** (center-click linha 134, antes do chord). Resultado: ao fim da mão 1 (1ª execução do `_close_hand_tab`) o estado de foco fica errado → o chord da mão 2 falha → `open_wizard` devolve `None` → `setup_hand` `return False` (`hwnd_wizard=None`). O `main()` OG (`active=[]`) fica preso → **deadlock "Activas"** (HRC vivo idle). A mão 1 (cold start) passa por estado limpo. **Fix:** `_restore_hrc_main_focus()` no fim do `_close_hand_tab` — espera o modal sumir (WARN se ficar) + `activate()`+center-click+settle (espelho da pré-condição do `open_wizard`). Provenance: o exe a correr no Beelink é `222FC48D…3F57` (pt68 — causa certa). swap_and_smoke ALL OK (49 funcs). |
+| `#OG-MAIN-LOOP-NO-WATCHDOG` | 🟠 MED | **Aberto** (registado pt69, fix futuro). O loop principal do bundle OG (`hrc_watcher.py:main()`, `active=[]`) espera o fim das mãos em curso **sem timeout/watchdog** → a deadlock "Activas" repete-se com **qualquer** causa futura de "zip-que-não-nasce" (não só o foco do `#HRC-CLOSE-TAB-BREAKS-CHORD-FOCUS`, que o pt69 remove). O bundle OG está em `_local_only/` (decompilado) — o watchdog exige editar o launcher OG. Adiar para um pt dedicado. |
+
+---
+
 ## pt68 (11 Jun 2026 — wipe total + re-teste faseado + Saúde do Import)
 
 | ID | Sev | Resumo |
