@@ -37,3 +37,10 @@ Qualquer operador que detete violação destas regras (própria ou alheia) regis
 
 ## 10. Fix de backend valida-se DEPLOYADO (regra do objeto-de-teste)
 A regra "push no fecho" (commit local, push só no fim) **NÃO se aplica quando a produção é o objeto do teste**. Um fix de backend só vale quando a **Railway fez o deploy** dele — caso contrário a smoke corre contra o backend **antigo** e o resultado é falso. Nasceu da frustração real do pt67: a re-smoke das 18:09 regenerou os packs com a derivação **antiga** (Max=2) porque os commits nunca tinham sido pushed/deployados; só a metade do watcher (visão/2 runs/CI) ficou validada. **Antes de uma smoke que depende de backend novo:** (1) push; (2) **esperar o deploy ficar LIVE** (`railway status --json` → `latestDeployment.status=SUCCESS` no commit certo); (3) **verificar a derivação no backend deployado** (ex.: `GET /api/queue/hrc/hand/<id>` e inspecionar o `meta.json`). Só depois se corre a smoke.
+
+## 11. Âmbito de disco no PC principal (regra do território — pt68)
+O Code **só LÊ/TOCA paths explicitamente listados**: a **tabela dos intocáveis** (BD do HM3, `LOBBY_DIR`=Capturas) **+ `C:\Users\User\Desktop\Batmen\`** (e subpastas). **Qualquer procura/leitura fora desses paths exige autorização prévia do Rui, pedida e dada por escrito** — sem exceções "úteis" por iniciativa própria. Nasceu de pt68: o Code andou a varrer `Documents\Poker\GG`, `POKER-GGPCOM-LIVE`, etc. à procura da GG, fora do âmbito.
+
+**Facto associado (corrige o entendimento):** as **HH/TS do GG vivem no BACKOFFICE do Rui (fora do PC)**; é **ele** que as descarrega e coloca manualmente em `gg_hh`/`gg_ts`. **Nunca procurar no disco o que é do ritual manual dele** — se falta a GG, pede-se ao Rui, não se vasculha o disco.
+
+**Reafirmação de papéis (`PAPEIS_E_RESPONSABILIDADES`):** decisões de produto, dados e operação manual = **Rui**; Web e Code movem-se **dentro do que está descrito**; as autorizações funcionam como documentado — **nada se estende por iniciativa própria**.

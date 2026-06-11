@@ -60,6 +60,12 @@ O Beelink tem **SEMPRE exatamente 1** watcher exe — o **activo**. Nunca dois, 
 
 **Se o Claude for invocado durante uma sessão activa**, avisar imediatamente o utilizador e pedir confirmação explícita antes de prosseguir. Nunca arrancar processos de longa duração (dev server, bot Discord, watchers) sem essa confirmação.
 
+## ⚠️ ÂMBITO DE DISCO no PC principal (regra do território — pt68, `FLUXO §11`)
+
+O Code **só LÊ/TOCA paths explicitamente listados**: a **tabela dos intocáveis** (BD do HM3 `…\MyHM3Database.hmdb`; `LOBBY_DIR` = `C:\Users\User\Pictures\Screenshots`) **+ `C:\Users\User\Desktop\Batmen\`** e subpastas (`gg_hh`/`gg_ts`/`it`/`it_em_espera`/`manual`/`lobby`/`done`). **Qualquer procura/leitura fora destes paths exige autorização prévia do Rui, por escrito** — sem exceções "úteis". (Origem pt68: o Code varreu `Documents\Poker\GG`, `POKER-GGPCOM-LIVE`, etc. à procura da GG, fora do âmbito — violação corrigida e registada.)
+
+**Facto:** as **HH/TS do GG vivem no BACKOFFICE do Rui (fora do PC)** — é **ele** que as descarrega e coloca à mão em `gg_hh`/`gg_ts`. Se falta GG, **pede-se ao Rui**; **não se vasculha o disco**. Decisões de produto/dados/operação manual = Rui; Web/Code movem-se dentro do descrito, nada se estende por iniciativa própria (`PAPEIS_E_RESPONSABILIDADES`).
+
 ## Mapa de acoplamento da app
 
 Antes de tocar em qualquer conceito da app (`match_method`, `origin`,
