@@ -2,15 +2,27 @@
 
 ## ★ Fila de arranque da pt71 (fecho pt70)
 
-1. **Verificação pós-deploy (Rui):** após o push pt70 deployar, regenerar `WN-…1780604663`
-   (a mão dos 13.73 BB) contra o backend deployado e confirmar a olho `SIZES_OPEN_SB=[2.5,
-   ALLIN]` (FLUXO §10). LEI §18 validada read-only + suite 935; falta só a confirmação
-   deployada.
-2. **Instalar `watcher-pt70` no Beelink** (`irm` do `instala_pt70.bat`, exe `315CC2B5…D50C`)
-   + smoke dirigida do `#OPEN-WIZARD-CHORD-FALLBACK-BLIND` (critério: **mão 2 abre o wizard**,
-   sem `Wizard assumed`/`hwnd_wizard=None`; bónus: a escada a actuar se um chord falhar).
-3. Backlog pt67: `#HRC-NODE-OFFSET-IMPLICIT-LINES`, `#HRC-2ND-RUN-CI-TIME`, 413 definitivo,
-   `#MYSTERY-KO-DUAL-SUPPORT`.
+**Fechado em pt70 (não repetir):** LEI §18 deployada LIVE (`7e7a68e`, SUCCESS) + `WN-…663`
+→ `SIZES_OPEN_SB=[2.5, ALLIN]` confirmado a olho; `watcher-pt70` (exe `315CC2B5…D50C`)
+**instalado no Beelink + smoke dirigida PASSOU** (escada validada no rung 2 na
+`GG-6041753261`, transições limpas no rung 0, zero deadlock).
+
+Genuinamente para a pt71:
+1. **1º lote real disparado no gate** (`POST /trigger?count=N`) com o exe pt70 a correr.
+2. **`#HRC-NODE-OFFSET-IMPLICIT-LINES`** — modelar o ALLIN implícito (regra 25 BB confirmada).
+3. **Política CI/tempo da 2ª run** (`#HRC-2ND-RUN-CI-TIME-DISCREPANCY`).
+4. **Mistério do chord SWT** (observação) — porque é que o chord `Ctrl+W,M` falha pós-fecho
+   de aba mas nunca em cold start (o pt70 contorna com a escada; a causa-raiz fica por
+   caracterizar — binding contextual SWT?).
+5. **`#SECOND-RUN-NOOP-SILENT-DONE`** — 2ª run que degrada para no-op sem sinalizar.
+6. **Max=2 da WN por auditar.**
+7. **Etapa 2 do re-teste** (sessões dos dias 5 + 8 + 9).
+8. **★ Futura encomenda — "Mestre único" de import (sem código nesta fase):** um
+   duplo-clique = HM3 + appimport ao-vivo (com confirmação) + Discord sync + rematch +
+   abrir a Saúde do Import. O **Intuitive Tables passa a gravar direto em `Batmen\it`** por
+   definição própria (config da app, sem código). Ver `REGISTO_CONCEITO` (linha pt70).
+
+Backlog: 413 definitivo (interino 200 MB), `#MYSTERY-KO-DUAL-SUPPORT`.
 
 ---
 
