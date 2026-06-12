@@ -6,6 +6,13 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt70 (11 Jun 2026 — fix #OPEN-WIZARD-CHORD-FALLBACK-BLIND + Release watcher-pt70)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#OPEN-WIZARD-CHORD-FALLBACK-BLIND` | 🔴 HIGH | ✅ **FIX em buffer** (validado Web; exe `315CC2B5…D50C` na Release `watcher-pt70`; smoke real Beelink pendente). O `open_wizard()` OG (`_local_only/.../hrc_watcher.py:128-163`), ao fim de **2 chords `Ctrl+W,M` falhados**, DESISTE e devolve um `WizardPos` **fabricado** (`Wizard assumed at ...`) **sem confirmar** que o wizard abriu → o pipeline opera contra a janela principal `HRC Pro` (cola/navega no vazio, export cancela, zip nunca nasce) → **deadlock `Activas`**. Provado na smoke pt69 (log `hrc_watcher_20260611_164520`): mão 1 OK; mão 2 (logo após o fecho de aba) `Wizard assumed`, foreground `HRC Pro` a mão toda, `hwnd_wizard=None`, Nash popup nunca visto. O comando do chord **não disparou** (janela `Hand Setup` nunca enumerada em 2 retries × 4s — **refuta** "wizard atrás" e "timing de detecção"). O `_restore_hrc_main_focus` (pt69) repôs o foreground mas **não** o contexto do chord multi-stroke SWT pós-fecho-de-aba — **necessário, não suficiente**. **Fix:** wrapper `_open_wizard_confirmed(hh_text)` (APPEND) — confirma via janela `Hand Setup` **real** (`_scan_handsetup_window`), descarta sempre o `WizardPos` fabricado, e escada `rung 0 confirma → rung 1 Esc+repor-foco+re-chord → rung 2 _restart_hrc+_wait_hrc_responsive+re-armar clipboard(HH)+zerar contador → rung 3 None (bail limpo)`. Cold start = único estado 100% fiável (prova: mão 1). `setup_hand` chama o wrapper; `open_wizard` OG intocado (sem novo SWAP). swap_and_smoke ALL OK (51 funcs). Mitiga (mas **não** fecha) o `#OG-MAIN-LOOP-NO-WATCHDOG` (pt69) — pior caso vira atraso ~30s em vez de deadlock. |
+| `#QUEUE-BETTING-SCRIPT-BUG` | 🟡 MED | **Aberto** (registado pt70; fix mais tarde — **não bloqueia o smoke pt70**). O `script.js` gerado para a mão **`GG-6041006979`** (auditoria visual do Rui) tem um bug no betting script. **A inspecionar quando chegar a vez:** o pack da mão (`queue`/`done` do Beelink) + o builder no backend (`backend/app/services/hrc_script_gen.py` + template `backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js`). O Rui descreve o **sintoma concreto** na altura do fix. |
+
 ## pt69 (11 Jun 2026 — frontend multi-select HRC + diagnóstico da deadlock "Activas")
 
 | ID | Sev | Resumo |

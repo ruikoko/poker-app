@@ -2097,12 +2097,64 @@ def _click_dont_save_dialog(timeout_s=6):
     return False
 
 
+def _restore_hrc_main_focus(timeout_dialog_s=3.0):
+    """pt69 (#HRC-CLOSE-TAB-BREAKS-CHORD-FOCUS): repõe a PRÉ-CONDIÇÃO que o
+    `open_wizard()` OG assume antes de disparar o chord Ctrl+W,M — a janela
+    PRINCIPAL do HRC com foreground+foco e SEM modal residual por cima.
+
+    Causa-raiz (mão 1 OK → mão 2 hwnd_wizard=None): o `_close_hand_tab` fecha
+    a tab e dispensa o "Save Resource" via BM_CLICK (mensagem, NÃO um click que
+    foca). Sem repor o foco, o foreground fica indeterminado / pode sobrar o
+    modal → o `pyautogui.click(centro)` + chord do open_wizard da mão seguinte
+    é bloqueado/desviado → o wizard nunca abre → o main loop ('active'/Activas)
+    fica preso (HRC vivo idle). `open_wizard` faz exactamente este center-click
+    como 1ª acção (hrc_watcher.py:134) — espelhamo-lo aqui para garantir o
+    estado limpo já no fecho.
+
+    1) Confirma que o diálogo "Save Resource" desapareceu (poll); se ficar, WARN.
+    2) Activa a janela principal + click no CENTRO (mesmo gesto do open_wizard)
+       + settle, para o chord da próxima mão acertar no editor focado.
+    """
+    # 1) Esperar o modal "Save Resource" sumir de vez.
+    t0 = time.time()
+    while time.time() - t0 < timeout_dialog_s:
+        if _find_top_by_substr('save resource', "save '", 'save ‘') is None:
+            break
+        time.sleep(0.3)
+    else:
+        print('   [WARN] [tab] "Save Resource" ainda presente após %.0fs — o '
+              'foco da próxima mão pode falhar (open_wizard chord).'
+              % timeout_dialog_s)
+    # 2) Repor foreground+foco na janela principal (espelho do open_wizard).
+    try:
+        hrc = find_hrc()
+        if not hrc:
+            return
+        try:
+            hrc.activate()
+        except Exception:
+            pass
+        time.sleep(0.3)
+        cx = hrc.left + hrc.width // 2
+        cy = hrc.top + hrc.height // 2
+        pyautogui.click(cx, cy)
+        time.sleep(0.6)
+        print('   [tab] foco reposto na janela principal do HRC '
+              '(pré-condição do chord da próxima mão).')
+    except Exception as e:
+        print('   [WARN] _restore_hrc_main_focus: %s' % e)
+
+
 def _close_hand_tab():
     """change 1 (#HRC-WATCHER-TAB-ACCUMULATION, fix de raiz): fecha a tab da mão
     após o export (anti-acumulação). **Ctrl+F4** (o Ctrl+W no HRC é chord de
     nova-mão — NUNCA usar) → diálogo SWT "Save Resource" → **Don't Save**.
     Guard: se o HRC desaparecer, avisa LOUD (o ensure_hrc da mão seguinte
-    relança). O reinício a cada N limita a acumulação mesmo que isto falhe."""
+    relança). O reinício a cada N limita a acumulação mesmo que isto falhe.
+
+    pt69: termina sempre por repor o foco na janela principal
+    (`_restore_hrc_main_focus`) — o `open_wizard` OG depende desse estado para
+    o chord Ctrl+W,M da mão seguinte (ver #HRC-CLOSE-TAB-BREAKS-CHORD-FOCUS)."""
     if not _CLOSE_TAB_AFTER_EXPORT:
         return
     try:
@@ -2121,14 +2173,112 @@ def _close_hand_tab():
         if find_hrc() is None:
             print('   [WARN] [tab] o HRC desapareceu após Ctrl+F4! '
                   'ensure_hrc relança na próxima mão.')
+            return
         elif clicked:
             print('   [tab] tab da mão fechada (Ctrl+F4 + Don\'t Save).')
         else:
             print('   [WARN] [tab] diálogo Save Resource não tratado — a tab pode '
                   'ter ficado aberta (o reinício a cada %d limita a acumulação).'
                   % _RESTART_EVERY_N_HANDS)
+        # pt69 — repor a pré-condição de foco do open_wizard (chord da próxima mão).
+        _restore_hrc_main_focus()
     except Exception as e:
         print('   [WARN] _close_hand_tab: %s' % e)
+
+
+def _scan_handsetup_window(poll_s=6.0, interval=0.5):
+    """pt70 (#OPEN-WIZARD-CHORD-FALLBACK-BLIND): devolve o OBJECTO da janela
+    top-level cujo titulo contem 'Hand Setup' (o sinal autoritario que o
+    open_wizard OG usa para confirmar o wizard), ou None apos `poll_s`.
+
+    Gemeo do `_wizard_window_present` (pt29) mas devolve a janela em vez de bool
+    — para o `_open_wizard_confirmed` obter o wpos da janela REAL, nunca o
+    WizardPos FABRICADO pelo fallback cego do open_wizard. Foi exactamente este
+    sinal que discriminou a smoke pt69 (mao 1 enumerou 'Hand Setup'; mao 2
+    nunca, em 2 retries) — logo e a base correcta da confirmacao.
+    """
+    t0 = time.time()
+    while time.time() - t0 < poll_s:
+        try:
+            windows = pyautogui.getAllWindows()
+        except Exception as _e:
+            windows = None
+        if windows:
+            for w in windows:
+                if 'Hand Setup' in (getattr(w, 'title', '') or ''):
+                    return w
+        time.sleep(interval)
+    return None
+
+
+def _open_wizard_confirmed(hh_text):
+    """pt70 (#OPEN-WIZARD-CHORD-FALLBACK-BLIND): wrapper autoritario sobre o
+    `open_wizard` OG. O OG, ao fim de 2 chords Ctrl+W,M falhados, DESISTE e
+    devolve um WizardPos FABRICADO ('Wizard assumed at ...') sem confirmar que o
+    wizard abriu — o pipeline a jusante opera entao contra a janela principal
+    'HRC Pro' (cola/navega no vazio, export cancela, zip nunca nasce, deadlock
+    no loop Activas). Provado na smoke pt69: mao 1 OK; mao 2 (logo apos o fecho
+    de aba) `Wizard assumed`, foreground 'HRC Pro' a mao toda, hwnd_wizard=None.
+
+    Causa provada pelo log: o comando do chord NAO disparou na mao 2 — a janela
+    'Hand Setup' nunca foi enumerada em 2 retries x 4s (refuta 'wizard atras' e
+    'timing de deteccao'; em mao 1 os mesmos sleeps funcionaram). O diferenciador
+    vs cold start e o estado de foco/contexto do chord multi-stroke SWT
+    pos-fecho-de-aba; o `_restore_hrc_main_focus` (pt69) repos o foreground mas
+    nao o contexto do chord — necessario, nao suficiente.
+
+    Escada (cold start = unico estado 100% fiavel; prova empirica: mao 1 e todo
+    cold start sempre abriu):
+      rung 0: open_wizard (gesto OG) + confirma via janela 'Hand Setup' REAL.
+      rung 1: Esc (limpa chord meio-entrado / modal residual) + repor foco
+              (`_restore_hrc_main_focus`) + novo open_wizard.
+      rung 2: `_restart_hrc` + `_wait_hrc_responsive` + re-armar clipboard com a
+              HH (auto-import do HRC no cold start) + zerar o contador de higiene
+              + novo open_wizard no HRC fresco.
+      rung 3: nem o cold start abriu -> None. `setup_hand` ja trata (guard
+              `if not win`): bail LIMPO, sem deadlock; o adapter marca `.failed`.
+
+    O WizardPos fabricado do OG e SEMPRE descartado — confiamos so na janela
+    real devolvida pelo `_scan_handsetup_window`. `hh_text` e parametro (e local
+    do `setup_hand`) porque o rung 2 re-arma o clipboard para o auto-import.
+    """
+    for attempt in range(3):
+        try:
+            open_wizard()  # gesto best-effort; retorno (incl. WizardPos fabricado) ignorado
+        except Exception as _e:
+            print('   [WARN] _open_wizard_confirmed: open_wizard levantou %s' % _e)
+        win = _scan_handsetup_window()
+        if win is not None:
+            try:
+                win.activate()
+            except Exception:
+                pass
+            if attempt > 0:
+                print('   [wizard] wizard confirmado no rung %d.' % attempt)
+            return win
+        if attempt == 0:
+            print('   [WARN] [wizard] chord falhou (janela "Hand Setup" nao '
+                  'confirmada) — Esc + repor foco + re-chord.')
+            try:
+                pyautogui.press('escape')
+            except Exception:
+                pass
+            time.sleep(0.4)
+            _restore_hrc_main_focus()
+            continue
+        if attempt == 1:
+            print('   [WARN] [wizard] chord falhou 2x — a reiniciar o HRC '
+                  '(cold start e o unico estado 100%% fiavel).')
+            _restart_hrc()
+            _wait_hrc_responsive()
+            globals()['_HANDS_DONE_SINCE_RESTART'] = 0
+            try:
+                _set_clipboard_with_verify(hh_text)
+            except Exception as _e:
+                print('   [WARN] _open_wizard_confirmed re-armar clipboard: %s' % _e)
+            continue
+    print('   [ERRO] [wizard] nem o cold start abriu o wizard — bail limpo da mao.')
+    return None
 
 
 def setup_hand(hand_name, hand_path):
@@ -2247,7 +2397,12 @@ def setup_hand(hand_name, hand_path):
     _set_clipboard_with_verify(hh_text)
 
     print('   A abrir wizard...')
-    win = open_wizard()
+    # pt70 (#OPEN-WIZARD-CHORD-FALLBACK-BLIND): confirmacao autoritaria via
+    # janela 'Hand Setup' real + escada re-chord -> restart -> bail. O OG
+    # devolvia um WizardPos fabricado ('Wizard assumed') quando o chord falhava
+    # pos-fecho-de-aba -> deadlock. hh_text passa para o rung 2 re-armar o
+    # clipboard apos restart.
+    win = _open_wizard_confirmed(hh_text)
     if not win:
         print('   ERRO: Wizard não encontrado!')
         return False

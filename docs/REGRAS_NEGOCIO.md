@@ -623,3 +623,63 @@ entrada porque o HRC acrescenta uma **linha ALLIN implícita** que não está no
 Com a regra agora **confirmada**, o gate do `#IMPLICIT-LINES` está **aberto deste lado**:
 o fix robusto é `count_lines = (nº de sizings não-allin) + 1 ALLIN implícito` (ou ler o
 `script.js` renderizado). Cross-ref `HRC_ANATOMIA §14` + `REGISTO_CONCEITO.md`.
+
+## §18. Sizing de opens das blinds + 3-bet da BB + raise sobre opens all-in — LEI do Rui (pt70, 11 Jun 2026)
+
+**Ditada pelo Rui em pt70. Fonte de verdade a partir de agora.** Estende o **§17**
+(que se mantém intocado: `eff ≤ 8 → [ALLIN]`; `8 < eff ≤ 25 → [size, ALLIN]`;
+`eff > 25 → [size]`; ordem **sempre `[size, ALLIN]`**). Vive no gerador
+`backend/app/services/hrc_script_gen.py`. Origem: busca inversa pt70 (2 bugs reais —
+"ponto 5" + fórmula 3-bet sobre all-in).
+
+### 18.1 Tabela de open das BLINDS (SB; BB sobre limpers = mesma tabela)
+
+A alternativa **não-jam** do open de uma blind (o `non_all_in_default`, usado quando o
+open foi all-in; nos opens não-all-in o §17 mantém o **size real** como 1ª opção) é, por
+`eff` (fronteiras contínuas):
+
+| eff (BB) | size do open |
+|---|---|
+| `eff ≤ 8` | `[ALLIN]` apenas (§17 intocada) |
+| `8 < eff < 20` | **2.5×** |
+| `20 ≤ eff < 31` | **3×** |
+| `31 ≤ eff ≤ 100` | **3.5×** |
+| `eff > 100` | **4×** |
+
+`eff ≤ 25` acrescenta `ALLIN` ao lado do size → `[size, ALLIN]`. Helper
+`_blind_open_size_by_eff`. **Fecha o bug "ponto 5"**: antes, um SB-shove com `8 < eff ≤ 25`
+saía `["ALLIN"]` **sem size** (`_compute_default_for_open` devolvia `None` para SB/BB) —
+ex. real `WN-…1780604663` (SB shove 13.73 BB) passou de `["ALLIN"]` para `[2.5, ALLIN]`.
+**Assunção #1 (Web, vetável):** o **BB a abrir sobre limpers** usa a **mesma** tabela da SB.
+HU `BU/SB` mantém o caminho não-blind (2 BB).
+
+### 18.2 Tabela de 3-bet da BB vs open (multiplicador × o open)
+
+A alternativa não-jam do **3-bet da BB** (só materializa quando o 3-bet da BB foi all-in;
+nos não-all-in o §17 mantém o size real) é `mult × opener_to_bb`, por tamanho do open:
+
+| open | mult do 3-bet |
+|---|---|
+| ~2.5× | **2.1×** |
+| ~3× | **2.5×** |
+| ~3.5× | **2.7×** |
+| ~4×+ | **3.3×** |
+
+Bandas de `ALLIN` acompanham a `eff` do 3-bettor (`≤ 25 → [size, ALLIN]`). Helper
+`_bb_3bet_default_vs_open`.
+
+### 18.3 Raise (3-bet) sobre um open ALL-IN — opção B1
+
+O nó de 3-bet **sobre um open all-in EXISTE** (a ação reabre com raise completo). A `eff` do
+3-bettor calcula-se **vs os vivos NÃO-all-in** (exclui o opener já all-in do `min` — não há
+mais fichas a jogar contra ele); helper `_eff_3bettor_vs_live_nonallin`. Regra (B1):
+
+- **3-bettor `eff ≤ 25`** → `["ALLIN"]` (jam-or-call sobre o shove).
+- **3-bettor `eff > 25`** → iso-raise com size = **`2.5 × o tamanho do all-in`** ⚠️ (o
+  multiplicador `2.5` foi **proposto** em pt70 — a LEI B1 não fixou o número; `confirmar`).
+
+**Defeito que isto corrige** (`#QUEUE-BETTING-SCRIPT-BUG`, mão `GG-6041006979` + 10 outras):
+a fórmula antiga fazia `2.3 × o shove` com a `eff` colapsada a ~0 (sempre bucket baixo) —
+ex. `SIZES_3BET_*=[16.05, ALLIN]` sobre um shove de 6.98 BB. **O defeito não era a existência
+dos arrays — era a fórmula do size.** Aplica-se a CASO B (candidatos IP) e CASO A (3-bettor
+real). Cross-ref `§17`, `HRC_ANATOMIA §3.4`, `REGISTO_CONCEITO.md`.

@@ -66,6 +66,54 @@ _NON_ALL_IN_DEFAULT_3BET_MULT_HIGH = 3.0   # eff >= 35
 _NON_ALL_IN_DEFAULT_3BET_MULT_MID = 2.7    # 26 <= eff < 35
 _NON_ALL_IN_DEFAULT_3BET_MULT_LOW = 2.3    # eff < 26 (inclui 0-25)
 
+# ── pt70 — LEI do Rui (REGRAS_NEGOCIO §18) ───────────────────────────────
+# Tabela de open das BLINDS (SB; BB sobre limpers usa a mesma — assunção Web).
+# Size do open em BB por eff (fronteiras contínuas). Aplica-se como
+# `non_all_in_default` do open (i.e. a alternativa não-jam quando o open foi
+# all-in); §17 mantém-se intocada (1ª opção = size real nos opens não-all-in).
+# eff <= 8 → None → fica `["ALLIN"]` (§17).
+
+
+def _blind_open_size_by_eff(eff: Optional[float]) -> Optional[float]:
+    """pt70: size do open da blind em BB por eff. None se eff None ou <= 8."""
+    if eff is None or eff <= _NON_ALL_IN_OPEN_MIN_EFF_BB:
+        return None
+    if eff < 20.0:
+        return 2.5          # 8 < eff < 20
+    if eff < 31.0:
+        return 3.0          # 20 <= eff < 31
+    if eff <= 100.0:
+        return 3.5          # 31 <= eff <= 100
+    return 4.0              # eff > 100
+
+
+# Tabela de 3-bet da BB vs open (multiplicador × o open). Banda por open size.
+def _bb_3bet_default_vs_open(action: dict) -> Optional[float]:
+    """pt70: default não-jam do 3-bet da BB = mult(open size) × opener_to_bb.
+
+    vs open ~2.5x → 2.1× · ~3x → 2.5× · ~3.5x → 2.7× · ~4x+ → 3.3×.
+    None se faltar `opener_to_bb`. Só materializa quando o 3-bet da BB foi
+    all-in (alternativa não-jam); §17 mantém o size real nos não-all-in.
+    """
+    opener_to_bb = action.get("opener_to_bb")
+    if opener_to_bb is None:
+        return None
+    if opener_to_bb < 2.75:
+        mult = 2.1
+    elif opener_to_bb < 3.25:
+        mult = 2.5
+    elif opener_to_bb < 3.75:
+        mult = 2.7
+    else:
+        mult = 3.3
+    return round(opener_to_bb * mult, 2)
+
+
+# Iso-raise sobre open ALL-IN (B1), quando a eff do 3-bettor > 25: multiplicador
+# × o tamanho do all-in. ⚠️ PROPOSTO — a LEI B1 não fixou o número (confirmar
+# com o Rui). eff do 3-bettor <= 25 → `["ALLIN"]` (jam-or-call sobre o shove).
+_ISO_RAISE_OVER_ALLIN_MULT = 2.5
+
 
 # ── Regex parsing ───────────────────────────────────────────────────────
 
@@ -514,15 +562,17 @@ def _bucket_4bet5bet(action: dict, n_seated: int) -> Optional[str]:
 # ── Defaults non-all-in (pt42 — só usado quando original foi ALLIN) ────
 
 def _compute_default_for_open(action: dict) -> Optional[float]:
-    """Non-all-in default do open: 2 BB, só se efectiva > 8 BB e posição
-    ≠ SB ≠ BB. None caso contrário (array fica `["ALLIN"]` só).
+    """Non-all-in default do open (alternativa não-jam quando o open foi all-in).
 
-    HU: posição é "BU/SB" — não cai em ("SB","BB"), logo o 2 BB aplica-se.
+    pt70 (LEI do Rui §18): blinds **SB/BB** usam a tabela de open por eff
+    (`_blind_open_size_by_eff`: 2.5/3/3.5/4 BB) em vez de None — fecha o bug
+    "ponto 5" (SB-shove 8<eff≤25 saía `["ALLIN"]` sem size). HU "BU/SB" mantém
+    o caminho não-blind (2 BB). Não-blinds: 2 BB só se eff > 8 BB.
     """
     pos = (action.get("position") or "").upper()
-    if pos in ("SB", "BB"):
-        return None
     eff = action.get("effective_stack_at_action_bb")
+    if pos in ("SB", "BB"):
+        return _blind_open_size_by_eff(eff)
     if eff is None or eff <= _NON_ALL_IN_OPEN_MIN_EFF_BB:
         return None
     return _NON_ALL_IN_DEFAULT_OPEN_BB
@@ -676,6 +726,24 @@ def _eff_spot_specific_bb(
     return round(eff_chips / float(level_bb), 2)
 
 
+def _eff_3bettor_vs_live_nonallin(
+    threebettor_remaining: Optional[float],
+    others_remaining: list,
+    level_bb: int,
+) -> Optional[float]:
+    """pt70 (LEI B1): eff do 3-bettor sobre um open ALL-IN = min(stack do
+    3-bettor, MAIOR stack dos vivos NÃO-all-in) / BB. O opener já all-in é
+    EXCLUÍDO de `others_remaining` pelo caller (não conta para o min — não há
+    mais fichas a jogar contra ele). Sem outros vivos → usa o próprio stack do
+    3-bettor (heads-up vs o all-in). None se input inválido.
+    """
+    if (threebettor_remaining is None or level_bb is None or level_bb <= 0):
+        return None
+    pool = [r for r in others_remaining if r is not None and r > 0]
+    max_other = max(pool) if pool else threebettor_remaining
+    return round(min(threebettor_remaining, max_other) / float(level_bb), 2)
+
+
 def _default_3bet_for_candidate(
     opener_to_bb: Optional[float], eff_bb: Optional[float],
 ) -> Optional[float]:
@@ -744,6 +812,7 @@ def _apply_caso_b_3bet_overrides(
         initial_stacks.get(opener_nick, 0.0)
         - contribs_post_open.get(opener_nick, 0.0)
     )
+    opener_all_in = bool(opener_action.get("is_all_in"))
 
     for candidate_pos in candidates:
         candidate_nick = nick_by_position.get(candidate_pos)
@@ -755,6 +824,29 @@ def _apply_caso_b_3bet_overrides(
         candidate_remaining = (
             candidate_initial - contribs_post_open.get(candidate_nick, 0.0)
         )
+
+        if opener_all_in:
+            # pt70 (LEI B1): 3-bet sobre open ALL-IN. eff do 3-bettor vs os
+            # vivos NÃO-all-in (exclui o opener já all-in). eff ≤ 25 → jam
+            # (`["ALLIN"]`); eff > 25 → iso-raise sized (mult × o all-in).
+            others = [
+                initial_stacks.get(s.get("nick"), 0.0)
+                - contribs_post_open.get(s.get("nick"), 0.0)
+                for s in seats
+                if s.get("nick") not in (opener_nick, candidate_nick)
+            ]
+            eff3 = _eff_3bettor_vs_live_nonallin(
+                candidate_remaining, others, level_bb,
+            )
+            if eff3 is None:
+                continue
+            if eff3 <= _OPEN_ALLIN_THRESHOLD_BB:
+                overrides[f"SIZES_3BET_{candidate_pos}"] = ["ALLIN"]
+            else:
+                iso = round(_ISO_RAISE_OVER_ALLIN_MULT * opener_to_bb, 2)
+                overrides[f"SIZES_3BET_{candidate_pos}"] = [iso]
+            continue
+
         eff = _eff_spot_specific_bb(
             opener_remaining, candidate_remaining, level_bb,
         )
@@ -799,6 +891,27 @@ def _apply_caso_a_3bet_ip(
         initial_stacks.get(threebettor_nick, 0.0)
         - contribs.get(threebettor_nick, 0.0)
     )
+
+    if opener_action.get("is_all_in"):
+        # pt70 (LEI B1): 3-bet real sobre open ALL-IN. Mesma regra do CASO B —
+        # eff do 3-bettor vs os vivos não-all-in (exclui o opener all-in).
+        others = [
+            initial_stacks.get(s.get("nick"), 0.0)
+            - contribs.get(s.get("nick"), 0.0)
+            for s in seats
+            if s.get("nick") not in (opener_nick, threebettor_nick)
+        ]
+        eff3 = _eff_3bettor_vs_live_nonallin(
+            threebettor_remaining, others, level_bb,
+        )
+        if eff3 is not None and eff3 <= _OPEN_ALLIN_THRESHOLD_BB:
+            return ["ALLIN"]
+        iso = round(
+            _ISO_RAISE_OVER_ALLIN_MULT
+            * (opener_action.get("to_amount_bb") or 0.0), 2,
+        )
+        return [iso] if iso > 0 else ["ALLIN"]
+
     eff_spot = _eff_spot_specific_bb(
         opener_remaining, threebettor_remaining, level_bb,
     )
@@ -832,8 +945,9 @@ def _array_for_raise(
     to_bb = action.get("to_amount_bb")
 
     if is_all_in:
+        # pt70 (LEI do Rui §18): ordem SEMPRE [size, ALLIN] (era ["ALLIN", size]).
         if non_all_in_default is not None:
-            return ["ALLIN", non_all_in_default]
+            return [non_all_in_default, "ALLIN"]
         return ["ALLIN"]
 
     # Original NÃO é ALLIN — 1ª opção é o sizing real.
@@ -938,9 +1052,13 @@ def build_sizings_overrides(
                 "SIZES_3BET_BB_VS_SB", "SIZES_3BET_BB_VS_OTHER",
                 "SIZES_3BET_IP",  # fallback defensivo (posição não esperada)
             ):
-                # SB/BB ou fallback IP genérico — lógica pt42 actual.
+                # SB ou fallback IP — lógica pt42 actual; BB — tabela pt70
+                # (mult × open) como default não-jam (só materializa em all-in).
                 if var not in overrides:
-                    default = _compute_default_for_classic_3bet(a)
+                    if var.startswith("SIZES_3BET_BB_"):
+                        default = _bb_3bet_default_vs_open(a)
+                    else:
+                        default = _compute_default_for_classic_3bet(a)
                     overrides[var] = _array_for_raise(a, default)
             else:
                 # pt42b — IP por posição (CASO A: sobrescreve CASO B sempre).
@@ -1003,9 +1121,10 @@ def _array_for_4bet5bet_in_pot_fraction(
         return round(inc / pot_after_call, 2)
 
     if is_all_in:
+        # pt70 (LEI do Rui §18): ordem SEMPRE [size, ALLIN].
         default_pot_fr = _bb_to_pot_fraction(non_all_in_default_bb)
         if default_pot_fr is not None:
-            return ["ALLIN", default_pot_fr]
+            return [default_pot_fr, "ALLIN"]
         return ["ALLIN"]
 
     if eff is not None and eff <= _OPEN_ALLIN_THRESHOLD_BB:

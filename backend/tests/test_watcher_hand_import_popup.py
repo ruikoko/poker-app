@@ -320,6 +320,10 @@ def _stub_setup_hand_globals(pf, tmp_root_str):
     Reutilizado nos 2 tests pt28-v3 abaixo."""
     pf.ensure_hrc = MagicMock(return_value=True)
     pf.open_wizard = MagicMock(return_value="mock_win")
+    # pt70 (#OPEN-WIZARD-CHORD-FALLBACK-BLIND): setup_hand chama agora o wrapper
+    # _open_wizard_confirmed, que confirma via _scan_handsetup_window. Mock o
+    # scan p/ devolver janela (senao a escada chega ao _restart_hrc → taskkill).
+    pf._scan_handsetup_window = MagicMock(return_value="mock_win")
     pf.get_win_pos = MagicMock(return_value=(0, 0, 800, 600))
     pf.paste_hh = MagicMock()
     pf.set_hand_mode_players = MagicMock()

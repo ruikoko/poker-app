@@ -1,5 +1,19 @@
 # Pendentes — backlog vivo
 
+## ★ Fila de arranque da pt71 (fecho pt70)
+
+1. **Verificação pós-deploy (Rui):** após o push pt70 deployar, regenerar `WN-…1780604663`
+   (a mão dos 13.73 BB) contra o backend deployado e confirmar a olho `SIZES_OPEN_SB=[2.5,
+   ALLIN]` (FLUXO §10). LEI §18 validada read-only + suite 935; falta só a confirmação
+   deployada.
+2. **Instalar `watcher-pt70` no Beelink** (`irm` do `instala_pt70.bat`, exe `315CC2B5…D50C`)
+   + smoke dirigida do `#OPEN-WIZARD-CHORD-FALLBACK-BLIND` (critério: **mão 2 abre o wizard**,
+   sem `Wizard assumed`/`hwnd_wizard=None`; bónus: a escada a actuar se um chord falhar).
+3. Backlog pt67: `#HRC-NODE-OFFSET-IMPLICIT-LINES`, `#HRC-2ND-RUN-CI-TIME`, 413 definitivo,
+   `#MYSTERY-KO-DUAL-SUPPORT`.
+
+---
+
 **Última actualização:** 11 Junho 2026 (**pt68 FECHADO**). Wipe total + Etapa 1 (sessão dia 4, 6 canos validados, ~5044 mãos, 123/127 órfãos); 502 do `/api/import` = timeout síncrono com import COMPLETO (4710 mãos 4-9 Jun verificadas); incidente do watcher (degradação progressiva por acumulação de abas, confirmada na fonte; 3 done VERDES na mini-auditoria); **★ Saúde do Import v1** (`/import-health`); **★ Gate da fila v1** (fila fechada + disparo manual/lote); **★ exe watcher pt68** (3 fixes: fechar aba Ctrl+F4+Don't Save, reiniciar/5+health-check, log-em-ficheiro) — **Release publicada+validada, instalação no Beelink PENDENTE**; **★ multi-select "Enviar ao HRC" backend LIVE** (frontend = 1º da próxima). Journal: `docs/JOURNAL_2026-06-11-pt68.md`. Antes: pt67 (pipeline certificado).
 **Propósito:** lista priorizada do que atacar a seguir. Distinta do
 `TECH_DEBTS_INVENTARIO.md` (que é o registo histórico exaustivo, com
