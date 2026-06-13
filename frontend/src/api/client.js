@@ -331,6 +331,14 @@ export const study = {
   week:  ()              => req('GET',  '/study/week'),
 }
 
+// ── Marcadas por captura (triagem de SS de mesa desanonimizadas) ────────────
+export const captureTriage = {
+  list:  ()              => req('GET',  '/capture-triage'),
+  count: ()              => req('GET',  '/capture-triage/count'),
+  tag:   (handId, tag)   => req('POST', `/capture-triage/${handId}/tag`, { tag }),
+  imageUrl: (id)         => `${BASE}/table-ss/image/${id}`,
+}
+
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
 export const hrc = {
   upload: (file, opts = {}) => {

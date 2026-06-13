@@ -13,6 +13,7 @@ const NAV = [
   { to: '/lobbys',      label: 'Lobbys' },
   { to: '/hm3',         label: 'HM3' },
   { to: '/table-ss',    label: 'SS Mesa' },
+  { to: '/marcadas-por-captura', label: 'Marcadas/captura' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
   { to: '/hrc',         label: 'HRC' },

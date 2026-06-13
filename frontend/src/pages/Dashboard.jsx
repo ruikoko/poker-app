@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { hands, study, screenshots, villains } from '../api/client'
+import { hands, study, screenshots, captureTriage } from '../api/client'
 import { SITE_COLORS } from '../lib/siteColors'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -133,17 +133,30 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const [stats, setStats] = useState(null)
   const [studyWeek, setStudyWeek] = useState(null)
-  const [recentVillains, setRecentVillains] = useState([])
+  const [captureMarks, setCaptureMarks] = useState([])
   const [error, setError] = useState('')
 
   function reloadStats() {
     hands.stats().then(setStats).catch(e => setError(e.message))
   }
 
+  function loadCaptureMarks() {
+    captureTriage.list().then(d => setCaptureMarks(d.hands || [])).catch(() => {})
+  }
+
+  async function applyCaptureTag(handId, tag) {
+    try {
+      await captureTriage.tag(handId, tag)
+      setCaptureMarks(ms => ms.filter(m => m.hand_id !== handId))
+    } catch (e) {
+      setError(e.message || String(e))
+    }
+  }
+
   useEffect(() => {
     reloadStats()
     study.week().then(setStudyWeek).catch(() => {})
-    villains.list({ page_size: 5, sort: 'updated_desc' }).then(d => setRecentVillains(d.data || [])).catch(() => {})
+    loadCaptureMarks()
   }, [])
 
   const recent = stats?.recent || []
@@ -426,13 +439,13 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* ── Vilões recentes ── */}
-      {recentVillains.length > 0 && (
+      {/* ── Marcadas por captura (compacto — no lugar dos Vilões recentes) ── */}
+      {captureMarks.length > 0 && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginTop: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Vilões recentes</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Marcadas por captura · {captureMarks.length}</span>
             <button
-              onClick={() => navigate('/villains')}
+              onClick={() => navigate('/marcadas-por-captura')}
               style={{
                 fontSize: 12, padding: '4px 12px', borderRadius: 4,
                 background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)',
@@ -440,34 +453,34 @@ export default function DashboardPage() {
               }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
               onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
-            >Ver todos →</button>
+            >Ver todas →</button>
           </div>
-          {recentVillains.map((v, idx) => (
+          {captureMarks.slice(0, 5).map((m, idx) => (
             <div
-              key={v.id}
-              onClick={() => navigate(`/villains?nick=${encodeURIComponent(v.nick)}`)}
+              key={m.hand_id}
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
                 padding: '10px 16px',
-                borderBottom: idx < recentVillains.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
-                cursor: 'pointer', transition: 'background 0.1s',
+                borderBottom: idx < Math.min(captureMarks.length, 5) - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', padding: '2px 8px', borderRadius: 4 }}>{v.nick}</span>
-                {v.site && <SiteBadge site={v.site} />}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {m.tournament_name || m.hand_id}
+                  {m.deanon_partial && <span title="Mapeamento parcial" style={{ marginLeft: 6, fontSize: 9, color: '#f59e0b' }}>parcial</span>}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{(m.players || []).slice(0, 4).join(' · ')}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11 }}>
-                <span style={{ color: 'var(--muted)' }}>{v.hands_seen} mãos</span>
-                {v.tags?.length > 0 && (
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    {v.tags.slice(0, 2).map((t, i) => (
-                      <span key={i} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontWeight: 500 }}>{t}</span>
-                    ))}
-                  </div>
-                )}
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                {[['icm-pko', '#6366f1'], ['pos-pko', '#0ea5e9'], ['icm', '#22c55e'], ['nota', '#f59e0b'], ['__discard__', '#ef4444']].map(([tg, col]) => (
+                  <button key={tg}
+                    onClick={() => applyCaptureTag(m.hand_id, tg)}
+                    style={{ padding: '3px 8px', fontSize: 10, fontWeight: 600, borderRadius: 4,
+                      background: tg === '__discard__' ? 'transparent' : `${col}1a`,
+                      border: `1px solid ${col}55`, color: col, cursor: 'pointer' }}>
+                    {tg === '__discard__' ? '✕' : tg}
+                  </button>
+                ))}
               </div>
             </div>
           ))}
