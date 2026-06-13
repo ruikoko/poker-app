@@ -60,11 +60,24 @@ _TABLE_PROMPT = (
     '  "average_stack_bb": <float average stack in BIG BLINDS> | null,\n'
     '  "hero_stack_bb": <float hero stack in BIG BLINDS> | null,\n'
     '  "hero_position": "UTG" | "UTG1" | "MP" | "HJ" | "CO" | "BTN" | "SB" | "BB" | null,\n'
-    '  "hero_nick": "<hero screen name>" | null\n'
+    '  "hero_nick": "<hero screen name>" | null,\n'
+    '  "seats": [ {"nick": "<exact screen name under the avatar>", '
+    '"stack_bb": <float stack in BIG BLINDS> | "ALLIN" | null, '
+    '"bounty_usd": <float $ value in the gold badge above the avatar> | null, '
+    '"is_hero": <true for the bottom-center hero seat, else false>} ]\n'
     "}\n\n"
     "RULES:\n"
     "- HERO is the seat at the BOTTOM-CENTER of the table whose hole cards are "
     "face-up/visible. hero_nick is that seat's screen name.\n"
+    "- seats: return EVERY seated player at the table (one object per occupied "
+    "seat, including the hero). nick = the exact screen name shown under that "
+    "seat's avatar (preserve case and punctuation). stack_bb = that seat's stack "
+    "in BIG BLINDS (convert from chips by dividing by big_blind if shown in "
+    "chips; use the literal 'ALLIN' string if the seat shows All-In; null if "
+    "unreadable). bounty_usd = the $ value in the GOLD badge above the avatar "
+    "(the KO/PKO bounty), null if none. is_hero = true only for the bottom-center "
+    "hero seat. Do NOT include empty seats. Read each nick carefully — they feed "
+    "an exact name match.\n"
     "- hero_position is the HERO seat relative to the dealer BUTTON (the 'D' "
     "chip). The seat with the button = BTN; the next clockwise = SB, then BB, "
     "then UTG, etc. Read carefully which seat the button is on.\n"
@@ -156,6 +169,36 @@ def _coerce_pos_int(value: Any) -> Optional[int]:
         n = int(value.strip())
         return n if n > 0 else None
     return None
+
+
+def _coerce_stack_bb(value: Any) -> Any:
+    """Stack do banco: float > 0, a sentinela 'ALLIN' (string), ou None."""
+    if isinstance(value, str) and value.strip().upper() in ("ALLIN", "ALL-IN", "ALL IN"):
+        return "ALLIN"
+    f = _coerce_float(value)
+    return f if (f is not None and f > 0) else None
+
+
+def _coerce_seats(value: Any) -> list[dict]:
+    """Valida a lista `seats` da Vision. Cada banco vira
+    {nick:str, stack_bb:float|'ALLIN'|None, bounty_usd:float|None, is_hero:bool}.
+    Descarta entradas sem nick. Lista vazia se ausente/inválida."""
+    if not isinstance(value, list):
+        return []
+    out: list[dict] = []
+    for s in value:
+        if not isinstance(s, dict):
+            continue
+        nick = (s.get("nick") or "").strip()
+        if not nick:
+            continue
+        out.append({
+            "nick": nick,
+            "stack_bb": _coerce_stack_bb(s.get("stack_bb")),
+            "bounty_usd": _coerce_float(s.get("bounty_usd")),
+            "is_hero": bool(s.get("is_hero")),
+        })
+    return out
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -264,6 +307,7 @@ def parse_and_validate_table_ss_json(raw: Optional[str]) -> Optional[dict]:
     data["itm_places"] = _coerce_pos_int(data.get("itm_places"))
     data["average_stack_bb"] = _coerce_float(data.get("average_stack_bb"))
     data["hero_stack_bb"] = _coerce_float(data.get("hero_stack_bb"))
+    data["seats"] = _coerce_seats(data.get("seats"))
     return data
 
 
