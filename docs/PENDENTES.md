@@ -1,6 +1,17 @@
 # Pendentes — backlog vivo
 
-## ★ Fila de arranque da pt71 (fecho pt70)
+## ★ Feito em pt71 (13 Jun) — desanonimização por table-SS
+
+**FECHADO (não repetir):** pipeline de desanonimização por SS de mesa em **6 estágios**
+(deployed) + **votação cross-mão por torneio** (validada por forense: hash-fixo-por-torneio,
+0 violações cross-torneio) + **64 mãos GG renascidas** com nomes reais (confirmação visual
+do Rui) na fila `/marcadas-por-captura` + lightbox + guarda epistémica na Saúde do Import.
+Commits `79677fe`…`9442729`. Detalhe: `JOURNAL_2026-06-13-pt71.md`.
+
+Follow-ups LOW (não-bloqueantes): `#TABLE-SS-DEANON-VILLAIN-NOTES-STALE`,
+`#TABLE-SS-DEANON-SINGLETON-UNVERIFIED`, `#PLAYED-AT-COARSE-GRANULARITY` (TECH_DEBTS pt71).
+
+## ★ Fila de arranque da pt71 (fecho pt70) — HRC (não tocado nesta sessão)
 
 **Fechado em pt70 (não repetir):** LEI §18 deployada LIVE (`7e7a68e`, SUCCESS) + `WN-…663`
 → `SIZES_OPEN_SB=[2.5, ALLIN]` confirmado a olho; `watcher-pt70` (exe `315CC2B5…D50C`)

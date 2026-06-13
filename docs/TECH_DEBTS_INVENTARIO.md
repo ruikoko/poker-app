@@ -2232,3 +2232,22 @@ persistida vs re-criar) movido inline para a entry de #11 no backlog
 "Tech Debts abertos pós-pt10" acima.
 -->
 
+## pt71 (13 Jun 2026) — desanonimização por table-SS
+
+- 🟢 **`#TABLE-SS-DEANON-VILLAIN-NOTES-STALE` (LOW)** — quando a votação cross-mão
+  corrige um nick, `reconcile_tournament_deanon` limpa os `hand_villains` da mão e
+  re-aplica as regras com o nick votado, MAS os `villain_notes` (globais por nick,
+  cross-mão) criados sob o nick **antigo** ficam órfãos. Impacto mínimo (o modal do
+  vilão usa `hand_villains`, que é limpo); ruído nas notas. Follow-up: varrer
+  `villain_notes` sem `hand_villains` correspondente. → `services/table_ss_deanon.py`.
+- 🟢 **`#TABLE-SS-DEANON-SINGLETON-UNVERIFIED` (LOW)** — hashes em **1 só** mão
+  table_ss do torneio (128 nas 64) não têm cross-check de votação → mantêm o
+  mapeamento per-mão, que pode estar trocado se os stacks forem próximos.
+  **Mitigação já activa:** a votação é contínua (cada captura nova do torneio
+  acrescenta voto e retro-corrige). Não-bloqueante.
+- 🟢 **`#PLAYED-AT-COARSE-GRANULARITY` (LOW, latente)** — a forense de veneno apanhou
+  1 par com `played_at` a 62s mas hand-ids a distar ~894k (impossível) → o `played_at`
+  de algumas mãos GG tem granularidade grosseira / artefacto. Não afecta a votação
+  (usa hashes, não tempo) nem o pipeline HRC (TM number). Só relevante se um match
+  temporal vier a depender de precisão sub-minuto. → `JOURNAL pt71 §C`.
+
