@@ -111,6 +111,16 @@ def import_health(
         logger.exception("import-health mesa")
         out["pipelines"]["mesa"] = {"error": f"{type(e).__name__}: {e}"}
 
+    # ── desanonimização por table-SS (guarda epistémica) ────────────────────
+    # Não tem janela (é estado agregado das mãos table_ss). agree visível pela
+    # fracção de PARCIAIS; alerta se as maiorias da votação cross-mão colapsam.
+    try:
+        from app.services.table_ss_deanon import capture_deanon_agreement
+        out["deanon"] = capture_deanon_agreement()
+    except Exception as e:
+        logger.exception("import-health deanon")
+        out["deanon"] = {"error": f"{type(e).__name__}: {e}"}
+
     # ── lobby (lobby_processing_log) ────────────────────────────────────────
     try:
         lobby_time = ("COALESCE((posted_at AT TIME ZONE 'Europe/Lisbon'), "

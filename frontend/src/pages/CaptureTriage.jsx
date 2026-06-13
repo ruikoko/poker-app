@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { captureTriage } from '../api/client'
+import ZoomableImage from '../components/Lightbox'
 
 // Tags de 1 clique (nomes de canal Discord) + descartar. A tag integra a mão no
 // fluxo normal (Estudo/Vilões) como se viesse do Discord.
@@ -95,10 +96,10 @@ export default function CaptureTriagePage() {
           }}>
             {/* SS de mesa ao lado da mão */}
             {h.table_ss_id != null ? (
-              <img
+              <ZoomableImage
                 src={captureTriage.imageUrl(h.table_ss_id)}
                 alt="SS de mesa"
-                style={{ width: 240, height: 'auto', borderRadius: 6, objectFit: 'contain',
+                thumbStyle={{ width: 240, height: 'auto', borderRadius: 6, objectFit: 'contain',
                   border: '1px solid var(--border)', flexShrink: 0, alignSelf: 'flex-start' }}
                 onError={e => { e.currentTarget.style.display = 'none' }}
               />

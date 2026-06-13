@@ -337,6 +337,31 @@ def _hand_tournament_number(hand_db_id: int) -> Optional[str]:
     return rows[0]["tournament_number"] if rows else None
 
 
+def capture_deanon_agreement() -> dict:
+    """Guarda epistémica (Saúde do Import): estado da desanonimização por
+    table-SS. Alerta se a fracção de mãos PARCIAIS (algum banco por mapear =
+    empates da votação cross-mão) for alta — sinal de que as MAIORIAS colapsam
+    (hash-estabilidade a degradar ou Vision pior). Read-only.
+
+    A `agree_rate` por torneio é logada em cada `reconcile_tournament_deanon`;
+    aqui dá-se a foto agregada barata a partir do estado guardado."""
+    from app.db import query
+    rows = query(
+        "SELECT (player_names->>'deanon_partial') = 'true' AS partial "
+        "FROM hands WHERE site = 'GGPoker' AND (player_names->>'match_method') = %s",
+        (MATCH_METHOD,),
+    )
+    total = len(rows)
+    partial = sum(1 for r in rows if r["partial"])
+    rate = (partial / total) if total else 0.0
+    return {
+        "total": total, "complete": total - partial, "partial": partial,
+        "partial_rate": round(rate, 3),
+        # alerta só com amostra mínima; >35% parciais = maiorias a colapsar.
+        "alert": total >= 10 and rate > 0.35,
+    }
+
+
 def reconcile_tournament_deanon(tournament_number: str, *, conn=None) -> dict:
     """Vota o mapeamento hash→nick entre TODAS as mãos `table_ss` do torneio e
     reescreve cada mão com o mapa votado (corrige swaps do per-mão). Empates →

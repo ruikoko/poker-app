@@ -164,6 +164,22 @@ export default function ImportHealth() {
 
       {data && ORDER.map((k) => <PipelineCard key={k} p={data.pipelines[k]} />)}
 
+      {data?.deanon && !data.deanon.error && data.deanon.total > 0 && (
+        <div style={{ ...card, borderColor: data.deanon.alert ? '#ef4444' : 'var(--border)' }}>
+          <b>Desanonimização por SS de mesa (guarda epistémica)</b>
+          <div style={{ fontSize: 13, marginTop: 6 }}>
+            {data.deanon.total} mãos · {data.deanon.complete} completas · {data.deanon.partial} parciais
+            {' '}(<span style={{ color: data.deanon.alert ? '#ef4444' : 'var(--muted)' }}>
+              {Math.round(data.deanon.partial_rate * 100)}% por mapear</span>)
+          </div>
+          <div style={{ fontSize: 11, color: data.deanon.alert ? '#ef4444' : 'var(--muted)', marginTop: 4 }}>
+            {data.deanon.alert
+              ? '⚠️ ALERTA: muitas mãos parciais — as maiorias da votação cross-mão podem estar a colapsar (hash-estabilidade / Vision a degradar). Investigar.'
+              : 'Saudável. Parciais = empates honestos da votação (banco ambíguo fica por mapear, nunca nome trocado).'}
+          </div>
+        </div>
+      )}
+
       {data?.holes && (
         <div style={{ ...card, borderColor: '#a16207' }}>
           <b>⚠️ Buracos de logging (v2 — falhas que hoje NÃO deixam rasto queryable)</b>
