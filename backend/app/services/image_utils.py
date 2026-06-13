@@ -30,3 +30,30 @@ def detect_image_mime(image_bytes: bytes) -> str:
     ):
         return "image/webp"
     return "image/png"
+
+
+def compress_image(
+    image_bytes: bytes, max_width: int = 1280, quality: int = 85
+) -> tuple[str, str]:
+    """Comprime para guardar na BD: redimensiona a `max_width` e converte a JPEG.
+
+    Espelho do padrão dos replayers (`screenshot._compress_image`, 1280px/JPEG85):
+    o mesmo regime de poupança usado em `entries.raw_json.img_b64`, agora também
+    para o table-SS. Devolve (base64_str, mime). Em qualquer falha de PIL devolve
+    o original em base64 com o mime detectado (fail-safe — nunca rebenta o upload).
+    """
+    import base64
+    import io
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes))
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        if img.width > max_width:
+            ratio = max_width / img.width
+            img = img.resize((max_width, int(img.height * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return base64.b64encode(buf.getvalue()).decode("ascii"), "image/jpeg"
+    except Exception:
+        return base64.b64encode(image_bytes).decode("ascii"), detect_image_mime(image_bytes)

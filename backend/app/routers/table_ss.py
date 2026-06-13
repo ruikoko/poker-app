@@ -25,11 +25,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 
 from app.auth import require_auth
 from app.db import get_conn, query
-from app.services.image_utils import detect_image_mime
+from app.services.image_utils import detect_image_mime, compress_image
 from app.services import table_ss_vision as tv
 from app.services.tournament_resolver import (
     resolve_tournament_number, name_tokens_subset, clean_winamax_tournament_name,
@@ -186,6 +186,13 @@ def ensure_table_ss_processing_log_schema():
         vision_json        JSONB
     );
     """
+    # Estágio 2 desanon — imagem comprimida (1280/JPEG85, padrão dos replayers)
+    # guardada na linha para o painel de triagem mostrar a SS ao lado da mão.
+    # ADD COLUMN IF NOT EXISTS para BDs já em produção (lifespan boot).
+    alter_img = (
+        "ALTER TABLE table_ss_processing_log "
+        "ADD COLUMN IF NOT EXISTS img_b64 TEXT;"
+    )
     idx_uploaded = (
         "CREATE INDEX IF NOT EXISTS idx_table_ss_uploaded_at "
         "ON table_ss_processing_log (uploaded_at DESC);"
@@ -203,6 +210,7 @@ def ensure_table_ss_processing_log_schema():
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
+            cur.execute(alter_img)
             cur.execute(idx_uploaded)
             cur.execute(idx_result)
             cur.execute(idx_tn_captured)
@@ -260,6 +268,7 @@ def _upsert_table_ss_log(
     matched_hand_id: Optional[str] = None,
     vision_json: Optional[dict] = None,
     matched_hand_db_id: Optional[int] = None,
+    img_b64: Optional[str] = None,
 ) -> Optional[int]:
     """UPSERT por file_hash; incrementa attempt_count em conflito. Reconcilia o
     link da mão na MESMA transacção via `_apply_hand_link` (#FIX-B3 pt50): liga a
@@ -280,9 +289,9 @@ def _upsert_table_ss_log(
                     file_hash, source, original_filename, file_size, captured_at,
                     result, reason_detail, site, tournament_name,
                     tournament_number, players_left, total_entries,
-                    matched_hand_id, vision_json
+                    matched_hand_id, vision_json, img_b64
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (file_hash) DO UPDATE SET
                     uploaded_at       = NOW(),
@@ -299,14 +308,15 @@ def _upsert_table_ss_log(
                     players_left      = COALESCE(EXCLUDED.players_left, table_ss_processing_log.players_left),
                     total_entries     = COALESCE(EXCLUDED.total_entries, table_ss_processing_log.total_entries),
                     matched_hand_id   = COALESCE(EXCLUDED.matched_hand_id, table_ss_processing_log.matched_hand_id),
-                    vision_json       = COALESCE(EXCLUDED.vision_json, table_ss_processing_log.vision_json)
+                    vision_json       = COALESCE(EXCLUDED.vision_json, table_ss_processing_log.vision_json),
+                    img_b64           = COALESCE(EXCLUDED.img_b64, table_ss_processing_log.img_b64)
                 RETURNING id
                 """,
                 (
                     file_hash, source, original_filename, file_size, captured_at,
                     result, reason_detail, site, tournament_name,
                     tournament_number, players_left, total_entries,
-                    matched_hand_id, vision_json,
+                    matched_hand_id, vision_json, img_b64,
                 ),
             )
             row = cur.fetchone()
@@ -678,6 +688,7 @@ def _finalize(
     out: dict, *, source: str, original_filename: Optional[str],
     file_size: int, captured_at: Optional[datetime],
     matched_hand_db_id: Optional[int] = None,
+    img_b64: Optional[str] = None,
 ) -> dict:
     """Persiste o resultado e devolve `out`."""
     _upsert_table_ss_log(
@@ -689,6 +700,7 @@ def _finalize(
         players_left=out["players_left"], total_entries=out["total_entries"],
         captured_at=captured_at, matched_hand_id=out["hand_matched"],
         vision_json=out["vision_json"], matched_hand_db_id=matched_hand_db_id,
+        img_b64=img_b64,
     )
     return out
 
@@ -733,6 +745,10 @@ async def _process_table_ss(
     out["captured_at"] = captured_at.isoformat() if captured_at else None
     fsize = len(content)
 
+    # 2b. Imagem comprimida (1280/JPEG85, padrão dos replayers) — guardada na
+    # linha para a triagem mostrar a SS ao lado da mão. Off-thread (PIL é CPU).
+    img_b64, _ = await asyncio.to_thread(compress_image, content)
+
     # 3. Vision (off-thread — única chamada lenta/externa).
     mime = detect_image_mime(content)
     raw = await asyncio.to_thread(tv.extract_table_ss_json, content, mime)
@@ -740,14 +756,14 @@ async def _process_table_ss(
         out["result"] = "vision_failed"
         out["reason_detail"] = "extract_table_ss_json devolveu None"
         return _finalize(out, source=source, original_filename=filename,
-                         file_size=fsize, captured_at=captured_at)
+                         file_size=fsize, captured_at=captured_at, img_b64=img_b64)
 
     vj = tv.parse_and_validate_table_ss_json(raw)
     if vj is None:
         out["result"] = "json_invalid"
         out["reason_detail"] = "JSON inválido ou sem campos úteis"
         return _finalize(out, source=source, original_filename=filename,
-                         file_size=fsize, captured_at=captured_at)
+                         file_size=fsize, captured_at=captured_at, img_b64=img_b64)
     # #TABLE-SS-VISION-SITE-MISCLASS: corrige a site lida quando o nome a
     # contradiz (Regra A `#NNN` trailing + Regra B cross-check BD), ANTES de
     # gravar a site no log e de filtrar candidatos por site.
@@ -779,7 +795,7 @@ async def _process_table_ss(
         out["result"] = "site_undetected"
         out["reason_detail"] = f"site={site!r} não suportado"
         return _finalize(out, source=source, original_filename=filename,
-                         file_size=fsize, captured_at=captured_at)
+                         file_size=fsize, captured_at=captured_at, img_b64=img_b64)
 
     # 5. Match — função determinística ÚNICA R (a MESMA que o reconcile corre).
     #    O upload deixa de ter caminho de match próprio: grava o read e chama R.
@@ -794,7 +810,8 @@ async def _process_table_ss(
 
     return _finalize(out, source=source, original_filename=filename,
                      file_size=fsize, captured_at=captured_at,
-                     matched_hand_db_id=desired["matched_hand_db_id"])
+                     matched_hand_db_id=desired["matched_hand_db_id"],
+                     img_b64=img_b64)
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -814,6 +831,29 @@ async def upload_table_ss(
     fname = filename or file.filename or "upload.png"
     return await _process_table_ss(
         content, fname, captured_at_override=captured_at, source=source,
+    )
+
+
+@router.get("/image/{ss_id}")
+def table_ss_image(ss_id: int, current_user=Depends(require_auth)):
+    """Serve a imagem comprimida (JPEG) guardada para uma SS de mesa.
+
+    Endpoint espelho do `GET /api/screenshots/image/{id}` dos replayers — a
+    triagem mostra a SS ao lado da mão. mime detectado dos bytes (robusto ao
+    fallback fail-safe do `compress_image`). 404 se a linha não tem imagem."""
+    rows = query(
+        "SELECT img_b64 FROM table_ss_processing_log WHERE id = %s", (ss_id,)
+    )
+    if not rows or not rows[0].get("img_b64"):
+        raise HTTPException(404, "Sem imagem para esta SS")
+    import base64
+    try:
+        raw = base64.b64decode(rows[0]["img_b64"])
+    except Exception:
+        raise HTTPException(404, "Imagem inválida")
+    return Response(
+        content=raw, media_type=detect_image_mime(raw),
+        headers={"Cache-Control": "private, max-age=86400"},
     )
 
 
