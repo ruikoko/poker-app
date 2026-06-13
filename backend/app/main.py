@@ -46,6 +46,10 @@ from app.routers.table_ss import (
     router as table_ss_router,
     ensure_table_ss_processing_log_schema,
 )
+from app.routers.capture_triage import (
+    router as capture_triage_router,
+    ensure_capture_triage_column,
+)
 
 load_dotenv()
 
@@ -275,6 +279,7 @@ async def lifespan(app: FastAPI):
     ensure_lobby_processing_log_schema()
     ensure_table_ss_processing_log_schema()
     ensure_context_table_ss_column()
+    ensure_capture_triage_column()
     ensure_hrc_jobs_schema()
     ensure_hrc_schema()
     from app.routers.queue import ensure_hrc_queue_release_schema
@@ -336,6 +341,7 @@ app.include_router(tournament_results_router)
 app.include_router(hrc_router)
 app.include_router(table_ss_router)
 app.include_router(import_health_router)
+app.include_router(capture_triage_router)
 
 # Serve uploaded screenshots as static files
 import os
