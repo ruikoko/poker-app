@@ -36,6 +36,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 from typing import Any, Optional
 
 logger = logging.getLogger("table_ss_deanon")
@@ -226,6 +229,192 @@ def deanonymize_hand_from_table_ss(
         hand_db_id, h.get("hand_id"), len(anon_map),
         len([k for k in apa_raw if k != "_meta"]),
     )
+
+    # ── Camada de consistência cross-mão por torneio ────────────────────────
+    # Invariante (forense Jun-2026): o hash GG é FIXO por jogador dentro do
+    # torneio (0 violações cross-torneio em 1059 hashes; 94% persistem ≥2 mãos).
+    # → votar o mapeamento entre TODAS as mãos table_ss do torneio corrige swaps
+    # do per-mão (stacks próximos / all-in). Empates ficam por mapear (veneno).
+    try:
+        tn = h.get("tournament_number") or _hand_tournament_number(hand_db_id)
+        if tn:
+            reconcile_tournament_deanon(tn)
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error("[table_ss_deanon] reconcile torneio falhou hand %s: %s",
+                     hand_db_id, e)
+
     return {"status": "deanonymized", "hand_db_id": hand_db_id,
             "mapped": len(anon_map), "total": total_hh,
             "deanon_partial": deanon_partial, "anon_map": anon_map}
+
+
+# ── Votação cross-mão por torneio (consistência hash→nick) ───────────────────
+
+def _norm_nick(s: Any) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def cluster_vote(nicks: list[str]) -> tuple[Optional[str], str]:
+    """Vota um nick canónico a partir das grafias observadas (1 por mão).
+
+    Agrupa grafias semelhantes (SequenceMatcher ≥ 0.88 — absorve variância OCR
+    'justdoitttttt'≈'justdoittttt'). Vencedor = maior cluster com **pluralidade
+    estrita** (top > 2º). Empate/sem pluralidade → (None, 'tie') = POR MAPEAR
+    (regra do veneno). 1 voto → singleton (mantém-se). Canónico = grafia mais
+    frequente no cluster vencedor (desempate: mais longa). Devolve (nick|None, kind).
+    """
+    clusters: list[dict] = []
+    for nk in nicks:
+        if not nk:
+            continue
+        nn = _norm_nick(nk)
+        placed = False
+        for cl in clusters:
+            if SequenceMatcher(None, nn, cl["key"]).ratio() >= 0.88:
+                cl["members"].append(nk)
+                placed = True
+                break
+        if not placed:
+            clusters.append({"members": [nk], "key": nn})
+    if not clusters:
+        return None, "none"
+    clusters.sort(key=lambda c: -len(c["members"]))
+    if len(clusters) > 1 and len(clusters[1]["members"]) == len(clusters[0]["members"]):
+        return None, "tie"
+    cnt = Counter(clusters[0]["members"])
+    canonical = max(cnt.items(), key=lambda kv: (kv[1], len(kv[0])))[0]
+    kind = "unanimous" if len(clusters) == 1 else "majority"
+    return canonical, kind
+
+
+def vote_tournament_maps(anon_maps: list[dict]) -> tuple[dict, dict]:
+    """anon_maps: lista de mapas hash→nick (1 por mão, inclui 'Hero').
+    Devolve (canonical {hash: nick} só para hashes com vencedor, stats por kind).
+    'Hero' é votado como um hash normal (nick do herói — consistente)."""
+    votes: dict = defaultdict(list)
+    for am in anon_maps:
+        for hsh, nk in (am or {}).items():
+            votes[hsh].append(nk)
+    canonical: dict = {}
+    stats = {"unanimous": 0, "majority": 0, "tie": 0, "singleton": 0}
+    for hsh, nks in votes.items():
+        if len(nks) == 1:
+            canonical[hsh] = nks[0]
+            stats["singleton"] += 1
+            continue
+        nick, kind = cluster_vote(nks)
+        stats[kind if kind in stats else "tie"] += 1
+        if nick is not None:
+            canonical[hsh] = nick
+    return canonical, stats
+
+
+def _invert_anon_map(anon_map: dict) -> dict:
+    """nick→hash a partir de hash→nick (para re-keyar apa de nicks p/ hashes)."""
+    inv = {}
+    for hsh, nk in (anon_map or {}).items():
+        if nk:
+            inv[nk] = hsh
+    return inv
+
+
+def _rekey_apa_to_hashes(apa_nick_keyed: dict, anon_map: dict) -> dict:
+    """apa com keys=nicks (pós-enrich) → keys=hashes, via inverso do anon_map.
+    Preserva '_meta'. Keys sem inverso ficam como estão (best-effort)."""
+    inv = _invert_anon_map(anon_map)
+    out: dict = {}
+    for k, v in (apa_nick_keyed or {}).items():
+        if k == "_meta":
+            out[k] = v
+            continue
+        out[inv.get(k, k)] = v
+    return out
+
+
+def _hand_tournament_number(hand_db_id: int) -> Optional[str]:
+    from app.db import query
+    rows = query("SELECT tournament_number FROM hands WHERE id = %s", (hand_db_id,))
+    return rows[0]["tournament_number"] if rows else None
+
+
+def reconcile_tournament_deanon(tournament_number: str, *, conn=None) -> dict:
+    """Vota o mapeamento hash→nick entre TODAS as mãos `table_ss` do torneio e
+    reescreve cada mão com o mapa votado (corrige swaps do per-mão). Empates →
+    por mapear + `deanon_partial`. Coerência a jusante: mãos cujo mapa MUDA têm
+    `hand_villains` limpos + `apply_villain_rules` re-disparadas (nick novo).
+    Idempotente. Devolve stats (incl. concordância, p/ a guarda epistémica)."""
+    from app.db import get_conn, query
+    from app.routers.screenshot import _enrich_all_players_actions
+
+    rows = query(
+        "SELECT id, hand_id, all_players_actions, player_names "
+        "FROM hands WHERE tournament_number = %s AND site = 'GGPoker' "
+        "AND (player_names->>'match_method') = %s",
+        (tournament_number, MATCH_METHOD),
+    )
+    if not rows:
+        return {"tournament": tournament_number, "hands": 0, "changed": 0}
+
+    per_hand = []
+    anon_maps = []
+    for r in rows:
+        pn = r.get("player_names") or {}
+        if isinstance(pn, str):
+            try:
+                pn = json.loads(pn)
+            except (ValueError, TypeError):
+                pn = {}
+        apa = r.get("all_players_actions") or {}
+        if isinstance(apa, str):
+            try:
+                apa = json.loads(apa)
+            except (ValueError, TypeError):
+                apa = {}
+        am = pn.get("anon_map") or {}
+        anon_maps.append(am)
+        per_hand.append((r["id"], am, apa, pn))
+
+    canonical, stats = vote_tournament_maps(anon_maps)
+
+    own = conn is None
+    if own:
+        conn = get_conn()
+    changed = 0
+    try:
+        from app.services.villain_rules import apply_villain_rules
+        for hand_db_id, old_map, apa, pn in per_hand:
+            hash_apa = _rekey_apa_to_hashes(apa, old_map)
+            hashes = [k for k in hash_apa if k != "_meta"]
+            new_map = {hsh: canonical[hsh] for hsh in hashes if hsh in canonical}
+            new_partial = len(new_map) < len(hashes)
+            if new_map == (old_map or {}) and bool(pn.get("deanon_partial")) == new_partial:
+                continue  # nada mudou nesta mão
+            vision_data = {"players_list": pn.get("players_list") or []}
+            new_apa = _enrich_all_players_actions(hash_apa, new_map, vision_data)
+            new_pn = {**pn, "anon_map": new_map, "deanon_partial": new_partial}
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE hands SET all_players_actions = %s, player_names = %s WHERE id = %s",
+                    (json.dumps(new_apa), json.dumps(new_pn), hand_db_id),
+                )
+                # Coerência a jusante: limpa vilões do nick antigo desta mão…
+                cur.execute("DELETE FROM hand_villains WHERE hand_db_id = %s", (hand_db_id,))
+            apply_villain_rules(hand_db_id, conn=conn)  # …e re-cria com o nick votado
+            changed += 1
+        if own:
+            conn.commit()
+    finally:
+        if own:
+            conn.close()
+
+    # Guarda epistémica: concordância (alerta se as maiorias colapsarem).
+    multi = stats["unanimous"] + stats["majority"] + stats["tie"]
+    agree_rate = (stats["unanimous"] + stats["majority"]) / multi if multi else 1.0
+    logger.info(
+        "[table_ss_reconcile_vote] tn=%s hands=%d changed=%d "
+        "unanimous=%d majority=%d tie=%d singleton=%d agree=%.2f",
+        tournament_number, len(rows), changed, stats["unanimous"],
+        stats["majority"], stats["tie"], stats["singleton"], agree_rate,
+    )
+    return {"tournament": tournament_number, "hands": len(rows), "changed": changed,
+            "stats": stats, "agree_rate": round(agree_rate, 3)}

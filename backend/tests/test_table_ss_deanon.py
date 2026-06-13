@@ -11,6 +11,9 @@ from app.services.table_ss_deanon import (
     _existing_match_method,
     _filter_ambiguous_stackless,
     build_anon_map_from_seats,
+    cluster_vote,
+    vote_tournament_maps,
+    _rekey_apa_to_hashes,
 )
 
 
@@ -156,6 +159,50 @@ def test_ambiguous_leaves_unmapped_with_filter():
     total_hh = 3  # Hero + aaaa1111 + bbbb2222 + cccc3333 = 4; _meta fora → 4? não:
     # apa tem 4 jogadores não-_meta (Hero,aaaa1111,bbbb2222,cccc3333)
     assert len(anon_map) == 2  # parcial: 2 de 4 mapeados
+
+
+# ── Votação cross-mão por torneio ────────────────────────────────────────────
+
+def test_cluster_vote_basico():
+    assert cluster_vote(["a", "a", "a"]) == ("a", "unanimous")
+    # grafias OCR semelhantes colapsam num cluster (ratio>=0.88)
+    nick, kind = cluster_vote(["justdoitttttt", "justdoittttt", "justdoittttt"])
+    assert nick == "justdoittttt" and kind == "unanimous"
+    assert cluster_vote(["x", "x", "y"]) == ("x", "majority")
+    assert cluster_vote(["x", "y"]) == (None, "tie")  # 1-1 → por mapear
+
+
+def test_vote_tournament_maps_corrige_swap_881():
+    """Os 3 mapas reais do Daily Hyper (dry-run): a maioria corrige o swap do
+    881 (4d2df37c hxnniUb→justdoittttt); 44d9e3c1 fica POR MAPEAR (1-1)."""
+    maps = [
+        # GG-6066749894
+        {"Hero": "Lauro Dermio", "37bb0e2a": "DWilliams", "44d9e3c1": "hxnniUb",
+         "4d2df37c": "justdoitttttt", "3aa60ee0": "I GRIND THIS", "c18b8c5d": "TennEggGuy"},
+        # GG-6066749881 (o swap)
+        {"Hero": "Lauro Dermio", "37bb0e2a": "DWilliams", "3aa60ee0": "I GRIND THIS",
+         "c18b8c5d": "TennEggGuy", "44d9e3c1": "justdoittttt", "4d2df37c": "hxnniUb"},
+        # GG-6066749680
+        {"Hero": "Lauro Dermio", "435c8617": "Augusto Hagen", "4d2df37c": "justdoittttt",
+         "c18b8c5d": "TennEggGuy", "efa85a54": "Andre Marques"},
+    ]
+    canon, stats = vote_tournament_maps(maps)
+    # ★ swap do 881 corrigido: 4d2df37c deixa de ser 'hxnniUb' → cluster justdoit*
+    # (a votação unifica a grafia em todas as mãos; o nº de 't' é variância OCR).
+    assert canon["4d2df37c"].lower().startswith("justdoit")
+    assert canon["4d2df37c"].lower() != "hxnniub"
+    assert canon["c18b8c5d"] == "TennEggGuy"      # unânime 3/3
+    assert canon["37bb0e2a"] == "DWilliams"
+    assert "44d9e3c1" not in canon                # 1-1 → empate → por mapear
+    assert canon["435c8617"] == "Augusto Hagen"   # singleton mantém-se
+    assert stats["tie"] >= 1 and stats["majority"] >= 1
+
+
+def test_rekey_apa_to_hashes():
+    anon_map = {"hash1": "Nick1", "Hero": "HeroNick"}
+    apa = {"_meta": {"x": 1}, "Nick1": {"a": 1}, "HeroNick": {"b": 2}}
+    out = _rekey_apa_to_hashes(apa, anon_map)
+    assert out == {"_meta": {"x": 1}, "hash1": {"a": 1}, "Hero": {"b": 2}}
 
 
 def test_existing_match_method_variants():
