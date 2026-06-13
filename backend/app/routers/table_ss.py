@@ -640,6 +640,11 @@ def reconcile_table_ss(hand_ids=None) -> dict:
             prev_matched_hand_id=r.get("matched_hand_id"),
         ):
             changed += 1
+            # Estágio 3-b: o match MUDOU para uma mão nova → desanonimiza-a
+            # (gated GG-sem-Discord). Só quando muda, para não re-correr em
+            # cada reconcile de import. Rows antigas sem `seats` → no-op.
+            if desired["result"] == "success":
+                _deanon_after_match(desired["matched_hand_db_id"], vj)
         if desired["result"] == "success":
             n_success += 1
         elif desired["result"] == "tm_ambiguous":
@@ -684,6 +689,49 @@ def _blank_out(file_hash: str) -> dict:
     }
 
 
+# ── Desanonimização pós-match (Estágio 3-b) ──────────────────────────────────
+
+def _hand_has_discord(hand_db_id: int) -> bool:
+    """Mão tem presença Discord? (discord_tags não-vazio OU entry source=discord).
+    Discord PREVALECE — uma mão assim não é desanonimizada pelo table-SS."""
+    rows = query(
+        "SELECT 1 FROM hands h WHERE h.id = %s AND ("
+        "  (h.discord_tags IS NOT NULL AND h.discord_tags <> ARRAY[]::text[]) "
+        "  OR EXISTS (SELECT 1 FROM entries e WHERE e.id = h.entry_id "
+        "             AND e.source = 'discord')"
+        ") LIMIT 1",
+        (hand_db_id,),
+    )
+    return bool(rows)
+
+
+def _deanon_after_match(matched_hand_db_id: Optional[int], vision_json) -> None:
+    """Dispara a desanonimização da mão GG casada com os `seats` do table-SS.
+    Gated (Estágio 3-b): só corre se a mão NÃO tem entrada Discord (Discord
+    prevalece). Defensivo — falha aqui nunca rebenta o upload/reconcile. Rows
+    antigas (vision_json sem `seats`, pré-Estágio-1) → no-op (Estágio 6 re-Vision)."""
+    if not matched_hand_db_id or not isinstance(vision_json, dict):
+        return
+    seats = vision_json.get("seats") or []
+    if not seats:
+        return
+    try:
+        if _hand_has_discord(matched_hand_db_id):
+            return  # Discord prevalece
+        from app.services.table_ss_deanon import deanonymize_hand_from_table_ss
+        res = deanonymize_hand_from_table_ss(
+            matched_hand_db_id, seats, vision_json.get("hero_nick")
+        )
+        if res.get("status") == "deanonymized":
+            logger.info(
+                "[table_ss_deanon] hand %s: %s/%s mapeados (partial=%s)",
+                matched_hand_db_id, res.get("mapped"), res.get("total"),
+                res.get("deanon_partial"),
+            )
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error("[table_ss_deanon] hand %s falhou: %s", matched_hand_db_id, e)
+
+
 def _finalize(
     out: dict, *, source: str, original_filename: Optional[str],
     file_size: int, captured_at: Optional[datetime],
@@ -702,6 +750,8 @@ def _finalize(
         vision_json=out["vision_json"], matched_hand_db_id=matched_hand_db_id,
         img_b64=img_b64,
     )
+    # Estágio 3-b: após o link estar gravado, desanonimiza a mão GG casada.
+    _deanon_after_match(matched_hand_db_id, out.get("vision_json"))
     return out
 
 

@@ -1,0 +1,231 @@
+"""Desanonimização de mão GG via SS de mesa (Intuitive Tables) — Estágio 3.
+
+Estende a maquinaria de match banco-a-banco do pt7 (âncoras + aritmética de
+stacks + atribuição óptima, em `routers/screenshot.py`) à **SS de mesa**: a
+Vision do table-SS lê (nick, stack_bb, herói) por banco; esta camada cruza
+isso com a HH GG anonimizada (hashes) já ligada à SS (`context_table_ss_id`)
+e produz `player_names` + `match_method='table_ss'` + `all_players_actions`
+enriquecido — pela MESMA porta que o caminho do replayer, para a mão entrar
+no Estudo/Vilões sem excepção ao gate.
+
+PRINCÍPIO (Rui, pt-desanon): a captura é o sinal de interesse; os nicks reais
+estão na imagem do IT, a HH tem tudo menos nomes. Cruzam-se.
+
+NÃO toca no caminho actual do screenshot.py — só **reutiliza** os seus
+helpers puros (`_build_anon_to_real_map`, `_enrich_all_players_actions`),
+importados lazy para evitar ciclos e custo de import.
+
+Guardas (invariantes):
+- Só mão **GG** com **HH real** (`raw` populado) e `all_players_actions` com
+  jogadores (não placeholder só-`_meta`).
+- Só se a mão **ainda não tem match real** (`match_method` ausente ou
+  `discord_placeholder_*`). **Discord prevalece** — nunca sobrescreve um
+  `anchors_stack_elimination_v2`. Re-correr sobre uma mão já `table_ss` é
+  permitido (idempotente — re-deriva o mesmo map).
+- A decisão "esta mão é elegível" (sem Discord, etc.) é do CALL SITE; aqui
+  ficam só as guardas de segurança de dados.
+
+Aproximação conhecida (documentada): a SS de mesa casa com a mão GG mais
+próxima no TEMPO (não necessariamente a mão exacta da captura). Os stacks
+podem ter deriva de algumas mãos; a tolerância (2%/20 fichas nos folds) + a
+atribuição global óptima resolvem pela ORDEM relativa dos stacks, que se
+mantém ao longo de poucas mãos. Bancos em ALL-IN (stack desconhecido) só
+resolvem por eliminação 1-1.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Optional
+
+logger = logging.getLogger("table_ss_deanon")
+
+MATCH_METHOD = "table_ss"
+# match_methods que NÃO devemos sobrescrever (match real já existente).
+_REAL_MATCH_METHODS = frozenset({"anchors_stack_elimination_v2"})
+
+
+def _seats_to_vision_data(seats: list[dict], hero_nick: Optional[str]) -> dict:
+    """Converte os `seats` da Vision do table-SS para o shape que o
+    `_build_anon_to_real_map` consome (igual ao do replayer).
+
+    - stack em BB → `stack_unit='bb'` + `stack_raw=<bb>` (o helper normaliza
+      para fichas com o bb_size da HH). 'ALLIN'/None → sem stack (resolve por
+      eliminação).
+    - `vision_sb`/`vision_bb` = None: o table-SS não identifica SB/BB por nome,
+      logo as âncoras SB/BB do helper são saltadas (os bancos caem nas fases de
+      stack/eliminação). O Hero ancora à mesma (nick = hero_nick).
+    """
+    players_list: list[dict] = []
+    for s in seats or []:
+        nick = (s.get("nick") or "").strip()
+        if not nick:
+            continue
+        p: dict[str, Any] = {"name": nick}
+        stack = s.get("stack_bb")
+        if isinstance(stack, (int, float)) and not isinstance(stack, bool) and stack > 0:
+            p["stack_unit"] = "bb"
+            p["stack_raw"] = float(stack)
+        # 'ALLIN'/None → sem stack (name-only); bounty preservado p/ enrich.
+        if s.get("bounty_usd") is not None:
+            p["bounty_value_usd"] = s.get("bounty_usd")
+        players_list.append(p)
+    return {
+        "players_list": players_list,
+        "players_by_position": {},
+        "hero": hero_nick,
+        "vision_sb": None,
+        "vision_bb": None,
+    }
+
+
+def _has_usable_stack(seat: dict) -> bool:
+    """Banco tem stack numérico > 0 (não 'ALLIN', não None, não 0)."""
+    s = seat.get("stack_bb")
+    return isinstance(s, (int, float)) and not isinstance(s, bool) and s > 0
+
+
+def _filter_ambiguous_stackless(seats: list[dict]) -> tuple[list[dict], bool]:
+    """Afinação Web (anti-envenenamento): se há **≥2 bancos NÃO-herói sem stack
+    utilizável**, a atribuição óptima do pt7 mapearia-os por palpite (todos os
+    diffs = stack vs 0 → permutação arbitrária). Em vez disso, **removem-se** do
+    pool → ficam POR MAPEAR (hash mantido). Nome em falta é honesto; nome
+    trocado envenena fichas de vilões. O Hero nunca é removido (ancora por nick).
+    1 só banco sem stack mantém-se (a eliminação 1-1 do pt7 é segura).
+
+    Devolve (seats_para_o_helper, removeu_algum)."""
+    nonhero_stackless = [
+        s for s in seats
+        if (s.get("nick") or "").strip()
+        and not s.get("is_hero")
+        and not _has_usable_stack(s)
+    ]
+    if len(nonhero_stackless) >= 2:
+        kept = [s for s in seats if s.get("is_hero") or _has_usable_stack(s)]
+        return kept, True
+    return seats, False
+
+
+def build_anon_map_from_seats(
+    matched_hand: dict, seats: list[dict], hero_nick: Optional[str]
+) -> dict:
+    """Núcleo puro/testável: hash→nick para `matched_hand` a partir dos `seats`
+    do table-SS. Reutiliza `_build_anon_to_real_map` (pt7) DEPOIS de remover os
+    bancos ambíguos (≥2 sem stack) — ver `_filter_ambiguous_stackless`. {} se
+    não mapeia."""
+    from app.routers.screenshot import _build_anon_to_real_map  # lazy
+    seats_for_map, _ = _filter_ambiguous_stackless(seats)
+    vision_data = _seats_to_vision_data(seats_for_map, hero_nick)
+    if not vision_data["players_list"]:
+        return {}
+    return _build_anon_to_real_map(matched_hand, vision_data)
+
+
+def _existing_match_method(player_names: Any) -> Optional[str]:
+    pn = player_names
+    if isinstance(pn, str):
+        try:
+            pn = json.loads(pn)
+        except (ValueError, TypeError):
+            pn = {}
+    return pn.get("match_method") if isinstance(pn, dict) else None
+
+
+def deanonymize_hand_from_table_ss(
+    hand_db_id: int, seats: list[dict], hero_nick: Optional[str]
+) -> dict:
+    """Desanonimiza a mão `hand_db_id` com os bancos lidos do table-SS.
+
+    Escreve `player_names` (com anon_map + match_method='table_ss') +
+    `all_players_actions` enriquecido, e dispara `apply_villain_rules`.
+    Devolve {status, mapped, ...}. Idempotente sob re-corrida table_ss.
+
+    status: 'deanonymized' | 'no_map' | 'skip_real_match' | 'skip_no_hh' |
+            'skip_not_gg' | 'hand_not_found'
+    """
+    from app.db import get_conn, query
+    from app.routers.screenshot import _enrich_all_players_actions  # lazy
+
+    rows = query(
+        "SELECT id, hand_id, site, raw, all_players_actions, player_names "
+        "FROM hands WHERE id = %s",
+        (hand_db_id,),
+    )
+    if not rows:
+        return {"status": "hand_not_found", "hand_db_id": hand_db_id}
+    h = dict(rows[0])
+
+    # Guarda 1: GG only (o table-SS desanon é específico da GG anonimizada).
+    if h.get("site") != "GGPoker":
+        return {"status": "skip_not_gg", "hand_db_id": hand_db_id}
+
+    # Guarda 2: HH real (sem raw a mão nunca entra em Estudo — regra dura).
+    if not (h.get("raw") or "").strip():
+        return {"status": "skip_no_hh", "hand_db_id": hand_db_id}
+
+    # Guarda 3: não sobrescrever match real (Discord prevalece).
+    existing_mm = _existing_match_method(h.get("player_names"))
+    if existing_mm in _REAL_MATCH_METHODS:
+        return {"status": "skip_real_match", "hand_db_id": hand_db_id,
+                "match_method": existing_mm}
+
+    apa_raw = h.get("all_players_actions") or {}
+    if isinstance(apa_raw, str):
+        try:
+            apa_raw = json.loads(apa_raw)
+        except (ValueError, TypeError):
+            apa_raw = {}
+    # apa placeholder-only (só _meta) → nada a mapear.
+    if not [k for k in apa_raw if k != "_meta"]:
+        return {"status": "no_map", "hand_db_id": hand_db_id, "reason": "apa_meta_only"}
+
+    anon_map = build_anon_map_from_seats(h, seats, hero_nick)
+    if not anon_map:
+        return {"status": "no_map", "hand_db_id": hand_db_id}
+
+    vision_data = _seats_to_vision_data(seats, hero_nick)
+    enriched_apa = _enrich_all_players_actions(apa_raw, anon_map, vision_data)
+
+    # Afinação Web: flag honesta quando NEM todos os hashes foram mapeados
+    # (bancos ambíguos removidos, ou stacks que não chegaram a todos). Hashes
+    # por mapear MANTÊM-SE como chave em all_players_actions (não inventamos
+    # nomes). A flag fica visível em player_names para a triagem/Vilões.
+    total_hh = len([k for k in apa_raw if k != "_meta"])
+    deanon_partial = len(anon_map) < total_hh
+
+    player_names_json = {
+        "players_list": vision_data["players_list"],
+        "hero": hero_nick,
+        "anon_map": anon_map,
+        "match_method": MATCH_METHOD,
+        "source": "table_ss",
+        "deanon_partial": deanon_partial,
+    }
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE hands SET all_players_actions = %s, player_names = %s "
+                "WHERE id = %s",
+                (json.dumps(enriched_apa), json.dumps(player_names_json), hand_db_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Vilões pela porta normal (Regra C/D lêem player_names + discord_tags/nick).
+    try:
+        from app.services.villain_rules import apply_villain_rules
+        apply_villain_rules(hand_db_id)
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error("apply_villain_rules falhou hand %s: %s", hand_db_id, e)
+
+    logger.info(
+        "[table_ss_deanon] hand %s (%s) desanonimizada: %d/%d bancos mapeados",
+        hand_db_id, h.get("hand_id"), len(anon_map),
+        len([k for k in apa_raw if k != "_meta"]),
+    )
+    return {"status": "deanonymized", "hand_db_id": hand_db_id,
+            "mapped": len(anon_map), "total": total_hh,
+            "deanon_partial": deanon_partial, "anon_map": anon_map}
