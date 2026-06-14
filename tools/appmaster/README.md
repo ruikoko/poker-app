@@ -30,6 +30,8 @@ processam o que está nas pastas.
   HM3 — últimos N dias (ou 'all')      [90]:
   HM3 — tag (Enter = todas)            [todas]:
   Lobbys — desde (YYYY-MM-DD)          [2026-06-01]:   ← default = LOBBY_SINCE do config
+  Imagens — desde (YYYY-MM-DD)         [(tudo)]:       ← janela it/manual/lobby
+  Imagens — até   (YYYY-MM-DD)         [(tudo)]:
   Discord — 72h | 24h/7d/15d/30d | YYYY-MM-DD   [72h]:
 ```
 
@@ -39,8 +41,17 @@ processam o que está nas pastas.
   existir, o `hm3_export.py` erra e **lista as tags disponíveis** (deixamos a
   mensagem aparecer).
 - **Lobbys**: data `YYYY-MM-DD`; override do `LOBBY_SINCE` só desta corrida.
+- **Imagens — desde / até**: **janela de datas** que filtra **só as imagens**
+  (`it` pelo timestamp do nome; `manual`/`lobby` pelo mtime) — conceito
+  **dia-de-jogo 15:00→15:00**, `até` inclusive. **`gg_hh`/`gg_ts` entram SEMPRE
+  por inteiro** (nunca filtrados). Enter nos dois = sem janela (tudo). Default =
+  `IMPORT_DESDE`/`IMPORT_ATE` do `config_local` do appimport (se definidos).
 - **Discord**: uma janela pré-definida (`72h`, `24h`, `7d`, `15d`, `30d`) **ou**
   uma data `YYYY-MM-DD` (= desde essa data até agora, modo `custom`).
+
+> **O appimport corre AO VIVO** no mestre (envia e move). A janela e o
+> `LOBBY_SINCE` são injectados só nesta corrida (via `argv` + `overrides`); o
+> `config_local` do appimport **não é tocado**.
 
 No fim, um **resumo consolidado** com o estado de cada pipeline.
 
@@ -62,9 +73,11 @@ resumo no fim.
 
 Orquestração pura, **zero alterações** a `appimport`/`apphm3`:
 
-- **appimport** corre **in-process**: `import app_import`, sobrepõe o
-  módulo-global `app_import.LOBBY_SINCE` (só desta corrida) e chama
-  `app_import.main()`. O `config_local.py` não é tocado.
+- **appimport** corre **in-process** e **ao vivo**: `import app_import` e chama
+  `app_import.main(argv=["--ao-vivo", "--desde", D, "--ate", A], overrides={"LOBBY_SINCE": …})`.
+  A janela vai por `argv` (as flags ganham à config); o `LOBBY_SINCE` vai por
+  `overrides` (aplicado **depois** do `load_config`, que de outro modo o
+  esmagaria). O `config_local.py` não é tocado.
 - **apphm3** corre como **subprocesso** `python hm3_export.py --days N` (o script
   já aceita `--days`; o prompt interactivo vive no `HM3_Import.bat`, que aqui é
   contornado).

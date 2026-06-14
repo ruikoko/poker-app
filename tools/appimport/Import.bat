@@ -4,14 +4,26 @@ set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 echo ========================================
 echo   Poker App - Import por pasta local
+echo   *** MODO ENSAIO (dry-run) ***
 echo ========================================
 echo.
 echo   Correr SO depois da sessao de poker
 echo   (salas fechadas). E um envio unico,
 echo   nao corre em background.
 echo.
+echo   Janela de IMAGENS (it/manual/lobby) - dia-de-jogo 15:00-15:00.
+echo   Enter nos dois = tudo. HH/TS entram sempre por inteiro.
+echo.
+set "DESDE="
+set "ATE="
+set /p DESDE="  Imagens - desde (YYYY-MM-DD, Enter = tudo): "
+set /p ATE="  Imagens - ate   (YYYY-MM-DD, Enter = tudo): "
+set "JANELA="
+if not "%DESDE%"=="" set "JANELA=%JANELA% --desde %DESDE%"
+if not "%ATE%"=="" set "JANELA=%JANELA% --ate %ATE%"
+echo.
 echo ----------------------------------------
-python "%~dp0app_import.py"
+python "%~dp0app_import.py"%JANELA%
 echo ----------------------------------------
 echo.
 pause

@@ -64,9 +64,13 @@ def menu():
     hm3_days = ask("HM3 — últimos N dias (ou 'all')", DEFAULT_HM3_DAYS)
     hm3_tag = ask("HM3 — tag (Enter = todas)", DEFAULT_HM3_TAG, empty_label="todas")
     lobby_since = ask("Lobbys — desde (YYYY-MM-DD)", app_import.LOBBY_SINCE)
+    # Janela das IMAGENS (it/manual/lobby) — dia-de-jogo 15:00→15:00. HH/TS entram
+    # sempre por inteiro (sem janela). Enter = config IMPORT_DESDE/ATE (ou tudo).
+    img_desde = ask("Imagens — desde (YYYY-MM-DD)", getattr(app_import, "IMPORT_DESDE", None))
+    img_ate = ask("Imagens — até   (YYYY-MM-DD)", getattr(app_import, "IMPORT_ATE", None))
     discord = ask("Discord — 72h | 24h/7d/15d/30d | YYYY-MM-DD", DEFAULT_DISCORD)
     print("=" * 56)
-    return hm3_days, hm3_tag, lobby_since, discord
+    return hm3_days, hm3_tag, lobby_since, img_desde, img_ate, discord
 
 
 # ── Discord: janela do menu → body do sync-and-process ───────────────────────
@@ -91,20 +95,29 @@ def discord_body(win):
 
 # ── Execução das 3 pipelines ─────────────────────────────────────────────────
 
-def run_appimport(lobby_since, summary):
+def run_appimport(lobby_since, img_desde, img_ate, summary):
+    win = (f"desde {img_desde or '—'} até {img_ate or '—'}"
+           if (img_desde or img_ate) else "(tudo)")
     print("\n" + "#" * 56)
-    print("# 1/3  APPIMPORT  (gg_hh + gg_ts + it + manual + lobby)")
+    print("# 1/3  APPIMPORT  (gg_hh + gg_ts + it + manual + lobby)  *** AO VIVO ***")
     print(f"#       LOBBY_SINCE desta corrida = {lobby_since or '(tudo)'}")
+    print(f"#       JANELA de imagens (it/manual/lobby) = {win}")
     print("#" * 56)
-    # Override SÓ desta corrida — o config_local NÃO é tocado.
-    app_import.LOBBY_SINCE = lobby_since or None
-    lobby_lbl = f"lobby desde {lobby_since or 'tudo'}"
+    # AO VIVO + janela injectados por argv (--ao-vivo + --desde/--ate). LOBBY_SINCE
+    # vai por `overrides` (aplicado DEPOIS do load_config, que de outro modo o
+    # esmagaria). O config_local do appimport NÃO é tocado.
+    argv = ["--ao-vivo"]
+    if img_desde:
+        argv += ["--desde", img_desde]
+    if img_ate:
+        argv += ["--ate", img_ate]
+    lobby_lbl = f"lobby desde {lobby_since or 'tudo'}; janela {win}"
     # IMPORTANTE: app_import.main() pode terminar com sys.exit (ex.: login()
     # falha → sys.exit(1)). Apanhamos SystemExit (incl. sys.exit(0)) AQUI para
     # NÃO deixar o exit do appimport derrubar o orquestrador — a cadeia tem de
     # prosseguir ao HM3 e ao Discord. Idem para qualquer Exception.
     try:
-        app_import.main()
+        app_import.main(argv=argv, overrides={"LOBBY_SINCE": lobby_since or None})
         summary["appimport"] = f"OK ({lobby_lbl})"
     except SystemExit as e:
         code = e.code if e.code is not None else 0
@@ -174,10 +187,10 @@ def main():
     print(f"Poker App: {URL}")
     print(f"appimport: {APPIMPORT_DIR}")
     print(f"apphm3   : {APPHM3_DIR}\n")
-    hm3_days, hm3_tag, lobby_since, discord = menu()
+    hm3_days, hm3_tag, lobby_since, img_desde, img_ate, discord = menu()
 
     summary = {}
-    run_appimport(lobby_since, summary)        # 1 — HH/TS/IT/manual/lobby (dispara reconciles)
+    run_appimport(lobby_since, img_desde, img_ate, summary)   # 1 — HH/TS/IT/manual/lobby (dispara reconciles)
     run_apphm3(hm3_days, hm3_tag, summary)     # 2 — HM3 sem prompt (dias + tag opcional)
     run_discord(discord, summary)              # 3 — sync Discord
 

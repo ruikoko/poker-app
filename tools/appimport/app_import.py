@@ -31,7 +31,7 @@ import os
 import re
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import requests
@@ -60,6 +60,8 @@ LOGIN_EMAIL = None
 LOGIN_PASS = None
 LOBBY_DIR = None        # pasta EXTERNA opcional (2ª via manual, só com --lobby-dir)
 LOBBY_SINCE = None      # só capturas (mtime) >= esta data, na LOBBY_DIR
+IMPORT_DESDE = None     # janela das IMAGENS: dia-de-jogo inicial YYYY-MM-DD (ou None = sem início)
+IMPORT_ATE = None       # janela das IMAGENS: dia-de-jogo final inclusive YYYY-MM-DD (ou None = sem fim)
 
 
 def load_config():
@@ -67,6 +69,7 @@ def load_config():
     `import app_import` seguro para os testes do classificador, que não precisam
     de credenciais)."""
     global PARENT_DIR, LOGIN_EMAIL, LOGIN_PASS, LOBBY_DIR, LOBBY_SINCE
+    global IMPORT_DESDE, IMPORT_ATE
     try:
         import config_local as cfg
     except ImportError:
@@ -79,6 +82,8 @@ def load_config():
     LOGIN_PASS = cfg.LOGIN_PASS
     LOBBY_DIR = getattr(cfg, "LOBBY_DIR", None)
     LOBBY_SINCE = getattr(cfg, "LOBBY_SINCE", None)
+    IMPORT_DESDE = getattr(cfg, "IMPORT_DESDE", None)
+    IMPORT_ATE = getattr(cfg, "IMPORT_ATE", None)
 
 
 # ── Classificador determinístico por NOME (pasta única `it`) ──────────────────
@@ -305,9 +310,74 @@ def _mtime_iso(path):
     return datetime.fromtimestamp(os.path.getmtime(path)).isoformat()  # Lisboa naive
 
 
+# ── Janela de datas das IMAGENS (it / manual / lobby) — dia-de-jogo 15:00→15:00 ─
+# Só filtra IMAGENS. gg_hh/gg_ts (HH/TS) NÃO são filtrados: entram sempre por
+# inteiro (duplicados impossíveis; o despejo não incomoda). Tudo Lisboa-naive
+# (pt51): mtime = hora local do PC do Rui (= Lisboa); timestamp do nome do IT idem.
+
+def _parse_day(s):
+    """'YYYY-MM-DD' → datetime à meia-noite (Lisboa naive). None se vazio/inválido."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(str(s).strip(), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        print(f"   (aviso: data {s!r} inválida — ignorada)")
+        return None
+
+
+def window_bounds(desde, ate):
+    """(desde, ate) 'YYYY-MM-DD' → (lo, hi) do conceito DIA-DE-JOGO (15:00→15:00):
+      lo = desde às 15:00 (inclusive); hi = (ate+1) às 15:00 (EXCLUSIVO) → cobre o
+      dia-de-jogo `ate` inteiro. Cada lado pode ser None (sem limite desse lado).
+      (None, None) = sem janela."""
+    d = _parse_day(desde)
+    a = _parse_day(ate)
+    lo = d.replace(hour=15) if d else None
+    hi = (a + timedelta(days=1)).replace(hour=15) if a else None
+    return (lo, hi)
+
+
+def date_in_window(dt, window):
+    """dt (datetime ou ISO str) vs window=(lo, hi) semiaberto [lo, hi). Devolve
+    (dentro: bool, motivo: str|None). dt None/inparseável OU window vazia →
+    (True, None) (não filtra — comportamento de sempre)."""
+    if not window or (window[0] is None and window[1] is None):
+        return (True, None)
+    lo, hi = window
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except (ValueError, TypeError):
+            return (True, None)
+    if not isinstance(dt, datetime):
+        return (True, None)
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    if lo is not None and dt < lo:
+        return (False, f"{dt:%Y-%m-%d %H:%M} < desde {lo:%Y-%m-%d %H:%M}")
+    if hi is not None and dt >= hi:
+        return (False, f"{dt:%Y-%m-%d %H:%M} >= fim {hi:%Y-%m-%d %H:%M}")
+    return (True, None)
+
+
+def _img_date(path, captured_iso=None):
+    """Data de uma imagem p/ a janela: o timestamp do NOME (captured_iso, fonte
+    `it`) ganha; senão o mtime do ficheiro (manual/lobby). Devolve datetime."""
+    if captured_iso:
+        try:
+            return datetime.fromisoformat(captured_iso)
+        except (ValueError, TypeError):
+            pass
+    return datetime.fromtimestamp(os.path.getmtime(path))
+
+
 # ── Fontes por SUBPASTA (gg_hh / gg_ts / manual) ──────────────────────────────
 
-def process_type(session, sub, endpoint, exts, label, live):
+def process_type(session, sub, endpoint, exts, label, live, window=None):
+    """`window` (=(lo,hi) ou None) só é passado para canais de IMAGEM (manual);
+    gg_hh/gg_ts chamam sempre com window=None → entram por inteiro. A data de uma
+    imagem é o mtime (manual não tem timestamp no nome)."""
     src = os.path.join(PARENT_DIR, sub)
     done = os.path.join(PARENT_DIR, "done", sub)
     files = [f for f in sorted(os.listdir(src))
@@ -316,15 +386,21 @@ def process_type(session, sub, endpoint, exts, label, live):
     skipped = len([f for f in os.listdir(src)
                    if os.path.isfile(os.path.join(src, f))
                    and os.path.splitext(f)[1].lower() not in exts])
-    sent = failed = 0
+    sent = failed = fora = 0
 
     print(f"── {sub}/  ({label})  — {len(files)} ficheiro(s) novo(s)")
     for fname in files:
+        path = os.path.join(src, fname)
+        if window:
+            dentro, motivo = date_in_window(_img_date(path), window)
+            if not dentro:
+                fora += 1
+                print(f"   [fora] {fname}  ({motivo})")
+                continue
         if not live:
             sent += 1
-            print(f"   [dry] {fname}  → {endpoint}")
+            print(f"   [dry{' dentro' if window else ''}] {fname}  → {endpoint}")
             continue
-        path = os.path.join(src, fname)
         mime = exts[os.path.splitext(fname)[1].lower()]
         try:
             with open(path, "rb") as fh:
@@ -341,22 +417,23 @@ def process_type(session, sub, endpoint, exts, label, live):
         else:
             failed += 1
             print(f"   ✗ {fname}: HTTP {r.status_code} {r.text[:120]}")
-    return sent, failed, skipped
+    return sent, failed, skipped, fora
 
 
 # ── Pasta única `it` — classificada por NOME (MESA | LOBBY | SKIP) ─────────────
 
-def process_it_mixed(session, live):
+def process_it_mixed(session, live, window=None):
     """Pasta única do Intuitive Tables (mesa + lobby). Cada ficheiro é
     classificado pelo NOME e roteado para o endpoint certo. MESA → table-ss
     (move → done/it); LOBBY → lobbys (move → done/lobby, retry transitório fica);
     SKIP → fica no sítio (formato não-IT). Em dry-run só imprime o plano.
-    Devolve um dict de contagens."""
+    `window` (=(lo,hi) ou None) filtra por data: timestamp do NOME (captured),
+    fallback mtime. Devolve um dict de contagens."""
     src = os.path.join(PARENT_DIR, IT_SUB)
     done_table = os.path.join(PARENT_DIR, "done", IT_SUB)
     done_lobby = os.path.join(PARENT_DIR, "done", LOBBY_SUB)
     files = _imgs_in(src)
-    c = {"mesa": 0, "lobby": 0, "nonlobby": 0, "skip": 0, "retry": 0, "fail": 0}
+    c = {"mesa": 0, "lobby": 0, "nonlobby": 0, "skip": 0, "retry": 0, "fail": 0, "fora": 0}
 
     print(f"── {IT_SUB}/  (Intuitive Tables — mesa+lobby, routing por nome)  "
           f"— {len(files)} ficheiro(s)")
@@ -367,6 +444,12 @@ def process_it_mixed(session, live):
             c["skip"] += 1
             print(f"   ⤳ SKIP   {fname}  (formato não-IT)")
             continue
+        if window:
+            dentro, motivo = date_in_window(_img_date(path, captured), window)
+            if not dentro:
+                c["fora"] += 1
+                print(f"   [fora] {kind:5} {fname}  ({motivo})")
+                continue
         cap = captured or _mtime_iso(path)   # fallback: mtime do ficheiro
         endpoint = "/api/table-ss/upload" if kind == "MESA" else "/api/lobbys/upload"
         # pt63 — hint de nome do torneio (GG), só relevante p/ LOBBY
@@ -407,19 +490,26 @@ def process_it_mixed(session, live):
 
 # ── Subpasta dedicada "lobby" (drop-only-these; captured_at = mtime) ──────────
 
-def process_lobby_subdir(session, live):
+def process_lobby_subdir(session, live, window=None):
     """Subpasta PARENT_DIR/lobby: SÓ processa o que está cá dentro. captured_at =
     mtime do ficheiro (back-compat para nomes Windows sem timestamp embutido). O
     backend faz o gate 'é lobby?'. Mover: lobby/nonlobby → done/lobby; retry
-    transitório → fica. Devolve (lobbies, nao_lobbies, falhas)."""
+    transitório → fica. `window` (=(lo,hi) ou None) filtra por mtime. Devolve
+    (lobbies, nao_lobbies, falhas, fora_da_janela)."""
     src = os.path.join(PARENT_DIR, LOBBY_SUB)
     done = os.path.join(PARENT_DIR, "done", LOBBY_SUB)
     files = _imgs_in(src)
     print(f"── {LOBBY_SUB}/  (SS de lobby, drop-only-these)  — {len(files)} ficheiro(s)")
-    lobby = nonlobby = failed = 0
+    lobby = nonlobby = failed = fora = 0
     for fname in files:
         path = os.path.join(src, fname)
         cap = _mtime_iso(path)
+        if window:
+            dentro, motivo = date_in_window(_img_date(path), window)
+            if not dentro:
+                fora += 1
+                print(f"   [fora] {fname}  ({motivo})")
+                continue
         if not live:
             lobby += 1
             print(f"   [dry] LOBBY  captured_at={cap}  → /api/lobbys/upload  ({fname})")
@@ -436,7 +526,7 @@ def process_lobby_subdir(session, live):
             nonlobby += 1
             print(f"   · {fname}: {msg} — processado")
         shutil.move(path, _dest_no_clobber(done, fname))
-    return (lobby, nonlobby, failed)
+    return (lobby, nonlobby, failed, fora)
 
 
 # ── Fonte "lobby" externa LOBBY_DIR (2ª via MANUAL — só com --lobby-dir) ───────
@@ -457,10 +547,12 @@ def _append_manifest(path, name):
         f.write(name + "\n")
 
 
-def process_lobby_dir(session, live):
+def process_lobby_dir(session, live, window=None):
     """Lê a pasta externa LOBBY_DIR DIRECTAMENTE (sem mover), dedup por
     manifesto. 2ª via MANUAL desde pt62: só corre com --lobby-dir. captured_at =
-    mtime. Devolve (lobbies, nao_lobbies, falhas) ou None."""
+    mtime. `window` (=(lo,hi) ou None) é um filtro ADICIONAL por mtime: o piso
+    efectivo é o MAIS restritivo de LOBBY_SINCE e da janela `desde`; o `até` da
+    janela também se aplica. Devolve (lobbies, nao_lobbies, falhas, fora) ou None."""
     if not LOBBY_DIR:
         print("\n── lobby (LOBBY_DIR): não configurada em config_local — salto")
         return None
@@ -479,14 +571,20 @@ def process_lobby_dir(session, live):
                   if os.path.isfile(os.path.join(LOBBY_DIR, f))
                   and os.path.splitext(f)[1].lower() in _IMG
                   and f not in sent]
-    files, skipped_old = [], 0
+    files, skipped_old, fora = [], 0, 0
     for f in candidates:
         mt = datetime.fromtimestamp(os.path.getmtime(os.path.join(LOBBY_DIR, f)))
         if since and mt < since:
             skipped_old += 1
-        else:
-            files.append((f, mt))
+            continue
+        if window:
+            dentro, _motivo = date_in_window(mt, window)
+            if not dentro:
+                fora += 1
+                continue
+        files.append((f, mt))
     extra = f"  (fora de LOBBY_SINCE: {skipped_old})" if skipped_old else ""
+    extra += f"  (fora da janela: {fora})" if fora else ""
     print(f"\n── lobby (LOBBY_DIR externa, lida directa, sem mover)  — {len(files)} novo(s){extra}")
     lobby = nonlobby = failed = 0
     for fname, mt in files:
@@ -508,7 +606,7 @@ def process_lobby_dir(session, live):
             nonlobby += 1
             print(f"   · {fname}: {msg} — ignorado")
         _append_manifest(mpath, fname)
-    return (lobby, nonlobby, failed)
+    return (lobby, nonlobby, failed, fora)
 
 
 # ── Entrada ────────────────────────────────────────────────────────────────--
@@ -520,13 +618,33 @@ def parse_args(argv=None):
                    help="ENVIA a sério (e move). Sem esta flag = dry-run (só plano).")
     p.add_argument("--lobby-dir", dest="lobby_dir", action="store_true",
                    help="Lê também a LOBBY_DIR externa (2ª via manual; off por defeito).")
+    p.add_argument("--desde", dest="desde", default=None, metavar="YYYY-MM-DD",
+                   help="Janela das IMAGENS (it/manual/lobby): dia-de-jogo inicial. "
+                        "Sobrepõe IMPORT_DESDE da config. HH/TS entram SEMPRE por inteiro.")
+    p.add_argument("--ate", dest="ate", default=None, metavar="YYYY-MM-DD",
+                   help="Janela das IMAGENS: dia-de-jogo final inclusive. Sobrepõe IMPORT_ATE.")
     return p.parse_args(argv)
 
 
-def main(argv=None):
+def main(argv=None, overrides=None):
+    """`overrides` (dict opcional, usado pelo appmaster/run_all) aplica-se DEPOIS
+    do load_config para sobrepor globals desta corrida sem tocar o config_local —
+    chaves aceites: LOBBY_SINCE, LOBBY_DIR, IMPORT_DESDE, IMPORT_ATE. As flags da
+    CLI (--desde/--ate) continuam a ganhar à config/overrides."""
+    global LOBBY_SINCE, LOBBY_DIR, IMPORT_DESDE, IMPORT_ATE
     args = parse_args(argv)
     live = args.ao_vivo
     load_config()
+    if overrides:
+        for k in ("LOBBY_SINCE", "LOBBY_DIR", "IMPORT_DESDE", "IMPORT_ATE"):
+            if k in overrides:
+                globals()[k] = overrides[k]
+
+    # Janela das IMAGENS: flag da CLI ganha à config (IMPORT_DESDE/ATE).
+    desde = args.desde if args.desde is not None else IMPORT_DESDE
+    ate = args.ate if args.ate is not None else IMPORT_ATE
+    wb = window_bounds(desde, ate)
+    img_window = wb if (wb[0] or wb[1]) else None
 
     if not os.path.isdir(PARENT_DIR):
         print(f"A criar a pasta-mãe: {PARENT_DIR}")
@@ -539,6 +657,14 @@ def main(argv=None):
     else:
         print("MODO: TESTE (dry-run) — NADA é enviado nem movido.")
         print("       Confirma o plano abaixo; depois corre com --ao-vivo.")
+    if img_window:
+        lo, hi = img_window
+        ini = f"desde {lo:%Y-%m-%d %H:%M}" if lo else "sem início"
+        fim = f"até {hi:%Y-%m-%d %H:%M} (excl.)" if hi else "sem fim"
+        print(f"JANELA de IMAGENS (it/manual/lobby): {ini} · {fim}")
+        print("       (dia-de-jogo 15:00→15:00; gg_hh/gg_ts entram SEMPRE por inteiro)")
+    else:
+        print("JANELA de IMAGENS: nenhuma — entra tudo (it/manual/lobby).")
     print("─" * 56)
 
     session = None
@@ -551,41 +677,51 @@ def main(argv=None):
 
     totals = {}
     for sub, endpoint, exts, label in TYPES:
-        totals[sub] = process_type(session, sub, endpoint, exts, label, live)
+        w = img_window if sub == "manual" else None   # HH/TS nunca filtrados
+        totals[sub] = process_type(session, sub, endpoint, exts, label, live, window=w)
 
-    it_counts = process_it_mixed(session, live)
-    lobby_sub_res = process_lobby_subdir(session, live)
-    lobby_res = process_lobby_dir(session, live) if args.lobby_dir else None
+    it_counts = process_it_mixed(session, live, window=img_window)
+    lobby_sub_res = process_lobby_subdir(session, live, window=img_window)
+    lobby_res = process_lobby_dir(session, live, window=img_window) if args.lobby_dir else None
     if not args.lobby_dir:
         print("\n── lobby (LOBBY_DIR externa): 2ª via manual — salto (usa --lobby-dir)")
 
     print("\n" + "═" * 56)
     print("RESUMO" + ("  (DRY-RUN — nada enviado)" if not live else ""))
     print("═" * 56)
-    tot_sent = tot_fail = 0
+    tot_sent = tot_fail = tot_fora = 0
     for sub, *_ in TYPES:
-        sent, failed, skipped = totals[sub]
+        sent, failed, skipped, fora = totals[sub]
         tot_sent += sent
         tot_fail += failed
+        tot_fora += fora
         extra = f"  (ignorados por extensão: {skipped})" if skipped else ""
+        extra += f"  fora da janela={fora}" if fora else ""
         verb = "plano" if not live else "enviados"
         print(f"  {sub:8} {verb}={sent}  falhas={failed}{extra}")
+    it_fora = f"  fora da janela={it_counts['fora']}" if it_counts["fora"] else ""
     print(f"  {'it':8} mesa={it_counts['mesa']}  lobby={it_counts['lobby']}  "
           f"não-lobby={it_counts['nonlobby']}  skip={it_counts['skip']}  "
-          f"retry={it_counts['retry']}  falhas={it_counts['fail']}")
+          f"retry={it_counts['retry']}  falhas={it_counts['fail']}{it_fora}")
     tot_sent += it_counts["mesa"] + it_counts["lobby"]
     tot_fail += it_counts["fail"] + it_counts["retry"]
-    lob_s, nonlob_s, lfail_s = lobby_sub_res
+    tot_fora += it_counts["fora"]
+    lob_s, nonlob_s, lfail_s, lfora_s = lobby_sub_res
     tot_sent += lob_s
     tot_fail += lfail_s
-    print(f"  {'lobby':8} lobbies={lob_s}  não-lobby={nonlob_s}  falhas={lfail_s}   (subpasta drop-only)")
+    tot_fora += lfora_s
+    lsub_fora = f"  fora da janela={lfora_s}" if lfora_s else ""
+    print(f"  {'lobby':8} lobbies={lob_s}  não-lobby={nonlob_s}  falhas={lfail_s}{lsub_fora}   (subpasta drop-only)")
     if lobby_res is not None:
-        lob, nonlob, lfail = lobby_res
+        lob, nonlob, lfail, lfora = lobby_res
         tot_fail += lfail
-        print(f"  {'lobby*':8} lobbies={lob}  não-lobby={nonlob}  falhas={lfail}   (LOBBY_DIR externa)")
+        tot_fora += lfora
+        ldir_fora = f"  fora da janela={lfora}" if lfora else ""
+        print(f"  {'lobby*':8} lobbies={lob}  não-lobby={nonlob}  falhas={lfail}{ldir_fora}   (LOBBY_DIR externa)")
     print("─" * 56)
     label = "plano (would-send)" if not live else "enviados"
-    print(f"  TOTAL {label}={tot_sent}  falhas={tot_fail}")
+    fora_lbl = f"  fora da janela={tot_fora}" if tot_fora else ""
+    print(f"  TOTAL {label}={tot_sent}  falhas={tot_fail}{fora_lbl}")
     if live and tot_fail:
         print("\n  ⚠ Ficheiros com falha FICARAM na subpasta — retry no próximo duplo-clique.")
     if live:
