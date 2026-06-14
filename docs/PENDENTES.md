@@ -1,5 +1,29 @@
 # Pendentes — backlog vivo
 
+## ★ Fila de arranque da pt73 (fecho pt72, 14 Jun)
+
+**Contexto fechado em pt72 (não repetir):** o **replayer-image GG morreu** (SPA Angular
+sem og:image, todas as idades — `#REPLAYER-OGIMAGE-DEAD-SPA`); screenshot/headless
+**descartado** (pesado/frágil/ToS incerto). Desanon GG = **só table-SS do IT**. 3 features
+shipped (`70a2919` botão Sincronizar histórico, `6b8d09c` janela de datas appimport,
+`f539cef` Dashboard nome-clicável). Detalhe: `JOURNAL_2026-06-14-pt72.md`.
+
+Para a pt73:
+1. **★ Classificador de tags por PASTA do IT** — **AUTORIZADO** (Rui, pt72). Tabela:
+   `ICM`→`icm`, `ICM PKO`→`icm-pko`, `PKO Pos`→`pos-pko`, `NPKO Pos`→**`pos-nko`**
+   (canónica existente — o Rui propôs `pos-npko` mas órfão de 21 mãos `pos-nko`;
+   recomendado `pos-nko`; aguarda 1 linha de confirmação da grafia). FT auto em todas
+   as famílias (`len(seats)==players_left`; fail-safe sem `-ft` se incerto;
+   `pos-pko-ft` unifica com `pos pko FT` existente — sem órfão). Construção:
+   (a) appimport itera **subpastas** de `it\` + injecta tag; (b) `folder_tag` no
+   `/api/table-ss/upload` → aplica a `discord_tags` da mão casada (como `capture_triage.tag`)
+   + guarda no log p/ reconcile; (c) `ALLOWED_TRIAGE_TAGS` += `pos-nko` + variantes `-ft`;
+   (d) FT `-ft` prudente. Diff ao Web antes do push. Ver `JOURNAL pt72 §E/§F`.
+2. **Concluir o Discord de maio 15-31** (`#DISCORD-MAIO-15-31-PENDENTE`) — sync até 31-mai +
+   processar o sem-replayer; GG-só-replayer ficam anónimas até haver table-SS.
+
+---
+
 ## ★ Feito em pt71 (13 Jun) — desanonimização por table-SS
 
 **FECHADO (não repetir):** pipeline de desanonimização por SS de mesa em **6 estágios**

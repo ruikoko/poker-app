@@ -6,6 +6,13 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt72 (14 Jun 2026 — replayer GG morto + Discord maio por concluir)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#REPLAYER-OGIMAGE-DEAD-SPA` | 🟠 (estrutural, externo) | **Aberto / não-corrigível do nosso lado.** A GG migrou `my.pokercraft.com/embedded/shared/client/…` de página server-rendered (com `<meta og:image>`) para **SPA Angular sem og:image** → `_extract_gg_replayer_image` (fetch+regex, httpx + urllib fallback) extrai **0/627** em TODAS as idades (fetch real maio-08→junho-13: HTTP 200, ~85 KB, zero `og:*`; só assets CSS `.png`; confirmado pelo Rui no HTML). Sem fallback guardado (`img_b64`=0, `screenshot_url`=0 nos entries + 0 nas 34 320 mãos GG). **Via screenshot/headless investigada e DESCARTADA** (Chromium na Railway: pesado ~300-500 MB + RAM/página, ~5-15 s/link, render assíncrono/bot-protection por validar, ToS pokercraft **não-verificado**). **Decisão:** replayer-image **descontinuado**; desanon GG só por table-SS do IT. Não há fix — é mudança da GG. **Impacto:** a Fase 2 do botão "Sincronizar histórico" (`70a2919`) extrai 0; o valor do botão fica na Fase 1 (RETOMAR sync) + Fase 3 (placeholders). → `JOURNAL pt72 §A/§B`; `discord_bot.py:_extract_gg_replayer_image`. |
+| `#DISCORD-MAIO-15-31-PENDENTE` | 🟡 MED | **Aberto — ficou por concluir nesta sessão.** O Discord de maio (15-31) está **cru/parcial**: as mensagens apanham-se (Fase 1 / `/sync`), mas as mãos GG referidas por replayer-link **ficam anónimas** (Fase 2 morta — ver `#REPLAYER-OGIMAGE-DEAD-SPA`). **Próximo:** (1) confirmar que o `/sync` apanhou tudo até 31-mai (cursor por canal); (2) processar o processável **sem** replayer (HH-text directo, placeholders GGDiscord); (3) aceitar que as GG-só-replayer de maio ficam por desanonimizar até haver table-SS do IT (se houver captura). → `JOURNAL pt72 §D`. |
+
 ## pt70 (11 Jun 2026 — fix #OPEN-WIZARD-CHORD-FALLBACK-BLIND + Release watcher-pt70)
 
 | ID | Sev | Resumo |
