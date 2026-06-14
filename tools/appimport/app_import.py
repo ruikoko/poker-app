@@ -256,13 +256,16 @@ def _imgs_in(folder):
 
 # ── Envio de 1 ficheiro (reutilizado pelas várias fontes) ─────────────────────
 
-def _post_table_ss(session, path, fname):
-    """POST /api/table-ss/upload. Devolve (ok, resumo)."""
+def _post_table_ss(session, path, fname, folder_tag=None):
+    """POST /api/table-ss/upload. Devolve (ok, resumo). `folder_tag` (pasta-como-tag,
+    pt72) viaja como form field opcional; o backend aplica-o à mão casada."""
     mime = _IMG[os.path.splitext(fname)[1].lower()]
+    data = {"folder_tag": folder_tag} if folder_tag else None
     try:
         with open(path, "rb") as fh:
             r = session.post(f"{POKER_APP_URL}/api/table-ss/upload",
-                             files={"file": (fname, fh, mime)}, timeout=600)
+                             files={"file": (fname, fh, mime)}, data=data,
+                             timeout=600)
     except Exception as e:
         return (False, f"EXC {type(e).__name__}: {e}")
     if 200 <= r.status_code < 300:
@@ -420,22 +423,38 @@ def process_type(session, sub, endpoint, exts, label, live, window=None):
     return sent, failed, skipped, fora
 
 
-# ── Pasta única `it` — classificada por NOME (MESA | LOBBY | SKIP) ─────────────
+# ── Pasta-como-tag (pt72): subpasta de it\ → tag de estudo ────────────────────
+# A PASTA escolhida no IT no momento da captura É a tag (substitui o canal
+# Discord, morto com o replayer GG). Chave = nome da subpasta normalizado
+# (lowercase, espaços colapsados); valor = tag BASE. O sufixo de fase '-ft' é
+# acrescentado pelo BACKEND a partir da Vision (bancos == players_left), não aqui.
+# EXTENSÍVEL: o Rui cria mais pastas no IT → acrescenta-se aqui a linha.
+IT_FOLDER_TAGS = {
+    "icm":      "icm",
+    "icm pko":  "icm-pko",
+    "pko pos":  "pos-pko",
+    "npko pos": "pos-nko",   # canónica existente (HM3_REAL_TAGS); simétrica de pos-pko
+}
 
-def process_it_mixed(session, live, window=None):
-    """Pasta única do Intuitive Tables (mesa + lobby). Cada ficheiro é
-    classificado pelo NOME e roteado para o endpoint certo. MESA → table-ss
-    (move → done/it); LOBBY → lobbys (move → done/lobby, retry transitório fica);
-    SKIP → fica no sítio (formato não-IT). Em dry-run só imprime o plano.
-    `window` (=(lo,hi) ou None) filtra por data: timestamp do NOME (captured),
-    fallback mtime. Devolve um dict de contagens."""
-    src = os.path.join(PARENT_DIR, IT_SUB)
-    done_table = os.path.join(PARENT_DIR, "done", IT_SUB)
-    done_lobby = os.path.join(PARENT_DIR, "done", LOBBY_SUB)
+
+def _folder_tag_for(subdir_name):
+    """Nome de uma subpasta de it\\ → tag BASE (ou None se não está na tabela)."""
+    key = re.sub(r"\s+", " ", (subdir_name or "").strip().lower())
+    return IT_FOLDER_TAGS.get(key)
+
+
+# ── Pasta `it` — classificada por NOME (MESA | LOBBY | SKIP) + tag da subpasta ──
+
+def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_lobby):
+    """Processa as imagens de UMA pasta de captura do IT (a raiz de it\\ ou uma
+    subpasta). `folder_tag` (ou None) = tag BASE da pasta-como-tag (pt72): viaja
+    no POST de MESA → o backend aplica-a à mão casada (o FT '-ft' é decidido lá,
+    pela Vision). LOBBY ignora a tag (não é mão de estudo). Muta `c`."""
     files = _imgs_in(src)
-    c = {"mesa": 0, "lobby": 0, "nonlobby": 0, "skip": 0, "retry": 0, "fail": 0, "fora": 0}
-
-    print(f"── {IT_SUB}/  (Intuitive Tables — mesa+lobby, routing por nome)  "
+    label = os.path.basename(src.rstrip("\\/")) or IT_SUB
+    sublbl = "" if label == IT_SUB else label
+    tag_lbl = f"  tag={folder_tag}" if folder_tag else ""
+    print(f"── {IT_SUB}/{sublbl}  (Intuitive Tables — routing por nome{tag_lbl})  "
           f"— {len(files)} ficheiro(s)")
     for fname in files:
         path = os.path.join(src, fname)
@@ -457,13 +476,14 @@ def process_it_mixed(session, live, window=None):
 
         if not live:
             hint = f" name_hint={name_hint!r}" if name_hint else ""
+            tg = f" folder_tag={folder_tag}" if (folder_tag and kind == "MESA") else ""
             print(f"   [dry] {kind:5} site={site or '?':9} captured_at={cap}  "
-                  f"→ {endpoint}{hint}  ({fname})")
+                  f"→ {endpoint}{hint}{tg}  ({fname})")
             c["mesa" if kind == "MESA" else "lobby"] += 1
             continue
 
         if kind == "MESA":
-            ok, msg = _post_table_ss(session, path, fname)
+            ok, msg = _post_table_ss(session, path, fname, folder_tag=folder_tag)
             if ok:
                 c["mesa"] += 1
                 print(f"   ✓ MESA   {fname}: {msg}")
@@ -471,7 +491,7 @@ def process_it_mixed(session, live, window=None):
             else:
                 c["fail"] += 1
                 print(f"   ✗ MESA   {fname}: {msg} → retry depois")
-        else:  # LOBBY — passa site (do filename) + name_hint (GG) como precedência
+        else:  # LOBBY — tag da pasta NÃO se aplica (lobby ≠ mão de estudo)
             status, msg = _post_lobby(session, path, fname, cap,
                                       site_hint=site, name_hint=name_hint)
             if status == "retry":
@@ -485,6 +505,38 @@ def process_it_mixed(session, live, window=None):
                 c["nonlobby"] += 1
                 print(f"   · LOBBY  {fname}: {msg} — processado")
                 shutil.move(path, _dest_no_clobber(done_lobby, fname))
+
+
+def process_it_mixed(session, live, window=None):
+    """Pasta do Intuitive Tables (mesa + lobby), classificada por NOME e roteada
+    para o endpoint certo. MESA → table-ss (move → done/it); LOBBY → lobbys (move
+    → done/lobby, retry transitório fica); SKIP → fica no sítio (formato não-IT).
+    Em dry-run só imprime o plano.
+
+    pt72 — PASTA-COMO-TAG: além da RAIZ de it\\ (sem tag, back-compat), processa
+    as SUBPASTAS de it\\ (ICM, ICM PKO, PKO Pos, NPKO Pos, …). A subpasta É a tag
+    (IT_FOLDER_TAGS); viaja no POST de MESA. Subpasta fora da tabela → processa
+    SEM tag (não inventa) + aviso. `window` filtra por data. Devolve contagens."""
+    src_root = os.path.join(PARENT_DIR, IT_SUB)
+    done_table = os.path.join(PARENT_DIR, "done", IT_SUB)
+    done_lobby = os.path.join(PARENT_DIR, "done", LOBBY_SUB)
+    c = {"mesa": 0, "lobby": 0, "nonlobby": 0, "skip": 0, "retry": 0, "fail": 0,
+         "fora": 0, "untagged_folder": 0}
+
+    # 1) raiz de it\ — sem tag (back-compat: ficheiros largados directamente).
+    _process_it_dir(session, live, src_root, None, window, c, done_table, done_lobby)
+
+    # 2) subpastas de it\ — a subpasta É a tag (pasta-como-tag).
+    for entry in sorted(os.listdir(src_root)):
+        sub = os.path.join(src_root, entry)
+        if not os.path.isdir(sub):
+            continue
+        tag = _folder_tag_for(entry)
+        if tag is None:
+            c["untagged_folder"] += 1
+            print(f"── {IT_SUB}/{entry}  ⚠ subpasta fora da tabela de tradução "
+                  f"(IT_FOLDER_TAGS) → processada SEM tag")
+        _process_it_dir(session, live, sub, tag, window, c, done_table, done_lobby)
     return c
 
 

@@ -193,6 +193,13 @@ def ensure_table_ss_processing_log_schema():
         "ALTER TABLE table_ss_processing_log "
         "ADD COLUMN IF NOT EXISTS img_b64 TEXT;"
     )
+    # pt72 — pasta-como-tag: a subpasta de captura do IT é a tag de estudo.
+    # Guardada na linha p/ o reconcile re-aplicar à mão (o FT '-ft' é derivado da
+    # Vision na aplicação, não guardado aqui).
+    alter_folder_tag = (
+        "ALTER TABLE table_ss_processing_log "
+        "ADD COLUMN IF NOT EXISTS folder_tag TEXT;"
+    )
     idx_uploaded = (
         "CREATE INDEX IF NOT EXISTS idx_table_ss_uploaded_at "
         "ON table_ss_processing_log (uploaded_at DESC);"
@@ -211,6 +218,7 @@ def ensure_table_ss_processing_log_schema():
         with conn.cursor() as cur:
             cur.execute(sql)
             cur.execute(alter_img)
+            cur.execute(alter_folder_tag)
             cur.execute(idx_uploaded)
             cur.execute(idx_result)
             cur.execute(idx_tn_captured)
@@ -269,6 +277,7 @@ def _upsert_table_ss_log(
     vision_json: Optional[dict] = None,
     matched_hand_db_id: Optional[int] = None,
     img_b64: Optional[str] = None,
+    folder_tag: Optional[str] = None,
 ) -> Optional[int]:
     """UPSERT por file_hash; incrementa attempt_count em conflito. Reconcilia o
     link da mão na MESMA transacção via `_apply_hand_link` (#FIX-B3 pt50): liga a
@@ -289,9 +298,9 @@ def _upsert_table_ss_log(
                     file_hash, source, original_filename, file_size, captured_at,
                     result, reason_detail, site, tournament_name,
                     tournament_number, players_left, total_entries,
-                    matched_hand_id, vision_json, img_b64
+                    matched_hand_id, vision_json, img_b64, folder_tag
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (file_hash) DO UPDATE SET
                     uploaded_at       = NOW(),
@@ -309,14 +318,15 @@ def _upsert_table_ss_log(
                     total_entries     = COALESCE(EXCLUDED.total_entries, table_ss_processing_log.total_entries),
                     matched_hand_id   = COALESCE(EXCLUDED.matched_hand_id, table_ss_processing_log.matched_hand_id),
                     vision_json       = COALESCE(EXCLUDED.vision_json, table_ss_processing_log.vision_json),
-                    img_b64           = COALESCE(EXCLUDED.img_b64, table_ss_processing_log.img_b64)
+                    img_b64           = COALESCE(EXCLUDED.img_b64, table_ss_processing_log.img_b64),
+                    folder_tag        = COALESCE(EXCLUDED.folder_tag, table_ss_processing_log.folder_tag)
                 RETURNING id
                 """,
                 (
                     file_hash, source, original_filename, file_size, captured_at,
                     result, reason_detail, site, tournament_name,
                     tournament_number, players_left, total_entries,
-                    matched_hand_id, vision_json, img_b64,
+                    matched_hand_id, vision_json, img_b64, folder_tag,
                 ),
             )
             row = cur.fetchone()
@@ -621,7 +631,7 @@ def reconcile_table_ss(hand_ids=None) -> dict:
 
     rows = query(
         """SELECT id, captured_at, site, vision_json, result, matched_hand_id,
-                  original_filename
+                  original_filename, folder_tag
              FROM table_ss_processing_log
             WHERE result IN ('success', 'no_match_to_hand', 'tm_ambiguous')
               AND vision_json IS NOT NULL"""
@@ -645,6 +655,9 @@ def reconcile_table_ss(hand_ids=None) -> dict:
             # cada reconcile de import. Rows antigas sem `seats` → no-op.
             if desired["result"] == "success":
                 _deanon_after_match(desired["matched_hand_db_id"], vj)
+                # pt72 — re-aplica a tag da pasta à mão (nova) casada.
+                _apply_folder_tag_to_hand(
+                    desired["matched_hand_db_id"], r.get("folder_tag"), vj)
         if desired["result"] == "success":
             n_success += 1
         elif desired["result"] == "tm_ambiguous":
@@ -732,11 +745,81 @@ def _deanon_after_match(matched_hand_db_id: Optional[int], vision_json) -> None:
         logger.error("[table_ss_deanon] hand %s falhou: %s", matched_hand_db_id, e)
 
 
+# ── pt72 — pasta-como-tag: aplicar a tag da subpasta do IT à mão casada ───────
+
+def _ft_applies(vision_json) -> bool:
+    """FT (mesa final) = nº de bancos OCUPADOS (com nick) == `players_left`,
+    ambos lidos pela Vision. Fail-safe: qualquer um ausente/0 → False (sem '-ft').
+    Pura/testável."""
+    if not isinstance(vision_json, dict):
+        return False
+    seats = vision_json.get("seats") or []
+    occupied = [
+        s for s in seats
+        if isinstance(s, dict) and (s.get("nick") or "").strip()
+    ]
+    pl = vision_json.get("players_left")
+    return (
+        bool(occupied)
+        and isinstance(pl, int) and not isinstance(pl, bool) and pl > 0
+        and len(occupied) == pl
+    )
+
+
+def _final_folder_tag(base_tag: Optional[str], vision_json) -> Optional[str]:
+    """tag final = base + '-ft' quando a Vision indica mesa final (bancos ==
+    restantes); senão só a base. Fail-safe (Rui): incerto → sem '-ft'. Pura."""
+    if not base_tag:
+        return None
+    return f"{base_tag}-ft" if _ft_applies(vision_json) else base_tag
+
+
+def _apply_folder_tag_to_hand(
+    matched_hand_db_id: Optional[int], base_tag: Optional[str], vision_json,
+    *, conn=None,
+) -> None:
+    """Aplica a tag da PASTA do IT à mão casada: escreve em `discord_tags` (union
+    distinct) + dispara `apply_villain_rules` — a MESMA porta da triagem manual
+    (`capture_triage.tag`). A tag final ganha '-ft' se a Vision indicar mesa final.
+    No-op se faltar mão/tag. Defensivo — falha aqui nunca rebenta o upload/reconcile.
+
+    `conn` dado (reconcile) → escreve na transacção do caller (não faz commit);
+    None → conn própria + commit."""
+    if not matched_hand_db_id or not base_tag:
+        return
+    final_tag = _final_folder_tag(base_tag, vision_json)
+    own = conn is None
+    try:
+        if own:
+            conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
+                "COALESCE(discord_tags, '{}'::text[]) || %s::text[])) WHERE id = %s",
+                ([final_tag], matched_hand_db_id),
+            )
+        if own:
+            conn.commit()
+        from app.services.villain_rules import apply_villain_rules
+        apply_villain_rules(matched_hand_db_id, conn=conn)
+        logger.info(
+            "[table_ss_folder_tag] hand %s -> tag %r", matched_hand_db_id, final_tag
+        )
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error(
+            "[table_ss_folder_tag] hand %s falhou: %s", matched_hand_db_id, e
+        )
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
 def _finalize(
     out: dict, *, source: str, original_filename: Optional[str],
     file_size: int, captured_at: Optional[datetime],
     matched_hand_db_id: Optional[int] = None,
     img_b64: Optional[str] = None,
+    folder_tag: Optional[str] = None,
 ) -> dict:
     """Persiste o resultado e devolve `out`."""
     _upsert_table_ss_log(
@@ -748,18 +831,26 @@ def _finalize(
         players_left=out["players_left"], total_entries=out["total_entries"],
         captured_at=captured_at, matched_hand_id=out["hand_matched"],
         vision_json=out["vision_json"], matched_hand_db_id=matched_hand_db_id,
-        img_b64=img_b64,
+        img_b64=img_b64, folder_tag=folder_tag,
     )
     # Estágio 3-b: após o link estar gravado, desanonimiza a mão GG casada.
     _deanon_after_match(matched_hand_db_id, out.get("vision_json"))
+    # pt72 — pasta-como-tag: aplica a tag da subpasta do IT à mão casada (após o
+    # de-anon, para a mão já ser table_ss quando as regras de vilão correm).
+    _apply_folder_tag_to_hand(matched_hand_db_id, folder_tag, out.get("vision_json"))
     return out
 
 
 async def _process_table_ss(
     content: bytes, filename: str, *,
     captured_at_override: Optional[str] = None, source: str = "manual_upload",
+    folder_tag: Optional[str] = None,
 ) -> dict:
-    """Pipeline de 1 SS de mesa. Devolve dict serializável de resultado."""
+    """Pipeline de 1 SS de mesa. Devolve dict serializável de resultado.
+
+    pt72 — `folder_tag` (pasta-como-tag do IT) é gravado no log e aplicado à mão
+    casada (via `_finalize`). NB: a via de dedup (sucesso prévio) retorna cedo e
+    NÃO re-aplica a tag — cada captura é processada uma vez (a tag entra aí)."""
     import asyncio
 
     file_hash = hashlib.sha256(content).hexdigest()
@@ -806,14 +897,16 @@ async def _process_table_ss(
         out["result"] = "vision_failed"
         out["reason_detail"] = "extract_table_ss_json devolveu None"
         return _finalize(out, source=source, original_filename=filename,
-                         file_size=fsize, captured_at=captured_at, img_b64=img_b64)
+                         file_size=fsize, captured_at=captured_at, img_b64=img_b64,
+                         folder_tag=folder_tag)
 
     vj = tv.parse_and_validate_table_ss_json(raw)
     if vj is None:
         out["result"] = "json_invalid"
         out["reason_detail"] = "JSON inválido ou sem campos úteis"
         return _finalize(out, source=source, original_filename=filename,
-                         file_size=fsize, captured_at=captured_at, img_b64=img_b64)
+                         file_size=fsize, captured_at=captured_at, img_b64=img_b64,
+                         folder_tag=folder_tag)
     # #TABLE-SS-VISION-SITE-MISCLASS: corrige a site lida quando o nome a
     # contradiz (Regra A `#NNN` trailing + Regra B cross-check BD), ANTES de
     # gravar a site no log e de filtrar candidatos por site.
@@ -845,7 +938,8 @@ async def _process_table_ss(
         out["result"] = "site_undetected"
         out["reason_detail"] = f"site={site!r} não suportado"
         return _finalize(out, source=source, original_filename=filename,
-                         file_size=fsize, captured_at=captured_at, img_b64=img_b64)
+                         file_size=fsize, captured_at=captured_at, img_b64=img_b64,
+                         folder_tag=folder_tag)
 
     # 5. Match — função determinística ÚNICA R (a MESMA que o reconcile corre).
     #    O upload deixa de ter caminho de match próprio: grava o read e chama R.
@@ -861,7 +955,7 @@ async def _process_table_ss(
     return _finalize(out, source=source, original_filename=filename,
                      file_size=fsize, captured_at=captured_at,
                      matched_hand_db_id=desired["matched_hand_db_id"],
-                     img_b64=img_b64)
+                     img_b64=img_b64, folder_tag=folder_tag)
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -872,15 +966,20 @@ async def upload_table_ss(
     filename: Optional[str] = Form(None),
     captured_at: Optional[str] = Form(None),
     source: str = Form("manual_upload"),
+    folder_tag: Optional[str] = Form(None),
     current_user=Depends(require_auth),
 ):
-    """Upload de 1 SS de mesa (manual UI ou cliente automático). Cookie auth."""
+    """Upload de 1 SS de mesa (manual UI ou cliente automático). Cookie auth.
+
+    pt72 — `folder_tag` (opcional, pasta-como-tag do IT): a subpasta de captura é
+    a tag de estudo; o backend aplica-a à mão casada (+ '-ft' se mesa final)."""
     content = await file.read()
     if not content:
         raise HTTPException(400, "Ficheiro vazio")
     fname = filename or file.filename or "upload.png"
     return await _process_table_ss(
         content, fname, captured_at_override=captured_at, source=source,
+        folder_tag=(folder_tag or "").strip() or None,
     )
 
 

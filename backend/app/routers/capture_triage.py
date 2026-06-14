@@ -25,7 +25,13 @@ logger = logging.getLogger("capture_triage")
 
 # Tags de 1 clique (nomes de canal Discord). 'nota' destina a Vilões; as outras
 # a Estudo — via as transições canónicas, que já lêem discord_tags + match real.
-ALLOWED_TRIAGE_TAGS = {"icm-pko", "pos-pko", "icm", "nota"}
+# pt72 — pasta-como-tag do IT: + 'pos-nko' (NPKO pós-flop, canónica) e as
+# variantes de fase '-ft' que o backend gera (mesa final). Tabela de tradução
+# das pastas vive em tools/appimport/app_import.py:IT_FOLDER_TAGS.
+ALLOWED_TRIAGE_TAGS = {
+    "icm", "icm-pko", "pos-pko", "pos-nko", "nota",
+    "icm-ft", "icm-pko-ft", "pos-pko-ft", "pos-nko-ft",
+}
 DISCARD = "__discard__"
 
 # Predicado da fila (DERIVADO): mão GG desanonimizada por table-SS, SEM tag, SEM

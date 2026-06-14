@@ -257,3 +257,24 @@ def test_img_date_bad_captured_falls_back_to_mtime():
         assert ai._img_date(path, "data-invalida") == datetime(2026, 6, 9, 12, 0, 0)
     finally:
         os.unlink(path)
+
+
+# ── pt72 — pasta-como-tag: subpasta de it\ → tag base ─────────────────────────
+
+def test_folder_tag_known_folders():
+    assert ai._folder_tag_for("ICM") == "icm"
+    assert ai._folder_tag_for("ICM PKO") == "icm-pko"
+    assert ai._folder_tag_for("PKO Pos") == "pos-pko"
+    assert ai._folder_tag_for("NPKO Pos") == "pos-nko"
+
+
+def test_folder_tag_case_and_space_insensitive():
+    assert ai._folder_tag_for("icm pko") == "icm-pko"
+    assert ai._folder_tag_for("  ICM   PKO  ") == "icm-pko"
+    assert ai._folder_tag_for("npko  pos") == "pos-nko"
+
+
+def test_folder_tag_unknown_returns_none():
+    assert ai._folder_tag_for("Qualquer Outra") is None
+    assert ai._folder_tag_for("") is None
+    assert ai._folder_tag_for(None) is None

@@ -21,6 +21,12 @@ Para a pt73:
    (d) FT `-ft` prudente. Diff ao Web antes do push. Ver `JOURNAL pt72 §E/§F`.
 2. **Concluir o Discord de maio 15-31** (`#DISCORD-MAIO-15-31-PENDENTE`) — sync até 31-mai +
    processar o sem-replayer; GG-só-replayer ficam anónimas até haver table-SS.
+3. **★ VALIDAR o `-ft` automático nas primeiras FT reais** (pedido do Web, pt72) — a regra
+   `len(seats_ocupados)==players_left → +"-ft"` está LIVE mas **nunca foi vista numa mão FT
+   real** (no lote das 64 GG, 0 eram FT). Quando aparecer a 1ª captura de mesa final
+   (`it\…` com bancos==restantes), confirmar que a tag sai `…-ft` correcta (ex. `icm-pko-ft`)
+   e que a contagem de bancos ignora vazios. Fail-safe activo (incerto → sem sufixo). Se a
+   Vision contar bancos a mais/menos, rever o `_ft_applies`. → `table_ss.py:_ft_applies`.
 
 ---
 
