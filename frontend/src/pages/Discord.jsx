@@ -340,6 +340,13 @@ export default function DiscordPage() {
   const [lobbySites, setLobbySites] = useState([])
   const [lobbyFailureTypes, setLobbyFailureTypes] = useState([])
   const [lobbyRetrySuccess, setLobbyRetrySuccess] = useState(false)
+  // Botão "Sincronizar histórico" (máquina de 3 fases no frontend) — pt(actual)
+  const [histRunning, setHistRunning] = useState(false)
+  const [histPhase, setHistPhase] = useState(null)   // 'retomar' | 'processar' | 'placeholders' | 'done' | 'erro'
+  const [histMsg, setHistMsg] = useState('')
+  const [histWave, setHistWave] = useState(0)
+  const [histProgress, setHistProgress] = useState(null)  // preview: {total, done, pending_extract, has_image_no_vision}
+  const [histError, setHistError] = useState('')
 
   const loadStatus = useCallback(() => {
     discord.status().then(setStatus).catch(e => setError(e.message))
@@ -412,6 +419,104 @@ export default function DiscordPage() {
     } finally {
       setSyncing(false)
       setSelectedWindow(null)  // reset chip activo após sync
+    }
+  }
+
+  // ── Botão "Sincronizar histórico" — máquina de 3 fases (à prova da armadilha)
+  // Fase 1 RETOMAR: /sync SEM corpo (avança do last_message_id para a frente até
+  //   ao presente). NUNCA o sync-and-process com janela (esse RESETA o cursor).
+  // Fase 2 PROCESSAR: process-replayer-links em VAGAS (max_iters=1, limit=30) até
+  //   o preview dar 0 pendentes. Resiliente ao timeout: o servidor faz commit
+  //   por-entry, por isso cada vaga é curta e retomável; deteta stall (og:image
+  //   que falha permanentemente nunca ganha img_b64 → não conta como progresso).
+  // Fase 3 PLACEHOLDERS: backfill-ggdiscord no fim.
+  // GG-replayer-only (os outros sites entram com nicks reais pela HH). Se a tab
+  // fechar a meio, o trabalho já feito fica (re-clicar retoma do estado actual).
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+  // Assinatura do cursor = par canal:last_message_id. Avanço do cursor é o sinal
+  // de progresso fiável do fetch (last_message_id sobe mesmo quando 0 itens úteis).
+  const cursorSig = (rows) => (rows || []).map(r => `${r.channel_id}:${r.last_message_id || ''}`).sort().join('|')
+  // Snowflake Discord → Date (epoch 1420070400000). Mostra a data da última msg
+  // apanhada por canal (o `messages_synced`/`last_sync_at` não dizem ATÉ QUANDO).
+  const snowflakeDate = (id) => {
+    if (!id) return null
+    try { return new Date(Number((BigInt(id) >> 22n)) + 1420070400000) } catch { return null }
+  }
+
+  const runHistorySync = async () => {
+    if (histRunning) return
+    setHistRunning(true); setHistError(''); setHistWave(0); setHistProgress(null)
+    setError(''); setMsg('')
+    try {
+      // ── FASE 1 — RETOMAR ────────────────────────────────────────────────
+      setHistPhase('retomar')
+      setHistMsg('A retomar do cursor — a apanhar mensagens novas até ao presente…')
+      // Loop /sync até o cursor parar de avançar (cobre canais com >500 msg novas,
+      // que uma só passagem do /sync corta em 500). Cap defensivo de 10 rondas.
+      for (let round = 0; round < 10; round++) {
+        const before = cursorSig(await discord.syncState())
+        await discord.sync()  // devolve logo; fetch corre em fundo no servidor
+        // Aguarda a assinatura do cursor estabilizar (2 leituras iguais), máx ~60s.
+        let prevSig = null, stable = 0
+        for (let i = 0; i < 20; i++) {
+          await sleep(3000)
+          const st = await discord.syncState(); setSyncState(st)
+          const sig = cursorSig(st)
+          if (sig === prevSig) { stable++; if (stable >= 2) break } else stable = 0
+          prevSig = sig
+        }
+        const after = cursorSig(await discord.syncState())
+        if (after === before) break  // este /sync não avançou → apanhado
+      }
+
+      // ── FASE 2 — PROCESSAR em vagas ─────────────────────────────────────
+      setHistPhase('processar')
+      let prev = await discord.processReplayerLinksPreview()
+      setHistProgress(prev)
+      // 2a) drenar a EXTRACÇÃO (og:image) — a parte que dava timeout.
+      let lastPending = prev.pending_extract, stall = 0, wave = 0
+      while (prev.pending_extract > 0 && stall < 3 && wave < 300) {
+        wave++; setHistWave(wave)
+        setHistMsg(`Vaga ${wave}: ${prev.done}/${prev.total} processadas · ${prev.pending_extract} por extrair…`)
+        try {
+          await discord.processReplayerLinks(30)  // max_iters=1 → 1 página, devolve rápido
+        } catch (_e) {
+          // timeout/erro de vaga: o servidor já fez commit por-entry → reler e continuar
+        }
+        await sleep(2500)  // deixar a Vision em fundo assentar antes de reler
+        prev = await discord.processReplayerLinksPreview()
+        setHistProgress(prev)
+        discord.syncState().then(setSyncState).catch(() => {})
+        if (prev.pending_extract >= lastPending) stall++; else stall = 0
+        lastPending = prev.pending_extract
+      }
+      const stuckExtract = prev.pending_extract  // og:image indisponível (ex. CDN expirado)
+      // 2b) esperar a Vision (em fundo) drenar `has_image_no_vision`, sem acção.
+      setHistMsg('A aguardar a Vision terminar em fundo…')
+      let lastVis = prev.has_image_no_vision, vstall = 0
+      while (prev.has_image_no_vision > 0 && vstall < 6) {
+        await sleep(3000)
+        prev = await discord.processReplayerLinksPreview()
+        setHistProgress(prev)
+        if (prev.has_image_no_vision >= lastVis) vstall++; else vstall = 0
+        lastVis = prev.has_image_no_vision
+      }
+
+      // ── FASE 3 — PLACEHOLDERS ───────────────────────────────────────────
+      setHistPhase('placeholders')
+      setHistMsg('A criar placeholders GGDiscord para mãos sem HH…')
+      await discord.backfillGgdiscord()
+
+      setHistPhase('done')
+      const parts = [`${prev.done}/${prev.total} processadas`]
+      if (stuckExtract > 0) parts.push(`${stuckExtract} sem og:image (CDN indisponível)`)
+      if (prev.has_image_no_vision > 0) parts.push(`${prev.has_image_no_vision} ainda na Vision`)
+      setHistMsg('Concluído — ' + parts.join(' · '))
+      loadStatus(); loadHands()
+    } catch (e) {
+      setHistPhase('erro'); setHistError(e.message || String(e))
+    } finally {
+      setHistRunning(false)
     }
   }
 
@@ -531,14 +636,84 @@ export default function DiscordPage() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer' }} onClick={() => { loadStatus(); loadHands() }}>Actualizar</button>
           <button
-            style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer', opacity: syncing || !status?.online ? 0.5 : 1 }}
+            style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#0ea5e9', color: '#fff', border: 'none', cursor: histRunning || syncing || !status?.online ? 'default' : 'pointer', opacity: histRunning || syncing || !status?.online ? 0.5 : 1 }}
+            onClick={runHistorySync}
+            disabled={histRunning || syncing || !status?.online}
+            title="Retoma do cursor (apanha o que falta + futuro), processa replayer-links em vagas e cria placeholders. Serve maio e todo o histórico."
+          >
+            {histRunning ? 'A sincronizar histórico…' : 'Sincronizar histórico'}
+          </button>
+          <button
+            style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', cursor: 'pointer', opacity: syncing || histRunning || !status?.online ? 0.5 : 1 }}
             onClick={() => setPanelOpen(o => !o)}
-            disabled={syncing || !status?.online}
+            disabled={syncing || histRunning || !status?.online}
           >
             Sincronizar {panelOpen ? '▴' : '▾'}
           </button>
         </div>
       </div>
+
+      {/* Painel de progresso do "Sincronizar histórico" (visível em qualquer tab) */}
+      {(histRunning || histPhase) && (
+        <div style={{ background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 10, padding: 18, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {histRunning && <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid #0ea5e9', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />}
+              Sincronizar histórico
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', background: '#0f1117', padding: '2px 8px', borderRadius: 999 }}>
+                {histPhase === 'retomar' && '1/3 · Retomar'}
+                {histPhase === 'processar' && '2/3 · Processar'}
+                {histPhase === 'placeholders' && '3/3 · Placeholders'}
+                {histPhase === 'done' && '✓ Concluído'}
+                {histPhase === 'erro' && '✕ Erro'}
+              </span>
+            </div>
+            {!histRunning && (histPhase === 'done' || histPhase === 'erro') && (
+              <button onClick={() => { setHistPhase(null); setHistError(''); setHistProgress(null); setHistMsg('') }}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 2 }}>×</button>
+            )}
+          </div>
+
+          <div style={{ fontSize: 12, color: histPhase === 'erro' ? '#f87171' : '#cbd5e1', marginBottom: 12 }}>
+            {histPhase === 'erro' ? `Erro: ${histError}` : histMsg}
+          </div>
+
+          {histProgress && (() => {
+            const t = histProgress.total || 0
+            const done = histProgress.done || 0
+            const pct = t > 0 ? Math.round((done / t) * 100) : 0
+            return (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ height: 10, background: '#0f1117', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: '#22c55e', transition: 'width 0.4s' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11 }}>
+                  <span style={{ color: '#22c55e', fontWeight: 600 }}>{done} concluídas</span>
+                  <span style={{ color: '#94a3b8' }}>{histProgress.has_image_no_vision} na Vision</span>
+                  <span style={{ color: '#f59e0b' }}>{histProgress.pending_extract} por extrair</span>
+                  <span style={{ color: '#64748b', marginLeft: 'auto' }}>{done}/{t} ({pct}%){histWave > 0 ? ` · vaga ${histWave}` : ''}</span>
+                </div>
+              </div>
+            )
+          })()}
+
+          {syncState.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Cursor por canal (última mensagem apanhada)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {syncState.filter(r => r.last_message_id).map(r => {
+                  const d = snowflakeDate(r.last_message_id)
+                  return (
+                    <span key={r.channel_id} style={{ fontSize: 11, background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, padding: '3px 8px', color: '#cbd5e1' }}>
+                      #{r.channel_name} <span style={{ color: '#64748b' }}>{d ? d.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Painel sincronização (toggle inline) */}
       {panelOpen && !syncing && (

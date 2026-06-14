@@ -700,6 +700,7 @@ def debug_fetch(url: str, current_user=Depends(require_auth)):
 async def process_replayer_links(
     confirm: bool = False,
     limit: int = 50,
+    max_iters: int = 50,
     current_user=Depends(require_auth),
 ):
     """
@@ -710,7 +711,13 @@ async def process_replayer_links(
       2. Guarda img_b64 no entry
       3. Dispara _run_vision_for_entry em background — Vision + match automático
 
-    Requer ?confirm=true. Parâmetro ?limit=N limita quantos processa (default 50).
+    Requer ?confirm=true. Parâmetro ?limit=N limita o tamanho de cada página
+    (default 50). Parâmetro ?max_iters=N limita quantas páginas processa antes
+    de devolver (default 50 = drena todo o backlog numa chamada, comportamento
+    legacy). O botão "Sincronizar histórico" passa max_iters=1 para processar
+    em VAGAS curtas: cada chamada faz 1 página e devolve, o frontend repete até
+    o preview dar 0 pendentes. Isto evita o timeout de 300s (uma só chamada a
+    drenar centenas de og:image sequenciais) e a sobreposição de pedidos.
     Devolve relatório por entry (sucesso extract / falha + razão).
     Vision corre em background, pode demorar ~5s por entry.
     """
@@ -739,7 +746,9 @@ async def process_replayer_links(
     report = []
     vision_queued = 0
     total_scanned = 0
-    _PAGINATION_CAP = 50
+    # Cap de páginas: max_iters=1 → uma vaga (botão "Sincronizar histórico");
+    # default 50 → drena tudo (legacy). Clamp >=1 para nunca virar no-op.
+    _PAGINATION_CAP = max(1, max_iters)
 
     conn = get_conn()
     try:

@@ -150,6 +150,12 @@ export const discord = {
   // Recompute N/M/K do último sync contra o estado actual da BD (números
   // assentes após Vision/match em background). `since` = last_sync.started_at.
   syncCounters:   (since)  => req('GET', `/discord/sync-counters?since=${encodeURIComponent(since)}`),
+  // Botão "Sincronizar histórico" (orquestração no frontend): processa
+  // replayer-links GG em VAGAS curtas (max_iters=1) e lê o progresso via
+  // preview; backfill cria os placeholders GGDiscord no fim.
+  processReplayerLinks:        (limit = 30)  => req('POST', `/discord/process-replayer-links?confirm=true&limit=${limit}&max_iters=1`),
+  processReplayerLinksPreview: ()  => req('GET',  '/discord/process-replayer-links/preview'),
+  backfillGgdiscord:           ()  => req('POST', '/discord/backfill-ggdiscord?confirm=true'),
 }
 
 // ── Import ────────────────────────────────────────────────────────────────────
