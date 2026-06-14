@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { hands, study, screenshots, captureTriage } from '../api/client'
 import { SITE_COLORS } from '../lib/siteColors'
+import ZoomableImage from '../components/Lightbox'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -466,7 +467,13 @@ export default function DashboardPage() {
             >
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {m.tournament_name || m.hand_id}
+                  <ZoomableImage
+                    src={m.table_ss_id != null ? captureTriage.imageUrl(m.table_ss_id) : null}
+                    alt="Captura da mão"
+                    triggerStyle={{ color: 'var(--accent, #0ea5e9)', textDecoration: 'underline', textUnderlineOffset: 2 }}
+                  >
+                    {m.tournament_name || m.hand_id}
+                  </ZoomableImage>
                   {m.deanon_partial && <span title="Mapeamento parcial" style={{ marginLeft: 6, fontSize: 9, color: '#f59e0b' }}>parcial</span>}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>{(m.players || []).slice(0, 4).join(' · ')}</div>

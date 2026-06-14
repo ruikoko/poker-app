@@ -107,7 +107,15 @@ export default function CaptureTriagePage() {
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{h.tournament_name || h.hand_id}</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  <ZoomableImage
+                    src={h.table_ss_id != null ? captureTriage.imageUrl(h.table_ss_id) : null}
+                    alt="Captura da mão"
+                    triggerStyle={{ color: 'var(--accent, #0ea5e9)', textDecoration: 'underline', textUnderlineOffset: 2 }}
+                  >
+                    {h.tournament_name || h.hand_id}
+                  </ZoomableImage>
+                </span>
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtDate(h.played_at)}</span>
                 {h.deanon_partial && (
                   <span title="Nem todos os bancos foram mapeados (ambíguos ficaram por mapear)"
@@ -117,7 +125,15 @@ export default function CaptureTriagePage() {
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 4px' }}>{h.hand_id}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 4px' }}>
+                <ZoomableImage
+                  src={h.table_ss_id != null ? captureTriage.imageUrl(h.table_ss_id) : null}
+                  alt="Captura da mão"
+                  triggerStyle={{ color: 'var(--accent, #0ea5e9)', textDecoration: 'underline', textUnderlineOffset: 2 }}
+                >
+                  {h.hand_id}
+                </ZoomableImage>
+              </div>
               <div style={{ fontSize: 12, lineHeight: 1.5 }}>
                 {(h.players || []).map((p, i) => (
                   <span key={i} style={{ fontWeight: p === h.hero ? 700 : 400,

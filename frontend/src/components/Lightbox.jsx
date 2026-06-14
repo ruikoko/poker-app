@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react'
 
 /**
- * ZoomableImage — miniatura que amplia num lightbox ao clicar.
- * Clica na miniatura → overlay fullscreen com a imagem em grande.
+ * ZoomableImage — abre a imagem (captura) num lightbox ao clicar.
+ * Clica no gatilho → overlay fullscreen com a imagem em grande.
  * Clica fora / Esc → fecha. Reutilizável onde a imagem da captura aparece
- * (triagem, Estudo, detalhe da mão) por consistência.
+ * (triagem, Dashboard, Estudo, detalhe da mão) por consistência.
  *
- * Props: src, alt, e qualquer style/className para a MINIATURA (thumbStyle).
+ * Gatilho:
+ *  - por defeito = uma MINIATURA <img src> (estilo via thumbStyle).
+ *  - se passares `children`, eles são o gatilho clicável (ex.: o nome/ID da
+ *    mão como texto), estilizável via triggerStyle. Sem `src`, os children
+ *    renderizam tal-e-qual SEM serem clicáveis (mão sem captura).
+ *
+ * Props: src, alt, thumbStyle (miniatura), children + triggerStyle (texto), onError.
  */
-export default function ZoomableImage({ src, alt = '', thumbStyle = {}, onError }) {
+export default function ZoomableImage({ src, alt = '', thumbStyle = {}, onError, children, triggerStyle = {} }) {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -24,18 +30,30 @@ export default function ZoomableImage({ src, alt = '', thumbStyle = {}, onError 
     }
   }, [open])
 
-  if (!src) return null
+  // Sem captura: como wrapper de texto mostra os children não-clicáveis;
+  // como miniatura não renderiza nada (comportamento de sempre).
+  if (!src) return children ? children : null
+
+  const trigger = children ? (
+    <span
+      onClick={() => setOpen(true)}
+      title="Clica para ver a captura"
+      style={{ cursor: 'zoom-in', ...triggerStyle }}
+    >{children}</span>
+  ) : (
+    <img
+      src={src}
+      alt={alt}
+      onClick={() => setOpen(true)}
+      onError={onError}
+      title="Clica para ampliar"
+      style={{ cursor: 'zoom-in', ...thumbStyle }}
+    />
+  )
 
   return (
     <>
-      <img
-        src={src}
-        alt={alt}
-        onClick={() => setOpen(true)}
-        onError={onError}
-        title="Clica para ampliar"
-        style={{ cursor: 'zoom-in', ...thumbStyle }}
-      />
+      {trigger}
       {open && (
         <div
           onClick={() => setOpen(false)}
