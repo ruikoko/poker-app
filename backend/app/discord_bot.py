@@ -51,6 +51,16 @@ LOBBY_CHANNEL_NAME = os.getenv("DISCORD_LOBBY_CHANNEL", "lobbys").lower()
 # quando quiser comecar a usar. Independente de DISCORD_AUTO_SYNC global.
 LOBBY_AUTO = os.getenv("DISCORD_LOBBY_AUTO", "false").lower() in ("true", "1", "yes")
 
+# pt73 — #REPLAYER-OGIMAGE-DEAD-SPA / #SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT:
+# o replayer GG passou a SPA Angular SEM og:image (todas as idades, pt72) → a
+# descoberta de imagem do replayer falha SEMPRE. Pior: o fetch era HTTP SÍNCRONO
+# (gg.gl→pokercraft) e, em lote, prendia o event loop do uvicorn (502, worker
+# único). Desligada por defeito; a desanon GG faz-se por table-SS, não pelo
+# replayer. Reversível por env REPLAYER_IMAGE_DISCOVERY=1 se a GG repuser og:image.
+REPLAYER_IMAGE_DISCOVERY = os.getenv(
+    "REPLAYER_IMAGE_DISCOVERY", "false"
+).lower() in ("true", "1", "yes")
+
 # ── Regex para detecção de conteúdo ──────────────────────────────────────────
 
 PATTERNS = {
@@ -386,7 +396,15 @@ def _extract_gg_replayer_image(url: str) -> dict | None:
     2. Extrai URL da imagem do HTML (og:image ou img tag)
     3. Download do PNG
     4. Retorna URL + base64
+
+    pt73 — desligado por defeito (`REPLAYER_IMAGE_DISCOVERY`): o replayer GG é
+    uma SPA sem og:image (#REPLAYER-OGIMAGE-DEAD-SPA) → falhava sempre, e o fetch
+    síncrono em lote prendia o event loop (#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT).
+    Short-circuit a None evita qualquer chamada de rede.
     """
+    if not REPLAYER_IMAGE_DISCOVERY:
+        return None
+
     import base64
     try:
         import httpx

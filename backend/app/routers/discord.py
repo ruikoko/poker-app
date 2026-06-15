@@ -630,6 +630,23 @@ def process_replayer_links_preview(current_user=Depends(require_auth)):
     has_image_no_vision = [r for r in rows if r["has_image"] and not r["vision_done"]]
     done = [r for r in rows if r["vision_done"]]
 
+    # pt73 — com a descoberta de imagem desligada (#REPLAYER-OGIMAGE-DEAD-SPA),
+    # os 'pending_extract' nunca resolvem por extracção. Reportar 0 para o botão
+    # "Sincronizar histórico" (que repete até pending=0) não entrar em loop. O
+    # backlog real fica visível em `pending_extract_blocked` para transparência.
+    from app.discord_bot import REPLAYER_IMAGE_DISCOVERY
+    if not REPLAYER_IMAGE_DISCOVERY:
+        return {
+            "ok": True,
+            "total": len(rows),
+            "pending_extract": 0,
+            "pending_extract_blocked": len(pending),
+            "has_image_no_vision": len(has_image_no_vision),
+            "done": len(done),
+            "discovery_disabled": True,
+            "sample_pending": [],
+        }
+
     sample = [
         {
             "id": r["id"],
@@ -731,8 +748,20 @@ async def process_replayer_links(
     import asyncio
     import json
     from app.db import get_conn
-    from app.discord_bot import _extract_gg_replayer_image
+    from app.discord_bot import _extract_gg_replayer_image, REPLAYER_IMAGE_DISCOVERY
     from app.routers.screenshot import _run_vision_for_entry
+
+    # pt73 — #REPLAYER-OGIMAGE-DEAD-SPA: com a descoberta de imagem desligada
+    # (defeito), este endpoint não tem nada a extrair. Sair já evita varrer (e
+    # re-varrer, 50 iters) entries que nunca resolvem — o que prendia o worker
+    # (#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT). A Vision de entries com img_b64 já
+    # existente é tratada à parte (sync-and-process step 4b).
+    if not REPLAYER_IMAGE_DISCOVERY:
+        return {
+            "status": "skipped",
+            "reason": "replayer image discovery desligada (#REPLAYER-OGIMAGE-DEAD-SPA)",
+            "processed": [], "vision_queued": 0, "total_scanned": 0,
+        }
 
     # #P13 fix (pt14): paginar até esgotar candidatos. Limit antigo (200)
     # cortava silenciosamente quando volume >200 (29% das entries em pt14
@@ -777,9 +806,13 @@ async def process_replayer_links(
                 report.append(entry_item)
                 continue
 
-            # Extrair og:image
+            # Extrair og:image. pt73: OFF-THREAD (asyncio.to_thread) — a função
+            # faz httpx SÍNCRONO; corrê-la no event loop prendia o worker único
+            # em lote (#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT). Hoje devolve None
+            # de imediato (descoberta desligada, #REPLAYER-OGIMAGE-DEAD-SPA), mas
+            # o to_thread garante que não bloqueia se for re-activada.
             try:
-                img_data = _extract_gg_replayer_image(url)
+                img_data = await asyncio.to_thread(_extract_gg_replayer_image, url)
             except Exception as e:
                 entry_item["status"] = "error_extract"
                 entry_item["reason"] = f"excepção: {e}"

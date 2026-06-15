@@ -44,6 +44,62 @@ Para a pt73:
 - **✅ `Nota` sem formato/pré-pós — RESOLVIDO** (decisão do Rui, pt73): a tag `nota` sozinha
   basta (→ Vilões, regra C). Sem família de formato nem fase. Questão fechada.
 
+### 🔴 RE-IMPORT do 14 Jun — bloqueado por crédito Anthropic esgotado (pt73)
+
+No `--ao-vivo` de 14 Jun a **Vision falhou 100%** (166 capturas `vision_failed`, 39 lobbys
+"transitório"). **Causa confirmada** (teste directo à API com a chave de prod): Anthropic
+**`400 invalid_request_error: "Your credit balance is too low"`** — saldo a zero. **NÃO é o
+deploy** `a894703` (ilibado: 8 capturas tiveram `success` antes do saldo acabar; serviço
+saudável, migração `folder_ft_source` correu no boot; rollback não resolveria). O
+classificador de pastas funcionou (tags certas em todas as subpastas).
+- **Acção do Rui:** ✅ feito — créditos carregados na conta Anthropic.
+- **Retrato (verificado read-only, 15 Jun):** **120 capturas de 14 Jun**, todas `vision_failed`,
+  `attempt_count=1`, **com `folder_tag` (120/120) + `img_b64` (120/120) + `original_filename`**
+  guardados no `table_ss_processing_log`. **0 mãos desanon** (Vision falhou → sem match → tag não
+  propagou a `hands.discord_tags`). As 1495 HH GG de 14 Jun estão na BD. **Nada perdido.**
+  ⚠️ **Correcção:** os ficheiros **FORAM movidos para `done\`** (não "ficaram nas pastas" — eu
+  tinha dito mal); `attempt_count=1` ⟹ nunca reprocessados (o re-import pós-créditos não lhes
+  tocou, já estavam em `done\`).
+- **✅ Recuperação = ferramenta de reprocesso SERVER-SIDE** (a seguir ao fix Discord): re-corre a
+  Vision sobre o `img_b64` guardado → match HH → aplica `folder_tag` → desanon. Sem o Rui mexer
+  em ficheiros. Idempotente (`file_hash` PK; table-SS liga, não cria mãos). **NÃO** re-feed dos
+  ficheiros de `done\`.
+- **Observabilidade (✅ pt73, commit a):** `extract_table_ss_json`/`extract_lobby_payout_json`
+  propagam o erro REAL da Anthropic para `reason_detail` (ex. "credit balance too low") em vez
+  do genérico "devolveu None" — o próximo caso é óbvio no `/import-health` sem ir à API.
+
+### Discord ReadTimeout no mesmo import — `#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT` (pré-existente)
+
+O Discord sync deu **ReadTimeout (300s)** no mesmo import. É **separado** da Vision e
+**pré-existente** (pt68, `#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT`): endpoint síncrono a estoirar
+o limite num lote grande. Não tem a ver com o crédito Anthropic nem com o deploy de hoje.
+Backlog: tornar os endpoints de import assíncronos (job + polling) — fora do âmbito da pt73.
+
+### 🟥→✅ 502 do servidor (15 Jun) — replayer GG morto a prender o event loop — FIX pt73
+
+Após o re-import (com créditos), a app deu **502** (containers "Online", mas o worker único do
+uvicorn **bloqueado**). Causa real (watchdog dumpou a stack do event loop 3×, fundo em
+`httpcore/_sync/ssl.recv`): `process_replayer_links` é `async` mas chamava
+`_extract_gg_replayer_image` **síncrono no event loop**, 1× por entry replayer GG pendente —
+cada um um fetch a `gg.gl→pokercraft` que **falha sempre** (SPA morto, `#REPLAYER-OGIMAGE-DEAD-SPA`).
+Em lote (14 Jun), centenas a fio congelaram o worker. **Não era OOM nem crash-loop; não era o
+deploy.** Rui reiniciou → estável.
+- **✅ FIX (pt73, commit b):** flag `REPLAYER_IMAGE_DISCOVERY` (env, **default OFF**) +
+  short-circuit em `_extract_gg_replayer_image` (zero rede); a chamada em `process_replayer_links`
+  passa a `asyncio.to_thread` (nunca no event loop) + early-return quando off; `preview` reporta
+  `pending_extract=0` (botão "Sincronizar histórico" não entra em loop). Fecha o lado **replayer**
+  do `#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT`; o refactor async geral dos endpoints de import fica
+  backlog. Reversível por `REPLAYER_IMAGE_DISCOVERY=1` se a GG repuser og:image.
+
+### 🟡 BUG appimport — `_post_table_ss` move para `done\` mesmo em `vision_failed` (registar, corrigir depois)
+
+`tools/appimport/app_import.py:_post_table_ss` trata **qualquer HTTP 200 como sucesso** e o
+appimport move o ficheiro para `done\` — mas o endpoint responde 200 mesmo em `vision_failed`.
+Resultado: capturas que **não** foram desanon foram movidas (e o `done\it\` é **achatado**, perde
+a subpasta = a tag). Foi isto que assustou o Rui no 14 Jun. **Correcção (não agora):** o MESA deve
+imitar o LOBBY — em falha **não mover** (deixar nas pastas para retry), distinguindo `success` de
+`vision_failed`/`json_invalid`/`no_match` na resposta. Ver `_post_lobby` (devolve `retry` e não move).
+
 ---
 
 ## ★ Feito em pt71 (13 Jun) — desanonimização por table-SS
