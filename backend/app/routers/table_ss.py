@@ -1225,3 +1225,132 @@ def list_recent_table_ss(
         (limit,),
     )
     return {"count": len(rows), "items": [dict(r) for r in rows]}
+
+
+# ── pt73 — Auditoria read-only da desanon por table-SS (verificar a amostra) ──
+
+_VERIFY_SCOPE = (
+    "h.site='GGPoker' AND (h.player_names->>'match_method')='table_ss' "
+    "AND h.context_table_ss_id IS NOT NULL AND h.played_at >= '2026-01-01' "
+    "AND h.study_state <> 'mtt_archive'"
+)
+
+
+def _verify_is_strong(method: str) -> bool:
+    """Método de match 'forte' = identidade por NOME directo ou tn do filename.
+    'Fraco' = aproximação (stack/tempo) → verificar primeiro."""
+    m = (method or "").lower()
+    return ("name" in m) or ("filename_tn" in m)
+
+
+@router.get("/verify-recovery")
+def verify_recovery(
+    samples: int = Query(4, ge=0, le=20),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """READ-ONLY (não altera nada). Retrato de confiança da desanon por table-SS
+    (GG 2026): (1) distribuição por método + lista das FRACAS; (2) parciais vs
+    completas + lista das parciais; (3) coerência cross-torneio (hash→nome fixo
+    dentro do torneio? swaps); (4) amostras de torneios diferentes com nomes reais
+    + link da captura. Auth dual (cookie OU Bearer)."""
+    # (1) método de match — via reason_detail do log da captura ligada à mão.
+    method_rows = query(
+        f"""SELECT COALESCE(l.reason_detail, '(sem)') AS method, COUNT(*) AS n
+              FROM hands h
+              JOIN table_ss_processing_log l ON l.id = h.context_table_ss_id
+             WHERE {_VERIFY_SCOPE}
+             GROUP BY 1 ORDER BY n DESC"""
+    )
+    method_dist = [
+        {"method": r["method"], "n": r["n"],
+         "confianca": "forte" if _verify_is_strong(r["method"]) else "fraca"}
+        for r in method_rows
+    ]
+    weak = query(
+        f"""SELECT h.hand_id, h.tournament_name, h.played_at::text AS played_at,
+                   h.context_table_ss_id AS ss_id, l.reason_detail AS method
+              FROM hands h
+              JOIN table_ss_processing_log l ON l.id = h.context_table_ss_id
+             WHERE {_VERIFY_SCOPE}
+               AND COALESCE(l.reason_detail, '') !~* '(name|filename_tn)'
+             ORDER BY h.played_at DESC LIMIT 50"""
+    )
+
+    # (2) parciais vs completas.
+    pc = query(
+        f"""SELECT COALESCE((h.player_names->>'deanon_partial')='true', false) AS partial,
+                   COUNT(*) AS n FROM hands h WHERE {_VERIFY_SCOPE} GROUP BY 1"""
+    )
+    pc_map = {bool(r["partial"]): r["n"] for r in pc}
+    partial_list = query(
+        f"""SELECT h.hand_id, h.tournament_name, h.played_at::text AS played_at,
+                   h.context_table_ss_id AS ss_id
+              FROM hands h
+             WHERE {_VERIFY_SCOPE} AND (h.player_names->>'deanon_partial')='true'
+             ORDER BY h.played_at DESC LIMIT 50"""
+    )
+
+    # (3) coerência cross-torneio: o hash GG deve mapear para 1 só nome dentro
+    #     do torneio. >1 nome = swap (sinal vermelho). Esperado: 0.
+    amap_rows = query(
+        f"""SELECT h.hand_id, h.tournament_number,
+                   h.player_names->'anon_map' AS anon_map
+              FROM hands h
+             WHERE {_VERIFY_SCOPE} AND h.tournament_number IS NOT NULL"""
+    )
+    by_tn: dict = {}
+    for r in amap_rows:
+        tn = r["tournament_number"]
+        e = by_tn.setdefault(tn, {"hands": set(), "hash_names": {}})
+        e["hands"].add(r["hand_id"])
+        for hsh, name in (r.get("anon_map") or {}).items():
+            e["hash_names"].setdefault(hsh, set()).add(name)
+    multi = {tn: e for tn, e in by_tn.items() if len(e["hands"]) >= 2}
+    conflicts = []
+    for tn, e in multi.items():
+        for hsh, names in e["hash_names"].items():
+            if len(names) > 1:
+                conflicts.append({"tournament_number": tn, "hash": hsh,
+                                  "names": sorted(names)})
+
+    # (4) amostras de torneios DIFERENTES (1 por tn), com nomes + link da captura.
+    sample_rows = query(
+        f"""SELECT DISTINCT ON (h.tournament_number)
+                   h.hand_id, h.tournament_name, h.tournament_number,
+                   h.played_at::text AS played_at,
+                   h.context_table_ss_id AS ss_id,
+                   h.player_names->'anon_map' AS anon_map,
+                   h.player_names->>'hero' AS hero
+              FROM hands h
+             WHERE {_VERIFY_SCOPE}
+             ORDER BY h.tournament_number, h.played_at DESC"""
+    )
+    out_samples = []
+    for r in sample_rows[:samples]:
+        names = sorted({v for v in (r.get("anon_map") or {}).values() if v})
+        out_samples.append({
+            "hand_id": r["hand_id"],
+            "tournament_name": r["tournament_name"],
+            "played_at": r["played_at"],
+            "hero": r["hero"],
+            "players": names,
+            "n_mapped": len(names),
+            "capture_url": f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None,
+        })
+
+    total = query(f"SELECT COUNT(*) AS n FROM hands h WHERE {_VERIFY_SCOPE}")[0]["n"]
+    return {
+        "total_deanon_table_ss": total,
+        "method_distribution": method_dist,
+        "weak_matches": [dict(r) for r in weak],
+        "partial_vs_complete": {
+            "complete": pc_map.get(False, 0), "partial": pc_map.get(True, 0)},
+        "partial_list": [dict(r) for r in partial_list],
+        "cross_tournament": {
+            "tournaments_checked": len(by_tn),
+            "tournaments_multi_capture": len(multi),
+            "conflicts": len(conflicts),
+            "conflict_detail": conflicts[:20],
+        },
+        "samples": out_samples,
+    }

@@ -294,6 +294,45 @@ def test_process_vision_failed(_q, _ex, _up):
     _up.assert_called_once()
 
 
+# ── pt73 — auditoria read-only verify-recovery ────────────────────────────────
+
+def test_verify_is_strong_classifier():
+    assert table_ss._verify_is_strong("disambiguated_by_name_direct") is True
+    assert table_ss._verify_is_strong("filename_tn") is True
+    assert table_ss._verify_is_strong("closest_by_time") is False
+    assert table_ss._verify_is_strong("stack_arithmetic") is False
+    assert table_ss._verify_is_strong(None) is False
+
+
+def test_verify_recovery_assembles_and_detects_swap():
+    # 7 chamadas a query(), por ordem: method, weak, pc, partial_list, amap,
+    # samples, total. amap tem 1 torneio com 2 mãos e o MESMO hash com 2 nomes
+    # diferentes → conflito (swap) detectado.
+    side = [
+        [{"method": "disambiguated_by_name_direct", "n": 160},
+         {"method": "closest_by_time", "n": 6}],                       # method
+        [{"hand_id": "GG-1", "tournament_name": "X", "played_at": "2026-06-14",
+          "ss_id": 1, "method": "closest_by_time"}],                   # weak
+        [{"partial": False, "n": 164}, {"partial": True, "n": 2}],     # pc
+        [{"hand_id": "GG-2", "tournament_name": "Y", "played_at": "2026-06-14",
+          "ss_id": 2}],                                                # partial_list
+        [{"hand_id": "GG-3", "tournament_number": "T1", "anon_map": {"ab": "Joana"}},
+         {"hand_id": "GG-4", "tournament_number": "T1", "anon_map": {"ab": "Pedro"}}],  # amap (swap!)
+        [{"hand_id": "GG-3", "tournament_name": "X", "tournament_number": "T1",
+          "played_at": "2026-06-14", "ss_id": 3, "anon_map": {"ab": "Joana"},
+          "hero": "thinvalium"}],                                      # samples
+        [{"n": 166}],                                                  # total
+    ]
+    with patch("app.routers.table_ss.query", side_effect=side):
+        out = table_ss.verify_recovery(samples=4, current_user={"id": 1})
+    assert out["total_deanon_table_ss"] == 166
+    assert out["partial_vs_complete"] == {"complete": 164, "partial": 2}
+    assert len(out["weak_matches"]) == 1
+    assert out["cross_tournament"]["conflicts"] == 1          # swap apanhado
+    assert out["cross_tournament"]["conflict_detail"][0]["names"] == ["Joana", "Pedro"]
+    assert out["samples"][0]["capture_url"] == "/api/table-ss/image/3"
+
+
 # ── pt73 — reprocesso server-side de capturas vision_failed (recuperação) ─────
 
 def _failed_row():
