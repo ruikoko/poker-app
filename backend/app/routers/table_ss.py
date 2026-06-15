@@ -27,7 +27,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 
-from app.auth import require_auth
+from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
 from app.services.image_utils import detect_image_mime, compress_image
 from app.services import table_ss_vision as tv
@@ -988,6 +988,117 @@ async def _process_table_ss(
                      img_b64=img_b64, folder_tag=folder_tag)
 
 
+# ── pt73 — Recuperar capturas que falharam a Vision (sem re-feed de ficheiros) ─
+# Quando a Vision falhou (ex. crédito Anthropic esgotado) a captura ficou
+# `vision_failed` mas COM `img_b64` (imagem comprimida) + `folder_tag` +
+# `original_filename` no log. Esta ferramenta re-corre a Vision sobre a imagem
+# GUARDADA → parse → match HH → deanon + folder_tag, ACTUALIZANDO a MESMA row
+# (por id). Idempotente: não duplica linhas (UPDATE in-place) nem mãos (table-SS
+# LIGA, não cria). Vision OFF-THREAD + sequencial + throttle → não volta a afogar
+# o worker (#SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT) nem rebenta o rate-limit. É o
+# espelho do post-Vision do upload, mas a partir do read guardado.
+
+_REPROCESS_THROTTLE_S = 0.4   # pausa entre Visions (suaviza o rate-limit)
+
+
+def _update_failed_reason(ss_id: int, reason: str, *, result: str = "vision_failed") -> None:
+    """Actualiza só result/reason_detail (+ attempt_count) quando o reprocesso
+    não chega a produzir um read utilizável (Vision ainda falha, JSON inválido,
+    site não suportado). Não toca o link da mão."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE table_ss_processing_log SET result=%s, reason_detail=%s, "
+                "attempt_count = attempt_count + 1 WHERE id=%s",
+                (result, reason, ss_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _store_recovered_vision(ss_id: int, vj: dict) -> None:
+    """Grava o read Vision recuperado na row existente (vision_json + derivados).
+    NÃO toca match/link — isso é o _persist_table_ss_match a seguir. dict→jsonb
+    via o adapter global (app.db)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE table_ss_processing_log SET vision_json=%s, site=%s, "
+                "tournament_name=%s, players_left=%s, total_entries=%s WHERE id=%s",
+                (vj, vj.get("site"), vj.get("tournament_name"),
+                 vj.get("players_left"), vj.get("total_entries"), ss_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def _reprocess_failed_row(row: dict) -> dict:
+    """Re-corre a Vision sobre o img_b64 guardado de UMA captura `vision_failed`
+    e refaz o pipeline post-Vision na MESMA row. Devolve {id, result, reason}."""
+    import base64
+    ss_id = row["id"]
+    filename = row.get("original_filename") or ""
+    folder_tag = row.get("folder_tag")
+    captured_at = row.get("captured_at")
+    out = {"id": ss_id, "result": None, "reason": None}
+    import asyncio
+
+    try:
+        content = base64.b64decode(row["img_b64"])
+    except Exception:
+        _update_failed_reason(ss_id, "img_b64 inválido")
+        out["result"] = "vision_failed"; out["reason"] = "img_b64 inválido"
+        return out
+
+    err: dict = {}
+    raw = await asyncio.to_thread(tv.extract_table_ss_json, content, "image/jpeg", err)
+    if _REPROCESS_THROTTLE_S:
+        await asyncio.sleep(_REPROCESS_THROTTLE_S)
+    if raw is None:
+        _update_failed_reason(ss_id, err.get("error") or "vision_failed (reprocess)")
+        out["result"] = "vision_failed"; out["reason"] = err.get("error")
+        return out
+
+    vj = tv.parse_and_validate_table_ss_json(raw)
+    if vj is None:
+        _update_failed_reason(ss_id, "JSON inválido ou sem campos úteis", result="json_invalid")
+        out["result"] = "json_invalid"; out["reason"] = "JSON inválido"
+        return out
+
+    # Site AUTORITÁRIO do nome do ficheiro (pt56); fallback Vision + _correct_site.
+    _parsed = parse_table_ss_filename(filename)
+    if _parsed["site"]:
+        vj["site"] = _parsed["site"]
+    else:
+        vj["site"] = tv._correct_site(vj.get("tournament_name"), vj.get("site"))
+    if vj.get("site") == "Winamax":
+        vj["tournament_name"] = clean_winamax_tournament_name(vj.get("tournament_name"))[0]
+
+    _store_recovered_vision(ss_id, vj)
+
+    site = vj.get("site")
+    if site not in ALLOWED_SITES:
+        _update_failed_reason(ss_id, f"site={site!r} não suportado", result="site_undetected")
+        out["result"] = "site_undetected"; out["reason"] = f"site={site!r}"
+        return out
+
+    # Match determinístico (a MESMA função R do upload/reconcile) + persist + link.
+    desired = compute_table_ss_match(
+        captured_at, site, vj, filename_tn=_parsed["tournament_number"])
+    _persist_table_ss_match(
+        ss_id, desired, prev_result="vision_failed", prev_matched_hand_id=None)
+    if desired["result"] == "success":
+        _deanon_after_match(desired["matched_hand_db_id"], vj)
+        _apply_folder_tag_to_hand(desired["matched_hand_db_id"], folder_tag, vj)
+    out["result"] = desired["result"]
+    out["reason"] = desired["reason_detail"]
+    return out
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/upload")
@@ -1043,6 +1154,58 @@ def trigger_reconcile_table_ss(current_user=Depends(require_auth)):
     (consultas + updates, sem Vision). Usado p.ex. após backfill de nomes para
     re-ligar as SS já importadas (#FIX-B3 + pt54). Devolve o tally."""
     return reconcile_table_ss(hand_ids=None)
+
+
+# pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).
+_REPROCESS_ELIGIBLE_SQL = (
+    "FROM table_ss_processing_log "
+    "WHERE result = 'vision_failed' AND img_b64 IS NOT NULL AND img_b64 <> ''"
+)
+
+
+@router.get("/reprocess-failed/preview")
+def reprocess_failed_preview(current_user=Depends(require_auth_or_api_key)):
+    """DRY-RUN: quantas capturas `vision_failed` têm imagem guardada (logo são
+    recuperáveis server-side, sem re-feed de ficheiros). pt73: auth dual
+    (cookie OU Bearer HRC_WATCHER_API_KEY) — recuperação service-side."""
+    n = query(f"SELECT COUNT(*) AS n {_REPROCESS_ELIGIBLE_SQL}")[0]["n"]
+    return {"eligible": n}
+
+
+@router.post("/reprocess-failed")
+async def reprocess_failed(
+    confirm: bool = Query(False),
+    limit: int = Query(25, ge=1, le=100),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """Recupera capturas `vision_failed` que têm `img_b64` guardado: re-corre a
+    Vision sobre a imagem GUARDADA (sem o Rui mexer em ficheiros) → match HH →
+    deanon + folder_tag, na MESMA row. Idempotente (UPDATE in-place; sem duplicar
+    linhas nem mãos).
+
+    Processa em VAGAS de `limit` (default 25) — Vision OFF-THREAD + sequencial +
+    throttle, por isso o event loop fica livre (health/login respondem) e o
+    rate-limit não rebenta. Chamar repetidamente (ou ver `remaining`) até 0.
+    Requer ?confirm=true. Devolve tally por resultado + `remaining`."""
+    if not confirm:
+        raise HTTPException(400, "Adicionar ?confirm=true. Ver /reprocess-failed/preview primeiro.")
+    rows = query(
+        "SELECT id, original_filename, folder_tag, captured_at, img_b64 "
+        f"{_REPROCESS_ELIGIBLE_SQL} ORDER BY id ASC LIMIT %s",
+        (limit,),
+    )
+    tally = {"processed": 0, "success": 0, "no_match_to_hand": 0,
+             "tm_ambiguous": 0, "vision_failed": 0, "json_invalid": 0,
+             "site_undetected": 0}
+    report = []
+    for r in rows:
+        res = await _reprocess_failed_row(r)
+        tally["processed"] += 1
+        tally[res["result"]] = tally.get(res["result"], 0) + 1
+        report.append(res)
+    remaining = query(f"SELECT COUNT(*) AS n {_REPROCESS_ELIGIBLE_SQL}")[0]["n"]
+    logger.info("[table_ss_reprocess] %s remaining=%d", tally, remaining)
+    return {"tally": tally, "remaining": remaining, "report": report}
 
 
 @router.get("/recent")

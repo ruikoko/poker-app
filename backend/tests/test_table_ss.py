@@ -294,6 +294,55 @@ def test_process_vision_failed(_q, _ex, _up):
     _up.assert_called_once()
 
 
+# ── pt73 — reprocesso server-side de capturas vision_failed (recuperação) ─────
+
+def _failed_row():
+    return {"id": 7, "original_filename": "GGPoker-X(123)(#1)-20260614231443-9.png",
+            "folder_tag": "icm-pko", "captured_at": CAP, "img_b64": "aGVsbG8="}
+
+
+@patch("app.routers.table_ss._apply_folder_tag_to_hand")
+@patch("app.routers.table_ss._deanon_after_match")
+@patch("app.routers.table_ss._persist_table_ss_match", return_value=True)
+@patch("app.routers.table_ss._store_recovered_vision")
+@patch("app.routers.table_ss.compute_table_ss_match",
+       return_value={"result": "success", "reason_detail": "filename_tn",
+                     "site": "GGPoker", "tournament_number": "123",
+                     "matched_hand_id": "GG-9", "matched_hand_db_id": 9})
+@patch("app.routers.table_ss.parse_table_ss_filename",
+       return_value={"site": "GGPoker", "tournament_number": "123"})
+@patch("app.routers.table_ss.tv.parse_and_validate_table_ss_json",
+       return_value={"site": "GGPoker", "tournament_name": "X", "players_left": 50,
+                     "seats": [{"nick": "a"}]})
+@patch("app.routers.table_ss.tv.extract_table_ss_json", return_value='{"site":"GGPoker"}')
+def test_reprocess_failed_row_success_applies_folder_tag(
+    _ex, _pv, _pf, _cm, _store, _persist, _deanon, _apply):
+    out = asyncio.run(table_ss._reprocess_failed_row(_failed_row()))
+    assert out["result"] == "success"
+    # desanon + folder_tag aplicados à mão casada
+    _deanon.assert_called_once()
+    _apply.assert_called_once()
+    assert _apply.call_args[0][0] == 9          # matched_hand_db_id
+    assert _apply.call_args[0][1] == "icm-pko"  # folder_tag preservado
+    _store.assert_called_once()                  # vision_json gravado in-place
+
+
+@patch("app.routers.table_ss._update_failed_reason")
+@patch("app.routers.table_ss.tv.extract_table_ss_json", return_value=None)
+def test_reprocess_failed_row_still_failing_updates_reason(_ex, _upd):
+    # Vision ainda falha (ex. crédito ainda em falta) → só actualiza reason,
+    # NÃO cria mão nem aplica tag; fica vision_failed para nova tentativa.
+    def _se(content, mime, err_out=None):
+        if err_out is not None:
+            err_out["error"] = "Vision API: BadRequestError: credit balance too low"
+        return None
+    with patch("app.routers.table_ss.tv.extract_table_ss_json", side_effect=_se):
+        out = asyncio.run(table_ss._reprocess_failed_row(_failed_row()))
+    assert out["result"] == "vision_failed"
+    _upd.assert_called_once()
+    assert "credit balance too low" in _upd.call_args[0][1]
+
+
 @patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
 @patch("app.routers.table_ss.query", return_value=[])
 def test_process_vision_failed_propagates_real_error(_q, _up):
