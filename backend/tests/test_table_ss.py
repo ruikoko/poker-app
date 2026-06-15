@@ -295,6 +295,20 @@ def test_process_vision_failed(_q, _ex, _up):
 
 
 @patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
+@patch("app.routers.table_ss.query", return_value=[])
+def test_process_vision_failed_propagates_real_error(_q, _up):
+    # pt73 — a causa REAL (escrita no err_out pela Vision) chega ao reason_detail.
+    def _se(content, mime, err_out=None):
+        if err_out is not None:
+            err_out["error"] = "Vision API: BadRequestError: credit balance is too low"
+        return None
+    with patch("app.routers.table_ss.tv.extract_table_ss_json", side_effect=_se):
+        out = _run_process()
+    assert out["result"] == "vision_failed"
+    assert out["reason_detail"] == "Vision API: BadRequestError: credit balance is too low"
+
+
+@patch("app.routers.table_ss._upsert_table_ss_log", return_value=1)
 @patch("app.routers.table_ss.tv.extract_table_ss_json", return_value="not json at all")
 @patch("app.routers.table_ss.query", return_value=[])
 def test_process_json_invalid(_q, _ex, _up):

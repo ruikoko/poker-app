@@ -5,13 +5,49 @@ coercoes. NAO chama Anthropic API (extract_table_ss_json fica para smoke).
 """
 import json
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from app.services.table_ss_vision import (
+    extract_table_ss_json,
     parse_and_validate_table_ss_json,
     derive_captured_at,
     _coerce_pos_int,
     _coerce_float,
 )
+
+
+# ── pt73 — observabilidade: err_out apanha a causa REAL da falha ──────────────
+
+def test_extract_err_out_captures_api_error():
+    """Excepção da Anthropic (ex. crédito esgotado) → err_out['error'] populado,
+    return None. O caller propaga isto para reason_detail."""
+    err = {}
+    with patch("anthropic.Anthropic") as MockA:
+        MockA.return_value.messages.create.side_effect = RuntimeError(
+            "Error code: 400 - credit balance is too low"
+        )
+        out = extract_table_ss_json(b"\x89PNG", "image/png", err)
+    assert out is None
+    assert "credit balance is too low" in err["error"]
+    assert err["error"].startswith("Vision API:")
+
+
+def test_extract_err_out_captures_no_json():
+    """Resposta sem JSON parseable → err_out marca isso (não 'devolveu None')."""
+    err = {}
+    with patch("anthropic.Anthropic") as MockA:
+        resp = MockA.return_value.messages.create.return_value
+        resp.content = [type("C", (), {"text": "desculpa, não consigo"})()]
+        out = extract_table_ss_json(b"\x89PNG", "image/png", err)
+    assert out is None
+    assert err["error"] == "Vision respondeu sem JSON parseable"
+
+
+def test_extract_err_out_optional_no_crash_when_omitted():
+    """err_out é opcional: omitir não rebenta (back-compat)."""
+    with patch("anthropic.Anthropic") as MockA:
+        MockA.return_value.messages.create.side_effect = RuntimeError("boom")
+        assert extract_table_ss_json(b"\x89PNG", "image/png") is None
 
 
 # ── derive_captured_at (pt51: Lisboa naive, verbatim do filename) ───────────

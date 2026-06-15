@@ -114,15 +114,22 @@ _MODEL = "claude-sonnet-4-6"
 
 
 def extract_lobby_payout_json(
-    image_bytes: bytes, mime_type: str = "image/png"
+    image_bytes: bytes, mime_type: str = "image/png",
+    err_out: Optional[dict] = None,
 ) -> Optional[str]:
     """Chama Claude Sonnet 4.6 com a SS da lobby. Devolve raw JSON text ou
     None em caso de falha API. Pre-fill com '{' garante JSON puro (no preamble).
+
+    pt73 — observabilidade: se `err_out` (dict) for dado, escreve nele
+    `err_out['error']` com a causa REAL quando devolve None (espelho do
+    table_ss_vision). Tipo de retorno inalterado — os mocks ignoram o arg extra.
     """
     try:
         from anthropic import Anthropic  # lazy: evita import-time se SDK ausente
     except ImportError:
         logger.error("anthropic SDK nao instalado")
+        if err_out is not None:
+            err_out["error"] = "anthropic SDK nao instalado"
         return None
 
     try:
@@ -152,9 +159,16 @@ def extract_lobby_payout_json(
         # {...} no output via regex — resiliente a markdown wrap / prosa.
         text = (response.content[0].text or "").strip()
         m = re.search(r"\{.*\}", text, re.DOTALL)
-        return m.group(0) if m else None
+        if m:
+            return m.group(0)
+        if err_out is not None:
+            err_out["error"] = "Vision respondeu sem JSON parseable"
+        return None
     except Exception as e:
-        logger.error(f"lobby_vision API error: {type(e).__name__}: {e}")
+        msg = f"{type(e).__name__}: {e}"
+        logger.error(f"lobby_vision API error: {msg}")
+        if err_out is not None:
+            err_out["error"] = f"Vision API: {msg[:300]}"
         return None
 
 

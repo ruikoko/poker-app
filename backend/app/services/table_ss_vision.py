@@ -115,15 +115,25 @@ _TABLE_PROMPT = (
 # ── Vision call ──────────────────────────────────────────────────────────────
 
 def extract_table_ss_json(
-    image_bytes: bytes, mime_type: str = "image/png"
+    image_bytes: bytes, mime_type: str = "image/png",
+    err_out: Optional[dict] = None,
 ) -> Optional[str]:
     """Chama Claude Sonnet 4.6 com a SS da mesa. Devolve raw JSON text ou None
     em caso de falha API. Sonnet 4.6 não aceita prefill — apanha o 1º {...} via
-    regex (resiliente a markdown wrap / prosa). Idêntico ao lobby_vision."""
+    regex (resiliente a markdown wrap / prosa). Idêntico ao lobby_vision.
+
+    pt73 — observabilidade: se `err_out` (dict) for dado, escreve nele
+    `err_out['error']` com a causa REAL quando devolve None (ex.: erro da
+    Anthropic 'credit balance too low', SDK ausente, ou resposta sem JSON). O
+    caller propaga isso para `reason_detail` em vez do genérico 'devolveu None'.
+    Mantém o tipo de retorno (Optional[str]) — os mocks dos testes ignoram o
+    arg extra."""
     try:
         from anthropic import Anthropic  # lazy: evita import-time se SDK ausente
     except ImportError:
         logger.error("anthropic SDK não instalado")
+        if err_out is not None:
+            err_out["error"] = "anthropic SDK não instalado"
         return None
 
     try:
@@ -151,9 +161,16 @@ def extract_table_ss_json(
         )
         text = (response.content[0].text or "").strip()
         m = re.search(r"\{.*\}", text, re.DOTALL)
-        return m.group(0) if m else None
+        if m:
+            return m.group(0)
+        if err_out is not None:
+            err_out["error"] = "Vision respondeu sem JSON parseable"
+        return None
     except Exception as e:
-        logger.error(f"table_ss_vision API error: {type(e).__name__}: {e}")
+        msg = f"{type(e).__name__}: {e}"
+        logger.error(f"table_ss_vision API error: {msg}")
+        if err_out is not None:
+            err_out["error"] = f"Vision API: {msg[:300]}"
         return None
 
 

@@ -277,23 +277,25 @@ async def process_lobby_message(
         base["result"] = "pre_2026_skip"
         return base
 
+    vmeta: dict = {}   # pt73: apanha a causa REAL da falha da Vision
     async with _anthropic_sem:
         raw = await asyncio.to_thread(
-            lobby_vision.extract_lobby_payout_json, image_bytes, mime_type
+            lobby_vision.extract_lobby_payout_json, image_bytes, mime_type, vmeta
         )
         if throttle_seconds > 0:
             await asyncio.sleep(throttle_seconds)
 
     if raw is None:
+        real_err = vmeta.get("error") or "vision_returned_none"
         if log_on_failure:
             _upsert_lobby_log(
                 message_id=message_id, channel_id=channel_id,
                 result="vision_failed",
-                reason_detail="extract_lobby_payout_json returned None",
+                reason_detail=real_err,
                 posted_at=posted_at,
             )
         base["result"] = "vision_failed"
-        base["reason_detail"] = "vision_returned_none"
+        base["reason_detail"] = real_err
         return base
 
     vj = lobby_vision.parse_and_validate_lobby_json(raw)

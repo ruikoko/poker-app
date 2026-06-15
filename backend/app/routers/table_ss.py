@@ -918,12 +918,14 @@ async def _process_table_ss(
     # linha para a triagem mostrar a SS ao lado da mão. Off-thread (PIL é CPU).
     img_b64, _ = await asyncio.to_thread(compress_image, content)
 
-    # 3. Vision (off-thread — única chamada lenta/externa).
+    # 3. Vision (off-thread — única chamada lenta/externa). pt73: vmeta apanha a
+    # causa REAL da falha (ex. crédito Anthropic esgotado) p/ o reason_detail.
     mime = detect_image_mime(content)
-    raw = await asyncio.to_thread(tv.extract_table_ss_json, content, mime)
+    vmeta: dict = {}
+    raw = await asyncio.to_thread(tv.extract_table_ss_json, content, mime, vmeta)
     if raw is None:
         out["result"] = "vision_failed"
-        out["reason_detail"] = "extract_table_ss_json devolveu None"
+        out["reason_detail"] = vmeta.get("error") or "extract_table_ss_json devolveu None"
         return _finalize(out, source=source, original_filename=filename,
                          file_size=fsize, captured_at=captured_at, img_b64=img_b64,
                          folder_tag=folder_tag)
