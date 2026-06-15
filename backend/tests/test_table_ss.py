@@ -333,6 +333,33 @@ def test_verify_recovery_assembles_and_detects_swap():
     assert out["samples"][0]["capture_url"] == "/api/table-ss/image/3"
 
 
+def test_hand_seats_maps_seats_and_flags_unmapped():
+    # APA com hero (mapeado) + 1 vilão mapeado + 1 assento POR MAPEAR (hash).
+    apa = {
+        "_meta": {"sb": 100, "bb": 200, "level": 5},
+        "Lauro Dermio": {"seat": 1, "position": "BTN", "stack": 20000,
+                         "stack_bb": 100.0, "is_hero": True, "real_name": "Lauro Dermio"},
+        "Niklas Astedt": {"seat": 3, "position": "BB", "stack": 9000,
+                          "stack_bb": 45.0, "is_hero": False, "real_name": "Niklas Astedt"},
+        "89ef4cba": {"seat": 5, "position": "CO", "stack": 0, "stack_bb": 0,
+                     "is_hero": False, "real_name": "89ef4cba"},  # all-in / por mapear
+    }
+    pn = {"anon_map": {"h1": "Lauro Dermio", "h2": "Niklas Astedt"}, "match_method": "table_ss"}
+    row = {"hand_id": "GG-9", "tournament_name": "X", "played_at": "2026-06-09",
+           "ss_id": 9, "all_players_actions": apa, "player_names": pn}
+    with patch("app.routers.table_ss.query", return_value=[row]):
+        out = table_ss.hand_seats(hand_ids="GG-9", current_user={"id": 1})
+    h = out["hands"][0]
+    assert h["n_seats"] == 3 and h["n_mapped"] == 2
+    assert h["capture_url"] == "/api/table-ss/image/9"
+    s = {x["seat"]: x for x in h["seats"]}
+    assert s[1]["nick"] == "Lauro Dermio" and s[1]["is_hero"] is True and s[1]["mapped"]
+    assert s[3]["nick"] == "Niklas Astedt" and s[3]["position"] == "BB"
+    assert s[5]["mapped"] is False and s[5]["nick"] is None and s[5]["raw_hash"] == "89ef4cba"
+    # ordenado por seat
+    assert [x["seat"] for x in h["seats"]] == [1, 3, 5]
+
+
 # ── pt73 — reprocesso server-side de capturas vision_failed (recuperação) ─────
 
 def _failed_row():

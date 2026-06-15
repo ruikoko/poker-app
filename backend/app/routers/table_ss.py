@@ -1354,3 +1354,59 @@ def verify_recovery(
         },
         "samples": out_samples,
     }
+
+
+@router.get("/hand-seats")
+def hand_seats(
+    hand_ids: str = Query(..., description="hand_ids separados por vírgula"),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """READ-ONLY: mapa por ASSENTO de cada mão, EXACTAMENTE como ficou na BD após
+    o match (de `all_players_actions`). Por assento: seat · nick (ou hash se por
+    mapear) · stack (fichas + BB) · posição · hero. Para comparar banco-a-banco
+    com a captura. Marca os assentos POR MAPEAR (all-in/ambíguos). Auth dual."""
+    ids = [x.strip() for x in (hand_ids or "").split(",") if x.strip()]
+    if not ids:
+        raise HTTPException(400, "hand_ids vazio")
+    rows = query(
+        """SELECT hand_id, tournament_name, played_at::text AS played_at,
+                  context_table_ss_id AS ss_id, all_players_actions, player_names
+             FROM hands WHERE hand_id = ANY(%s)""",
+        (ids,),
+    )
+    out = []
+    for r in rows:
+        apa = r.get("all_players_actions") or {}
+        pn = r.get("player_names") or {}
+        mapped_names = set((pn.get("anon_map") or {}).values())
+        meta = apa.get("_meta") or {}
+        seats = []
+        for key, info in apa.items():
+            if key == "_meta" or not isinstance(info, dict):
+                continue
+            name = info.get("real_name", key)
+            is_mapped = name in mapped_names
+            seats.append({
+                "seat": info.get("seat"),
+                "nick": name if is_mapped else None,
+                "raw_hash": None if is_mapped else name,
+                "stack": info.get("stack"),
+                "stack_bb": info.get("stack_bb"),
+                "position": info.get("position"),
+                "is_hero": bool(info.get("is_hero")),
+                "mapped": is_mapped,
+            })
+        seats.sort(key=lambda s: (s["seat"] is None, s["seat"] if s["seat"] is not None else 0))
+        out.append({
+            "hand_id": r["hand_id"],
+            "tournament_name": r["tournament_name"],
+            "played_at": r["played_at"],
+            "capture_url": f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None,
+            "blinds": {"sb": meta.get("sb"), "bb": meta.get("bb"), "level": meta.get("level")},
+            "n_seats": len(seats),
+            "n_mapped": sum(1 for s in seats if s["mapped"]),
+            "seats": seats,
+        })
+    order = {h: i for i, h in enumerate(ids)}
+    out.sort(key=lambda x: order.get(x["hand_id"], 999))
+    return {"hands": out}
