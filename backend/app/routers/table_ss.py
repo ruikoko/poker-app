@@ -1359,7 +1359,8 @@ def verify_recovery(
 @router.get("/deanon-debug")
 def deanon_debug(
     hand_id: Optional[str] = Query(None, description="forense de 1 mão; ausente = scan da frota"),
-    gap_bb: float = Query(2.0, description="scan: flag se 2 stacks não-hero ficam a <gap_bb BB"),
+    mode: str = Query("fit", description="scan: 'fit' (SS≠mão por stacks/hero) ou 'gap' (stacks próximos)"),
+    gap_bb: float = Query(2.0, description="scan gap: flag se 2 stacks não-hero ficam a <gap_bb BB"),
     current_user=Depends(require_auth_or_api_key),
 ):
     """READ-ONLY forense da desanon table-SS. A desanon mapeia nome→cadeira SÓ por
@@ -1424,35 +1425,104 @@ def deanon_debug(
             "nota": "posição = da HH (correcta); nick = mapeado por stack (pode trocar).",
         }
 
-    # ── Scan da frota: risco de troca por stacks próximos ────────────────────
+    if mode == "gap":
+        # Risco de PERMUTAÇÃO por stacks próximos (within-hand). Sinal secundário.
+        rows = query(
+            f"""SELECT h.hand_id, h.tournament_name, h.all_players_actions
+                  FROM hands h WHERE {_VERIFY_SCOPE} AND h.all_players_actions IS NOT NULL""")
+        flagged = []
+        for r in rows:
+            apa = r.get("all_players_actions") or {}
+            stacks = []
+            for k, info in apa.items():
+                if k == "_meta" or not isinstance(info, dict) or info.get("is_hero"):
+                    continue
+                sb = info.get("stack_bb")
+                if isinstance(sb, (int, float)) and not isinstance(sb, bool) and sb > 0:
+                    stacks.append((round(float(sb), 1), info.get("position")))
+            stacks.sort()
+            close = []
+            for i in range(1, len(stacks)):
+                gap = stacks[i][0] - stacks[i - 1][0]
+                if gap < gap_bb:
+                    close.append({"a": stacks[i - 1], "b": stacks[i], "gap_bb": round(gap, 2)})
+            if close:
+                flagged.append({"hand_id": r["hand_id"],
+                                "tournament_name": r["tournament_name"], "close_pairs": close})
+        return {"scope": "GG table_ss deanon 2026", "mode": "gap",
+                "total_checked": len(rows), "gap_bb_threshold": gap_bb,
+                "n_swap_risk": len(flagged), "flagged": flagged[:80]}
+
+    # mode == 'fit' (default): a SS corresponde MESMO a esta mão? Compara os
+    # stacks que a Vision leu na imagem com os stacks da HH. Sinal PRIMÁRIO do
+    # bug GG-6042783089: se o hero está ALLIN na imagem mas tem stack na HH (ou
+    # os conjuntos divergem muito), a SS é de OUTRA mão → deanon não-fiável.
     rows = query(
-        f"""SELECT h.hand_id, h.tournament_name, h.all_players_actions
-              FROM hands h WHERE {_VERIFY_SCOPE} AND h.all_players_actions IS NOT NULL""")
+        f"""SELECT h.hand_id, h.tournament_name, h.all_players_actions, l.vision_json
+              FROM hands h
+              JOIN table_ss_processing_log l ON l.id = h.context_table_ss_id
+             WHERE {_VERIFY_SCOPE} AND h.all_players_actions IS NOT NULL""")
+
+    def _num(x):
+        return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+
     flagged = []
+    n_hero_allin_mismatch = 0
     for r in rows:
         apa = r.get("all_players_actions") or {}
-        stacks = []
+        vj = r.get("vision_json") or {}
+        hero_hh = None
+        hh = []
         for k, info in apa.items():
-            if k == "_meta" or not isinstance(info, dict) or info.get("is_hero"):
+            if k == "_meta" or not isinstance(info, dict):
                 continue
-            sb = info.get("stack_bb")
-            if isinstance(sb, (int, float)) and not isinstance(sb, bool) and sb > 0:
-                stacks.append((round(float(sb), 1), info.get("position")))
-        stacks.sort()
-        close = []
-        for i in range(1, len(stacks)):
-            gap = stacks[i][0] - stacks[i - 1][0]
-            if gap < gap_bb:
-                close.append({"a": stacks[i - 1], "b": stacks[i], "gap_bb": round(gap, 2)})
-        if close:
-            flagged.append({"hand_id": r["hand_id"],
-                            "tournament_name": r["tournament_name"],
-                            "close_pairs": close})
+            sb = _num(info.get("stack_bb"))
+            if info.get("is_hero"):
+                hero_hh = sb
+            elif sb and sb > 0:
+                hh.append(sb)
+        hero_vis = None
+        hero_vis_allin = False
+        vis = []
+        for s in (vj.get("seats") or []):
+            raw = s.get("stack_bb")
+            n = _num(raw)
+            if s.get("is_hero"):
+                hero_vis = n
+                hero_vis_allin = (isinstance(raw, str) and raw.upper() == "ALLIN")
+            elif n and n > 0:
+                vis.append(n)
+        # hero: ALLIN na imagem mas com stack na HH (ou diff grande) = SS≠mão.
+        hero_allin_mismatch = bool(hero_vis_allin and hero_hh and hero_hh > 12)
+        hero_diff = (abs(hero_hh - hero_vis) if (hero_hh and hero_vis) else None)
+        # residual do melhor alinhamento (ordenado) dos stacks não-hero.
+        a, b = sorted(hh), sorted(vis)
+        m = min(len(a), len(b))
+        resid = [abs(a[i] - b[i]) for i in range(m)] if m else []
+        max_resid = round(max(resid), 1) if resid else None
+        mean_resid = round(sum(resid) / len(resid), 1) if resid else None
+        misfit = (
+            hero_allin_mismatch
+            or (hero_diff is not None and hero_diff > 10)
+            or (max_resid is not None and max_resid > 12)
+            or (mean_resid is not None and mean_resid > 6)
+        )
+        if hero_allin_mismatch:
+            n_hero_allin_mismatch += 1
+        if misfit:
+            flagged.append({
+                "hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+                "hero_hh_bb": hero_hh, "hero_vision_bb": ("ALLIN" if hero_vis_allin else hero_vis),
+                "hero_diff_bb": round(hero_diff, 1) if hero_diff is not None else None,
+                "max_resid_bb": max_resid, "mean_resid_bb": mean_resid,
+            })
+    flagged.sort(key=lambda x: (x["mean_resid_bb"] or 0), reverse=True)
     return {
-        "scope": "GG table_ss deanon 2026",
+        "scope": "GG table_ss deanon 2026", "mode": "fit",
         "total_checked": len(rows),
-        "gap_bb_threshold": gap_bb,
-        "n_swap_risk": len(flagged),
+        "n_misfit": len(flagged),
+        "n_hero_allin_mismatch": n_hero_allin_mismatch,
+        "criteria": "hero ALLIN-vs-stack, |hero diff|>10bb, max_resid>12bb, ou mean_resid>6bb",
         "flagged": flagged[:80],
     }
 

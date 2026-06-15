@@ -374,10 +374,32 @@ def test_deanon_debug_scan_flags_close_stacks():
     }
     row = {"hand_id": "GG-Y", "tournament_name": "T", "all_players_actions": apa}
     with patch("app.routers.table_ss.query", return_value=[row]):
-        out = table_ss.deanon_debug(hand_id=None, gap_bb=2.0, current_user={"id": 1})
+        out = table_ss.deanon_debug(hand_id=None, mode="gap", gap_bb=2.0, current_user={"id": 1})
     assert out["n_swap_risk"] == 1
     assert out["flagged"][0]["hand_id"] == "GG-Y"
     assert out["flagged"][0]["close_pairs"][0]["gap_bb"] == 0.8
+
+
+def test_deanon_debug_fit_flags_hero_allin_mismatch():
+    # SS de OUTRA mão: hero ALLIN na imagem mas 31.4bb na HH → misfit.
+    apa = {
+        "_meta": {"bb": 7000},
+        "Lauro Dermio": {"seat": 4, "stack_bb": 31.4, "is_hero": True},
+        "TeaFoxxx": {"seat": 5, "stack_bb": 64.4, "is_hero": False},
+        "Evil249": {"seat": 3, "stack_bb": 8.8, "is_hero": False},
+    }
+    vj = {"seats": [
+        {"nick": "Lauro Dermio", "stack_bb": "ALLIN", "is_hero": True},
+        {"nick": "x", "stack_bb": 44.7, "is_hero": False},
+        {"nick": "y", "stack_bb": 21.8, "is_hero": False}]}
+    row = {"hand_id": "GG-Z", "tournament_name": "T", "all_players_actions": apa, "vision_json": vj}
+    with patch("app.routers.table_ss.query", return_value=[row]):
+        out = table_ss.deanon_debug(hand_id=None, mode="fit", current_user={"id": 1})
+    assert out["mode"] == "fit"
+    assert out["n_hero_allin_mismatch"] == 1
+    assert out["n_misfit"] == 1
+    assert out["flagged"][0]["hero_vision_bb"] == "ALLIN"
+    assert out["flagged"][0]["hero_hh_bb"] == 31.4
 
 
 def test_hand_seats_maps_seats_and_flags_unmapped():
