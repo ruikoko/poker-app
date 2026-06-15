@@ -1049,6 +1049,7 @@ function TagGroup({ normKey, displayName, variants, sources, count, wins, losses
         const params = { ...filters, page_size: 500, page: 1 }
         if (!params.date_from) delete params.date_from
         if (!params.ire_min) delete params.ire_min   // #IRE-FILTER: passa direto; '' => 422
+        if (!params.folder_ft_source) delete params.folder_ft_source   // pt73
         if (studyView) params.study_view = true
         if (normKey) {
           // #B17 (REGRAS_NEGOCIO.md §3.2.2): backend faz OR cross-source via
@@ -1482,6 +1483,8 @@ function applyFilterTransform(params) {
   // #IRE-FILTER: valor numérico passa direto (nome === param backend); '' => 422
   // no Optional[float], por isso apaga quando vazio.
   if (params.ire_min === '' || params.ire_min == null) delete params.ire_min
+  // pt73 — '-ft' auto/manual: só envia quando activo (evita ?folder_ft_source=).
+  if (!params.folder_ft_source) delete params.folder_ft_source
   return params
 }
 
@@ -1489,7 +1492,7 @@ export default function HandsPage() {
   const [data, setData]           = useState({ data: [], total: 0, pages: 1 })
   const [tagGroupsData, setTagGroupsData] = useState({ groups: [], total: 0 })
   const [page, setPage]           = useState(1)
-  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false, ire_min: '' })
+  const [filters, setFilters]     = useState({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false, ire_min: '', folder_ft_source: '' })
   const [error, setError]         = useState('')
   const [loading, setLoading]     = useState(false)
   const [selected, setSelected]   = useState(null)
@@ -1672,6 +1675,27 @@ export default function HandsPage() {
             )
           })}
         </div>
+
+        {/* pt73 — só mãos cujo '-ft' foi ADIVINHADO pela Vision (rever as auto). Âmbar. */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(() => {
+            const active = filters.folder_ft_source === 'auto'
+            return (
+              <button
+                onClick={() => { setFilters(f => ({ ...f, folder_ft_source: f.folder_ft_source === 'auto' ? '' : 'auto' })); setPage(1) }}
+                title="Mostrar só mãos cuja tag de mesa final (-ft) foi adivinhada pela app — para confirmar"
+                style={{
+                  padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                  border: '1px solid',
+                  borderColor: active ? '#f59e0b' : '#2a2d3a',
+                  background: active ? 'rgba(245,158,11,0.15)' : 'transparent',
+                  color: active ? '#f59e0b' : '#64748b',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >-ft auto</button>
+            )
+          })()}
+        </div>
       </div>
 
       {/* Filtros */}
@@ -1715,9 +1739,9 @@ export default function HandsPage() {
           }}
         />
 
-        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from || filters.villain || filters.sd_yes || filters.sd_no || filters.ire_min) && (
+        {(filters.study_state || filters.site || filters.position || filters.search || filters.date_from || filters.villain || filters.sd_yes || filters.sd_no || filters.ire_min || filters.folder_ft_source) && (
           <button
-            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false, ire_min: '' }); setPage(1) }}
+            onClick={() => { setFilters({ study_state: '', site: '', position: '', search: '', date_from: '', villain: '', sd_yes: false, sd_no: false, ire_min: '', folder_ft_source: '' }); setPage(1) }}
             style={{
               padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
               background: 'transparent', color: '#64748b', border: '1px solid #2a2d3a', cursor: 'pointer',

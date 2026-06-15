@@ -542,10 +542,17 @@ def _build_conditions(
     discord_tag: str = None,
     unified_tag: str = None,
     has_showdown: Optional[bool] = None,
+    folder_ft_source: str = None,
 ):
     """Constrói lista de condições SQL e parâmetros para filtros de mãos."""
     conditions = []
     params = []
+
+    if folder_ft_source:
+        # pt73 — proveniência do '-ft' da pasta-como-tag ('auto'/'manual'). O
+        # caso de uso é o Rui rever as FT adivinhadas (folder_ft_source='auto').
+        conditions.append("h.folder_ft_source = %s")
+        params.append(folder_ft_source)
 
     if site:
         conditions.append("h.site = %s")
@@ -659,6 +666,7 @@ def list_hands(
     ire_min:          Optional[float] = Query(None, description="#IRE-FILTER: só mãos cujo MAIOR ire_pct de qualquer oponente (maior-da-mesa) >= este limiar (em %). None = sem filtro."),
     study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
     include_discord_placeholders: bool = Query(False, description="Se true (e study_view=true), aceita placeholders Discord excepto discord_tags=['nota'] exclusivamente. Para a secção 'Discord — Só SS (sem HH)' da vista Por Tags."),
+    folder_ft_source: Optional[str] = Query(None, description="pt73: filtrar pela proveniência do '-ft' da pasta-como-tag ('auto' = FT adivinhado pela Vision, p/ o Rui rever; 'manual' = confirmado)."),
     page:             int = Query(1, ge=1),
     page_size:        int = Query(50, ge=1, le=2000),
     current_user=Depends(require_auth)
@@ -668,7 +676,7 @@ def list_hands(
         result_min, result_max, source=source, villain=villain, date_to=date_to,
         hm3_tag=hm3_tag, discord_tag=discord_tag,
         unified_tag=normalize_tag_key(unified_tag) if unified_tag else None,
-        has_showdown=has_showdown,
+        has_showdown=has_showdown, folder_ft_source=folder_ft_source,
     )
     # Excluir arquivo MTT por defeito (a não ser que pedido explicitamente ou filtrado por study_state)
     if not include_archive and study_state != 'mtt_archive':
@@ -690,6 +698,7 @@ def list_hands(
                h.study_state, h.entry_id, h.viewed_at, h.studied_at, h.created_at,
                h.all_players_actions, h.screenshot_url, h.player_names,
                h.tournament_format, h.tournament_name, h.tournament_number, h.buy_in,
+               h.folder_ft_source,
                CASE
                    WHEN h.study_state = 'mtt_archive' THEN 'archive'
                    WHEN h.entry_id IS NULL THEN 'orphan'
@@ -815,6 +824,7 @@ def tag_groups(
     has_showdown:     Optional[bool] = Query(None, description="Filtrar por has_showdown (true/false)"),
     study_view:       bool = Query(False, description="Se true, exclui GG anonimizada (sem match real) — usado pela página Estudo"),
     include_discord_placeholders: bool = Query(False, description="Se true (e study_view=true), aceita placeholders Discord excepto discord_tags=['nota'] exclusivamente. Para a secção 'Discord — Só SS (sem HH)' da vista Por Tags."),
+    folder_ft_source: Optional[str] = Query(None, description="pt73: filtrar grupos pela proveniência do '-ft' ('auto'/'manual')."),
     current_user=Depends(require_auth)
 ):
     """Devolve grupos de tags com contagens, wins/losses e resultado total em BB.
@@ -828,7 +838,7 @@ def tag_groups(
     """
     conditions, params = _build_conditions(
         site, None, study_state, position, search, date_from, exclude_mtt_only,
-        has_showdown=has_showdown,
+        has_showdown=has_showdown, folder_ft_source=folder_ft_source,
     )
     # Excluir arquivo MTT por defeito
     if not include_archive and study_state != 'mtt_archive':

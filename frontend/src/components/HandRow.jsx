@@ -283,15 +283,33 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
             {hand.discord_tags.slice(0, 2).map((ch, i) => (
               <span
                 key={i}
-                style={{
-                  fontSize: 10, padding: '2px 6px', borderRadius: 3,
-                  background: 'rgba(88,101,242,0.18)',
-                  border: '1px solid rgba(88,101,242,0.45)',
-                  color: '#5865F2',
-                  fontWeight: 700, fontFamily: 'monospace',
-                  whiteSpace: 'nowrap',
-                }}
-              >#{ch}</span>
+                style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}
+              >
+                <span
+                  style={{
+                    fontSize: 10, padding: '2px 6px', borderRadius: 3,
+                    background: 'rgba(88,101,242,0.18)',
+                    border: '1px solid rgba(88,101,242,0.45)',
+                    color: '#5865F2',
+                    fontWeight: 700, fontFamily: 'monospace',
+                    whiteSpace: 'nowrap',
+                  }}
+                >#{ch}</span>
+                {/* pt73 — '-ft' adivinhado pela Vision (vs confirmado pelo Rui):
+                    badge âmbar discreto p/ o Rui rever as auto. */}
+                {ch.endsWith('-ft') && hand.folder_ft_source === 'auto' && (
+                  <span
+                    title="Mesa final (-ft) adivinhada pela app (bancos == restantes) — por confirmar"
+                    style={{
+                      fontSize: 9, padding: '1px 4px', borderRadius: 3,
+                      background: 'rgba(245,158,11,0.15)',
+                      border: '1px solid rgba(245,158,11,0.4)',
+                      color: '#f59e0b', fontWeight: 700, fontFamily: 'monospace',
+                      letterSpacing: 0.3, whiteSpace: 'nowrap',
+                    }}
+                  >auto</span>
+                )}
+              </span>
             ))}
             {hand.discord_tags.length > 2 && (
               <span

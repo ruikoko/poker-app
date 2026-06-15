@@ -423,22 +423,37 @@ def process_type(session, sub, endpoint, exts, label, live, window=None):
     return sent, failed, skipped, fora
 
 
-# ── Pasta-como-tag (pt72): subpasta de it\ → tag de estudo ────────────────────
+# ── Pasta-como-tag (pt72/pt73): subpasta de it\ → tag de estudo ───────────────
 # A PASTA escolhida no IT no momento da captura É a tag (substitui o canal
 # Discord, morto com o replayer GG). Chave = nome da subpasta normalizado
-# (lowercase, espaços colapsados); valor = tag BASE. O sufixo de fase '-ft' é
-# acrescentado pelo BACKEND a partir da Vision (bancos == players_left), não aqui.
-# EXTENSÍVEL: o Rui cria mais pastas no IT → acrescenta-se aqui a linha.
+# (lowercase, espaços colapsados); valor = tag (BASE ou já com '-ft').
+#
+# Duas famílias de pasta (pt73):
+#   • SEM '-ft' (icm, icm-pko, pos-pko, pos-nko, speed-racer): o sufixo de fase
+#     '-ft' é decidido pelo BACKEND a partir da Vision (bancos == players_left).
+#     Quando aplicado assim, fica MARCADO como AUTOMÁTICO (o Rui revê-o).
+#   • JÁ com '-ft' (icm-pko-ft, pos-pko-ft): o Rui escolheu a pasta de mesa final
+#     à mão → FT MANUAL, confirmado. O backend NÃO re-verifica nem re-acrescenta.
+#
+# 'nota' → tag 'nota' (dispara Vilões, regra C). Sem família de fase.
+# EXTENSÍVEL: o Rui cria mais pastas no IT → acrescenta-se aqui a linha. Subpasta
+# fora desta tabela → processada SEM tag (não inventa) + aviso.
 IT_FOLDER_TAGS = {
-    "icm":      "icm",
-    "icm pko":  "icm-pko",
-    "pko pos":  "pos-pko",
-    "npko pos": "pos-nko",   # canónica existente (HM3_REAL_TAGS); simétrica de pos-pko
+    "icm":         "icm",
+    "icm pko":     "icm-pko",
+    "pko pos":     "pos-pko",
+    "npko pos":    "pos-nko",      # canónica existente (HM3_REAL_TAGS); simétrica de pos-pko
+    "icm pko ft":  "icm-pko-ft",   # FT MANUAL — pasta de mesa final escolhida pelo Rui
+    "pko pos ft":  "pos-pko-ft",   # FT MANUAL
+    "speedracer":  "speed-racer",
+    "speed racer": "speed-racer",  # tolera grafia com espaço
+    "nota":        "nota",         # → Vilões (regra C); sem fase pré/pós
 }
 
 
 def _folder_tag_for(subdir_name):
-    """Nome de uma subpasta de it\\ → tag BASE (ou None se não está na tabela)."""
+    """Nome de uma subpasta de it\\ → tag (BASE ou já com '-ft'); None se não está
+    na tabela. Pastas que já trazem '-ft' (ICM PKO FT, PKO Pos FT) = FT MANUAL."""
     key = re.sub(r"\s+", " ", (subdir_name or "").strip().lower())
     return IT_FOLDER_TAGS.get(key)
 
@@ -513,10 +528,13 @@ def process_it_mixed(session, live, window=None):
     → done/lobby, retry transitório fica); SKIP → fica no sítio (formato não-IT).
     Em dry-run só imprime o plano.
 
-    pt72 — PASTA-COMO-TAG: além da RAIZ de it\\ (sem tag, back-compat), processa
-    as SUBPASTAS de it\\ (ICM, ICM PKO, PKO Pos, NPKO Pos, …). A subpasta É a tag
-    (IT_FOLDER_TAGS); viaja no POST de MESA. Subpasta fora da tabela → processa
-    SEM tag (não inventa) + aviso. `window` filtra por data. Devolve contagens."""
+    pt72/pt73 — PASTA-COMO-TAG: além da RAIZ de it\\ (sem tag, back-compat),
+    processa as SUBPASTAS de it\\ (ICM, ICM PKO, PKO Pos, NPKO Pos, ICM PKO FT,
+    PKO Pos FT, SpeedRacer, Nota, …). A subpasta É a tag (IT_FOLDER_TAGS); viaja
+    no POST de MESA. Pastas com '-ft' no nome = FT MANUAL (confirmado pelo Rui);
+    as restantes recebem '-ft' AUTO do backend se a Vision indicar mesa final.
+    Subpasta fora da tabela → processa SEM tag (não inventa) + aviso. `window`
+    filtra por data. Devolve contagens."""
     src_root = os.path.join(PARENT_DIR, IT_SUB)
     done_table = os.path.join(PARENT_DIR, "done", IT_SUB)
     done_lobby = os.path.join(PARENT_DIR, "done", LOBBY_SUB)

@@ -278,3 +278,23 @@ def test_folder_tag_unknown_returns_none():
     assert ai._folder_tag_for("Qualquer Outra") is None
     assert ai._folder_tag_for("") is None
     assert ai._folder_tag_for(None) is None
+
+
+# ── pt73 — tabela alargada: FT manual, SpeedRacer, Nota ───────────────────────
+
+def test_folder_tag_manual_ft_folders():
+    # pastas que JÁ trazem '-ft' no nome → tag já-FT (FT manual, confirmado)
+    assert ai._folder_tag_for("ICM PKO FT") == "icm-pko-ft"
+    assert ai._folder_tag_for("PKO Pos FT") == "pos-pko-ft"
+    assert ai._folder_tag_for("  icm  pko  ft ") == "icm-pko-ft"
+
+
+def test_folder_tag_speedracer():
+    assert ai._folder_tag_for("SpeedRacer") == "speed-racer"
+    assert ai._folder_tag_for("speedracer") == "speed-racer"
+    assert ai._folder_tag_for("Speed Racer") == "speed-racer"   # tolera espaço
+
+
+def test_folder_tag_nota():
+    assert ai._folder_tag_for("Nota") == "nota"
+    assert ai._folder_tag_for("nota") == "nota"

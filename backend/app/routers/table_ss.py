@@ -766,11 +766,34 @@ def _ft_applies(vision_json) -> bool:
     )
 
 
-def _final_folder_tag(base_tag: Optional[str], vision_json) -> Optional[str]:
-    """tag final = base + '-ft' quando a Vision indica mesa final (bancos ==
-    restantes); senão só a base. Fail-safe (Rui): incerto → sem '-ft'. Pura."""
+def _folder_tag_ft_source(base_tag: Optional[str], vision_json) -> Optional[str]:
+    """Proveniência do sufixo de fase '-ft' (pt73), independente da BD. Pura.
+
+    - `'manual'`  → a pasta JÁ trazia '-ft' (ICM PKO FT, PKO Pos FT): o Rui
+      confirmou a mesa final à mão; NÃO se re-verifica.
+    - `'auto'`    → a pasta era BASE e a Vision indicou mesa final (bancos ==
+      restantes) → '-ft' adivinhado pela app (o Rui revê).
+    - `None`      → sem '-ft' (base sem mesa final, ou sem tag).
+    """
     if not base_tag:
         return None
+    if base_tag.endswith("-ft"):
+        return "manual"
+    return "auto" if _ft_applies(vision_json) else None
+
+
+def _final_folder_tag(base_tag: Optional[str], vision_json) -> Optional[str]:
+    """tag final aplicada à mão (pt73). Prioridade MANUAL > AUTO:
+
+    - pasta já com '-ft' (FT MANUAL) → devolve tal-e-qual (NÃO re-verifica nem
+      duplica o sufixo — evita 'icm-pko-ft-ft');
+    - pasta BASE → base + '-ft' (AUTO) se a Vision indicar mesa final, senão base.
+
+    Fail-safe (Rui): incerto → sem '-ft' (preferir base a sufixo errado). Pura."""
+    if not base_tag:
+        return None
+    if base_tag.endswith("-ft"):       # FT manual: confirmado, não mexer
+        return base_tag
     return f"{base_tag}-ft" if _ft_applies(vision_json) else base_tag
 
 
@@ -788,22 +811,27 @@ def _apply_folder_tag_to_hand(
     if not matched_hand_db_id or not base_tag:
         return
     final_tag = _final_folder_tag(base_tag, vision_json)
+    ft_source = _folder_tag_ft_source(base_tag, vision_json)   # pt73: 'manual'/'auto'/None
     own = conn is None
     try:
         if own:
             conn = get_conn()
         with conn.cursor() as cur:
+            # pt73 — escreve a tag final + a proveniência do '-ft' (manual/auto).
+            # COALESCE: não apaga um 'manual'/'auto' anterior quando ft_source=None.
             cur.execute(
                 "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
-                "COALESCE(discord_tags, '{}'::text[]) || %s::text[])) WHERE id = %s",
-                ([final_tag], matched_hand_db_id),
+                "COALESCE(discord_tags, '{}'::text[]) || %s::text[])), "
+                "folder_ft_source = COALESCE(%s, folder_ft_source) WHERE id = %s",
+                ([final_tag], ft_source, matched_hand_db_id),
             )
         if own:
             conn.commit()
         from app.services.villain_rules import apply_villain_rules
         apply_villain_rules(matched_hand_db_id, conn=conn)
         logger.info(
-            "[table_ss_folder_tag] hand %s -> tag %r", matched_hand_db_id, final_tag
+            "[table_ss_folder_tag] hand %s -> tag %r (ft_source=%s)",
+            matched_hand_db_id, final_tag, ft_source,
         )
     except Exception as e:  # pragma: no cover - defensivo
         logger.error(

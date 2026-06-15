@@ -25,12 +25,13 @@ logger = logging.getLogger("capture_triage")
 
 # Tags de 1 clique (nomes de canal Discord). 'nota' destina a Vilões; as outras
 # a Estudo — via as transições canónicas, que já lêem discord_tags + match real.
-# pt72 — pasta-como-tag do IT: + 'pos-nko' (NPKO pós-flop, canónica) e as
-# variantes de fase '-ft' que o backend gera (mesa final). Tabela de tradução
-# das pastas vive em tools/appimport/app_import.py:IT_FOLDER_TAGS.
+# pt72/pt73 — pasta-como-tag do IT: + 'pos-nko' (NPKO pós-flop, canónica), o
+# 'speed-racer' e as variantes de fase '-ft' (mesa final, manual da pasta ou
+# auto da Vision). Tabela de tradução das pastas vive em
+# tools/appimport/app_import.py:IT_FOLDER_TAGS.
 ALLOWED_TRIAGE_TAGS = {
-    "icm", "icm-pko", "pos-pko", "pos-nko", "nota",
-    "icm-ft", "icm-pko-ft", "pos-pko-ft", "pos-nko-ft",
+    "icm", "icm-pko", "pos-pko", "pos-nko", "speed-racer", "nota",
+    "icm-ft", "icm-pko-ft", "pos-pko-ft", "pos-nko-ft", "speed-racer-ft",
 }
 DISCARD = "__discard__"
 
@@ -50,7 +51,13 @@ _PENDING_WHERE = (
 
 def ensure_capture_triage_column():
     """Idempotente (lifespan). `hands.capture_triage` ∈ {NULL,'resolved','discarded'}.
-    NULL = ainda na fila (se o predicado derivado bater); os outros = fora."""
+    NULL = ainda na fila (se o predicado derivado bater); os outros = fora.
+
+    pt73 — `hands.folder_ft_source` ∈ {NULL,'manual','auto'}: proveniência do
+    sufixo de fase '-ft' aplicado pela pasta-como-tag do IT. 'manual' = a pasta
+    já trazia '-ft' (mesa final confirmada pelo Rui, ou tag '-ft' escolhida à mão
+    na triagem); 'auto' = '-ft' adivinhado pela Vision (bancos == restantes) — o
+    Rui revê estes. NULL = sem '-ft' envolvido. Escrita também em table_ss.py."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -58,8 +65,15 @@ def ensure_capture_triage_column():
                 "ALTER TABLE hands ADD COLUMN IF NOT EXISTS capture_triage TEXT"
             )
             cur.execute(
+                "ALTER TABLE hands ADD COLUMN IF NOT EXISTS folder_ft_source TEXT"
+            )
+            cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_hands_capture_triage "
                 "ON hands (capture_triage) WHERE capture_triage IS NULL"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_hands_folder_ft_source "
+                "ON hands (folder_ft_source) WHERE folder_ft_source = 'auto'"
             )
         conn.commit()
     finally:
@@ -145,15 +159,18 @@ def tag_capture_triage(hand_id: str, body: TagBody, current_user=Depends(require
         )
 
     # Aplica a tag em discord_tags (semântica de canal, union distinct) + marca
-    # resolved. apply_villain_rules a seguir (lê discord_tags actuais).
+    # resolved. apply_villain_rules a seguir (lê discord_tags actuais). pt73 — se
+    # o Rui escolheu à mão uma tag '-ft', a proveniência do sufixo é MANUAL.
+    ft_source = "manual" if tag.endswith("-ft") else None
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
                 "COALESCE(discord_tags, '{}'::text[]) || %s::text[])), "
-                "capture_triage = 'resolved' WHERE id = %s",
-                ([tag], hand_db_id),
+                "capture_triage = 'resolved', "
+                "folder_ft_source = COALESCE(%s, folder_ft_source) WHERE id = %s",
+                ([tag], ft_source, hand_db_id),
             )
         conn.commit()
     finally:

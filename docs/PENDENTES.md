@@ -28,6 +28,22 @@ Para a pt73:
    e que a contagem de bancos ignora vazios. Fail-safe activo (incerto → sem sufixo). Se a
    Vision contar bancos a mais/menos, rever o `_ft_applies`. → `table_ss.py:_ft_applies`.
 
+### Ajuste pt73 ao classificador (14 Jun) — ✅ FEITO (diff ao Web; falta correr `--ao-vivo`)
+
+- **Tabela alargada** (`IT_FOLDER_TAGS`): + `ICM PKO FT`→`icm-pko-ft`, `PKO Pos FT`→`pos-pko-ft`,
+  `SpeedRacer`→`speed-racer`, `Nota`→`nota` (4 faltavam → 34 capturas entravam SEM tag).
+  `ALLOWED_TRIAGE_TAGS` += `speed-racer`, `speed-racer-ft`.
+- **FT dupla, prioridade MANUAL > AUTO**: pasta já com `-ft` = FT confirmado (não re-verifica,
+  não duplica sufixo); pasta base = `-ft` AUTO via Vision. `_folder_tag_ft_source` devolve
+  `'manual'`/`'auto'`/`None`.
+- **✅ Distinguir `-ft` MANUAL vs AUTO na app** (aprovado pelo Rui, pt73): coluna nova
+  `hands.folder_ft_source` (`manual`/`auto`/NULL; `ensure_capture_triage_column`); escrita no
+  table-SS (`_apply_folder_tag_to_hand`) e na triagem manual (tag `-ft` clicada = manual). Badge
+  **âmbar "auto"** ao lado da tag `-ft` no `HandRow`; filtro **"-ft auto"** na Estudo
+  (`list_hands`/`tag-groups` param `folder_ft_source`) para o Rui rever as adivinhadas.
+- **✅ `Nota` sem formato/pré-pós — RESOLVIDO** (decisão do Rui, pt73): a tag `nota` sozinha
+  basta (→ Vilões, regra C). Sem família de formato nem fase. Questão fechada.
+
 ---
 
 ## ★ Feito em pt71 (13 Jun) — desanonimização por table-SS
