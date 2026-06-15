@@ -1356,6 +1356,107 @@ def verify_recovery(
     }
 
 
+@router.get("/deanon-debug")
+def deanon_debug(
+    hand_id: Optional[str] = Query(None, description="forense de 1 mão; ausente = scan da frota"),
+    gap_bb: float = Query(2.0, description="scan: flag se 2 stacks não-hero ficam a <gap_bb BB"),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """READ-ONLY forense da desanon table-SS. A desanon mapeia nome→cadeira SÓ por
+    STACK (a Vision do table-SS devolve uma LISTA de (nick, stack_bb) SEM posição/
+    ordem) → dois stacks próximos podem PERMUTAR (nome na cadeira errada; a posição
+    da cadeira é da HH e está certa, mas fica com o nome trocado).
+
+    `hand_id` → detalhe: HH crua (seat·hash·stack·posição) vs nome gravado pela
+    desanon, + o que a Vision leu (nick·stack). Ausente → scan das mãos desanon
+    GG-2026: quantas têm ≥2 stacks não-hero a <`gap_bb` BB (risco de troca)."""
+    if hand_id:
+        rows = query(
+            "SELECT hand_id, raw, all_players_actions, player_names, "
+            "context_table_ss_id FROM hands WHERE hand_id=%s LIMIT 1", (hand_id,))
+        if not rows:
+            raise HTTPException(404, "mão não encontrada")
+        h = rows[0]
+        raw = h.get("raw") or ""
+        apa = h.get("all_players_actions") or {}
+        pn = h.get("player_names") or {}
+        anon_map = pn.get("anon_map") or {}
+        bb = (apa.get("_meta") or {}).get("bb")
+        bm = re.search(r"Seat\s*#(\d+)\s+is the button", raw)
+        button_seat = int(bm.group(1)) if bm else None
+        # HH crua: seat -> hash + stack (direto do ficheiro, sem processamento).
+        hh = {}
+        for m in re.finditer(r"Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)\s+in chips\)", raw):
+            seat = int(m.group(1)); hsh = m.group(2).strip()
+            chips = float(m.group(3).replace(",", ""))
+            hh[seat] = {
+                "seat": seat, "hh_hash": hsh, "stack_chips": chips,
+                "stack_bb": round(chips / bb, 1) if bb else None,
+                "nick_gravado": (pn.get("hero") or "Hero") if hsh == "Hero"
+                                else anon_map.get(hsh, f"({hsh}) POR-MAPEAR"),
+                "mapped": hsh == "Hero" or hsh in anon_map,
+            }
+        # posição da HH por cadeira (do APA já parseado).
+        for k, info in apa.items():
+            if k == "_meta" or not isinstance(info, dict):
+                continue
+            s = info.get("seat")
+            if s in hh:
+                hh[s]["position"] = info.get("position")
+                hh[s]["is_hero"] = bool(info.get("is_hero"))
+        hh_seats = [hh[s] for s in sorted(hh)]
+        # o que a VISION leu (lista plana nick+stack, SEM posição).
+        vision_seats = []
+        if h.get("context_table_ss_id"):
+            vr = query("SELECT vision_json FROM table_ss_processing_log WHERE id=%s",
+                       (h["context_table_ss_id"],))
+            vj = (vr[0].get("vision_json") if vr else None) or {}
+            for s in (vj.get("seats") or []):
+                vision_seats.append({"nick": s.get("nick"),
+                                     "stack_bb": s.get("stack_bb"),
+                                     "is_hero": bool(s.get("is_hero"))})
+        return {
+            "hand_id": h["hand_id"], "bb": bb, "button_seat": button_seat,
+            "n_hh_seats": len(hh_seats),
+            "hh_seats_with_gravado": hh_seats,
+            "vision_seats_lidos": vision_seats,
+            "anon_map": anon_map,
+            "nota": "posição = da HH (correcta); nick = mapeado por stack (pode trocar).",
+        }
+
+    # ── Scan da frota: risco de troca por stacks próximos ────────────────────
+    rows = query(
+        f"""SELECT h.hand_id, h.tournament_name, h.all_players_actions
+              FROM hands h WHERE {_VERIFY_SCOPE} AND h.all_players_actions IS NOT NULL""")
+    flagged = []
+    for r in rows:
+        apa = r.get("all_players_actions") or {}
+        stacks = []
+        for k, info in apa.items():
+            if k == "_meta" or not isinstance(info, dict) or info.get("is_hero"):
+                continue
+            sb = info.get("stack_bb")
+            if isinstance(sb, (int, float)) and not isinstance(sb, bool) and sb > 0:
+                stacks.append((round(float(sb), 1), info.get("position")))
+        stacks.sort()
+        close = []
+        for i in range(1, len(stacks)):
+            gap = stacks[i][0] - stacks[i - 1][0]
+            if gap < gap_bb:
+                close.append({"a": stacks[i - 1], "b": stacks[i], "gap_bb": round(gap, 2)})
+        if close:
+            flagged.append({"hand_id": r["hand_id"],
+                            "tournament_name": r["tournament_name"],
+                            "close_pairs": close})
+    return {
+        "scope": "GG table_ss deanon 2026",
+        "total_checked": len(rows),
+        "gap_bb_threshold": gap_bb,
+        "n_swap_risk": len(flagged),
+        "flagged": flagged[:80],
+    }
+
+
 @router.get("/hand-seats")
 def hand_seats(
     hand_ids: str = Query(..., description="hand_ids separados por vírgula"),

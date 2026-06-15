@@ -333,6 +333,53 @@ def test_verify_recovery_assembles_and_detects_swap():
     assert out["samples"][0]["capture_url"] == "/api/table-ss/image/3"
 
 
+def test_deanon_debug_detail_lines_up_hh_vs_gravado():
+    raw = (
+        "Table 'Mesa' 6-max Seat #3 is the button\n"
+        "Seat 1: Hero (220146 in chips)\n"
+        "Seat 2: 89ef4cba (450924 in chips)\n"
+        "Seat 3: aa11bb22 (61500 in chips)\n"
+    )
+    apa = {
+        "_meta": {"bb": 7000},
+        "Lauro Dermio": {"seat": 1, "position": "SB", "stack_bb": 31.4, "is_hero": True},
+        "TeaFoxxx": {"seat": 2, "position": "BB", "stack_bb": 64.4, "is_hero": False},
+        "Evil249": {"seat": 3, "position": "BTN", "stack_bb": 8.8, "is_hero": False},
+    }
+    pn = {"hero": "Lauro Dermio",
+          "anon_map": {"89ef4cba": "TeaFoxxx", "aa11bb22": "Evil249"}}
+    hand_row = {"hand_id": "GG-X", "raw": raw, "all_players_actions": apa,
+                "player_names": pn, "context_table_ss_id": 5}
+    vis_row = {"vision_json": {"seats": [
+        {"nick": "Lauro Dermio", "stack_bb": 31.4, "is_hero": True},
+        {"nick": "TeaFoxxx", "stack_bb": 64.4, "is_hero": False},
+        {"nick": "Evil249", "stack_bb": 8.8, "is_hero": False}]}}
+    with patch("app.routers.table_ss.query", side_effect=[[hand_row], [vis_row]]):
+        out = table_ss.deanon_debug(hand_id="GG-X", current_user={"id": 1})
+    assert out["button_seat"] == 3
+    by_seat = {s["seat"]: s for s in out["hh_seats_with_gravado"]}
+    assert by_seat[1]["nick_gravado"] == "Lauro Dermio" and by_seat[1]["position"] == "SB"
+    assert by_seat[2]["nick_gravado"] == "TeaFoxxx" and by_seat[2]["stack_bb"] == 64.4
+    assert by_seat[3]["nick_gravado"] == "Evil249" and by_seat[3]["position"] == "BTN"
+    assert len(out["vision_seats_lidos"]) == 3
+
+
+def test_deanon_debug_scan_flags_close_stacks():
+    apa = {
+        "_meta": {"bb": 1000},
+        "Hero": {"seat": 1, "stack_bb": 30.0, "is_hero": True},
+        "A": {"seat": 2, "stack_bb": 10.0, "is_hero": False},
+        "B": {"seat": 3, "stack_bb": 10.8, "is_hero": False},   # gap 0.8 < 2.0 → flag
+        "C": {"seat": 4, "stack_bb": 50.0, "is_hero": False},
+    }
+    row = {"hand_id": "GG-Y", "tournament_name": "T", "all_players_actions": apa}
+    with patch("app.routers.table_ss.query", return_value=[row]):
+        out = table_ss.deanon_debug(hand_id=None, gap_bb=2.0, current_user={"id": 1})
+    assert out["n_swap_risk"] == 1
+    assert out["flagged"][0]["hand_id"] == "GG-Y"
+    assert out["flagged"][0]["close_pairs"][0]["gap_bb"] == 0.8
+
+
 def test_hand_seats_maps_seats_and_flags_unmapped():
     # APA com hero (mapeado) + 1 vilão mapeado + 1 assento POR MAPEAR (hash).
     apa = {
