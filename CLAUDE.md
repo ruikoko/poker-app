@@ -17,8 +17,9 @@ Qualquer sessão Claude Code que toque neste repositório DEVE ler primeiro este
 5. **`docs/TECH_DEBTS_INVENTARIO.md`** — backlog actualizado de tech debts.
 6. **`docs/HRC_ANATOMIA_OPERACIONAL.md`** — anatomia do HRC consolidada (wizard, Strategy Table, popup Nash, clipboard, coords, formato HH aceite). **Obrigatório se o trabalho toca o robot ou a pipeline HRC.** Lê antes de propor mudanças em `tools/watcher_src/` ou `backend/app/services/queue_export.py`.
 7. **`docs/GTO_BRAIN.md`** — visão consolidada do GTO Brain (origem, filosofia, arquitectura `gto_trees`/`gto_nodes` + matching engine, plano em 3 fases). **Obrigatório se o trabalho toca o GTO Brain** (watcher export, `backend/app/routers/gto.py`, tab GTO do replayer, ou o futuro pipeline `.zip` → `gto_trees`).
+8. **`docs/DESANON_ANATOMIA.md`** — anatomia consolidada da desanonimização GG (as DUAS perguntas: P1 QUAL é a mão / P2 QUEM senta onde; match captura↔mão; hash→cadeira; bug dos vilões trocados). **Obrigatório se o trabalho toca o match/desanon GG** (`routers/table_ss.py`, `services/table_ss_deanon.py`, `services/table_ss_vision.py`, `routers/screenshot.py`).
 
-Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no GTO Brain), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
+Sem ler estes 5 documentos (6 se tocares no robot/pipeline HRC, 7 se tocares no GTO Brain, 8 se tocares no match/desanon GG), NÃO tocar em código. Atalhos aqui produzem regressões (já aconteceu).
 
 ## 📖 Referência de terminologia de poker
 
@@ -166,10 +167,14 @@ Ao listar mãos, **filtrar sempre por `study_state` explicitamente**. "Todas as 
 
 ### Pipeline screenshot ↔ HH
 
+> **As DUAS perguntas (ver `docs/DESANON_ANATOMIA.md`):** o passo 3 abaixo é a **Pergunta 1
+> (QUAL é a mão)**; o passo 4 é a **Pergunta 2 (QUEM senta onde)**. São separadas — acertar a
+> mão não resolve as cadeiras (é P2 que tem o bug dos vilões em cadeiras trocadas).
+
 1. Parse determinístico do nome do ficheiro — fonte de verdade para data, hora, blinds e TM number (ex: `2026-03-06_06_02_PM_2,000_4,000(500)_#TM5672663145.png`). **Nunca confiar no Vision para blinds/ante** — alucina; extrair do filename.
 2. Vision extrai `(nome, stack)` por seat + identifica o Hero (centro-baixo).
-3. Match por `hand_id = GG-{TM_number}`.
-4. Constrói `hash → nome_real` por âncoras (Hero/SB/BB) + aritmética de stacks (folded: `stack_ss ≈ stack_hh - ante`, tolerância <2%) + eliminação para os restantes.
+3. **(P1)** Match por `hand_id = GG-{TM_number}`. *(No replayer-SS o TM vem do nome. Para o **table-SS** do Intuitive Tables, a chave de match passa a ser o **hand-id do nome do ficheiro** — **DECISÃO pt73, DECIDIDO / POR IMPLEMENTAR**, ainda não no código; substitui o match por tempo/nome/fingerprint. Ver `DESANON_ANATOMIA.md §2.2`.)*
+4. **(P2)** Constrói `hash → nome_real` por âncoras (Hero/SB/BB) + aritmética de stacks (folded: `stack_ss ≈ stack_hh - ante`, tolerância <2%) + eliminação para os restantes. **NÃO resolvida pelo passo 3** — é por stack, o que troca vilões de stacks próximos (bug dos vilões em cadeiras trocadas; detectado pelo Rui em `img/89`/`GG-6042783089`, quantificado por scan de fit = 66/185 misfit); âncora futura = disco do dealer/botão, a especificar pelo Rui. Ver `DESANON_ANATOMIA.md §3`.
 5. Escreve em `hands.all_players_actions`, `screenshot_url`, `player_names`.
 
 Posições na wire: o parser emite `UTG1`, `MP1` (sem `+`). Vision devolve `UTG+1`; normalizar antes de persistir.

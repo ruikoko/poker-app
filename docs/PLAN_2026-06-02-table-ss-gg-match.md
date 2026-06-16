@@ -1,3 +1,13 @@
+> ⚠️ **SUPERSEDED (P1) pela DECISÃO pt73 (2026-06-16) — hand-id do filename.** O match
+> SS de mesa ↔ mão GG (Pergunta 1: QUAL é a mão) passa a ser PRIMARIAMENTE por **hand-id
+> extraído do nome do ficheiro** (TM antes do timestamp → `GG-{TM}`), determinístico, que
+> **mata o multi-tabling de raiz**. O desenho central deste plano — **nome-directo +
+> impressão digital (hero_stack ±20% + big_blind)** — fica **REDUZIDO a FALLBACK** (só
+> quando o ID falta no nome, formato antigo). **DECIDIDO / POR IMPLEMENTAR — ainda NÃO no
+> código.** A parte de **cobertura `players_left`** (alvo `#HRC-MTT-STACKS-PAGE-SKIPPED`)
+> mantém-se válida. Nota: o hand-id resolve só P1; o "quem senta onde" (P2, bug dos vilões
+> trocados) continua aberto. Ver `docs/DESANON_ANATOMIA.md` + `REGISTO_CONCEITO` 2026-06-16.
+
 # PLAN — Match SS de mesa ↔ mão GG (multi-tabling) + cobertura players_left
 
 **Data:** 2026-06-02. **Tipo:** investigação read-only (zero código alterado) + plano para a próxima sessão.

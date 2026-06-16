@@ -54,15 +54,24 @@ Lê o input cru e extrai info estruturada:
 
 ### 2.2. Match
 
+> **⚠️ DUAS perguntas separadas (anatomia completa em `docs/DESANON_ANATOMIA.md`):**
+> **P1 — QUAL é a mão** (liga a captura à mão GG certa) e **P2 — QUEM senta onde**
+> (hash → nick na cadeira certa). São independentes: acertar a mão (P1) **não** resolve as
+> cadeiras (P2). P2 é por stack e tem o **bug dos vilões em cadeiras trocadas** (detectado pelo
+> Rui em `img/89`/`GG-6042783089`, quantificado por scan de fit = 66/185 misfit; ver
+> `docs/DESANON_ANATOMIA.md §3`).
+
 Tenta unir peças que pertencem juntas:
 - **SS ↔ HH (mesma mão GG):**
-  - Match por `hand_id = GG-{TM_number}`.
-  - Resolve hashes anonimizados → nicks reais por âncoras (Hero/SB/BB) + aritmética de stacks + eliminação para o resto.
+  - **(P1)** Match por `hand_id = GG-{TM_number}`.
+  - **(P2)** Resolve hashes anonimizados → nicks reais por âncoras (Hero/SB/BB) + aritmética de stacks + eliminação para o resto.
 - **Discord entry ↔ HH existente:**
   - Append discord_tags via helper centralizado `append_discord_channel_to_hand` (#B12 fix pt9).
 - **Imagem ↔ mão (galeria):**
   - Manual. Rui escolhe via UI.
-- **SS de mesa (Intuitive Tables) ↔ mão (por tempo):** desde pt50 o match vive numa **função determinística R** (`compute_table_ss_match`, pura), separada do upload. `reconcile_table_ss()` re-avalia **todas** as rows (não só órfãs) e converge sempre para o mesmo estado (idempotente, independente da ordem); exposto em `POST /api/table-ss/reconcile`.
+- **SS de mesa (Intuitive Tables) ↔ mão — P1:** desde pt50 o match vive numa **função determinística R** (`compute_table_ss_match`, pura), separada do upload. `reconcile_table_ss()` re-avalia **todas** as rows (não só órfãs) e converge sempre para o mesmo estado (idempotente, independente da ordem); exposto em `POST /api/table-ss/reconcile`.
+  - **★ DECISÃO pt73 (DECIDIDO / POR IMPLEMENTAR — ainda NÃO no código):** a forma PRIMÁRIA de match passa a ser o **hand ID extraído do nome do ficheiro** (o TM imediatamente antes do timestamp, ex.: `...6081471864-20260615223557-127.png` → `GG-6081471864`). Determinístico, sem Vision/tempo/stack; confirmado nas HH (`#TM6081471864`, `#TM6079987069` batem). **Substitui** o match actual por **tempo+nome+fingerprint**, frágil porque a captura é tirada **segundos DEPOIS** do início da mão → em multi-tabling a hora erra a mão por segundos. **FALLBACK:** torneio+mesa+tempo SÓ quando o ID falta no nome (formato antigo sem TM). Implementação adia o nome-directo/fingerprint para fallback.
+  - **(estado actual, até pt73 ser implementado)** o match é **por tempo** (janela ±5min):
   - **Site = nome do ficheiro** (pt56), **não** a Vision: `_site_from_filename` lê `<Site>` de `Shot<N>-<Site>-<ts>` (autoritativo). Token não-reconhecido → fallback Vision + log.
   - **Desambiguação multi-tn** (vários candidatos na janela): compara o **nome fiel da imagem** com cada candidato (`name_tokens_subset`); liga só se **exactamente 1** `tournament_number` bater (`disambiguated_by_name_direct`, pt54). `name_tokens_subset` tolera o **título GG truncado** (`…`) por prefix-match do último token, restantes exactos (pt58).
   - **Validação de nome só em GG/Winamax** (`_NAME_RELIABLE_SITES`): WPN/PS têm nomes genéricos → casam **só por tempo** (ver tech-debt `#WPN-PS-TABLE-SS-TIME-ONLY-MATCH`).

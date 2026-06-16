@@ -100,6 +100,9 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 
 **O que é (humano):** As mãos GGPoker chegam anonimizadas (jogadores aparecem como hashes tipo `89ef4cba`). Para saber os nicks reais usamos screenshots cruzados via Vision. O `match_method` regista qual pipeline produziu o cruzamento — útil para distinguir "dados Vision válidos" de "ainda à espera". Vive dentro de `hands.player_names ->> 'match_method'` (JSONB), não numa coluna própria.
 
+> **⚠️ DUAS perguntas separadas (anatomia em `docs/DESANON_ANATOMIA.md`):** o cruzamento parte-se em **P1 — QUAL é a mão** (ligar a captura à mão GG certa) e **P2 — QUEM senta onde** (hash → nick na cadeira certa). **`match_method` é o rótulo de P2** (`anchors_stack_elimination_v2`, `table_ss`, …). Acertar P1 **não** resolve P2: P2 é por **stack** (âncora Hero + permutação) e tem o **bug dos vilões em cadeiras trocadas** (detectado pelo Rui em `img/89`/`GG-6042783089`, quantificado por scan de fit = 66/185 misfit) — âncora futura = disco do dealer/botão, a especificar pelo Rui.
+> **DECISÃO pt73 (DECIDIDO / POR IMPLEMENTAR, ainda NÃO no código):** para o table-SS, a chave de **P1** passa a ser o **hand-id do nome do ficheiro** (`GG-{TM}`), substituindo o match por tempo+nome+fingerprint. Não altera `match_method` (que é P2).
+
 **Detalhes (técnico):**
 
 | Onde é produzido | Função |
