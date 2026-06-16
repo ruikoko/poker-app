@@ -811,7 +811,7 @@ created_at    TIMESTAMPTZ DEFAULT NOW()
 | `board` | `screenshot.py:936` | `screenshot.py:1097, 1322` | Cartas do board lidas pelo Vision |
 | `img_b64` | `screenshot.py:932, 1258`, `discord.py:467` | `screenshot.py:1564, 1610, 1635-1636`, `hands.py:798` | Imagem comprimida base64 |
 | `mime_type` | `screenshot.py:931, 1257` | `screenshot.py:1568, 1615` | Para servir imagem |
-| `file_meta` | `screenshot.py:930, 1256` | `screenshot.py:1305, 1328`, `mtt.py:444, 466`, `discord.py:651, 659` | Output do `_parse_filename`: `{date,time,blinds,tm,og_image_url,source_url,via,posted_at}` |
+| `file_meta` | `screenshot.py:930, 1256` | `screenshot.py:1305, 1328`, `mtt.py:444, 466`, `discord.py:651, 659` | Output do `_parse_filename`: `{date,time,blinds,tm,og_image_url,source_url,via,posted_at}`. ⚠️ **Só o `tm` é fiável.** A `time`/`date` são do momento do **DOWNLOAD** (não do jogo) e as `blinds` no nome **NÃO são de confiança**. Fonte de verdade da data/hora-de-jogo, blinds, stacks e acções = a **HH**; a Vision serve só para nicks reais + tag. Ver `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE` + `DESANON_ANATOMIA §2`. |
 | `og_image_url` | `discord.py:488, 696`, `screenshot.py:1110-1123, 1170` | `screenshot.py:1112-1115`, `discord.py:659-668` | URL CDN GG; gera `played_at` por extracção do `<unix_ms>.png` |
 | `source_url` | `discord.py:487` | (display) | URL Discord do replayer original |
 | `content_type` | `discord_bot.py:175` | (legacy) | Subtipo do entry (`hh_text`, `gg_replayer`, ...) |

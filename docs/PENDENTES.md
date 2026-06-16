@@ -510,6 +510,40 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
 
 ---
 
+## ★ Lane — Importador automático de replayer GG (ressuscitar a desanon) — **FIX-PRIMEIRO**
+
+Lane nova (registada pt73, 16 Jun). **Não ligar a torneira antes do fix** — ver ordem abaixo.
+
+**O quê:** um **importador automático** (irmão do `bat` HM3 / `appimport` / `appmaster`) que
+lê imagens do **replayer GG** de uma pasta e as mete pelo **caminho de screenshot-por-nome**
+(`screenshot.py:_parse_filename` + `mtt._match_screenshot`) → **ressuscita a desanon GG** agora
+que o `og:image` morreu (pt72, `#REPLAYER-OGIMAGE-DEAD-SPA`).
+
+**Porquê vale a pena:** a imagem do replayer é a **MELHOR fonte de desanon** — traz **SB/BB +
+botão do dealer + Herói**, ou seja os **três critérios da âncora P2** (`DESANON_ANATOMIA §3.2.1`).
+Melhor que o table-SS para alinhamento.
+
+- **Persistir a imagem** — é a **outra metade do registo da mão** (tags + nicks); perdê-la =
+  perder ambos para sempre. O table-SS já guarda `img_b64`; esta lane tem de garantir o mesmo.
+- **P1 (qual é a mão)** = por **hand-id do nome** (o número TM imediatamente antes do timestamp),
+  determinístico — decisão pt73 (`DESANON_ANATOMIA §2`).
+- **P2 (quem senta onde)** = âncora SB+BB + botão (invariante) + Herói — `DESANON_ANATOMIA §3.2.1`.
+
+**⚠️ ORDEM OBRIGATÓRIA — fix-primeiro-depois-acordar.** Antes de alimentar **mãos reais** por
+este caminho:
+1. **Corrigir o debt do nome** `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE` — tirar a
+   **hora-de-download** e as **blinds** do nome do `_match_screenshot` (desempate) **e** do
+   **`played_at`-fallback** (`screenshot.py:1565`). O único sinal fiável do nome é o **TM**.
+2. **Corrigir a doutrina** — para estas imagens, a **Vision é a fonte das blinds**; o nome só
+   dá o TM (reconciliar `CLAUDE.md:174` / `MAPA_ACOPLAMENTO §file_meta` / `VERIFICACAO_PIPELINES:516`).
+3. **Só depois ligar a torneira** (apontar o importador a mãos reais).
+
+> Nota: o **scan pt73** mostrou **0 mãos contaminadas hoje** (a superfície de screenshot-por-nome
+> está vazia post-wipe + replayer morto). O caminho está **latente**, não activo — é exactamente
+> por isso que se corrige **antes** de o reactivar, e não depois. → `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE`.
+
+---
+
 ## Cross-references
 
 - `docs/TECH_DEBTS_INVENTARIO.md` — estado detalhado de cada `#TECH-DEBT`.

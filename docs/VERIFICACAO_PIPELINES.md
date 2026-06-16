@@ -513,7 +513,7 @@ WHERE h.site = 'GGPoker'
 
 ### Descrição
 
-Drag-and-drop de screenshots GG na UI. `POST /api/screenshots` cria entries `source='screenshot'`, `entry_type='screenshot'`, parse de filename (data/hora/blinds/TM determinístico — fonte de verdade para esses campos). Vision processa em background, extrai seats e identifica Hero. Se há HH em BD para `GG-{TM}`, enriquece via `_enrich_hand_from_orphan_entry` e dispara `apply_villain_rules`. Se não, cria placeholder com `origin='ss_upload'`, `tags=['SSMatch']`, `match_method='discord_placeholder_no_hh'`, à espera de HH. Aparece no painel SSMatch do Dashboard via `GET /api/hands/ss-match-pending`.
+Drag-and-drop de screenshots GG na UI. `POST /api/screenshots` cria entries `source='screenshot'`, `entry_type='screenshot'`, parse de filename (**fiável só para o TM/hand-id**; a hora/data no nome são do momento do **DOWNLOAD**, não do jogo, e as blinds **NÃO são de confiança** — fonte de verdade da data/hora-de-jogo/blinds/stacks/acções = a **HH**; ver `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE` + `DESANON_ANATOMIA §2`). Vision processa em background, extrai seats e identifica Hero. Se há HH em BD para `GG-{TM}`, enriquece via `_enrich_hand_from_orphan_entry` e dispara `apply_villain_rules`. Se não, cria placeholder com `origin='ss_upload'`, `tags=['SSMatch']`, `match_method='discord_placeholder_no_hh'`, à espera de HH. Aparece no painel SSMatch do Dashboard via `GET /api/hands/ss-match-pending`.
 
 ### Pré-condições
 

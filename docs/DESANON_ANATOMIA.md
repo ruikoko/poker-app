@@ -17,7 +17,7 @@ resolver uma resolve a outra — **não resolve**.
 | | Pergunta | O que responde | Sinal usado | Estado |
 |---|---|---|---|---|
 | **P1** | **QUAL é a mão?** | Liga a captura (SS) à mão GG certa na BD | hand_id / tempo / nome | ver §2 |
-| **P2** | **QUEM senta em que cadeira?** | Mapeia cada hash anónimo → nick real, na cadeira certa | âncora + stacks | ver §3 — **NÃO fechada** |
+| **P2** | **QUEM senta em que cadeira?** | Mapeia cada hash anónimo → nick real, na cadeira certa | âncora + stacks | ver §3 — **desenho fechado (§3.2.1), implementação pendente** |
 
 > **Por que importa a separação:** o hand_id do filename (decisão pt73, §2) resolve **só P1**
 > — diz qual é a mão, **não** quem são os jogadores. P2 continua a precisar de uma âncora
@@ -77,10 +77,12 @@ o caso GG com TM no nome — passam a ser usados só quando o hand_id falta (ver
 
 ---
 
-## 3. Pergunta 2 — QUEM senta onde (hash → nick → cadeira) — **NÃO fechada**
+## 3. Pergunta 2 — QUEM senta onde (hash → nick → cadeira) — **desenho fechado, impl pendente**
 
 O hand_id resolve P1 mas **não traz nicks**. Para pôr cada nick real na cadeira certa é
-preciso uma âncora própria. Hoje a âncora é por **stack**.
+preciso uma âncora própria. Hoje a âncora é por **stack** (§3.1) — origem do bug (§3.2). O
+**desenho fechado da âncora** (SB+BB + botão + Herói) está em **§3.2.1** (2026-06-16); ainda
+**não implementado**.
 
 ### 3.1 Maquinaria actual (por stack — herança do pt7)
 `deanonymize_hand_from_table_ss()` (`table_ss_deanon.py`, pt71 E3) reutiliza
@@ -98,8 +100,45 @@ Nome trocado = **veneno** (envenena fichas de vilões via tag `nota`). **P2 NÃO
 sobre a BD pt73 → **66/185 misfit**, **6 com wrong-hand flagrante**, **119 fiáveis**. O 36% é
 **o resultado do scan**, não uma estimativa — a detecção foi do Rui, a quantificação foi o fit.
 
-**Âncora futura (a especificar pelo Rui):** o **disco do dealer / botão** como âncora
-posicional, em vez de (ou além de) o stack. Ainda por desenhar.
+### 3.2.1 ★ Âncora P2 — desenho FECHADO (2026-06-16)
+
+> Fecha o antigo "a especificar pelo Rui". **É desenho, não implementação** — a maquinaria
+> por stack (§3.1) e o bug (§3.2) continuam no código até isto ser construído.
+
+**Princípio (a HH é a fonte de verdade da estrutura).** A HH GG é exacta para
+**posições (SB/BB/BTN/Hero), stacks, ações, ordem**. Tem **exactamente DOIS buracos**:
+(1) os vilões vêm em hash (o Herói vem como `Hero`); (2) **não traz tags** (ICM/PKO/pos-pko/nota).
+A **imagem é a única fonte de ambos** — a tag vem da imagem do IT (**a subpasta de captura = a
+tag**) e os nicks reais vêm da imagem (IT e/ou replayer). Logo a imagem é a **OUTRA METADE** do
+registo da mão e **TEM de ser persistida**: perdê-la = perder tags + nicks para sempre.
+(O table-SS já guarda `img_b64`; a lane do replayer — ver `PENDENTES` — tem de garantir o mesmo.)
+
+**P2 é ALINHAMENTO, não estrutura.** A HH já conhece todas as cadeiras e posições com certeza;
+a imagem só dá os nicks. P2 = alinhar o layout da imagem ao da HH para cada nick aterrar na
+cadeira (hashed) certa. **Uma troca é erro de alinhamento de NOMES, nunca de estrutura.**
+
+**Âncora = TRÊS critérios corroborantes**, legíveis na imagem **E** na HH:
+
+1. **SB + BB (âncora primária)** — campo próprio dos dois lados. Duas cadeiras fixas e adjacentes.
+2. **Botão do dealer (confirmação)** — sempre na imagem (disco "D"); marcado na HH. Comparar
+   Vision vs HH usando o **invariante**: BTN, SB, BB são **três cadeiras seguidas**
+   (BTN → SB → BB; a SB entre o botão e a BB). O botão tem de cair na cadeira encostada à SB,
+   do lado oposto à BB.
+3. **Herói (referência fixa)** — centro-baixo + nick conhecido na imagem; `Hero` na HH. Já usado
+   pela máquina actual.
+
+**Resultado:** até **4 cadeiras conhecidas (SB, BB, BTN, Hero)** sobre-determinam a roda; o
+**stack desce a cruzamento final** (deixa de ser a âncora primária — passa a desempate).
+
+**Corroboração obrigatória:** os critérios **têm de concordar**. Algum não bate → **NÃO atribuir**
+→ a cadeira fica **"por mapear"** (hash mantido). **Nome em falta é honesto; nome trocado é veneno.**
+A HH fica **intacta** em qualquer caso.
+
+**Borda:** heads-up (**BTN = SB**) → tratar à parte.
+
+**Novo vs existente:** o **Herói** já é âncora; **SB/BB** existiam (pt7) mas o table-SS
+**salta-as** (= raiz do bug §3.2) → **REPOR**; o **botão como confirmação pela invariante** é
+**NOVO**.
 
 ### 3.3 Mitigações já no sítio (reduzem, não resolvem)
 - **Guarda anti-envenenamento** (`_filter_ambiguous_stackless`, pt71): ≥2 bancos não-herói
