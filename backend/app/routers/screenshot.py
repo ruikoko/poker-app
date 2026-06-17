@@ -1561,17 +1561,11 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
             extra_updates.append("position = %s")
             extra_params.append("BB")
 
-    # Date from file_meta
-    if file_meta.get("date") and not matched_hand.get("played_at"):
-        date_str = file_meta["date"]
-        time_str = file_meta.get("time", "00:00")
-        try:
-            from datetime import datetime as dt
-            played = dt.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-            extra_updates.append("played_at = %s")
-            extra_params.append(played.isoformat())
-        except (ValueError, TypeError):
-            pass
+    # played_at: NÃO derivar do nome do ficheiro.
+    # A data/hora no nome do screenshot GG é o instante do DOWNLOAD, não a
+    # hora-de-jogo (ver DESANON_ANATOMIA §2 + `#GG-DOWNLOAD-IMG-FILENAME-TIME-
+    # AND-BLINDS-UNRELIABLE`). A hora-de-jogo é matematicamente exacta só na HH;
+    # sem HH com played_at, fica NULL — não se inventa do nome do download.
 
     # Entry ID link
     extra_updates.append("entry_id = %s")
