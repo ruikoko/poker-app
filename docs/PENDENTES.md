@@ -484,18 +484,21 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    - **A confirmar ao implementar:** como a imagem se prende à mão (timestamp, à la
      table-SS); **nova categoria de imagem** na pipeline (hoje só lobby / table-SS /
      manual / replayer); **formato do breakdown** em WPN/GG. Nota: as imagens do
-     table-SS não são guardadas (`#TABLE-SS-IMAGE-NOT-STORED`) — se este fluxo
-     precisar de re-Vision retroactiva, ter isso em conta.
+     table-SS **são guardadas** (`img_b64`; `#TABLE-SS-IMAGE-NOT-STORED` ✅ resolvido
+     16 Jun) → re-Vision retroactiva **é** possível para esse caminho.
 
 ---
 
 ## Baixo prazo / qualidade
 
-15b. **`#TABLE-SS-IMAGE-NOT-STORED` (🟢 LOW, aberto pt56).** Imagens do table-SS
-   descartadas após a Vision (`table_ss_processing_log` sem coluna de imagem) →
-   sem re-Vision sem re-fornecer o ficheiro. Bloqueou o V2 multi-site. Trade-off
-   aceite (poupa storage); registar antes de qualquer plano que dependa de
-   re-Vision retroactiva.
+15b. **`#TABLE-SS-IMAGE-NOT-STORED` — ✅ RESOLVIDO (16 Jun, pt73).** **Era falso já:**
+   o `table_ss_processing_log` **guarda** a imagem em `img_b64` (coluna `table_ss.py:194`;
+   escrita no upload). Validado ponta-a-ponta na recuperação 14 Jun: **120/120** com
+   `img_b64` + re-Vision a partir do guardado a funcionar (`/reprocess-failed`). **A
+   re-Vision retroactiva é possível** — sem re-fornecer o ficheiro. Âmbito: caminho
+   **table-SS** (o screenshot/replayer guarda `img_b64` em `entries.raw_json`, separado).
+   Reforça o princípio de hoje (a imagem é a outra metade — `REGISTO_CONCEITO 2026-06-16`),
+   já satisfeito aqui. Detalhe: entrada `#TABLE-SS-IMAGE-NOT-STORED` no `TECH_DEBTS_INVENTARIO.md`.
 
 15c. **🟢 BAIXA (tracking, pt73) — 1 captura `no_match_to_hand` (12 Jun).** site/tn
    casados mas **sem mão correspondente** na BD. Leitura provável (**não verificada**):
