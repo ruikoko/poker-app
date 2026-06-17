@@ -53,6 +53,8 @@ TYPES = [
 IT_SUB = "it"
 # Subpasta dedicada drop-only-these p/ SS de lobby (back-compat; captured_at=mtime).
 LOBBY_SUB = "lobby"
+# Nome da área done/ das gold images (pasta EXTERNA GOLD_DIR → done/gold).
+GOLD_SUB = "gold"
 
 # Config local (preenchida por load_config; globals p/ as funções de envio).
 PARENT_DIR = None
@@ -60,6 +62,7 @@ LOGIN_EMAIL = None
 LOGIN_PASS = None
 LOBBY_DIR = None        # pasta EXTERNA opcional (2ª via manual, só com --lobby-dir)
 LOBBY_SINCE = None      # só capturas (mtime) >= esta data, na LOBBY_DIR
+GOLD_DIR = None         # pasta EXTERNA das gold images (descarga do replayer GG, ex. Documents)
 IMPORT_DESDE = None     # janela das IMAGENS: dia-de-jogo inicial YYYY-MM-DD (ou None = sem início)
 IMPORT_ATE = None       # janela das IMAGENS: dia-de-jogo final inclusive YYYY-MM-DD (ou None = sem fim)
 
@@ -68,7 +71,7 @@ def load_config():
     """Carrega config_local.py para os globals. Chamada só em main() (mantém o
     `import app_import` seguro para os testes do classificador, que não precisam
     de credenciais)."""
-    global PARENT_DIR, LOGIN_EMAIL, LOGIN_PASS, LOBBY_DIR, LOBBY_SINCE
+    global PARENT_DIR, LOGIN_EMAIL, LOGIN_PASS, LOBBY_DIR, LOBBY_SINCE, GOLD_DIR
     global IMPORT_DESDE, IMPORT_ATE
     try:
         import config_local as cfg
@@ -82,6 +85,7 @@ def load_config():
     LOGIN_PASS = cfg.LOGIN_PASS
     LOBBY_DIR = getattr(cfg, "LOBBY_DIR", None)
     LOBBY_SINCE = getattr(cfg, "LOBBY_SINCE", None)
+    GOLD_DIR = getattr(cfg, "GOLD_DIR", None)
     IMPORT_DESDE = getattr(cfg, "IMPORT_DESDE", None)
     IMPORT_ATE = getattr(cfg, "IMPORT_ATE", None)
 
@@ -215,6 +219,8 @@ def scaffold():
     for sub in (IT_SUB, LOBBY_SUB):
         os.makedirs(os.path.join(PARENT_DIR, sub), exist_ok=True)
         os.makedirs(os.path.join(PARENT_DIR, "done", sub), exist_ok=True)
+    # 'gold' — destino done/ das gold images da pasta EXTERNA GOLD_DIR (Documents).
+    os.makedirs(os.path.join(PARENT_DIR, "done", GOLD_SUB), exist_ok=True)
 
 
 def _dest_no_clobber(done_dir, fname):
@@ -266,6 +272,22 @@ def _post_table_ss(session, path, fname, folder_tag=None):
             r = session.post(f"{POKER_APP_URL}/api/table-ss/upload",
                              files={"file": (fname, fh, mime)}, data=data,
                              timeout=600)
+    except Exception as e:
+        return (False, f"EXC {type(e).__name__}: {e}")
+    if 200 <= r.status_code < 300:
+        return (True, _summary_line(r))
+    return (False, f"HTTP {r.status_code} {r.text[:120]}")
+
+
+def _post_screenshot(session, path, fname):
+    """POST /api/screenshots (gold image / SS do replayer). Devolve (ok, resumo).
+    O backend tira o TM/hand-id do NOME e faz Vision+match+desanon (position_v3).
+    Dedup é server-side por file_hash — 2ª importação devolve status='duplicate'."""
+    mime = _IMG[os.path.splitext(fname)[1].lower()]
+    try:
+        with open(path, "rb") as fh:
+            r = session.post(f"{POKER_APP_URL}/api/screenshots",
+                             files={"file": (fname, fh, mime)}, timeout=600)
     except Exception as e:
         return (False, f"EXC {type(e).__name__}: {e}")
     if 200 <= r.status_code < 300:
@@ -679,6 +701,46 @@ def process_lobby_dir(session, live, window=None):
     return (lobby, nonlobby, failed, fora)
 
 
+# ── Fonte "gold" externa GOLD_DIR (gold images do replayer GG — ex. Documents) ─
+
+def process_gold_dir(session, live):
+    """Lê a pasta EXTERNA GOLD_DIR (gold images = descarga completa da mão pelo
+    botão do replayer GG; ex. Documents) e envia TODAS as imagens (.png/.jpg)
+    para /api/screenshots. SEM filtro de mês/janela — a GOLD_DIR só tem gold
+    images, de qualquer mês. Em 2xx MOVE o ficheiro para PARENT_DIR/done/gold
+    (sai da GOLD_DIR → dedup natural no cliente; o backend dedupa por file_hash).
+
+    A jusante reutiliza o pipeline do upload manual: Vision → match por hand-id
+    (GG-<TM> do nome) → desanon position_v3 → vilões. Sem HH ainda, o entry fica
+    ÓRFÃO (sem erro) e liga-se sozinho quando a HH for importada (re-link de
+    órfãos, já existente). Devolve (enviadas, falhas) ou None se não configurada."""
+    if not GOLD_DIR:
+        print("\n── gold (GOLD_DIR): não configurada em config_local — salto")
+        return None
+    if not os.path.isdir(GOLD_DIR):
+        print(f"\n── gold (GOLD_DIR): não existe ({GOLD_DIR}) — salto")
+        return None
+    done = os.path.join(PARENT_DIR, "done", GOLD_SUB)
+    files = _imgs_in(GOLD_DIR)
+    print(f"\n── gold (GOLD_DIR externa: gold images → /api/screenshots)  — {len(files)} ficheiro(s)")
+    sent = failed = 0
+    for fname in files:
+        path = os.path.join(GOLD_DIR, fname)
+        if not live:
+            sent += 1
+            print(f"   [dry] {fname}  → /api/screenshots")
+            continue
+        ok, msg = _post_screenshot(session, path, fname)
+        if ok:
+            sent += 1
+            print(f"   ✓ {fname}: {msg}")
+            shutil.move(path, _dest_no_clobber(done, fname))   # sai da GOLD_DIR
+        else:
+            failed += 1
+            print(f"   ✗ {fname}: {msg} → retry depois (não movido)")
+    return (sent, failed)
+
+
 # ── Entrada ────────────────────────────────────────────────────────────────--
 
 def parse_args(argv=None):
@@ -752,6 +814,7 @@ def main(argv=None, overrides=None):
 
     it_counts = process_it_mixed(session, live, window=img_window)
     lobby_sub_res = process_lobby_subdir(session, live, window=img_window)
+    gold_res = process_gold_dir(session, live)   # gold images (GOLD_DIR externa); sem janela
     lobby_res = process_lobby_dir(session, live, window=img_window) if args.lobby_dir else None
     if not args.lobby_dir:
         print("\n── lobby (LOBBY_DIR externa): 2ª via manual — salto (usa --lobby-dir)")
@@ -782,6 +845,12 @@ def main(argv=None, overrides=None):
     tot_fora += lfora_s
     lsub_fora = f"  fora da janela={lfora_s}" if lfora_s else ""
     print(f"  {'lobby':8} lobbies={lob_s}  não-lobby={nonlob_s}  falhas={lfail_s}{lsub_fora}   (subpasta drop-only)")
+    if gold_res is not None:
+        g_sent, g_fail = gold_res
+        tot_sent += g_sent
+        tot_fail += g_fail
+        verb = "plano" if not live else "enviadas"
+        print(f"  {'gold':8} {verb}={g_sent}  falhas={g_fail}   (GOLD_DIR externa → /api/screenshots)")
     if lobby_res is not None:
         lob, nonlob, lfail, lfora = lobby_res
         tot_fail += lfail
