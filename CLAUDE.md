@@ -100,6 +100,15 @@ REGRAS_NEGOCIO) a afirmar "não implementado" depois de implementados. Para cada
 debt: confirma se ainda existe, onde vive (ficheiro:linha), e quantifica o
 impacto real (ex.: query read-only) antes de estimar esforço.
 
+## ⚠️ Convenção — journals e archive são IMUTÁVEIS
+
+Os **journals** (`docs/JOURNAL_*`) e a pasta **`archive/`** são snapshots **DATADOS e
+IMUTÁVEIS**. Registam o que era verdade na data da sessão e **NÃO se reescrevem** para
+reflectir resoluções ou alterações posteriores. O estado **ACTUAL** de qualquer item (tech
+debt, pendência, decisão) vive sempre nos **docs vivos**: **`TECH_DEBTS_INVENTARIO.md`** e
+**`PENDENTES.md`** (e **`REGISTO_CONCEITO.md`** para conceitos, append-only). Um item marcado
+"aberto" num journal antigo lê-se como **"à data"** — confirmar o estado actual nos docs vivos.
+
 ## ⚠️ Descrever o problema em PT-PT simples antes de pedir decisão ao Rui
 
 Antes de qualquer **decisão de produto**, o problema **todo** tem de estar descrito
