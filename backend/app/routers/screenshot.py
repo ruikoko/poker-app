@@ -233,7 +233,16 @@ def _build_gg_vision_prompt() -> str:
         "       the avatar (above the name). Output the number ONLY (no '$' or commas). If\n"
         "       two amounts are shown, take the FIRST. Use 0 ONLY if there is genuinely no\n"
         "       $ banner for that player.\n"
-        "   (e) Country code from the flag (2 letters, or NONE).\n\n"
+        "   (e) Country code from the flag (2 letters, or NONE).\n"
+        "   (f) Position label, read from the ACTION LOG in the BOTTOM/LEFT panel\n"
+        "       (the panel with Pre-Flop/Flop/Turn/River columns, one row per\n"
+        "       action). In that log, each player's action row shows a small\n"
+        "       POSITION BADGE next to the player name — one of: UTG, UTG+1,\n"
+        "       UTG+2, MP, MP+1, LJ, HJ, CO, BTN (or BU), SB, BB. Transcribe that\n"
+        "       badge EXACTLY as drawn. If a player has NO badge in the action log\n"
+        "       (e.g. the Hero, or someone seated but not dealt into this hand),\n"
+        "       output NONE. NEVER infer a position from stack size or seat order\n"
+        "       — only transcribe a badge that is actually printed in the log.\n\n"
         "Reply in EXACTLY this format (no extra text, no markdown):\n"
         "TM: <TM number, e.g. TM5672663145>\n"
         "TOURNAMENT: <tournament name from title>\n"
@@ -243,8 +252,8 @@ def _build_gg_vision_prompt() -> str:
         "POT: <pot size number, or NONE>\n"
         "SB: <SB player name from LEFT PANEL>\n"
         "BB: <BB player name from LEFT PANEL>\n"
-        "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
-        "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country>\n"
+        "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country> | <position>\n"
+        "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country> | <position>\n"
         "... (one PLAYER line per player, including Hero, SB, and BB)\n\n"
         "RULES:\n"
         "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
@@ -260,7 +269,12 @@ def _build_gg_vision_prompt() -> str:
         "- Country is the 2-letter code from the flag, or NONE\n"
         "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
         "- Include ALL players visible at the table, even if eliminated\n"
-        "- Do NOT guess positions — only output SB and BB from the left panel\n\n"
+        "- position: transcribe the position BADGE shown in the ACTION LOG (bottom/\n"
+        "  left panel) next to each player's action row, EXACTLY as drawn (UTG,\n"
+        "  UTG+1, UTG+2, MP, MP+1, LJ, HJ, CO, BTN/BU, SB, BB). Output NONE when a\n"
+        "  player has no badge in the log. NEVER guess from stack or seat order.\n"
+        "  (SB/BB names above come from the blinds area; this position field comes\n"
+        "  from the per-player badge in the action log.)\n\n"
         "Output ONLY the structured lines above. No explanations."
     )
 
@@ -410,10 +424,15 @@ def _parse_vision_response(text: str) -> dict:
                 # `name | stack | bounty_pct | country` — onde bounty_pct historicamente
                 # era usado para VPIP % (orange flame), não para bounty $. Tech debt
                 # #FIELD-BOUNTY-PCT-MISNAMED traceia o rename futuro do field key.
+                # pt-pos: 6º campo opcional `position` (rótulo lido junto ao seat
+                # na gold image). Aditivo — não altera o caminho stack-elimination.
+                position_str = None
                 if len(parts) >= 5:
                     vpip_str = parts[2]
                     bounty_value_str = parts[3]
                     country = parts[4]
+                    if len(parts) >= 6:
+                        position_str = parts[5]
                 else:
                     vpip_str = parts[2] if len(parts) > 2 else "0%"
                     bounty_value_str = "0"
@@ -487,6 +506,12 @@ def _parse_vision_response(text: str) -> dict:
                     "bounty_pct": bounty_pct,             # historic name; semantically VPIP % — see #FIELD-BOUNTY-PCT-MISNAMED
                     "bounty_value_usd": bounty_value_usd, # pt24: USD bounty (golden crown)
                     "country": country if country and country.upper() != "NONE" else None,
+                    # pt-pos: rótulo de posição lido na imagem (None se não visível).
+                    # Aditivo; consumido só pelo mapa por posição (match_method
+                    # 'position_v3'). O caminho stack-elimination ignora-o.
+                    "position": (position_str.strip().upper()
+                                 if position_str and position_str.strip().upper() != "NONE"
+                                 else None),
                 }
                 result["players_list"].append(player_info)
 
@@ -817,6 +842,144 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
     logger.info(f"Match result: {len(anon_map)}/{len(all_players)} mapped. "
                f"Anchors: Hero+SB+BB. Folds: stack match. Rest: elimination.")
     return anon_map
+
+
+# ── Mapa nome→cadeira por POSIÇÃO (match_method 'position_v3') ───────────────
+# Caminho ADITIVO, separado do stack-elimination acima. NÃO está ligado a
+# nenhum caller vivo — é a desanon por posição (prove-first). A HH dá
+# seat→posição (botão conhecido); para cada jogador da Vision com rótulo de
+# posição visível, o nome vai para o seat da HH com a MESMA posição. Sem
+# aritmética de stack. NUNCA adivinha: rótulo em falta, posição sem seat
+# correspondente, ou colisão → deixa por mapear e sinaliza (lacuna honesta).
+
+POSITION_V3_MATCH_METHOD = "position_v3"
+
+# Nicks-Hero conhecidos (lowercase) — usado para VERIFICAR o Hero lido pela
+# Vision antes de o escrever no seat 'Hero'. Inclui a lista global + os de GG.
+_KNOWN_HERO_NICKS = {n.strip().lower() for n in HERO_NAMES_ALL} | {
+    n.strip().lower() for n in ALL_NICKS_BY_SITE.get("GGPoker", [])
+}
+
+
+def _canon_position(p: str | None) -> str | None:
+    """Normaliza um rótulo de posição (HH ou Vision) para um canónico único,
+    para que os dois lados comparem sem depender da grafia. Estritamente
+    lexical — NÃO infere nada."""
+    if not p:
+        return None
+    s = re.sub(r"\s+", "", str(p).strip().upper()).replace("+", "")
+    syn = {
+        "BU": "BTN", "BTN": "BTN", "BUTTON": "BTN", "DEALER": "BTN", "D": "BTN",
+        "SMALLBLIND": "SB", "SB": "SB",
+        "BIGBLIND": "BB", "BB": "BB",
+        "LOJACK": "LJ", "LJ": "LJ", "HIJACK": "HJ", "HJ": "HJ",
+    }
+    return syn.get(s, s)
+
+
+def _build_anon_to_real_map_by_position(hand_row: dict, vision_data: dict) -> dict:
+    """Mapa player_key→nome_real PURAMENTE por posição (sem stack).
+
+    Devolve um dict de diagnóstico:
+      {
+        "anon_map": {player_key: real_name, ...},   # só os que casaram
+        "match_method": "position_v3",
+        "hero_ok": bool | None,                       # nome+posição Hero batem?
+        "no_label": [vision_name, ...],               # Vision sem rótulo de posição
+        "vision_pos_no_hh_seat": [(name, canon_pos)], # rótulo sem seat na HH
+        "vision_pos_collision": [canon_pos, ...],     # 2+ Vision na mesma posição
+        "unmapped_hh": [(player_key, canon_pos)],     # seats HH sem nome
+        "n_mapped": int, "n_hh_seats": int,
+      }
+    """
+    raw_hh = (hand_row.get("raw") or "")
+    hh = _parse_hh_stacks_and_blinds(raw_hh)
+    hh_players = hh.get("players") or {}   # name(hash/"Hero") -> {seat, stack_chips, position}
+
+    # HH: canon_pos -> player_key (a HH não deve ter colisão de posição)
+    pos_to_hhkey = {}
+    hh_pos_collision = []
+    for key, info in hh_players.items():
+        cp = _canon_position(info.get("position"))
+        if cp is None:
+            continue
+        if cp in pos_to_hhkey:
+            hh_pos_collision.append(cp)  # defensivo; não deve acontecer
+        else:
+            pos_to_hhkey[cp] = key
+
+    vlist = vision_data.get("players_list") or []
+
+    # Vision: detectar colisão de posição do lado da imagem
+    vis_pos_count = {}
+    for vp in vlist:
+        cp = _canon_position(vp.get("position"))
+        if cp:
+            vis_pos_count[cp] = vis_pos_count.get(cp, 0) + 1
+    vis_collisions = {cp for cp, n in vis_pos_count.items() if n > 1}
+
+    anon_map = {}
+    no_label = []
+    vision_pos_no_hh_seat = []
+    used_hhkeys = set()
+
+    for vp in vlist:
+        name = vp.get("name")
+        cp = _canon_position(vp.get("position"))
+        if cp is None:
+            no_label.append(name)
+            continue
+        if cp in vis_collisions:
+            # 2+ jogadores da Vision com a mesma posição → ambíguo, não mapear
+            continue
+        hhkey = pos_to_hhkey.get(cp)
+        if hhkey is None:
+            vision_pos_no_hh_seat.append((name, cp))
+            continue
+        if hhkey in used_hhkeys:
+            continue  # já ocupado (defensivo)
+        anon_map[hhkey] = name
+        used_hhkeys.add(hhkey)
+
+    # Seat do Hero: NUNCA escrever o 'hero' da Vision às cegas. A Vision por
+    # vezes identifica mal o Hero (ex. #6083126980: leu 'MR_WEI' como Hero) — e
+    # escrever isso no seat 'Hero' metia o nome de um VILÃO no lugar do Hero.
+    # Só mapeamos o seat 'Hero' se o nome da Vision for um nick-Hero CONHECIDO
+    # (exacto normalizado, ou ratio ≥ 0.9 para tolerar OCR). Senão: lacuna
+    # honesta — deixa 'Hero' por mapear (a jusante o seat continua 'Hero', que
+    # já é o Hero) e sinaliza.
+    hero_ok = None
+    hero_unverified = False
+    hero_name_vision = (vision_data.get("hero") or "").strip()
+    if "Hero" in hh_players:
+        hv = hero_name_vision.lower()
+        is_known = bool(hv) and (
+            hv in _KNOWN_HERO_NICKS
+            or any(SequenceMatcher(None, hv, k).ratio() >= 0.9 for k in _KNOWN_HERO_NICKS)
+        )
+        hero_ok = is_known
+        if is_known:
+            anon_map["Hero"] = hero_name_vision
+            used_hhkeys.add("Hero")
+        else:
+            hero_unverified = True
+
+    unmapped_hh = [(k, _canon_position(v.get("position")))
+                   for k, v in hh_players.items() if k not in used_hhkeys]
+
+    return {
+        "anon_map": anon_map,
+        "match_method": POSITION_V3_MATCH_METHOD,
+        "hero_ok": hero_ok,
+        "hero_unverified": hero_unverified,
+        "no_label": no_label,
+        "vision_pos_no_hh_seat": vision_pos_no_hh_seat,
+        "vision_pos_collision": sorted(vis_collisions),
+        "hh_pos_collision": hh_pos_collision,
+        "unmapped_hh": unmapped_hh,
+        "n_mapped": len([k for k in anon_map if k != "Hero"]),
+        "n_hh_seats": len([k for k in hh_players if k != "Hero"]),
+    }
 
 
 def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: dict) -> dict:
@@ -1412,7 +1575,7 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     # enrich completo. Sem isto, hands com match_method='v2' mas anon_map={}
     # (estado degenerate causado por enrich correr quando apa só tinha _meta)
     # ficavam presas — re-enrich nunca corria, apa permanecia com hashes.
-    if (existing_mm == "anchors_stack_elimination_v2"
+    if (existing_mm in ("anchors_stack_elimination_v2", POSITION_V3_MATCH_METHOD)
             and raw_already_present
             and existing_anon_map):
         # apa já enriquecido → NÃO re-corre o algoritmo v2 caro (anon_map). MAS
@@ -1498,8 +1661,24 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
             f"placeholder-only (só _meta) — bug upstream, não devia chegar aqui."
         )
 
-    # Novo algoritmo v2: âncoras + stack esperado + eliminação
-    anon_map = _build_anon_to_real_map(matched_hand, raw_json)
+    # Desanon POR MÃO (pt-pos):
+    #  • Se a gold image trouxe SIGLAS de posição (descarga completa GG, lidas
+    #    do log de acção), usa o mapa por POSIÇÃO (position_v3) — robusto, sem
+    #    aritmética de stack.
+    #  • Caso contrário (sem siglas), cai no stack-elimination legacy
+    #    (anchors_stack_elimination_v2).
+    # ⚠️ O fallback é POR MÃO. Dentro de uma mão com gold image NUNCA se preenche
+    # por stack uma lacuna honesta do position_v3: um seat sem sigla fica por
+    # mapear (o hash mantém-se). Não se mistura os dois caminhos na mesma mão.
+    _has_positions = any(
+        (p or {}).get("position") for p in (raw_json.get("players_list") or [])
+    )
+    if _has_positions:
+        anon_map = _build_anon_to_real_map_by_position(matched_hand, raw_json)["anon_map"]
+        _used_position_v3 = True
+    else:
+        anon_map = _build_anon_to_real_map(matched_hand, raw_json)
+        _used_position_v3 = False
     enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json)
 
     # match_method só sobe a 'anchors_stack_elimination_v2' quando há HH real
@@ -1520,7 +1699,10 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     # é falso positivo: o guard idempotência depois fecha a porta para re-
     # correr quando apa já foi populada com hashes via outro caminho.
     if has_real_hh and anon_map:
-        match_method_value = "anchors_stack_elimination_v2"
+        match_method_value = (
+            POSITION_V3_MATCH_METHOD if _used_position_v3
+            else "anchors_stack_elimination_v2"
+        )
     else:
         # Preservar match_method existente do placeholder (ex:
         # 'discord_placeholder_no_hh' / '_backfill'); fallback ao default
