@@ -23,6 +23,14 @@ LOBBY_DIR = r"C:\Users\User\Pictures\Screenshots"
 # Vision na história toda na 1ª corrida e mantém o scope (o Rui só estuda 2026+).
 LOBBY_SINCE = "2026-05-30"
 
+# (OPCIONAL) Fonte "gold": pasta EXTERNA das GOLD IMAGES (a descarga completa da
+# mão pelo botão do replayer GG; ex. a pasta Documents). TODAS as imagens (.png/
+# .jpg) são enviadas para /api/screenshots — SEM filtro de mês (a pasta só tem
+# gold images, de qualquer mês). Em sucesso o ficheiro é MOVIDO para
+# PARENT_DIR/done/gold (sai da pasta de origem). O backend dedupa por file_hash.
+# Comenta/remove para desligar.
+GOLD_DIR = r"C:\Users\User\Documents"
+
 # (OPCIONAL) JANELA DE DATAS das IMAGENS — aplica-se a it / manual / lobby /
 # LOBBY_DIR (NÃO a gg_hh/gg_ts, que entram sempre por inteiro). Conceito
 # DIA-DE-JOGO 15:00→15:00 Lisboa: IMPORT_DESDE="2026-06-08" + IMPORT_ATE="2026-06-11"

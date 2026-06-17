@@ -1154,8 +1154,13 @@ async def _run_vision_for_entry(entry_id: int, content: bytes, mime_type: str,
             conn = get_conn()
             try:
                 with conn.cursor() as cur:
+                    import hashlib as _hl
                     raw_json_str = json.dumps({
                             "tm": tm_final,
+                            # preservar o file_hash (dedup): este UPDATE reconstrói
+                            # o raw_json, e sem isto a 2ª importação da mesma gold
+                            # image não encontraria o dedup. Mesmo hash do endpoint.
+                            "file_hash": _hl.sha256(content).hexdigest(),
                             "tournament": vision_data.get("tournament"),
                             "file_meta": file_meta,
                             "mime_type": compressed_mime,
@@ -1466,6 +1471,27 @@ async def upload_screenshot(
         except (ValueError, TypeError):
             pass  # parse fail → deixa passar (filename ambíguo não bloqueia)
 
+    # Dedup server-side por file_hash (espelho do table_ss_processing_log): correr
+    # a via de pasta (appimport) outra vez sobre a MESMA gold image NÃO cria um
+    # entry novo nem re-dispara Vision. Hash do conteúdo ORIGINAL.
+    import hashlib
+    file_hash = hashlib.sha256(content).hexdigest()
+    dup = query(
+        "SELECT id FROM entries WHERE entry_type = 'screenshot' "
+        "AND raw_json->>'file_hash' = %s ORDER BY id LIMIT 1",
+        (file_hash,),
+    )
+    if dup:
+        eid = dup[0]["id"]
+        logger.info(f"[ss-upload] dedup file_hash={file_hash[:12]}… → entry {eid} (skip)")
+        return {
+            "status": "duplicate",
+            "tm_number": tm_number,
+            "file_meta": file_meta,
+            "message": "Screenshot já importado (dedup file_hash) — sem novo entry.",
+            "entry_id": eid,
+        }
+
     # Comprimir para BD (original fica em memória para Vision)
     compressed_b64, compressed_mime = _compress_image(content)
     img_b64_original = base64.b64encode(content).decode("utf-8")
@@ -1484,6 +1510,7 @@ async def upload_screenshot(
                     f"Screenshot -- TM: {tm_number or 'not detected'}",
                     json.dumps({
                         "tm": tm_number,
+                        "file_hash": file_hash,
                         "file_meta": file_meta,
                         "mime_type": compressed_mime,
                         "img_b64": compressed_b64,
