@@ -44,7 +44,7 @@ Para a pt73:
 - **✅ `Nota` sem formato/pré-pós — RESOLVIDO** (decisão do Rui, pt73): a tag `nota` sozinha
   basta (→ Vilões, regra C). Sem família de formato nem fase. Questão fechada.
 
-### 🔴 RE-IMPORT do 14 Jun — bloqueado por crédito Anthropic esgotado (pt73)
+### ✅ RE-IMPORT do 14 Jun — RECUPERAÇÃO CONCLUÍDA (verificado 16 Jun, pt73)
 
 No `--ao-vivo` de 14 Jun a **Vision falhou 100%** (166 capturas `vision_failed`, 39 lobbys
 "transitório"). **Causa confirmada** (teste directo à API com a chave de prod): Anthropic
@@ -60,10 +60,14 @@ classificador de pastas funcionou (tags certas em todas as subpastas).
   ⚠️ **Correcção:** os ficheiros **FORAM movidos para `done\`** (não "ficaram nas pastas" — eu
   tinha dito mal); `attempt_count=1` ⟹ nunca reprocessados (o re-import pós-créditos não lhes
   tocou, já estavam em `done\`).
-- **✅ Recuperação = ferramenta de reprocesso SERVER-SIDE** (a seguir ao fix Discord): re-corre a
-  Vision sobre o `img_b64` guardado → match HH → aplica `folder_tag` → desanon. Sem o Rui mexer
-  em ficheiros. Idempotente (`file_hash` PK; table-SS liga, não cria mãos). **NÃO** re-feed dos
-  ficheiros de `done\`.
+- **✅ Recuperação 14 Jun CONCLUÍDA (verificado 16 Jun):** **120/120** capturas em `success`,
+  `img_b64` guardado. Preview `GET /api/table-ss/reprocess-failed` = **0 eligible** → **nada a
+  reprocessar**. Créditos já carregados. A ferramenta de reprocesso server-side existe (re-corre a
+  Vision sobre o `img_b64` guardado → match HH → `folder_tag` → desanon; idempotente, `file_hash`
+  PK; sem re-feed de `done\`) mas **não foi preciso disparar** — as 120 já tinham passado a `success`.
+- **Snapshot verificado (`table_ss_processing_log`, 16 Jun):** **262 linhas** — **261 success, 1
+  no_match_to_hand (12 Jun), 0 vision_failed**. Por dia: 05/1, 08/15, 09/36, 11/36, 12/4 (+1
+  no_match), 13/3, **14/120**, 15/46 — todas `success`.
 - **Observabilidade (✅ pt73, commit a):** `extract_table_ss_json`/`extract_lobby_payout_json`
   propagam o erro REAL da Anthropic para `reason_detail` (ex. "credit balance too low") em vez
   do genérico "devolveu None" — o próximo caso é óbvio no `/import-health` sem ir à API.
@@ -492,6 +496,11 @@ Plano completo em `docs/GTO_BRAIN.md §7`. Resumo da fila:
    sem re-Vision sem re-fornecer o ficheiro. Bloqueou o V2 multi-site. Trade-off
    aceite (poupa storage); registar antes de qualquer plano que dependa de
    re-Vision retroactiva.
+
+15c. **🟢 BAIXA (tracking, pt73) — 1 captura `no_match_to_hand` (12 Jun).** site/tn
+   casados mas **sem mão correspondente** na BD. Leitura provável (**não verificada**):
+   HH ainda não reimportado (reimport por fases) ou órfão. **Revisitar quando a fase do
+   HH chegar**; **não** é `vision_failed` (fora do âmbito da recuperação de Vision).
 
 
 15. **Vision parser improvements** — tolerância ao prefixo TM, heurística do

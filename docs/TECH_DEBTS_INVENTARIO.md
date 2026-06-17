@@ -6,6 +6,14 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt73 (16 Jun 2026 — nome das imagens GG-download: hora E blinds não-fiáveis)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE` (renomeado de `#GG-DOWNLOAD-IMG-FILENAME-TIME-IS-DOWNLOAD-NOT-PLAY`, que nunca chegou a ser registado em commit) | 🟡 MED — **confirmado LATENTE (0 mãos contaminadas, 16 Jun)**, não activo | **Aberto — latente.** **FACTO (Rui, 16 Jun, com print, ex. `2026-06-16__08-42_PM__0_35__0_70__6083717338.png`):** no nome destas imagens GG-download / replayer-share, **nem a hora nem as blinds** correspondem à mão — a **HORA é a do DOWNLOAD** (não a do jogo) e as **BLINDS no nome (`0_35`/`0_70`) estão ERRADAS** (as reais são extraídas **depois**, pela Vision, sobre a imagem). **Único sinal fiável no nome = TM/hand-id** (`6083717338` → `GG-6083717338`). **Exposição no código (read-only, confirmada):** (1) `screenshot.py:88` `_parse_filename` extrai date/time/blinds/tm e a doutrina chama-lhes "fonte primária"; (2) `screenshot.py:1565-1574` escreve `played_at = date+time` do nome quando a mão ainda não tem `played_at` → grava **DOWNLOAD-time como hora-de-jogo**; (3) `mtt.py:445` `ss_blinds = file_meta.get("blinds")` + `mtt.py:1042` `_match_screenshot(tm, played_at, blinds)` → blinds **e** hora do nome entram como **sinal de match** imagem↔mão (ambos do download, não da mão). **Contradição com a doutrina (a reconciliar, NÃO mexer sem decisão do Rui):** `CLAUDE.md:174` ("Parse determinístico do nome — fonte de verdade para data, hora, blinds e TM number; nunca confiar no Vision p/ blinds"), `MAPA_ACOPLAMENTO §file_meta`, `VERIFICACAO_PIPELINES:516`, `archive/ONBOARDING_OPERADOR_pre_pt9.md:37` afirmam o contrário do que o Rui afirma para estas imagens (blinds via Vision). Decisão de **doutrina/dados → Rui**. **Cross-ref:** `DESANON_ANATOMIA §2` (nome do replayer-SS GG: só o TM é fiável; hora/blinds do nome não são da mão) — reforça a **DECISÃO pt73** (match por hand-id). **A DECIDIR ANTES DE FIX (Rui):** (a) flip da doutrina p/ estas imagens (Vision = fonte de blinds; nome só dá o TM); (b) tirar hora+blinds do nome do `_match_screenshot` e do `played_at`-fallback; (c) scan read-only à prod p/ contar quantas mãos já têm `played_at`/blinds vindos do nome. **Scan pt73 (16 Jun, read-only): 0 mãos contaminadas.** Causa: caminho **latente** (0 `entry_type='screenshot'`; `played_at` sempre = HH; 0 desempate por blinds). **Debt confirmado LATENTE, não activo** — só morde se a lane de screenshot-por-nome for reactivada (ver lane nova em `PENDENTES` + ordem fix-primeiro). |
+
+---
+
 ## pt72 (14 Jun 2026 — replayer GG morto + Discord maio por concluir)
 
 | ID | Sev | Resumo |
