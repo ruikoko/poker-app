@@ -1700,6 +1700,33 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     _has_positions = any(
         (p or {}).get("position") for p in (raw_json.get("players_list") or [])
     )
+    # A ORDEM NÃO PODE IMPORTAR: no match DIRECTO (HH antes da imagem) o caller
+    # passa o players_list fresco da Vision (com posições) → position_v3. No
+    # RE-LINK (imagem antes da HH) alguns callers passam um raw_json que perdeu
+    # as posições → caía no stack. Robustez caller-agnóstica: se o raw_json
+    # recebido não traz posições mas o ENTRY guardado tem (gold image já com
+    # Vision feita), recupera-as do entry e usa position_v3 — mesmo resultado
+    # que o directo. Entries SEM posições (table-SS, replayer antigo) ficam como
+    # estão → stack-elimination intacto.
+    if not _has_positions:
+        try:
+            _erow = query("SELECT raw_json FROM entries WHERE id = %s", (entry_id,))
+            _erj = (_erow[0].get("raw_json") if _erow else None) or {}
+            if isinstance(_erj, str):
+                _erj = json.loads(_erj)
+            _epl = _erj.get("players_list") or []
+            if any((p or {}).get("position") for p in _epl):
+                raw_json = {
+                    **raw_json,
+                    "players_list": _epl,
+                    "hero": raw_json.get("hero") or _erj.get("hero"),
+                    "vision_sb": raw_json.get("vision_sb") or _erj.get("vision_sb"),
+                    "vision_bb": raw_json.get("vision_bb") or _erj.get("vision_bb"),
+                }
+                hero_name = hero_name or _erj.get("hero")
+                _has_positions = True
+        except Exception as _e:
+            logger.warning(f"[pos-v3] recover positions from entry {entry_id} falhou: {_e}")
     if _has_positions:
         anon_map = _build_anon_to_real_map_by_position(matched_hand, raw_json)["anon_map"]
         _used_position_v3 = True
