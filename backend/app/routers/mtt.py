@@ -398,90 +398,39 @@ def _extract_screenshot_data(raw: dict, entry_id: int) -> dict:
     }
 
 
-def _match_screenshot(tm_number: str, played_at: str | None = None, blinds: str | None = None) -> dict | None:
+def _match_screenshot(tm_number: str) -> dict | None:
     """
-    Procura um screenshot órfão pelo TM number + hora + blinds.
+    Procura um screenshot órfão pelo TM number (hand-id) — e SÓ pelo TM.
     Usa apenas dígitos para comparação (ignora prefixos TM, GG-, #, etc.)
-    
-    Estratégia:
-      1. Filtrar por TM number (só dígitos)
-      2. Se houver múltiplos, filtrar por blinds
-      3. Se ainda houver múltiplos, filtrar por hora (±5 min)
+
+    A chave do match GG é o hand-id (TM). A HORA e as BLINDS lidas do nome do
+    ficheiro do screenshot NÃO entram no desempate: a hora é o instante do
+    DOWNLOAD (não a hora-de-jogo) e as blinds do nome não são de confiança
+    (ver DESANON_ANATOMIA §2 + `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-
+    UNRELIABLE`). Múltiplos screenshots com o mesmo TM são a mesma mão →
+    pegamos no determinístico (menor id).
+
     Retorna dados do Vision incluindo players_list e vision_sb/bb.
     """
     tm_digits = _extract_tm_digits(tm_number)
     if not tm_digits:
         return None
-    
+
     rows = query(
-        """SELECT id, raw_json 
-           FROM entries 
-           WHERE entry_type = 'screenshot' 
+        """SELECT id, raw_json
+           FROM entries
+           WHERE entry_type = 'screenshot'
              AND raw_json->>'tm' LIKE %s
              AND (raw_json->>'vision_done')::boolean = true
            ORDER BY id""",
         (f"%{tm_digits}%",)
     )
-    
+
     if not rows:
         return None
-    
-    if len(rows) == 1:
-        raw = rows[0].get("raw_json") or {}
-        return _extract_screenshot_data(raw, rows[0]["id"])
-    
-    # Múltiplos screenshots do mesmo TM — filtrar por blinds + hora
-    def _normalise_blinds(b: str | None) -> str:
-        if not b:
-            return ""
-        return re.sub(r"[,\s]", "", b).lower()
-    
-    hh_blinds_norm = _normalise_blinds(blinds)
-    
-    candidates = []
-    for row in rows:
-        raw = row.get("raw_json") or {}
-        file_meta = raw.get("file_meta") or {}
-        ss_blinds = file_meta.get("blinds") or raw.get("blinds") or ""
-        ss_blinds_norm = _normalise_blinds(ss_blinds)
-        if hh_blinds_norm and ss_blinds_norm and hh_blinds_norm == ss_blinds_norm:
-            candidates.append(row)
-    
-    if not candidates:
-        candidates = rows
-    
-    if len(candidates) == 1:
-        raw = candidates[0].get("raw_json") or {}
-        return _extract_screenshot_data(raw, candidates[0]["id"])
-    
-    # Filtrar por hora (±5 minutos)
-    if played_at:
-        try:
-            hh_dt = datetime.fromisoformat(played_at.replace("Z", "+00:00"))
-            best = None
-            best_diff = float("inf")
-            for row in candidates:
-                raw = row.get("raw_json") or {}
-                file_meta = raw.get("file_meta") or {}
-                ss_time_str = file_meta.get("time")
-                ss_date_str = file_meta.get("date")
-                if ss_time_str and ss_date_str:
-                    try:
-                        ss_dt = datetime.fromisoformat(f"{ss_date_str}T{ss_time_str}:00")
-                        diff = abs((hh_dt.replace(tzinfo=None) - ss_dt).total_seconds())
-                        if diff < best_diff:
-                            best_diff = diff
-                            best = row
-                    except Exception:
-                        pass
-            if best and best_diff < 300:
-                raw = best.get("raw_json") or {}
-                return _extract_screenshot_data(raw, best["id"])
-        except Exception as e:
-            logger.warning(f"Erro ao comparar horas no match: {e}")
-    
-    raw = candidates[0].get("raw_json") or {}
-    return _extract_screenshot_data(raw, candidates[0]["id"])
+
+    raw = rows[0].get("raw_json") or {}
+    return _extract_screenshot_data(raw, rows[0]["id"])
 
 
 def _build_seat_to_name_map(hh_hand: dict, screenshot_data: dict) -> dict:
@@ -1038,8 +987,9 @@ async def import_mtt(
                 else:
                     logger.info(f"[import_mtt] hand_id {hand_id} é novo. A inserir.")
                 
-                # Procurar screenshot match (TM + hora + blinds)
-                screenshot = _match_screenshot(h["tm_number"], h.get("played_at"), h.get("blinds"))
+                # Procurar screenshot match — só pelo TM (hand-id). Hora/blinds
+                # do nome do ficheiro não entram no match (ver _match_screenshot).
+                screenshot = _match_screenshot(h["tm_number"])
                 has_screenshot = screenshot is not None
                 screenshot_entry_id = screenshot["entry_id"] if screenshot else None
 
