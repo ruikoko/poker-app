@@ -1,5 +1,37 @@
 # Pendentes — backlog vivo
 
+## ★ pt78 (18 Jun) — HRC pacote vazio / payouts Winamax (lobby SS)
+
+Contexto completo em `docs/JOURNAL_2026-06-18-pt78.md` (arco: pacote HRC vazio →
+payouts Winamax → upload de lobby SS).
+
+1. **WN lobby não religa sozinha quando as mãos chegam (auto-retry do `tm_not_found`).**
+   As lobby SS WN foram processadas (16-Jun) **antes** das mãos existirem → `tm_not_found`
+   (tn=NULL, 0 payouts) e ficaram assim. Falta disparar `reconcile_lobby_logs` de forma
+   fiável no fim do import de HH (cobrir os `tm_not_found`/`tm_ambiguous` com `vision_json`
+   guardado). → `services/lobby_sync.py:reconcile_lobby_logs`, triggers em `import_`/`import_hm3`.
+
+2. **Avisar à entrada quando um torneio entra SEM payout (não-pronto p/ HRC).** Hoje
+   descobre-se só por **pacote vazio**. Inclui resolver o **mismatch `include_no_payout`**:
+   o `POST /hrc/release` valida com `include_no_payout=True` (`queue.py:186`) → liberta;
+   o `GET /api/queue/hrc` puxa com `include_no_payout=False` (`queue.py:96→124`) → dropa
+   em `missing_payouts`. Resultado: **libertada mas não puxável**. Decidir comportamento
+   canónico (bloquear release sem payout, ou sinalizar "à espera de payout" no painel/gate).
+
+3. **Religação a sério dos 15 de 16-Jun (escrita pendente).** Dry-run de
+   `reconcile_lobby_logs` feito: resolve **7 torneios WN / 15 mãos** (16-Jun), matches
+   verificados correctos. Falta correr **sem `dry_run`** (1ª escrita; só com OK do Rui) →
+   escreve `tournament_payouts` (source `reconcile_lobby_vision:`) e destrava essas 15.
+
+4. **`tm_not_found` por resolver.** Casos a triar: **2 GG Bounty Hunters**, **ZENITH 15-Jun**,
+   **William Harding** (este possível **misread da Vision** no nome do torneio). Re-Vision
+   ou desambiguação manual.
+
+5. **`limpa_scratch.bat`: `arquivo\` access denied** (snag operacional, POR RESOLVER) — ao
+   mover `arquivo\` para o backup. Provável permissão `riand`↔`Administrator` ou handles
+   abertos. A tentar: correr como `Administrator` / fechar HRC+watcher antes / `robocopy
+   /MOVE` com retry. → `tools/hrc_adapter/limpa_scratch.bat`.
+
 ## ★ pt75 (18 Jun) — operacional
 
 - **Cobertura de HH (Março/Junho) do backoffice.** A desanon por `position_v3` está pronta e
