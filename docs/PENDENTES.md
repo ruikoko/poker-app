@@ -1,5 +1,18 @@
 # Pendentes — backlog vivo
 
+## ★ pt80 (18 Jun) — equity model FT/MTT
+
+- **Onde o Rui vê o alarme de validação do equity model** (`#EQUITY-MODEL-FT-VS-MTT-VALIDATION`).
+  A validação `validate_equity_model_vs_table_ss` (a SS de mesa do IT valida o modelo
+  que a tag decidiu) já corre e regista o conflito em **dois sítios**: `logger.warning`
+  (`[equity-validation] ALARME …`) + `manifest.hands_included[*].equity_validation`
+  (None ou `{kind, equity_model, players_left, seats_at_table, looks_ft}`). **Falta
+  decidir ONDE o Rui o vê** — coluna/badge no painel `/hrc`, no Estudo, ou um painel
+  próprio. **Pode mexer em schema/UX → desenhar COM o Rui** (não decidir sozinho).
+  Tipos de alarme: `ft_tag_but_multi_table` (tag FT mas várias mesas),
+  `mtt_tag_but_single_table` (tag MTT mas todos numa mesa). Hoje: 0 conflitos reais
+  (scan 91 mãos com SS de mesa). Ver `JOURNAL_2026-06-18-pt80.md`.
+
 ## ★ pt78 (18 Jun) — HRC pacote vazio / payouts Winamax (lobby SS)
 
 Contexto completo em `docs/JOURNAL_2026-06-18-pt78.md` (arco: pacote HRC vazio →
