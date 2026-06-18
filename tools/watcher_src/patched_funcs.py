@@ -1925,6 +1925,13 @@ def export_strategies(export_path):
 #  mitiga o cold start); 3. log a ficheiro com rotação (_ensure_file_logging).
 _HANDS_DONE_SINCE_RESTART = 0
 _RESTART_EVERY_N_HANDS = 5
+# pt79 (#HRC-RESTART-POST-WINDOW-FAILURE): True quando a mão anterior falhou
+# DEPOIS de o wizard abrir (cálculo/finish/export) — o HRC pode ter ficado sujo
+# (diálogo "Hand Setup"/"Open" preso + memória alta) e arrasta as seguintes
+# ("setup failed"). Reiniciado no arranque da mão seguinte. Lido via
+# globals().get(...,False) para ser SEGURO mesmo sem APPEND no marshal-swap
+# (ver README §"Resolução de globais"); a 1ª escrita cria a chave no namespace.
+_HRC_WINDOW_DIRTY = False
 _HRC_COLDSTART_GRACE_S = 8
 _CLOSE_TAB_AFTER_EXPORT = True
 _FILE_LOGGING_READY = False
@@ -2369,12 +2376,23 @@ def setup_hand(hand_name, hand_path):
     # pt68 change 2 — reiniciar o HRC a cada N mãos (higiene de memória contra a
     # acumulação de tabs). O reinício corre ANTES do ensure_hrc, que depois
     # encontra (ou relança) o HRC fresco.
-    if _HANDS_DONE_SINCE_RESTART >= _RESTART_EVERY_N_HANDS:
-        print('   [HRC-RESTART] %d mãos desde o último reinício (>= %d) — a '
-              'reiniciar o HRC...' % (_HANDS_DONE_SINCE_RESTART,
-                                      _RESTART_EVERY_N_HANDS))
+    # pt79 (#HRC-RESTART-POST-WINDOW-FAILURE): + reiniciar quando a mão ANTERIOR
+    # falhou DEPOIS de o wizard abrir (cálculo/finish/export). Generaliza o
+    # restart da rung 2 (que só cobre wizard-NÃO-abriu). O bail limpo de
+    # wizard-não-abriu NÃO marca _HRC_WINDOW_DIRTY → sem restart duplicado.
+    # Loop guard: a mão falhada é sempre marcada .failed e a fila avança; o
+    # restart é 1x por mão (aqui, no arranque) — nunca um ciclo de restart sem fim.
+    _post_window_dirty = globals().get('_HRC_WINDOW_DIRTY', False)
+    if _post_window_dirty or _HANDS_DONE_SINCE_RESTART >= _RESTART_EVERY_N_HANDS:
+        _why = ('mão anterior falhou pós-abertura-de-janela (cálculo/finish/export)'
+                if _post_window_dirty
+                else '%d mãos desde o último reinício (>= %d)'
+                     % (_HANDS_DONE_SINCE_RESTART, _RESTART_EVERY_N_HANDS))
+        print('   [HRC-RESTART] %s — a reiniciar o HRC...' % _why)
         _restart_hrc()
         globals()['_HANDS_DONE_SINCE_RESTART'] = 0
+        globals()['_HRC_WINDOW_DIRTY'] = False
+        # _wait_hrc_responsive corre logo abaixo (health-check pós-arranque).
     hrc = ensure_hrc()
     if not hrc:
         print('   ERRO: HRC Pro não iniciou!')
@@ -2406,6 +2424,13 @@ def setup_hand(hand_name, hand_path):
     if not win:
         print('   ERRO: Wizard não encontrado!')
         return False
+
+    # pt79 (#HRC-RESTART-POST-WINDOW-FAILURE): a partir daqui o wizard ESTÁ aberto
+    # — qualquer falha pós-abertura (popup HRC / paste / finish / cálculo / export
+    # / scope) deixa o HRC potencialmente sujo. Marca dirty; só se LIMPA no fim
+    # de sucesso (abaixo). O bail `if not win` acima NÃO chega aqui → não marca
+    # dirty (a rung 2 já tratou o wizard-não-abriu) → sem restart duplicado.
+    globals()['_HRC_WINDOW_DIRTY'] = True
 
     wpos = get_win_pos(win)
 
@@ -2631,6 +2656,8 @@ def setup_hand(hand_name, hand_path):
     print('   [hrc-hygiene] mãos desde o último reinício: %d/%d'
           % (_HANDS_DONE_SINCE_RESTART, _RESTART_EVERY_N_HANDS))
 
+    # pt79: fim LIMPO — o HRC não ficou sujo; cancela o restart-antes-da-próxima.
+    globals()['_HRC_WINDOW_DIRTY'] = False
     print(f'   [QUEUED] {hand_name} -> {os.path.basename(export_zip)} '
           f'(Bloco 1 — finalize Bloco 2)')
     return export_zip
