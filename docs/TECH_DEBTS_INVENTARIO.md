@@ -6,6 +6,12 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt77 (18 Jun 2026 — YaPoker → WPN)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#LOBBY-NAME-HINT-YAPOKER-JUNK` | 🟢 LOW (parqueado) | `lobby_name_hint()` (`tools/appimport/app_import.py`) extrai do nome dos ficheiros YaPoker o título `"YaPoker Lobby Logged in as cringemeariver"` — que **não é nome de torneio** — e sobrepõe-no ao nome lido pela Vision no lobby. Efeito: o lobby YaPoker fica **reconhecido como WPN** (pt77, FEITO) mas o resolver tende a falhar → `tm_not_found` em vez de `success`. **Não bloqueante** (mãos WPN já têm nomes pelo HM3) e mexe em lógica **partilhada** de extração de nomes (GG depende dela) → adiado por decisão do Rui. Fix futuro: suprimir o título quando é o chrome da janela do IT (ex.: contém "Logged in as"), deixando a Vision mandar no nome. Ver `JOURNAL_2026-06-18-pt77.md`. |
+
 ## pt75 (18 Jun 2026 — desanon por posição shipped: notas/dívidas)
 
 | ID | Sev | Resumo |
