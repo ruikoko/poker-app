@@ -46,6 +46,12 @@ Os nomes reais vêm de uma de duas capturas:
 Match por `hand_id = GG-{TM_number}`, com o TM extraído do nome do ficheiro do SS
 (`screenshot.py`). Determinístico. Não afectado pela decisão pt73 (já era por hand-id).
 
+> **Gold image (pt75, 2026-06-18):** a "gold image" = a **descarga completa da mão** pelo
+> botão do replayer GG (não um screenshot). A GG **NÃO desenha rótulo de posição por seat**;
+> as siglas (UTG/MP/CO/BTN/SB/BB) vivem no **LOG DE ACÇÃO** (painel inferior, uma linha por
+> acção). É daí que a Vision as lê (ver §3.2.2). Blinds do nome do ficheiro continuam
+> não-fiáveis (só o hand-id presta).
+
 ### 2.2 Table-SS ↔ mão GG
 
 > **★ DECISÃO pt73 (DECIDIDO / POR IMPLEMENTAR — ainda NÃO no código).**
@@ -77,12 +83,14 @@ o caso GG com TM no nome — passam a ser usados só quando o hand_id falta (ver
 
 ---
 
-## 3. Pergunta 2 — QUEM senta onde (hash → nick → cadeira) — **desenho fechado, impl pendente**
+## 3. Pergunta 2 — QUEM senta onde (hash → nick → cadeira)
 
 O hand_id resolve P1 mas **não traz nicks**. Para pôr cada nick real na cadeira certa é
-preciso uma âncora própria. Hoje a âncora é por **stack** (§3.1) — origem do bug (§3.2). O
-**desenho fechado da âncora** (SB+BB + botão + Herói) está em **§3.2.1** (2026-06-16); ainda
-**não implementado**.
+preciso uma âncora própria. **Para gold images GG (replayer) está RESOLVIDA e DEPLOYED por
+POSIÇÃO — `position_v3` (§3.2.2, pt75)**, o método primário. A âncora por **stack** (§3.1)
+fica como **fallback** (entries sem sigla) e continua a desanon das **185 table-SS**, onde
+mora o bug (§3.2). O desenho por SB/BB+botão+Herói (§3.2.1, 2026-06-16) mantém-se como a
+âncora futura do table-SS.
 
 ### 3.1 Maquinaria actual (por stack — herança do pt7)
 `deanonymize_hand_from_table_ss()` (`table_ss_deanon.py`, pt71 E3) reutiliza
@@ -139,6 +147,24 @@ A HH fica **intacta** em qualquer caso.
 **Novo vs existente:** o **Herói** já é âncora; **SB/BB** existiam (pt7) mas o table-SS
 **salta-as** (= raiz do bug §3.2) → **REPOR**; o **botão como confirmação pela invariante** é
 **NOVO**.
+
+### 3.2.2 ★ `position_v3` — desanon por POSIÇÃO (FEITO + DEPLOYED, pt75 2026-06-18)
+
+Método **primário** para gold images GG. Sem aritmética de stack: a Vision lê a **sigla de
+posição de cada jogador no LOG DE ACÇÃO** (§2.1); a HH dá seat→posição pelo botão; cada nick
+vai para o seat da HH com a **mesma** posição (`_canon_position` reconcilia a grafia GG↔HH,
+inclui LJ). `match_method='position_v3'`.
+
+- **Verificação do Hero:** o seat `Hero` da HH só recebe o nick da Vision se for um **nick-Hero
+  conhecido** (`hero_unverified` caso contrário) — nunca se escreve um nick de vilão no seat do
+  Hero (bug apanhado no smoke).
+- **Guard-rails de lacuna honesta:** sigla em falta, posição sem seat, colisão, ou não-participante
+  → seat **por mapear** (hash mantido), nunca um nome trocado.
+- **A ordem deixou de importar:** HH-primeiro (match directo, `screenshot._enrich_hand_from_orphan_entry`)
+  **e** imagem-primeiro (órfã → re-link na promoção do placeholder, `hand_service._insert_hand`)
+  dão **ambos `position_v3`**. Entries **sem** sigla caem no stack-elimination (§3.1), intacto.
+- **Prova:** 41 gold images de Junho (âncoras SB/BB 81/81; consistência entre mãos 54/55, 0
+  inconsistências) + smoke ao vivo nos dois sentidos (nomes certos por cadeira). → `JOURNAL pt75`.
 
 ### 3.3 Mitigações já no sítio (reduzem, não resolvem)
 - **Guarda anti-envenenamento** (`_filter_ambiguous_stackless`, pt71): ≥2 bancos não-herói

@@ -6,6 +6,16 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt75 (18 Jun 2026 — desanon por posição shipped: notas/dívidas)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#POSITION-V3-TWO-RELINK-PATHS` | 🟢 LOW (manutenção) | A branch `position_v3` (posições→`_build_anon_to_real_map_by_position`; senão stack) vive em **DOIS** sítios que têm de ficar em sync: `screenshot._enrich_hand_from_orphan_entry` (match directo + um caminho de rematch) e `hand_service._insert_hand` (promoção de placeholder = re-link imagem-primeiro). Um 3º caminho que desanonimize tem de replicar a mesma branch. |
+| `#CANON-POSITION-LJ-NO-HH-SEAT` | 🟢 LOW (latente) | `_canon_position` reconhece `LJ` mas a `POSITION_MAPS` da HH não tem `LJ` (usa HJ/MP no full-ring). Se a GG escrever `LJ` para um seat, não casa → **lacuna honesta** (seat por mapear, nunca nome errado). Não apareceu nas 41; só morde em full-ring 9-handed. |
+| `#STACK-LEGACY-TABLE-SS-AND-PANEL` | 🟡 MED (dívida do stack) | O stack-elimination continua nas **185 table-SS** (sem sigla de posição) e ancora no **painel SB/BB** — que o smoke mostrou ser **mal lido ~10/19** quando o Hero é o blind (o crachá do log é mais fiável). Argumento para migrar o table-SS para a âncora SB/BB+botão (`DESANON_ANATOMIA §3.2.1`) ou posição quando houver sinal. |
+
+---
+
 ## pt73 (16 Jun 2026 — nome das imagens GG-download: hora E blinds não-fiáveis)
 
 | ID | Sev | Resumo |

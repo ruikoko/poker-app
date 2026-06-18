@@ -114,6 +114,7 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 | `backend/app/routers/mtt.py:1077` | `import_mtt` → escreve `"mtt_import_v3"` |
 | `backend/app/routers/hands.py:1537` | `admin_refix_anonmap_execute` → escreve `"anchors_stack_elimination_v2_refix"` |
 | `backend/app/services/hand_service.py:82` | `_insert_hand` placeholder upgrade → promove `discord_placeholder_*` para `"anchors_stack_elimination_v2"` quando há HH real e Vision data |
+| **`screenshot.py` `_enrich_hand_from_orphan_entry` + `hand_service.py` `_insert_hand`** *(pt75)* | **branch por-mão:** se a Vision tem siglas de posição → `_build_anon_to_real_map_by_position` → escreve **`"position_v3"`**; senão → stack-elimination. Ambos os caminhos (match directo **e** re-link de placeholder) → a ordem deixou de importar. |
 
 | Onde é consumido | Função |
 |---|---|
@@ -128,7 +129,8 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 | Valor | Significado |
 |---|---|
 | `null` | Mão GGPoker anonimizada sem qualquer cruzamento; ou mão de PS/WN/WPN (nicks vêm do raw, não precisa). |
-| `anchors_stack_elimination_v2` | Match real: Vision deu nicks + cruzou com HH via stacks/eliminação. |
+| `anchors_stack_elimination_v2` | Match real por **stack** (fallback / table-SS / entries sem sigla). |
+| `position_v3` *(pt75)* | Match real por **POSIÇÃO** (sigla do log de acção da gold image → seat da HH, sem stack). Método **primário** das gold images GG. |
 | `anchors_stack_elimination_v2_refix` | Reaplicação do match após bug do anon-map (42 mãos refixadas). |
 | `mtt_promote_v2` | Promoção via fluxo MTT (`_promote_to_study`). |
 | `mtt_import_v3` | Match feito durante `import_mtt`. |
@@ -140,6 +142,8 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 - `null` → `anchors_stack_elimination_v2` ou `mtt_*`: mão entra automaticamente em Estudo (filtro `STUDY_VIEW_GG_MATCH_FILTER` deixa de a excluir) e fica elegível para regras B/C de villains.
 - `discord_placeholder_*` → `anchors_stack_elimination_v2`: o `_insert_hand` (services/hand_service.py:82) faz a transição quando a HH real chega; placeholder é apagado e dados Vision (`players_list`) preservados.
 - Se mudar para `discord_placeholder_*`: a mão **sai** da Estudo até a HH chegar.
+
+**Nova via de ingestão de gold images (pt75):** `tools/appimport` lê a pasta EXTERNA `GOLD_DIR` (ex. Documents) em `process_gold_dir` → POST `/api/screenshots` (origin `ss_upload`) → move para `done/gold` no 2xx; **sem filtro de mês**. `/api/screenshots` tem **dedup server-side por `file_hash`** (SHA256 em `entries.raw_json.file_hash`): 2ª importação da mesma imagem → `status='duplicate'`, sem entry novo nem Vision. A jusante reusa Vision → match `GG-{tm}` → enrich (`position_v3`).
 
 **Armadilhas conhecidas:**
 

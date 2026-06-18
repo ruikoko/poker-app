@@ -1,5 +1,14 @@
 # Pendentes — backlog vivo
 
+## ★ pt75 (18 Jun) — operacional
+
+- **Cobertura de HH (Março/Junho) do backoffice.** A desanon por `position_v3` está pronta e
+  a lane gold (`GOLD_DIR`→`/api/screenshots`) também, mas as gold images da Documents só
+  desanonimizam quando a **HH correspondente** existir na app. As HH de Março e de 16-Jun **não
+  estão importadas** (vivem no backoffice do Rui). **Ordem recomendada:** importar a HH primeiro,
+  depois correr a gold lane → `position_v3` no match directo (a ordem inversa também dá
+  `position_v3` via re-link, mas precisa na mesma da HH). Operacional, não código.
+
 ## ★ Fila de arranque da pt73 (fecho pt72, 14 Jun)
 
 **Contexto fechado em pt72 (não repetir):** o **replayer-image GG morreu** (SPA Angular

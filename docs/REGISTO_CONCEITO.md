@@ -13,6 +13,11 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
 
 ---
 
+## 2026-06-18 (pt75)
+
+- 2026-06-18 — **Desanon GG por POSIÇÃO (`position_v3`) é o método primário** para gold images: nome+sigla→cadeira via HH, **sem aritmética de stack**. Stack-elimination passa a fallback (entries sem sigla) + continua nas 185 table-SS. A **ordem deixou de importar** (HH-primeiro e imagem-primeiro dão ambos `position_v3`). **Porquê:** a posição é sinal fiável; o stack troca vilões de stacks próximos (bug §3.2). → `DESANON_ANATOMIA §3.2.2`; `JOURNAL pt75`.
+- 2026-06-18 — **A "gold image" (descarga completa da mão pelo replayer GG) é a fonte das siglas de posição + a outra metade do registo.** A GG **não desenha rótulo por seat**; as siglas vêm do **LOG DE ACÇÃO** da imagem (transcrever o crachá, nunca inferir por stack/ordem). **Porquê:** funda o `position_v3` e confirma que a imagem tem de ser persistida. → `DESANON_ANATOMIA §2.1/§3.2.2`.
+
 ## 2026-06-10 (pt64–pt67)
 
 - 2026-06-10 — **LEI Max Players (HRC)** = **span posicional âncora→BB, teto 6** (não a contagem de participantes). **Porquê:** o HRC Hand Mode tem de refletir os jogadores entre a decisão e a BB; subcontava com herói tardio. → `REGRAS_NEGOCIO §15`; `JOURNAL pt67`.
