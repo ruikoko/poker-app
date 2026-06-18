@@ -4,6 +4,7 @@ import { villains, hands as handsApi, mtt, hm3 } from '../api/client'
 import { SITE_COLORS, SITE_COLOR_DEFAULT } from '../lib/siteColors'
 import { compactStreetActions } from '../lib/handParser'
 import { isoDateLisbon } from '../utils/datetime'
+import { DeanonBadge } from '../components/DeanonBadge'
 
 // ── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ function CompactHandRow({ hand, villainNick, expanded, onToggle }) {
       <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <PosBadge pos={villainPos} />
         <span style={{ color: '#f59e0b', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{villainNick}</span>
+        <DeanonBadge status={hand.deanon_status} />
       </span>
       <span style={{ display: 'flex', gap: 2 }}>
         {showVillainCards

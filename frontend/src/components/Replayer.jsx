@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { equity } from '../api/client'
 import { HERO_NAMES } from '../heroNames'
 import { parseHH } from '../lib/handParser'
+import { DeanonBanner } from './DeanonBadge'
 
 const SUIT_COLORS = { h: '#ef4444', d: '#3b82f6', c: '#22c55e', s: '#e2e8f0' }
 const SUIT_BG = { h: '#7f1d1d', d: '#1e3a5f', c: '#14532d', s: '#1e293b' }
@@ -120,6 +121,9 @@ export default function Replayer({ hand }) {
         </div>
         <span style={{ fontSize: 11, fontWeight: 600, color: STREET_COLORS[step.street], padding: '2px 8px', borderRadius: 4, background: `${STREET_COLORS[step.street]}15`, border: `1px solid ${STREET_COLORS[step.street]}30`, textTransform: 'uppercase' }}>{step.label}</span>
       </div>
+
+      {/* pt76: aviso de desanon por verificar (stack/feltro) */}
+      <DeanonBanner status={hand?.deanon_status} />
 
       {/* Table */}
       <div style={{ position: 'relative', width: '100%', paddingTop: '55%', background: 'radial-gradient(ellipse at center,#0f2318,#0a1510 40%,#080d0f)' }}>
