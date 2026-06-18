@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import logging
 from app.auth import require_auth
 from app.db import query, execute, execute_returning, get_conn
+from app.services.deanon_status import deanon_status_from_row
 
 router = APIRouter(prefix="/api/hands", tags=["hands"])
 logger = logging.getLogger("hands")
@@ -774,6 +775,7 @@ def list_hands(
             if d.get("site") == "Winamax" and not d.get("raw"):
                 d["raw"] = wn_raw.get(d["id"])
             d["ire"] = compute_ire(d, meta_by_num.get(d.get("tournament_number")))
+            d["deanon_status"] = deanon_status_from_row(d)  # pt76: ⚠ desanon por stack
             out.append(d)
         return out
 
@@ -1420,6 +1422,7 @@ def get_hand(hand_pk: int, current_user=Depends(require_auth)):
         raise HTTPException(status_code=404, detail="Mão não encontrada")
 
     hand = dict(rows[0])
+    hand["deanon_status"] = deanon_status_from_row(hand)  # pt76: ⚠ desanon por stack
 
     # Tech Debt #5: pré-resolve hashes GG anonimizados no raw HH para os
     # nicks reais. Frontend usa hand.raw_resolved se disponível, fallback

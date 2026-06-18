@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import TagEditor from './TagEditor'
 import { dateTimeLisbon } from '../utils/datetime'
 import { useHrcSelection, RowCheckbox, HrcStateBadge } from './HrcSelection'
+import { DeanonBadge } from './DeanonBadge'
 
 // ── Constantes (cópia de Hands.jsx para auto-conteúdo) ──────────────────────
 
@@ -172,7 +173,10 @@ export default function HandRow({ hand, onClick, onDelete, onTagsUpdate, idx = 0
       )}
 
       {/* 1. Estado (badge unificado: matchState tem prioridade quando ≠ matched) */}
-      <div><StateBadge state={hand.study_state} matchState={hand.match_state} /></div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <StateBadge state={hand.study_state} matchState={hand.match_state} />
+        <DeanonBadge status={hand.deanon_status} />
+      </div>
 
       {/* 2. Hero cards */}
       <div style={{ display: 'flex', gap: 2 }}>

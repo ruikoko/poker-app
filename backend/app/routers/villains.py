@@ -6,6 +6,7 @@ from typing import Optional
 from app.auth import require_auth
 from app.db import query, execute, execute_returning
 from app.hero_names import FRIEND_NICKS
+from app.services.deanon_status import deanon_status_from_row
 
 router = APIRouter(prefix="/api/villains", tags=["villains"])
 
@@ -440,6 +441,7 @@ def villain_hands(
         except (TypeError, ValueError):
             bb_size_f = 0.0
         d["villain_result"] = _compute_villain_result(d.get("raw") or "", nick, bb_size_f)
+        d["deanon_status"] = deanon_status_from_row(d)  # pt76: ⚠ desanon por stack
         data.append(d)
 
     return {
