@@ -257,6 +257,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                         # + grava anon_map. Sem binding, descarta o marker (não força
                         # entrada em Estudo sem ligação feita).
                         anon_map = {}
+                        mm_value = None
                         if pn_clean.get("players_list"):
                             vision_data = {
                                 "players_list": pn_clean.get("players_list", []),
@@ -268,13 +269,33 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                             try:
                                 from app.routers.screenshot import (
                                     _build_anon_to_real_map,
+                                    _build_anon_to_real_map_by_position,
                                     _enrich_all_players_actions,
                                 )
-                                anon_map = _build_anon_to_real_map(
-                                    {"raw": h.get("raw", ""),
-                                     "all_players_actions": apa_new},
-                                    vision_data,
-                                ) or {}
+                                # A ORDEM NÃO IMPORTA: este é o re-link imagem-
+                                # primeiro (placeholder promovido quando a HH chega).
+                                # Se a gold image trouxe siglas de posição (guardadas
+                                # no players_list do placeholder), usar position_v3 —
+                                # mesmo resultado que o match directo. Sem siglas →
+                                # stack-elimination legacy.
+                                _has_pos = any(
+                                    (p or {}).get("position")
+                                    for p in vision_data["players_list"]
+                                )
+                                hand_row_for_map = {
+                                    "raw": h.get("raw", ""),
+                                    "all_players_actions": apa_new,
+                                }
+                                if _has_pos:
+                                    anon_map = (_build_anon_to_real_map_by_position(
+                                        hand_row_for_map, vision_data,
+                                    ) or {}).get("anon_map", {}) or {}
+                                    mm_value = "position_v3"
+                                else:
+                                    anon_map = _build_anon_to_real_map(
+                                        hand_row_for_map, vision_data,
+                                    ) or {}
+                                    mm_value = "anchors_stack_elimination_v2"
                                 if anon_map:
                                     h["all_players_actions"] = _enrich_all_players_actions(
                                         apa_new, anon_map, vision_data,
@@ -287,7 +308,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                                 anon_map = {}
                         if anon_map:
                             pn_clean["anon_map"] = anon_map
-                            pn_clean["match_method"] = "anchors_stack_elimination_v2"
+                            pn_clean["match_method"] = mm_value
                         else:
                             # Sem binding -> não promover (não força Estudo com hashes).
                             pn_clean.pop("match_method", None)
