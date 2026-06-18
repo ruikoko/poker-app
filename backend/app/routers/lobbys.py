@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth import require_auth
@@ -151,14 +151,23 @@ async def upload_lobby_ss(
 @router.post("/reconcile")
 def reconcile_lobbys(
     dry_run: bool = Query(False, description="Calcula sem escrever (preview)"),
+    message_ids: Optional[list[str]] = Body(
+        None, embed=True,
+        description="Limitar a estes discord_message_id (lote específico). "
+                    "None/omisso = GLOBAL (todos os pendentes), como antes.",
+    ),
     current_user=Depends(require_auth),
 ):
     """Re-corre o resolver sobre os lobbys pendentes (tm_not_found/tm_ambiguous)
     contra o estado ACTUAL da BD, usando o vision_json já guardado (sem Vision).
     Quando o torneio se tornou resolvível (chegaram mãos/TS), escreve o payout
     (respeitando precedência manual/backoffice) e marca o log success. Idempotente.
-    dry_run=True devolve o preview por torneio sem escrever. Ver reconcile_lobby_logs."""
-    return reconcile_lobby_logs(dry_run=dry_run)
+    dry_run=True devolve o preview por torneio sem escrever.
+
+    `message_ids` (opcional): restringe a um LOTE específico — não toca nos
+    restantes pendentes. Omisso = comportamento GLOBAL de sempre. Ver
+    reconcile_lobby_logs (`message_ids=[]` curto-circuita → no-op)."""
+    return reconcile_lobby_logs(message_ids=message_ids, dry_run=dry_run)
 
 
 @router.post("/sync-recent")
