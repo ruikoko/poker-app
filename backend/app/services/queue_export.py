@@ -34,12 +34,21 @@ from app.services.derive_max_players import derive_max_players
 
 logger = logging.getLogger("queue_export")
 
-# Tags FT-style → equity model `malmuth_harville_icm`. Restantes mãos default →
-# `multi_table_icm`. Comparação via `normalize_tag_key` (#B17): case-insensitive
-# + hyphen→space, daí 'ICM FT' ≡ 'icm-ft' ≡ 'ICM-ft' batem todos a 'icm ft'.
-# Substituiu pt23 os sets `_EQUITY_FT_HM3` / `_EQUITY_FT_DISCORD` (case-sensitive,
-# exigiam manter ambas as formas à mão).
-_EQUITY_FT_NORM_KEYS = {"icm ft", "icm pko ft"}
+# pt80 (#EQUITY-MODEL-FT-VS-MTT-VALIDATION): a TAG decide o equity model. O
+# marcador de Final Table é o TOKEN "ft" na tag normalizada (normalize_tag_key:
+# case-insensitive + hyphen→space). Cobre as 4 tags FT do Rui — FT, ICM FT,
+# ICM PKO FT, Speed Racer FT (e qualquer "<X> FT" futura) — sem manter uma lista.
+# Antes (pt23) era o set fixo {'icm ft', 'icm pko ft'} (2 tags) que deixava de
+# fora 'FT' sozinho e 'Speed Racer FT'. NÃO há guarda por nº de jogadores: a tag
+# decide SEMPRE; a mesa só VALIDA (validate_equity_model_vs_table_ss).
+_FT_TOKEN = "ft"
+
+
+def _is_ft_tag(tag) -> bool:
+    """True se a tag (normalizada) tem o token 'ft' — marcador de Final Table.
+    'ICM FT'/'icm-ft'/'FT'/'Speed Racer FT' → True; 'icm'/'pos-pko'/'draft' → False
+    ('draft' normaliza para um único token != 'ft')."""
+    return _FT_TOKEN in normalize_tag_key(tag).split()
 
 
 # pt41 #HERO-BOUNTY-FROM-TS-DERIVATION — formatos de torneio com bounty real.
@@ -1034,16 +1043,96 @@ def convert_gg_hh_to_pokerstars_compatible(
 
 
 def _derive_equity_model(hm3_tags, discord_tags) -> str:
-    """pt23 fix Bug A. Decide equity model hint based on tag membership.
+    """A TAG decide o equity model (pt23 Bug A; alargado pt80).
 
-    Devolve 'malmuth_harville_icm' se houver tag FT (HM3 ou Discord, em
-    qualquer case-variant); caso contrário 'multi_table_icm' (default p/
-    mid-MTT). Comparação cross-source via `normalize_tag_key` (#B17).
+    Devolve 'malmuth_harville_icm' (FT) se ALGUMA tag (HM3 ou Discord) tiver o
+    token 'ft' (FT, ICM FT, ICM PKO FT, Speed Racer FT, em qualquer case/sep);
+    caso contrário 'multi_table_icm' (MTT, default p/ mid-MTT). A decisão é só
+    pela tag — sem guarda por nº de jogadores (a mesa só valida, não decide).
     """
     for t in list(hm3_tags or []) + list(discord_tags or []):
-        if normalize_tag_key(t) in _EQUITY_FT_NORM_KEYS:
+        if _is_ft_tag(t):
             return "malmuth_harville_icm"
     return "multi_table_icm"
+
+
+# pt80 (#EQUITY-MODEL-FT-VS-MTT-VALIDATION): a SS de mesa do IT VALIDA (não
+# decide) o equity model. A estrutura de pagamentos NÃO entra aqui.
+_EQUITY_MODEL_FT = "malmuth_harville_icm"
+_EQUITY_MODEL_MTT = "multi_table_icm"
+
+
+def validate_equity_model_vs_table_ss(
+    hand: dict, equity_model: Optional[str]
+) -> Optional[dict]:
+    """Valida o `equity_model` (que segue a TAG) contra a SS de mesa DESTA mão.
+
+    Lê da `table_ss_processing_log` da própria mão (`hands.context_table_ss_id`):
+    `players_left` + nº de jogadores na mesa (`len(vision_json['seats'])`).
+    "Parece FT" = `players_left <= jogadores_na_mesa` (todos numa mesa).
+
+    Devolve um dict de ALARME quando há conflito tag↔mesa, ou None quando bate
+    certo OU faltam dados. NUNCA altera o modelo — só assinala (o caller loga +
+    regista no manifest; o modelo segue a tag e a mão entra na mesma no HRC):
+      - tag FT  + NÃO parece FT (várias mesas) → kind='ft_tag_but_multi_table'
+      - tag MTT + parece FT (1 mesa)           → kind='mtt_tag_but_single_table'
+
+    Regra 5: sem `players_left` ou sem seats → não valida, sem alarme.
+    """
+    if not isinstance(hand, dict):
+        return None
+    ctx_id = hand.get("context_table_ss_id")
+    if not isinstance(ctx_id, int):
+        return None  # sem SS de mesa desta mão → não valida
+
+    try:
+        from app.db import query
+        rows = query(
+            "SELECT players_left, vision_json FROM table_ss_processing_log "
+            "WHERE id = %s",
+            (ctx_id,),
+        )
+    except Exception:
+        logger.exception(
+            "validate_equity_model_vs_table_ss query falhou ctx_id=%s", ctx_id,
+        )
+        return None
+    if not rows:
+        return None
+    row = rows[0] if isinstance(rows[0], dict) else {}
+
+    players_left = row.get("players_left")
+    vj = row.get("vision_json")
+    if isinstance(vj, str):
+        try:
+            vj = json.loads(vj)
+        except (ValueError, TypeError):
+            vj = None
+    seats = vj.get("seats") if isinstance(vj, dict) else None
+    seats_at_table = len(seats) if isinstance(seats, list) else None
+
+    # Regra 5: dados em falta → não valida, sem alarme.
+    if (not isinstance(players_left, int)
+            or not isinstance(seats_at_table, int) or seats_at_table <= 0):
+        return None
+
+    looks_ft = players_left <= seats_at_table
+    is_ft_model = (equity_model == _EQUITY_MODEL_FT)
+    kind = None
+    if is_ft_model and not looks_ft:
+        kind = "ft_tag_but_multi_table"      # tag FT, mas a mesa parece multi-mesa
+    elif (not is_ft_model) and looks_ft:
+        kind = "mtt_tag_but_single_table"    # tag MTT, mas estão todos numa mesa
+    if kind is None:
+        return None  # bate certo
+
+    return {
+        "kind": kind,
+        "equity_model": equity_model,
+        "players_left": players_left,
+        "seats_at_table": seats_at_table,
+        "looks_ft": looks_ft,
+    }
 
 
 # Mapping equity_model → stage para o watcher (pt25e Bloco 2 piece 2).
@@ -1369,6 +1458,29 @@ def build_queue_zip(
             # payouts.json só com hints para o watcher os ler.
             hints = _build_watcher_hints(h, hh_text)
 
+            # pt80 (#EQUITY-MODEL-FT-VS-MTT-VALIDATION): a tag decide o equity
+            # model (em hints); a SS de mesa do IT VALIDA. Alarme só assinala
+            # (log + manifest) — o modelo segue a tag, a mão entra na mesma.
+            equity_validation = None
+            try:
+                equity_validation = validate_equity_model_vs_table_ss(
+                    h, hints.get("equity_model"),
+                )
+            except Exception:
+                logger.exception(
+                    "validate_equity_model_vs_table_ss falhou hand_id=%s", hand_id,
+                )
+            if equity_validation is not None:
+                logger.warning(
+                    "[equity-validation] ALARME %s hand_id=%s equity_model=%s "
+                    "players_left=%s jogadores_na_mesa=%s looks_ft=%s",
+                    equity_validation["kind"], hand_id,
+                    equity_validation["equity_model"],
+                    equity_validation["players_left"],
+                    equity_validation["seats_at_table"],
+                    equity_validation["looks_ft"],
+                )
+
             # Maio 2026: gera .js per-hand com SIZES_* substituídos pela
             # acção real da HH (open/3-bet/squeeze/4-bet/5-bet). O template
             # canónico é único; o gerador (services/hrc_script_gen.py)
@@ -1547,6 +1659,7 @@ def build_queue_zip(
                 "aggressor_real_action": aggressor_real_action,
                 "target_node_offset": target_node_offset,
                 "aggressor_source": aggressor_source,
+                "equity_validation": equity_validation,  # pt80: None ou dict de alarme
                 "hand_meta": hand_meta,
                 "converted_format": (
                     "pokerstars_compat" if (

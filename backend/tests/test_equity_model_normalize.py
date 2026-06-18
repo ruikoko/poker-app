@@ -1,12 +1,12 @@
 """Tests para `_derive_equity_model` em services/queue_export.py.
 
-Refactor: substituiu os 2 sets `_EQUITY_FT_HM3` / `_EQUITY_FT_DISCORD`
-(case-sensitive, exigiam manter ambas as formas) por `_EQUITY_FT_NORM_KEYS`
-+ `normalize_tag_key` (#B17). Cobre agora qualquer case-variant.
+pt23: case-insensitive via `normalize_tag_key` (#B17). pt80: a decisão passa a
+ser pelo TOKEN 'ft' (`_is_ft_tag`), alargando o reconhecimento de 2 para as 4
+tags FT do Rui (FT, ICM FT, ICM PKO FT, Speed Racer FT) — a tag decide o modelo.
 """
 from __future__ import annotations
 
-from app.services.queue_export import _derive_equity_model, _EQUITY_FT_NORM_KEYS
+from app.services.queue_export import _derive_equity_model, _is_ft_tag
 
 
 # ── Regressão: cases antigos continuam a bater ─────────────────────
@@ -78,22 +78,41 @@ def test_ft_tag_among_other_tags_still_matches():
 
 
 def test_no_false_positives_from_substring_match():
-    """'icm' (sem FT) NÃO deve disparar malmuth. Norm key 'icm' não está
-    em _EQUITY_FT_NORM_KEYS ({'icm ft', 'icm pko ft'})."""
+    """'icm' (sem token 'ft') NÃO deve disparar malmuth."""
     assert _derive_equity_model(["ICM"], ["icm"]) == "multi_table_icm"
     # 'icm pko' (sem FT) também não.
     assert _derive_equity_model(["ICM PKO"], ["icm-pko"]) == "multi_table_icm"
 
 
-# ── Invariante do set canónico ─────────────────────────────────────
+# ── pt80: alargar o reconhecimento de 2 → 4 tags FT (token 'ft') ───
 
 
-def test_canonical_set_uses_normalized_form():
-    """Defensiva: o set _EQUITY_FT_NORM_KEYS contém chaves já normalizadas
-    (lowercase, espaço único, sem hyphens). Se alguém adicionar 'ICM FT'
-    cru no set, o lookup nunca bate."""
-    from app.routers.hands import normalize_tag_key
-    for k in _EQUITY_FT_NORM_KEYS:
-        assert k == normalize_tag_key(k), (
-            f"_EQUITY_FT_NORM_KEYS contém '{k}' não normalizado"
-        )
+def test_pt80_ft_token_alone_matches():
+    """'FT' sozinho → FT (antes só apanhava 'icm ft'/'icm pko ft')."""
+    assert _derive_equity_model(["FT"], None) == "malmuth_harville_icm"
+    assert _derive_equity_model(None, ["ft"]) == "malmuth_harville_icm"
+
+
+def test_pt80_speed_racer_ft_matches():
+    """'Speed Racer FT' / 'speed-racer-ft' → FT (4ª tag FT do Rui)."""
+    assert _derive_equity_model(["Speed Racer FT"], None) == "malmuth_harville_icm"
+    assert _derive_equity_model(None, ["speed-racer-ft"]) == "malmuth_harville_icm"
+
+
+def test_pt80_all_four_named_ft_tags():
+    """As 4 tags FT do Rui → todas FT."""
+    for tag in ("FT", "ICM FT", "ICM PKO FT", "Speed Racer FT"):
+        assert _derive_equity_model([tag], None) == "malmuth_harville_icm", tag
+
+
+def test_pt80_non_ft_with_ft_substring_not_a_token():
+    """'draft' normaliza para 1 token != 'ft' → NÃO é FT (sem falso positivo
+    por substring)."""
+    assert _is_ft_tag("draft") is False
+    assert _derive_equity_model(["draft"], None) == "multi_table_icm"
+
+
+def test_pt80_is_ft_tag_helper():
+    """O helper de token: as 4 FT True; não-FT False."""
+    assert _is_ft_tag("ICM FT") and _is_ft_tag("ft") and _is_ft_tag("speed-racer-ft")
+    assert not _is_ft_tag("icm") and not _is_ft_tag("pos-pko") and not _is_ft_tag("")
