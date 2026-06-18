@@ -145,6 +145,8 @@ A tabela `hands` é o esqueleto da app. Cada linha cobre um momento de jogo. O q
 
 **Nova via de ingestão de gold images (pt75):** `tools/appimport` lê a pasta EXTERNA `GOLD_DIR` (ex. Documents) em `process_gold_dir` → POST `/api/screenshots` (origin `ss_upload`) → move para `done/gold` no 2xx; **sem filtro de mês**. `/api/screenshots` tem **dedup server-side por `file_hash`** (SHA256 em `entries.raw_json.file_hash`): 2ª importação da mesma imagem → `status='duplicate'`, sem entry novo nem Vision. A jusante reusa Vision → match `GG-{tm}` → enrich (`position_v3`).
 
+**Aviso de desanon por verificar (pt76, `deanon_status`):** campo **DERIVADO** do `match_method` (puro, nunca guardado), exposto em `list_hands` + `get_hand` (`hands.py`) e `villain_hands` (`villains.py`) via `services/deanon_status.py`. Regra: **`unverified`** = GG por stack/feltro (`table_ss` / `anchors_stack_elimination*` / `mtt_*`); **`verified`** = GG `position_v3`; **`null`** = não-GG (nomes reais da HH) ou GG sem match real (null/placeholder). Frontend: `<DeanonBadge>` (chip) + `<DeanonBanner>` (faixa) em `components/DeanonBadge.jsx`, mostram **só** em `unverified` (só ⚠) nos **4 sítios**: Estudo lista (`HandRow`), Estudo detalhe (`HandHistoryViewer`, faixa), Replayer (`Replayer`, faixa sobre a mesa), Vilões (`Villains`, chip). Vilões **herdam** por derivação (sem coluna em `hand_villains`).
+
 **Armadilhas conhecidas:**
 
 - 42 mãos GG ficaram com o `_meta` (bb/sb/ante) trocado com a chave de um nick por um bug iterativo em `_build_anon_to_real_map`. Detector e fix em `backend/app/routers/hands.py:1149` (`/admin/scope-anonmap-bug`) e `:1430` (`/admin/refix-anonmap-bug`).
