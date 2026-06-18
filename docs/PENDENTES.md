@@ -18,11 +18,12 @@
 Contexto completo em `docs/JOURNAL_2026-06-18-pt78.md` (arco: pacote HRC vazio →
 payouts Winamax → upload de lobby SS).
 
-1. **WN lobby não religa sozinha quando as mãos chegam (auto-retry do `tm_not_found`).**
-   As lobby SS WN foram processadas (16-Jun) **antes** das mãos existirem → `tm_not_found`
-   (tn=NULL, 0 payouts) e ficaram assim. Falta disparar `reconcile_lobby_logs` de forma
-   fiável no fim do import de HH (cobrir os `tm_not_found`/`tm_ambiguous` com `vision_json`
-   guardado). → `services/lobby_sync.py:reconcile_lobby_logs`, triggers em `import_`/`import_hm3`.
+1. ✅ **RESOLVIDO (pt81) — `#WN-LOBBY-NO-AUTO-RETRY`.** As mãos WN entram pelo **.bat do
+   HM3 (`import_hm3`)**, que — ao contrário do `import_.py` — **não** re-corria
+   `reconcile_lobby_logs` → os lobbys ficavam `tm_not_found` mesmo depois de as mãos
+   chegarem. **Fix:** `import_hm3` (hm3.py) passa a disparar o mesmo gatilho fire-and-forget
+   `reconcile_lobby_logs()` (o relink de SS de mesa órfãs já lá estava) → caminho HM3 igual
+   ao `import_`/`tournament_summaries`. Ver `JOURNAL_2026-06-18-pt81.md`.
 
 2. **Avisar à entrada quando um torneio entra SEM payout (não-pronto p/ HRC).** Hoje
    descobre-se só por **pacote vazio**. Inclui resolver o **mismatch `include_no_payout`**:
@@ -31,10 +32,11 @@ payouts Winamax → upload de lobby SS).
    em `missing_payouts`. Resultado: **libertada mas não puxável**. Decidir comportamento
    canónico (bloquear release sem payout, ou sinalizar "à espera de payout" no painel/gate).
 
-3. **Religação a sério dos 15 de 16-Jun (escrita pendente).** Dry-run de
-   `reconcile_lobby_logs` feito: resolve **7 torneios WN / 15 mãos** (16-Jun), matches
-   verificados correctos. Falta correr **sem `dry_run`** (1ª escrita; só com OK do Rui) →
-   escreve `tournament_payouts` (source `reconcile_lobby_vision:`) e destrava essas 15.
+3. ✅ **FEITO (pt81) — religação a sério do lote 16-Jun.** Reconcile **scoped** (novo param
+   `message_ids` no `POST /api/lobbys/reconcile`) corrido a sério sobre os **14** lobbys WN
+   tm_not_found do lote: **12 escritos** (7 torneios, source `reconcile_lobby_vision:`),
+   **2 still** (LATE REGISTRATION misread + ZENITH 15-Jun sem mãos), precedência OK
+   (0 manual/backoffice sobrescrito), 4 GG intactos. Ver `JOURNAL_2026-06-18-pt81.md`.
 
 4. **`tm_not_found` por resolver.** Casos a triar: **2 GG Bounty Hunters**, **ZENITH 15-Jun**,
    **William Harding** (este possível **misread da Vision** no nome do torneio). Re-Vision

@@ -1191,6 +1191,27 @@ async def import_hm3(
 
     asyncio.create_task(_table_ss_relink_async())
 
+    # ── Trigger reconcile de lobbys pendentes (tm_not_found/tm_ambiguous) ──
+    # #WN-LOBBY-NO-AUTO-RETRY: as mãos WN entram pelo .bat do HM3 (este
+    # caminho), que — ao contrário do import_.py — não re-corria o resolver
+    # sobre os lobbys pendentes. Resultado: lobbys ficavam tm_not_found mesmo
+    # depois de as mãos chegarem. Espelha import_.py: re-corre reconcile_lobby_logs
+    # (sem Vision; usa o vision_json guardado; idempotente). Fire-and-forget.
+    from app.services.lobby_sync import reconcile_lobby_logs
+
+    async def _lobby_reconcile_async():
+        try:
+            res = await asyncio.to_thread(reconcile_lobby_logs)
+            logger.info(
+                f"[import_hm3] lobby reconcile: resolved={res['resolved']} "
+                f"written={res['written']} skipped_prec={res['skipped_precedence']} "
+                f"still={res['still_unresolved']} (scanned={res['scanned']})"
+            )
+        except Exception as exc:
+            logger.error(f"[import_hm3] lobby reconcile falhou: {exc}")
+
+    asyncio.create_task(_lobby_reconcile_async())
+
     return {
         "status": "ok",
         "total_rows": len(hands_map),
