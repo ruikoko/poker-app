@@ -55,6 +55,19 @@ def test_site_hint_rescues_vision_undetected():
     assert mres.called
 
 
+def test_yapoker_filename_recognized_as_wpn():
+    # YaPoker = skin WPN do Rui (IT: 'YaPoker.exe-…'). A Vision não conhece a sala
+    # (site=None) → sem hint daria site_undetected ("são saltados"). O filename
+    # mapeia YaPoker→WPN (site_hint), e o gate do lobby passou a aceitar WPN: a mão
+    # é reconhecida como WPN e segue para o resolver (deixa de ser site_undetected).
+    vj = {"site": None, "tournament_name": None, "players_left": 9}
+    res, mres, _ = _run(vj=vj, site_hint="WPN", name_hint=None)
+    assert res["site"] == "WPN"
+    assert res["result"] != "site_undetected"
+    assert res["result"] == "tm_not_found"
+    assert mres.call_args.args[0] == "WPN"              # resolver recebeu WPN
+
+
 # ── name_hint: nome do filename entra no resolver (GG) ────────────────────────
 
 def test_name_hint_drives_resolver():

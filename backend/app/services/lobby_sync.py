@@ -342,7 +342,10 @@ async def process_lobby_message(
     base["prizes_count"] = len(vj.get("prizes") or {})
     base["players_left"] = players_left
 
-    if site not in ("GGPoker", "PokerStars", "Winamax"):
+    # WPN é sala de 1ª classe desde pt60 (ALLOWED_SITES do table_ss, resolver,
+    # fila HRC); o gate do lobby ficou sem ela. Incluída para a skin WPN do Rui
+    # (YaPoker, site_hint=WPN do filename) deixar de cair em site_undetected.
+    if site not in ("GGPoker", "PokerStars", "Winamax", "WPN"):
         if log_on_failure:
             _upsert_lobby_log(
                 message_id=message_id, channel_id=channel_id,

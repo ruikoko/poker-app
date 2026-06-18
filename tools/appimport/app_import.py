@@ -103,6 +103,7 @@ _SITE_TOKEN_MAP = {
     "ggnet": "GGPoker",          # IT: GGnet.exe
     "winamax": "Winamax",        # IT: Winamax.exe
     "wpn": "WPN",
+    "yapoker": "WPN",            # skin WPN do Rui (IT: YaPoker.exe) → tratar como WPN
     "stars": "PokerStars",
     "pokerstars": "PokerStars",
 }

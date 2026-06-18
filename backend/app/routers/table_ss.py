@@ -64,6 +64,7 @@ _FILENAME_SITE_MAP = {
     "ggnet": "GGPoker",           # IT: GGnet.exe
     "winamax": "Winamax",         # IT: Winamax.exe (sufixo aparado antes do lookup)
     "wpn": "WPN",
+    "yapoker": "WPN",             # skin WPN do Rui (IT: YaPoker.exe) → tratar como WPN
     "stars": "PokerStars",        # antigo: Shot<N>-Stars-…
     "pokerstars": "PokerStars",   # novo: nome completo
 }
