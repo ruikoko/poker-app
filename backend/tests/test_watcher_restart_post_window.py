@@ -51,6 +51,9 @@ def pf(tmp_path):
     _pf._HANDS_DONE_SINCE_RESTART = 0
     _pf._HRC_WINDOW_DIRTY = False
     _pf._RESTART_EVERY_N_HANDS = 5
+    # pt79 hook de smoke — inerte por defeito (one-shot por processo)
+    _pf._SMOKE_FAIL_FIRST = False
+    _pf._SMOKE_FAIL_FIRST_FIRED = False
 
     # constantes module-level do watcher original (resolvidas via LOAD_GLOBAL)
     _pf.BTN_NEXT = (677, 438)
@@ -215,3 +218,45 @@ def test_consecutive_failures_restart_once_each_no_loop(pf, tmp_path):
         pf.setup_hand(nameB, pathB)
     pf._restart_hrc.assert_called_once()        # exactamente 1 restart (no arranque de B)
     assert pf._HRC_WINDOW_DIRTY is True         # falhou outra vez → a próxima reinicia
+
+
+# ── pt79: HOOK DE INDUÇÃO do re-smoke (env/flag, one-shot, pós-janela) ──────
+
+def test_smoke_hook_env_raises_first_hand_then_inert_one_shot(pf, tmp_path, monkeypatch):
+    """env HRC_WATCHER_SMOKE_FAIL_FIRST: a 1ª mão levanta o RuntimeError pós-janela
+    (independente da árvore — _wait_for_finish_ready nem é alcançado) e marca
+    dirty; a 2ª (one-shot já disparado) NÃO levanta → processa limpa (auto-cura)."""
+    monkeypatch.setenv("HRC_WATCHER_SMOKE_FAIL_FIRST", "1")
+
+    # 1ª mão → hook dispara ANTES do finish-wait
+    nameA, pathA = _make_hand(tmp_path, name="A")
+    with pytest.raises(RuntimeError, match="WIZARD_FINISH_NEVER_RE_ENABLED"):
+        pf.setup_hand(nameA, pathA)
+    assert pf._HRC_WINDOW_DIRTY is True
+    assert pf._SMOKE_FAIL_FIRST_FIRED is True
+    pf._wait_for_finish_ready.assert_not_called()   # hook precede o finish-wait
+
+    # 2ª mão → one-shot já gasto: NÃO levanta; reinicia (dirty) e segue até ao fim
+    nameB, pathB = _make_hand(tmp_path, name="B")
+    res = pf.setup_hand(nameB, pathB)
+    assert res and res.endswith("B.zip")            # processou limpa
+    pf._restart_hrc.assert_called_once()            # reiniciou no arranque da B
+    assert pf._HRC_WINDOW_DIRTY is False            # fim limpo
+
+
+def test_smoke_hook_inert_without_env_or_flag(pf, tmp_path):
+    """Sem env e flag False (produção) → hook inerte: mão de sucesso normal."""
+    name, path = _make_hand(tmp_path)
+    res = pf.setup_hand(name, path)
+    assert res and res.endswith("HAND01.zip")
+    assert pf._HRC_WINDOW_DIRTY is False
+
+
+def test_smoke_hook_flag_activates_build_variant(pf, tmp_path):
+    """Activação por FLAG (_SMOKE_FAIL_FIRST=True, p/ um build de smoke) — mesma
+    falha pós-janela determinística na 1ª mão."""
+    pf._SMOKE_FAIL_FIRST = True
+    name, path = _make_hand(tmp_path)
+    with pytest.raises(RuntimeError, match="WIZARD_FINISH_NEVER_RE_ENABLED"):
+        pf.setup_hand(name, path)
+    assert pf._HRC_WINDOW_DIRTY is True

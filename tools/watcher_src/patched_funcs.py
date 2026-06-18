@@ -1932,6 +1932,15 @@ _RESTART_EVERY_N_HANDS = 5
 # globals().get(...,False) para ser SEGURO mesmo sem APPEND no marshal-swap
 # (ver README §"Resolução de globais"); a 1ª escrita cria a chave no namespace.
 _HRC_WINDOW_DIRTY = False
+# pt79 — HOOK DE INDUÇÃO do re-smoke (#HRC-RESTART-POST-WINDOW-FAILURE). Activado
+# pela env `HRC_WATCHER_SMOKE_FAIL_FIRST` (ou pondo `_SMOKE_FAIL_FIRST=True` num
+# build de smoke). Na 1ª mão (one-shot por PROCESSO do watcher), `setup_hand`
+# levanta o RuntimeError pós-janela LOGO APÓS o wizard abrir — determinístico,
+# INDEPENDENTE do tamanho da árvore (não depende do finish-wait, que escapava em
+# árvores triviais). INERTE em produção (env unset + flag False). Não re-arma no
+# `_restart_hrc` (o flag vive no processo do watcher, não no HRC).
+_SMOKE_FAIL_FIRST = False
+_SMOKE_FAIL_FIRST_FIRED = False
 _HRC_COLDSTART_GRACE_S = 8
 _CLOSE_TAB_AFTER_EXPORT = True
 _FILE_LOGGING_READY = False
@@ -2431,6 +2440,21 @@ def setup_hand(hand_name, hand_path):
     # de sucesso (abaixo). O bail `if not win` acima NÃO chega aqui → não marca
     # dirty (a rung 2 já tratou o wizard-não-abriu) → sem restart duplicado.
     globals()['_HRC_WINDOW_DIRTY'] = True
+
+    # pt79 — HOOK DE INDUÇÃO do re-smoke (one-shot por processo). Se activado
+    # (env HRC_WATCHER_SMOKE_FAIL_FIRST ou flag _SMOKE_FAIL_FIRST), levanta o
+    # RuntimeError pós-janela LOGO AQUI (wizard já aberto) na 1ª mão →
+    # determinístico, independente da árvore. As mãos seguintes NÃO disparam
+    # (one-shot) → a 2ª reinicia (via _HRC_WINDOW_DIRTY acima) E processa limpa,
+    # provando a auto-cura. Inerte em produção (env unset + flag False).
+    if (not globals().get('_SMOKE_FAIL_FIRST_FIRED', False)
+            and (_SMOKE_FAIL_FIRST or os.environ.get('HRC_WATCHER_SMOKE_FAIL_FIRST'))):
+        globals()['_SMOKE_FAIL_FIRST_FIRED'] = True
+        print('   [SMOKE] hook one-shot ACTIVO — a forçar falha pós-janela na 1ª '
+              'mão (re-smoke do [HRC-RESTART]). Inerte em produção.')
+        raise RuntimeError(
+            'WIZARD_FINISH_NEVER_RE_ENABLED: SMOKE pt79 one-shot (pós-abertura-de-janela)'
+        )
 
     wpos = get_win_pos(win)
 

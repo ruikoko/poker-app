@@ -62,25 +62,36 @@ Duplo-clique no `instala_pt79.bat`. O `.bat` (regra «1 só exe»): descarrega �
 Objetivo: ver o **`[HRC-RESTART]`** pós-falha-pós-janela nos logs e a auto-cura.
 
 **⚠️ Não depender de uma falha natural (rara).** Induzir a falha pós-janela de forma
-**determinística**, pelo caminho de falha REAL (`_wait_for_finish_ready` →
-`WIZARD_FINISH_NEVER_RE_ENABLED`), encolhendo o timeout da Fase 2.
+**determinística** e **independente do tamanho da árvore** via o HOOK de smoke.
 
-### 5a. Indução determinística (build de SMOKE, timeout encolhido)
+> **Histórico:** a 1ª tentativa encolhia o timeout da Fase 2 (60→1s). FALHOU no
+> Beelink (19 Jun): a mão tinha tree-size instantâneo → a Fase 1 nunca viu o Finish
+> *disabled* → a Fase 2 nunca foi alcançada → sem raise; a mão seguiu para uma 2ª run
+> real. O tree-SIZE (o que a Fase 2 vigia) ≠ a duração da run Nash. Substituído pelo
+> hook one-shot abaixo.
 
-1. **Edição temporária** em `tools/watcher_src/patched_funcs.py:112`:
-   `_FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0` → **`1.0`**.
-   (NÃO mexer no `_FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0` — a Fase 1 tem de continuar a
-   ver o Finish ficar *disabled*, senão `_wait_for_finish_ready` devolve cedo sem
-   levantar.)
-2. Build de um `.exe` de **SMOKE** com esse timeout (mesmo processo do passo 1; é um
-   `.exe` descartável, NÃO o de produção). Instalar no Beelink pelo bat (ou cópia
-   manual para `HRCWatch`).
-3. Pôr **≥2 mãos** na fila, com a 1ª a ter **árvore não-trivial** (calc demora >1s, p/
-   a Fase 1 ver o Finish *disabled* e a Fase 2 estourar ao 1s → levanta o
-   `WIZARD_FINISH_NEVER_RE_ENABLED` **pós-janela**). Mão de árvore minúscula
-   (tree≈0) NÃO serve (Fase 1 devolve cedo, sem raise).
-4. Confirmar nos logs (passo 5c). **Repor o timeout a `60.0`** e construir/instalar o
-   `.exe` de **produção** (timeout normal) — o build de smoke NÃO vai para produção.
+### 5a. Indução determinística — HOOK one-shot pós-wizard (env)
+
+`patched_funcs.py:setup_hand` tem um hook (commitado, **inerte em produção**): se a
+env **`HRC_WATCHER_SMOKE_FAIL_FIRST`** estiver setada (ou o flag `_SMOKE_FAIL_FIRST`
+num build de smoke), a **1ª mão** (one-shot por processo) levanta o RuntimeError
+pós-janela **logo após o wizard abrir** — antes do finish-wait, logo independente da
+árvore. As mãos seguintes NÃO disparam (one-shot) → a 2ª **reinicia e processa
+limpa** (prova a auto-cura completa).
+
+1. Build do `.exe` (processo do passo 1 — **sem edições temporárias**; o hook é
+   commitado e inerte sem a env). Publicar + instalar no Beelink pelo bat.
+2. No Beelink, **correr o watcher com a env setada SÓ NESTA SESSÃO** (cmd, NÃO
+   `setx` — para não persistir e falhar produção):
+   ```
+   set HRC_WATCHER_SMOKE_FAIL_FIRST=1
+   "C:\Users\riand\HRCWatch\hrc_watcher.exe"
+   ```
+3. Pôr **≥2 mãos** na fila (qualquer árvore serve). A 1ª falha pós-janela
+   (`WIZARD_FINISH_NEVER_RE_ENABLED: SMOKE pt79 one-shot`); a 2ª deve reiniciar +
+   processar.
+4. Confirmar nos logs (passo 5c). **Produção:** o MESMO `.exe`, corrido **sem** a env
+   (lançamento normal / atalho) → hook inerte. Não é preciso re-build.
 
 ### 5b. Caminho natural (alternativa, se calhar uma falha real em sessão)
 
