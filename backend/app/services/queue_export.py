@@ -1171,20 +1171,30 @@ def _clean_for_filename(s: str, maxlen: int) -> str:
 
 
 def compute_tree_filename(hand: dict) -> str:
-    """`<torneio>_<mãoHerói>_<AAAA-MM-DD>_<HHhMM>_<hand_id>.zip`. Campos em falta →
-    fallback seguro; nunca devolve nome inválido para Windows."""
-    tn = _clean_for_filename(hand.get("tournament_name") or "",
-                             _TREE_NAME_TOURNAMENT_MAXLEN) or "torneio"
-    hc = re.sub(r'[^0-9A-Za-z]', '', hand.get("hero_cards") or '') or "XX"
-    pa = hand.get("played_at")
-    if isinstance(pa, str):
-        try:
-            pa = datetime.fromisoformat(pa)
-        except (ValueError, TypeError):
-            pa = None
-    when = pa.strftime("%Y-%m-%d_%Hh%M") if hasattr(pa, "strftime") else "sem-data"
-    hid = _clean_for_filename(hand.get("hand_id") or "", 60) or "hand"
-    return f"{tn}_{hc}_{when}_{hid}.zip"
+    """`<torneio>_<mãoHerói>_<AAAA-MM-DD>_<HHhMM>_<hand_id>.zip`. Campos em falta/
+    de tipo inesperado → fallback seguro. À PROVA DE BALA: NUNCA levanta (o nome
+    bonito não pode rebentar o pull — pt82b #HERO-CARDS-LIST-IN-TREE-NAME)."""
+    try:
+        tn = _clean_for_filename(str(hand.get("tournament_name") or ""),
+                                 _TREE_NAME_TOURNAMENT_MAXLEN) or "torneio"
+        # hero_cards em prod pode vir como LISTA (['Ah','Ks']) — coerce p/ string.
+        hc_raw = hand.get("hero_cards")
+        if isinstance(hc_raw, (list, tuple)):
+            hc_raw = "".join(str(c) for c in hc_raw)
+        hc = re.sub(r'[^0-9A-Za-z]', '', str(hc_raw or "")) or "XX"
+        pa = hand.get("played_at")
+        if isinstance(pa, str):
+            try:
+                pa = datetime.fromisoformat(pa)
+            except (ValueError, TypeError):
+                pa = None
+        when = pa.strftime("%Y-%m-%d_%Hh%M") if hasattr(pa, "strftime") else "sem-data"
+        hid = _clean_for_filename(str(hand.get("hand_id") or ""), 60) or "hand"
+        return f"{tn}_{hc}_{when}_{hid}.zip"
+    except Exception:
+        # último recurso — só o hand_id; nunca devolve nome inválido nem rebenta.
+        hid = _clean_for_filename(str((hand or {}).get("hand_id") or ""), 60) or "hand"
+        return f"{hid}.zip"
 
 
 def _build_hand_meta(

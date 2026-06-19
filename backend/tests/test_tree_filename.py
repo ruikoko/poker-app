@@ -72,6 +72,23 @@ def test_winamax_hand_id_with_hyphens_preserved():
     assert out.endswith("_WN-4850168930850832391-177-1781554111.zip")
 
 
+def test_hero_cards_as_list_pt82b():
+    """Regressão pt82b (#HERO-CARDS-LIST-IN-TREE-NAME): em prod hero_cards vem
+    como LISTA → coerce p/ string, sem TypeError (era o 500 do pull)."""
+    h = {"tournament_name": "Daily", "hero_cards": ["Ah", "Ks"],
+         "played_at": datetime(2026, 6, 1, 20, 30), "hand_id": "GG-7"}
+    assert compute_tree_filename(h) == "Daily_AhKs_2026-06-01_20h30_GG-7.zip"
+
+
+def test_never_raises_on_weird_types_pt82b():
+    """À prova de bala: tipos inesperados → fallback <hand_id>.zip, NUNCA levanta."""
+    h = {"tournament_name": {"x": 1}, "hero_cards": 12345,
+         "played_at": object(), "hand_id": "GG-8"}
+    out = compute_tree_filename(h)
+    assert out and out.endswith(".zip")
+    assert not any(c in out for c in '<>:"/\\|?*')
+
+
 def test_build_hand_meta_includes_tree_filename():
     """_build_hand_meta mete `tree_filename` (sem tournament_number → sem DB)."""
     h = {"tournament_name": "Daily", "hero_cards": "AhKs",
