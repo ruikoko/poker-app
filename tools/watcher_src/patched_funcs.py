@@ -70,6 +70,12 @@ _pt30_user32.GetDlgCtrlID.argtypes = [wintypes.HWND]
 _pt30_user32.GetDlgCtrlID.restype = ctypes.c_int
 _pt30_user32.IsWindowVisible.argtypes = [wintypes.HWND]
 _pt30_user32.IsWindowVisible.restype = wintypes.BOOL
+# pt84 (#HRC-HANG-WATCHDOG) — IsHungAppWindow: TRUE se a janela parou de bombear
+# mensagens (~5s) = congelada. Usado pelo vigia para detectar HRC frozen (OOM).
+_pt30_user32.IsHungAppWindow.argtypes = [wintypes.HWND]
+_pt30_user32.IsHungAppWindow.restype = wintypes.BOOL
+_pt30_user32.IsWindow.argtypes = [wintypes.HWND]
+_pt30_user32.IsWindow.restype = wintypes.BOOL
 
 CB_GETCURSEL = 0x0147   # lê o índice seleccionado (read-back de verificação)
 CB_SETCURSEL = 0x014E   # selecciona item por índice
@@ -520,7 +526,7 @@ def _wait_for_finish_ready(hwnd_wizard):
         if not _is_enabled(btn):
             saw_disabled = True
             break
-        time.sleep(_FINISH_WAIT_POLL_S)
+        _watchdog_sleep(_FINISH_WAIT_POLL_S)   # pt84 — vigia (OOM/hung) no Hand Setup
     if not saw_disabled:
         print('   [WARN] [finish-wait] Finish nunca ficou disabled em %.0fs — '
               'calculo provavelmente instantaneo (tree=0); a continuar'
@@ -535,7 +541,7 @@ def _wait_for_finish_ready(hwnd_wizard):
             print('   [finish-wait] tree estavel em %.1fs (Finish enabled)'
                   % (time.time() - f2_start))
             return
-        time.sleep(_FINISH_WAIT_POLL_S)
+        _watchdog_sleep(_FINISH_WAIT_POLL_S)   # pt84 — vigia (OOM/hung) no build da árvore
     raise RuntimeError(
         'WIZARD_FINISH_NEVER_RE_ENABLED: calculo do tree size nao terminou '
         'em %.0fs (Finish ficou disabled)' % _FINISH_WAIT_PHASE2_TIMEOUT_S
@@ -659,7 +665,7 @@ def _wait_for_run_completion(timeout_total_s=7200, run_label="run",
         hwnd = _find_progress_window_hwnd(match_substring)
         if hwnd:
             break
-        time.sleep(_RUN_WAIT_POLL_S)
+        _watchdog_sleep(_RUN_WAIT_POLL_S)   # pt84 — vigia (OOM/hung) durante o grace
     if not hwnd:
         print('   [run-wait] %s: janela de progresso NUNCA vista em %.0fs de ecrã '
               'limpo — run muito curta (terminou entre polls) ou não arrancou; a '
@@ -685,7 +691,7 @@ def _wait_for_run_completion(timeout_total_s=7200, run_label="run",
             print('   [run-wait] %s: ainda a correr ha %d minutos'
                   % (run_label, int((now - b_start) / 60.0)))
             next_log = now + _RUN_WAIT_PROGRESS_LOG_S
-        time.sleep(_RUN_WAIT_POLL_S)
+        _watchdog_sleep(_RUN_WAIT_POLL_S)   # pt84 — vigia (OOM/hung) durante a run
     raise RuntimeError(
         'RUN_NEVER_COMPLETED: %s nao terminou em %ds'
         % (run_label, timeout_total_s)
@@ -1946,6 +1952,158 @@ _CLOSE_TAB_AFTER_EXPORT = True
 _FILE_LOGGING_READY = False
 _WATCHER_LOG_DIR = r'C:\hrc\watcher_logs'
 
+# ── pt84 (#HRC-HANG-WATCHDOG) — vigia de mão pendurada ───────────────────────
+# Detecta HRC congelado/OOM DURANTE as esperas e RECUPERA: mark_failed(reason)
+# (→ adapter POSTa failed → hrc_jobs failed → re-queue) + kill+restart do HRC +
+# segue para a mão seguinte. Sinais: (1) diálogo fatal Java/OOM por título;
+# (2) janela principal HUNG (IsHungAppWindow) sustido; (3) backstop wall-clock já
+# existente na espera-mãe (7200s). X FOLGADO de propósito — solves legítimos de CI
+# chegam a ~78 min; NÃO matar solves bons. Calibrar no re-smoke; desligável por env.
+_WATCHDOG_ENABLED = (os.environ.get('HRC_WATCHDOG_DISABLED', '') == '')
+_WATCHDOG_POLL_S = 5.0          # throttle: 1 verificação a cada 5s, no máximo
+# diálogo fatal: substrings de título (getAllWindows). Conservador — confirmar o
+# título REAL do popup OOM no Beelink no re-smoke e afinar esta tupla.
+_WATCHDOG_FATAL_TITLE_HINTS = (
+    'outofmemoryerror', 'out of memory', 'java.lang.', 'java exception',
+    'fatal error', 'unexpected error',
+)
+# HUNG sustido: a janela tem de estar congelada CONTINUAMENTE este tempo antes de
+# disparar (guard contra falso-positivo se o HRC bloqueia a UI num build de árvore
+# legítimo). FOLGADO. Override por env HRC_WATCHDOG_HUNG_SUSTAIN_S.
+_WATCHDOG_HUNG_SUSTAIN_S = float(os.environ.get('HRC_WATCHDOG_HUNG_SUSTAIN_S') or 1200.0)
+_WATCHDOG_HUNG_SINCE = None     # timestamp do início do hung contínuo (ou None)
+_WATCHDOG_LAST_CHECK = 0.0      # último instante em que se correu a deteção
+_CURRENT_HAND_PATH = None       # mão a decorrer (mark_failed sem threading o path)
+# hook de smoke: força um reason na 1ª verificação (env HRC_WATCHDOG_SMOKE_FORCE).
+# One-shot por PROCESSO. Prova a cadeia de recuperação ponta-a-ponta SEM OOM real.
+_WATCHDOG_SMOKE_FORCE = False
+_WATCHDOG_SMOKE_FIRED = False
+
+
+class HRCWatchdogError(Exception):
+    """Disparada quando o vigia deteta HRC pendurado/OOM. _watchdog_trip já marcou
+    a mão .failed (reason específico) + reiniciou o HRC ANTES de propagar; o
+    try_setup.except do Baltazar devolve None (NÃO re-marca) e a fila avança."""
+
+
+def _find_hrc_main_hwnd():
+    """HWND da janela principal do HRC: find_hrc() (Baltazar) se devolver hwnd,
+    senão EnumWindows ao título. None se não encontrar."""
+    fh = globals().get('find_hrc')
+    if fh:
+        try:
+            w = fh()
+            for attr in ('_hWnd', 'hWnd', 'handle'):
+                h = getattr(w, attr, None)
+                if isinstance(h, int) and h:
+                    return h
+            if isinstance(w, int) and w:
+                return w
+        except Exception:
+            pass
+    found = []
+    def _enum(hwnd, lparam):
+        try:
+            n = _pt30_user32.GetWindowTextLengthW(hwnd)
+            if n > 0:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                _pt30_user32.GetWindowTextW(hwnd, buf, n + 1)
+                t = (buf.value or '').lower()
+                if 'holdem resources' in t or t.strip() == 'hrc':
+                    found.append(hwnd)
+        except Exception:
+            pass
+        return True
+    try:
+        _pt30_user32.EnumWindows(_PT30_WNDENUMPROC(_enum), 0)
+    except Exception:
+        return None
+    return found[0] if found else None
+
+
+def _detect_fatal_hrc_window():
+    """Procura um diálogo fatal Java/OOM por título (getAllWindows). Devolve o
+    título (lower) ou None. Mesmo padrão de _detect_hand_import_error_popup."""
+    try:
+        windows = pyautogui.getAllWindows()
+    except Exception:
+        return None
+    if not windows:
+        return None
+    for w in windows:
+        title = (getattr(w, 'title', '') or '').strip().lower()
+        if not title:
+            continue
+        for hint in _WATCHDOG_FATAL_TITLE_HINTS:
+            if hint in title:
+                return title
+    return None
+
+
+def _watchdog_reason():
+    """reason (str) se o HRC está pendurado/OOM, senão None.
+    Ordem: smoke-force > diálogo fatal > hung sustido."""
+    if not _WATCHDOG_ENABLED:
+        return None
+    if (not globals().get('_WATCHDOG_SMOKE_FIRED', False)
+            and (_WATCHDOG_SMOKE_FORCE or os.environ.get('HRC_WATCHDOG_SMOKE_FORCE'))):
+        globals()['_WATCHDOG_SMOKE_FIRED'] = True
+        return 'watchdog_smoke_force (indução one-shot pt84)'
+    fatal = _detect_fatal_hrc_window()
+    if fatal:
+        return 'hrc_fatal_dialog: %s' % fatal[:80]
+    hwnd = _find_hrc_main_hwnd()
+    if hwnd and bool(_pt30_user32.IsHungAppWindow(hwnd)):
+        since = globals().get('_WATCHDOG_HUNG_SINCE')
+        if since is None:
+            globals()['_WATCHDOG_HUNG_SINCE'] = time.time()
+        elif time.time() - since >= _WATCHDOG_HUNG_SUSTAIN_S:
+            return ('hrc_hung_sustained: janela principal congelada >= %ds'
+                    % int(_WATCHDOG_HUNG_SUSTAIN_S))
+    else:
+        globals()['_WATCHDOG_HUNG_SINCE'] = None   # responsiva → reset do timer
+    return None
+
+
+def _watchdog_trip(reason):
+    """Recupera de um pendurar: mark_failed(reason) + restart do HRC + levanta
+    HRCWatchdogError. mark_failed ANTES de propagar para o reason específico
+    sobreviver (try_setup.except não re-marca)."""
+    print('   [WATCHDOG] DISPARO: %s — marcar failed, kill+restart HRC, seguir.' % reason)
+    hp = globals().get('_CURRENT_HAND_PATH')
+    mf = globals().get('mark_failed')
+    if hp and mf:
+        try:
+            mf(hp, reason)
+        except Exception as _e:
+            print('   [WATCHDOG] mark_failed falhou: %s' % _e)
+    else:
+        print('   [WATCHDOG] sem _CURRENT_HAND_PATH/mark_failed — não marcou (anómalo).')
+    try:
+        _restart_hrc()
+        globals()['_HANDS_DONE_SINCE_RESTART'] = 0
+        globals()['_HRC_WINDOW_DIRTY'] = False
+    except Exception as _e:
+        print('   [WATCHDOG] _restart_hrc falhou: %s' % _e)
+    globals()['_WATCHDOG_HUNG_SINCE'] = None
+    raise HRCWatchdogError(reason)
+
+
+def _watchdog_sleep(seconds):
+    """Drop-in para time.sleep(seconds) nas esperas longas: corre a deteção do
+    vigia no máximo a cada _WATCHDOG_POLL_S; se disparar, recupera e levanta
+    HRCWatchdogError. Inofensivo com o vigia desligado."""
+    if not _WATCHDOG_ENABLED:
+        time.sleep(seconds)
+        return
+    now = time.time()
+    if now - globals().get('_WATCHDOG_LAST_CHECK', 0.0) >= _WATCHDOG_POLL_S:
+        globals()['_WATCHDOG_LAST_CHECK'] = now
+        reason = _watchdog_reason()
+        if reason:
+            _watchdog_trip(reason)   # levanta HRCWatchdogError
+    time.sleep(seconds)
+
 
 class _Tee:
     """Escreve em vários streams (consola + ficheiro). Robusto a falhas."""
@@ -2313,6 +2471,10 @@ def setup_hand(hand_name, hand_path):
     health-check (change 2) + fecho da tab após export (change 1).
     """
     _ensure_file_logging()  # pt68 change 3 — espelha consola para ficheiro
+    # pt84 (#HRC-HANG-WATCHDOG): regista a mão a decorrer (o vigia marca-a .failed
+    # sem threading o path) + reseta o timer de hung-sustido por mão.
+    globals()['_CURRENT_HAND_PATH'] = hand_path
+    globals()['_WATCHDOG_HUNG_SINCE'] = None
     print('\n==================================================')
     print(f'  [SETUP] {hand_name}')
     print('==================================================')
