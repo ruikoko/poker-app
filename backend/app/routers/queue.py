@@ -369,6 +369,58 @@ def queue_set_aside(payload: dict = Body(...),
     return {"set_aside": set_aside, "skipped": skipped}
 
 
+@router.get("/hrc/verify/{hand_id}")
+def queue_verify_hand(hand_id: str, current_user=Depends(require_auth_or_api_key)):
+    """pt85 (#HRC-VERIFY) — verificação de correção HH-vs-HRC de UMA mão resolvida
+    (C1-C5; C6 = v2). Read-only: abre o result_zip + a HH e cruza."""
+    from app.services.hrc_verify import verify_hand
+    rows = query(
+        "SELECT h.hand_id, h.site, h.tournament_format, h.raw, h.all_players_actions, "
+        "       h.context_table_ss_id, j.result_zip "
+        "FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
+        "WHERE h.hand_id = %s AND j.status = 'done' AND j.result_zip IS NOT NULL",
+        (hand_id,))
+    if not rows:
+        raise HTTPException(404, "mão não resolvida ou sem result_zip")
+    h = dict(rows[0])
+    res = verify_hand(h, bytes(h["result_zip"]))
+    res["site"] = h["site"]
+    res.update(_verify_origin(h))
+    return res
+
+
+def _verify_origin(h: dict) -> dict:
+    """Origem da mão para o verify view: SS (table-SS) para GG com imagem guardada;
+    HH texto caso contrário (WN/import). A imagem table-SS vive em
+    table_ss_processing_log.img_b64, servível em /api/table-ss/image/{id}."""
+    tsid = h.get("context_table_ss_id")
+    if tsid:
+        return {"origin_kind": "ss", "capture_url": f"/api/table-ss/image/{tsid}"}
+    return {"origin_kind": "hh_text", "capture_url": None}
+
+
+@router.get("/hrc/verify")
+def queue_verify_batch(current_user=Depends(require_auth_or_api_key)):
+    """pt85 — verify C1-C5 em lote sobre todas as resolvidas. Read-only."""
+    from collections import Counter
+    from app.services.hrc_verify import verify_hand
+    rows = query(
+        "SELECT h.hand_id, h.site, h.tournament_format, h.raw, h.all_players_actions, "
+        "       h.context_table_ss_id, j.result_zip "
+        "FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
+        "WHERE j.status = 'done' AND j.result_zip IS NOT NULL "
+        "ORDER BY h.site, h.played_at")
+    out, vc = [], Counter()
+    for r in rows:
+        h = dict(r)
+        res = verify_hand(h, bytes(h["result_zip"]))
+        vc[res["verdict"]] += 1
+        out.append({"hand_id": res["hand_id"], "site": h["site"],
+                    "verdict": res["verdict"], "scale": res["scale"],
+                    "checks": res["checks"], **_verify_origin(h)})
+    return {"total": len(out), "summary": dict(vc), "hands": out}
+
+
 @router.get("/hrc/gate")
 def queue_gate(current_user=Depends(require_auth_or_api_key)):
     """Estado do gate da fila HRC (pt68). `gate` = 'open' se há lote libertado
