@@ -335,6 +335,40 @@ def queue_requeue(payload: dict = Body(...),
     return {"requeued": requeued, "skipped": skipped}
 
 
+@router.post("/hrc/set-aside")
+def queue_set_aside(payload: dict = Body(...),
+                    current_user=Depends(require_auth_or_api_key)):
+    """Põe mãos-veneno DE LADO (inverso do /hrc/release): des-libertar (sai da fila
+    servida → o adapter deixa de as puxar) + nota de auditoria (hrc_jobs failed).
+    NÃO re-enfileirável (un-released → fora do /sent → sem botão Re-pôr na fila).
+    Re-libertar no fluxo normal ("Disparar") quando se quiser re-tentar.
+    Body: {hand_ids: [...], note?: "..."}. Devolve {set_aside, skipped}."""
+    hand_ids = payload.get("hand_ids") or []
+    note = (payload.get("note") or "set-aside manual").strip()
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    set_aside, skipped = [], []
+    for hid in hand_ids:
+        rows = query("SELECT id FROM hands WHERE hand_id = %s", (hid,))
+        if not rows:
+            skipped.append({"hand_id": hid, "reason": "mão não encontrada"})
+            continue
+        hdb = rows[0]["id"]
+        # 1. des-libertar → fora da fila servida (adapter deixa de puxar)
+        execute("DELETE FROM hrc_queue_release WHERE hand_db_id = %s", (hdb,))
+        # 2. nota de auditoria (hrc_jobs failed; UNIQUE(hand_db_id) → upsert)
+        execute(
+            "INSERT INTO hrc_jobs (hand_db_id, status, error, submitted_at, "
+            "completed_at, meta_json) VALUES (%s, 'failed', %s, NOW(), NOW(), %s) "
+            "ON CONFLICT (hand_db_id) DO UPDATE SET status='failed', "
+            "error=EXCLUDED.error, completed_at=NOW(), meta_json=EXCLUDED.meta_json",
+            (hdb, note, json.dumps({"set_aside": True, "reason": "manual", "note": note})),
+        )
+        set_aside.append(hid)
+    logger.info("queue/hrc set-aside: %d de lado, %d skipped", len(set_aside), len(skipped))
+    return {"set_aside": set_aside, "skipped": skipped}
+
+
 @router.get("/hrc/gate")
 def queue_gate(current_user=Depends(require_auth_or_api_key)):
     """Estado do gate da fila HRC (pt68). `gate` = 'open' se há lote libertado

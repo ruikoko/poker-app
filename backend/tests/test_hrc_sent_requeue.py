@@ -104,3 +104,37 @@ def test_requeue_skips_unknown_hand(mq, mex):
 def test_requeue_empty_body_400():
     r = _client().post("/api/queue/hrc/requeue", json={"hand_ids": []})
     assert r.status_code == 400
+
+
+# ── POST /hrc/set-aside (mão-veneno: des-libertar + nota; NÃO re-enfileirável) ──
+@patch("app.routers.queue.execute")
+@patch("app.routers.queue.query")
+def test_set_aside_unreleases_and_notes(mq, mex):
+    mq.return_value = [{"id": 681}]
+    r = _client().post("/api/queue/hrc/set-aside",
+                       json={"hand_ids": ["GG-6083125360"], "note": "pendura o HRC"})
+    assert r.status_code == 200
+    assert r.json()["set_aside"] == ["GG-6083125360"]
+    # DELETE do release + UPSERT do hrc_job failed = 2 execute()
+    assert mex.call_count == 2
+    sqls = " ".join(c.args[0] for c in mex.call_args_list)
+    assert "DELETE FROM hrc_queue_release" in sqls
+    assert "INSERT INTO hrc_jobs" in sqls and "'failed'" in sqls
+    # a nota vai para o error do job
+    insert_args = [c.args[1] for c in mex.call_args_list if "INSERT INTO hrc_jobs" in c.args[0]][0]
+    assert "pendura o HRC" in insert_args[1]
+
+
+@patch("app.routers.queue.execute")
+@patch("app.routers.queue.query")
+def test_set_aside_skips_unknown(mq, mex):
+    mq.return_value = []
+    r = _client().post("/api/queue/hrc/set-aside", json={"hand_ids": ["GG-X"]})
+    assert r.json()["set_aside"] == []
+    assert "não encontrada" in r.json()["skipped"][0]["reason"]
+    mex.assert_not_called()
+
+
+def test_set_aside_empty_body_400():
+    r = _client().post("/api/queue/hrc/set-aside", json={"hand_ids": []})
+    assert r.status_code == 400
