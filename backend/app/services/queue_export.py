@@ -1704,6 +1704,7 @@ def build_queue_zip(
                 "target_node_offset": target_node_offset,
                 "aggressor_source": aggressor_source,
                 "equity_validation": equity_validation,  # pt80: None ou dict de alarme
+                "requeue_epoch": h.get("requeue_epoch", 0),  # pt83: dedup epoch-aware do adapter
                 "hand_meta": hand_meta,
                 "converted_format": (
                     "pokerstars_compat" if (

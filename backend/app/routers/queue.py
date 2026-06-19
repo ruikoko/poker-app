@@ -81,6 +81,13 @@ def ensure_hrc_queue_release_schema():
         )
         """
     )
+    # pt83 (#HRC-SENT-LIST-AND-REQUEUE) — epoch de re-queue, incrementado por
+    # POST /hrc/requeue. Servido por mão no manifest do pack → o adapter derrota
+    # o dedup D10 (re-puxa quando served_epoch > o que tem em state).
+    execute(
+        "ALTER TABLE hrc_queue_release "
+        "ADD COLUMN IF NOT EXISTS requeue_epoch INT NOT NULL DEFAULT 0"
+    )
 
 
 def _released_ids() -> set:
@@ -107,6 +114,11 @@ def export_queue(
     # Gate (pt68): só servir mãos LIBERTADAS. Fila fechada (nada libertado) → vazio.
     released = _released_ids()
     hands = [h for h in hands if h["id"] in released]
+    # pt83 — epoch de re-queue por mão (servido no manifest → dedup epoch-aware do adapter).
+    epoch_by_id = {r["hand_db_id"]: r["requeue_epoch"]
+                   for r in query("SELECT hand_db_id, requeue_epoch FROM hrc_queue_release")}
+    for h in hands:
+        h["requeue_epoch"] = epoch_by_id.get(h["id"], 0)
     payouts_by_key = lookup_payouts(hands)
     bounty_by_key = lookup_bounties(hands)
 
@@ -236,6 +248,91 @@ def queue_hand_states(payload: dict = Body(...),
                   ("site não suportado" if r["site"] not in ALLOWED_SITES else "sem HH"))
         out[r["hand_id"]] = {"state": state, "exportable": exportable, "reason": reason}
     return {"states": out}
+
+
+# ── pt83 (#HRC-SENT-LIST-AND-REQUEUE) — lista das ENVIADAS + estado + re-queue ──
+def _derive_sent_state(job_status) -> str:
+    """Estado derivado de uma mão LIBERTADA (released). O backend NÃO distingue
+    'a resolver agora' de 'presa' nem 'ainda não puxada' — tudo 'por_resolver'
+    (o adapter não reporta pull, o watcher não reporta progresso)."""
+    if job_status == "done":
+        return "resolvida"
+    if job_status == "failed":
+        return "cancelada"
+    return "por_resolver"
+
+
+@router.get("/hrc/sent")
+def queue_sent(current_user=Depends(require_auth_or_api_key)):
+    """Lista TODAS as mãos libertadas (enviadas ao HRC) + estado derivado, para a
+    secção 'Enviadas' do painel HRC. Reusa o JOIN de /hrc/states.
+
+    Estados: resolvida (job done) / cancelada (job failed, +error) / por_resolver
+    (released sem job). `released_at` p/ a pista 'enviada há Xh'. Read-only."""
+    rows = query(
+        "SELECT h.id, h.hand_id, h.site, h.tournament_name, h.hero_cards, h.played_at, "
+        "       r.released_at, r.batch_id, r.requeue_epoch, "
+        "       j.status AS job_status, j.error, j.result_zip_size, j.completed_at "
+        "FROM hrc_queue_release r "
+        "JOIN hands h ON h.id = r.hand_db_id "
+        "LEFT JOIN hrc_jobs j ON j.hand_db_id = r.hand_db_id "
+        "ORDER BY r.released_at DESC"
+    )
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["state"] = _derive_sent_state(d.get("job_status"))
+        out.append({
+            "id": d.get("id"), "hand_id": d["hand_id"], "site": d["site"],
+            "tournament_name": d.get("tournament_name"),
+            "hero_cards": d.get("hero_cards"),
+            "played_at": d.get("played_at"),
+            "released_at": d.get("released_at"),
+            "requeue_epoch": d.get("requeue_epoch") or 0,
+            "state": d["state"],
+            "error": d.get("error") if d["state"] == "cancelada" else None,
+            "result_zip_size": d.get("result_zip_size") if d["state"] == "resolvida" else None,
+            "completed_at": d.get("completed_at"),
+        })
+    return {"sent": out, "total": len(out)}
+
+
+@router.post("/hrc/requeue")
+def queue_requeue(payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Re-põe mãos FALHADAS na fila: apaga o hrc_job failed (→ volta a
+    'por_resolver') + incrementa `requeue_epoch` (servido no manifest → o adapter
+    re-puxa, derrotando o dedup D10). Só actua sobre released + job failed.
+    Body: {hand_ids: [...]}. Devolve {requeued, skipped}."""
+    hand_ids = payload.get("hand_ids") or []
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    requeued, skipped = [], []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT h.id, (r.hand_db_id IS NOT NULL) AS released, j.status AS job_status "
+            "FROM hands h "
+            "LEFT JOIN hrc_queue_release r ON r.hand_db_id = h.id "
+            "LEFT JOIN hrc_jobs j ON j.hand_db_id = h.id "
+            "WHERE h.hand_id = %s", (hid,))
+        if not rows:
+            skipped.append({"hand_id": hid, "reason": "mão não encontrada"})
+            continue
+        row = rows[0]
+        if not row["released"]:
+            skipped.append({"hand_id": hid, "reason": "não está na fila (não libertada)"})
+            continue
+        if row["job_status"] != "failed":
+            skipped.append({"hand_id": hid,
+                            "reason": f"não é falhada (estado={row['job_status'] or 'por_resolver'})"})
+            continue
+        # apaga o job failed → volta a 'por_resolver'; bump do epoch → adapter re-puxa.
+        execute("DELETE FROM hrc_jobs WHERE hand_db_id = %s AND status = 'failed'", (row["id"],))
+        execute("UPDATE hrc_queue_release SET requeue_epoch = requeue_epoch + 1 "
+                "WHERE hand_db_id = %s", (row["id"],))
+        requeued.append(hid)
+    logger.info("queue/hrc requeue: requeued=%d skipped=%d", len(requeued), len(skipped))
+    return {"requeued": requeued, "skipped": skipped}
 
 
 @router.get("/hrc/gate")
