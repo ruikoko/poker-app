@@ -15,6 +15,24 @@ function fmtTs(iso) {
   return iso.replace('T', ' ').slice(0, 16)
 }
 
+// pt83 — "enviada há Xh" a partir do released_at (TIMESTAMPTZ).
+function fmtAge(iso) {
+  if (!iso) return ''
+  const ms = Date.now() - Date.parse(iso)
+  if (isNaN(ms) || ms < 0) return ''
+  const h = Math.floor(ms / 3.6e6)
+  if (h < 1) return `há ${Math.max(1, Math.floor(ms / 6e4))}m`
+  if (h < 48) return `há ${h}h`
+  return `há ${Math.floor(h / 24)}d`
+}
+
+// pt83 — estado das Enviadas: cor + rótulo.
+const SENT_STATE = {
+  resolvida:    { c: '#22c55e', label: 'resolvida' },
+  por_resolver: { c: '#eab308', label: 'por resolver' },
+  cancelada:    { c: '#ef4444', label: 'cancelada' },
+}
+
 function Chip({ children, color }) {
   return (
     <span style={{
@@ -39,6 +57,9 @@ export default function HRCQueuePage() {
   const [gate, setGate] = useState(null)         // pt68 — gate da fila (disparo manual)
   const [batchN, setBatchN] = useState('')
   const [gateBusy, setGateBusy] = useState(false)
+  const [sent, setSent] = useState(null)         // pt83 — Enviadas (released + estado)
+  const [sentMarks, setSentMarks] = useState({}) // hand_id -> 'por_resolver' (flip otimista)
+  const [rqBusy, setRqBusy] = useState({})       // hand_id -> 'busy'|'err'
 
   async function doTrigger(count) {
     setGateBusy(true)
@@ -84,15 +105,39 @@ export default function HRCQueuePage() {
     }
   }
 
+  // pt83 — estado actual da Enviada: flip otimista (após re-queue) > backend
+  function curSentState(s) { return sentMarks[s.hand_id] ?? s.state }
+
+  async function doRequeue(handId) {
+    setRqBusy(b => ({ ...b, [handId]: 'busy' }))
+    try {
+      const res = await queue.requeue([handId])
+      if (res.requeued?.includes(handId)) {
+        setSentMarks(m => ({ ...m, [handId]: 'por_resolver' }))   // flip otimista
+        setRqBusy(b => { const n = { ...b }; delete n[handId]; return n })
+      } else {
+        setRqBusy(b => ({ ...b, [handId]: 'err' }))
+        console.warn('requeue skipped:', res.skipped)
+      }
+    } catch (e) {
+      setRqBusy(b => ({ ...b, [handId]: 'err' }))
+      console.error('requeue falhou:', e)
+    }
+  }
+
   async function refresh() {
     setLoading(true)
     setError(null)
-    setMarks({}); setStBusy({})
+    setMarks({}); setStBusy({}); setSentMarks({}); setRqBusy({})
     try {
-      const [out, pend, g] = await Promise.all([hrc.eligible(), hrc.pendingTs(), queue.gate().catch(() => null)])
+      const [out, pend, g, snt] = await Promise.all([
+        hrc.eligible(), hrc.pendingTs(),
+        queue.gate().catch(() => null), queue.sent().catch(() => null),
+      ])
       setData(out)
       setPending(pend)
       setGate(g)
+      setSent(snt)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -344,6 +389,81 @@ export default function HRCQueuePage() {
             </div>
           )}
         </>
+      )}
+
+      {/* pt83 — Enviadas: mãos libertadas + estado (resolvida / por resolver / cancelada) */}
+      {sent && (
+        <div style={{ marginTop: 30 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>Enviadas ao HRC</h2>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span>{sent.total} no total</span>
+            <span style={{ color: 'var(--border)' }}>|</span>
+            <Chip color="#22c55e">resolvida {sent.sent.filter(s => curSentState(s) === 'resolvida').length}</Chip>
+            <Chip color="#eab308">por resolver {sent.sent.filter(s => curSentState(s) === 'por_resolver').length}</Chip>
+            <Chip color="#ef4444">cancelada {sent.sent.filter(s => curSentState(s) === 'cancelada').length}</Chip>
+          </div>
+          {sent.sent.length === 0 ? (
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+              Nenhuma mão enviada ainda.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
+                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'estado', 'acções'].map(h => (
+                      <th key={h} style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sent.sent.map(s => {
+                    const st = curSentState(s)
+                    const meta = SENT_STATE[st] || { c: '#94a3b8', label: st }
+                    return (
+                      <tr key={s.hand_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{s.hand_id}</td>
+                        <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtTs(s.played_at)}</td>
+                        <td style={{ padding: '7px 10px' }}>{s.site}</td>
+                        <td style={{ padding: '7px 10px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.tournament_name || '—'}</td>
+                        <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                          <Chip color={meta.c}>{meta.label}</Chip>
+                          {st === 'por_resolver' && fmtAge(s.released_at) && (
+                            <span style={{ color: 'var(--muted)', marginLeft: 6 }}>enviada {fmtAge(s.released_at)}</span>
+                          )}
+                          {st === 'cancelada' && s.error && (
+                            <span style={{ color: 'var(--muted)', marginLeft: 6 }} title={s.error}>· {s.error}</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                          {st === 'cancelada' && (
+                            <button
+                              onClick={() => doRequeue(s.hand_id)}
+                              disabled={rqBusy[s.hand_id] === 'busy'}
+                              title="Apaga o resultado falhado e re-põe a mão na fila (o adapter re-puxa)"
+                              style={{
+                                fontSize: 11, fontWeight: 600, cursor: rqBusy[s.hand_id] === 'busy' ? 'wait' : 'pointer',
+                                color: '#eab308', background: '#eab3081f', border: '1px solid #eab30855',
+                                borderRadius: 4, padding: '2px 7px', marginRight: 8,
+                                opacity: rqBusy[s.hand_id] === 'busy' ? 0.5 : 1,
+                              }}
+                            >{rqBusy[s.hand_id] === 'busy' ? '…' : '↻ Re-pôr na fila'}</button>
+                          )}
+                          {s.id != null && (
+                            <Link to={`/replayer/${s.id}`} style={{ color: 'var(--accent2, #818cf8)', textDecoration: 'none' }}>ver →</Link>
+                          )}
+                          {rqBusy[s.hand_id] === 'err' && (
+                            <span style={{ color: '#ef4444', marginLeft: 6, fontSize: 11 }}>erro</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

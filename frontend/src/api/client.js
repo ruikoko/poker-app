@@ -460,4 +460,7 @@ export const importHealth = {
 Object.assign(queue, {
   release: (handIds) => req('POST', '/queue/hrc/release', { hand_ids: handIds }),
   states:  (handIds) => req('POST', '/queue/hrc/states',  { hand_ids: handIds }),
+  // pt83 — lista das Enviadas + re-pôr na fila as falhadas
+  sent:    () => req('GET', '/queue/hrc/sent'),
+  requeue: (handIds) => req('POST', '/queue/hrc/requeue', { hand_ids: handIds }),
 })
