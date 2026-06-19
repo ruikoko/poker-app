@@ -458,9 +458,50 @@ def _ensure_meta_in_zip(zip_path: Path, hand_id: str) -> bytes:
     return out.getvalue()
 
 
+def _zip_is_stable_and_valid(zip_path: Path, settle_s: float = 2.0):
+    """pt85 C' (i, #HRC-ADAPTER-ZIP-STABILITY) — guarda ANTES de POSTar: o zip tem
+    de estar com tamanho ESTÁVEL (igual em 2 leituras a ~settle_s) E ser um zip
+    válido (`testzip()` None). Robusto a ler o ficheiro a meio da escrita do HRC
+    (a causa-raiz candidata do GG-6082958318 corrompido). Devolve (ok, motivo):
+      - 'unstable' (size mudou / 0 bytes) -> retry no próximo tick (ainda a escrever)
+      - 'invalid'  (estável mas mau)      -> skip; o watcher/Peça-A trata do mau
+      - 'ok'                               -> estável + válido, pode POSTar."""
+    try:
+        s1 = zip_path.stat().st_size
+    except OSError as e:
+        return False, "stat:%s" % e
+    if s1 <= 0:
+        return False, "unstable"
+    time.sleep(settle_s)
+    try:
+        s2 = zip_path.stat().st_size
+    except OSError as e:
+        return False, "stat:%s" % e
+    if s2 != s1:
+        return False, "unstable"
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            if zf.testzip() is not None:
+                return False, "invalid"
+    except (zipfile.BadZipFile, OSError):
+        return False, "invalid"
+    return True, "ok"
+
+
 def post_done(session: requests.Session, api_base: str, hand_id: str,
               zip_path: Path) -> bool:
     url = f"{api_base.rstrip('/')}/api/queue/hrc/results"
+    # pt85 C' (i) — só processa quando o zip está estável + válido.
+    ok, why = _zip_is_stable_and_valid(zip_path)
+    if not ok:
+        if why == "unstable":
+            logger.info("post %s done: zip ainda instável (a escrever?), retry no próximo tick", hand_id)
+        elif why == "invalid":
+            logger.warning("post %s done: zip inválido após estável — skip "
+                           "(watcher/Peça-A trata do mau)", hand_id)
+        else:
+            logger.warning("post %s done: guarda de estabilidade falhou (%s)", hand_id, why)
+        return False
     try:
         disk_size = zip_path.stat().st_size
     except OSError as e:
