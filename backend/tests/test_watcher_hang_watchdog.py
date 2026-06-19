@@ -190,3 +190,33 @@ def test_run_wait_is_watched_and_trips(wd):
         wd._wait_for_run_completion(timeout_total_s=99999, run_label="1ª run")
     wd.mark_failed.assert_called_once()    # recuperou (não pendurou até ao timeout)
     wd._restart_hrc.assert_called_once()
+
+
+# ── pt85 A — EXPORT_WAIT_TIMEOUT override (Baltazar 86400 -> 1200) ───────────
+def test_export_wait_timeout_overridden_to_1200(wd):
+    """Peça A (#HRC-EXPORT-WAIT-TIMEOUT): patched_funcs força 1200s; o trampoline
+    corre _P depois de _O, logo a main-loop resolve 1200 (não os 24h Baltazar)."""
+    assert wd.EXPORT_WAIT_TIMEOUT == 1200
+
+
+# ── pt85 B — vigia tecido no popup Nash + scope ─────────────────────────────
+def test_nash_popup_wait_is_watched_and_trips(wd):
+    """_wait_for_nash_popup chama _watchdog_sleep no poll → com smoke-force,
+    dispara (em vez de só dar timeout) e levanta HRCWatchdogError."""
+    wd._WATCHDOG_SMOKE_FORCE = True
+    wd.pyautogui.getAllWindows.return_value = []   # popup não aparece
+    with pytest.raises(wd.HRCWatchdogError):
+        wd._wait_for_nash_popup()
+    wd.mark_failed.assert_called_once()
+    wd._restart_hrc.assert_called_once()
+
+
+def test_set_scope_wait_is_watched_and_trips(wd):
+    """_set_scope_in_popup chama _watchdog_sleep ao abrir o dropdown → smoke-force
+    dispara e levanta HRCWatchdogError (cobre o flow do scope)."""
+    wd._WATCHDOG_SMOKE_FORCE = True
+    wd._find_nash_popup_hwnd = MagicMock(return_value=321)
+    wd._find_scope_dropdown_listview = MagicMock(return_value=None)
+    with pytest.raises(wd.HRCWatchdogError):
+        wd._set_scope_in_popup((0, 0, 800, 600))
+    wd.mark_failed.assert_called_once()

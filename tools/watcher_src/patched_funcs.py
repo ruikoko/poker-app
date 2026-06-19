@@ -1064,7 +1064,7 @@ def _wait_for_nash_popup(timeout=_NASH_POPUP_WAIT_TIMEOUT_S,
                     print(f'   _wait_for_nash_popup: matched title={title!r} '
                           f'rect=({left},{top},{width},{height})')
                     return (left, top, width, height)
-        time.sleep(poll_interval)
+        _watchdog_sleep(poll_interval)   # pt85 B — vigia (OOM/hung) na espera do popup Nash
     print(f'   [WARN] _wait_for_nash_popup: timeout {timeout}s — '
           'popup não detectado')
     return None
@@ -1350,7 +1350,7 @@ def _set_scope_in_popup(popup_rect):
         pyautogui.click(focus_x, focus_y)        # foco no campo Scope
         time.sleep(0.25)
         pyautogui.press('f4')                    # abre o dropdown do CCombo
-        time.sleep(0.4)
+        _watchdog_sleep(0.4)                     # pt85 B — vigia (OOM/hung) ao abrir o scope
         lv = _find_scope_dropdown_listview()
         if lv:
             break
@@ -1769,6 +1769,43 @@ def _find_save_button(dialog_hwnd):
     return found[0][0] if found else None
 
 
+def _verify_export_zip(target_path, settle_s=2.0, wait_total_s=30.0):
+    """pt85 C' (ii) — logo após o [SAVE-AS], espera o ficheiro existir + estabilizar
+    (tamanho igual em 2 leituras) e corre testzip(). Loga `[SAVE-AS-CHECK] OK` ou
+    `[SAVE-AS-CHECK] INVÁLIDO: <erro>` para apanhar recorrência do export corrompido.
+    NÃO bloqueia nem altera o fluxo — só observabilidade (a Peça A e a guarda do
+    adapter tratam do permanentemente-mau)."""
+    import zipfile as _zf
+    deadline = time.time() + wait_total_s
+    last_size = -1
+    stable_since = None
+    while time.time() < deadline:
+        try:
+            sz = os.path.getsize(target_path)
+        except OSError:
+            time.sleep(0.5)
+            continue
+        if sz == last_size and sz > 0:
+            if stable_since is None:
+                stable_since = time.time()
+            elif time.time() - stable_since >= settle_s:
+                break
+        else:
+            stable_since = None
+            last_size = sz
+        time.sleep(0.5)
+    base = os.path.basename(target_path)
+    try:
+        with _zf.ZipFile(target_path) as z:
+            bad = z.testzip()
+        if bad is None:
+            print('   [SAVE-AS-CHECK] OK: %s (%s bytes)' % (base, last_size))
+        else:
+            print('   [SAVE-AS-CHECK] INVÁLIDO: %s — entrada corrompida %r' % (base, bad))
+    except Exception as e:
+        print('   [SAVE-AS-CHECK] INVÁLIDO: %s — %s' % (base, e))
+
+
 def _save_as_set_and_click(target_path):
     """pt35 (port do `_save_as_set_and_click` do launcher) — trata o file-picker
     "Save As" do export: aguarda o diálogo (≤20s), cola o path por clipboard
@@ -1822,15 +1859,17 @@ def _save_as_set_and_click(target_path):
         print('   [SAVE-AS] Save btn hwnd=%s -> BM_CLICK' % save_btn)
         _pt30_user32.SendMessageW(save_btn, BM_CLICK, 0, 0)
         time.sleep(1.5)
-        return True
-    print('   [SAVE-AS] Save btn nao encontrado, Enter')
-    try:
-        pyautogui.press("enter")
-        time.sleep(1.5)
-        return True
-    except Exception as e:
-        print('   [SAVE-AS] enter erro: %s' % e)
-        return True
+    else:
+        print('   [SAVE-AS] Save btn nao encontrado, Enter')
+        try:
+            pyautogui.press("enter")
+            time.sleep(1.5)
+        except Exception as e:
+            print('   [SAVE-AS] enter erro: %s' % e)
+    # pt85 C' (ii) — valida o zip exportado logo após o Save (loga, não bloqueia);
+    # apanha a recorrência do export corrompido (caso GG-6082958318).
+    _verify_export_zip(target_path)
+    return True
 
 
 def export_strategies(export_path):
@@ -1951,6 +1990,16 @@ _HRC_COLDSTART_GRACE_S = 8
 _CLOSE_TAB_AFTER_EXPORT = True
 _FILE_LOGGING_READY = False
 _WATCHER_LOG_DIR = r'C:\hrc\watcher_logs'
+# pt85 (#HRC-EXPORT-WAIT-TIMEOUT) — Peça A: a main-loop Baltazar fica em `Activas`
+# à espera do zip em `replied/` (handshake do adapter) até `EXPORT_WAIT_TIMEOUT`;
+# o ramo `elapsed > EXPORT_WAIT_TIMEOUT → mark_failed` já existe, mas o default
+# Baltazar (86400 = 24h) = "pendura para sempre" se o export sair inválido ou o
+# adapter recusar. Override aqui (o trampoline corre Baltazar=_O e depois
+# patched_funcs=_P no MESMO globals → este valor vence). 1200s = 20 min: handshake
+# parada/zip mau falha ESSA mão + a fila avança; zip bom mas lento fica em disco e
+# o adapter POSTa-o depois (upsert sobre o failed). Provado em prod: GG-6082958318
+# pendurou ~1h46 (export corrompido recusado pelo adapter, nunca foi a replied/).
+EXPORT_WAIT_TIMEOUT = 1200
 
 # ── pt84 (#HRC-HANG-WATCHDOG) — vigia de mão pendurada ───────────────────────
 # Detecta HRC congelado/OOM DURANTE as esperas e RECUPERA: mark_failed(reason)
