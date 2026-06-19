@@ -237,6 +237,15 @@ def pull_queue(session: requests.Session, api_base: str, queue_dir: Path,
                     continue
                 entries_by_hand.setdefault(hand_id, []).append((name, fname))
 
+            # pt83 (#HRC-SENT-LIST-AND-REQUEUE) — epoch de re-queue por mão (do
+            # manifest). Derrota o dedup D10: re-queue no backend faz epoch++,
+            # logo o servido fica > o guardado no state → re-puxa.
+            served_epochs = {}
+            if isinstance(manifest_payload, dict):
+                for e in (manifest_payload.get("hands_included") or []):
+                    if isinstance(e, dict) and e.get("hand_id"):
+                        served_epochs[e["hand_id"]] = e.get("requeue_epoch", 0) or 0
+
             # 2. para cada hand_id novo, validar e descomprimir
             for hand_id, files in entries_by_hand.items():
                 # A5 — validação defensiva
@@ -247,9 +256,19 @@ def pull_queue(session: requests.Session, api_base: str, queue_dir: Path,
                     logger.warning("pull: hand_id com formato inesperado, skip: %s",
                                    hand_id)
                     continue
-                # D10 — state local manda
-                if hand_id in state:
+                # D10 — state local manda, MAS o requeue_epoch (pt83) derrota o
+                # dedup: re-puxa se o backend serviu um epoch > o do state.
+                served_epoch = served_epochs.get(hand_id, 0)
+                if hand_id in state and served_epoch <= (state[hand_id].get("requeue_epoch", 0)):
                     continue
+                if hand_id in state:
+                    logger.info("pull %s: re-queue (epoch %s > %s) — a re-puxar",
+                                hand_id, served_epoch, state[hand_id].get("requeue_epoch", 0))
+                    # limpa pack/markers stale (.failed/.done) antes de re-escrever,
+                    # para o watcher voltar a apanhar a mão em get_pending.
+                    _stale = queue_dir / hand_id
+                    if _stale.exists():
+                        _safe_rmtree(_stale)
 
                 target_dir = queue_dir / hand_id
                 try:
@@ -302,6 +321,7 @@ def pull_queue(session: requests.Session, api_base: str, queue_dir: Path,
                     "result_zip_size": None,
                     "error": None,
                     "tree_filename": tree_filename,
+                    "requeue_epoch": served_epoch,  # pt83 — dedup epoch-aware
                 }
                 written += 1
                 logger.info("pull %s OK (%d ficheiro(s)) -> %s",
