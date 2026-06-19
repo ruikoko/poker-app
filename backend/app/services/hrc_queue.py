@@ -143,7 +143,7 @@ def select_andar1_rows(
         SELECT id, hand_id, site, tournament_number, tournament_name,
                tournament_format, raw, player_names, played_at,
                position, study_state, hm3_tags, discord_tags,
-               context_table_ss_id
+               context_table_ss_id, hero_cards
           FROM hands
          WHERE played_at >= '2026-01-01'
            AND site = ANY(%s)

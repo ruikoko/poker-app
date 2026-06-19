@@ -50,6 +50,11 @@ MANIFESTS_DIR      = LOG_DIR / "manifests"
 STATE_FILE         = ADAPTER_HOME / "state.json"
 LOG_FILE           = LOG_DIR / "hrc_adapter.log"
 LOG_RETENTION_DAYS = 14
+# pt82 (#HRC-TREES-PERSIST-BEELINK) — arquivo PERMANENTE dos trees de output no
+# Beelink. O zip resolvido é COPIADO para cá (nome legível do meta), ANTES do
+# move-para-replied. SEM limpeza automática — ficam aqui sempre; o Rui sobe ao
+# estudo só os que escolher, pela porta manual (GTO Brain / HRC Sessions).
+TREES_DIR          = Path(r"C:\hrc\trees")
 
 POLL_INTERVAL_DEFAULT = 60
 HAND_ID_RE = re.compile(r"^[A-Z]+-\d+(-\d+)*$")
@@ -280,12 +285,23 @@ def pull_queue(session: requests.Session, api_base: str, queue_dir: Path,
                             hand_id,
                         )
 
+                # pt82 — nome legível do tree (do meta do backend), guardado no
+                # state p/ o reconcile_done copiar o output zip para C:\hrc\trees\.
+                tree_filename = None
+                if meta_path.is_file():
+                    try:
+                        with meta_path.open(encoding="utf-8") as mf:
+                            tree_filename = (json.load(mf) or {}).get("tree_filename")
+                    except (OSError, ValueError):
+                        pass
+
                 state[hand_id] = {
                     "status": STATUS_PULLED,
                     "pulled_at": now_iso(),
                     "posted_at": None,
                     "result_zip_size": None,
                     "error": None,
+                    "tree_filename": tree_filename,
                 }
                 written += 1
                 logger.info("pull %s OK (%d ficheiro(s)) -> %s",
@@ -528,6 +544,9 @@ def reconcile_done(session: requests.Session, api_base: str,
             "result_zip_size": size,
             "error": None,
         }
+        # pt82 — persistência LOCAL permanente do tree de output, ANTES do move/
+        # prune do replied/. Best-effort; não bloqueia a fila.
+        _copy_to_trees(zip_path, (state.get(hand_id) or {}).get("tree_filename"))
         # pt61: MOVE para replied/ (não unlink) → desbloqueia o arquivar+avançar
         # do watcher Baltazar (#HRC-EXPORT-WRITES-BUT-FINALIZE-HANGS).
         _move_to_replied(zip_path)
@@ -581,6 +600,22 @@ def _safe_rmtree(p: Path) -> None:
 #  (ii) `replied/` não acumula — `prune_replied` apaga por idade (≥ RETENTION,
 #       bem depois de o watcher ter consumido o zip; unlink puro, NUNCA POST).
 REPLIED_RETENTION_S = 3600  # 1h: o watcher arquiva em segundos/minutos
+
+
+def _copy_to_trees(zip_path: Path, tree_filename) -> None:
+    """pt82 (#HRC-TREES-PERSIST-BEELINK) — COPIA (não move) o zip de output para
+    `C:\\hrc\\trees\\<nome legível>` ANTES do move-para-replied. Best-effort: se
+    falhar, o pipeline da fila segue na mesma (só não fica a cópia local). Sem
+    limpeza automática — ficam lá sempre. Nome do meta do backend; fallback
+    `<hand_id>.zip` quando ausente (packs antigos / zip não-pulled)."""
+    name = (tree_filename or "").strip() or (zip_path.stem + ".zip")
+    try:
+        TREES_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(zip_path), str(TREES_DIR / name))   # sobrescreve = idempotente
+        logger.info("trees: copiado %s -> %s", zip_path.name, TREES_DIR / name)
+    except OSError as e:
+        logger.warning("trees: copia de %s falhou (%s) — fila segue na mesma",
+                       zip_path.name, e)
 
 
 def _move_to_replied(zip_path: Path) -> None:

@@ -1155,6 +1155,38 @@ def _derive_stage_from_equity_model(equity_model) -> str:
     return _STAGE_BY_EQUITY_MODEL.get(equity_model, "FT")
 
 
+# pt82 (#HRC-TREES-PERSIST-BEELINK) — nome legível do tree de output (o adapter
+# copia o zip resolvido para C:\hrc\trees\<este nome>). O BACKEND pré-computa o
+# filename a partir do hand record e mete-o em meta.json → o adapter não parseia
+# a HH. `played_at` é Lisboa naive (pt51) → formata-se directo.
+_TREE_NAME_TOURNAMENT_MAXLEN = 40
+
+
+def _clean_for_filename(s: str, maxlen: int) -> str:
+    """Tira chars inválidos de nome de ficheiro Windows (<>:"/\\|?* + controlo) e
+    espaços; trunca a `maxlen`."""
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', s or '')
+    s = re.sub(r'\s+', '', s)
+    return s[:maxlen]
+
+
+def compute_tree_filename(hand: dict) -> str:
+    """`<torneio>_<mãoHerói>_<AAAA-MM-DD>_<HHhMM>_<hand_id>.zip`. Campos em falta →
+    fallback seguro; nunca devolve nome inválido para Windows."""
+    tn = _clean_for_filename(hand.get("tournament_name") or "",
+                             _TREE_NAME_TOURNAMENT_MAXLEN) or "torneio"
+    hc = re.sub(r'[^0-9A-Za-z]', '', hand.get("hero_cards") or '') or "XX"
+    pa = hand.get("played_at")
+    if isinstance(pa, str):
+        try:
+            pa = datetime.fromisoformat(pa)
+        except (ValueError, TypeError):
+            pa = None
+    when = pa.strftime("%Y-%m-%d_%Hh%M") if hasattr(pa, "strftime") else "sem-data"
+    hid = _clean_for_filename(hand.get("hand_id") or "", 60) or "hand"
+    return f"{tn}_{hc}_{when}_{hid}.zip"
+
+
 def _build_hand_meta(
     hand: dict,
     hh_text: str,
@@ -1206,6 +1238,8 @@ def _build_hand_meta(
         "max_players": max_players,
         "script_path": script_path,
         "aggressor_real_action": aggressor_real_action,
+        # pt82 — nome legível p/ o adapter guardar o tree de output em C:\hrc\trees\.
+        "tree_filename": compute_tree_filename(hand),
     }
 
 
