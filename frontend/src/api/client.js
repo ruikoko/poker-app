@@ -1,6 +1,6 @@
 // Use relative path — in dev, Vite proxy forwards /api → backend.
 // In production, the reverse proxy (nginx/railway) does the same.
-const API_ROOT = import.meta.env.VITE_API_URL || ''
+export const API_ROOT = import.meta.env.VITE_API_URL || ''
 
 const BASE = `${API_ROOT}/api`
 

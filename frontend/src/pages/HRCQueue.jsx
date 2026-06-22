@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { hands as handsApi, hrc, queue } from '../api/client'
+import { API_ROOT, hands as handsApi, hrc, queue } from '../api/client'
 
 // Cores por cenário do aggressor (espelha build_queue_zip / classify_aggressor_source).
 const SRC_COLOR = {
@@ -87,6 +87,10 @@ function VerifyDetail({ res, handDbId }) {
   if (res === 'busy') return <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>A verificar…</div>
   if (res === 'err' || !res) return <div style={{ padding: 14, color: '#ef4444', fontSize: 12 }}>Erro a carregar a verificação.</div>
   const v = VERIFY_VERDICT[res.verdict] || { c: '#94a3b8', label: res.verdict }
+  // capture_url vem relativo (/api/...); prefixar API_ROOT p/ bater no BACKEND em
+  // prod (frontend e backend são domínios distintos) — igual às imagens que já
+  // funcionam (BASE = API_ROOT + /api). Em dev API_ROOT='' → Vite proxy.
+  const captureSrc = res.capture_url ? `${API_ROOT}${res.capture_url}` : null
   return (
     <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.02)', display: 'flex', gap: 20, flexWrap: 'wrap' }}>
       {/* Origem — o que o Rui confere à vista (SS de mesa ou HH em texto) */}
@@ -94,9 +98,9 @@ function VerifyDetail({ res, handDbId }) {
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
           Origem {res.origin_kind === 'ss' ? '· SS de mesa' : '· HH (texto)'}
         </div>
-        {res.origin_kind === 'ss' && res.capture_url ? (
-          <a href={res.capture_url} target="_blank" rel="noreferrer" title="Abrir captura em tamanho real">
-            <img src={res.capture_url} alt="captura SS de mesa"
+        {res.origin_kind === 'ss' && captureSrc ? (
+          <a href={captureSrc} target="_blank" rel="noreferrer" title="Abrir captura em tamanho real">
+            <img src={captureSrc} alt="captura SS de mesa"
               style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)', display: 'block' }} />
           </a>
         ) : (
