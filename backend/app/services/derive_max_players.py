@@ -34,10 +34,13 @@ from typing import Optional
 # em PS HH standard (em GG pós-`_replace_hashes` todos os seats têm `Dealt to`
 # sem brackets, por isso exigimos `[`). `.+?` tolera nicks com espaços.
 _HERO_RE = re.compile(r"^Dealt to (.+?) \[", re.MULTILINE)
-# Action lines: "<nick>: folds|calls|raises|bets|checks". `\b` evita "raised" no
-# SUMMARY. `.+?` (não `\S+`) tolera nicks com espaços.
+# Action lines. PS/GG têm colon ("Hero: folds"); Winamax/WPN NÃO ("thinvalium
+# folds"). `:?` torna o colon opcional → cross-site (alinha com hrc_verify_tree
+# `_ACTION_RE` e hrc_script_gen `_ACTION_LINE_RE`). Antes exigia ": " e cegava
+# TODA a Winamax → âncora nunca detectada → fallback max=2 (#WN-COLON-BLIND-MAX-PLAYERS).
+# `\b` evita "raised" no SUMMARY. `.+?` (não `\S+`) tolera nicks com espaços.
 _ACTION_RE = re.compile(
-    r"^(.+?): (folds|calls|raises|bets|checks)\b",
+    r"^(.+?):?\s+(folds|calls|raises|bets|checks)\b",
     re.MULTILINE,
 )
 # Dinheiro voluntário no pote (limp/call/raise/bet). Folds e checks NÃO contam.

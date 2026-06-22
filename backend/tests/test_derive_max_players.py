@@ -231,3 +231,47 @@ def test_gg5944816316_real_8max_anchor_mp_returns_6():
         "*** SUMMARY ***\n"
     )
     assert derive_max_players(hh) == 6
+
+
+# ── Winamax (sem colon nas action lines) — #WN-COLON-BLIND-MAX-PLAYERS ───────
+# Antes do fix, `_ACTION_RE` exigia ": " e cegava TODA a Winamax (linhas
+# "nick folds", sem colon) → âncora nunca detectada → fallback max=2.
+
+def _hh_winamax(order, hero, actions, button_seat=None):
+    """HH minimal estilo Winamax: action lines SEM colon ("nick folds")."""
+    n = len(order)
+    btn_seat = button_seat if button_seat else ((n - 2) if n >= 3 else 1)
+    lines = [
+        'Winamax Poker - Tournament "GRAVITY" buyIn: 232€ level: 5 - HandId: '
+        "#1-2-3 - Holdem no limit (200/400) - 2026/06/15 17:07:17 UTC",
+        f"Table: 'T' {n}-max (real money) Seat #{btn_seat} is the button",
+    ]
+    for i, nick in enumerate(order, start=1):
+        lines.append(f"Seat {i}: {nick} (10000)")
+    lines.append("*** PRE-FLOP ***")
+    lines.append(f"Dealt to {hero} [3s 8h]")
+    for nick, action in actions:           # SEM colon (formato Winamax)
+        lines.append(f"{nick} {action}")
+    lines.append("*** SUMMARY ***")
+    return "\n".join(lines) + "\n"
+
+
+def test_winamax_hero_btn_fold_around_anchor_btn_returns_3():
+    """GRAVITY real: Hero BTN, fold-around (Hero folda também). Âncora = BTN
+    (regra 1, fold do herói) → span BTN→BB = 3. Antes do fix dava 2."""
+    order = ["MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh_winamax(order, "BTN", [
+        ("MP", "folds"), ("HJ", "folds"), ("CO", "folds"),
+        ("BTN", "folds"), ("SB", "folds"),
+    ])
+    assert derive_max_players(hh) == 3
+
+
+def test_winamax_voluntary_open_anchor_at_opener():
+    """Winamax sem colon, CO abre (1ª ação voluntária). Âncora=CO (idx2) →
+    span CO→BB = 4. Confirma regra 2 com linhas sem colon."""
+    order = ["MP", "HJ", "CO", "BTN", "SB", "BB"]
+    hh = _hh_winamax(order, "BTN", [
+        ("MP", "folds"), ("HJ", "folds"), ("CO", "raises 400 to 800"),
+    ])
+    assert derive_max_players(hh) == 4
