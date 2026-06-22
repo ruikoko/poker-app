@@ -88,30 +88,87 @@ function actionColor(label) {
   return '#22c55e'   // R … (raise/all-in)
 }
 
-// pt86 (#HRC-VERIFY) — bloco "HH ↔ HRC produziu": HH crua à esquerda, o que o
-// HRC produziu (nó central por sequence-match + ramos imediatos) à direita.
-// Sem veredicto — o Rui lê e julga à vista.
+// pt86 v2 (#HRC-VERIFY) — nó navegável da árvore HRC. Mostra TODAS as opções da
+// posição (fold/call/raises com tamanho + frequência em barras); clicar numa
+// opção com filho abre o nó seguinte (próxima posição a responder), recursivo
+// até ao fim do preflop. `byIdx`: map idx→nó; `expanded`: Set de idxs abertos.
+function HrcTreeNode({ idx, byIdx, expanded, toggle, depth = 0 }) {
+  const nd = byIdx[idx]
+  if (!nd) return null
+  return (
+    <div style={{
+      marginLeft: depth ? 10 : 0, paddingLeft: depth ? 8 : 0,
+      borderLeft: depth ? '1px solid rgba(129,140,248,0.25)' : 'none',
+    }}>
+      <div style={{ fontWeight: 700, color: nd.is_central ? '#a5b4fc' : 'var(--text)', marginTop: depth ? 2 : 0 }}>
+        n{idx} {nd.actor}({nd.actor_stack_bb}bb)
+        {nd.is_central && <span style={{ color: '#818cf8', fontWeight: 700 }}> ◄ âncora</span>}
+      </div>
+      {nd.actions.map((a, i) => {
+        const hasChild = a.child != null
+        const isOpen = hasChild && expanded.has(a.child)
+        return (
+          <div key={i}>
+            <div
+              onClick={hasChild ? () => toggle(a.child) : undefined}
+              title={hasChild ? (isOpen ? 'fechar' : 'abrir a resposta seguinte') : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4,
+                cursor: hasChild ? 'pointer' : 'default',
+                userSelect: 'none', borderRadius: 3,
+                background: isOpen ? 'rgba(129,140,248,0.10)' : 'transparent',
+              }}
+            >
+              <span style={{ width: 12, color: '#818cf8', textAlign: 'center' }}>
+                {hasChild ? (isOpen ? '▾' : '▸') : ''}
+              </span>
+              <span style={{ color: actionColor(a.label), minWidth: 120 }}>{a.label}</span>
+              <span style={{ minWidth: 44, textAlign: 'right', color: 'var(--text)' }}>{a.pct.toFixed(1)}%</span>
+              <span style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', maxWidth: 90 }}>
+                <span style={{ display: 'block', height: '100%', width: `${Math.min(100, a.pct)}%`, background: actionColor(a.label) }} />
+              </span>
+            </div>
+            {isOpen && (
+              <HrcTreeNode idx={a.child} byIdx={byIdx} expanded={expanded} toggle={toggle} depth={depth + 1} />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// pt86 (#HRC-VERIFY) — bloco "HH ↔ HRC produziu". Esquerda: HH crua (intocada).
+// Direita (pt86 v2): ÁRVORE NAVEGÁVEL — arranca no nó-âncora (Selected Subtree)
+// e desce por qualquer ramo do subtree preflop. Sem veredicto — o Rui julga à vista.
 function HrcTreeView({ tree }) {
+  const [expanded, setExpanded] = useState(() => new Set())
   if (!tree) return null
   if (tree.error) {
     return (
-      <div style={{ marginTop: 14, fontSize: 12, color: 'var(--muted)' }}>
-        HRC: {tree.error}
-      </div>
+      <div style={{ marginTop: 14, fontSize: 12, color: 'var(--muted)' }}>HRC: {tree.error}</div>
     )
   }
   const nodes = tree.nodes || []
+  const byIdx = Object.fromEntries(nodes.map(n => [n.idx, n]))
+  const root = tree.root
+  const toggle = (childIdx) => setExpanded(s => {
+    const n = new Set(s)
+    n.has(childIdx) ? n.delete(childIdx) : n.add(childIdx)
+    return n
+  })
   return (
     <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 }}>
         HH ↔ HRC produziu
         <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 8 }}>
-          árvore {tree.n_nodes_total} nós{tree.tree_complete ? ' (completa)' : ''} · nó central n{tree.central_node}
+          árvore {tree.n_nodes_total} nós{tree.tree_complete ? ' (completa)' : ''} · subárvore {tree.subtree_size} nós (só preflop) · âncora n{root}
+          {tree.truncated ? ' · ⚠ truncada' : ''}
           {tree.positions?.length ? ` · ${tree.positions.map(p => `${p.pos}(${p.stack_bb}bb)`).join(' ')}` : ''}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {/* Esquerda — a mão real (HH crua, preflop) */}
+        {/* Esquerda — a mão real (HH crua, preflop) — INTOCADA */}
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>HH (a mão real)</div>
           <pre style={{
@@ -120,36 +177,18 @@ function HrcTreeView({ tree }) {
             whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}>{tree.hh_preflop || '—'}</pre>
         </div>
-        {/* Direita — o que o HRC produziu (nó central + ramos) */}
+        {/* Direita — árvore navegável HRC (clica numa opção para descer) */}
         <div style={{ flex: '1 1 420px', minWidth: 320 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>HRC produziu (nó central + ramos)</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
+            HRC produziu — árvore navegável <span style={{ opacity: 0.7 }}>(clica numa opção ▸ para ver a resposta seguinte)</span>
+          </div>
           <div style={{
             padding: 10, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
-            fontSize: 11, maxHeight: 420, overflow: 'auto', fontFamily: 'monospace',
+            fontSize: 11, maxHeight: 460, overflow: 'auto', fontFamily: 'monospace',
           }}>
-            {nodes.length === 0 && <span style={{ color: 'var(--muted)' }}>sem nós para mostrar.</span>}
-            {nodes.map(nd => (
-              <div key={nd.idx} style={{
-                marginBottom: 8, paddingLeft: 6,
-                borderLeft: nd.is_central ? '3px solid #818cf8' : '3px solid transparent',
-              }}>
-                <div style={{ fontWeight: 700, color: nd.is_central ? '#a5b4fc' : 'var(--text)' }}>
-                  n{nd.idx} {nd.actor}({nd.actor_stack_bb}bb)
-                  <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · enfrenta: {nd.facing}</span>
-                  {nd.is_central && <span style={{ color: '#818cf8', fontWeight: 700 }}> ◄ CENTRAL</span>}
-                </div>
-                {nd.actions.map((a, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 10 }}>
-                    <span style={{ color: actionColor(a.label), minWidth: 120 }}>{a.label}</span>
-                    <span style={{ minWidth: 44, textAlign: 'right', color: 'var(--text)' }}>{a.pct.toFixed(1)}%</span>
-                    <span style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', maxWidth: 90 }}>
-                      <span style={{ display: 'block', height: '100%', width: `${Math.min(100, a.pct)}%`, background: actionColor(a.label) }} />
-                    </span>
-                    <span style={{ color: 'var(--muted)' }}>{a.child != null ? `→n${a.child}` : '·'}</span>
-                  </div>
-                ))}
-              </div>
-            ))}
+            {root != null && byIdx[root]
+              ? <HrcTreeNode idx={root} byIdx={byIdx} expanded={expanded} toggle={toggle} />
+              : <span style={{ color: 'var(--muted)' }}>sem nós para mostrar.</span>}
           </div>
         </div>
       </div>

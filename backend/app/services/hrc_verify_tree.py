@@ -130,10 +130,11 @@ def _hh_preflop_text(raw: str) -> str:
     return raw[:(min(cut) if cut else len(raw))].strip()
 
 
-def build_verify_tree(hand: dict, zip_bytes: bytes, max_nodes: int = 16,
-                      max_depth: int = 5) -> dict:
-    """Nó central + ramos imediatos, em texto estruturado. `hand`: row de
-    `hands` (raw). `zip_bytes`: result_zip do HRC."""
+def build_verify_tree(hand: dict, zip_bytes: bytes, max_nodes: int = 1500) -> dict:
+    """Subárvore preflop completa a partir do nó-âncora (Selected Subtree), em
+    forma navegável: cada nó com a estratégia agregada da sua posição + links
+    para os nós-filho (`actions[].node`). `hand`: row de `hands` (raw).
+    `zip_bytes`: result_zip do HRC. `max_nodes`: tecto defensivo (truncated)."""
     from app.services.queue_export import derive_seats_in_preflop_order
 
     try:
@@ -198,16 +199,26 @@ def build_verify_tree(hand: dict, zip_bytes: bytes, max_nodes: int = 16,
         central = cur                    # sem info da HH → pára
         break
 
-    # ── Ramos imediatos: DFS a partir do central, seguindo não-folds ──
+    # ── Subárvore preflop COMPLETA a partir do nó-âncora (central) ──
+    # pt86 v2 (árvore navegável): BFS por TODAS as acções (incl. folds — o Rui
+    # quer navegar ramos que não aconteceram, desde que o solver os tenha). Cada
+    # nó traz a estratégia agregada da sua posição (todas as opções + freq). Os
+    # filhos vêm de `actions[].node`; o frontend expande on-click. Agregados são
+    # leves (~5 acções/nó), por isso devolve-se a subárvore inteira de uma vez.
     rendered = []
     seen = set()
-
-    def visit(i, depth):
-        if i is None or i in seen or len(rendered) >= max_nodes or depth > max_depth:
-            return
+    bfs = [central]
+    truncated = False
+    while bfs:
+        i = bfs.pop(0)
+        if i in seen:
+            continue
+        if len(seen) >= max_nodes:
+            truncated = True
+            break
         nd = get_node(i)
         if nd is None or not nd.get("actions"):
-            return
+            continue
         seen.add(i)
         strat = _node_strategy(nd, BB, stacks)
         p = strat["player_idx"]
@@ -217,20 +228,22 @@ def build_verify_tree(hand: dict, zip_bytes: bytes, max_nodes: int = 16,
             "actor_stack_bb": round(stacks[p] / BB, 1) if p < len(stacks) else None,
             "facing": _seq_str_bb(nd.get("sequence", []), idx2pos, BB),
             "is_central": (i == central),
+            "street": nd.get("street", 0),
             "combos": strat["combos"],
             "actions": strat["actions"],
         })
-        # recorre por todas as acções não-fold (mostra quem entra → 3bets → resposta)
         for a in nd["actions"]:
-            if a["type"] != "F" and a.get("node") is not None:
-                visit(a["node"], depth + 1)
-
-    visit(central, 0)
+            ch = a.get("node")
+            if ch is not None and ch not in seen:
+                bfs.append(ch)
 
     return {
         "central_node": central,
+        "root": central,
         "hero_idx": hero_idx,
         "n_nodes_total": n_total,
+        "subtree_size": len(rendered),
+        "truncated": truncated,
         "tree_complete": (get_node(0) is not None and not get_node(0).get("sequence")),
         "blinds_bb_chips": BB,
         "positions": [{"idx": i, "pos": idx2pos.get(i),
