@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { hands as handsApi, hrc, queue } from '../api/client'
 
@@ -43,6 +43,105 @@ function Chip({ children, color }) {
   )
 }
 
+// pt85 (#HRC-VERIFY) — veredicto da verificação C1-C5 HH-vs-HRC.
+const VERIFY_VERDICT = {
+  ok:   { c: '#22c55e', icon: '✓', label: 'OK' },
+  warn: { c: '#eab308', icon: '⚠', label: 'aviso' },
+  fail: { c: '#ef4444', icon: '✗', label: 'falha' },
+}
+// Rótulos PT dos checks (a chave vem do hrc_verify.py).
+const CHECK_LABEL = {
+  C1_players: 'C1 — nº de jogadores',
+  C2_stacks:  'C2 — stacks',
+  C3_blinds:  'C3 — blinds + ante',
+  C4_equity:  'C4 — equity model',
+  C5_bounty:  'C5 — bounty (PKO)',
+  zip:        'zip — result_zip',
+}
+const CHECK_STATUS = {
+  ok:   { c: '#22c55e', icon: '✓' },
+  warn: { c: '#eab308', icon: '⚠' },
+  fail: { c: '#ef4444', icon: '✗' },
+}
+
+// Badge clicável ✓/⚠/✗ por linha das Enviadas (alimentado pelo verify batch).
+function VerifyBadge({ verdict, open, onClick }) {
+  if (!verdict) return <span style={{ color: 'var(--muted)', opacity: 0.5 }}>—</span>
+  const m = VERIFY_VERDICT[verdict] || { c: '#94a3b8', icon: '?', label: verdict }
+  return (
+    <button
+      onClick={onClick}
+      title={`Verificação HH↔HRC: ${m.label} — clica para ${open ? 'fechar' : 'conferir'}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+        fontSize: 12, fontWeight: 700, color: m.c, background: `${m.c}1f`,
+        border: `1px solid ${m.c}55`, borderRadius: 4, padding: '2px 8px',
+      }}
+    >{m.icon} {open ? '▾' : '▸'}</button>
+  )
+}
+
+// Vista expandida de verificação de uma mão (Origem SS/HH + checks C1-C5).
+// `res` = resultado do single verify. `handDbId` p/ link ao replayer.
+function VerifyDetail({ res, handDbId }) {
+  if (res === 'busy') return <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>A verificar…</div>
+  if (res === 'err' || !res) return <div style={{ padding: 14, color: '#ef4444', fontSize: 12 }}>Erro a carregar a verificação.</div>
+  const v = VERIFY_VERDICT[res.verdict] || { c: '#94a3b8', label: res.verdict }
+  return (
+    <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.02)', display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+      {/* Origem — o que o Rui confere à vista (SS de mesa ou HH em texto) */}
+      <div style={{ flex: '0 0 320px', minWidth: 260 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+          Origem {res.origin_kind === 'ss' ? '· SS de mesa' : '· HH (texto)'}
+        </div>
+        {res.origin_kind === 'ss' && res.capture_url ? (
+          <a href={res.capture_url} target="_blank" rel="noreferrer" title="Abrir captura em tamanho real">
+            <img src={res.capture_url} alt="captura SS de mesa"
+              style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)', display: 'block' }} />
+          </a>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Sem captura guardada — a fonte de verdade é a HH em texto.{' '}
+            {handDbId != null && <Link to={`/replayer/${handDbId}`} style={{ color: 'var(--accent2, #818cf8)' }}>abrir no replayer →</Link>}
+          </div>
+        )}
+      </div>
+
+      {/* Checks C1-C5 — cada detail cruza Origem (HH) ↔ App ↔ HRC */}
+      <div style={{ flex: '1 1 420px', minWidth: 320 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            Origem ↔ App ↔ HRC
+          </span>
+          <Chip color={v.c}>{v.label}</Chip>
+          {res.scale != null && <span style={{ fontSize: 11, color: 'var(--muted)' }}>scale ×{Math.round(res.scale)}</span>}
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <tbody>
+            {(res.checks || []).map(c => {
+              const cs = CHECK_STATUS[c.status] || { c: '#94a3b8', icon: '?' }
+              return (
+                <tr key={c.check} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                    <span style={{ color: cs.c, marginRight: 6 }}>{cs.icon}</span>
+                    {CHECK_LABEL[c.check] || c.check}
+                  </td>
+                  <td style={{ padding: '6px 8px', color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{c.detail}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {(res.notes || []).length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
+            Notas: {res.notes.join(' · ')}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function HRCQueuePage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -60,6 +159,10 @@ export default function HRCQueuePage() {
   const [sent, setSent] = useState(null)         // pt83 — Enviadas (released + estado)
   const [sentMarks, setSentMarks] = useState({}) // hand_id -> 'por_resolver' (flip otimista)
   const [rqBusy, setRqBusy] = useState({})       // hand_id -> 'busy'|'err'
+  // pt85 (#HRC-VERIFY) — badge por linha (batch) + expand de detalhe (single)
+  const [verify, setVerify] = useState(null)     // { total, summary, byId: {hand_id->entry} }
+  const [vOpen, setVOpen] = useState(null)        // hand_id da linha expandida (1 de cada vez)
+  const [vDetail, setVDetail] = useState({})      // hand_id -> result single | 'busy' | 'err'
 
   async function doTrigger(count) {
     setGateBusy(true)
@@ -125,19 +228,40 @@ export default function HRCQueuePage() {
     }
   }
 
+  // pt85 — abre/fecha o detalhe de verificação de uma Enviada; fetch single lazy.
+  async function toggleVerify(handId) {
+    if (vOpen === handId) { setVOpen(null); return }
+    setVOpen(handId)
+    if (vDetail[handId] && vDetail[handId] !== 'err') return  // já carregado
+    setVDetail(d => ({ ...d, [handId]: 'busy' }))
+    try {
+      const res = await queue.verifyHand(handId)
+      setVDetail(d => ({ ...d, [handId]: res }))
+    } catch (e) {
+      setVDetail(d => ({ ...d, [handId]: 'err' }))
+      console.error('verify single falhou:', e)
+    }
+  }
+
   async function refresh() {
     setLoading(true)
     setError(null)
     setMarks({}); setStBusy({}); setSentMarks({}); setRqBusy({})
+    setVOpen(null); setVDetail({})
     try {
-      const [out, pend, g, snt] = await Promise.all([
+      const [out, pend, g, snt, ver] = await Promise.all([
         hrc.eligible(), hrc.pendingTs(),
         queue.gate().catch(() => null), queue.sent().catch(() => null),
+        queue.verify().catch(() => null),
       ])
       setData(out)
       setPending(pend)
       setGate(g)
       setSent(snt)
+      setVerify(ver && {
+        total: ver.total, summary: ver.summary || {},
+        byId: Object.fromEntries((ver.hands || []).map(v => [v.hand_id, v])),
+      })
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -401,6 +525,15 @@ export default function HRCQueuePage() {
             <Chip color="#22c55e">resolvida {sent.sent.filter(s => curSentState(s) === 'resolvida').length}</Chip>
             <Chip color="#eab308">por resolver {sent.sent.filter(s => curSentState(s) === 'por_resolver').length}</Chip>
             <Chip color="#ef4444">cancelada {sent.sent.filter(s => curSentState(s) === 'cancelada').length}</Chip>
+            {verify && verify.total > 0 && (
+              <>
+                <span style={{ color: 'var(--border)' }}>|</span>
+                <span style={{ fontSize: 11 }}>verificação HH↔HRC:</span>
+                <Chip color="#22c55e">✓ {verify.summary.ok || 0}</Chip>
+                <Chip color="#eab308">⚠ {verify.summary.warn || 0}</Chip>
+                <Chip color="#ef4444">✗ {verify.summary.fail || 0}</Chip>
+              </>
+            )}
           </div>
           {sent.sent.length === 0 ? (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
@@ -420,9 +553,18 @@ export default function HRCQueuePage() {
                   {sent.sent.map(s => {
                     const st = curSentState(s)
                     const meta = SENT_STATE[st] || { c: '#94a3b8', label: st }
+                    const vEntry = verify?.byId?.[s.hand_id]   // só as resolvidas têm result_zip
+                    const isOpen = vOpen === s.hand_id
                     return (
-                      <tr key={s.hand_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{s.hand_id}</td>
+                    <Fragment key={s.hand_id}>
+                      <tr style={{ borderBottom: isOpen ? 'none' : '1px solid rgba(255,255,255,0.04)' }}>
+                        <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <VerifyBadge verdict={vEntry?.verdict} open={isOpen}
+                              onClick={() => toggleVerify(s.hand_id)} />
+                            {s.hand_id}
+                          </span>
+                        </td>
                         <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtTs(s.played_at)}</td>
                         <td style={{ padding: '7px 10px' }}>{s.site}</td>
                         <td style={{ padding: '7px 10px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.tournament_name || '—'}</td>
@@ -457,6 +599,14 @@ export default function HRCQueuePage() {
                           )}
                         </td>
                       </tr>
+                      {isOpen && (
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td colSpan={6} style={{ padding: 0 }}>
+                            <VerifyDetail res={vDetail[s.hand_id]} handDbId={s.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                     )
                   })}
                 </tbody>

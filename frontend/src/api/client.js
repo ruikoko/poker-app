@@ -463,4 +463,8 @@ Object.assign(queue, {
   // pt83 — lista das Enviadas + re-pôr na fila as falhadas
   sent:    () => req('GET', '/queue/hrc/sent'),
   requeue: (handIds) => req('POST', '/queue/hrc/requeue', { hand_ids: handIds }),
+  // pt85 (#HRC-VERIFY) — verificação C1-C5 HH-vs-HRC das resolvidas.
+  // batch alimenta o badge por linha; single (por hand_id) alimenta o expand.
+  verify:     () => req('GET', '/queue/hrc/verify'),
+  verifyHand: (handId) => req('GET', `/queue/hrc/verify/${encodeURIComponent(handId)}`),
 })
