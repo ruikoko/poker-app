@@ -383,9 +383,14 @@ def queue_verify_hand(hand_id: str, current_user=Depends(require_auth_or_api_key
     if not rows:
         raise HTTPException(404, "mão não resolvida ou sem result_zip")
     h = dict(rows[0])
-    res = verify_hand(h, bytes(h["result_zip"]))
+    zb = bytes(h["result_zip"])
+    res = verify_hand(h, zb)
     res["site"] = h["site"]
     res.update(_verify_origin(h))
+    # pt86 (#HRC-VERIFY) — vista legível "HH vs HRC": nó central (sequence-match,
+    # não offset de linha) + ramos imediatos com frequências fold/call/raise.
+    from app.services.hrc_verify_tree import build_verify_tree
+    res["tree"] = build_verify_tree(h, zb)
     return res
 
 

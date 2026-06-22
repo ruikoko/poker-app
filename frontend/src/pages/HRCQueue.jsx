@@ -81,6 +81,82 @@ function VerifyBadge({ verdict, open, onClick }) {
   )
 }
 
+// Cor por tipo de acção na vista da árvore HRC.
+function actionColor(label) {
+  if (label.startsWith('FOLD')) return '#ef4444'
+  if (label.startsWith('CALL') || label.startsWith('CHECK')) return '#3b82f6'
+  return '#22c55e'   // R … (raise/all-in)
+}
+
+// pt86 (#HRC-VERIFY) — bloco "HH ↔ HRC produziu": HH crua à esquerda, o que o
+// HRC produziu (nó central por sequence-match + ramos imediatos) à direita.
+// Sem veredicto — o Rui lê e julga à vista.
+function HrcTreeView({ tree }) {
+  if (!tree) return null
+  if (tree.error) {
+    return (
+      <div style={{ marginTop: 14, fontSize: 12, color: 'var(--muted)' }}>
+        HRC: {tree.error}
+      </div>
+    )
+  }
+  const nodes = tree.nodes || []
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+        HH ↔ HRC produziu
+        <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 8 }}>
+          árvore {tree.n_nodes_total} nós{tree.tree_complete ? ' (completa)' : ''} · nó central n{tree.central_node}
+          {tree.positions?.length ? ` · ${tree.positions.map(p => `${p.pos}(${p.stack_bb}bb)`).join(' ')}` : ''}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        {/* Esquerda — a mão real (HH crua, preflop) */}
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>HH (a mão real)</div>
+          <pre style={{
+            margin: 0, padding: 10, background: 'var(--bg)', border: '1px solid var(--border)',
+            borderRadius: 6, fontSize: 11, lineHeight: 1.5, maxHeight: 420, overflow: 'auto',
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}>{tree.hh_preflop || '—'}</pre>
+        </div>
+        {/* Direita — o que o HRC produziu (nó central + ramos) */}
+        <div style={{ flex: '1 1 420px', minWidth: 320 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>HRC produziu (nó central + ramos)</div>
+          <div style={{
+            padding: 10, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+            fontSize: 11, maxHeight: 420, overflow: 'auto', fontFamily: 'monospace',
+          }}>
+            {nodes.length === 0 && <span style={{ color: 'var(--muted)' }}>sem nós para mostrar.</span>}
+            {nodes.map(nd => (
+              <div key={nd.idx} style={{
+                marginBottom: 8, paddingLeft: 6,
+                borderLeft: nd.is_central ? '3px solid #818cf8' : '3px solid transparent',
+              }}>
+                <div style={{ fontWeight: 700, color: nd.is_central ? '#a5b4fc' : 'var(--text)' }}>
+                  n{nd.idx} {nd.actor}({nd.actor_stack_bb}bb)
+                  <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · enfrenta: {nd.facing}</span>
+                  {nd.is_central && <span style={{ color: '#818cf8', fontWeight: 700 }}> ◄ CENTRAL</span>}
+                </div>
+                {nd.actions.map((a, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 10 }}>
+                    <span style={{ color: actionColor(a.label), minWidth: 120 }}>{a.label}</span>
+                    <span style={{ minWidth: 44, textAlign: 'right', color: 'var(--text)' }}>{a.pct.toFixed(1)}%</span>
+                    <span style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', maxWidth: 90 }}>
+                      <span style={{ display: 'block', height: '100%', width: `${Math.min(100, a.pct)}%`, background: actionColor(a.label) }} />
+                    </span>
+                    <span style={{ color: 'var(--muted)' }}>{a.child != null ? `→n${a.child}` : '·'}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Vista expandida de verificação de uma mão (Origem SS/HH + checks C1-C5).
 // `res` = resultado do single verify. `handDbId` p/ link ao replayer.
 function VerifyDetail({ res, handDbId }) {
@@ -92,7 +168,8 @@ function VerifyDetail({ res, handDbId }) {
   // funcionam (BASE = API_ROOT + /api). Em dev API_ROOT='' → Vite proxy.
   const captureSrc = res.capture_url ? `${API_ROOT}${res.capture_url}` : null
   return (
-    <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.02)', display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+    <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.02)' }}>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
       {/* Origem — o que o Rui confere à vista (SS de mesa ou HH em texto) */}
       <div style={{ flex: '0 0 320px', minWidth: 260 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
@@ -142,6 +219,8 @@ function VerifyDetail({ res, handDbId }) {
           </div>
         )}
       </div>
+      </div>
+      <HrcTreeView tree={res.tree} />
     </div>
   )
 }
