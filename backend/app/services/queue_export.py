@@ -596,6 +596,119 @@ def derive_aggressor_real_action(
 
 
 # ---------------------------------------------------------------------------
+# pt86c #HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO (Passo 1) — âncora no-raise.
+#
+# Regra do Rui: a âncora é o nó que governa a 1ª DECISÃO do Hero. Quando NÃO há
+# raise voluntário preflop (`derive_aggressor_real_action` devolve None), esta
+# função tenta ancorar — em vez de cair na raiz:
+#   - pote POR ABRIR no turno do Hero (nenhuma acção voluntária antes) → o nó de
+#     OPEN do próprio Hero (`{type:"open", position: hero_pos}`). Cobre as mãos
+#     "Hero-primeiro-a-agir" (Hero folda first-in; o que limpe DEPOIS dele é
+#     jusante e indiferente à âncora).
+#   - limp da SB ANTES do Hero (Hero=BB vs SB-limp) → o nó de COMPLETE da SB
+#     (`{position:"SB", type:"complete"}`). 0 mãos hoje; future-proof — o nó já
+#     existe na Strategy Table (`canFlatCallPreflop` bets==1 só SB).
+#   - walk (Hero nunca decide) → None → skip (nada a estudar).
+#   - limp de NÃO-BLIND antes do Hero (ex. MP) → None: o nó ainda não é modelado
+#     na árvore (Passo 2 — LIMP_POSITIONS + parser; ver PENDENTES). Fica
+#     fallback_root como hoje, sem regressão.
+#
+# Mesmo contrato de `derive_aggressor_real_action` (`{type, size_bb, position}`)
+# + `source` para audit. Watcher/template inalterados (lê o mesmo dict). NÃO
+# computa sizing (size_bb=None): o open/complete do Hero é a LINHA da posição;
+# `offset_within_bucket` dá 0 (open non-SB / complete) e a navegação resolve o
+# subtree por baixo (LEI B — posição certa, linha indiferente).
+_NORAISE_ACTION_RE = re.compile(
+    r"^(?P<nick>.*?)(?::)?\s+(?P<verb>folds|checks|calls|completes|raises|bets)\b"
+)
+_DEALT_HERO_RE = re.compile(r"Dealt to (.+?) \[")
+
+
+def _hero_nick_from_hh(hh_text: str) -> Optional[str]:
+    """Nick do Hero via `Dealt to <nick> [`. Na HH convertida (PS-compat) e nas
+    HH WN/PS nativas só o Hero tem hole cards mostradas → 1ª (e única) match.
+    None se ausente."""
+    if not hh_text:
+        return None
+    m = _DEALT_HERO_RE.search(hh_text)
+    return m.group(1).strip() if m else None
+
+
+def derive_noraise_anchor(
+    hh_text: str,
+    level_sb: int,
+    level_bb: int,
+    hero_nick: Optional[str] = None,
+) -> Optional[dict]:
+    """Âncora da 1ª decisão do Hero quando NÃO há raise voluntário preflop.
+
+    Chamada SÓ quando `derive_aggressor_real_action` devolve None (limp/walk).
+    Devolve `{type, size_bb, position, source}` (mesmo contrato) ou None (skip).
+    Ver o bloco de comentário acima para a regra completa.
+    """
+    if not hh_text or not isinstance(level_bb, int) or level_bb <= 0:
+        return None
+    if hero_nick is None:
+        hero_nick = _hero_nick_from_hh(hh_text)
+    if not hero_nick:
+        return None
+
+    start = find_preflop_marker(hh_text)
+    if start is None:
+        return None
+    end_flop = hh_text.find("*** FLOP ***", start)
+    end_summary = hh_text.find("*** SUMMARY ***", start)
+    ends = [e for e in (end_flop, end_summary) if e > 0]
+    end = min(ends) if ends else len(hh_text)
+    preflop = hh_text[start:end]
+
+    hero_acted = False
+    limper_before_hero: Optional[str] = None  # nick do 1º limper antes do Hero
+    for raw_line in preflop.splitlines():
+        ls = raw_line.strip()
+        if not ls or ls.startswith("***") or ls.startswith("Dealt to"):
+            continue
+        m = _NORAISE_ACTION_RE.match(ls)
+        if not m:
+            continue
+        nick = m.group("nick").strip()
+        if nick == hero_nick:
+            hero_acted = True
+            break  # só interessa o estado ATÉ à 1ª decisão do Hero
+        # No contexto no-raise não há raises/bets reais; um call/complete de
+        # OUTRO jogador antes do Hero = limp (SB completa = "calls" no GG/PS).
+        if m.group("verb") in ("calls", "completes") and limper_before_hero is None:
+            limper_before_hero = nick
+
+    if not hero_acted:
+        return None  # walk — o Hero nunca teve decisão (BB ganha sem agir)
+
+    if limper_before_hero is None:
+        # pote por abrir no turno do Hero → open do próprio Hero
+        hero_pos = _resolve_position_for_nick(hh_text, hero_nick)
+        if not hero_pos or hero_pos == "BB":
+            return None  # BB nunca abre first-in (se chegasse por abrir = walk)
+        return {
+            "type": "open",
+            "size_bb": None,
+            "position": hero_pos,
+            "source": "noraise_hero_open",
+        }
+
+    # houve limp antes do Hero: só a SB tem nó na árvore actual (Passo 1).
+    limp_pos = _resolve_position_for_nick(hh_text, limper_before_hero)
+    if limp_pos == "SB":
+        return {
+            "type": "complete",
+            "size_bb": None,
+            "position": "SB",
+            "source": "noraise_sb_complete",
+        }
+    # limp de não-blind (#7) → Passo 2 (nó não modelado) → skip → fallback_root.
+    return None
+
+
+# ---------------------------------------------------------------------------
 # pt29 Fase 2 — converter GG -> PokerStars-compat (8 transformacoes)
 #
 # Smoke pt28-v3 (20 Maio) + testes A/B manuais do Rui isolaram que o HRC
@@ -1563,8 +1676,30 @@ def build_queue_zip(
             real = derive_aggressor_real_action(hh_text, _sb, _bb) if _bb is not None else None
             aggressor_source = classify_aggressor_source(real, positions)
 
+            # pt86c #HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO (Passo 1): sem raise
+            # voluntário, tenta ancorar na 1ª DECISÃO do Hero (open do próprio
+            # Hero / complete da SB) em vez de cair na raiz. NÃO toca o caminho
+            # "real" (1º raiser) das mãos com raise. Limp de não-blind (#7) e
+            # walk continuam fallback_root/skip (Passo 2 / nada a estudar).
+            noraise_anchor = None
+            if aggressor_source != "real" and _bb is not None:
+                try:
+                    noraise_anchor = derive_noraise_anchor(hh_text, _sb, _bb)
+                except Exception:
+                    logger.exception(
+                        "derive_noraise_anchor falhou hand_id=%s", hand_id,
+                    )
+                    noraise_anchor = None
+                if (noraise_anchor is not None
+                        and noraise_anchor.get("position") in positions):
+                    aggressor_source = "noraise_hero"
+                else:
+                    noraise_anchor = None  # não utilizável → fallback_root como hoje
+
             if aggressor_source == "real":
                 aggressor_real_action = real  # estrutura legacy intacta, sem "source"
+            elif aggressor_source == "noraise_hero":
+                aggressor_real_action = noraise_anchor  # {type, size_bb:None, position, source}
             else:
                 aggressor_real_action = {
                     "type": "fallback_root",
@@ -1590,12 +1725,17 @@ def build_queue_zip(
             # vez da raiz. O fallback NÃO tem agressão real → forçamos offset 0
             # directamente (invariante "fallback = raiz"), só computando para
             # o caso "real".
-            target_node_offset = 0 if aggressor_source != "real" else None
-            if aggressor_source == "real":
+            # pt86c: a âncora no-raise ("noraise_hero") computa o offset como a
+            # "real"; só o fallback_root/unusable força a raiz (0).
+            target_node_offset = (
+                0 if aggressor_source not in ("real", "noraise_hero") else None
+            )
+            if aggressor_source in ("real", "noraise_hero"):
                 try:
                     raiser_stack_bb = (
                         derive_aggressor_stack_bb(hh_text, _bb)
-                        if _bb is not None else None
+                        if (aggressor_source == "real" and _bb is not None)
+                        else None
                     )
                     # pt86 (#HRC-NODE-OFFSET-IMPLICIT-LINES): stacks individuais
                     # por posição p/ o limiar 25/30 do ALLIN implícito (espelha

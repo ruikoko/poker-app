@@ -3973,11 +3973,11 @@ def test_build_queue_zip_injects_aggressor_real_action_in_manifest_and_meta():
     assert meta["aggressor_real_action"] == expected
 
 
-def test_build_queue_zip_fallback_root_for_limp_pot():
-    """pt36 #HRC-RUN-2-ALWAYS-DISPATCH (substitui o antigo _None_for_limp_pot):
-    limp pot (sem raise/bet preflop) → o derive devolve None, mas
-    build_queue_zip aplica a sentinela fallback_root na raiz para garantir a
-    2ª run. Antes (pt25e) o campo ficava None."""
+def test_build_queue_zip_hero_open_anchor_unopened_at_hero():
+    """pt86c #HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO (Passo 1) — substitui o antigo
+    _fallback_root_for_limp_pot. O Hero (BTN) folda num pote POR ABRIR (o limp
+    da SB é a JUSANTE) → a âncora vai ao open do PRÓPRIO Hero (BTN), com offset
+    computado — já não cai na raiz. (Antes: fallback_root/raiz.)"""
     limp_hh = """Poker Hand #TM3: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00
 Table 'X' 8-max Seat #4 is the button
 Seat 1: P1 (10000 in chips)
@@ -4005,12 +4005,49 @@ BBplayer: checks
     zf = _zipfile.ZipFile(_io.BytesIO(blob))
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
-    assert entry["aggressor_source"] == "fallback_root"
-    assert entry["target_node_offset"] == 0
+    assert entry["aggressor_source"] == "noraise_hero"
+    assert entry["target_node_offset"] is not None  # computado, não forçado 0
     ara = entry["aggressor_real_action"]
-    assert ara is not None
-    assert ara["source"] == "fallback_root"
-    assert ara["position"] == "CO"   # positions[0] em 4 seats: _POSITION_LABELS_BY_N[4] = [CO, BTN, SB, BB]
+    assert ara["source"] == "noraise_hero_open"
+    assert ara["type"] == "open"
+    assert ara["position"] == "BTN"   # Hero está no botão (4 seats: CO,BTN,SB,BB)
     # pt42d: aggressor_real_action movido para meta.json
     meta = _json.loads(zf.read("GG-LIMP/meta.json"))
-    assert meta["aggressor_real_action"]["source"] == "fallback_root"
+    assert meta["aggressor_real_action"]["source"] == "noraise_hero_open"
+
+
+def test_build_queue_zip_fallback_root_for_nonblind_limp():
+    """pt86c: a sentinela fallback_root continua viva para os no-raise SEM nó
+    ancorável no Passo 1 — aqui um limp de NÃO-blind (UTG) antes do Hero (#7,
+    Passo 2). Garante que a 2ª run continua a despachar (offset 0 na raiz)."""
+    limp_hh = """Poker Hand #TM7: Tournament #100, Test - Level5 (200/400) - 2026/05/01 00:00:00
+Table 'X' 8-max Seat #4 is the button
+Seat 1: UTGlimp (10000 in chips)
+Seat 2: P2 (10000 in chips)
+Seat 3: P3 (10000 in chips)
+Seat 4: Hero (10000 in chips)
+Seat 5: SBplayer (10000 in chips)
+Seat 6: BBplayer (10000 in chips)
+SBplayer: posts small blind 200
+BBplayer: posts big blind 400
+*** HOLE CARDS ***
+Dealt to Hero [As Kd]
+UTGlimp: calls 400
+P2: folds
+P3: folds
+Hero: folds
+SBplayer: folds
+BBplayer: checks
+*** SUMMARY ***
+"""
+    hand = {
+        "id": 1, "hand_id": "GG-LIMP7", "site": "GGPoker",
+        "tournament_number": "111", "raw": limp_hh,
+        "player_names": {}, "players_left": 200,
+    }
+    blob = build_queue_zip([hand], {("GGPoker", "111"): _fake_payout_blob()})
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    entry = _json.loads(zf.read("manifest.json"))["hands_included"][0]
+    assert entry["aggressor_source"] == "fallback_root"
+    assert entry["target_node_offset"] == 0
+    assert entry["aggressor_real_action"]["source"] == "fallback_root"

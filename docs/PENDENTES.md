@@ -1,14 +1,26 @@
 # Pendentes — backlog vivo
 
-## ★ pt86 — decisão de produto: âncora cai na raiz sem raise (`#HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO`)
+## ★ pt86c — Passo 2 do anchor: limp de não-blind (`#HRC-ANCHOR-NONBLIND-LIMP`) — ADIÁVEL
 
-**NOVO, aberto** (ver `TECH_DEBTS pt85–pt86`). Sem raise preflop (walk/limp-pot), a
-âncora do offset cai na **raiz** (1ª a agir), **não no Hero** — ~7 mãos / ~10% das
-elegíveis. Regra do Rui: ancorar **sempre no nó de decisão do Hero**. Transplanta limpo
-quando **Hero=BTN** (tem nó de open); falta **decisão de produto** para:
-- **Hero=BB** → não há nó de open na tabela (a BB nunca abre na vista de opens);
-- **pote limpado** → a decisão real do Hero é "vs limp", que não existe como nó de open.
-O que ancorar nesses dois casos é a pergunta. **Não construir até o Rui decidir.**
+**Passo 1 do `#HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO` ✅ FEITO** em pt86c (commit, sem push;
+ver `TECH_DEBTS pt86c` + `JOURNAL pt86c`). Regra do Rui aplicada: âncora = nó que governa
+a 1ª decisão do Hero (open do próprio Hero / complete da SB; walk → skip). Cobre **6 das 7**
+mãos sem-raise (5 Hero-open + 1 walk-skip; 0 Hero=BB-vs-SB-limp hoje). A moldura antiga
+"decisão de produto Hero=BB / vs-limp" **dissolveu-se** (Hero=BB-vs-SB-limp ancora no
+Complete da SB, que já existe).
+
+**Falta só o Passo 2 — `#HRC-ANCHOR-NONBLIND-LIMP` (1 mão, mexe na árvore → exige smoke):**
+o limp de **NÃO-blind** antes do Hero (#7 GG-6083363633, MP limpa, Hero=BTN folda atrás).
+O template só modela limp da SB → não há nó. Fix em 3 peças:
+- **template** `LIMP_POSITIONS` (default `[]`, override per-mão com o índice HRC do limper)
+  + `canFlatCallPreflop` a aceitá-lo;
+- **parser de limp** no gerador (`_parse_preflop_actions` hoje só emite raises);
+- `count_lines_for_position` **limp-aware** (o bucket do limper ganha +1 linha Complete,
+  desloca os offsets seguintes — hoje só a SB).
+
+Confinado (`LIMP_POSITIONS=[]` nas outras = byte-idêntico), mas **toca a árvore → smoke
+obrigatório**. Por **1 mão**; não bloqueia nada (fica fallback_root como hoje). **Não
+construir até o Rui mandar.**
 
 ## ★ pt86 — RE-GERAR trees desalinhadas com a regra nova do ALLIN implícito (25/30)
 
