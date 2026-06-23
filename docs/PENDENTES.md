@@ -1,5 +1,18 @@
 # Pendentes — backlog vivo
 
+## ★ pt86c — bug do robot: stall no betting script (`#HRC-WATCHER-BETTING-SCRIPT-STALL`)
+
+**NOVO** (ver `TECH_DEBTS pt86c`, `JOURNAL_2026-06-23-pt86c.md` fecho 24 Jun). Na validação
+visual do Passo 1 do anchor (**as 2 mãos CONFIRMADAS à vista ✓**, âncora no BTN), o robot
+**encravou (STALL)** no passo de seleção do **betting script** na GG-6083363843 (3-max):
+janela Open/Browse **aberta e pronta**, robot **parado sem avançar nem dar erro**, exigiu
+**mão humana** (o Rui desencravou → a mão terminou). **Sem timeout nem recuperação.** Pista:
+`setup_scripting` (`watcher_src/patched_funcs.py:912`) carrega o script às cegas + o
+`_wait_for_finish_ready` (2480) sem saída se o Open dialog ficar aberto. **Investigar** esse
+passo. **Distinto** do incidente do chord do wizard a falhar 2×→reinício (esse **recuperou
+sozinho** — não fundir). Relacionado: arco **pt79 / hang-watchdog** atrás do gate (não
+ativo). **Prioridade a definir pelo Rui.**
+
 ## ★ pt86c — Passo 2 do anchor: limp de não-blind (`#HRC-ANCHOR-NONBLIND-LIMP`) — ADIÁVEL
 
 **Passo 1 do `#HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO` ✅ FEITO** em pt86c (commit, sem push;
