@@ -1,5 +1,23 @@
 # Pendentes — backlog vivo
 
+## ★ pt86 — RE-GERAR trees desalinhadas com a regra nova do ALLIN implícito (25/30)
+
+`#HRC-NODE-OFFSET-IMPLICIT-LINES` corrigido à secretária (buffer; pendente push):
+o template (`mtt_advanced_canonical_2026.js`) passou de **30 BB geral** para **25 BB
+geral / 30 BB só blind-vs-blind** no `shouldAddPreflopAllIn`, e o `count_lines_for_position`
+(`hrc_node_offset.py`) passou a espelhar o template com a stack individual de cada
+posição (limiar 25/30, colapso, Complete da SB) em vez de `len(array)`.
+
+- **Consequência:** as trees **já geradas/resolvidas com o template 30-geral** (todas
+  as do `hrc_jobs` até agora) ficam **desalinhadas** com a regra nova — o `script.js`
+  que correu nelas usava 30-geral, logo a contagem de linhas / âncora da 2ª run
+  podia divergir. **Re-geração futura no robot** (re-exportar com o template novo +
+  re-correr) quando o Rui mandar e o robot estiver livre. **Não fazer agora.**
+- Cruza com a re-corrida WN do `#DERIVE-MAX-PLAYERS-WINAMAX-COLON-BLIND` (PENDENTES
+  abaixo) — quando se re-correr, é com **ambos** os fixes (max_players + template 25/30).
+- GG/PS/WN/WPN todas afetadas (o template é cross-site). Não há corrupção de dados
+  na app; é a qualidade da **tree/âncora** que melhora com a re-geração.
+
 ## ★ FUTURO (registar, sem fix agora) — `#GTO-OPEN-SIZE-NOT-PER-POSITION`
 
 Para a **riqueza dos dados do GTO Brain** (não para o estudo de hoje). **Seguir como

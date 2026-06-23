@@ -72,7 +72,14 @@ let PREFLOP_ADD_ALLIN_SPR = 7;
 // TODOS os jogadores (incluindo deep stacks 100+BB). Filtro individual por
 // stack BB do jogador activo evita a explosao multiway. Threshold 30 BB
 // definido em despacho pt29 (Rui). Reduzir para 25 se 30 nao chegar.
-const STACK_BB_FOR_OPEN_ALLIN_OPTION = 30;
+//
+// pt86 (despacho Rui): o limiar passa a 25 BB GERAL; 30 BB SO em blind-vs-blind
+// (SB-vs-BB / BB-vs-SB; na tabela de opens = a SB). SEGURO re: pt29 — o filtro
+// CONTINUA por stack INDIVIDUAL (nao efetiva), por isso os deep 100+BB
+// continuam excluidos (100 > 25); baixar 30->25 so REMOVE ALLINs (arvore igual
+// ou menor), nunca reintroduz a explosao multiway.
+const STACK_BB_FOR_OPEN_ALLIN_OPTION = 25;       // geral (era 30 pre-pt86)
+const STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB = 30;   // SO blind-vs-blind
 
 // Flatting rules: betcount → allowed flats
 let ALLOWED_FLATS_PER_RAISE = {
@@ -180,10 +187,32 @@ function isPreflopFirstVoluntaryRaise(ctx) {
 	return ctx.getStreet() == PREFLOP && ctx.getBetCount() == 1;
 }
 
+// pt86: blind-vs-blind = so restam as duas blinds vivas (SB-vs-BB folded-to-SB,
+// ou BB-vs-SB com a SB a limpar). Usa so a API ja existente.
+function isBlindVsBlind(ctx) {
+	let p = ctx.getActivePlayer();
+	let sb = ctx.getPlayerIndexSmallBlind();
+	let bb = ctx.getPlayerIndexBigBlind();
+	if (p != sb && p != bb)
+		return false;
+	let state = ctx.getPotState();
+	for (let q = 0; q < ctx.getNumberOfPlayers(); q++) {
+		if (q == sb || q == bb)
+			continue;
+		if (!state.hasPlayerFolded(q))
+			return false;   // algum nao-blind ainda vivo -> multiway, nao BvB
+	}
+	return true;
+}
+
 function shouldAddPreflopAllIn(ctx) {
 	if (isPreflopFirstVoluntaryRaise(ctx)) {
-		// Opens: filtra por stack individual do jogador activo.
-		return getActivePlayerStackBB(ctx) <= STACK_BB_FOR_OPEN_ALLIN_OPTION;
+		// Opens: filtra por stack individual do jogador activo (pt29).
+		// pt86: 25 BB geral, 30 BB so em blind-vs-blind.
+		let threshold = isBlindVsBlind(ctx)
+			? STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB
+			: STACK_BB_FOR_OPEN_ALLIN_OPTION;
+		return getActivePlayerStackBB(ctx) <= threshold;
 	}
 	// 3-bet+: mantem logica original SPR-efectivo.
 	return ctx.getStackPotRatio() <= PREFLOP_ADD_ALLIN_SPR;

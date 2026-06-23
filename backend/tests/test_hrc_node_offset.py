@@ -403,3 +403,93 @@ def test_derive_aggressor_stack_bb_invalid_level_bb():
 def test_derive_aggressor_stack_bb_empty_hh():
     assert derive_aggressor_stack_bb("", level_bb=100) is None
     assert derive_aggressor_stack_bb(None, level_bb=100) is None
+
+
+# ── pt86 (#HRC-NODE-OFFSET-IMPLICIT-LINES) — count_lines com stack individual ──
+# Espelha o template: ALLIN implícito por stack individual ≤ 25 (geral) / ≤ 30
+# (SB, blind-vs-blind na tabela de opens); colapso (size≥stack → 1 linha);
+# Complete da SB. stack_bb=None → legacy (coberto pelos testes acima).
+
+_OTH = {"SIZES_OPEN_OTHERS": [2.0]}           # array [size] (opener eff>25, sem ALLIN)
+_OTH_ALLIN = {"SIZES_OPEN_OTHERS": [2.0, "ALLIN"]}  # array [size, ALLIN]
+
+
+def test_count_lines_nonblind_deep_above_25_is_1():
+    # stack > 25 → sem ALLIN implícito → 1 linha (só o size).
+    assert count_lines_for_position("UTG", _OTH, stack_bb=88.0) == 1
+
+
+def test_count_lines_nonblind_size_lt_stack_le_25_is_2():
+    # 2 < stack ≤ 25 → size + ALLIN implícito → 2 linhas.
+    assert count_lines_for_position("UTG", _OTH, stack_bb=20.0) == 2
+    assert count_lines_for_position("UTG", _OTH, stack_bb=25.0) == 2   # bordo inclusivo
+
+
+def test_count_lines_nonblind_ultrashort_collapse_is_1():
+    # stack ≤ size → o size colapsa para ALLIN → 1 linha.
+    assert count_lines_for_position("UTG", _OTH, stack_bb=1.5) == 1
+
+
+def test_count_lines_nonblind_25_threshold_not_30():
+    # 25 < stack ≤ 30 numa NÃO-blind → SEM ALLIN (limiar 25, não 30) → 1 linha.
+    assert count_lines_for_position("UTG", _OTH, stack_bb=28.0) == 1
+
+
+def test_count_lines_array_with_explicit_allin_is_2():
+    # [size, ALLIN] com stack > size → 2 linhas (ALLIN explícito sempre presente).
+    assert count_lines_for_position("UTG", _OTH_ALLIN, stack_bb=88.0) == 2
+
+
+def test_count_lines_array_with_allin_collapsed_is_1():
+    # [size, ALLIN] mas stack ≤ size → size colapsa, dedup com ALLIN → 1 linha.
+    assert count_lines_for_position("UTG", _OTH_ALLIN, stack_bb=1.5) == 1
+
+
+def test_count_lines_sb_comfortable_above_30_is_2():
+    # SB default [3.5]; stack > 30 (BvB) → Complete + size, SEM ALLIN → 2 linhas.
+    assert count_lines_for_position("SB", {}, stack_bb=88.0) == 2
+
+
+def test_count_lines_sb_size_lt_stack_le_30_is_3():
+    # SB, 3.5 < stack ≤ 30 → Complete + size + ALLIN → 3 linhas (limiar BvB = 30).
+    assert count_lines_for_position("SB", {}, stack_bb=20.0) == 3
+    assert count_lines_for_position("SB", {}, stack_bb=28.0) == 3   # 28>25 mas ≤30 (BvB)
+
+
+def test_count_lines_sb_ultrashort_collapse_is_2():
+    # SB, stack ≤ size(3.5) → Complete + ALLIN (size colapsa) → 2 linhas.
+    assert count_lines_for_position("SB", {}, stack_bb=3.0) == 2
+
+
+def test_count_lines_legacy_none_unchanged():
+    # stack_bb=None → comportamento legacy (len + Complete SB) intacto.
+    assert count_lines_for_position("UTG", {}, None) == 2
+    assert count_lines_for_position("SB", {}, None) == 3
+    assert count_lines_for_position("UTG", _OTH, None) == 1
+
+
+# ── pt86 — recálculo do offset na mão REAL GG-6084189514 (8-max, agg CO) ──────
+# UTG=15.95bb, UTG1=10.96bb (≤25 → 2 linhas cada), MP/HJ deep (>25 → 1). Old
+# (sem stacks) subconta → offset 4 (cai em MP). New (com stacks) → offset 6 (CO).
+
+_GG6084189514 = {
+    "agg": {"type": "raise", "position": "CO", "size_bb": 2.0},
+    "overrides": {"SIZES_OPEN_OTHERS": [2.0]},
+    "raiser_stack_bb": 32.43,
+    "stacks": {"UTG": 15.95, "UTG1": 10.96, "MP": 74.67, "HJ": 71.84,
+               "CO": 32.43, "BTN": 63.2, "SB": 12.54},
+}
+
+
+def test_offset_gg6084189514_old_undercounts_to_MP():
+    # Sem stacks (legacy): UTG/UTG1/MP/HJ contam 1 cada → offset 4 (= linha do MP).
+    c = _GG6084189514
+    assert compute_target_node_offset(
+        c["agg"], 8, c["overrides"], c["raiser_stack_bb"]) == 4
+
+
+def test_offset_gg6084189514_new_lands_on_CO():
+    # Com stacks: UTG/UTG1 (≤25)=2, MP/HJ (>25)=1 → 6 (= linha do CO, o agressor).
+    c = _GG6084189514
+    assert compute_target_node_offset(
+        c["agg"], 8, c["overrides"], c["raiser_stack_bb"], c["stacks"]) == 6

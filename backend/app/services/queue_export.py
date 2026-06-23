@@ -1487,6 +1487,7 @@ def build_queue_zip(
             from app.services.hrc_node_offset import (
                 compute_target_node_offset,
                 derive_aggressor_stack_bb,
+                derive_position_stacks_bb,
                 strategy_table_positions,
             )
             seats_at_table = len(derive_seats_in_preflop_order(hh_text))
@@ -1596,11 +1597,18 @@ def build_queue_zip(
                         derive_aggressor_stack_bb(hh_text, _bb)
                         if _bb is not None else None
                     )
+                    # pt86 (#HRC-NODE-OFFSET-IMPLICIT-LINES): stacks individuais
+                    # por posição p/ o limiar 25/30 do ALLIN implícito (espelha
+                    # o template). Sem isto, count_lines subconta as linhas.
+                    position_stacks_bb = derive_position_stacks_bb(
+                        hh_text, _sb, _bb,
+                    )
                     target_node_offset = compute_target_node_offset(
                         aggressor_real_action,
                         seats_at_table,
                         script_overrides,
                         raiser_stack_bb,
+                        position_stacks_bb,
                     )
                 except Exception:
                     logger.exception(

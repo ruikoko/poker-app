@@ -51,12 +51,36 @@ logger = logging.getLogger("hrc_node_offset")
 # raise, dust pots, etc).
 _ALL_IN_EFFECTIVE_THRESHOLD = 0.95
 
-# Cada bucket SIZES_OPEN_* no template canónico tem 2 entradas por
-# defeito (size real + ALLIN). Override do Trabalho A pode reduzir para 1.
+# Legacy (pré-pt86): contagem estrutural sem stack — usada no fallback defensivo
+# (stack indisponível) e pelos testes estruturais. Mantida verbatim.
 _TEMPLATE_DEFAULT_OPEN_COUNT = 2
 
 # Linhas extra que existem na Strategy Table independentes dos opens.
 _SB_COMPLETE_LINES = 1
+
+# pt86 — defaults dos arrays de open do template canónico
+# (`mtt_advanced_canonical_2026.js`): 1 sizing por bucket, SEM ALLIN (o ALLIN
+# implícito é adicionado em runtime pelo template, por stack individual).
+_TEMPLATE_DEFAULT_OPEN_ARRAY = {
+    "SIZES_OPEN_OTHERS": [2.0],
+    "SIZES_OPEN_BU": [2.0],
+    "SIZES_OPEN_SB": [3.5],
+    "SIZES_OPEN_BB": [4.0],
+}
+
+# pt86 — limiar do ALLIN implícito em opens (espelha `shouldAddPreflopAllIn`):
+# 25 BB geral; 30 BB só em blind-vs-blind (na tabela de opens = a SB).
+_OPEN_ALLIN_THRESHOLD_BB = 25.0
+_OPEN_ALLIN_THRESHOLD_BVB_BB = 30.0
+
+
+def _is_allin_token(s) -> bool:
+    """ALLIN nos arrays: string "ALLIN" (backend) ou 9999 (sentinela template)."""
+    if isinstance(s, str):
+        return s.strip().upper() == "ALLIN"
+    if isinstance(s, (int, float)):
+        return s >= 9000
+    return False
 
 
 def strategy_table_positions(seats_at_table: int) -> list:
@@ -90,23 +114,85 @@ def _bucket_open_for_position(position: str) -> str:
 
 
 def count_lines_for_position(
-    position: str, script_overrides: dict
+    position: str, script_overrides: dict, stack_bb=None
 ) -> int:
-    """Nº de linhas que `position` ocupa na Strategy Table HRC.
+    """Nº de linhas que `position` ocupa na Strategy Table HRC (open node).
 
-    SB tem +1 linha de Complete (limp) prepended aos seus opens.
+    `stack_bb` = stack INDIVIDUAL da posição em BB (remaining no nó de open).
+      - `None` → **legacy** (pré-pt86): `len(array)` + Complete da SB. Fallback
+        defensivo quando a stack não está disponível; mantém os testes
+        estruturais. NÃO aplica o limiar (subconta/sobreconta como o bug).
+      - valor → **pt86**: espelha o template (`getSizingsPreflop`):
+        linhas = `sizings não-ALLIN abaixo da stack` + `1 ALLIN se [ALLIN
+        explícito no array OU stack ≤ limiar OU um size ≥ stack (colapso)]`
+        + `1 Complete se SB`. Limiar = 30 BB se SB (blind-vs-blind na tabela
+        de opens), senão 25 BB.
+
+    SB tem sempre +1 linha de Complete (limp) — `canFlatCallPreflop` bets==1.
     """
     if not isinstance(script_overrides, dict):
         script_overrides = {}
+    pos = (position or "").upper()
     bucket = _bucket_open_for_position(position)
-    overrides = script_overrides.get(bucket)
-    count = (
-        len(overrides) if isinstance(overrides, list) and overrides
-        else _TEMPLATE_DEFAULT_OPEN_COUNT
-    )
-    if (position or "").upper() == "SB":
-        count += _SB_COMPLETE_LINES
-    return count
+    arr = script_overrides.get(bucket)
+
+    # ── Legacy (sem stack): comportamento pré-pt86 intacto ──
+    if stack_bb is None:
+        count = (
+            len(arr) if isinstance(arr, list) and arr
+            else _TEMPLATE_DEFAULT_OPEN_COUNT
+        )
+        if pos == "SB":
+            count += _SB_COMPLETE_LINES
+        return count
+
+    # ── pt86: espelha o template, com a stack individual + limiar 25/30 ──
+    if not (isinstance(arr, list) and arr):
+        arr = _TEMPLATE_DEFAULT_OPEN_ARRAY.get(bucket, [2.0])
+    non_allin = [s for s in arr if not _is_allin_token(s)]
+    has_explicit_allin = any(_is_allin_token(s) for s in arr)
+    threshold = _OPEN_ALLIN_THRESHOLD_BVB_BB if pos == "SB" else _OPEN_ALLIN_THRESHOLD_BB
+
+    kept = [s for s in non_allin if float(s) < stack_bb]      # sizes abaixo da stack
+    collapsed = any(float(s) >= stack_bb for s in non_allin)  # size ≥ stack → vira ALLIN
+    add_allin = has_explicit_allin or collapsed or (stack_bb <= threshold)
+
+    lines = len(kept) + (1 if add_allin else 0)
+    if pos == "SB":
+        lines += _SB_COMPLETE_LINES
+    return max(1, lines)
+
+
+def derive_position_stacks_bb(hh_text, level_sb, level_bb, seats=None) -> dict:
+    """`{position_label: remaining_bb}` no nó de open de cada posição — stack
+    inicial dos Seat lines MENOS o que já postou (antes/blinds), espelhando o
+    `getChipsRemaining(player)/BB` do template. Usado por
+    `compute_target_node_offset` para o limiar 25/30. `{}` defensivo."""
+    if not hh_text or not isinstance(level_bb, (int, float)) or level_bb <= 0:
+        return {}
+    try:
+        from app.services.hrc_script_gen import (
+            _parse_seat_stacks, _init_pot_from_blinds_antes,
+        )
+        from app.services.queue_export import derive_seats_in_preflop_order
+        if seats is None:
+            seats = derive_seats_in_preflop_order(hh_text)
+        initial = _parse_seat_stacks(hh_text)
+        contributions, _pot, _ctc = _init_pot_from_blinds_antes(
+            hh_text, seats, level_sb, level_bb,
+        )
+    except Exception:
+        logger.exception("derive_position_stacks_bb falhou")
+        return {}
+    out: dict = {}
+    for e in seats or []:
+        nick, pos = e.get("nick"), e.get("position")
+        ini = initial.get(nick) if nick else None
+        if not pos or ini is None:
+            continue
+        remaining = float(ini) - float(contributions.get(nick, 0.0))
+        out[pos] = round(remaining / float(level_bb), 2)
+    return out
 
 
 def _is_all_in_effective(
@@ -213,6 +299,7 @@ def compute_target_node_offset(
     seats_at_table: Optional[int],
     script_overrides: Optional[dict],
     raiser_stack_bb: Optional[float],
+    position_stacks_bb: Optional[dict] = None,
 ) -> Optional[int]:
     """Posição (0-indexed) da linha do raiser real na Strategy Table HRC.
 
@@ -272,9 +359,12 @@ def compute_target_node_offset(
         return None
 
     overrides = script_overrides or {}
+    # pt86: stack individual por posição (espelha o limiar 25/30 do template).
+    # `None` na posição → count_lines cai no legacy defensivo (sem regressão).
+    stacks = position_stacks_bb or {}
     raiser_idx = positions.index(position)
     offset = 0
     for p in positions[:raiser_idx]:
-        offset += count_lines_for_position(p, overrides)
+        offset += count_lines_for_position(p, overrides, stacks.get(p))
     offset += offset_within_bucket(aggressor_real_action, raiser_stack_bb)
     return offset
