@@ -1,10 +1,20 @@
 # Pendentes — backlog vivo
 
+## ★ pt86 — decisão de produto: âncora cai na raiz sem raise (`#HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO`)
+
+**NOVO, aberto** (ver `TECH_DEBTS pt85–pt86`). Sem raise preflop (walk/limp-pot), a
+âncora do offset cai na **raiz** (1ª a agir), **não no Hero** — ~7 mãos / ~10% das
+elegíveis. Regra do Rui: ancorar **sempre no nó de decisão do Hero**. Transplanta limpo
+quando **Hero=BTN** (tem nó de open); falta **decisão de produto** para:
+- **Hero=BB** → não há nó de open na tabela (a BB nunca abre na vista de opens);
+- **pote limpado** → a decisão real do Hero é "vs limp", que não existe como nó de open.
+O que ancorar nesses dois casos é a pergunta. **Não construir até o Rui decidir.**
+
 ## ★ pt86 — RE-GERAR trees desalinhadas com a regra nova do ALLIN implícito (25/30)
 
-`#HRC-NODE-OFFSET-IMPLICIT-LINES` corrigido à secretária (buffer; pendente push):
-o template (`mtt_advanced_canonical_2026.js`) passou de **30 BB geral** para **25 BB
-geral / 30 BB só blind-vs-blind** no `shouldAddPreflopAllIn`, e o `count_lines_for_position`
+`#HRC-NODE-OFFSET-IMPLICIT-LINES` ✅ corrigido e **pushed** (`8096f3c`): o template
+(`mtt_advanced_canonical_2026.js`) passou de **30 BB geral** para **25 BB geral / 30 BB
+só blind-vs-blind** no `shouldAddPreflopAllIn`, e o `count_lines_for_position`
 (`hrc_node_offset.py`) passou a espelhar o template com a stack individual de cada
 posição (limiar 25/30, colapso, Complete da SB) em vez de `len(array)`.
 

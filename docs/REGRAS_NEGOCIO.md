@@ -692,3 +692,36 @@ a fórmula antiga fazia `2.3 × o shove` com a `eff` colapsada a ~0 (sempre buck
 ex. `SIZES_3BET_*=[16.05, ALLIN]` sobre um shove de 6.98 BB. **O defeito não era a existência
 dos arrays — era a fórmula do size.** Aplica-se a CASO B (candidatos IP) e CASO A (3-bettor
 real). Cross-ref `§17`, `HRC_ANATOMIA §3.4`, `REGISTO_CONCEITO.md`.
+
+## §19. ALLIN implícito nos opens — 25 BB geral / 30 BB blind-vs-blind — LEI do Rui (pt86, 23 Jun 2026)
+
+**Ditada pelo Rui em pt86. Fonte de verdade.** Regra **distinta** do §17/§18 (que são o
+**ARRAY de sizes** do backend): esta é a **linha ALLIN implícita** que o **template** acrescenta
+**em runtime** a cada nó de open.
+
+**Regra:** num open (1ª raise voluntária preflop), o HRC acrescenta uma opção **ALLIN** à
+posição **sse a stack INDIVIDUAL dessa posição ≤ limiar**:
+- **25 BB** geral (qualquer posição não-blind);
+- **30 BB** só em **blind-vs-blind** (SB-vs-BB / BB-vs-SB; na tabela de opens = a **SB**).
+
+**Onde vive:** `shouldAddPreflopAllIn` + `isBlindVsBlind` em
+`backend/app/services/hrc_scripts/mtt_advanced_canonical_2026.js`
+(`STACK_BB_FOR_OPEN_ALLIN_OPTION=25`, `STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB=30`).
+
+**⚠️ Distinção crítica (§17 vs §19):** o **§17** decide o *array de sizes* enviado pelo
+backend (por stack **EFETIVA**, limiar 25 → `[size]` ou `[size, ALLIN]`). O **§19** decide a
+*linha ALLIN implícita* desenhada pelo **template** (por stack **INDIVIDUAL**, limiar 25/30).
+**O nº de linhas que o HRC realmente desenha por posição = §19**, não `len(array)`. As duas
+podem divergir (ex.: opener eff>25 → array `[size]`, mas uma posição antes dele com stack
+individual ≤25 ganha a linha ALLIN implícita → 2 linhas).
+
+**Porquê é seguro (não ressuscita a explosão do pt29):** o problema que o pt29 resolveu vinha
+de usar a stack **EFETIVA** (SPR) — um short na mesa puxava a efetiva para baixo e metia ALLIN
+em **todos** os opens (incl. 100+BB). O filtro pt29 (e o §19) é por stack **INDIVIDUAL**, por
+isso os deep 100+BB **continuam excluídos** (100 > 25). Baixar 30→25 fora dos blinds só **remove**
+ALLINs → árvore **igual ou menor**. O 30 mantém-se nos blinds (guerras curtas, jam relevante).
+
+**Espelho no offset:** `count_lines_for_position` (`hrc_node_offset.py`) espelha o §19 — com a
+stack individual de cada posição + limiar SB→30/resto→25 + colapso (size ≥ stack → vira ALLIN)
++ Complete-SB. Fecha o `#HRC-NODE-OFFSET-IMPLICIT-LINES` (a contagem por `len(array)` errava a
+âncora da 2ª run). Cross-ref `§16`, `§17`, `HRC_ANATOMIA`, `TECH_DEBTS` (pt85–pt86).
