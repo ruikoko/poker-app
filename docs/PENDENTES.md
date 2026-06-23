@@ -1,5 +1,34 @@
 # Pendentes — backlog vivo
 
+## ★ pt85–pt86 (22-23 Jun) — re-corrida das trees Winamax contaminadas
+
+Contexto: `#DERIVE-MAX-PLAYERS-WINAMAX-COLON-BLIND` ✅ fechado (`b7c3b08`,
+deployed) — ver `JOURNAL_2026-06-23-pt85-pt86.md` + `TECH_DEBTS_INVENTARIO.md`.
+O fix corrige a **geração** (mãos WN novas já saem com `max_players` certo,
+provado read-only sem robot). Falta **re-correr o que já está contaminado**.
+
+1. **Re-correr as 7 trees Winamax contaminadas** (quando o Rui mandar, com o
+   **robot livre**). Sequência: **apagar SÓ os `hrc_jobs` destas 7** (NUNCA a
+   tabela `hands`) → re-exportar (já com `max_players` certo) → re-correr no
+   Beelink. **Lista dos 7 `hand_id`:**
+   `WN-4850168930850832386-8-1781543237` (GRAVITY, max 2→3),
+   `WN-4850168930850832391-177-1781554111` (2→6),
+   `WN-4778368858757005322-248-1781557719` (2→5),
+   `WN-4778368858757005442-9-1781564008` (2→6),
+   `WN-4778368858757005442-14-1781564568` (2→5),
+   `WN-4853541992006680581-17-1781626609` (2→6),
+   `WN-4853547261931552780-74-1781630020` (…780-74, 2→4).
+   **EXCLUIR `WN-4853541992006680581-53-1781629653`** (já correta — SB-vs-BB
+   genuíno, max=2 certo, **não contaminada**). As **GG (17 done) ficam como
+   estão** (têm dois-pontos, nunca foram afetadas).
+
+2. **Validação à vista da página de verificação HRC** (pendente anterior,
+   continua) — só retoma **DEPOIS** de as 7 estarem re-corridas com max certo (a
+   árvore navegável da GRAVITY só fica "boa" então: o flat-call do SB passa a ter
+   o nó do BB). A **decisão do flat-call na UI** (deixar a opção CALL sem ▸ vs
+   pôr uma nota tipo "→ vai a flop, multiway não modelado") fica para quando a
+   árvore estiver boa.
+
 ## ★ pt80 (18 Jun) — equity model FT/MTT
 
 - **Onde o Rui vê o alarme de validação do equity model** (`#EQUITY-MODEL-FT-VS-MTT-VALIDATION`).

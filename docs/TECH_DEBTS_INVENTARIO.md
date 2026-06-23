@@ -6,6 +6,12 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt85–pt86 (22-23 Jun 2026 — vista de verificação HRC + cego Winamax)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#DERIVE-MAX-PLAYERS-WINAMAX-COLON-BLIND` | ✅ **FECHADO (mesma sessão, `b7c3b08`)** | **Sintoma:** na árvore navegável de verificação HRC (GRAVITY), a opção **"SB call" não expandia** — faltava o nó do BB a fechar a acção (à vista, na página de verificação). **Causa:** `derive_max_players._ACTION_RE` exigia `": "` (formato GG/PS, `"Hero: folds"`); a **Winamax escreve sem dois-pontos** (`"thinvalium folds"`) → **0 matches** → âncora nunca detectada → **fallback silencioso a `max=2`**. **TODA** a Winamax exportada para o HRC saiu colapsada a heads-up (`settings.engine.maxactive=2` → multiway cortado + redução ICM/equity ao nº de jogadores errado). **Distinto** do `#HRC-MAX-PLAYERS-SPAN-NOT-PARTICIPANTS` (fechado pt67, span-vs-participantes) — **este é formato de HH Winamax**. **Alcance (varrido o `app/` inteiro):** 1 só sítio cego; os outros 7 regexes de acção já eram colon-opcionais. **`derive_aggressor_real_action` e `target_node_offset` NÃO afetados** (caminho `_PREFLOP_OPEN_RE` colon-opcional) → âncora e 2ª-run foram ao **nó certo**; só o `max_players` saiu errado. **Fix:** `": "` → `:?\s+` (colon opcional, alinhado com `hrc_verify_tree`/`hrc_script_gen`). +2 testes WN sem colon. **32 passed**, backend-only, deployed. **Prova read-only** (packs gerados em memória, sem robot): `max_players` correto — GRAVITY 3, multiway 5/6, SB-vs-BB 2 pela razão certa; **7 de 8 mãos WN mudaram**; nenhum outro campo do pack preso ao max antigo (`payouts.json` só prémios; `maxactive` no `script.js` = var local de chips activos, não derivada). Ver `JOURNAL_2026-06-23-pt85-pt86.md`. **Pendente associado: re-correr as 7 trees contaminadas (ver `PENDENTES.md`).** |
+
 ## pt77 (18 Jun 2026 — YaPoker → WPN)
 
 | ID | Sev | Resumo |
