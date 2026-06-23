@@ -156,6 +156,29 @@ Não há suite de testes nem linter configurados.
 
 ## Modelo de domínio
 
+> ⚠️ **ESTADO ACTUAL DA ENTRADA (Jun 2026 — LER antes das tabelas "fontes de input" mais abaixo).**
+>
+> 1. **O Discord está DESCONTINUADO como pipeline de entrada de mãos** — **não se sincroniza**
+>    (morreu com o replayer-image GG, `#REPLAYER-OGIMAGE-DEAD-SPA`). O **bot/sync/cross-post ficam
+>    dormentes no código, intactos**, caso voltem a ser precisos. **Todas as tabelas "fontes de
+>    input" abaixo (linha "Discord (canais estudo)") são HISTÓRICAS** — lê-as à luz desta nota.
+> 2. **A coluna `hands.discord_tags` NÃO está morta:** passou a ser a **COLUNA PARTILHADA das tags
+>    de estudo**, agora preenchida pela **PASTA do Intuitive Tables** (`_apply_folder_tag_to_hand`
+>    em `table_ss.py` → escreve em `discord_tags` + dispara `apply_villain_rules`). O nome
+>    `discord_tags` é **histórico e enganador**; mantém-se **por decisão do Rui** (não vale o
+>    refactor). A **pasta `nota` do IT = o antigo canal `nota`**.
+> 3. **As regras que leem `discord_tags` continuam VIVAS e corretas** — recebem as tags do IT pela
+>    **mesma porta**. **Não tocar:** regra C dos vilões (`villain_rules.has_nota_intent`), gate de
+>    mãos (`hand_service`), equity model HRC (`queue_export._derive_equity_model`), desanon
+>    (`table_ss_deanon`).
+>
+> **Entrada GG actual (modelo de domínio):**
+> - **Mãos GG:** import **manual** de ZIP/TXT HH (`origin='hh_import'`), anonimizadas.
+> - **Desanon GG (nomes reais):** **SS de mesa do IT**, match por **hand-id do nome** do ficheiro.
+> - **Tags GG:** **pasta do IT** (nome da pasta → `discord_tags`).
+> - **Lobbys GG:** **SS de lobby do IT**.
+> - **(O HM3 é só WN/PS/WPN — não GG.)**
+
 O produto existe para **centralizar o estudo do Rui** — juntar num sítio único, organizado e trabalhável, as mãos de dúvida que hoje estão espalhadas por várias salas, vários sítios e vários formatos (tags HM3, canais Discord, screenshots, HHs em texto). Tudo o resto é canalização ao serviço disto.
 
 Uma dessas salas — a **GGPoker** — vem **anonimizada**, e por isso exige um mecanismo extra para entrar no sítio único com nicks reais como as outras. Esse mecanismo cruza **duas fontes de verdade**, cada uma com metade da informação:
@@ -203,6 +226,12 @@ Hero nicks em `backend/app/hero_names.py` e espelho em `frontend/src/heroNames.j
 Quando uma mensagem Discord referencia uma mão antes da HH ter sido importada, é criada uma linha placeholder em `hands` com `raw` vazio e `hm3_tags=['GGDiscord']`. Crucialmente, **o placeholder e a HH real partilham o mesmo `hand_id`** (formato `GG-<tm_number>`, derivado do TM number tanto no Discord como no parser da HH). É por isso que `_insert_hand` em `services/hand_service.py` detecta a colisão na inserção: faz `SELECT ... WHERE hand_id = %s`, confirma que o match é um placeholder (raw vazio + tag `GGDiscord`) e **apaga** a linha antes de inserir a HH real. Sem isto, essas mãos ficavam presas como placeholders para sempre. Preservar este comportamento.
 
 ## Bot Discord — modo manual
+
+> ⚠️ **DESCONTINUADO como pipeline de entrada (Jun 2026).** O Discord **deixou de se
+> sincronizar** (morreu com o replayer-image GG, `#REPLAYER-OGIMAGE-DEAD-SPA`). O bot/sync/
+> cross-post desta secção ficam **dormentes, intactos** (podem voltar). As **tags de estudo
+> chegam hoje pela PASTA do Intuitive Tables → `discord_tags`** (ver o banner em `## Modelo de
+> domínio`). O texto abaixo é **histórico**.
 
 `DISCORD_AUTO_SYNC=false` por defeito no Railway. O bot liga-se mas **não** extrai mensagens sozinho. Só corre quando o utilizador carrega em "Sincronizar Agora" em `/discord` (→ `POST /api/discord/sync` ou `/sync-and-process`). Isto reduz risco face ao ToS das salas de poker, que olham mal para scraping contínuo de canais de estudo. **Não mudar para auto-sync sem pedir autorização explícita.**
 

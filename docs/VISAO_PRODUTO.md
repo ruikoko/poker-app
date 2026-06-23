@@ -12,6 +12,21 @@ Foco principal:
 
 Por cima desta base de centralização, a app expande-se em quatro eixos: **análise de vilões**, **note-taking / criação de notas com AI**, **HRC Watcher** e **GTO Brain**. Estes transformam o repositório organizado num sistema de estudo activo — não são o propósito em si, são o que se constrói sobre ele.
 
+> ⚠️ **ESTADO ACTUAL DA ENTRADA (Jun 2026) — o Discord está DESCONTINUADO como pipeline de
+> mãos.** Não se sincroniza (morreu com o replayer-image GG, `#REPLAYER-OGIMAGE-DEAD-SPA`). O
+> bot/sync/cross-post ficam **dormentes no código, intactos**. **Várias secções abaixo que dizem
+> "Discord = fonte de mãos" são HISTÓRICAS** — lê-as à luz desta nota.
+>
+> A coluna `hands.discord_tags` **continua viva**, mas como **COLUNA PARTILHADA das tags de
+> estudo**, agora preenchida pela **PASTA do Intuitive Tables** (`_apply_folder_tag_to_hand`,
+> `table_ss.py`). A **pasta `nota` do IT = o antigo canal `nota`**; as regras (Estudo / Vilões
+> regra C / equity model HRC / desanon) recebem as tags pela **mesma porta** e continuam vivas.
+> Nome `discord_tags` mantido por decisão do Rui (sem refactor).
+>
+> **Entrada GG actual:** mãos = import **manual** ZIP/TXT HH (`origin='hh_import'`, anon);
+> desanon = **SS de mesa do IT** (match por hand-id do nome); tags = **pasta do IT** →
+> `discord_tags`; lobbys = **SS de lobby do IT**. (HM3 só WN/PS/WPN, **não** GG.)
+
 ## Os 4 vectores da app
 
 1. **ENTRADA** — recolher dados (HM3 .bat, Discord bot, upload manual).
@@ -35,7 +50,7 @@ Automação na recolha/processamento/distribuição. Controlo manual sempre disp
 ### Secções de ORIGEM (toda mão entra na respectiva)
 - **Dashboard** — hub geral; SS e imagens uploadadas manualmente.
 - **HM3** — mãos vindas do script .bat HM3 (Winamax/WPN/PokerStars).
-- **Discord** — mãos vindas do bot Discord (canais GG).
+- **Discord** — mãos vindas do bot Discord (canais GG). **⚠️ HISTÓRICO — Discord descontinuado (ver banner no topo). Hoje as tags GG chegam pela pasta do IT → `discord_tags`; a desanon GG por SS de mesa do IT.**
 - **Torneios** — drill-down por torneio (toda mão GG entra aqui).
 
 ### Secções DERIVADAS
@@ -73,6 +88,10 @@ Critérios (basta cumprir um — regras A∨C∨D, definidas em `_classify_villa
 
 ## Regra de cross-post Discord
 
+> ⚠️ **HISTÓRICO (Discord descontinuado, Jun 2026).** Não há cross-post novo do Discord. O que
+> permanece vivo é a **semântica do `discord_tags`** como coluna partilhada de tags — hoje
+> alimentada pela **pasta do IT** (a pasta `nota` = o antigo canal `nota`), não pelo Discord.
+
 Toda mão que apareça num canal Discord deve ter o nome desse canal em `discord_tags`. Sem excepções por origem da mão (Discord directo, HM3, GG anon, GG enriched).
 
 Se uma mão é cross-postada em N canais, `discord_tags` deve conter os N nomes.
@@ -95,7 +114,7 @@ Se uma mão é cross-postada em N canais, `discord_tags` deve conter os N nomes.
 
 1. Termina sessão de poker.
 2. Importa HH GGPoker do dia (Torneios > Sem SS).
-3. Sincroniza Discord (mãos cross-postadas + replayer-links + imagens contexto).
+3. ~~Sincroniza Discord (mãos cross-postadas + replayer-links + imagens contexto).~~ **⚠️ HISTÓRICO — Discord descontinuado (Jun 2026).** Em vez disso: importa as **SS do Intuitive Tables** (capturas de mesa para desanon + tags pela pasta; lobbys) via `appimport`/`/table-ss`.
 4. Eventualmente: upload manual de SS de amigos (raro).
 5. App processa, cataloga e distribui.
 6. Dia seguinte: trabalha mãos em Estudo + Vilões.
