@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from app.routers.import_ import import_file
+from app.routers.import_ import import_file, _import_status
 
 
 class _FakeUpload:
@@ -133,3 +133,34 @@ def test_unknown_zip_rejected_400(_sitezip, _site, _ctype, _entry):
                                 site=None, current_user=object()))
     assert exc.value.status_code == 400
     assert "não reconhecido" in exc.value.detail.lower()
+
+
+# ── #IMPORT-MODAL-UX — re-import dedupado = status benigno, não "error" ──────
+
+def test_import_status_rule():
+    """A regra do estado: progresso → ok; 0+erro → error; 0 sem erro → duplicate."""
+    assert _import_status(5, False) == "ok"         # houve novas
+    assert _import_status(0, True) == "error"        # 0 novas mas erro real
+    assert _import_status(0, False) == "duplicate"   # 0 novas por dedup (benigno)
+    assert _import_status(3, True) == "ok"           # progresso vence (parcial)
+
+
+@patch("app.routers.tournament_summaries.persist_tournament_summaries")
+@patch("app.routers.import_._insert_hand", return_value=False)   # TODAS dedup → skip
+@patch("app.routers.import_._parse_hh_file",
+       return_value=([{"hand_id": "GG-9", "played_at": "2026-05-01"}], []))   # 1 encontrada, 0 erros
+@patch("app.routers.import_.is_pre_2026", return_value=False)
+@patch("app.routers.import_.get_conn")
+@patch("app.routers.import_.create_entry", return_value={"id": 12})
+@patch("app.routers.import_.classify_entry", return_value={"entry_type": "hand_history"})
+@patch("app.routers.import_._detect_site", return_value="pokerstars")
+def test_hh_reimport_dedup_is_benign_not_error(_site, _classify, _entry, _conn, _pre, _parse, _ins, _persist):
+    """Re-import de um zip já importado (0 novas, tudo duplicado, 0 erros) →
+    status 'duplicate' (✓ no modal), NÃO 'error' (✗ falso do fix anterior)."""
+    r = asyncio.run(import_file(file=_FakeUpload("hand.txt", b"PokerStars Hand #1: ..."),
+                                site=None, current_user=object()))
+    assert r["import_type"] == "hands"
+    assert r["hands_inserted"] == 0
+    assert r["hands_found"] == 1           # encontrou 1, era duplicada
+    assert r["errors"] == 0
+    assert r["status"] == "duplicate"      # benigno, não "error"

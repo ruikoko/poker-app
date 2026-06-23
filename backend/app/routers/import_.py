@@ -26,11 +26,26 @@ SUMMARY_PARSERS = {
 }
 
 # Sites com pipeline TS OPERACIONAL (tournament_summaries: resolver TIER 0 +
-# bounty). Hoje só GG (parse_tournament_summary lê header GG `Tournament #`).
-# GG + Winamax desde o #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE (parser WN
-# operacional em tournament_summaries._parse_ts_by_site). Mantido como set
-# para extensão futura (PS/WPN) ser trivial.
+# bounty). **GG + Winamax** desde o #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE
+# (7ecf092, pt44; parser WN operacional em tournament_summaries._parse_ts_by_site).
+# Mantido como set para extensão futura (PS/WPN) ser trivial.
 OPERATIONAL_TS_SITES = {"ggpoker", "winamax"}
+
+
+def _import_status(progress: int, has_errors: bool) -> str:
+    """#IMPORT-MODAL-UX — estado do import para o modal/UI.
+
+    - ``"ok"``        : houve **progresso real** (linhas novas inseridas/atualizadas).
+    - ``"error"``     : 0 progresso **E** erro real (parse/HTTP/exceção) — falha genuína.
+    - ``"duplicate"`` : 0 progresso **SEM** erros — re-import dedupado (benigno → ✓).
+
+    O fix anterior devolvia ``"error"`` em qualquer caso de 0 progresso, o que
+    fazia o re-import dedupado aparecer como ✗ falso no modal. Aqui distingue-se
+    o noop benigno (tudo já existia) da falha real.
+    """
+    if progress > 0:
+        return "ok"
+    return "error" if has_errors else "duplicate"
 
 # ── HH multi-site splitter ────────────────────────────────────────────────────
 
@@ -523,7 +538,9 @@ async def import_file(
             "entry_id": entry_id,
             "site": entry_site_label or detected_site,
             "filename": filename,
-            "status": "ok" if total_inserted > 0 else "error",
+            # #IMPORT-MODAL-UX: 0 novas por dedup (sem erros reais) = "duplicate"
+            # (benigno), NÃO "error". "error" só com falha real em all_errors.
+            "status": _import_status(total_inserted, bool(all_errors)),
             "hands_found": total_inserted + total_skipped,
             "hands_inserted": total_inserted,
             "hands_skipped": total_skipped,
@@ -550,8 +567,8 @@ async def import_file(
     # ── TOURNAMENT SUMMARY → popula AMBOS (decisão #3) ──
     #    (1) P&L (tournaments)                  — multi-site GG/WN (SUMMARY_PARSERS).
     #    (2) operacional (tournament_summaries) — resolver TIER 0 + bounty; só
-    #        sites em OPERATIONAL_TS_SITES (hoje GG; WN entra com o
-    #        #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE).
+    #        sites em OPERATIONAL_TS_SITES (GG + WN desde o
+    #        #WINAMAX-TOURNAMENT-SUMMARIES-PIPELINE, pt44).
     if not detected_site or detected_site not in SUMMARY_PARSERS:
         raise HTTPException(
             status_code=400,
@@ -592,8 +609,11 @@ async def import_file(
         "entry_id": entry_id,
         "site": detected_site,
         "filename": filename,
-        "status": "ok" if (ts_total + pnl_inserted) > 0 else "error",
-        # operacional (tournament_summaries) — ts_applicable=False p/ Winamax
+        # #IMPORT-MODAL-UX: 0 progresso (P&L + operacional) sem parse_errors =
+        # "duplicate" (benigno), não "error".
+        "status": _import_status(ts_total + pnl_inserted, bool(parse_errors)),
+        # ts_applicable=True p/ sites em OPERATIONAL_TS_SITES (GG + WN); False só
+        # p/ sites fora (PS/WPN), que ficam só no P&L.
         "ts_applicable": ts_stats is not None,
         "ts_inserted": (ts_stats or {}).get("inserted"),
         "ts_updated": (ts_stats or {}).get("updated"),

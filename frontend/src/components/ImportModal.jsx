@@ -82,7 +82,7 @@ function formatResult(type, result) {
       parts.push(`${(result.ts_inserted || 0) + (result.ts_updated || 0)} summaries (operacional)`)
     parts.push(`${result.pnl_inserted || 0} P&L`)
     if (result.ts_failed) parts.push(`${result.ts_failed} falhas`)
-    if (!result.ts_applicable) parts.push('Winamax: só P&L')
+    if (!result.ts_applicable) parts.push('só P&L (TS operacional N/A neste site)')
     return parts.join(' · ')
   }
 
@@ -99,15 +99,22 @@ function formatResult(type, result) {
       ].filter(Boolean).join(' · ') || 'Importado'
 
     case 'hh':
-    case 'hh_zip':
-      return [
-        result.hands_inserted && `${result.hands_inserted} mãos inseridas`,
-        result.hands_found && result.hands_inserted && result.hands_found > result.hands_inserted &&
-          `${result.hands_found - result.hands_inserted} ignoradas`,
-        result.rematched?.length && `${result.rematched.length} screenshots matched`,
-        result.migrated_to_study > 0 && `${result.migrated_to_study} → Estudo`,
-        result.hands_rejected_pre_2026 > 0 && `${result.hands_rejected_pre_2026} <2026 rejeitadas`,
-      ].filter(Boolean).join(' · ') || 'Importado'
+    case 'hh_zip': {
+      // #IMPORT-MODAL-UX: mostrar SEMPRE o balanço, mesmo com 0 inseridas
+      // (re-import dedupado → "0 novas · X duplicadas", em vez de cair no
+      // "N screenshots matched" global ou no genérico "Importado").
+      const inserted = result.hands_inserted || 0
+      const found = result.hands_found || 0
+      const dups = Math.max(0, found - inserted)   // X = hands_found − hands_inserted
+      const parts = [`${inserted} novas`]
+      if (dups > 0) parts.push(`${dups} duplicadas`)
+      if (result.migrated_to_study > 0) parts.push(`${result.migrated_to_study} → Estudo`)
+      if (result.hands_rejected_pre_2026 > 0) parts.push(`${result.hands_rejected_pre_2026} <2026 rejeitadas`)
+      // result.rematched é um total GLOBAL (re-associa todos os órfãos no fim de
+      // QUALQUER import — não é resultado deste zip) → rotular como tal.
+      if (result.rematched?.length) parts.push(`${result.rematched.length} órfãos re-associados (total)`)
+      return parts.join(' · ')
+    }
 
     case 'gto':
       return result.tree_id ? `Árvore #${result.tree_id} criada (${result.nodes_count || '?'} nós)` : 'Importado'
@@ -176,8 +183,9 @@ export default function ImportModal({ open, onClose }) {
         const options = {}
         if (f.type === 'hm3' && f.daysBack) options.daysBack = parseInt(f.daysBack)
         const result = await uploadFile(f.file, f.type, options)
-        // Falha = erro HTTP (4xx/5xx), status 'error' do backend, ou detail de erro.
-        // Mata o "Importado" falso (#IMPORT-MODAL): 400/zero → ✗ vermelho, não ✓.
+        // Falha = erro REAL: HTTP 4xx/5xx (_ok=false), status 'error' genuíno do
+        // backend, ou detail de erro. 0 novas por dedup vem como status
+        // 'duplicate' (≠ 'error') → NÃO é falha, fica ✓ (#IMPORT-MODAL-UX).
         const failed = result._ok === false || result.status === 'error' || !!result.detail
         updateFile(f.id, { status: failed ? 'error' : 'done', result })
       } catch (err) {
