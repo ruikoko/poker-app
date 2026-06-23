@@ -1,5 +1,27 @@
 # Pendentes — backlog vivo
 
+## ★ FUTURO (registar, sem fix agora) — `#GTO-OPEN-SIZE-NOT-PER-POSITION`
+
+Para a **riqueza dos dados do GTO Brain** (não para o estudo de hoje). **Seguir como
+está por agora.** Detalhe e cross-refs em `GTO_BRAIN.md §9` e `TECH_DEBTS_INVENTARIO.md`.
+
+- **Hoje (bucketed):** o size **REAL** do opener propaga-se a **todas** as posições
+  OTHERS que partilham `SIZES_OPEN_OTHERS` — confirmado read-only: **CO abre 2.5 → nas
+  sub-árvores onde o BTN é opener, o BTN também "abre" 2.5**. (`hrc_script_gen.py`:
+  `build_sizings_overrides` bc==1 → `_array_for_raise` usa o `to_amount_bb` real;
+  `_bucket_open_for_position` é partilhado.)
+- **Regra desejada (Rui):** nas posições **À FRENTE** do nó principal (opener) o open
+  deve ser o **standard 2 BB**, não o size real do opener. Só o **opener** usa o seu
+  size real. A **SB** usa o seu próprio size de blind (`_blind_open_size_by_eff`). As
+  posições **ATRÁS** do opener (já foldadas) são indiferentes.
+- **Ex.:** CO abre 2.5 → CO=2.5 (real), **BTN=2.0 (standard)**, SB=size próprio. Hoje o
+  BTN fica 2.5 (errado p/ os dados do GTO Brain).
+- **Por quê futuro e não agora:** o Rui **não estuda essas ranges hoje**; só importa
+  quando o **GTO Brain consumir** estas trees. **Exige tornar os opens PER-POSITION**
+  (como os 3-bets ficaram em pt42b) — **trabalho arquitetural, não ajuste**.
+- **NÃO afeta o `#HRC-NODE-OFFSET-IMPLICIT-LINES`** (bug separado; o **valor** do size
+  não gateia o offset — só o **comprimento/ALLIN** do array).
+
 ## ★ pt85–pt86 (22-23 Jun) — re-corrida das trees Winamax contaminadas
 
 Contexto: `#DERIVE-MAX-PLAYERS-WINAMAX-COLON-BLIND` ✅ fechado (`b7c3b08`,
