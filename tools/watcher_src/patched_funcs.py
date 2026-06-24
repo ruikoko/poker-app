@@ -1620,7 +1620,7 @@ def finalize_after_second_run(wpos, export_zip):
     (Bloco 1 valida arquitectura; `.exe` em produção continua pt25d).
     """
     print('   A fazer queue do export (finalize após 2ª run)...')
-    export_strategies(export_zip)
+    return export_strategies(export_zip)
 
 
 def _find_export_combo(dialog_hwnd):
@@ -1769,16 +1769,38 @@ def _find_save_button(dialog_hwnd):
     return found[0][0] if found else None
 
 
-def _verify_export_zip(target_path, settle_s=2.0, wait_total_s=30.0):
-    """pt85 C' (ii) — logo após o [SAVE-AS], espera o ficheiro existir + estabilizar
-    (tamanho igual em 2 leituras) e corre testzip(). Loga `[SAVE-AS-CHECK] OK` ou
-    `[SAVE-AS-CHECK] INVÁLIDO: <erro>` para apanhar recorrência do export corrompido.
-    NÃO bloqueia nem altera o fluxo — só observabilidade (a Peça A e a guarda do
-    adapter tratam do permanentemente-mau)."""
+def _confirm_overwrite_if_present(timeout_s=2.0):
+    """pt87 — se o Save abriu um 'Confirm Save As' (ficheiro já existe → Replace?),
+    clica Yes/Save via BM_CLICK. No-op se não houver. True se tratou."""
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        found = _find_top_by_substr('confirm save as', 'guardar como', 'replace')
+        if found:
+            btn = _find_button_by_text(
+                found[0], lambda t: t in ('yes', 'sim', 'save', 'guardar'))
+            if btn:
+                _pt30_user32.SendMessageW(btn, BM_CLICK, 0, 0)
+                print('   [SAVE-AS] overwrite confirmado (Yes/Save BM_CLICK)')
+                return True
+        time.sleep(0.3)
+    return False
+
+
+def _verify_export_zip(target_path, settle_s=2.0, wait_total_s=180.0):
+    """pt85 C' (ii) + pt87 (#HRC-WATCHER-SAVE-NOT-PERSISTED) — logo após o [SAVE-AS],
+    espera o ficheiro existir + estabilizar (tamanho igual em 2 leituras espaçadas
+    >= settle_s) e corre testzip().
+
+    pt87: passa a DEVOLVER bool (antes era só observabilidade). True = ficheiro
+    persistido E zip íntegro; False = não apareceu/instável em wait_total_s OU
+    testzip falhou. O caller usa-o como BARREIRA antes do close-tab (mata a corrida
+    com o Ctrl+F4). Continua a logar [SAVE-AS-CHECK] OK/INVÁLIDO. wait_total_s
+    subido 30→180s (trees grandes 40-70 MB)."""
     import zipfile as _zf
     deadline = time.time() + wait_total_s
     last_size = -1
     stable_since = None
+    persisted = False
     while time.time() < deadline:
         try:
             sz = os.path.getsize(target_path)
@@ -1789,21 +1811,28 @@ def _verify_export_zip(target_path, settle_s=2.0, wait_total_s=30.0):
             if stable_since is None:
                 stable_since = time.time()
             elif time.time() - stable_since >= settle_s:
+                persisted = True
                 break
         else:
             stable_since = None
             last_size = sz
         time.sleep(0.5)
     base = os.path.basename(target_path)
+    if not persisted:
+        print('   [SAVE-AS-CHECK] INVÁLIDO: %s — ficheiro nao persistiu em %.0fs '
+              '(ultimo size=%s)' % (base, wait_total_s, last_size))
+        return False
     try:
         with _zf.ZipFile(target_path) as z:
             bad = z.testzip()
         if bad is None:
             print('   [SAVE-AS-CHECK] OK: %s (%s bytes)' % (base, last_size))
-        else:
-            print('   [SAVE-AS-CHECK] INVÁLIDO: %s — entrada corrompida %r' % (base, bad))
+            return True
+        print('   [SAVE-AS-CHECK] INVÁLIDO: %s — entrada corrompida %r' % (base, bad))
+        return False
     except Exception as e:
         print('   [SAVE-AS-CHECK] INVÁLIDO: %s — %s' % (base, e))
+        return False
 
 
 def _save_as_set_and_click(target_path):
@@ -1836,40 +1865,60 @@ def _save_as_set_and_click(target_path):
         print('   [SAVE-AS] WARN: dialog nao apareceu em 20s')
         return False
 
-    try:
-        pyperclip.copy(target_path)
-        time.sleep(0.3)
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.15)
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.5)
-        print('   [SAVE-AS] filename pasted via clipboard: %s' % target_path)
-    except Exception as e:
-        print('   [SAVE-AS] WARN: clipboard paste falhou (%s), fallback typewrite' % e)
+    def _paste_filename():
         try:
-            pyautogui.hotkey("ctrl", "a")
-            time.sleep(0.1)
-            pyautogui.typewrite(target_path, interval=0.005)
+            pyperclip.copy(target_path)
             time.sleep(0.3)
-        except Exception as e2:
-            print('   [SAVE-AS] typewrite fallback tambem falhou: %s' % e2)
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.15)
+            pyautogui.hotkey("ctrl", "v")
+            time.sleep(0.5)
+            print('   [SAVE-AS] filename pasted via clipboard: %s' % target_path)
+        except Exception as e:
+            print('   [SAVE-AS] WARN: clipboard paste falhou (%s), fallback typewrite' % e)
+            try:
+                pyautogui.hotkey("ctrl", "a")
+                time.sleep(0.1)
+                pyautogui.typewrite(target_path, interval=0.005)
+                time.sleep(0.3)
+            except Exception as e2:
+                print('   [SAVE-AS] typewrite fallback tambem falhou: %s' % e2)
 
-    save_btn = _find_save_button(save_dlg)
-    if save_btn:
-        print('   [SAVE-AS] Save btn hwnd=%s -> BM_CLICK' % save_btn)
-        _pt30_user32.SendMessageW(save_btn, BM_CLICK, 0, 0)
-        time.sleep(1.5)
-    else:
-        print('   [SAVE-AS] Save btn nao encontrado, Enter')
+    def _click_save():
+        save_btn = _find_save_button(save_dlg)
+        if save_btn:
+            print('   [SAVE-AS] Save btn hwnd=%s -> BM_CLICK' % save_btn)
+            _pt30_user32.SendMessageW(save_btn, BM_CLICK, 0, 0)
+        else:
+            print('   [SAVE-AS] Save btn nao encontrado, Enter')
+            try:
+                pyautogui.press("enter")
+            except Exception as e:
+                print('   [SAVE-AS] enter erro: %s' % e)
+        time.sleep(0.5)
+        _confirm_overwrite_if_present()
+
+    # 1ª tentativa: paste → Save → (overwrite) → BARREIRA (persistência+integridade).
+    _paste_filename()
+    _click_save()
+    if _verify_export_zip(target_path):
+        return True
+
+    # pt87 — 1 retry: SÓ se o diálogo Save As ainda está aberto (o Save não pegou).
+    if _find_top_by_substr("save as", "guardar", "save a copy"):
+        print('   [SAVE-AS] retry: dialogo ainda aberto — re-Save via Enter')
+        _paste_filename()
         try:
             pyautogui.press("enter")
-            time.sleep(1.5)
+            time.sleep(0.5)
+            _confirm_overwrite_if_present()
         except Exception as e:
-            print('   [SAVE-AS] enter erro: %s' % e)
-    # pt85 C' (ii) — valida o zip exportado logo após o Save (loga, não bloqueia);
-    # apanha a recorrência do export corrompido (caso GG-6082958318).
-    _verify_export_zip(target_path)
-    return True
+            print('   [SAVE-AS] retry enter erro: %s' % e)
+        if _verify_export_zip(target_path):
+            return True
+
+    print('   [SAVE-AS] FALHOU: zip nao persistiu/integro apos retry: %s' % target_path)
+    return False
 
 
 def export_strategies(export_path):
@@ -1957,9 +2006,12 @@ def export_strategies(export_path):
     time.sleep(1.5)   # dar tempo ao file-picker para aparecer
 
     # 5) File-picker: Save As robusto (port self-contained do launcher)
-    _save_as_set_and_click(export_path)
-    print('   [export] _save_as_set_and_click concluído: %s' % export_path)
-    return None
+    saved = _save_as_set_and_click(export_path)
+    if saved:
+        print('   [export] _save_as_set_and_click concluído (persistido+íntegro): %s' % export_path)
+    else:
+        print('   [WARN] [export] _save_as_set_and_click NAO persistiu/integro: %s' % export_path)
+    return saved
 
 
 # ── pt68 — higiene do HRC (incidente madrugada 11 Jun) ──────────────────────
@@ -1995,11 +2047,11 @@ _WATCHER_LOG_DIR = r'C:\hrc\watcher_logs'
 # o ramo `elapsed > EXPORT_WAIT_TIMEOUT → mark_failed` já existe, mas o default
 # Baltazar (86400 = 24h) = "pendura para sempre" se o export sair inválido ou o
 # adapter recusar. Override aqui (o trampoline corre Baltazar=_O e depois
-# patched_funcs=_P no MESMO globals → este valor vence). 1200s = 20 min: handshake
+# patched_funcs=_P no MESMO globals → este valor vence). 1800s = 30 min (pt87): handshake
 # parada/zip mau falha ESSA mão + a fila avança; zip bom mas lento fica em disco e
 # o adapter POSTa-o depois (upsert sobre o failed). Provado em prod: GG-6082958318
 # pendurou ~1h46 (export corrompido recusado pelo adapter, nunca foi a replied/).
-EXPORT_WAIT_TIMEOUT = 1200
+EXPORT_WAIT_TIMEOUT = 1800
 
 # ── pt84 (#HRC-HANG-WATCHDOG) — vigia de mão pendurada ───────────────────────
 # Detecta HRC congelado/OOM DURANTE as esperas e RECUPERA: mark_failed(reason)
@@ -2881,10 +2933,13 @@ def setup_hand(hand_name, hand_path):
 
     # Bug H: finalize após 2ª run (ou skip da 2ª run se sem aggressor,
     # ou após WARN se 2ª run falhou em pt28).
-    finalize_after_second_run(wpos, export_zip)
+    saved = finalize_after_second_run(wpos, export_zip)
     # === FIM Bloco 2 piece 2 ===
 
-    # pt68 change 1 — fechar a tab/janela da mão após o export (anti-acumulação).
+    # pt87 — fechar a tab é seguro AGORA: a barreira de persistência+integridade
+    # (_verify_export_zip dentro do _save_as_set_and_click) já bloqueou até o zip
+    # existir+íntegro (ou desistir após retry), logo o Ctrl+F4 já não corre contra
+    # o write. Fecha em ambos os casos (no falhado não há nada a perder).
     _close_hand_tab()
     # pt68 change 2 — contar a mão processada (gatilho do reinício a cada N).
     globals()['_HANDS_DONE_SINCE_RESTART'] = _HANDS_DONE_SINCE_RESTART + 1
@@ -2893,6 +2948,15 @@ def setup_hand(hand_name, hand_path):
 
     # pt79: fim LIMPO — o HRC não ficou sujo; cancela o restart-antes-da-próxima.
     globals()['_HRC_WINDOW_DIRTY'] = False
+
+    # pt87 — só [QUEUED] se o zip está mesmo no disco e íntegro. Senão devolve
+    # None → try_setup (main loop) marca .failed e o watcher AVANÇA (sem congelar
+    # à espera de um zip inexistente; EXPORT_WAIT_TIMEOUT cobre o handshake).
+    if not saved:
+        print('   [WARN] %s: export NAO persistiu/integro apos retry — mao '
+              'marcada FALHADA (sem [QUEUED]); watcher avanca.' % hand_name)
+        return None
+
     print(f'   [QUEUED] {hand_name} -> {os.path.basename(export_zip)} '
           f'(Bloco 1 — finalize Bloco 2)')
     return export_zip
