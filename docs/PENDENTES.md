@@ -1,5 +1,34 @@
 # Pendentes — backlog vivo
 
+## ★ pt87 (24 Jun 2026) — verify-gate do save-as FEITO + VALIDADO EM PRODUÇÃO; 3 problemas novos do smoke
+
+**`#HRC-WATCHER-SAVE-NOT-PERSISTED` ✅ FEITO + VALIDADO EM PRODUÇÃO (24 Jun).** Causa: o
+`_close_hand_tab` (Ctrl+F4) corria contra o write assíncrono do Complete Export (40-70 MB) e
+**cancelava o save** → 0/38 mãos persistiam, watcher preso 24h. Fix (watcher-gate `6522278`):
+`_verify_export_zip` passa a **barreira** (existe + tamanho estável + `testzip`) que gateia o
+close-tab; trata overwrite; 1 retry; em falha `.failed`+avança; `EXPORT_WAIT_TIMEOUT` 24h→30 min.
+Harness 19/19. Exe `e1dced5a` (Release `watcher-pt87`) **instalado no Beelink e validado**: a WN
+de 36 MB drenou ponta-a-ponta com `[SAVE-AS-CHECK] OK`; lote a drenar (33+). É o **1º exe a conter
+de facto pt84 (watchdog) + pt85 + pt87** (a Release `watcher-pt84` enviara o exe pré-pt84 `5e1414`).
+
+**Reconciliação — saem do backlog (✅ FEITO + validado no smoke pt87 24/06; código no `main` + no
+exe que correu hoje):** `#HRC-WATCHER-TAB-ACCUMULATION`, `#WATCHER-LOG-TO-FILE`,
+`#HRC-CLOSE-TAB-BREAKS-CHORD-FOCUS`, `#OPEN-WIZARD-CHORD-FALLBACK-BLIND`,
+`#HRC-RUN-WINDOW-DETECTION-BLIND`, `#HRC-BOUNTY-HARDCODED-50PCT`,
+`#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS`, `#CI-TARGET-INITIAL-NOT-CALIBRATED` (8 itens watcher
+pt66-70 que estavam listados "re-smoke pendente / fix em buffer").
+
+**3 problemas NOVOS do smoke 24/06 (detalhe em `TECH_DEBTS pt87`):**
+- 🔴 `#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN` **REABERTO / REGRESSÃO** — a 2ª run não dispara
+  o popup Nash (estava fechado em pt32-34; voltou). **Investigar porque o fix antigo deixou de pegar.**
+- 🟠 `#HRC-EXPORT-DIALOG-32770-NO-OPEN` **NOVO** — o diálogo Export Strategies (`#32770`) não abre
+  (≠ popup Nash, com que partilha a classe).
+- 🔴 `#HRC-TREE-GIGANTE` **NOVO** — uma mão deu ~20 GB e sobrecarregou a máquina (Rui cancelou à
+  mão). Falta **medir a tree antes da 1ª run** + abortar/`.failed` acima de um limite.
+
+**Continuam pendentes (não tocados pelo pt87):** `#HRC-ADAPTER-STATE-DESYNC-SILENT` (🔴, abaixo),
+`#HRC-WATCHER-BETTING-SCRIPT-STALL` (🟠, abaixo), `#HRC-ANCHOR-NONBLIND-LIMP` (Passo 2, abaixo).
+
 ## ★ pt86c — adapter ignora mãos em silêncio quando o state.json dessincroniza (`#HRC-ADAPTER-STATE-DESYNC-SILENT`) — 🔴 HIGH
 
 **NOVO HIGH** (ver `TECH_DEBTS pt86c`). O adapter salta em silêncio mãos que já constam do

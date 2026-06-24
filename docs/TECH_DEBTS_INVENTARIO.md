@@ -6,6 +6,34 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt87 (24 Jun 2026 — verify-gate do save-as + smoke real Beelink + reconciliação de estado do watcher)
+
+**★ Smoke real ponta-a-ponta no Beelink (24 Jun), exe pt87 `e1dced5a` instalado e VALIDADO EM PRODUÇÃO.** A WN de 36 MB drenou ponta-a-ponta com `[SAVE-AS-CHECK] OK`; os 3 comportamentos (verify-gate, falha-limpa, watchdog) confirmados; o lote está a drenar (33+ mãos feitas). O exe pt87 é o **primeiro** a conter de facto pt84 (watchdog) + pt85 + pt87 — a Release `watcher-pt84` tinha enviado o exe **pré-pt84** (`5e1414`), por isso pt84/pt85 nunca tinham chegado a um exe instalado até agora.
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#HRC-WATCHER-SAVE-NOT-PERSISTED` | ✅ **FEITO + VALIDADO EM PRODUÇÃO (24 Jun)** | O "Complete Export" escreve a árvore (40-70 MB) de forma **assíncrona**; o `_close_hand_tab` (pt68, Ctrl+F4) corria contra o write e **cancelava o save** → 0/38 mãos persistiam (`done\Exports\` vazio, watcher preso 24h). **Fix (watcher-gate `6522278`):** `_verify_export_zip` (pt85, antes só observabilidade) passa a **BARREIRA** — devolve bool (existe + tamanho estável + `testzip`), gateia o close-tab; trata `Confirm Save As` (overwrite); 1 retry; em falha marca `.failed` e o watcher **AVANÇA**; `EXPORT_WAIT_TIMEOUT` 24h→30 min. Harness `swap_and_smoke` **19/19**. Exe `e1dced5a`, Release `watcher-pt87`. **Smoke real 24 Jun: WN 36 MB drenou com `[SAVE-AS-CHECK] OK`; lote a drenar (33+).** |
+| `#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN` | 🔴 **REABERTO / REGRESSÃO (smoke 24 Jun)** | A 2ª run **volta a não disparar o popup Nash** — bug que fora **fechado em pt32-34** (`c9c8818`/`867460c`/`e58c517`: origem do click `wpos`→`find_hrc()`, OK por BM_CLICK, ciclo ponta-a-ponta). Voltou no smoke pt87. **Investigar porque o fix antigo deixou de pegar** (coord/timing/estado do HRC pós-pt66-70? interação com watchdog/close-tab?). |
+| `#HRC-EXPORT-DIALOG-32770-NO-OPEN` | 🟠 **NOVO (smoke 24 Jun)** | O **diálogo Export Strategies** (`_find_export_dialog`, classe `#32770`, título vazio) **não abre** em alguns casos. **Distinto** das refs `#32770` históricas, que eram do **popup Nash**. Sem o diálogo, `export_strategies` aborta. Investigar o passo Hand→Export Strategies (menu/timing/foco). |
+| `#HRC-TREE-GIGANTE` | 🔴 **NOVO (smoke 24 Jun)** | Uma mão gerou uma árvore **~20 GB** e **sobrecarregou a máquina**; o Rui teve de **cancelar à mão**. Falta **guarda preventiva: medir o tamanho/ETA da tree ANTES da 1ª run** e abortar/marcar `.failed` acima de um limite, em vez de deixar o HRC explodir. Relacionado (stale): `#HRC-WATCHER-JS-HARDCODED` (pt22, superado pelo gerador per-hand). |
+
+**Reconciliação — 8 tech debts do watcher pt66-70 ✅ FEITO + VALIDADOS (smoke pt87 24 Jun).** Estavam listados "aberto / Release ptXX / re-smoke pendente / fix em buffer", mas o código está no `main` **E** no exe que correu hoje no Beelink (confirmados a correr, não só committed):
+
+| ID | Fix | Geração |
+|---|---|---|
+| `#HRC-WATCHER-TAB-ACCUMULATION` | `_close_hand_tab` | pt68 |
+| `#WATCHER-LOG-TO-FILE` | `_ensure_file_logging` | pt68 |
+| `#HRC-CLOSE-TAB-BREAKS-CHORD-FOCUS` | `_restore_hrc_main_focus` | pt69 |
+| `#OPEN-WIZARD-CHORD-FALLBACK-BLIND` | `_open_wizard_confirmed` | pt70 |
+| `#HRC-RUN-WINDOW-DETECTION-BLIND` | `_find_progress_window_hwnd` | pt67 |
+| `#HRC-BOUNTY-HARDCODED-50PCT` | `select_bounty_mode` removido | pt66 |
+| `#HRC-REDUNDANT-SECOND-RUN-OLD-CONFIGS` | run intermédia removida de `setup_hand` | pt66 |
+| `#CI-TARGET-INITIAL-NOT-CALIBRATED` | dissolvido; `_ci_target_readback_warn` | pt66 |
+
+(pt79/pt84/pt85/pt87 vivem no `watcher-gate`; pt84+pt85+pt87 agora **deployed** via exe `e1dced5a`. Push/merge do `watcher-gate`→`main` = decisão à parte.)
+
+---
+
 ## pt86c (23 Jun 2026 — âncora no-raise Passo 1)
 
 | ID | Sev | Resumo |
