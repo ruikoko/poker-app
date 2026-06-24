@@ -134,6 +134,44 @@ está por agora.** Detalhe e cross-refs em `GTO_BRAIN.md §9` e `TECH_DEBTS_INVE
 - **NÃO afeta o `#HRC-NODE-OFFSET-IMPLICIT-LINES`** (bug separado; o **valor** do size
   não gateia o offset — só o **comprimento/ALLIN** do array).
 
+## ★ FUTURO (registar, sem fix agora) — `#BEELINK-DAEMONS-AUTOSTART`
+
+Arranque automático dos daemons do robot no Beelink. **Estende/subsome o
+`#HRC-ADAPTER-SCHEDULED-TASK`** (TECH_DEBTS, 🟢 LOW, que cobre **só o adapter**) — esta
+visão é mais larga: **adapter + watcher + watchdog**.
+
+- **O que já está feito:** o lado da **APP**. O Rui abre a queue na app e a app comanda o
+  que o robot puxa (gate da fila pt68, multi-select, `GET /api/queue/hrc`). Esse fluxo
+  funciona.
+- **A dor (o que falta):** o arranque **no Beelink** é todo manual e frágil — arrancar o
+  adapter à mão (`arranca_adapter.bat` / `venv\python hrc_adapter.py`), ligar o watcher à
+  mão (`hrc_watcher.exe`), e o PATH/env que não persiste entre reinícios (visto nesta
+  sessão: o Claude Code do Beelink e o `setx` na janela errada). E os daemons **morrem em
+  silêncio** sem ninguém os levantar.
+- **Visão:** adapter + watcher arrancam **sozinhos** (no boot/logon do Beelink, ou num
+  único atalho/serviço), para o Rui **só ligar o Beelink e abrir a queue na app** — zero
+  comandos à mão.
+- **Candidato técnico (confirmado read-only, faz sentido):** **Scheduled Task do Windows
+  "ao logon"** para os dois. **Caveat-chave:** o **watcher precisa de sessão interactiva
+  com desktop** (conduz o GUI do HRC por rato/Win32) → tem de ser **task ao logon a correr
+  como `riand`**, **NÃO um Windows Service** (sem desktop). O **adapter é headless** (HTTP +
+  filesystem) e podia ser serviço, mas por simplicidade vai como task ao logon ao lado do
+  watcher. Cadeia: Beelink liga → **auto-logon** `riand` → task(s) arrancam adapter +
+  watcher → o `ensure_hrc` do watcher abre o HRC. O env (`HRC_WATCHER_API_KEY`) viaja na
+  task (ou no `.bat`), matando a fragilidade do `setx`.
+- **Watchdog (incluir):** relançar um daemon que **morra**. (a) "restart-on-failure" nativo
+  da Scheduled Task apanha o fim do processo; (b) uma 2ª task em intervalo curto que
+  **verifica liveness** (processo vivo?) e relança — apanha também o caso de morte
+  silenciosa. ⚠️ **Distinto** do `pt84` hang-watchdog INTERNO do watcher (esse trata o HRC
+  pendurado/OOM **dentro** do watcher; não relança o **processo** watcher se este morre).
+- **Custo grosseiro:** **BAIXO-MÉD.** Config (schtasks/XML do Task Scheduler), **não código**
+  nos daemons; + config de **auto-logon** (registo/netplwiz — nota de segurança: sem gate de
+  password numa máquina dedicada, aceitável); + watchdog (pequeno script/2ª task). A maior
+  parte é **operacional no Beelink** + 1 validação (reiniciar → ambos sobem → queue funciona).
+- **NÃO implementar agora — só registado.** Instruções base do adapter já em
+  `tools/hrc_adapter/README.md`; o `tools/appmaster/RunAll.bat` (bat-mestre) é ponto de
+  partida para o "único atalho".
+
 ## ★ pt85–pt86 (22-23 Jun) — re-corrida das trees Winamax contaminadas
 
 Contexto: `#DERIVE-MAX-PLAYERS-WINAMAX-COLON-BLIND` ✅ fechado (`b7c3b08`,
