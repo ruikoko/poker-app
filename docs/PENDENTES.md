@@ -1,5 +1,19 @@
 # Pendentes — backlog vivo
 
+## ★ pt86c — adapter ignora mãos em silêncio quando o state.json dessincroniza (`#HRC-ADAPTER-STATE-DESYNC-SILENT`) — 🔴 HIGH
+
+**NOVO HIGH** (ver `TECH_DEBTS pt86c`). O adapter salta em silêncio mãos que já constam do
+`state.json` local mesmo quando o servidor as volta a oferecer (dedup `hrc_adapter.py:262`);
+fica em "entering main loop" a puxar 0 — opaco para o Rui. O "Disparar" da app não toca no
+state local → desencontro garantido. **Já não há razão para o skip permanente:** desde o
+pt43 o servidor já exclui as `done`, por isso o que ele serve **precisa mesmo** de correr.
+**Plano (não implementar até o Rui aprovar):** **(a)** auto-reconciliação — confiar no
+servidor e re-puxar, com guarda de in-flight + cooldown pós-done (custo BAIXO-MÉD, adapter
+Python puro sem rebuild, exige smoke Beelink); **(b)** aviso claro em PT na consola quando
+salta N mãos (custo muito baixo — pode entrar já); **(c)** ressincronizar sem mexer em
+ficheiros (sentinela `RESYNC`, custo baixo; ou botão na app, custo méd-alto, dispensável com
+(a)). **Recomendado: (a) + (b).** Objetivo: o Rui nunca mais tocar no `state.json` à mão.
+
 ## ★ pt86c — bug do robot: stall no betting script (`#HRC-WATCHER-BETTING-SCRIPT-STALL`)
 
 **NOVO** (ver `TECH_DEBTS pt86c`, `JOURNAL_2026-06-23-pt86c.md` fecho 24 Jun). Na validação
