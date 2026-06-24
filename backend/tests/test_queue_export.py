@@ -1219,8 +1219,11 @@ def test_position_bucket_open_returns_SB_BB():
     assert _position_bucket_open("BB") == "BB"
 
 
-def test_position_bucket_open_returns_OTHERS_for_everything_else():
-    for pos in ("UTG", "EP", "MP", "EP1", "EP2", "HJ", "CO"):
+def test_position_bucket_open_returns_per_position_pt89():
+    # pt89: posições canónicas → a sua própria var; labels fora do conjunto → OTHERS.
+    for pos in ("UTG1", "UTG", "MP", "HJ", "CO"):
+        assert _position_bucket_open(pos) == pos
+    for pos in ("EP", "EP1", "EP2"):
         assert _position_bucket_open(pos) == "OTHERS"
 
 
@@ -1319,7 +1322,7 @@ def test_parse_preflop_actions_walk_to_BB_returns_empty():
 # ── _bucket_open / _bucket_3bet / _bucket_4bet5bet ─────────────────────────
 
 def test_bucket_open_mapping():
-    assert _bucket_open({"bet_count": 1, "position": "UTG"}) == "SIZES_OPEN_OTHERS"
+    assert _bucket_open({"bet_count": 1, "position": "UTG"}) == "SIZES_OPEN_UTG"
     assert _bucket_open({"bet_count": 1, "position": "BU"}) == "SIZES_OPEN_BU"
     assert _bucket_open({"bet_count": 1, "position": "SB"}) == "SIZES_OPEN_SB"
     assert _bucket_open({"bet_count": 1, "position": "BB"}) == "SIZES_OPEN_BB"
@@ -1892,8 +1895,9 @@ def test_build_sizings_overrides_GG_HJ_open_deep():
         _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
         effective_stack_bb=eff,
     )
-    assert "SIZES_OPEN_OTHERS" in out
-    assert out["SIZES_OPEN_OTHERS"] == [2.0]  # sem ALLIN — eff > 25
+    # pt89: open per-posição — o opener desta mão (5-handed) é rotulado CO.
+    assert "SIZES_OPEN_CO" in out
+    assert out["SIZES_OPEN_CO"] == [2.0]  # sem ALLIN — eff > 25
     # Nenhum 3-bet/4-bet na mão
     assert "SIZES_3BET_IP" not in out
     # pt42b — CASO B: HJ open em 5-handed → candidato IP único = BU.
@@ -1933,7 +1937,7 @@ def test_build_sizings_overrides_WN_squeeze_3bet():
         _HH_WN_REAL, level_sb=4000, level_bb=8000, seats=seats,
         effective_stack_bb=eff,
     )
-    assert out["SIZES_OPEN_OTHERS"] == [2.0]
+    assert out["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener HJ → SIZES_OPEN_HJ
     assert out["SIZES_3BET_SQUEEZE_SB"] == [8.0]
     # pt42b — CASO B: HJ open em 5-handed → candidatos IP = [CO, BU].
     # Eff(HJ, CO) = min(338758, 163754)/8000 = 20.47 BB < 26 → 2.3×opener + ALLIN.
@@ -1953,7 +1957,7 @@ def test_build_sizings_overrides_WPN_HJ_open_deep():
         _HH_WPN_REAL, level_sb=800, level_bb=1600, seats=seats,
         effective_stack_bb=eff,
     )
-    assert out["SIZES_OPEN_OTHERS"] == [2.0]
+    assert out["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener HJ → SIZES_OPEN_HJ
     # pt42b — CASO B: HJ open em 8-handed → candidatos IP = [CO, BU].
     # Eff(HJ, CO) = min(107768, 34502)/1600 = 21.56 BB < 26 → 2.3×opener + ALLIN.
     # Eff(HJ, BU) = min(107768, 448265)/1600 = 67.36 BB >= 35 → 3.0×opener.
@@ -2006,7 +2010,8 @@ def test_build_sizings_overrides_drops_ALLIN_when_eff_at_action_above_threshold(
         effective_stack_bb=25.0,
     )
     # eff_at_action = min(2500, max(2500-50, 2500-100, 2500, 2500)) = 2450 → 24.5 BB ≤ 25.
-    assert out_below["SIZES_OPEN_OTHERS"] == [2.0, "ALLIN"]
+    # pt89: opener C = idx0 em 5-handed = HJ (_POSITION_LABELS_BY_N[5][0]).
+    assert out_below["SIZES_OPEN_HJ"] == [2.0, "ALLIN"]
 
     hh_above_threshold = hh_at_threshold.replace("2500 in chips", "2600 in chips")
     seats = derive_seats_in_preflop_order(hh_above_threshold)
@@ -2015,7 +2020,7 @@ def test_build_sizings_overrides_drops_ALLIN_when_eff_at_action_above_threshold(
         effective_stack_bb=26.0,
     )
     # eff_at_action = min(2600, 2600-50=2550) = 2550 → 25.5 BB > 25.
-    assert out_above["SIZES_OPEN_OTHERS"] == [2.0]
+    assert out_above["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener C = idx0 5-handed = HJ
 
 
 def test_build_sizings_overrides_classic_3bet_uses_real_sizing_when_deep():
@@ -2361,8 +2366,8 @@ def test_open_allin_jam_with_eff_above_8_adds_2bb_default():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=15.0)
-    # UTG (C) hrc_idx 0 → SIZES_OPEN_OTHERS.
-    assert out["SIZES_OPEN_OTHERS"] == [2.0, "ALLIN"]  # pt70 ordem [size, ALLIN]
+    # C = idx0 em 5-handed = HJ (pt89: per-posição, _POSITION_LABELS_BY_N[5][0]).
+    assert out["SIZES_OPEN_HJ"] == [2.0, "ALLIN"]  # pt70 ordem [size, ALLIN]
 
 
 def test_open_allin_jam_with_eff_below_8_no_default():
@@ -2374,7 +2379,7 @@ def test_open_allin_jam_with_eff_below_8_no_default():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=7.0)
-    assert out["SIZES_OPEN_OTHERS"] == ["ALLIN"]
+    assert out["SIZES_OPEN_HJ"] == ["ALLIN"]   # pt89: opener C = idx0 5-handed = HJ
 
 
 def test_open_allin_jam_position_SB_uses_blind_table():
@@ -2717,8 +2722,8 @@ def test_build_sizings_overrides_caso_B_no_3bet_real():
         hh, level_sb=50, level_bb=100, seats=seats,
         effective_stack_bb=50.0,
     )
-    # Open caught — eff > 25 → só [2.0].
-    assert out["SIZES_OPEN_OTHERS"] == [2.0]
+    # Open caught — eff > 25 → só [2.0]. pt89: opener = idx0 em 6-handed = MP.
+    assert out["SIZES_OPEN_MP"] == [2.0]
     # CASO B — 3 candidatos IP, todos com eff(opener,candidate) ~= 48 BB (>=35).
     assert out["SIZES_3BET_HJ"] == [6.0]
     assert out["SIZES_3BET_CO"] == [6.0]
@@ -2756,7 +2761,7 @@ def test_build_sizings_overrides_caso_A_overrides_caso_B_in_3bettor_position():
         hh, level_sb=50, level_bb=100, seats=seats,
         effective_stack_bb=50.0,
     )
-    assert out["SIZES_OPEN_OTHERS"] == [2.0]
+    assert out["SIZES_OPEN_MP"] == [2.0]   # pt89: opener = idx0 em 6-handed = MP
     # CASO A — HJ 3-betou (sizing real 6 BB; eff spot >25 → só [6.0]).
     assert out["SIZES_3BET_HJ"] == [6.0]
     # CASO B — CO/BU ficaram, bucket >=35 → 6.0 também.
@@ -2859,7 +2864,8 @@ def test_build_sizings_overrides_open_jam_caso_B_still_generated():
         effective_stack_bb=15.0,
     )
     # Open ALLIN (1500 = 100% stack) + default 2 BB (ordem pt70 [size, ALLIN]).
-    assert out["SIZES_OPEN_OTHERS"] == [2.0, "ALLIN"]
+    # pt89: opener = idx0 em 6-handed = MP.
+    assert out["SIZES_OPEN_MP"] == [2.0, "ALLIN"]
     # pt70 LEI B1: CASO B sobre open ALL-IN → iso = 2.5 × opener_to_bb(15) = 37.5
     # (eff do 3-bettor 50 BB > 25 → sem ALLIN). Já NÃO é 2.3×shove.
     assert out["SIZES_3BET_HJ"] == [37.5]
@@ -2917,8 +2923,9 @@ def test_generate_hrc_script_for_hand_GG_HJ_open():
     )
     assert err is None
     assert eff == 133.33
-    assert overrides["SIZES_OPEN_OTHERS"] == [2.0]
-    assert "let SIZES_OPEN_OTHERS = [2];" in js
+    # pt89: opener desta mão (5-handed) é rotulado CO → SIZES_OPEN_CO.
+    assert overrides["SIZES_OPEN_CO"] == [2.0]
+    assert "let SIZES_OPEN_CO = [2];" in js
     # Outras vars não tocadas → default do template.
     # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
     assert "let SIZES_OPEN_BU = [2];" in js
@@ -3177,10 +3184,10 @@ def test_build_queue_zip_writes_script_js_for_hand_with_open():
     assert meta["script_path"] == "script.js"
 
     js = zf.read("GG-OPEN/script.js").decode("utf-8")
-    # UTGopener é UTG (idx 0 em 8-handed) → SIZES_OPEN_OTHERS substituído.
+    # UTGopener é UTG (idx 0 em 8-handed) → SIZES_OPEN_UTG substituído (pt89).
     # Open size = 1200/400 = 3 BB. Eff stack = 10000/400 = 25 → override do
     # gerador inclui ALLIN (eff ≤ 25). ALLIN aqui vem do override, não do default.
-    assert "let SIZES_OPEN_OTHERS = [3, ALLIN];" in js
+    assert "let SIZES_OPEN_UTG = [3, ALLIN];" in js
     # Outras vars intactas → default do template.
     # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
     assert "let SIZES_OPEN_BU = [2];" in js
@@ -3188,7 +3195,7 @@ def test_build_queue_zip_writes_script_js_for_hand_with_open():
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
     assert entry["has_script"] is True
-    assert entry["script_overrides"]["SIZES_OPEN_OTHERS"] == [3.0, "ALLIN"]
+    assert entry["script_overrides"]["SIZES_OPEN_UTG"] == [3.0, "ALLIN"]
     assert entry["effective_stack_bb"] == 25.0
     assert entry["aggressor_position"] == 0  # UTG=0 em 8-handed (HRC docs conv)
     assert entry["aggressor_source"] == "real"  # pt36: open real → "real"

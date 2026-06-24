@@ -62,7 +62,8 @@ def test_count_lines_for_position_SB_default_has_extra_complete():
 
 def test_count_lines_for_position_override_1_entry_eff_above_25():
     """Override do Trabalho A com [size] (1 entrada) → 1 linha."""
-    overrides = {"SIZES_OPEN_OTHERS": [2.5]}
+    # pt89: open per-posição → a chave do UTG é SIZES_OPEN_UTG (era OTHERS).
+    overrides = {"SIZES_OPEN_UTG": [2.5]}
     assert count_lines_for_position("UTG", overrides) == 1
 
 
@@ -265,8 +266,10 @@ def test_offset_GG6028190109_6max_HJ_small_returns_2():
 def test_compute_target_node_offset_override_eff_above_25_collapses_buckets():
     """Eff > 25BB → Trabalho A devolve [size] (1 entrada). 5-max com
     HJ/CO/BTN override [2.5]: HJ=0, CO=1, BTN=2, SB-complete=3."""
+    # pt89: open per-posição → HJ/CO levam a sua própria var (era OTHERS partilhado).
     overrides = {
-        "SIZES_OPEN_OTHERS": [2.5],
+        "SIZES_OPEN_HJ": [2.5],
+        "SIZES_OPEN_CO": [2.5],
         "SIZES_OPEN_BU": [2.0],
         "SIZES_OPEN_SB": [3.5],
     }
@@ -410,8 +413,10 @@ def test_derive_aggressor_stack_bb_empty_hh():
 # (SB, blind-vs-blind na tabela de opens); colapso (size≥stack → 1 linha);
 # Complete da SB. stack_bb=None → legacy (coberto pelos testes acima).
 
-_OTH = {"SIZES_OPEN_OTHERS": [2.0]}           # array [size] (opener eff>25, sem ALLIN)
-_OTH_ALLIN = {"SIZES_OPEN_OTHERS": [2.0, "ALLIN"]}  # array [size, ALLIN]
+# pt89: open per-posição — os testes abaixo usam a posição "UTG", logo a var é
+# SIZES_OPEN_UTG (era o partilhado SIZES_OPEN_OTHERS).
+_OTH = {"SIZES_OPEN_UTG": [2.0]}           # array [size] (opener eff>25, sem ALLIN)
+_OTH_ALLIN = {"SIZES_OPEN_UTG": [2.0, "ALLIN"]}  # array [size, ALLIN]
 
 
 def test_count_lines_nonblind_deep_above_25_is_1():
@@ -474,7 +479,12 @@ def test_count_lines_legacy_none_unchanged():
 
 _GG6084189514 = {
     "agg": {"type": "raise", "position": "CO", "size_bb": 2.0},
-    "overrides": {"SIZES_OPEN_OTHERS": [2.0]},
+    # pt89: open per-posição — cada posição antes do CO leva a sua própria var
+    # (era o partilhado SIZES_OPEN_OTHERS). Valores [2.0] inalterados.
+    "overrides": {
+        "SIZES_OPEN_UTG": [2.0], "SIZES_OPEN_UTG1": [2.0],
+        "SIZES_OPEN_MP": [2.0], "SIZES_OPEN_HJ": [2.0], "SIZES_OPEN_CO": [2.0],
+    },
     "raiser_stack_bb": 32.43,
     "stacks": {"UTG": 15.95, "UTG1": 10.96, "MP": 74.67, "HJ": 71.84,
                "CO": 32.43, "BTN": 63.2, "SB": 12.54},
@@ -493,3 +503,37 @@ def test_offset_gg6084189514_new_lands_on_CO():
     c = _GG6084189514
     assert compute_target_node_offset(
         c["agg"], 8, c["overrides"], c["raiser_stack_bb"], c["stacks"]) == 6
+
+
+# ── pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION) — split per-posição não contamina ──
+# O bug antigo: SIZES_OPEN_OTHERS partilhado → um ALLIN injectado no open de UMA
+# posição contava +1 linha em TODAS as posições antes do agressor (âncora a saltar).
+# Com o split per-posição, cada open vive na sua var e não vaza para as outras.
+
+def test_count_lines_per_position_no_contamination_pt89():
+    # CO tem [2.0, ALLIN] na SUA var; UTG fundo (>25) NÃO herda esse ALLIN.
+    ov = {"SIZES_OPEN_CO": [2.0, "ALLIN"]}
+    assert count_lines_for_position("UTG", ov, stack_bb=88.0) == 1   # só o size
+    # E a própria CO conta as 2 linhas (size + ALLIN explícito).
+    assert count_lines_for_position("CO", ov, stack_bb=88.0) == 2
+
+
+def test_anchor_offset_consistent_after_split_pt89():
+    # Prova de que a âncora NÃO se re-parte com o split per-posição.
+    # GG-6084189514 (8-max, agg CO, stacks reais): âncora pousa no nó do CO (6).
+    agg = {"type": "raise", "size_bb": 2.0, "position": "CO"}
+    stacks = {"UTG": 15.95, "UTG1": 10.96, "MP": 74.67, "HJ": 71.84,
+              "CO": 32.43, "BTN": 63.2, "SB": 12.54}
+    base = compute_target_node_offset(agg, 8, {}, 32.43, stacks)
+    assert base == 6   # UTG/UTG1 (≤25)=2 cada, MP/HJ (>25)=1 cada → 6
+    # Contaminar o OPEN do BTN (posterior ao CO) NÃO desloca a âncora do CO:
+    # só as posições ANTES do agressor contam, e cada uma na sua própria var.
+    contaminated = compute_target_node_offset(
+        agg, 8, {"SIZES_OPEN_BU": [2.0, "ALLIN"]}, 32.43, stacks)
+    assert contaminated == base
+    # Contaminar o OPEN de UMA posição anterior (HJ) com ALLIN explícito só muda
+    # a linha do HJ (deep>25 ignora o ALLIN implícito, mas o explícito conta) —
+    # e nunca contamina UTG/UTG1/MP. HJ passa de 1→2 → âncora desce 1 (7).
+    hj_allin = compute_target_node_offset(
+        agg, 8, {"SIZES_OPEN_HJ": [2.0, "ALLIN"]}, 32.43, stacks)
+    assert hj_allin == base + 1

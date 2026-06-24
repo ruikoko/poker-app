@@ -206,7 +206,12 @@ def _position_bucket_open(position: Optional[str]) -> str:
         return "SB"
     if p == "BB":
         return "BB"
-    return "OTHERS"
+    # pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION) — per-posição (UTG1/UTG/MP/HJ/CO),
+    # reusando o mapa canónico dos 3-bets. BU já tratado acima.
+    canon = _canonical_3bet_position(position)
+    if canon and canon != "BU":
+        return canon
+    return "OTHERS"   # fallback defensivo (label fora do esperado)
 
 
 def _postflop_rank(preflop_idx: int, n: int) -> int:

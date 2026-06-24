@@ -23,6 +23,16 @@ let ALLIN = 9999;
 // de short + deep stacks (smoke pt29 GG-5944816316: 26.9 GB > limite 20.4
 // GB). 3-bet/4-bet/5-bet arrays mantem o ALLIN literal (lógica SPR-efectivo
 // continua valida em pots ja levantados).
+// pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION): opens per-posição (era o bucket
+// partilhado SIZES_OPEN_OTHERS). Cada posição não-blind/não-BU tem a sua var,
+// para o gerador overridar SÓ a do opener (size + ALLIN por stack individual)
+// sem vazar para as fundas. Default [2] em todas (= o antigo OTHERS).
+let SIZES_OPEN_UTG1 = [2];
+let SIZES_OPEN_UTG  = [2];
+let SIZES_OPEN_MP   = [2];
+let SIZES_OPEN_HJ   = [2];
+let SIZES_OPEN_CO   = [2];
+// SIZES_OPEN_OTHERS = fallback defensivo p/ labels inesperados (fora de UTG1/UTG/MP/HJ/CO).
 let SIZES_OPEN_OTHERS = [2];
 let SIZES_OPEN_BU = [2];
 let SIZES_OPEN_SB = [3.5];
@@ -228,7 +238,21 @@ function getSizingsOpening(ctx) {
 	if (player == ctx.getPlayerIndexBigBlind()) //BB
 		return SIZES_OPEN_BB.map(s => ctx.sizingBigBlinds(s));
 
-	return SIZES_OPEN_OTHERS.map(s => ctx.sizingBigBlinds(s));
+	// pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION) — per-posição (era SIZES_OPEN_OTHERS
+	// partilhado). Reusa positionLabelForIdx (helper pt42b).
+	return openSizesForPosition(positionLabelForIdx(player, ctx.getNumberOfPlayers()))
+		.map(s => ctx.sizingBigBlinds(s));
+}
+
+function openSizesForPosition(label) {
+	switch (label) {
+		case "UTG1": return SIZES_OPEN_UTG1;
+		case "UTG":  return SIZES_OPEN_UTG;
+		case "MP":   return SIZES_OPEN_MP;
+		case "HJ":   return SIZES_OPEN_HJ;
+		case "CO":   return SIZES_OPEN_CO;
+		default:     return SIZES_OPEN_OTHERS;   // fallback defensivo
+	}
 }
 
 function getSizings3Bets(ctx) {

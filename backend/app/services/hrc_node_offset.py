@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from app.services.hrc_script_gen import _parse_seat_stacks
+from app.services.hrc_script_gen import _parse_seat_stacks, _canonical_3bet_position
 from app.services.queue_export import (
     _POSITION_LABELS_BY_N,
     find_preflop_marker,
@@ -62,7 +62,13 @@ _SB_COMPLETE_LINES = 1
 # (`mtt_advanced_canonical_2026.js`): 1 sizing por bucket, SEM ALLIN (o ALLIN
 # implícito é adicionado em runtime pelo template, por stack individual).
 _TEMPLATE_DEFAULT_OPEN_ARRAY = {
-    "SIZES_OPEN_OTHERS": [2.0],
+    # pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION) — opens per-posição (era só OTHERS).
+    "SIZES_OPEN_UTG1": [2.0],
+    "SIZES_OPEN_UTG": [2.0],
+    "SIZES_OPEN_MP": [2.0],
+    "SIZES_OPEN_HJ": [2.0],
+    "SIZES_OPEN_CO": [2.0],
+    "SIZES_OPEN_OTHERS": [2.0],   # fallback defensivo
     "SIZES_OPEN_BU": [2.0],
     "SIZES_OPEN_SB": [3.5],
     "SIZES_OPEN_BB": [4.0],
@@ -110,7 +116,11 @@ def _bucket_open_for_position(position: str) -> str:
         return "SIZES_OPEN_SB"
     if p == "BB":
         return "SIZES_OPEN_BB"
-    return "SIZES_OPEN_OTHERS"
+    # pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION) — espelha o gerador: per-posição.
+    canon = _canonical_3bet_position(position)
+    if canon and canon != "BU":
+        return f"SIZES_OPEN_{canon}"
+    return "SIZES_OPEN_OTHERS"   # fallback defensivo
 
 
 def count_lines_for_position(
