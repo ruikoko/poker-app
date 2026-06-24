@@ -195,14 +195,23 @@ def queue_release(payload: dict = Body(...),
         try:  # guard profundo: o pack é gerável?
             pk = lookup_payouts([h])
             bk = lookup_bounties([h])
-            zb = build_queue_zip([h], pk, include_no_payout=True,
+            # (#include_no_payout-mismatch): include_no_payout=False alinha o release
+            # com o que o GET /hrc serve. Sem isto, uma mão sem payout passava o guard
+            # (True) e era LIBERTADA, mas o adapter (GET, False) nunca a servia →
+            # released-fantasma presa em hrc_queue_release.
+            zb = build_queue_zip([h], pk, include_no_payout=False,
                                  filters_meta={"single_hand": hid}, bounty_by_key=bk)
             with zipfile.ZipFile(io.BytesIO(zb)) as zf:
                 man = json.loads(zf.read("manifest.json"))
             if man.get("total_in_zip", 0) == 0:
-                sk = man.get("skipped") or []
-                skipped.append({"hand_id": hid,
-                                "reason": (sk[0].get("reason") if sk else "não exportável")})
+                # sem payout → vai para `missing_payouts` (não `skipped`): motivo claro.
+                if man.get("missing_payouts"):
+                    reason = ("sem payout — não pode ir ao HRC "
+                              "(torneio sem estrutura de prémios)")
+                else:
+                    sk = man.get("skipped") or []
+                    reason = sk[0].get("reason") if sk else "não exportável"
+                skipped.append({"hand_id": hid, "reason": reason})
                 continue
         except Exception as e:
             skipped.append({"hand_id": hid,
