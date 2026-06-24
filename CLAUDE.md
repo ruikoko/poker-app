@@ -192,8 +192,8 @@ A app cruza as duas para produzir `hands.all_players_actions` enriquecido. **Est
 
 Cada linha em `hands` tem `study_state`. As duas pistas não se devem contaminar:
 
-- **Arquivo de torneio**: imports em bulk (`.zip` HH) entram com `study_state = 'mtt_archive'`. Aparecem só na secção **Torneios** (drill-down por torneio) — **nunca** na página Mãos.
-- **Estudo**: uma mão entra em `new` apenas quando chega um screenshot (ou marcação manual). Depois percorre `new → review → studying → resolved`. A página Mãos mostra o track de estudo.
+- **Arquivo de torneio**: imports em bulk (`.zip` HH) entram com `study_state = 'mtt_archive'`. Aparecem só na secção **Torneios** (drill-down por torneio) — **nunca** na página Mãos. **⚠️ Nota (pt88): o `mtt_archive` era pensado só para a GG ANONIMIZADA** (não se pode estudar sem nicks). As **não-GG (PS/WN/WPN) são mãos de ESTUDO** — entram em `'new'` e vão para Estudo directo (têm nicks reais), por desenho. Hoje o `import_.py` mete **tudo** em `'new'` (site-agnóstico): correto para as não-GG; para a GG bulk é só um **mislabel cosmético sem sintoma** (escondida do Estudo pelo gate `match_method`; visível em Torneios na mesma, que filtra por site/SS, não por `study_state`). Ver `#STUDY-STATE-REGRESSION-HH-IMPORT` (reclassificado em `TECH_DEBTS pt88` — **não é bug**).
+- **Estudo**: uma mão entra em `new` apenas quando chega um screenshot (ou marcação manual) — **ou directamente, no caso das HH não-GG (PS/WN/WPN) que já têm nicks reais**. Depois percorre `new → review → studying → resolved`. A página Mãos mostra o track de estudo.
 
 Ao listar mãos, **filtrar sempre por `study_state` explicitamente**. "Todas as mãos" quase nunca é o que a UI quer.
 

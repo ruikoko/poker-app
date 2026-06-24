@@ -1,5 +1,21 @@
 # Pendentes — backlog vivo
 
+## ★ pt88 (24 Jun 2026) — 2 fixes em prod + reclassificação do study-state
+
+- ✅ **`#POST-TABLE-SS-MOVE-EM-VISION-FAILED`** (commit `c5a2a29`, origin/main) — table-SS `vision_failed`
+  deixa de ser movida com ✓ falso; passa a `retry` (fica, re-envia no próximo run), paridade com o
+  lobby. Tool local appimport, sem deploy. (Detalhe em `TECH_DEBTS pt88`.)
+- ✅ **`#include_no_payout-mismatch`** (commit `078072f`, deploy Railway SUCCESS) — `/hrc/release`
+  alinhado a `include_no_payout=False`; mão sem payout **rejeitada com motivo claro**
+  (`sem payout — não pode ir ao HRC (torneio sem estrutura de prémios)` no tooltip de "ignoradas")
+  em vez de **released-fantasma** presa sem nunca correr.
+- 🟢 **`#STUDY-STATE-REGRESSION-HH-IMPORT` reclassificado — NÃO é bug.** As não-GG (PS/WN/WPN) são
+  mãos de estudo → `'new'`/Estudo é **correto e documentado** ("PS/WN/WPN HH sem SS → Estudo directo").
+  A premissa "deviam arquivar" vinha da spec pt27 "Duas pistas", que era **só para GG anonimizada**.
+  Só a **GG bulk** tem mislabel cosmético (`'new'` vs `'mtt_archive'`) **sem sintoma** (escondida do
+  Estudo pelo gate `match_method`; visível em Torneios na mesma). Acionável = **só doc, sem backfill**;
+  nota acrescentada à spec "Duas pistas" no `CLAUDE.md`. (Detalhe em `TECH_DEBTS pt88`.)
+
 ## ★ pt87 (24 Jun 2026) — verify-gate do save-as FEITO + VALIDADO EM PRODUÇÃO; 3 problemas novos do smoke
 
 **`#HRC-WATCHER-SAVE-NOT-PERSISTED` ✅ FEITO + VALIDADO EM PRODUÇÃO (24 Jun).** Causa: o
