@@ -264,8 +264,16 @@ def _imgs_in(folder):
 # ── Envio de 1 ficheiro (reutilizado pelas várias fontes) ─────────────────────
 
 def _post_table_ss(session, path, fname, folder_tag=None):
-    """POST /api/table-ss/upload. Devolve (ok, resumo). `folder_tag` (pasta-como-tag,
-    pt72) viaja como form field opcional; o backend aplica-o à mão casada."""
+    """POST /api/table-ss/upload. Devolve (status, resumo); status ∈
+    {'table', 'retry', 'fail'}. 'retry' = transitório — result == 'vision_failed'
+    (a Vision falhou apesar do 200: soluço/créditos) → NÃO mover, re-envia no
+    próximo run (paridade com _post_lobby; retry infinito do lado do ficheiro).
+    `folder_tag` (pasta-como-tag, pt72) viaja como form field opcional; o backend
+    aplica-o à mão casada.
+
+    Âmbito do retry = SÓ vision_failed. json_invalid/site_undetected seguem como
+    'table' (move), como antes — não melhoram com retry cego. O backend guarda
+    img_b64 + folder_tag e tem POST /api/table-ss/reprocess-failed p/ esses casos."""
     mime = _IMG[os.path.splitext(fname)[1].lower()]
     data = {"folder_tag": folder_tag} if folder_tag else None
     try:
@@ -274,10 +282,17 @@ def _post_table_ss(session, path, fname, folder_tag=None):
                              files={"file": (fname, fh, mime)}, data=data,
                              timeout=600)
     except Exception as e:
-        return (False, f"EXC {type(e).__name__}: {e}")
-    if 200 <= r.status_code < 300:
-        return (True, _summary_line(r))
-    return (False, f"HTTP {r.status_code} {r.text[:120]}")
+        return ("fail", f"EXC {type(e).__name__}: {e}")
+    if not (200 <= r.status_code < 300):
+        return ("fail", f"HTTP {r.status_code} {r.text[:120]}")
+    j = {}
+    try:
+        j = r.json()
+    except Exception:
+        pass
+    if j.get("result") == "vision_failed":
+        return ("retry", "Vision falhou (transitório)")
+    return ("table", _summary_line(r))
 
 
 def _post_screenshot(session, path, fname):
@@ -521,12 +536,15 @@ def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_
             continue
 
         if kind == "MESA":
-            ok, msg = _post_table_ss(session, path, fname, folder_tag=folder_tag)
-            if ok:
+            status, msg = _post_table_ss(session, path, fname, folder_tag=folder_tag)
+            if status == "retry":
+                c["retry"] += 1
+                print(f"   ⟳ MESA   {fname}: {msg} → retry depois (não movido)")
+            elif status == "table":
                 c["mesa"] += 1
                 print(f"   ✓ MESA   {fname}: {msg}")
                 shutil.move(path, _dest_no_clobber(done_table, fname))
-            else:
+            else:  # fail (exceção / HTTP não-2xx) — comportamento de sempre
                 c["fail"] += 1
                 print(f"   ✗ MESA   {fname}: {msg} → retry depois")
         else:  # LOBBY — tag da pasta NÃO se aplica (lobby ≠ mão de estudo)
