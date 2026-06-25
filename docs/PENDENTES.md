@@ -45,9 +45,23 @@ pt66-70 que estavam listados "re-smoke pendente / fix em buffer").
 **Continuam pendentes (não tocados pelo pt87):** `#HRC-ADAPTER-STATE-DESYNC-SILENT` (🔴, abaixo),
 `#HRC-WATCHER-BETTING-SCRIPT-STALL` (🟠, abaixo), `#HRC-ANCHOR-NONBLIND-LIMP` (Passo 2, abaixo).
 
-## ★ pt86c — adapter ignora mãos em silêncio quando o state.json dessincroniza (`#HRC-ADAPTER-STATE-DESYNC-SILENT`) — 🔴 HIGH
+## ✅ FECHADO (pt89, `bf2da9a`, deployed) — `#HRC-ADAPTER-STATE-DESYNC-SILENT`
 
-**NOVO HIGH** (ver `TECH_DEBTS pt86c`). O adapter salta em silêncio mãos que já constam do
+**Era 🔴 HIGH diferido.** Causa-raiz operacional resolvida do **lado do servidor**: o
+re-envio (`POST /hrc/release`) usava `ON CONFLICT DO NOTHING` → re-enviar uma mão já
+libertada era no-op, o `requeue_epoch` não subia, e o adapter saltava-a em silêncio
+(`hrc_adapter.py:262`). **Fix:** `ON CONFLICT DO UPDATE` incrementa `requeue_epoch` (+1)
+no re-envio → `served_epoch > stored` → o adapter re-puxa sozinho e loga `re-queue`
+(mecanismo pt83, já existente). Release fresco = epoch 0 (adapter puxa na mesma). **Sem
+mudanças no adapter, sem rebuild.** Consumidor único verificado (manifest → dedup do
+adapter). +teste `test_release_rerelease_bumps_epoch`. Ver `JOURNAL_2026-06-25-pt89.md`,
+`TECH_DEBTS pt89`.
+
+As opções (a)/(b)/(c) abaixo (robustez do `state.json` no adapter) ficam **dispensáveis**
+para o sintoma real (re-envio não corre); só voltam a interessar se aparecer um desync de
+outra natureza. Registo histórico do plano:
+
+**(diferido — robustez adicional do adapter, não necessária agora).** O adapter saltava em silêncio mãos que já constavam do
 `state.json` local mesmo quando o servidor as volta a oferecer (dedup `hrc_adapter.py:262`);
 fica em "entering main loop" a puxar 0 — opaco para o Rui. O "Disparar" da app não toca no
 state local → desencontro garantido. **Já não há razão para o skip permanente:** desde o
