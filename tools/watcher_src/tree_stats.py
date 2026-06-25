@@ -243,14 +243,23 @@ def _crop_group(img, win_origin, group_rect, upscale: int):
 # ----------------------------------------------------------------------------- #
 async def _ocr_async(png_bytes: bytes) -> str:
     # imports localizados: erro de dependência fica claro e não parte o import do módulo
-    from winsdk.windows.graphics.imaging import BitmapDecoder
-    from winsdk.windows.media.ocr import OcrEngine
-    from winsdk.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
-    from winsdk.windows.globalization import Language
+    # dual-import: winsdk (Py<=3.13) OU winrt-* (Py 3.14+; API idêntica)
+    try:
+        from winsdk.windows.graphics.imaging import BitmapDecoder
+        from winsdk.windows.media.ocr import OcrEngine
+        from winsdk.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+        from winsdk.windows.globalization import Language
+    except ImportError:
+        from winrt.windows.graphics.imaging import BitmapDecoder
+        from winrt.windows.media.ocr import OcrEngine
+        from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+        from winrt.windows.globalization import Language
 
     stream = InMemoryRandomAccessStream()
     writer = DataWriter(stream.get_output_stream_at(0))
-    writer.write_bytes(list(png_bytes))
+    # bytearray: aceite por winrt E winsdk. Se um build winsdk reclamar, reverter
+    # SÓ este arg para list(png_bytes).
+    writer.write_bytes(bytearray(png_bytes))
     await writer.store_async()
     await writer.flush_async()
     stream.seek(0)
