@@ -24,12 +24,14 @@ LOBBY_DIR = r"C:\Users\User\Pictures\Screenshots"
 LOBBY_SINCE = "2026-05-30"
 
 # (OPCIONAL) Fonte "gold": pasta EXTERNA das GOLD IMAGES (a descarga completa da
-# mão pelo botão do replayer GG; ex. a pasta Documents). TODAS as imagens (.png/
-# .jpg) são enviadas para /api/screenshots — SEM filtro de mês (a pasta só tem
-# gold images, de qualquer mês). Em sucesso o ficheiro é MOVIDO para
+# mão pelo botão do replayer GG). TODAS as imagens (.png/.jpg) são enviadas para
+# /api/screenshots — SEM filtro de mês. Em sucesso o ficheiro é MOVIDO para
 # PARENT_DIR/done/gold (sai da pasta de origem). O backend dedupa por file_hash.
 # Comenta/remove para desligar.
-GOLD_DIR = r"C:\Users\User\Documents"
+# ⚠️ USA UMA SUBPASTA DEDICADA, não a raiz de Documents: o read é NÃO-RECURSIVO e
+#    envia TODAS as imagens que estiverem nesta pasta — apontar à raiz de Documents
+#    arriscava enviar imagens que nada têm a ver com poker. Recomendado: Documents\Gold.
+GOLD_DIR = r"C:\Users\User\Documents\Gold"
 
 # (OPCIONAL) JANELA DE DATAS das IMAGENS — aplica-se a it / manual / lobby /
 # LOBBY_DIR (NÃO a gg_hh/gg_ts, que entram sempre por inteiro). Conceito

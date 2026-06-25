@@ -7,12 +7,17 @@ Source + harness + OCR (smoke #1 no Beelink) + bundle do `.exe` **verificados**.
 SHA256 `69e741c2f8b80e3f1323aaa1fe6150adb046d3b83ef87debadf7613321cc673c` (32 988 546 B);
 Release https://github.com/ruikoko/poker-app/releases/tag/watcher-pt90.
 
+**Instalado no Beelink — REPORTADO pelo Rui (26 Jun):** o `.exe` `watcher-pt90` (SHA acima) foi
+instalado; o **pt87 foi guardado em `C:\hrc\backup_watcher`** como rollback. ⚠️ Nota: um backup do
+exe anterior no Beelink **fricciona com a regra «1 só watcher exe»** (o histórico devia viver no
+PC+git) — registado aqui para não se perder; decidir se `C:\hrc\backup_watcher` fica ou se limpa
+depois do smoke OK. *(Estado da instalação por confirmação de SHA round-trip no próprio Beelink.)*
+
 **Falta (operacional, Rui+Web no Beelink):**
-1. **Descarregar da Release + confirmar o SHA256** antes de instalar (round-trip do binário).
-2. **Instalar no Beelink** (regra «1 só exe»; salas fechadas — regra de sessão).
-3. **Smoke end-to-end no `.exe`:** (a) mão normal corre; (b) tree gigante forçada → `.failed`
+1. ~~Descarregar da Release + confirmar o SHA256~~ / ~~Instalar no Beelink~~ — **reportado feito** (ver acima; SHA round-trip a confirmar no Beelink).
+2. **Smoke end-to-end no `.exe`:** (a) mão normal corre; (b) tree gigante forçada → `.failed`
    com motivo "tree gigante: X GB > 15"; (c) OCR forçado a falhar → corre na mesma (`ocr_ok:false`).
-4. Só depois de (3) OK: dar `#HRC-TREE-GIGANTE` por **fechado** e ponderar merge `watcher-gate`→`main`.
+3. Só depois de (2) OK: dar `#HRC-TREE-GIGANTE` por **fechado** e ponderar merge `watcher-gate`→`main`.
 
 ## ★ `#WATCHER-JANELA-DE-TRABALHO-ETA` (FUTURO, URGENTE) — janela de trabalho + travão por ETA/custo
 
@@ -58,6 +63,37 @@ leitura do ETA for cara.
 
 > Estado: **FUTURO/URGENTE — medição pendente no Beelink**. Não construir antes de medir os 3 sinais.
 > Cross-ref: pt90 (`#HRC-TREE-GIGANTE`, infra OCR), `TECH_DEBTS_INVENTARIO.md` (secção homónima).
+
+## ★ `#APPIMPORT-DATE-FILTER-IT-GOLD` (appimport — filtro de data `--desde/--ate` por NOME)
+
+Pedido do Rui: filtrar `--desde/--ate` também por **data do NOME** do ficheiro nas fontes de
+imagem `it` e `gold`, para **não ter de mover ficheiros à mão por data**. **Investigação read-only
+feita (26 Jun):**
+
+- **`it` — JÁ FUNCIONA, nada a fazer.** O filtro `--desde/--ate` já se aplica aos `it` e já lê a
+  data **do NOME** (`classify_it_file` extrai `YYYYMMDDHHMMSS` da cauda `-YYYYMMDDHHMMSS-NN`;
+  `_img_date(path, captured)` em `process_it_mixed`). **Provado** correndo as funções sobre nomes
+  reais: 22/06 e 25/06 saem **FORA**, 23/06 **DENTRO** com `--desde/--ate 2026-06-23`. (Formato
+  novo `GGnet.exe-<Título>-<YYYYMMDDHHMMSS>-<NN>.png`; antigo `Shot<N>-<Site>-<YYYYMMDDHHMMSS>` →
+  `_OLD_SHOT_RE`, também com data; nome sem data → SKIP, nem é enviado, ou fallback a `mtime`.)
+- **`gold` — FALTA. É o único gap.** `process_gold_dir(session, live)` **não tem parâmetro
+  `window`** e é chamada sem janela (de propósito: "SEM filtro de mês"). Os nomes gold/manual são
+  `YYYY-MM-DD_ HH-MM_AM|PM_$SB_$BB_#TM.png` (data **no início**, hora **12h AM/PM**).
+  **Mudança** (1 ficheiro, `tools/appimport/app_import.py`): helper `_gold_name_date(fname)`
+  (regex `^(\d{4}-\d{2}-\d{2})_\s*(\d{2})-(\d{2})_(AM|PM)` → datetime 24h, **fallback a `mtime`**
+  se não casar, para nunca descartar em silêncio) + `process_gold_dir(..., window=None)` + passar
+  `window=img_window` no `main()` + contagem "fora da janela".
+- ⚠️ **Decisão de produto POR FECHAR antes de construir:** a data do nome gold/manual é a do
+  **DOWNLOAD**, **não** a hora de jogo (`#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE`).
+  Para "não enviar meses antigos" serve (≈ `mtime`, que o `manual`/`lobby` já usam); se o objetivo
+  fosse filtrar pela **hora a que a mão foi jogada**, o nome do gold **não** ta dá. Confirmar o
+  objetivo antes de desenhar.
+- **Contexto (mudança de hoje):** o `GOLD_DIR` do `config_local.py` passou de `Documents` (raiz)
+  para a **subpasta dedicada `Documents\Gold`** — `config_local.py` é gitignored, mas o
+  `config_local.example.py` foi alinhado (a raiz era perigosa: o read é **não-recursivo** e
+  enviaria **todas** as imagens da pasta). Ver `#GOLD-DIR-DEDICATED-SUBFOLDER`.
+
+> Estado: **investigação feita; construção POR FAZER** (aguarda decisão download-time vs play-time).
 
 ## ★ pt88 (24 Jun 2026) — 2 fixes em prod + reclassificação do study-state
 
