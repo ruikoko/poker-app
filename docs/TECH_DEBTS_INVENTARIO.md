@@ -6,6 +6,19 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt90 (25 Jun 2026 — captura OCR do tamanho da tree + abort preventivo; Release watcher-pt90)
+
+**★ Guarda preventiva de trees gigantes shipped no `watcher-gate` + Release `watcher-pt90`.**
+O watcher lê as estatísticas da tree (OCR read-only do painel "Tree Statistics") logo após a
+Fase 2 do finish-wait (tree size já computado, **ANTES da 1ª run**) e aborta as gigantes pelo
+mecanismo `.failed` existente. **End-to-end no `.exe` por validar no Beelink (smoke).**
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#HRC-TREE-GIGANTE` | 🟢 **FIX SHIPPED (watcher-gate `9609ab6`+`7384ed2`, Release `watcher-pt90`); end-to-end `.exe` PENDENTE** | `tools/watcher_src/tree_stats.py` (novo) lê `{nodes, gb, hrc_available_gb}` por OCR (PrintWindow `PW_RENDERFULLCONTENT` + `Windows.Media.Ocr`; **dual-import winsdk (Py≤3.13) / winrt (Py3.14+)**; nunca lança). Hook em `_wait_for_finish_ready` (Fase 2): regista stats no `meta.json` (`tree_nodes`/`tree_size_gb`/`hrc_available_gb`/`build_seconds`/`solve_seconds`/`ocr_ok`) + **abort por DUPLA LEITURA** — aborta (raise → `.failed`, como a Fase 2 timeout) SÓ se ambas as leituras `ok` E concordarem que `gb > TREE_GB_ABORT_LIMIT`(15) **OU** `> hrc_available`; OCR falhado / leituras a discordar → **NUNCA aborta (fail-open)**. Cross-check do tempo-de-build **descartado** (gigantes 2-3s / normais <1s — janela cega). **Validação:** OCR provado em Python real no Beelink (smoke #1: `nodes=507581, tree=3.8GB, hrc=19.9GB` certos contra o painel); harness `swap_and_smoke` **ALL OK**; bundle do `.exe` verificado por TOC (`tree_stats` + winsdk OCR `media.ocr`/`graphics.imaging`/`storage.streams`/`globalization` + `_winrt.pyd` presentes → guarda viva, não fail-open-morta). **`.exe`: SHA256 `69e741c2f8b80e3f1323aaa1fe6150adb046d3b83ef87debadf7613321cc673c`, 32 988 546 B, Release https://github.com/ruikoko/poker-app/releases/tag/watcher-pt90.** **Falta:** instalar no Beelink (confirmar SHA) + smoke end-to-end (mão normal corre; gigante forçada → `.failed`; OCR forçado a falhar → corre). |
+
+---
+
 ## pt89 (25 Jun 2026 — open per-posição FECHADO + filtros /hrc + registo geral)
 
 | ID | Sev | Resumo |
@@ -44,7 +57,7 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 | `#HRC-WATCHER-SAVE-NOT-PERSISTED` | ✅ **FEITO + VALIDADO EM PRODUÇÃO (24 Jun)** | O "Complete Export" escreve a árvore (40-70 MB) de forma **assíncrona**; o `_close_hand_tab` (pt68, Ctrl+F4) corria contra o write e **cancelava o save** → 0/38 mãos persistiam (`done\Exports\` vazio, watcher preso 24h). **Fix (watcher-gate `6522278`):** `_verify_export_zip` (pt85, antes só observabilidade) passa a **BARREIRA** — devolve bool (existe + tamanho estável + `testzip`), gateia o close-tab; trata `Confirm Save As` (overwrite); 1 retry; em falha marca `.failed` e o watcher **AVANÇA**; `EXPORT_WAIT_TIMEOUT` 24h→30 min. Harness `swap_and_smoke` **19/19**. Exe `e1dced5a`, Release `watcher-pt87`. **Smoke real 24 Jun: WN 36 MB drenou com `[SAVE-AS-CHECK] OK`; lote a drenar (33+).** |
 | `#START-CALC-SELECTED-SUBTREE-NO-POPUP-OPEN` | 🔴 **REABERTO / REGRESSÃO (smoke 24 Jun)** | A 2ª run **volta a não disparar o popup Nash** — bug que fora **fechado em pt32-34** (`c9c8818`/`867460c`/`e58c517`: origem do click `wpos`→`find_hrc()`, OK por BM_CLICK, ciclo ponta-a-ponta). Voltou no smoke pt87. **Investigar porque o fix antigo deixou de pegar** (coord/timing/estado do HRC pós-pt66-70? interação com watchdog/close-tab?). |
 | `#HRC-EXPORT-DIALOG-32770-NO-OPEN` | 🟠 **NOVO (smoke 24 Jun)** | O **diálogo Export Strategies** (`_find_export_dialog`, classe `#32770`, título vazio) **não abre** em alguns casos. **Distinto** das refs `#32770` históricas, que eram do **popup Nash**. Sem o diálogo, `export_strategies` aborta. Investigar o passo Hand→Export Strategies (menu/timing/foco). |
-| `#HRC-TREE-GIGANTE` | 🔴 **NOVO (smoke 24 Jun)** | Uma mão gerou uma árvore **~20 GB** e **sobrecarregou a máquina**; o Rui teve de **cancelar à mão**. Falta **guarda preventiva: medir o tamanho/ETA da tree ANTES da 1ª run** e abortar/marcar `.failed` acima de um limite, em vez de deixar o HRC explodir. Relacionado (stale): `#HRC-WATCHER-JS-HARDCODED` (pt22, superado pelo gerador per-hand). |
+| `#HRC-TREE-GIGANTE` | 🟢→ **FIX SHIPPED em pt90** (Release `watcher-pt90`; end-to-end `.exe` pendente — ver secção pt90 no topo) | *(diagnóstico à data)* Uma mão gerou uma árvore **~20 GB** e **sobrecarregou a máquina**; o Rui teve de **cancelar à mão**. Falta **guarda preventiva: medir o tamanho/ETA da tree ANTES da 1ª run** e abortar/marcar `.failed` acima de um limite, em vez de deixar o HRC explodir. Relacionado (stale): `#HRC-WATCHER-JS-HARDCODED` (pt22, superado pelo gerador per-hand). |
 
 **Reconciliação — 8 tech debts do watcher pt66-70 ✅ FEITO + VALIDADOS (smoke pt87 24 Jun).** Estavam listados "aberto / Release ptXX / re-smoke pendente / fix em buffer", mas o código está no `main` **E** no exe que correu hoje no Beelink (confirmados a correr, não só committed):
 

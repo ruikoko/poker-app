@@ -1,5 +1,19 @@
 # Pendentes — backlog vivo
 
+## ★ pt90 (25 Jun 2026) — watcher OCR tree-size: instalar `watcher-pt90` + smoke end-to-end
+
+`#HRC-TREE-GIGANTE` **fix shipped** (`watcher-gate` `9609ab6`+`7384ed2`; Release `watcher-pt90`).
+Source + harness + OCR (smoke #1 no Beelink) + bundle do `.exe` **verificados**. **`.exe`:**
+SHA256 `69e741c2f8b80e3f1323aaa1fe6150adb046d3b83ef87debadf7613321cc673c` (32 988 546 B);
+Release https://github.com/ruikoko/poker-app/releases/tag/watcher-pt90.
+
+**Falta (operacional, Rui+Web no Beelink):**
+1. **Descarregar da Release + confirmar o SHA256** antes de instalar (round-trip do binário).
+2. **Instalar no Beelink** (regra «1 só exe»; salas fechadas — regra de sessão).
+3. **Smoke end-to-end no `.exe`:** (a) mão normal corre; (b) tree gigante forçada → `.failed`
+   com motivo "tree gigante: X GB > 15"; (c) OCR forçado a falhar → corre na mesma (`ocr_ok:false`).
+4. Só depois de (3) OK: dar `#HRC-TREE-GIGANTE` por **fechado** e ponderar merge `watcher-gate`→`main`.
+
 ## ★ pt88 (24 Jun 2026) — 2 fixes em prod + reclassificação do study-state
 
 - ✅ **`#POST-TABLE-SS-MOVE-EM-VISION-FAILED`** (commit `c5a2a29`, origin/main) — table-SS `vision_failed`
@@ -39,8 +53,9 @@ pt66-70 que estavam listados "re-smoke pendente / fix em buffer").
   o popup Nash (estava fechado em pt32-34; voltou). **Investigar porque o fix antigo deixou de pegar.**
 - 🟠 `#HRC-EXPORT-DIALOG-32770-NO-OPEN` **NOVO** — o diálogo Export Strategies (`#32770`) não abre
   (≠ popup Nash, com que partilha a classe).
-- 🔴 `#HRC-TREE-GIGANTE` **NOVO** — uma mão deu ~20 GB e sobrecarregou a máquina (Rui cancelou à
-  mão). Falta **medir a tree antes da 1ª run** + abortar/`.failed` acima de um limite.
+- 🟢 `#HRC-TREE-GIGANTE` **FIX SHIPPED em pt90** (Release `watcher-pt90`) — guarda preventiva
+  construída (OCR do painel "Tree Statistics" + abort por dupla leitura, ANTES da 1ª run). Falta
+  só o **smoke end-to-end no `.exe`** (ver "★ pt90" no topo).
 
 **Continuam pendentes (não tocados pelo pt87):** `#HRC-ADAPTER-STATE-DESYNC-SILENT` (🔴, abaixo),
 `#HRC-WATCHER-BETTING-SCRIPT-STALL` (🟠, abaixo), `#HRC-ANCHOR-NONBLIND-LIMP` (Passo 2, abaixo).
