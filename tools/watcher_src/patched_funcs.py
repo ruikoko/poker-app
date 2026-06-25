@@ -118,6 +118,12 @@ _FINISH_WAIT_PHASE1_TIMEOUT_S = 5.0    # aguardar Finish disabled (calc arrancou
 _FINISH_WAIT_PHASE2_TIMEOUT_S = 60.0   # aguardar Finish re-enabled (calc terminou)
 _FINISH_WAIT_POLL_S = 0.1
 
+# pt90 (#HRC-TREE-GIGANTE) — abort preventivo de trees gigantes ANTES da 1ª run.
+# Stats lidas via OCR read-only do painel "Tree Statistics" (tree_stats.py), logo
+# após a Fase 2 do finish-wait (Finish re-enabled = tree size já computado).
+TREE_GB_ABORT_LIMIT = 15.0     # GB. Acima disto (com confiança) → .failed.
+OCR_REREAD_GAP_S = 0.25        # intervalo entre as 2 leituras OCR de confirmação.
+
 
 # ---------------------------------------------------------------------------
 # pt29 (#PT25D-WATCHER-FRAGILE-CLIPBOARD-OR-RESTORE) — clipboard race fix
@@ -497,6 +503,103 @@ def _find_finish_button(hwnd_wizard):
     return found[0] if found else None
 
 
+def _merge_meta_json(updates):
+    """pt90 — merge defensivo de `updates` no meta.json da mão a decorrer
+    (_CURRENT_HAND_PATH). Nunca rebenta o watcher."""
+    hp = globals().get('_CURRENT_HAND_PATH')
+    if not hp:
+        print('   [tree-stats][WARN] sem _CURRENT_HAND_PATH — meta.json nao actualizado')
+        return
+    mp = os.path.join(hp, 'meta.json')
+    try:
+        data = {}
+        if os.path.exists(mp):
+            with open(mp) as f:
+                data = json.load(f) or {}
+        data.update(updates)
+        with open(mp, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        print('   [tree-stats][WARN] meta.json update falhou: %s' % e)
+
+
+def _capture_tree_stats_safe(hwnd):
+    """pt90 — lazy-import + chamada a tree_stats.capture_tree_stats. Fail-open
+    TOTAL: qualquer erro (módulo ausente, winsdk, OCR) → ok=False (nunca aborta)."""
+    try:
+        import tree_stats
+        return tree_stats.capture_tree_stats(top_hwnd=hwnd)
+    except Exception as e:
+        return {"ok": False, "nodes": None, "gb": None,
+                "hrc_available_gb": None, "raw": "err:import_or_call:%s" % e}
+
+
+def _record_tree_stats_and_maybe_abort(hwnd_wizard, build_seconds):
+    """pt90 (#HRC-TREE-GIGANTE): lê stats da tree (OCR read-only) e:
+      1) regista SEMPRE no meta.json (audit), mesmo com OCR falhado;
+      2) ABORTA (raise RuntimeError → main loop marca .failed, EXACTAMENTE como
+         a Fase 2 timeout faz hoje) SÓ com CONFIANÇA por DUPLA LEITURA: duas
+         leituras seguidas (~OCR_REREAD_GAP_S) têm de ambas ok=True E CONCORDAR
+         que a tree está acima do limite (ambas gb>TREE_GB_ABORT_LIMIT OU >available).
+      OCR falhado, OU leituras a DISCORDAR (uma over, outra under) → NUNCA aborta
+      (instável/suspeita); deixa correr + log + ocr_ok:false.
+    build_seconds NÃO é gate (gigantes 2-3s / normais <1s — janela cega); fica só
+    registado no meta.json para histórico."""
+
+    def _over(s):
+        gb = s.get("gb")
+        if gb is None:
+            return False
+        avail = s.get("hrc_available_gb")
+        return gb > TREE_GB_ABORT_LIMIT or (avail is not None and gb > avail)
+
+    read1 = _capture_tree_stats_safe(hwnd_wizard)
+    time.sleep(OCR_REREAD_GAP_S)
+    read2 = _capture_tree_stats_safe(hwnd_wizard)
+
+    over1, over2 = _over(read1), _over(read2)
+    both_ok = bool(read1.get("ok")) and bool(read2.get("ok"))
+    confident = both_ok and (over1 == over2)        # ambas ok E concordam na classificação
+
+    # meta.json: valores da leitura ok (read1 preferida); ocr_ok = leitura confiável.
+    primary = read1 if read1.get("ok") else (read2 if read2.get("ok") else read1)
+    _merge_meta_json({
+        "tree_nodes": primary.get("nodes"),
+        "tree_size_gb": primary.get("gb"),
+        "hrc_available_gb": primary.get("hrc_available_gb"),
+        "build_seconds": round(build_seconds, 1),
+        "ocr_ok": confident,
+    })
+    print('   [tree-stats] r1(ok=%s gb=%s avail=%s) r2(ok=%s gb=%s) '
+          'build=%.1fs over=(%s,%s) confident=%s'
+          % (read1.get("ok"), read1.get("gb"), read1.get("hrc_available_gb"),
+             read2.get("ok"), read2.get("gb"), build_seconds, over1, over2, confident))
+
+    if not both_ok:
+        print('   [tree-stats] OCR falhado/ambiguo numa das leituras '
+              '(r1=%r / r2=%r) — NAO aborta, deixa correr'
+              % (read1.get("raw"), read2.get("raw")))
+        return
+    if over1 != over2:
+        print('   [tree-stats] leituras DISCORDAM (over1=%s gb1=%s | over2=%s gb2=%s) '
+              '— instavel, NAO aborta'
+              % (over1, read1.get("gb"), over2, read2.get("gb")))
+        return
+    if not (over1 and over2):
+        return                                       # ambas under → corre normal
+
+    # ambas ok E concordam que está ACIMA → abort com confiança.
+    gb1, gb2 = read1.get("gb"), read2.get("gb")
+    avail = read1.get("hrc_available_gb")
+    over_limit = gb1 is not None and gb1 > TREE_GB_ABORT_LIMIT
+    why = ('> %.1f GB' % TREE_GB_ABORT_LIMIT) if over_limit \
+          else ('> %.1f GB disponiveis' % (avail if avail is not None else -1.0))
+    raise RuntimeError(
+        'tree gigante: %.1f/%.1f GB %s (nodes=%s, build=%.0fs, dupla leitura) '
+        '— abort antes da 1a run'
+        % (gb1, gb2, why, read1.get("nodes"), build_seconds))
+
+
 def _wait_for_finish_ready(hwnd_wizard):
     """pt30 (#WIZARD-FINISH-DISABLED-DURING-TREE-CALC): aguarda a transicao
     enabled->disabled->enabled do botao Finish, para confirmar que o HRC
@@ -538,8 +641,13 @@ def _wait_for_finish_ready(hwnd_wizard):
     deadline = f2_start + _FINISH_WAIT_PHASE2_TIMEOUT_S
     while time.time() < deadline:
         if _is_enabled(btn):
+            build_seconds = time.time() - f2_start
             print('   [finish-wait] tree estavel em %.1fs (Finish enabled)'
-                  % (time.time() - f2_start))
+                  % build_seconds)
+            # pt90 (#HRC-TREE-GIGANTE): tree size já computado, ANTES da 1ª run →
+            # regista stats + abort preventivo (dupla leitura). Pode raise →
+            # .failed (mesmo caminho que a Fase 2 timeout abaixo).
+            _record_tree_stats_and_maybe_abort(hwnd_wizard, build_seconds)
             return
         _watchdog_sleep(_FINISH_WAIT_POLL_S)   # pt84 — vigia (OOM/hung) no build da árvore
     raise RuntimeError(
@@ -2850,11 +2958,13 @@ def setup_hand(hand_name, hand_path):
     # NÃO fecha, o check era enganador. ⚠️ NUNCA "Always run in background" no
     # HRC (esconde as janelas; runbook §2.7).
     print('   A aguardar fim da 1ª run (lançada pelo Finish; vigia desde o Finish)...')
+    _run1_t0 = time.time()
     _wait_for_run_completion(
         timeout_total_s=7200, run_label="1ª run",
         match_substring=("Hand Setup", "Monte Carlo Sampling"),
     )
     print('   1ª run terminou.')
+    _merge_meta_json({"solve_seconds": round(time.time() - _run1_t0, 1)})  # pt90
 
     exports_dir = os.path.join(DONE_DIR, 'Exports')
     os.makedirs(exports_dir, exist_ok=True)
