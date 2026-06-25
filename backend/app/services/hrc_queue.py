@@ -17,6 +17,7 @@ com `aggressor_source` (via `classify_aggressor_source`, partilhado com
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -27,6 +28,7 @@ from app.services.queue_export import (
     convert_gg_hh_to_pokerstars_compatible,
     derive_seats_in_preflop_order,
     derive_aggressor_real_action,
+    derive_first_vpip_position,
     classify_aggressor_source,
     _extract_blinds_from_header,
     BOUNTY_FORMATS,
@@ -35,6 +37,8 @@ from app.services.queue_export import (
 )
 from app.services.hrc_node_offset import strategy_table_positions
 from app.services.hrc_script_gen import _parse_seat_stacks
+
+logger = logging.getLogger("hrc_queue")
 
 # Basket por defeito do export. Cada string passa por `normalize_tag_key` (#B17)
 # antes de bater contra `hm3_tags`/`discord_tags`: case-insensitive + hyphen→space,
@@ -253,6 +257,82 @@ def lookup_bounties(rows: list[dict]) -> dict:
     }
 
 
+def lookup_ts_meta(rows: list[dict]) -> dict:
+    """Lookup {(site, tn): {total_players, tournament_speed}} para os filtros da
+    UI (total de jogadores + velocidade). Query ÚNICA em lote ao
+    `tournament_summaries` (espelho de `lookup_bounties`; separada para não
+    tocar no contrato testado dessa). Defensivo: `{}` em falha/sem-chaves."""
+    sites = list({r["site"] for r in rows if r.get("site")})
+    tnums = list({r["tournament_number"] for r in rows if r.get("tournament_number")})
+    if not (sites and tnums):
+        return {}
+    try:
+        prows = query(
+            """SELECT site, tournament_number, total_players, tournament_speed
+                 FROM tournament_summaries
+                WHERE site = ANY(%s) AND tournament_number = ANY(%s)""",
+            (sites, tnums),
+        )
+    except Exception:
+        logger.exception("lookup_ts_meta falhou")
+        return {}
+    return {
+        (r["site"], r["tournament_number"]): {
+            "total_players": r.get("total_players"),
+            "tournament_speed": (
+                (r.get("tournament_speed") or "").strip().lower() or None
+            ),
+        }
+        for r in prows
+    }
+
+
+def lookup_players_left(rows: list[dict]) -> dict:
+    """Resolve `players_left` por mão (id → (valor, fonte)) em LOTE — sem query
+    por mão. Precedência espelha `queue_export._resolve_players_left`:
+    `table_ss_processing_log` (per-mão, via `context_table_ss_id`) >
+    `lobby_processing_log` (por torneio). Defensivo: tudo (None, None) em falha."""
+    ctx_ids = list({
+        r["context_table_ss_id"] for r in rows
+        if isinstance(r.get("context_table_ss_id"), int)
+    })
+    tnums = list({r["tournament_number"] for r in rows if r.get("tournament_number")})
+    ts_map: dict = {}
+    lobby_map: dict = {}
+    try:
+        if ctx_ids:
+            for pr in query(
+                "SELECT id, players_left FROM table_ss_processing_log "
+                "WHERE id = ANY(%s) AND players_left IS NOT NULL",
+                (ctx_ids,),
+            ):
+                ts_map[pr["id"]] = pr["players_left"]
+        if tnums:
+            for pr in query(
+                """SELECT DISTINCT ON (tournament_number)
+                          tournament_number, players_left
+                     FROM lobby_processing_log
+                    WHERE tournament_number = ANY(%s)
+                      AND result = 'success' AND players_left IS NOT NULL
+                    ORDER BY tournament_number, posted_at DESC NULLS LAST""",
+                (tnums,),
+            ):
+                lobby_map[pr["tournament_number"]] = pr["players_left"]
+    except Exception:
+        logger.exception("lookup_players_left falhou")
+    out: dict = {}
+    for r in rows:
+        ctx = r.get("context_table_ss_id")
+        tn = r.get("tournament_number")
+        if isinstance(ctx, int) and ctx in ts_map:
+            out[r["id"]] = (ts_map[ctx], "table_ss")
+        elif tn and tn in lobby_map:
+            out[r["id"]] = (lobby_map[tn], "lobby")
+        else:
+            out[r["id"]] = (None, None)
+    return out
+
+
 def pending_ts_hands(
     *,
     tags: Optional[str] = None,
@@ -350,6 +430,8 @@ def eligible_hands(
     )]
     payouts = lookup_payouts(rows)
     bounties = lookup_bounties(rows)
+    ts_meta = lookup_ts_meta(rows)            # total_players + speed (lote)
+    players_left_map = lookup_players_left(rows)  # id → (valor, fonte) (lote)
 
     hands: list[dict] = []
     scen = {"real": 0, "fallback_root": 0, "fallback_unusable_position": 0}
@@ -364,7 +446,8 @@ def eligible_hands(
         if blob is None and not include_no_payout:
             continue
         # ANDAR 2 — gate 3: seats parseáveis
-        seats = len(derive_seats_in_preflop_order(hh))
+        seats_list = derive_seats_in_preflop_order(hh)
+        seats = len(seats_list)
         positions = strategy_table_positions(seats)
         if not positions:
             continue
@@ -376,6 +459,8 @@ def eligible_hands(
         scen[src] = scen.get(src, 0) + 1
         fkey = h.get("tournament_format") or "?"
         fmt[fkey] = fmt.get(fkey, 0) + 1
+        meta = ts_meta.get((h["site"], h["tournament_number"])) or {}
+        pl_val, pl_src = players_left_map.get(h["id"], (None, None))
         hands.append({
             "id": h["id"],
             "hand_id": h["hand_id"],
@@ -387,12 +472,19 @@ def eligible_hands(
             "hm3_tags": h.get("hm3_tags") or [],
             "discord_tags": h.get("discord_tags") or [],
             "position_hero": h.get("position"),
+            "first_vpip_position": derive_first_vpip_position(hh, seats_list),
+            "seats_occupied": seats,
             "stack_hero_bb": _hero_stack_bb(hh, bb),
             "aggressor_source": src,
             "has_payout": blob is not None,
             "starting_bounty": (
                 bounties.get((h["site"], h["tournament_number"])) or {}
             ).get("starting_bounty"),
+            # Filtros de torneio (UI). None = "sem dado" (nunca esconder a mão).
+            "total_players": meta.get("total_players"),
+            "tournament_speed": meta.get("tournament_speed"),
+            "players_left": pl_val,
+            "players_left_source": pl_src,
         })
 
     return {

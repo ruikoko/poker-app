@@ -9,6 +9,21 @@ const SRC_COLOR = {
   fallback_unusable_position: '#f97316',
 }
 
+// Estilos partilhados da barra de filtros.
+const SEL_STYLE = { background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 4, padding: '3px 6px', fontSize: 12 }
+const SEL_LABEL = { display: 'inline-flex', alignItems: 'center', gap: 6 }
+// Badge "sem dado" (reutilizável nas células da tabela).
+const SD = <span style={{ fontSize: 10, color: 'var(--muted)', opacity: 0.55, fontStyle: 'italic' }}>sem dado</span>
+// Normaliza labels de posição para o vocabulário do Rui (#POSITION-LABELS-PYTHON-JS-DRIFT):
+// BTN / BU/SB → BU; EP / EP1 / EP2 → UTG1; resto inalterado (UTG/UTG1/MP/HJ/CO/BU/SB/BB).
+const normPos = p => {
+  if (!p) return p
+  const u = String(p).toUpperCase()
+  if (u === 'BTN' || u === 'BU/SB') return 'BU'
+  if (u === 'EP' || u === 'EP1' || u === 'EP2') return 'UTG1'
+  return p
+}
+
 function fmtTs(iso) {
   if (!iso) return '—'
   // ISO UTC → "YYYY-MM-DD HH:MM" (UTC, consistente com played_at na BD)
@@ -269,7 +284,14 @@ export default function HRCQueuePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [site, setSite] = useState('')
-  const [format, setFormat] = useState('')
+  const [format, setFormat] = useState('')   // bucket: '' | vanilla | pko | sd
+  const [heroPos, setHeroPos] = useState('')
+  const [vpipPos, setVpipPos] = useState('')
+  const [totalSel, setTotalSel] = useState('')
+  const [leftSel, setLeftSel] = useState('')
+  const [fieldSel, setFieldSel] = useState('')
+  const [speedSel, setSpeedSel] = useState('')
+  const [speedRacer, setSpeedRacer] = useState(false)
   const [dl, setDl] = useState({})  // hand_id -> 'busy' | 'err'
   const [marks, setMarks] = useState({})    // id -> 'new'|'resolved' (override optimista)
   const [stBusy, setStBusy] = useState({})  // id -> 'busy'|'err'
@@ -285,6 +307,12 @@ export default function HRCQueuePage() {
   const [verify, setVerify] = useState(null)     // { total, summary, byId: {hand_id->entry} }
   const [vOpen, setVOpen] = useState(null)        // hand_id da linha expandida (1 de cada vez)
   const [vDetail, setVDetail] = useState({})      // hand_id -> result single | 'busy' | 'err'
+  // pt69 — seleção manual mão-a-mão → release(hand_ids). PERSISTE ao filtrar
+  // (o filtro é a lente; o X é seleção durável). Guarda hand_id strings.
+  const [selected, setSelected] = useState(() => new Set())
+  const [showSelected, setShowSelected] = useState(false)  // "ver só marcadas"
+  const [sendBusy, setSendBusy] = useState(false)
+  const [sendResult, setSendResult] = useState(null)       // {released, skipped, ...} | {error}
 
   async function doTrigger(count) {
     setGateBusy(true)
@@ -377,6 +405,9 @@ export default function HRCQueuePage() {
         queue.verify().catch(() => null),
       ])
       setData(out)
+      // Poda marcadas órfãs (mãos que saíram da elegibilidade — enviadas/resolvidas)
+      // para o contador "N marcadas" ficar honesto. As ainda-elegíveis persistem.
+      setSelected(s => new Set([...s].filter(id => (out.hands || []).some(h => h.hand_id === id))))
       setPending(pend)
       setGate(g)
       setSent(snt)
@@ -395,11 +426,92 @@ export default function HRCQueuePage() {
 
   const hands = data?.hands || []
   const sites = useMemo(() => [...new Set(hands.map(h => h.site))].sort(), [hands])
-  const formats = useMemo(() => [...new Set(hands.map(h => h.tournament_format).filter(Boolean))].sort(), [hands])
+  // Opções de posição DINÂMICAS (do data): robusto à convenção de labels do
+  // backend (#POSITION-LABELS-PYTHON-JS-DRIFT — pode trazer EP/BTN, não só
+  // UTG1/BU). O dropdown adapta-se sempre ao que existe.
+  const heroPositions = useMemo(() => [...new Set(hands.map(h => normPos(h.position_hero)).filter(Boolean))].sort(), [hands])
+  const vpipPositions = useMemo(() => [...new Set(hands.map(h => normPos(h.first_vpip_position)).filter(Boolean))].sort(), [hands])
 
+  // ── buckets / normalizers dos filtros de torneio ──
+  const fmtBucket = f => {
+    if (!f || f === 'None' || f === '?') return 'sd'
+    const lf = String(f).toLowerCase()
+    if (lf.includes('ko')) return 'pko'
+    if (lf === 'vanilla') return 'vanilla'
+    return 'sd'
+  }
+  const totalBucket = n => n == null ? 'sd' : n < 100 ? '<100' : n < 500 ? '100-500' : n < 1000 ? '500-1000' : '1000+'
+  const leftBucket = n => n == null ? 'sd' : n <= 50 ? '1-50' : n <= 200 ? '51-200' : n <= 1000 ? '201-1000' : '1000+'
+  // FT = restantes-no-torneio == sentados-à-mesa (só resta 1 mesa). Checa FT
+  // PRIMEIRO; senão %; sem players_left (ou sem total p/ o %) → "sem dado".
+  const fieldBucket = h => {
+    const pl = h.players_left, tp = h.total_players, s = h.seats_occupied
+    if (pl == null) return 'sd'
+    if (s != null && pl === s) return 'FT'
+    if (tp == null || tp <= 0) return 'sd'
+    const pct = pl / tp * 100
+    return pct <= 10 ? '<=10' : pct <= 25 ? '10-25' : pct <= 50 ? '25-50' : '>50'
+  }
+  const speedBucket = s => {
+    if (!s) return 'sd'
+    const ls = String(s).toLowerCase()
+    if (ls.includes('hyper')) return 'hyper'
+    if (ls.includes('turbo')) return 'turbo'
+    if (ls.includes('normal')) return 'normal'
+    return 'sd'
+  }
+  const isSpeedRacer = h => {
+    const norm = t => String(t).toLowerCase().replace(/-/g, ' ').trim()
+    const tags = [...(h.hm3_tags || []), ...(h.discord_tags || [])].map(norm)
+    return tags.includes('speed racer') || tags.includes('speed racer ft')
+  }
+
+  // "sem dado" (sd) aparece por defeito: só restringe quando se escolhe um
+  // valor concreto; escolher "sd" mostra SÓ as null.
   const filtered = useMemo(() => hands.filter(h =>
-    (!site || h.site === site) && (!format || h.tournament_format === format)
-  ), [hands, site, format])
+    (!site || h.site === site) &&
+    (!heroPos || (heroPos === 'sd' ? !h.position_hero : normPos(h.position_hero) === heroPos)) &&
+    (!vpipPos || (vpipPos === 'sd' ? !h.first_vpip_position : normPos(h.first_vpip_position) === vpipPos)) &&
+    (!format || fmtBucket(h.tournament_format) === format) &&
+    (!totalSel || totalBucket(h.total_players) === totalSel) &&
+    (!leftSel || leftBucket(h.players_left) === leftSel) &&
+    (!fieldSel || fieldBucket(h) === fieldSel) &&
+    (!speedSel || speedBucket(h.tournament_speed) === speedSel) &&
+    (!speedRacer || isSpeedRacer(h))
+  ), [hands, site, heroPos, vpipPos, format, totalSel, leftSel, fieldSel, speedSel, speedRacer])
+
+  const clearFilters = () => {
+    setSite(''); setHeroPos(''); setVpipPos(''); setFormat('')
+    setTotalSel(''); setLeftSel(''); setFieldSel(''); setSpeedSel(''); setSpeedRacer(false)
+  }
+  const activeFilters = [site, heroPos, vpipPos, format, totalSel, leftSel, fieldSel, speedSel]
+    .filter(Boolean).length + (speedRacer ? 1 : 0)
+
+  // ── Seleção manual (release por hand_id) ──────────────────────────────────
+  // `visible` = o que a tabela mostra: lista filtrada, ou (em "ver marcadas") só
+  // as marcadas, ignorando os filtros. A seleção NUNCA deriva de `filtered`.
+  const visible = showSelected ? hands.filter(h => selected.has(h.hand_id)) : filtered
+  const toggleSel = handId => setSelected(s => {
+    const n = new Set(s); n.has(handId) ? n.delete(handId) : n.add(handId); return n
+  })
+  const selectAllVisible = () => setSelected(s => {
+    const n = new Set(s); visible.forEach(h => n.add(h.hand_id)); return n   // UNIÃO, não substitui
+  })
+  const clearSelected = () => { setSelected(new Set()); setShowSelected(false) }
+  const allVisibleSelected = visible.length > 0 && visible.every(h => selected.has(h.hand_id))
+  async function sendSelected() {
+    if (selected.size === 0) return
+    setSendBusy(true); setSendResult(null)
+    try {
+      const res = await queue.release([...selected])
+      setSendResult(res)
+      const rel = new Set(res.released || [])
+      setSelected(s => new Set([...s].filter(id => !rel.has(id))))  // tira as enviadas
+      await refresh()
+    } catch (e) {
+      setSendResult({ error: String(e.message || e) })
+    } finally { setSendBusy(false) }
+  }
 
   const scen = data?.scenario_counts || {}
   const fmtCounts = data?.format_counts || {}
@@ -525,38 +637,153 @@ export default function HRCQueuePage() {
             {Object.entries(fmtCounts).map(([k, v]) => <Chip key={k}>{k} {v}</Chip>)}
           </div>
 
-          {/* Filtros client-side */}
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 12, fontSize: 12, color: 'var(--muted)' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              Site:
-              <select value={site} onChange={e => setSite(e.target.value)}
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}>
+          {/* Filtros client-side — 8 filtros combináveis (AND); "sem dado" aparece por defeito */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, fontSize: 12, color: 'var(--muted)',
+            padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <label style={SEL_LABEL}>Site:
+              <select value={site} onChange={e => setSite(e.target.value)} style={SEL_STYLE}>
                 <option value="">Todos</option>
                 {sites.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              Formato:
-              <select value={format} onChange={e => setFormat(e.target.value)}
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}>
-                <option value="">Todos</option>
-                {formats.map(f => <option key={f} value={f}>{f}</option>)}
+            <label style={SEL_LABEL}>Hero pos:
+              <select value={heroPos} onChange={e => setHeroPos(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todas</option>
+                {heroPositions.map(p => <option key={p} value={p}>{p}</option>)}
+                <option value="sd">— sem dado —</option>
               </select>
             </label>
-            <span style={{ opacity: 0.7 }}>{filtered.length} de {hands.length} visíveis</span>
+            <label style={SEL_LABEL}>1º VPIP:
+              <select value={vpipPos} onChange={e => setVpipPos(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todas</option>
+                {vpipPositions.map(p => <option key={p} value={p}>{p}</option>)}
+                <option value="sd">— sem dado —</option>
+              </select>
+            </label>
+            <label style={SEL_LABEL}>Formato:
+              <select value={format} onChange={e => setFormat(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todos</option>
+                <option value="vanilla">Vanilla</option>
+                <option value="pko">PKO/KO</option>
+                <option value="sd">— sem dado —</option>
+              </select>
+            </label>
+            <label style={SEL_LABEL}>Speed:
+              <select value={speedSel} onChange={e => setSpeedSel(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todos</option>
+                <option value="hyper">Hyper</option>
+                <option value="turbo">Turbo</option>
+                <option value="normal">Normal</option>
+                <option value="sd">— sem dado —</option>
+              </select>
+            </label>
+            <label style={SEL_LABEL}>Total jog.:
+              <select value={totalSel} onChange={e => setTotalSel(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todos</option>
+                <option value="<100">&lt;100</option>
+                <option value="100-500">100–500</option>
+                <option value="500-1000">500–1.000</option>
+                <option value="1000+">1.000+</option>
+                <option value="sd">— sem dado —</option>
+              </select>
+            </label>
+            <label style={SEL_LABEL}>Restantes:
+              <select value={leftSel} onChange={e => setLeftSel(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todos</option>
+                <option value="1-50">1–50</option>
+                <option value="51-200">51–200</option>
+                <option value="201-1000">201–1.000</option>
+                <option value="1000+">1.000+</option>
+                <option value="sd">— sem dado —</option>
+              </select>
+            </label>
+            <label style={SEL_LABEL}>% field:
+              <select value={fieldSel} onChange={e => setFieldSel(e.target.value)} style={SEL_STYLE}>
+                <option value="">Todos</option>
+                <option value="FT">FT (mesa final)</option>
+                <option value="<=10">≤10%</option>
+                <option value="10-25">10–25%</option>
+                <option value="25-50">25–50%</option>
+                <option value=">50">&gt;50%</option>
+                <option value="sd">— sem dado —</option>
+              </select>
+            </label>
+            <label style={{ ...SEL_LABEL, cursor: 'pointer' }}>
+              <input type="checkbox" checked={speedRacer} onChange={e => setSpeedRacer(e.target.checked)} />
+              Só Speed Racer
+            </label>
+            <span style={{ opacity: 0.7, fontWeight: 600 }}>{filtered.length} de {hands.length}</span>
+            {activeFilters > 0 && (
+              <button onClick={clearFilters}
+                style={{ ...SEL_STYLE, cursor: 'pointer', color: 'var(--accent)', fontWeight: 600 }}>
+                limpar ({activeFilters})
+              </button>
+            )}
           </div>
 
+          {/* Seleção manual → Enviar ao HRC (release por hand_id). Filtrar NUNCA envia. */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12,
+            padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: 'rgba(59,130,246,0.05)' }}>
+            <button onClick={selectAllVisible} style={{ ...SEL_STYLE, cursor: 'pointer' }}>
+              Selecionar todas (visíveis: {visible.length})
+            </button>
+            <span style={{ fontWeight: 700, color: selected.size ? 'var(--accent)' : 'var(--muted)' }}>{selected.size} marcadas</span>
+            {selected.size > 0 && (
+              <>
+                <label style={{ ...SEL_LABEL, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={showSelected} onChange={e => setShowSelected(e.target.checked)} />
+                  ver só marcadas
+                </label>
+                <button onClick={clearSelected} style={{ ...SEL_STYLE, cursor: 'pointer' }}>limpar marcadas</button>
+              </>
+            )}
+            <span style={{ flex: 1 }} />
+            <button onClick={sendSelected} disabled={sendBusy || selected.size === 0}
+              style={{ padding: '6px 16px', fontSize: 12, fontWeight: 700, borderRadius: 6, background: 'var(--accent)', border: 'none', color: '#fff',
+                cursor: (sendBusy || selected.size === 0) ? 'not-allowed' : 'pointer', opacity: (sendBusy || selected.size === 0) ? 0.5 : 1 }}>
+              {sendBusy ? 'A enviar…' : `Enviar marcadas (${selected.size})`}
+            </button>
+          </div>
+          {sendResult && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)' }}>
+              {sendResult.error ? <span style={{ color: '#ef4444' }}>Erro: {sendResult.error}</span> : (
+                <>
+                  <span style={{ color: '#22c55e', fontWeight: 600 }}>✓ {(sendResult.released || []).length} enviadas ao HRC</span>
+                  {(sendResult.missing_payouts || []).length > 0 && (
+                    <span style={{ color: '#f97316', marginLeft: 12 }}>{sendResult.missing_payouts.length}× sem payout — não pode ir ao HRC (torneio sem estrutura de prémios)</span>
+                  )}
+                  {(sendResult.skipped || []).length > 0 && (
+                    <span style={{ color: '#f59e0b', marginLeft: 12 }}>⚠ {sendResult.skipped.length} ignoradas</span>
+                  )}
+                  {(sendResult.skipped || []).length > 0 && (
+                    <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+                      {sendResult.skipped.map(s => `${s.hand_id}: ${s.reason}`).join(' · ')}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {/* Tabela */}
-          {filtered.length === 0 ? (
+          {visible.length === 0 ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-              {hands.length === 0 ? '0 mãos elegíveis agora.' : 'Nenhuma mão corresponde aos filtros.'}
+              {showSelected ? '0 mãos marcadas.' : (hands.length === 0 ? '0 mãos elegíveis agora.' : 'Nenhuma mão corresponde aos filtros.')}
             </div>
           ) : (
             <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
-                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'fmt', 'pos', 'heroBB', 'aggressor', 'tags', 'acções'].map(h => (
+                    <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', width: 30 }}>
+                      <input type="checkbox" title="Marcar/desmarcar visíveis" checked={allVisibleSelected}
+                        onChange={e => setSelected(s => {
+                          const n = new Set(s)
+                          visible.forEach(h => e.target.checked ? n.add(h.hand_id) : n.delete(h.hand_id))
+                          return n
+                        })} />
+                    </th>
+                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'fmt', 'pos', '1ºVPIP', 'heroBB', 'restantes', 'total', '%field', 'speed', 'aggressor', 'tags', 'acções'].map(h => (
                       <th key={h} style={{
                         padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
                         ...(h === 'acções' ? { position: 'sticky', right: 0, background: 'var(--bg)', zIndex: 2, borderLeft: '1px solid var(--border)' } : {}),
@@ -565,8 +792,11 @@ export default function HRCQueuePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(h => (
-                    <tr key={h.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {visible.map(h => (
+                    <tr key={h.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', ...(selected.has(h.hand_id) ? { background: 'rgba(59,130,246,0.08)' } : {}) }}>
+                      <td style={{ padding: '7px 10px' }}>
+                        <input type="checkbox" checked={selected.has(h.hand_id)} onChange={() => toggleSel(h.hand_id)} />
+                      </td>
                       <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{h.hand_id}</td>
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtTs(h.played_at)}</td>
                       <td style={{ padding: '7px 10px' }}>{h.site}</td>
@@ -574,9 +804,23 @@ export default function HRCQueuePage() {
                         {h.tournament_name}
                         <span style={{ color: 'var(--muted)', opacity: 0.7 }}> ({h.tournament_number})</span>
                       </td>
-                      <td style={{ padding: '7px 10px' }}>{h.tournament_format || '—'}</td>
-                      <td style={{ padding: '7px 10px' }}>{h.position_hero || '—'}</td>
-                      <td style={{ padding: '7px 10px' }}>{h.stack_hero_bb ?? '—'}</td>
+                      <td style={{ padding: '7px 10px' }}>{h.tournament_format || SD}</td>
+                      <td style={{ padding: '7px 10px' }}>{normPos(h.position_hero) || SD}</td>
+                      <td style={{ padding: '7px 10px' }}>{normPos(h.first_vpip_position) || SD}</td>
+                      <td style={{ padding: '7px 10px' }}>{h.stack_hero_bb ?? SD}</td>
+                      <td style={{ padding: '7px 10px' }} title={h.players_left_source || ''}>
+                        {h.players_left != null ? h.players_left : SD}
+                      </td>
+                      <td style={{ padding: '7px 10px' }}>{h.total_players != null ? h.total_players : SD}</td>
+                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const b = fieldBucket(h)
+                          if (b === 'sd') return SD
+                          if (b === 'FT') return <Chip color="#f59e0b">FT</Chip>
+                          return `${Math.round(h.players_left / h.total_players * 100)}%`
+                        })()}
+                      </td>
+                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{h.tournament_speed || SD}</td>
                       <td style={{ padding: '7px 10px' }}>
                         <Chip color={SRC_COLOR[h.aggressor_source]}>{h.aggressor_source}</Chip>
                       </td>

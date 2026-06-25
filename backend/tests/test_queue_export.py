@@ -674,7 +674,68 @@ def test_end_to_end_gg_5944816316_passes_all_8_transformations():
 import os as _os
 from app.services.queue_export import (
     derive_real_aggressor_position,
+    derive_first_vpip_position,
 )
+
+
+# ── derive_first_vpip_position (1º VPIP, inclui limps) ───────────────────────
+
+_HH_LIMP_6MAX = '''Poker Hand #TM7777: Tournament #1, Test $10 Hold'em No Limit - Level5(100/200) - 2026/05/01 12:00:00
+Table '1' 6-max Seat #1 is the button
+Seat 1: BtnP (10000)
+Seat 2: SbP (10000)
+Seat 3: BbP (10000)
+Seat 4: UtgP (10000)
+Seat 5: HjP (10000)
+Seat 6: CoP (10000)
+SbP: posts small blind 100
+BbP: posts big blind 200
+*** HOLE CARDS ***
+UtgP: calls 200
+HjP: folds
+CoP: raises 400 to 600
+BtnP: folds
+SbP: folds
+BbP: checks
+*** SUMMARY ***
+'''
+
+_HH_WALK_6MAX = '''Poker Hand #TM7778: Tournament #1, Test - Level5(100/200) - 2026/05/01 12:00:00
+Table '1' 6-max Seat #1 is the button
+Seat 1: BtnP (10000)
+Seat 2: SbP (10000)
+Seat 3: BbP (10000)
+Seat 4: UtgP (10000)
+Seat 5: HjP (10000)
+Seat 6: CoP (10000)
+SbP: posts small blind 100
+BbP: posts big blind 200
+*** HOLE CARDS ***
+UtgP: folds
+HjP: folds
+CoP: folds
+BtnP: folds
+SbP: folds
+*** SUMMARY ***
+'''
+
+
+def test_first_vpip_open_raise_equals_opener():
+    """Pote aberto com raise (sem limp): 1º VPIP = o opener. _HH_GG_REAL:
+    8db88342(HJ) folda, 221ebf0d(CO) abre → 1º VPIP = CO (label derive_seats)."""
+    assert derive_first_vpip_position(_HH_GG_REAL) == "CO"
+
+
+def test_first_vpip_limped_pot_is_limper_not_raiser():
+    """LIMPED pot: 1º VPIP = o LIMPER (call), ≠ o aggressor (raiser). UtgP(MP)
+    limpa antes do raise do CoP(CO) → VPIP=MP; aggressor=CO(idx 2)."""
+    assert derive_first_vpip_position(_HH_LIMP_6MAX) == "MP"
+    assert derive_real_aggressor_position(_HH_LIMP_6MAX) == 2  # CO ≠ MP
+
+
+def test_first_vpip_walk_returns_none():
+    """Walk-to-BB (todos foldam): sem entrada voluntária → None."""
+    assert derive_first_vpip_position(_HH_WALK_6MAX) is None
 
 
 # ── derive_real_aggressor_position ──────────────────────────────────────────

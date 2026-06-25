@@ -131,6 +131,9 @@ _DEAD_BUTTON_DISTANCE_LABELS = ("CO", "HJ", "MP", "UTG1", "UTG", "UTG2")
 # - Winamax: `blueballs67 raises 8000 to 16000` (sem colon)
 # `(?::)?` torna o `:` opcional. `(?: ... )?` é non-capturing.
 _PREFLOP_OPEN_RE = re.compile(r"^(.+?)(?::)?\s+(raises|bets)\b", re.MULTILINE)
+# 1º VPIP (entrada voluntária no pote): inclui LIMPS (calls) além de raises/bets.
+# Distingue-se do _PREFLOP_OPEN_RE (só raises) por contar o limper como 1º a entrar.
+_PREFLOP_VPIP_RE = re.compile(r"^(.+?)(?::)?\s+(calls|raises|bets)\b", re.MULTILINE)
 
 
 def find_preflop_marker(hh_text: str) -> Optional[int]:
@@ -418,6 +421,43 @@ def derive_real_aggressor_position(hh_text: str) -> Optional[int]:
     if idx is None:
         return None  # nick não está em seats (HH inválido)
     return idx
+
+
+def derive_first_vpip_position(
+    hh_text: str, seats: Optional[list] = None
+) -> Optional[str]:
+    """Label da posição (UTG/MP/HJ/...) do 1º jogador a entrar VOLUNTÁRIO no
+    pote preflop — limp (call) OU raise/bet. Inclui limps, ao contrário de
+    `derive_real_aggressor_position` (que só vê o 1º raiser).
+
+    `seats` = saída de `derive_seats_in_preflop_order` (reaproveitada pelo
+    caller para não reparsear). None se omitida → deriva-se aqui.
+
+    Devolve None se: walk-to-BB / sem ação voluntária / parse de seats falha /
+    nick do 1º actor não está nos seats.
+    """
+    if not hh_text:
+        return None
+    if seats is None:
+        seats = derive_seats_in_preflop_order(hh_text)
+    nick_to_pos = {
+        e["nick"]: e["position"]
+        for e in (seats or [])
+        if isinstance(e, dict) and e.get("nick") and e.get("position")
+    }
+    if not nick_to_pos:
+        return None
+    start = find_preflop_marker(hh_text)
+    if start is None:
+        return None
+    end_flop = hh_text.find("*** FLOP ***", start)
+    end_summary = hh_text.find("*** SUMMARY ***", start)
+    ends = [e for e in (end_flop, end_summary) if e > 0]
+    end = min(ends) if ends else len(hh_text)
+    m = _PREFLOP_VPIP_RE.search(hh_text[start:end])
+    if not m:
+        return None  # limp/raise nenhum → walk-to-BB
+    return nick_to_pos.get(m.group(1).strip())
 
 
 # pt25e #META-AGGRESSOR-REAL-ACTION: regex em cadeia para extrair (SB, BB)
