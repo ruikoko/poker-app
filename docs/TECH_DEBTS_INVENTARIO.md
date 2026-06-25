@@ -6,6 +6,15 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt89 (25 Jun 2026 — open per-posição FECHADO + filtros /hrc + registo geral)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#GTO-OPEN-SIZE-NOT-PER-POSITION` | ✅ **FECHADO (commit `90c07ad`, deployed)** | Era 🟢 FUTURO (`PENDENTES`/`GTO_BRAIN §9`). **Fix:** opens passam a **per-posição** — cada não-blind tem a sua var `SIZES_OPEN_UTG/UTG1/MP/HJ/CO` (como os 3-bets em pt42b), acabou a partilhada `SIZES_OPEN_OTHERS` como canal de propagação. O gerador faz override **só** ao bucket do **opener real**; as restantes posições ficam no **default do template `[2]`**. Regra do Rui satisfeita: opener usa o seu size real; posições à frente usam o standard 2 BB; SB usa o size de blind. **Ficheiros:** `hrc_node_offset.py`, `hrc_script_gen.py`, `mtt_advanced_canonical_2026.js` (+ `test_hrc_node_offset.py`/`test_queue_export.py`). **★ Smoke do GERADOR PROVADO (25 Jun, read-only, sem HRC)** — `GG-6084129607` (8-max; HJ abre 2.0bb, eff 18.02bb ≤25): gerador de produção produziu `SIZES_OPEN_HJ = [2, ALLIN]` (ALLIN **confinado** ao opener curto) e `SIZES_OPEN_UTG/_UTG1/_MP/_CO = [2]` (fundos UTG 36.9bb · MP 32.5bb · CO 49.5bb **limpos, SEM allin**); overrides aplicados = só `SIZES_OPEN_HJ`. **Contaminação confinada ao HJ → bug desapareceu. Falta só o smoke da ÂNCORA no HRC** (mão que flua naturalmente; não soltar mão de propósito). Ver `JOURNAL_2026-06-25-pt89.md`, `GTO_BRAIN §9`. |
+| `#HRC-QUEUE-PANEL-FILTERS` | ✅ **FEITO + UX VALIDADO À VISTA (commit `6e2c2d7`)** | Painel `/hrc`: **8 filtros** + **seleção mão-a-mão (multi-select)** + **normalização de posições**. Backend `hrc_queue.py`/`queue_export.py` (+ `test_queue_export.py`); frontend `HRCQueue.jsx`. UX já validado visualmente pelo Rui. |
+
+---
+
 ## pt89-bug (25 Jun 2026 — fallback_root com meta incoerente; tema do gerador)
 
 | ID | Sev | Resumo |

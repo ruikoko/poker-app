@@ -112,27 +112,25 @@ posição (limiar 25/30, colapso, Complete da SB) em vez de `len(array)`.
 - GG/PS/WN/WPN todas afetadas (o template é cross-site). Não há corrupção de dados
   na app; é a qualidade da **tree/âncora** que melhora com a re-geração.
 
-## ★ FUTURO (registar, sem fix agora) — `#GTO-OPEN-SIZE-NOT-PER-POSITION`
+## ✅ FECHADO (pt89, `90c07ad`) — `#GTO-OPEN-SIZE-NOT-PER-POSITION`
 
-Para a **riqueza dos dados do GTO Brain** (não para o estudo de hoje). **Seguir como
-está por agora.** Detalhe e cross-refs em `GTO_BRAIN.md §9` e `TECH_DEBTS_INVENTARIO.md`.
+**Era FUTURO; foi feito em pt89.** Os opens passaram a **per-posição** (cada não-blind
+tem a sua var `SIZES_OPEN_UTG/UTG1/MP/HJ/CO`, como os 3-bets em pt42b); o gerador faz
+override **só** ao bucket do opener real, as restantes ficam no default do template `[2]`.
+Acabou a propagação pela var partilhada `SIZES_OPEN_OTHERS`.
 
-- **Hoje (bucketed):** o size **REAL** do opener propaga-se a **todas** as posições
-  OTHERS que partilham `SIZES_OPEN_OTHERS` — confirmado read-only: **CO abre 2.5 → nas
-  sub-árvores onde o BTN é opener, o BTN também "abre" 2.5**. (`hrc_script_gen.py`:
-  `build_sizings_overrides` bc==1 → `_array_for_raise` usa o `to_amount_bb` real;
-  `_bucket_open_for_position` é partilhado.)
-- **Regra desejada (Rui):** nas posições **À FRENTE** do nó principal (opener) o open
-  deve ser o **standard 2 BB**, não o size real do opener. Só o **opener** usa o seu
-  size real. A **SB** usa o seu próprio size de blind (`_blind_open_size_by_eff`). As
-  posições **ATRÁS** do opener (já foldadas) são indiferentes.
-- **Ex.:** CO abre 2.5 → CO=2.5 (real), **BTN=2.0 (standard)**, SB=size próprio. Hoje o
-  BTN fica 2.5 (errado p/ os dados do GTO Brain).
-- **Por quê futuro e não agora:** o Rui **não estuda essas ranges hoje**; só importa
-  quando o **GTO Brain consumir** estas trees. **Exige tornar os opens PER-POSITION**
-  (como os 3-bets ficaram em pt42b) — **trabalho arquitetural, não ajuste**.
-- **NÃO afeta o `#HRC-NODE-OFFSET-IMPLICIT-LINES`** (bug separado; o **valor** do size
-  não gateia o offset — só o **comprimento/ALLIN** do array).
+- **Regra do Rui satisfeita:** só o **opener** usa o seu size real; posições **à frente**
+  usam o standard **2 BB**; a **SB** usa o seu próprio size de blind; posições atrás
+  (foldadas) indiferentes.
+- **Smoke do gerador PROVADO (25 Jun, read-only, sem HRC)** — `GG-6084129607` (HJ abre
+  2.0bb, eff 18.02bb): `SIZES_OPEN_HJ = [2, ALLIN]` (ALLIN confinado ao opener curto);
+  `SIZES_OPEN_UTG/_MP/_CO = [2]` (fundos 36.9/32.5/49.5bb **limpos, sem allin**).
+  **Contaminação confinada ao HJ.**
+- **Falta só o smoke da ÂNCORA no HRC** (navegação real ao nó) — para mão que flua
+  naturalmente; **não** soltar mão de propósito.
+- **Não afetou o `#HRC-NODE-OFFSET-IMPLICIT-LINES`** (o valor do size não gateia o offset,
+  só o comprimento/ALLIN do array).
+- Detalhe: `JOURNAL_2026-06-25-pt89.md`, `GTO_BRAIN.md §9`, `TECH_DEBTS pt89`.
 
 ## ★ FUTURO (registar, sem fix agora) — `#BEELINK-DAEMONS-AUTOSTART`
 
