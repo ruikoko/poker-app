@@ -217,8 +217,16 @@ def queue_release(payload: dict = Body(...),
             skipped.append({"hand_id": hid,
                             "reason": "erro ao gerar pack: %s" % type(e).__name__})
             continue
+        # #HRC-ADAPTER-STATE-DESYNC-SILENT: re-envio tem de incrementar o
+        # requeue_epoch (servir epoch > o do state local do adapter), senão o
+        # adapter salta a mão em silêncio (dedup hrc_adapter.py:262). Release
+        # fresco → INSERT epoch=0 (adapter puxa na mesma, não está em state);
+        # re-envio (já libertada) → +1 → adapter re-puxa sozinho e loga re-queue.
         execute("INSERT INTO hrc_queue_release (hand_db_id, batch_id) VALUES (%s,%s) "
-                "ON CONFLICT (hand_db_id) DO NOTHING", (h["id"], batch_id))
+                "ON CONFLICT (hand_db_id) DO UPDATE SET "
+                "  requeue_epoch = hrc_queue_release.requeue_epoch + 1, "
+                "  released_at = NOW(), "
+                "  batch_id = EXCLUDED.batch_id", (h["id"], batch_id))
         released.append(hid)
     logger.info("queue/hrc release forçado: released=%d skipped=%d batch=%s",
                 len(released), len(skipped), batch_id)

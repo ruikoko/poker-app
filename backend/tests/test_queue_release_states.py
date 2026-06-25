@@ -137,6 +137,37 @@ def test_release_happy_path_inserts_and_returns_released():
     ex.assert_called_once()   # INSERT em hrc_queue_release
 
 
+def test_release_rerelease_bumps_epoch():
+    """#HRC-ADAPTER-STATE-DESYNC-SILENT: o re-envio tem de incrementar o
+    requeue_epoch (ON CONFLICT DO UPDATE), senão o adapter salta a mão em silêncio.
+    Release fresco = epoch 0 (INSERT); re-envio = +1 (servido > o do state →
+    adapter re-puxa). O endpoint emite sempre o mesmo UPSERT: aqui validamos que
+    o SQL faz o bump no conflito."""
+    app = _make_app(); client = TestClient(app)
+    hand_row = {"id": 7, "hand_id": "GG-1", "site": _OK_SITE, "raw": "PokerStars Hand...",
+                "tournament_number": "T1", "tournament_name": "X",
+                "tournament_format": "PKO", "player_names": {}, "played_at": None,
+                "position": "BTN", "study_state": "new", "hm3_tags": [],
+                "discord_tags": [], "context_table_ss_id": None}
+    zb = _zip_with_manifest(1)
+    with patch("app.routers.queue.query", return_value=[hand_row]), \
+         patch("app.routers.queue.lookup_payouts", return_value={(_OK_SITE, "T1"): {"p": 1}}), \
+         patch("app.routers.queue.lookup_bounties", return_value={}), \
+         patch("app.routers.queue.build_queue_zip", return_value=zb), \
+         patch("app.routers.queue.execute") as ex:
+        r = client.post("/api/queue/hrc/release", json={"hand_ids": ["GG-1"]})
+    assert r.status_code == 200
+    assert r.json()["released"] == ["GG-1"]
+    sql = ex.call_args.args[0]
+    assert "INSERT INTO hrc_queue_release" in sql
+    assert "ON CONFLICT (hand_db_id) DO UPDATE" in sql
+    assert "requeue_epoch = hrc_queue_release.requeue_epoch + 1" in sql
+    # NÃO usa o antigo DO NOTHING (que era a causa do bug).
+    assert "DO NOTHING" not in sql
+    # o id da mão e o batch_id vão como params (hand_db_id=7).
+    assert ex.call_args.args[1][0] == 7
+
+
 def test_release_skips_unknown_hand():
     app = _make_app(); client = TestClient(app)
     with patch("app.routers.queue.query", return_value=[]), \
