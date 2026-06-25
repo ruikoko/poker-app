@@ -19,6 +19,14 @@ mecanismo `.failed` existente. **End-to-end no `.exe` por validar no Beelink (sm
 
 ---
 
+## `#WATCHER-JANELA-DE-TRABALHO-ETA` (FUTURO, URGENTE — janela de trabalho + travão por ETA/custo)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#WATCHER-JANELA-DE-TRABALHO-ETA` | 🟡 **FUTURO/URGENTE — medição pendente no Beelink (não construído)** | **Ideia:** definir uma **janela de trabalho** (ex.: 8h) e o watcher **gere a fila** para a encher de forma mais produtiva, usando o **ETA da janela "Monte Carlo Sampling" do HRC** como **travão em tempo real** (*Via C*). **Liga ao pt90** (`#HRC-TREE-GIGANTE`) — **reutiliza a infra de OCR** (`tools/watcher_src/tree_stats.py`, PrintWindow + `Windows.Media.Ocr`). **Comportamento desenhado:** watcher **lê o ETA assim que aparece** (logo após o Finish, início do solve); **mão saltada** (ETA grande de mais) → **marcada para OUTRA janela** (mais longa), **não se perde**. **POR FECHAR:** critério de corte (**teto fixo por mão + margem no fim da janela** *(recomendado)* vs. só tempo-restante); **POR DECIDIR:** comportamento se o ETA **crescer depois de começar**. **Obstáculos conhecidos:** (1) o ETA **só aparece DEPOIS de o solve começar** (~13% da barra), **não antes** → só dá para **travar em tempo real**, não **ordenar à partida**; (2) **espreitar** o ETA de N mãos **consome tempo real da janela** → viabilidade depende do **custo de ler o ETA por mão** (medição pendente: setup→Finish, Finish→ETA estável, overhead de troca de mão); (3) ler o ETA exige **OCR da janela "Monte Carlo Sampling"** — **não testado** se essa janela se lê (pode ser opaca como o Tree Statistics era; talvez precise do mesmo **PrintWindow**). **SINAIS PRECOCES DE CUSTO (ideia Rui — alternativa/complemento ao ETA caro):** em vez de esperar o ETA estabilizar (gasta solve por mão), usar sinais mais cedo como proxy do tamanho/tempo: **(1)** tamanho da tree (nós/GB), **JÁ lido por OCR antes do Finish** (pt90) — o mais precoce; **(2) NOVO (Rui):** o **tempo de espera até à 1ª run** / a **lentidão dos primeiros instantes** do Monte Carlo Sampling **correlaciona com o tamanho da tree** → pista do custo **antes** do ETA estabilizar; **(3)** ETA estabilizado — o mais tarde e caro. **Implicação:** a janela de trabalho **pode dispensar a leitura cara do ETA** e gerir-se pelos **sinais 1+2** (baratos, precoces) — **a validar** cruzando os 3 sinais contra o tempo real de mãos conhecidas. **Alternativa — *Via A*:** **ordenar pelo TAMANHO da tree** (lido por OCR **ANTES** do Finish, sem gastar solve) como proxy do tempo; pode ganhar à *Via C* se o ETA for caro de ler. **Não implementar agora — só registado.** Detalhe em `PENDENTES.md` (secção homónima). |
+
+---
+
 ## pt89 (25 Jun 2026 — open per-posição FECHADO + filtros /hrc + registo geral)
 
 | ID | Sev | Resumo |

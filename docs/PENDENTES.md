@@ -14,6 +14,51 @@ Release https://github.com/ruikoko/poker-app/releases/tag/watcher-pt90.
    com motivo "tree gigante: X GB > 15"; (c) OCR forçado a falhar → corre na mesma (`ocr_ok:false`).
 4. Só depois de (3) OK: dar `#HRC-TREE-GIGANTE` por **fechado** e ponderar merge `watcher-gate`→`main`.
 
+## ★ `#WATCHER-JANELA-DE-TRABALHO-ETA` (FUTURO, URGENTE) — janela de trabalho + travão por ETA/custo
+
+**Ideia:** definir uma **janela de trabalho** (ex.: 8h) e o watcher **gerir a fila** para a encher
+da forma mais produtiva, usando o **ETA da janela "Monte Carlo Sampling" do HRC** como **travão em
+tempo real** (*Via C*). Liga-se ao pt90 (captura OCR) — **reutiliza a mesma infra** de OCR de
+janela do HRC (`tools/watcher_src/tree_stats.py`, PrintWindow + `Windows.Media.Ocr`).
+
+**Comportamento desenhado até agora:**
+- O watcher **lê o ETA assim que aparece** (logo após o Finish, no início do solve).
+- **Critério de corte: POR FECHAR** — decidir entre **teto fixo por mão + margem no fim da janela**
+  (recomendado) vs. **só tempo-restante**.
+- **Mão saltada** (ETA grande de mais) → **marcada para OUTRA janela** (mais longa), **NÃO se perde**.
+- **Se o ETA crescer depois de começar:** comportamento **POR DECIDIR**.
+
+**Obstáculos conhecidos (registar):**
+1. O ETA **só aparece DEPOIS de o solve começar** (visível na barra ~13%), **não antes** → não dá
+   para **ordenar à partida**, só **travar em tempo real**.
+2. Percorrer N mãos só para **"espreitar" o ETA** de cada uma **CONSOME tempo real da janela** →
+   viabilidade depende de **quanto custa ler o ETA por mão** (**medição pendente no Beelink**:
+   setup→Finish, Finish→ETA estável, overhead de troca de mão).
+3. Ler o ETA exige **OCR da janela "Monte Carlo Sampling"** — **ainda NÃO testado** se essa janela
+   se lê (pode ser opaca, como o painel Tree Statistics era; talvez precise do **mesmo PrintWindow**).
+   **Validação pendente.**
+
+**SINAIS PRECOCES DE CUSTO (ideia Rui — alternativa/complemento ao ETA, que é caro):**
+em vez de esperar o ETA estabilizar (obriga a **gastar solve** por mão), usar sinais que aparecem
+**MAIS CEDO** como proxy do tamanho/tempo da tree:
+1. **Tamanho da tree (nós/GB)** — **JÁ lido por OCR antes do Finish** (pt90). O **mais precoce**.
+2. **NOVO (Rui):** o **tempo de espera até à 1ª run** / a **lentidão dos primeiros instantes** do
+   Monte Carlo Sampling **correlaciona com o tamanho da tree** → dá pista do custo **antes** de o
+   ETA estabilizar.
+3. **ETA estabilizado** — o **mais tarde e caro**.
+
+**Implicação:** a "janela de trabalho" **pode talvez dispensar a leitura cara do ETA** e gerir-se
+pelos **sinais 1+2** (baratos, precoces). **A validar** quando se medir no Beelink
+(setup→Finish, Finish→1ª run, evolução do ETA) — **cruzar os 3 sinais contra o tempo real de mãos
+conhecidas** para ver qual prevê melhor.
+
+**Alternativa a considerar — *Via A*:** **ordenar pelo TAMANHO da tree** (que já lemos por OCR
+**ANTES** do Finish, sem gastar solve), como **proxy do tempo**. Pode ser melhor que a *Via C* se a
+leitura do ETA for cara.
+
+> Estado: **FUTURO/URGENTE — medição pendente no Beelink**. Não construir antes de medir os 3 sinais.
+> Cross-ref: pt90 (`#HRC-TREE-GIGANTE`, infra OCR), `TECH_DEBTS_INVENTARIO.md` (secção homónima).
+
 ## ★ pt88 (24 Jun 2026) — 2 fixes em prod + reclassificação do study-state
 
 - ✅ **`#POST-TABLE-SS-MOVE-EM-VISION-FAILED`** (commit `c5a2a29`, origin/main) — table-SS `vision_failed`
