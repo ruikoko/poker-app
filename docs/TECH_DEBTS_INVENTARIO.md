@@ -6,6 +6,14 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt91 (26 Jun 2026 — filtro de data do gold por NOME)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#APPIMPORT-DATE-FILTER-IT-GOLD` | ✅ **FECHADO (commit `de2fa18`, tool-side, sem deploy)** | O `gold` era o **único gap** de cobertura de janela no appimport: `process_gold_dir` corria **sempre sem janela** ("SEM filtro de mês"). **Fix (1 ficheiro, `tools/appimport/app_import.py`):** `process_gold_dir(session, live, window=None)` filtra pela **DATA-DE-JOGO lida do NOME** — novo helper `_gold_name_date(fname)` (regexes `(\d{4}-\d{2}-\d{2})` + `(\d{1,2})[-_](\d{2})[-_](AM\|PM)`, **alinhadas com `backend/app/routers/screenshot.py:_parse_filename`** para não divergirem). **Decisão de produto (pt91):** a data/hora do nome gold é a do DOWNLOAD, mas o Rui **descarrega a mão no momento em que a joga** → download = play na prática; a objecção `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE` **não se aplica** ao filtro de meses. **"Na dúvida inclui":** nome sem data/hora legível → **incluído por defeito + aviso** (`[aviso]`), nunca descartado em silêncio. Conta/reporta `fora da janela` no resumo, como as outras fontes; `main()` passa `window=img_window`. **Resultado:** as **5 fontes de imagem** (`manual`, `it`, `lobby`-subpasta, `gold`, `LOBBY_DIR`) respeitam agora `--desde/--ate`. **Critério não-uniforme por desenho** (auditoria fonte-a-fonte): data-do-nome onde o nome a tem (`it`, `gold`); `mtime` onde não (`manual`, `lobby` — nomes sem timestamp). **Validação:** dry-run `--desde 2026-06-01` → gold **325 dentro / 89 fora** (os de Março), fronteira dia-de-jogo 15:00 correcta, **0 avisos** (414 ficheiros gold reais todos com data+hora legíveis). **Tool-side → `git pull` na máquina do appimport** (não há deploy). Ver `PENDENTES` (secção homónima, com a investigação original) + `#GOLD-DIR-DEDICATED-SUBFOLDER`. |
+
+---
+
 ## pt90 (25 Jun 2026 — captura OCR do tamanho da tree + abort preventivo; Release watcher-pt90)
 
 **★ Guarda preventiva de trees gigantes shipped no `watcher-gate` + Release `watcher-pt90`.**

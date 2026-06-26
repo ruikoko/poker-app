@@ -72,7 +72,18 @@ leitura do ETA for cara.
 > Estado: **FUTURO/URGENTE — medição pendente no Beelink**. Não construir antes de medir os 3 sinais.
 > Cross-ref: pt90 (`#HRC-TREE-GIGANTE`, infra OCR), `TECH_DEBTS_INVENTARIO.md` (secção homónima).
 
-## ★ `#APPIMPORT-DATE-FILTER-IT-GOLD` (appimport — filtro de data `--desde/--ate` por NOME)
+## ✅ FECHADO (`de2fa18`, 26 Jun) — `#APPIMPORT-DATE-FILTER-IT-GOLD`
+
+**Construído e validado.** O `gold` era o **único gap** de cobertura de janela; depois do fix, as
+**5 fontes de imagem** (`manual`, `it`, `lobby`-subpasta, `gold`, `LOBBY_DIR`) respeitam
+`--desde/--ate`. `process_gold_dir` ganhou `window=` e filtra pela **data do NOME** (helper
+`_gold_name_date`, regexes alinhadas com `screenshot._parse_filename`; **decisão pt91: data/hora de
+download = de jogo** → a objecção download-vs-play dissolveu-se). Nome sem data/hora legível →
+**incluído por defeito + aviso** ("na dúvida inclui"). Conta/reporta `fora da janela` no resumo.
+Critério não-uniforme **por desenho**: data-do-nome onde existe (`it`, `gold`); `mtime` onde o nome
+não tem data (`manual`, `lobby`). **Dry-run `--desde 2026-06-01`:** gold **325 dentro / 89 fora**
+(Março), fronteira dia-de-jogo 15:00 correcta, **0 avisos**. **Tool-side, sem deploy** → `git pull`
+na máquina do appimport. Detalhe em `TECH_DEBTS pt91`. Mantém-se o registo da investigação original abaixo.
 
 Pedido do Rui: filtrar `--desde/--ate` também por **data do NOME** do ficheiro nas fontes de
 imagem `it` e `gold`, para **não ter de mover ficheiros à mão por data**. **Investigação read-only
@@ -101,7 +112,8 @@ feita (26 Jun):**
   `config_local.example.py` foi alinhado (a raiz era perigosa: o read é **não-recursivo** e
   enviaria **todas** as imagens da pasta). Ver `#GOLD-DIR-DEDICATED-SUBFOLDER`.
 
-> Estado: **investigação feita; construção POR FAZER** (aguarda decisão download-time vs play-time).
+> Estado: ✅ **FECHADO** (`de2fa18`, 26 Jun) — ver topo desta secção. A decisão download-vs-play
+> foi tomada (pt91: download = play na prática) e o fix shipped.
 
 **Import de mãos — mapa levantado, por EXECUTAR (26 Jun).** As pipelines de entrada estão todas
 mapeadas: **`RunAll.bat`** (appmaster → appimport + HM3 + Discord, um clique) · **`ImportAoVivo.bat`**
