@@ -19,11 +19,12 @@ mecanismo `.failed` existente. **End-to-end no `.exe` por validar no Beelink (sm
 
 ---
 
-## pt90-bug (26 Jun 2026 — regressão a investigar: log a ficheiro do watcher)
+## pt90-bug (26 Jun 2026 — regressão do log + lacuna de registo OCR no ramo tree=0)
 
 | ID | Sev | Resumo |
 |---|---|---|
 | `#WATCHER-LOG-FILE-REGRESSION-PT90` | 🟡 **NOVO — A INVESTIGAR (reportado pelo Rui, 26 Jun)** | **Sintoma:** o `.exe` `watcher-pt90` **deixou de escrever o ficheiro de log** (só `stdout`); o `#WATCHER-LOG-TO-FILE` (entregue no pt68) gravava em `C:\hrc\watcher_logs\hrc_watcher_<ts>.log`. **Bug, não intencional:** a fonte **continua a ter** `_ensure_file_logging` (`tools/watcher_src/patched_funcs.py:1954`, Tee de stdout/stderr → ficheiro + rotação 14) e **continua a chamá-la** como **1ª linha do `setup_hand`** (`:2299`), em `main` E em `watcher-gate` → a perda do ficheiro **não** vem de remoção no código-fonte. **Pistas a investigar (no Beelink):** (1) o **bundle/trampoline do pt90** (`_local_only/…/swap_and_smoke.py`/`wrapper.py`, gitignored) pode não fiar a chamada, ou o SWAP de `setup_hand` no bundle pode ter trazido uma versão sem ela; (2) **build PyInstaller windowed / sem consola** → `sys.__stdout__` None pode partir o `_Tee` (cai no `except` → "[WARN] … só consola"); (3) `_ensure_file_logging` só corre quando o **1º `setup_hand`** dispara — com a fila vazia, nunca há log (pré-existente, não-pt90). **Verificação concreta:** processar 1 mão com o pt90 e confirmar se `C:\hrc\watcher_logs\hrc_watcher_*.log` é criado; se não, capturar o stdout para ver a linha `[log] a gravar em …` vs `[WARN] _ensure_file_logging falhou`. Cross-ref `#WATCHER-LOG-TO-FILE` (a feature original, pt68). **Só registado — investigar antes de fix.** |
+| `#WATCHER-OCR-NOT-READ-ON-TREE-ZERO-BRANCH` | 🟢 **LOW — NOVO (lacuna de DADOS, não de guarda; para pt91)** | **Descoberto no smoke happy-path pt90** (1ª mão `GG-6083866641`): a mão caiu no **ramo `tree=0`** e o **OCR não disparou** → o `meta.json` dessa mão **não regista `tree_nodes`/`tree_size_gb`** (`ocr_ok` em falso/ausente). **NÃO é abort falhado** — não há gigantes a escapar à guarda (a `GG-6083866641` era ~2 GB, normal; os 8.6 GB eram **RAM do processo**, não árvore); é só **registo de dados incompleto** para as mãos que entram nesse ramo. **Fix (pt91, sem urgência):** fazer o OCR ler o painel "Tree Statistics" **também** no ramo `tree=0`, para preencher `nodes/gb` no `meta.json` (telemetria completa) — reutiliza a mesma infra `tree_stats.py`. **Não bloqueia** o fecho do `#HRC-TREE-GIGANTE` (a guarda está viva onde importa). Cross-ref `#HRC-TREE-GIGANTE`, `#WATCHER-JANELA-DE-TRABALHO-ETA` (os sinais precoces dependem de ter `nodes/gb` sempre registados). **Só registado.** |
 
 ---
 

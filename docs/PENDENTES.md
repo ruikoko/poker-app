@@ -13,6 +13,14 @@ exe anterior no Beelink **fricciona com a regra «1 só watcher exe»** (o hist�
 PC+git) — registado aqui para não se perder; decidir se `C:\hrc\backup_watcher` fica ou se limpa
 depois do smoke OK. *(Estado da instalação por confirmação de SHA round-trip no próprio Beelink.)*
 
+**Smoke happy-path — 1ª tentativa (26 Jun), NÃO concluída.** A 1ª mão (`GG-6083866641`) caiu no
+**ramo `tree=0`** → o OCR **não disparou** (ver `#WATCHER-OCR-NOT-READ-ON-TREE-ZERO-BRANCH` em
+`TECH_DEBTS`). **Esclarecido: NÃO era gigante** — árvore **~2 GB** (os **8.6 GB** eram **RAM do
+processo**, não a árvore); os **33 min** são **normais** para o perfil **MP/multiway** (confirmado
+no histórico: solves longos são todos early/multiway HJ). **Sem falha de guarda, sem drama**; mão
+em `C:\hrc\queue_hold`, **recuperável**. **FALTA:** correr o happy-path com uma mão de **árvore
+média** que dispare **"tree estável" limpo** (e ver `nodes/gb` no `meta.json` + `ocr_ok:true`).
+
 **Falta (operacional, Rui+Web no Beelink):**
 1. ~~Descarregar da Release + confirmar o SHA256~~ / ~~Instalar no Beelink~~ — **reportado feito** (ver acima; SHA round-trip a confirmar no Beelink).
 2. **Smoke end-to-end no `.exe`:** (a) mão normal corre; (b) tree gigante forçada → `.failed`
@@ -94,6 +102,13 @@ feita (26 Jun):**
   enviaria **todas** as imagens da pasta). Ver `#GOLD-DIR-DEDICATED-SUBFOLDER`.
 
 > Estado: **investigação feita; construção POR FAZER** (aguarda decisão download-time vs play-time).
+
+**Import de mãos — mapa levantado, por EXECUTAR (26 Jun).** As pipelines de entrada estão todas
+mapeadas: **`RunAll.bat`** (appmaster → appimport + HM3 + Discord, um clique) · **`ImportAoVivo.bat`**
+(só appimport: `gg_hh`/`gg_ts`/`manual`/`it`/`lobby`/`gold`) · **`Import.bat`** (dry-run de ensaio).
+A **execução real** fica para amanhã (regra de sessão: **salas fechadas**). Ordem embutida no
+appimport (HH→TS→imagens→lobby→gold) + reconciles automáticos no servidor; ver também a ordem
+gold↔HH em "★ pt75 — operacional".
 
 ## ★ pt88 (24 Jun 2026) — 2 fixes em prod + reclassificação do study-state
 
