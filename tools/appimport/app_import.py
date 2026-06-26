@@ -413,6 +413,34 @@ def _img_date(path, captured_iso=None):
     return datetime.fromtimestamp(os.path.getmtime(path))
 
 
+# ── Data-de-jogo das gold images a partir do NOME (pt91) ──────────────────────
+# As gold images (descarga do replayer GG) têm o nome
+# "YYYY-MM-DD_ HH-MM_PM_$SB_$BB_#TM.png". A data/hora de DOWNLOAD = data/hora de
+# JOGO na prática (decisão do Rui, pt91: descarrega a mão no momento em que a joga),
+# por isso a objecção download-vs-hora-de-jogo não se aplica aqui. Regexes alinhadas
+# com o backend (screenshot._parse_filename) para não divergirem.
+def _gold_name_date(fname):
+    """Data-de-jogo de uma gold image lida do NOME, como datetime Lisboa-naive.
+    Devolve None se o nome não tiver data+hora legíveis → o chamador INCLUI por
+    defeito ('na dúvida, inclui') e regista aviso, nunca descarta em silêncio."""
+    dm = re.search(r'(\d{4}-\d{2}-\d{2})', fname)
+    tm = re.search(r'(\d{1,2})[-_](\d{2})[-_](AM|PM)', fname, re.IGNORECASE)
+    if not dm or not tm:
+        return None
+    try:
+        d = datetime.strptime(dm.group(1), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+    h, mi, period = int(tm.group(1)), int(tm.group(2)), tm.group(3).upper()
+    if period == "PM" and h != 12:
+        h += 12
+    elif period == "AM" and h == 12:
+        h = 0
+    if not (0 <= h <= 23 and 0 <= mi <= 59):
+        return None
+    return d.replace(hour=h, minute=mi)
+
+
 # ── Fontes por SUBPASTA (gg_hh / gg_ts / manual) ──────────────────────────────
 
 def process_type(session, sub, endpoint, exts, label, live, window=None):
@@ -722,17 +750,20 @@ def process_lobby_dir(session, live, window=None):
 
 # ── Fonte "gold" externa GOLD_DIR (gold images do replayer GG — ex. Documents) ─
 
-def process_gold_dir(session, live):
+def process_gold_dir(session, live, window=None):
     """Lê a pasta EXTERNA GOLD_DIR (gold images = descarga completa da mão pelo
     botão do replayer GG; ex. Documents) e envia TODAS as imagens (.png/.jpg)
-    para /api/screenshots. SEM filtro de mês/janela — a GOLD_DIR só tem gold
-    images, de qualquer mês. Em 2xx MOVE o ficheiro para PARENT_DIR/done/gold
+    para /api/screenshots. `window` (=(lo,hi) ou None) filtra pela DATA-DE-JOGO
+    lida do NOME (pt91 — a hora de download = hora de jogo); ficheiro sem data/hora
+    legível NÃO se perde (entra por defeito + aviso, 'na dúvida inclui'). Em 2xx
+    MOVE o ficheiro para PARENT_DIR/done/gold
     (sai da GOLD_DIR → dedup natural no cliente; o backend dedupa por file_hash).
 
     A jusante reutiliza o pipeline do upload manual: Vision → match por hand-id
     (GG-<TM> do nome) → desanon position_v3 → vilões. Sem HH ainda, o entry fica
     ÓRFÃO (sem erro) e liga-se sozinho quando a HH for importada (re-link de
-    órfãos, já existente). Devolve (enviadas, falhas) ou None se não configurada."""
+    órfãos, já existente). Devolve (enviadas, falhas, fora) ou None se não
+    configurada."""
     if not GOLD_DIR:
         print("\n── gold (GOLD_DIR): não configurada em config_local — salto")
         return None
@@ -742,12 +773,22 @@ def process_gold_dir(session, live):
     done = os.path.join(PARENT_DIR, "done", GOLD_SUB)
     files = _imgs_in(GOLD_DIR)
     print(f"\n── gold (GOLD_DIR externa: gold images → /api/screenshots)  — {len(files)} ficheiro(s)")
-    sent = failed = 0
+    sent = failed = fora = 0
     for fname in files:
         path = os.path.join(GOLD_DIR, fname)
+        if window:
+            dt = _gold_name_date(fname)
+            if dt is None:
+                print(f"   [aviso] {fname}  (sem data/hora legível no nome — incluído por defeito)")
+            else:
+                dentro, motivo = date_in_window(dt, window)
+                if not dentro:
+                    fora += 1
+                    print(f"   [fora] {fname}  ({motivo})")
+                    continue
         if not live:
             sent += 1
-            print(f"   [dry] {fname}  → /api/screenshots")
+            print(f"   [dry{' dentro' if window else ''}] {fname}  → /api/screenshots")
             continue
         ok, msg = _post_screenshot(session, path, fname)
         if ok:
@@ -757,7 +798,7 @@ def process_gold_dir(session, live):
         else:
             failed += 1
             print(f"   ✗ {fname}: {msg} → retry depois (não movido)")
-    return (sent, failed)
+    return (sent, failed, fora)
 
 
 # ── Entrada ────────────────────────────────────────────────────────────────--
@@ -833,7 +874,7 @@ def main(argv=None, overrides=None):
 
     it_counts = process_it_mixed(session, live, window=img_window)
     lobby_sub_res = process_lobby_subdir(session, live, window=img_window)
-    gold_res = process_gold_dir(session, live)   # gold images (GOLD_DIR externa); sem janela
+    gold_res = process_gold_dir(session, live, window=img_window)   # gold images (GOLD_DIR externa); janela por data do NOME (pt91)
     lobby_res = process_lobby_dir(session, live, window=img_window) if args.lobby_dir else None
     if not args.lobby_dir:
         print("\n── lobby (LOBBY_DIR externa): 2ª via manual — salto (usa --lobby-dir)")
@@ -865,11 +906,13 @@ def main(argv=None, overrides=None):
     lsub_fora = f"  fora da janela={lfora_s}" if lfora_s else ""
     print(f"  {'lobby':8} lobbies={lob_s}  não-lobby={nonlob_s}  falhas={lfail_s}{lsub_fora}   (subpasta drop-only)")
     if gold_res is not None:
-        g_sent, g_fail = gold_res
+        g_sent, g_fail, g_fora = gold_res
         tot_sent += g_sent
         tot_fail += g_fail
+        tot_fora += g_fora
         verb = "plano" if not live else "enviadas"
-        print(f"  {'gold':8} {verb}={g_sent}  falhas={g_fail}   (GOLD_DIR externa → /api/screenshots)")
+        g_fora_lbl = f"  fora da janela={g_fora}" if g_fora else ""
+        print(f"  {'gold':8} {verb}={g_sent}  falhas={g_fail}{g_fora_lbl}   (GOLD_DIR externa → /api/screenshots)")
     if lobby_res is not None:
         lob, nonlob, lfail, lfora = lobby_res
         tot_fail += lfail
