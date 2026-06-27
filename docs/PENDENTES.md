@@ -1,5 +1,72 @@
 # Pendentes — backlog vivo
 
+## ★ pt91 (26–27 Jun 2026) — FECHO DE DIA (import Junho + Vision + fix posições HRC + GTO Nível 2 mapa técnico)
+
+> ⚠️ **Reconciliação com a nota ditada do Rui:** 2 itens da nota de fecho avançaram NESTA
+> sessão e a redacção dela ficou stale — registado o estado **verificado** (confirmar):
+> **(item 3)** o `GG-6101135610` foi **diagnosticado e Fase 1 corrigida** (`8c9ef66`) — é o
+> `#POSITION-LABELS-PYTHON-JS-DRIFT`, **NÃO** money-vs-BB (descartado: stacks corretas em BB);
+> **(item 7)** o import `--ao-vivo` 21–26 Jun **FOI corrido e concluído** nesta sessão.
+
+### ✅ Feito/confirmado nesta sessão (verificado)
+- **#POSITION-LABELS-PYTHON-JS-DRIFT Fase 1** (`8c9ef66`, deployed) — label do 1º a agir 6-max
+  `MP→UTG` em `_POSITION_LABELS_BY_N[6]`. Corrige o `GG-6101135610` (UTG ~3,3 BB: dava
+  `R 2.00 + R 3.16`, passa a só `ALLIN`). +7 testes migrados; prova local `SIZES_OPEN_UTG=['ALLIN']`.
+  Ver entrada no `TECH_DEBTS`.
+- **Import 21–26 Jun `--ao-vivo`** corrido e concluído (~1968 ficheiros em `done`: mesa 1145,
+  lobby 457, gold 315, mãos/TS). Fora-da-janela (datas ≠ 21–26) saltadas, como esperado.
+- **Vision destrancada** — a IA Anthropic estava **sem créditos** (todas as chamadas 400
+  "credit balance too low"); após recarga do Rui, backfill `POST /api/screenshots/vision/backfill`
+  processou as 244 pendentes → **SS sem match 145 → 0**; gold ligadas às mãos.
+- **Lobbys**: 303/319 casaram (95%); os 16 pendentes são capturas inválidas/lixo (login,
+  "late registration", WPN com data partida) — não casam por não terem torneio real. **ZENITH**
+  (Winamax, lobby 15 Jun) fica `tm_not_found` porque **não há mãos ZENITH de 15 Jun** na app
+  (só 16/21/22/23/25/26) — falta-lhe a edição desse dia, não é bug.
+- **Nível 1 (badge HRC na Estudo)** — **JÁ EXISTE desde pt69**, funciona (provider envolve
+  `Hands.jsx`; `HrcStateBadge` em `HandRow.jsx:241`; `/api/queue/hrc/states` devolve
+  `concluída/na fila/falhou`; vocab bate). **Nada a fazer.** Estado prod: gate **ABERTO**,
+  **71 mãos resolvidas (done)**, 36 por resolver, 17 falhou, 373 não enviadas.
+- **#APPIMPORT-DATE-FILTER-IT-GOLD** (item 5) — FECHADO (`de2fa18` + `d3bdfa2`). [já registado abaixo]
+- **#HRC-NODE-OFFSET-IMPLICIT-LINES** — confirmado **já FECHADO** (`8096f3c`, pt86b); a nota
+  "fila travada por este bug" (pt67) está **stale**. A fila está aberta; ~0 solves era falso.
+
+### EM ABERTO — para retomar amanhã
+1. **GTO Nível 2 (mostrar estratégia HRC na mão + NAVEGAR a árvore)** — **decisão tomada** (Rui):
+   o MEU spot + navegação multi-spot, com a **solve exata 1:1**. **Mapa técnico FEITO (leitura):**
+   a navegação da tab GTO (`ReplayerPage.jsx`) **NÃO está presa ao match** — `POST /api/gto/navigate`
+   e `getNode` só precisam de um `tree_id`; o `gtoApi.match` (l.287) é apenas a fonte do `tree_id`.
+   **Desenho ideal:** parsear a solve 1:1 (`hrc_jobs.result_zip` → `parse_hrc_zip()` já existe) para
+   uma árvore `gto_trees` **própria**, ligá-la à mão (coluna nova `source_hand_db_id`), endpoint
+   `GET /api/hands/{id}/gto-tree` → `tree_id`, e no frontend usar **esse** `tree_id` em vez do
+   `bestMatch.tree_id` (fallback ao match para mãos sem solve). Reaproveita `parse_hrc_zip`,
+   `gto_trees/gto_nodes`, `/navigate`, `/node` e a tab GTO inteira. **3 DETALHES POR DECIDIR:**
+   (a) **excluir** as árvores por-mão do `/match` difuso (`AND source_hand_db_id IS NULL`);
+   (b) **storage** — descartar o zip bruto após parsear ou manter para auditoria;
+   (c) **solves "stale"** pré-correções (offset pt86b + posições pt91) — re-gerar as antigas.
+   **FALTA: a proposta de implementação faseada.** NÃO construído.
+2. **(item 3 resto) Sizes em stack curto** — UTG **FIXO** (Fase 1). **Por verificar:** o caso
+   **BTN <5BB** (nota Rui) também a dar 2 sizes — provavelmente **causa distinta** (o BTN já
+   normalizava `BTN→BU`, a Fase 1 não o muda). **Fase 2** (n=7/8/9, drift estrutural + `EP/UTG1`)
+   aberta. Ver `#POSITION-LABELS-PYTHON-JS-DRIFT`.
+3. **(item 4) OCR pt90 não dispara** — *(fio do Code principal, branch `watcher-gate`)*. Diagnóstico
+   Beelink: solves grandes/reais não registaram nodes/GB; **0 OCR em log nenhum de sempre**. Causa
+   provável: call-site do OCR **não alcançado** no `.exe` (chamada ausente do fluxo OU try/except a
+   engolir). Por achar no código-fonte do watcher. *(Não tocado nesta sessão.)*
+4. **(item 7 resto) HM3 — 6 dias por importar** *(operacional do Rui)*. O appimport faz-se à mão
+   (`python app_import.py --ao-vivo --desde 2026-06-21 --ate 2026-06-26`, salas fechadas), **NÃO** o
+   RunAll/appmaster (força Discord). O **import de mãos GG/IT/gold** já foi nesta sessão; **falta o
+   HM3** (mãos WN/PS/WPN dos 6 dias). *(Nota: o HM3 já foi corrido pelo Rui a meio da sessão p/
+   destrancar os lobbys WN; confirmar cobertura dos 6 dias.)*
+5. **(item 8) Fila partilhada — 5 pessoas do backer team a partilhar o Beelink** (recepção→HRC→envio).
+   FUTURO, sem pressa. Em discussão: regra de fila (à vez vs pequena-primeiro) + realidade de
+   1 máquina / 1 mão de cada vez. **Depende do OCR (tamanho da árvore) funcionar.** NÃO começado.
+
+### ✅ Fechado hoje (confirmado, não reabrir)
+- **(item 6) Reinício do HRC a cada 5 mãos** — confirmado a funcionar no pt90 (**falso alarme**).
+- **(item 5) #APPIMPORT-DATE-FILTER-IT-GOLD** — `de2fa18` + `d3bdfa2`.
+
+---
+
 ## ★ pt90 (25 Jun 2026) — watcher OCR tree-size: instalar `watcher-pt90` + smoke end-to-end
 
 `#HRC-TREE-GIGANTE` **fix shipped** (`watcher-gate` `9609ab6`+`7384ed2`; Release `watcher-pt90`).
