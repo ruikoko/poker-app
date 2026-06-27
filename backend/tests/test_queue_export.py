@@ -727,10 +727,10 @@ def test_first_vpip_open_raise_equals_opener():
 
 
 def test_first_vpip_limped_pot_is_limper_not_raiser():
-    """LIMPED pot: 1º VPIP = o LIMPER (call), ≠ o aggressor (raiser). UtgP(MP)
-    limpa antes do raise do CoP(CO) → VPIP=MP; aggressor=CO(idx 2)."""
-    assert derive_first_vpip_position(_HH_LIMP_6MAX) == "MP"
-    assert derive_real_aggressor_position(_HH_LIMP_6MAX) == 2  # CO ≠ MP
+    """LIMPED pot: 1º VPIP = o LIMPER (call), ≠ o aggressor (raiser). UtgP(UTG)
+    limpa antes do raise do CoP(CO) → VPIP=UTG; aggressor=CO(idx 2)."""
+    assert derive_first_vpip_position(_HH_LIMP_6MAX) == "UTG"
+    assert derive_real_aggressor_position(_HH_LIMP_6MAX) == 2  # CO ≠ UTG
 
 
 def test_first_vpip_walk_returns_none():
@@ -1486,15 +1486,17 @@ def test_candidate_3bet_positions_ip_4handed_opener_CO():
     assert _candidate_3bet_positions_ip(seats, "CO") == ["BU"]
 
 
-def test_candidate_3bet_positions_ip_6handed_opener_MP():
-    """6-handed [MP, HJ, CO, BTN, SB, BB]: opener=MP → [HJ, CO, BU]."""
-    seats = [{"position": p} for p in ("MP", "HJ", "CO", "BTN", "SB", "BB")]
-    assert _candidate_3bet_positions_ip(seats, "MP") == ["HJ", "CO", "BU"]
+def test_candidate_3bet_positions_ip_6handed_opener_UTG():
+    """6-handed [UTG, HJ, CO, BTN, SB, BB]: opener=UTG → [HJ, CO, BU].
+
+    (pt92 #POSITION-LABELS-PYTHON-JS-DRIFT: idx0 do 6-max é UTG, não MP.)"""
+    seats = [{"position": p} for p in ("UTG", "HJ", "CO", "BTN", "SB", "BB")]
+    assert _candidate_3bet_positions_ip(seats, "UTG") == ["HJ", "CO", "BU"]
 
 
 def test_candidate_3bet_positions_ip_6handed_opener_HJ():
     """6-handed: opener=HJ → só [CO, BU] são candidatos IP."""
-    seats = [{"position": p} for p in ("MP", "HJ", "CO", "BTN", "SB", "BB")]
+    seats = [{"position": p} for p in ("UTG", "HJ", "CO", "BTN", "SB", "BB")]
     assert _candidate_3bet_positions_ip(seats, "HJ") == ["CO", "BU"]
 
 
@@ -1517,7 +1519,7 @@ def test_candidate_3bet_positions_ip_9handed_opener_UTG2():
 
 def test_candidate_3bet_positions_ip_invalid_opener_returns_empty():
     """Opener não está em labels → [] (defensivo)."""
-    seats = [{"position": p} for p in ("MP", "HJ", "CO", "BTN", "SB", "BB")]
+    seats = [{"position": p} for p in ("UTG", "HJ", "CO", "BTN", "SB", "BB")]
     assert _candidate_3bet_positions_ip(seats, "NotAPos") == []
     assert _candidate_3bet_positions_ip(seats, None) == []
 
@@ -2783,8 +2785,8 @@ def test_build_sizings_overrides_caso_B_no_3bet_real():
         hh, level_sb=50, level_bb=100, seats=seats,
         effective_stack_bb=50.0,
     )
-    # Open caught — eff > 25 → só [2.0]. pt89: opener = idx0 em 6-handed = MP.
-    assert out["SIZES_OPEN_MP"] == [2.0]
+    # Open caught — eff > 25 → só [2.0]. opener = idx0 em 6-handed = UTG (pt92).
+    assert out["SIZES_OPEN_UTG"] == [2.0]
     # CASO B — 3 candidatos IP, todos com eff(opener,candidate) ~= 48 BB (>=35).
     assert out["SIZES_3BET_HJ"] == [6.0]
     assert out["SIZES_3BET_CO"] == [6.0]
@@ -2822,7 +2824,7 @@ def test_build_sizings_overrides_caso_A_overrides_caso_B_in_3bettor_position():
         hh, level_sb=50, level_bb=100, seats=seats,
         effective_stack_bb=50.0,
     )
-    assert out["SIZES_OPEN_MP"] == [2.0]   # pt89: opener = idx0 em 6-handed = MP
+    assert out["SIZES_OPEN_UTG"] == [2.0]   # opener = idx0 em 6-handed = UTG (pt92)
     # CASO A — HJ 3-betou (sizing real 6 BB; eff spot >25 → só [6.0]).
     assert out["SIZES_3BET_HJ"] == [6.0]
     # CASO B — CO/BU ficaram, bucket >=35 → 6.0 também.
@@ -2925,8 +2927,8 @@ def test_build_sizings_overrides_open_jam_caso_B_still_generated():
         effective_stack_bb=15.0,
     )
     # Open ALLIN (1500 = 100% stack) + default 2 BB (ordem pt70 [size, ALLIN]).
-    # pt89: opener = idx0 em 6-handed = MP.
-    assert out["SIZES_OPEN_MP"] == [2.0, "ALLIN"]
+    # opener = idx0 em 6-handed = UTG (pt92).
+    assert out["SIZES_OPEN_UTG"] == [2.0, "ALLIN"]
     # pt70 LEI B1: CASO B sobre open ALL-IN → iso = 2.5 × opener_to_bb(15) = 37.5
     # (eff do 3-bettor 50 BB > 25 → sem ALLIN). Já NÃO é 2.3×shove.
     assert out["SIZES_3BET_HJ"] == [37.5]

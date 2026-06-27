@@ -169,7 +169,7 @@ _POSITION_LABELS_BY_N: dict = {
     3: ["BTN", "SB", "BB"],
     4: ["CO", "BTN", "SB", "BB"],
     5: ["HJ", "CO", "BTN", "SB", "BB"],
-    6: ["MP", "HJ", "CO", "BTN", "SB", "BB"],
+    6: ["UTG", "HJ", "CO", "BTN", "SB", "BB"],  # idx0 MP→UTG (pt92, #POSITION-LABELS-PYTHON-JS-DRIFT): alinha o label do 1º a agir com o que o HRC/script lê (era "MP" → override SIZES_OPEN_MP nunca lido). BTN mantém-se (traduz-se a BU em _canonical_3bet_position).
     7: ["UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"],
     8: ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"],
     9: ["UTG2", "UTG1", "UTG", "MP", "HJ", "CO", "BTN", "SB", "BB"],  # n=9/UTG2 provisório

@@ -34,7 +34,7 @@ def test_strategy_table_positions_keeps_other_labels_in_order():
     assert strategy_table_positions(3) == ["BTN", "SB"]
     assert strategy_table_positions(4) == ["CO", "BTN", "SB"]
     assert strategy_table_positions(5) == ["HJ", "CO", "BTN", "SB"]
-    assert strategy_table_positions(6) == ["MP", "HJ", "CO", "BTN", "SB"]
+    assert strategy_table_positions(6) == ["UTG", "HJ", "CO", "BTN", "SB"]
     assert strategy_table_positions(8) == [
         "UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB",
     ]
@@ -186,10 +186,13 @@ def test_compute_target_node_offset_GG6027751209_sb_jam():
 
 
 def test_compute_target_node_offset_6max():
-    """6-max default: MP=0, HJ=2, CO=4, BTN=6, SB-complete=8."""
+    """6-max default: UTG=0, HJ=2, CO=4, BTN=6, SB-complete=8.
+
+    (pt92 #POSITION-LABELS-PYTHON-JS-DRIFT: o 1º a agir em 6-max é UTG,
+    não MP — alinhado com a convenção do HRC/script.)"""
     base = {"type": "raise", "size_bb": 2.0}
     assert compute_target_node_offset(
-        {**base, "position": "MP"}, 6, {}, raiser_stack_bb=50.0,
+        {**base, "position": "UTG"}, 6, {}, raiser_stack_bb=50.0,
     ) == 0
     assert compute_target_node_offset(
         {**base, "position": "CO"}, 6, {}, raiser_stack_bb=50.0,
