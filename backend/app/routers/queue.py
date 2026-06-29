@@ -29,6 +29,7 @@ from app.services.hrc_queue import (
     select_andar1_rows,
     lookup_payouts,
     lookup_bounties,
+    lookup_icm_chips,
     DEFAULT_TAGS,
     DEFAULT_STUDY_STATES,
     ALLOWED_SITES,
@@ -121,6 +122,7 @@ def export_queue(
         h["requeue_epoch"] = epoch_by_id.get(h["id"], 0)
     payouts_by_key = lookup_payouts(hands)
     bounty_by_key = lookup_bounties(hands)
+    chips_by_key = lookup_icm_chips(hands)  # #ICM-CHIPS-USE-TS-FINAL-FIELD-GG
 
     filters_meta = {
         "tags": f["raw_tags"],
@@ -136,6 +138,7 @@ def export_queue(
         include_no_payout=include_no_payout,
         filters_meta=filters_meta,
         bounty_by_key=bounty_by_key,
+        chips_by_key=chips_by_key,
     )
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%dT%H%M%SZ")
@@ -532,12 +535,14 @@ def export_queue_single_hand(
     # pt41: bounty base do TS (per-mão); se for PKO GG sem TS, build_queue_zip
     # skipa com reason='pko_without_ts_bounty' → 422 no gate final abaixo.
     bounty_by_key = lookup_bounties([h])
+    chips_by_key = lookup_icm_chips([h])  # #ICM-CHIPS-USE-TS-FINAL-FIELD-GG
 
     zip_bytes = build_queue_zip(
         [h], payouts_by_key,
         include_no_payout=False,
         filters_meta={"single_hand": hand_id},
         bounty_by_key=bounty_by_key,
+        chips_by_key=chips_by_key,
     )
 
     # Gate final: se a mão foi saltada (raw/seats), não devolver zip só-manifest.

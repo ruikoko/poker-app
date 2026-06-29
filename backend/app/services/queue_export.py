@@ -1019,6 +1019,25 @@ def _patch_winamax_payouts_bountytype(
     return patched
 
 
+def _override_icm_chips_in_blob(blob, total_chips: float):
+    """#ICM-CHIPS-USE-TS-FINAL-FIELD-GG — sobrescreve `structures[i].chips` (=
+    total de fichas do torneio que o HRC usa para o ICM) com o valor derivado do
+    campo FINAL do TS (`total_players × starting_stack`), em vez da estimativa
+    parcial do lobby. Patch SÓ NO ZIP (BD intacta — audit trail). Não-destrutivo
+    (deep-copy). Se `blob` não é dict ou não tem `structures`, devolve como veio.
+    """
+    if not isinstance(blob, dict):
+        return blob
+    patched = json.loads(json.dumps(blob))  # deep-copy via serialização
+    structs = patched.get("structures")
+    if not isinstance(structs, list):
+        return patched
+    for s in structs:
+        if isinstance(s, dict):
+            s["chips"] = float(total_chips)
+    return patched
+
+
 def _format_winamax_structure_name(
     name: Optional[str], tournament_number: Optional[str],
 ) -> Optional[str]:
@@ -1570,6 +1589,7 @@ def build_queue_zip(
     include_no_payout: bool = False,
     filters_meta: Optional[dict] = None,
     bounty_by_key: Optional[dict] = None,
+    chips_by_key: Optional[dict] = None,
 ) -> bytes:
     """Constroi um zip com pasta por mao + manifest.json no root.
 
@@ -1585,6 +1605,12 @@ def build_queue_zip(
                      (pt41, espelho de payouts_by_key). Threaded para o conversor
                      via bounty_ctx. GG bounty-format sem base do TS é skipado
                      defensivamente (reason='pko_without_ts_bounty').
+      chips_by_key:  lookup {(site, tn): {"total_chips", "total_players",
+                     "starting_stack"}} (#ICM-CHIPS-USE-TS-FINAL-FIELD-GG, espelho
+                     de payouts_by_key). Quando presente para a mão, sobrescreve
+                     `structures[i].chips` no payouts.json do zip com o total
+                     derivado do TS (GG-only; só os torneios validados entram no
+                     mapa). Ausente/None → mantém-se a estimativa do lobby.
 
     Estrutura:
       <hand_id_1>/hh.txt
@@ -1827,6 +1853,19 @@ def build_queue_zip(
                     tournament_number=tnum,
                 )
 
+            # #ICM-CHIPS-USE-TS-FINAL-FIELD-GG — sobrescreve o total de fichas do
+            # ICM (`structures[i].chips`) com o valor derivado do campo FINAL do TS
+            # (total_players × starting_stack), em vez da estimativa parcial do
+            # lobby. Só GG e só torneios validados entram em `chips_by_key`
+            # (lookup_icm_chips); ausente → mantém-se a estimativa do lobby.
+            icm_chips_override = (chips_by_key or {}).get(key) if key else None
+            icm_chips_source = "lobby_estimate"
+            if icm_chips_override and payout_blob_for_zip is not None:
+                payout_blob_for_zip = _override_icm_chips_in_blob(
+                    payout_blob_for_zip, icm_chips_override["total_chips"],
+                )
+                icm_chips_source = "ts_final"
+
             # pt42d #WN-BOUNTY-NULL-IN-HRC-PIPELINE v2 — payouts.json no zip
             # contém APENAS `{name, folders, structures}` (sem merge com
             # hints top-level). HRC rejeita campos extra (custom.json fica
@@ -1900,6 +1939,19 @@ def build_queue_zip(
                 "starting_bounty": starting_bounty,
                 "hero_bounty": hero_bounty,
                 "hero_bounty_source": hero_bounty_source,
+                # #ICM-CHIPS-USE-TS-FINAL-FIELD-GG audit: "ts_final" (override
+                # aplicado) | "lobby_estimate" (sem override). Quando ts_final,
+                # icm_chips/icm_total_players/icm_starting_stack registam o cálculo.
+                "icm_chips_source": icm_chips_source,
+                "icm_chips": (
+                    icm_chips_override["total_chips"] if icm_chips_override else None
+                ),
+                "icm_total_players": (
+                    icm_chips_override["total_players"] if icm_chips_override else None
+                ),
+                "icm_starting_stack": (
+                    icm_chips_override["starting_stack"] if icm_chips_override else None
+                ),
                 "has_script": script_js is not None,
                 "script_overrides": script_overrides,
                 "script_generation_error": script_error,
