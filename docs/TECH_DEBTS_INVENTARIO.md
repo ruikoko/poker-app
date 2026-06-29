@@ -6,6 +6,14 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 29 Jun 2026 — fidelidade do total de fichas ICM (lobby parcial vs campo final)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#ICM-CHIPS-USE-TS-FINAL-FIELD-GG` | 🟢 **LOW-MED — SÓ REGISTADO (decisão do Rui: registar, atacar depois)** | **Problema:** o `chips` do `payouts.json` (= **total de fichas do torneio**, que o HRC usa para o **ICM**) é a **estimativa do lobby** — `average_stack × players_left` (`services/lobby_vision.py:285-296`), lida no **momento da SS**. Quando a SS é tirada durante o **registo tardio**, o campo ainda está incompleto → o `chips` **subconta**. **Caso real (tn 292447656, Speed Racer Bounty Europe $108, mão GG-6102826859):** lobby deu **1 409 980** (≈ **141** entradas a 10 000); o **TS** diz **151 Players** → total verdadeiro **151 × 10 000 = 1 510 000**. Faltam **10 entradas (~100 000 fichas)** que se inscreveram **depois** da foto (TS: torneio começou 17:10:00; a mão foi 17:16, ainda Nível 1, late-reg aberto). Fichas não somem — é *timing* da SS. **Impacto:** ICM ligeiramente sobrevaloriza as fichas (~7% de campo a menos); ao Nível 1 / longe do dinheiro é pequeno, mas perto da bolha pode pesar. Os **prémios** no `payouts.json` já são os finais e corretos. **Fix proposto (GG-only):** quando **GG + TS existe**, sobrescrever `chips = TS.total_players × stack_inicial`, com `stack_inicial` = **stack do Hero na mão MAIS ANTIGA do `tournament_number`** (regra do Rui: a 1ª mão = entrada = stack inicial; validado — a 1ª mão TM6102826764 tinha **os 6 seats a 10 000 redondos**). Robustez: validar que a mão é "fresca" (1ª por `played_at`, stack redonda / Nível 1) para não apanhar uma stack a meio. **Fora de scope (inalterado):** **WN / PS / WPN** (o parser de TS é **GG-only** desde pt38) e **GG sem TS** → continuam na estimativa do lobby. **Onde mexer:** override no caminho que monta o `chips` (pós-`lobby_vision` / resolver / `queue_export`), gated por site GG + existência de TS. **Cross-ref:** `#RESOLVER-TIER0-STRICT-EQUALITY` (mesma tensão lobby-tempo-real vs TS-final), `lobby_vision.py:285-296`, `tournament_summaries`. **Investigação read-only feita (29 Jun):** 1ª mão tirada de `Batmen/gg_hh` (stack 10 000) + TS colado pelo Rui (151); zero acesso a prod. **Só registado — não implementado.** |
+
+---
+
 ## pt91 (26 Jun 2026 — filtro de data do gold por NOME)
 
 | ID | Sev | Resumo |
