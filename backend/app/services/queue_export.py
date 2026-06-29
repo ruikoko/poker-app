@@ -1512,7 +1512,9 @@ def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
     return val if isinstance(val, int) else None
 
 
-def _build_hrc_script_for_hand(hh_text: str, level_sb: int, level_bb: int):
+def _build_hrc_script_for_hand(
+    hh_text: str, level_sb: int, level_bb: int, is_pko: bool = False,
+):
     """Pipeline novo (Maio 2026): gera `.js` per-hand com SIZES_* substituídos
     pela acção real da HH.
 
@@ -1534,7 +1536,9 @@ def _build_hrc_script_for_hand(hh_text: str, level_sb: int, level_bb: int):
     """
     from app.services.hrc_script_gen import generate_hrc_script_for_hand
     seats = derive_seats_in_preflop_order(hh_text)
-    return generate_hrc_script_for_hand(hh_text, level_sb, level_bb, seats)
+    return generate_hrc_script_for_hand(
+        hh_text, level_sb, level_bb, seats, is_pko=is_pko,
+    )
 
 
 def classify_aggressor_source(real_action: Optional[dict], positions: list) -> str:
@@ -1641,6 +1645,7 @@ def build_queue_zip(
                 compute_target_node_offset,
                 derive_aggressor_stack_bb,
                 derive_position_stacks_bb,
+                derive_position_total_stacks_bb,
                 strategy_table_positions,
             )
             seats_at_table = len(derive_seats_in_preflop_order(hh_text))
@@ -1695,9 +1700,13 @@ def build_queue_zip(
             script_error = None
             if _bb is not None:
                 try:
+                    # pt91 (Regra 3 do Rui): is_pko = qualquer formato com bounty
+                    # (BOUNTY_FORMATS — fonte única; inclui Mystery). O template
+                    # usa o flag para o all-in ISO extra (3bet/open) em PKO.
+                    is_pko = fmt in BOUNTY_FORMATS
                     (script_js, script_overrides,
                      effective_stack_bb, script_error) = _build_hrc_script_for_hand(
-                        hh_text, _sb, _bb,
+                        hh_text, _sb, _bb, is_pko=is_pko,
                     )
                 except Exception as _e:
                     logger.exception("hrc_script_gen falhou hand_id=%s", hand_id)
@@ -1783,12 +1792,20 @@ def build_queue_zip(
                     position_stacks_bb = derive_position_stacks_bb(
                         hh_text, _sb, _bb,
                     )
+                    # pt91 (Regras 1+3): stacks TOTAIS por posição + flag PKO →
+                    # o offset espelha o open colapsado (efetivo <= 9) e o all-in
+                    # ISO da Regra 3. fmt sempre definido (linha ~1614).
+                    position_total_bb = derive_position_total_stacks_bb(
+                        hh_text, _bb,
+                    )
                     target_node_offset = compute_target_node_offset(
                         aggressor_real_action,
                         seats_at_table,
                         script_overrides,
                         raiser_stack_bb,
                         position_stacks_bb,
+                        is_pko=(fmt in BOUNTY_FORMATS),
+                        position_total_bb=position_total_bb,
                     )
                 except Exception:
                     logger.exception(
