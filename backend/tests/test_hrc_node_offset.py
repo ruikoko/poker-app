@@ -11,6 +11,7 @@ da stack do raiser conta como all-in efectivo.
 from app.services.hrc_node_offset import (
     _ALL_IN_EFFECTIVE_THRESHOLD,
     _is_all_in_effective,
+    _open_node_eff_and_shortie,
     compute_target_node_offset,
     count_lines_for_position,
     derive_aggressor_stack_bb,
@@ -540,3 +541,105 @@ def test_anchor_offset_consistent_after_split_pt89():
     hj_allin = compute_target_node_offset(
         agg, 8, {"SIZES_OPEN_HJ": [2.0, "ALLIN"]}, 32.43, stacks)
     assert hj_allin == base + 1
+
+
+# ── pt91 (Regra 1 do Rui) — open efetivo <= 9 → só all-in ──────────────────
+
+def test_count_lines_rule1_effective_collapse_to_allin():
+    """eff <= 9 → 1 linha (só all-in), mesmo que a stack individual desse 2.
+    Sem effective_bb (back-compat) com 20 BB individual → 2 linhas (pt86)."""
+    assert count_lines_for_position("UTG", {}, stack_bb=20.0) == 2
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=20.0, effective_bb=8.0) == 1
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=20.0, effective_bb=9.0) == 1   # 9 incluído
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=20.0, effective_bb=9.01) == 2  # > 9 → normal
+
+
+def test_count_lines_rule1_collapse_SB_keeps_complete():
+    """SB com eff <= 9 → 1 (all-in) + 1 (Complete) = 2."""
+    assert count_lines_for_position(
+        "SB", {}, stack_bb=20.0, effective_bb=8.0) == 2
+
+
+def test_count_lines_rule1_shortie_own_pko_keeps_min_plus_allin():
+    """Regra 3 ganha à Regra 1: em PKO, o próprio shortie (<=4 BB) a abrir
+    leva min+allin (2 linhas), não só all-in (1)."""
+    # Não-PKO: eff<=9 → 1 linha.
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=3.5, effective_bb=3.5) == 1
+    # PKO + own<=4 → exceção → min+allin = 2.
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=3.5, effective_bb=3.5,
+        is_pko=True, own_total_bb=3.5) == 2
+
+
+def test_count_lines_rule3_open_iso_adds_allin_when_deep():
+    """Regra 3-em-open: PKO + adversário por falar <=4 BB → +all-in mesmo
+    com opener fundo (que normalmente daria 1 linha sem all-in)."""
+    assert count_lines_for_position("UTG", {}, stack_bb=88.0) == 1
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=88.0, effective_bb=88.0,
+        is_pko=True, own_total_bb=88.0,
+        yet_to_act_short_or_allin=True) == 2
+    # Sem PKO, o yet_short não acrescenta nada.
+    assert count_lines_for_position(
+        "UTG", {}, stack_bb=88.0, effective_bb=88.0,
+        is_pko=False, own_total_bb=88.0,
+        yet_to_act_short_or_allin=True) == 1
+
+
+def test_offset_within_bucket_unchanged_by_rule1_preservation():
+    """pt91: a ação real é sempre preservada → o within NÃO colapsa por Regra 1
+    (lógica pt67 intacta: small→0, jam→último nó). O índice exacto fica para o
+    smoke visual (#IMPLICIT-LINES)."""
+    nonsb = {"position": "UTG", "type": "raise", "size_bb": 8.0}
+    assert offset_within_bucket(nonsb, 8.0) == 1          # jam → nó ALLIN (idx 1)
+    small = {"position": "UTG", "type": "raise", "size_bb": 2.0}
+    assert offset_within_bucket(small, 30.0) == 0         # small → idx 0
+    sb = {"position": "SB", "type": "raise", "size_bb": 8.0}
+    assert offset_within_bucket(sb, 8.0) == 2             # SB jam → idx 2
+    sb_complete = {"position": "SB", "type": "complete", "size_bb": 0.0}
+    assert offset_within_bucket(sb_complete, 8.0) == 0
+
+
+def test_open_node_eff_and_shortie_caps_by_biggest_live():
+    """eff = min(own, maior vivo atrás); yet_short = algum atrás <= 4 BB."""
+    totals = {"UTG": 50.0, "HJ": 40.0, "CO": 30.0,
+              "BTN": 25.0, "SB": 20.0, "BB": 3.0}
+    eff, own, yet = _open_node_eff_and_shortie("UTG", 6, totals)
+    assert (eff, own, yet) == (40.0, 50.0, True)   # capado por HJ=40; BB=3<=4
+    eff_sb, own_sb, yet_sb = _open_node_eff_and_shortie("SB", 6, totals)
+    assert (eff_sb, own_sb, yet_sb) == (3.0, 20.0, True)  # só BB atrás (3)
+
+
+def test_compute_offset_pko_iso_shifts_anchor():
+    """End-to-end: PKO + shortie atrás (BB=3) → Regra 3 acrescenta linha de
+    all-in a cada posição anterior ao raiser → âncora sobe."""
+    totals = {"UTG": 50.0, "HJ": 50.0, "CO": 50.0,
+              "BTN": 50.0, "SB": 50.0, "BB": 3.0}
+    agg = {"position": "CO", "type": "raise", "size_bb": 2.0}
+    # Baseline sem totais/PKO: UTG(1)+HJ(1)+within(0) = 2.
+    assert compute_target_node_offset(agg, 6, {}, 50.0, totals) == 2
+    # PKO + totais: UTG(2)+HJ(2)+within(0) = 4.
+    assert compute_target_node_offset(
+        agg, 6, {}, 50.0, totals,
+        is_pko=True, position_total_bb=totals) == 4
+
+
+def test_compute_offset_rule1_collapse_shifts_anchor():
+    """Rule 1 (format-agnóstico) nas FOLDADAS antes do raiser: mesa toda curta
+    (8 BB) → cada open hipotético colapsa para 1 linha (era 2). O within do
+    raiser NÃO colapsa (ação real preservada → lógica pt67, jam=1).
+
+    Nota: o efetivo é capado pelo MAIOR vivo atrás — um único curto numa mesa
+    funda NÃO colapsa uma posição cedo (ela ainda joga deep vs as fundas)."""
+    totals = {"UTG": 8.0, "HJ": 8.0, "CO": 8.0,
+              "BTN": 8.0, "SB": 8.0, "BB": 8.0}
+    agg = {"position": "CO", "type": "raise", "size_bb": 8.0}  # jam (~stack)
+    # Sem totais: UTG(2)+HJ(2)+within(jam=1) = 5.
+    assert compute_target_node_offset(agg, 6, {}, 8.0, totals) == 5
+    # Com totais (Rule 1 nas foldadas): UTG(1)+HJ(1)+within(jam=1) = 3.
+    assert compute_target_node_offset(
+        agg, 6, {}, 8.0, totals, position_total_bb=totals) == 3

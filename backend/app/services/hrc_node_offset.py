@@ -79,6 +79,13 @@ _TEMPLATE_DEFAULT_OPEN_ARRAY = {
 _OPEN_ALLIN_THRESHOLD_BB = 25.0
 _OPEN_ALLIN_THRESHOLD_BVB_BB = 30.0
 
+# pt91 (Regras 1 e 3 do Rui) — espelham as consts do template canónico
+# (mtt_advanced_canonical_2026.js): OPEN_ALLIN_ONLY_EFF_BB e PKO_SHORTIE_BB.
+# Regra 1: open com EFETIVO <= 9 → só all-in (1 linha). Regra 3 (PKO): shortie
+# <= 4 BB acrescenta all-in. Manter em sync com o JS.
+_OPEN_ALLIN_ONLY_EFF_BB = 9.0
+_PKO_SHORTIE_BB = 4.0
+
 
 def _is_allin_token(s) -> bool:
     """ALLIN nos arrays: string "ALLIN" (backend) ou 9999 (sentinela template)."""
@@ -124,7 +131,9 @@ def _bucket_open_for_position(position: str) -> str:
 
 
 def count_lines_for_position(
-    position: str, script_overrides: dict, stack_bb=None
+    position: str, script_overrides: dict, stack_bb=None,
+    *, effective_bb=None, is_pko: bool = False, own_total_bb=None,
+    yet_to_act_short_or_allin: bool = False,
 ) -> int:
     """Nº de linhas que `position` ocupa na Strategy Table HRC (open node).
 
@@ -139,6 +148,16 @@ def count_lines_for_position(
         de opens), senão 25 BB.
 
     SB tem sempre +1 linha de Complete (limp) — `canFlatCallPreflop` bets==1.
+
+    pt91 (Regras 1 e 3 do Rui) — kwargs novos (espelham `getSizingsOpening`):
+      - `effective_bb`: efetivo no nó (min do opener com o maior vivo). Se
+        <= 9 → SÓ all-in → 1 linha (+ Complete se SB), EXCETO quando em PKO o
+        próprio opener é o shortie (<= 4 BB), que mantém min+allin.
+      - `is_pko` + `own_total_bb` + `yet_to_act_short_or_allin`: Regra 3-em-open
+        — em PKO, força a linha de all-in (se ainda não contada) quando o
+        próprio opener é shortie OU há adversário por falar all-in / <= 4 BB.
+      Defaults (`effective_bb=None`, `is_pko=False`) → comportamento pré-pt91
+      inalterado (back-compat dos testes e do caminho legacy).
     """
     if not isinstance(script_overrides, dict):
         script_overrides = {}
@@ -166,6 +185,24 @@ def count_lines_for_position(
     kept = [s for s in non_allin if float(s) < stack_bb]      # sizes abaixo da stack
     collapsed = any(float(s) >= stack_bb for s in non_allin)  # size ≥ stack → vira ALLIN
     add_allin = has_explicit_allin or collapsed or (stack_bb <= threshold)
+
+    # ── pt91 (Regra 1): efetivo <= 9 → SÓ all-in (1 linha), exceto shortie-own PKO ──
+    shortie_own = (
+        bool(is_pko) and own_total_bb is not None
+        and float(own_total_bb) <= _PKO_SHORTIE_BB
+    )
+    if (effective_bb is not None
+            and float(effective_bb) <= _OPEN_ALLIN_ONLY_EFF_BB
+            and not shortie_own):
+        lines = 1
+        if pos == "SB":
+            lines += _SB_COMPLETE_LINES
+        return max(1, lines)
+
+    # ── pt91 (Regra 3-em-open): PKO → força all-in se shortie próprio OU
+    #    adversário por falar all-in / <= 4 BB (aditivo; só se ainda não contado).
+    if is_pko and (shortie_own or yet_to_act_short_or_allin):
+        add_allin = True
 
     lines = len(kept) + (1 if add_allin else 0)
     if pos == "SB":
@@ -203,6 +240,59 @@ def derive_position_stacks_bb(hh_text, level_sb, level_bb, seats=None) -> dict:
         remaining = float(ini) - float(contributions.get(nick, 0.0))
         out[pos] = round(remaining / float(level_bb), 2)
     return out
+
+
+def derive_position_total_stacks_bb(hh_text, level_bb, seats=None) -> dict:
+    """pt91 — `{position_label: total_bb}` = stack INICIAL (Seat line) por posição,
+    em BB. Espelha `totalStackChips(p)/BB` do template no nó de open (= inicial,
+    porque o que já está no pote nessa street ainda é "stack do jogador a risco").
+
+    Usado pela Regra 1 (efetivo = min(opener, maior vivo)) e Regra 3 (shortie).
+    `{}` defensivo (HH/level inválidos ou parse falhado)."""
+    if not hh_text or not isinstance(level_bb, (int, float)) or level_bb <= 0:
+        return {}
+    try:
+        from app.services.queue_export import derive_seats_in_preflop_order
+        if seats is None:
+            seats = derive_seats_in_preflop_order(hh_text)
+        initial = _parse_seat_stacks(hh_text)
+    except Exception:
+        logger.exception("derive_position_total_stacks_bb falhou")
+        return {}
+    out: dict = {}
+    for e in seats or []:
+        nick, pos = e.get("nick"), e.get("position")
+        ini = initial.get(nick) if nick else None
+        if not pos or ini is None:
+            continue
+        out[pos] = round(float(ini) / float(level_bb), 2)
+    return out
+
+
+def _open_node_eff_and_shortie(
+    position: str, seats_at_table: int, position_total_bb: dict,
+):
+    """pt91 — para o nó de open de `position` (cenário fold-to-position):
+    devolve `(effective_bb, own_total_bb, yet_to_act_short_or_allin)`.
+
+    - opponents = posições que actuam DEPOIS na ordem de _POSITION_LABELS_BY_N
+      (incl. blinds; em fold-to-position todos os de trás estão vivos).
+    - effective = min(own_total, max(opp_total)); yet_short = algum opp <= 4 BB.
+    Qualquer falta de dados → `(None, own, False)` (Regra 1 inerte nessa posição).
+    """
+    labels = _POSITION_LABELS_BY_N.get(seats_at_table) or []
+    own = position_total_bb.get(position)
+    if not labels or position not in labels or own is None:
+        return None, own, False
+    after = labels[labels.index(position) + 1:]
+    opp_totals = [
+        position_total_bb[p] for p in after if p in position_total_bb
+    ]
+    if not opp_totals:
+        return None, own, False
+    effective = min(own, max(opp_totals))
+    yet_short = any(t <= _PKO_SHORTIE_BB for t in opp_totals)
+    return round(effective, 2), own, yet_short
 
 
 def _is_all_in_effective(
@@ -249,6 +339,12 @@ def offset_within_bucket(
     pos = (action.get("position") or "").upper()
     action_type = (action.get("type") or "").lower()
     is_jam = _is_all_in_effective(action.get("size_bb"), raiser_stack_bb)
+
+    # pt91: a ação REAL do agressor é SEMPRE preservada no template
+    # (preserveRealRaise) → o nó dela existe sempre no bucket. Por isso o
+    # within volta à lógica pt67 (NÃO colapsa por Regra 1; um small é o 1º nó,
+    # um jam é o nó ALLIN/último). O índice exacto (small vs implicit-all-in)
+    # é calibrado no smoke visual do Beelink (#HRC-NODE-OFFSET-IMPLICIT-LINES).
     if pos == "SB":
         # SB tem o nó Complete (limp) prepended antes dos raises.
         if action_type in ("complete", "limp", "call"):
@@ -310,6 +406,9 @@ def compute_target_node_offset(
     script_overrides: Optional[dict],
     raiser_stack_bb: Optional[float],
     position_stacks_bb: Optional[dict] = None,
+    *,
+    is_pko: bool = False,
+    position_total_bb: Optional[dict] = None,
 ) -> Optional[int]:
     """Posição (0-indexed) da linha do raiser real na Strategy Table HRC.
 
@@ -372,9 +471,25 @@ def compute_target_node_offset(
     # pt86: stack individual por posição (espelha o limiar 25/30 do template).
     # `None` na posição → count_lines cai no legacy defensivo (sem regressão).
     stacks = position_stacks_bb or {}
+    # pt91: stacks TOTAIS por posição p/ Regra 1 (efetivo) + Regra 3 (shortie).
+    # `None` → Regras 1/3 inertes (back-compat: caminho/test sem totais = pt86).
+    totals = position_total_bb or {}
     raiser_idx = positions.index(position)
     offset = 0
     for p in positions[:raiser_idx]:
-        offset += count_lines_for_position(p, overrides, stacks.get(p))
+        if totals:
+            eff_p, own_p, yet_short_p = _open_node_eff_and_shortie(
+                p, seats_at_table, totals,
+            )
+        else:
+            eff_p, own_p, yet_short_p = None, None, False
+        offset += count_lines_for_position(
+            p, overrides, stacks.get(p),
+            effective_bb=eff_p, is_pko=is_pko, own_total_bb=own_p,
+            yet_to_act_short_or_allin=yet_short_p,
+        )
+    # within-bucket do raiser: a ação real é sempre preservada no template
+    # (preserveRealRaise) → o nó dela existe sempre. Lógica pt67 (sem colapso
+    # Regra 1); índice exacto calibrado no smoke (#IMPLICIT-LINES).
     offset += offset_within_bucket(aggressor_real_action, raiser_stack_bb)
     return offset
