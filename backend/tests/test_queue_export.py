@@ -1213,6 +1213,11 @@ from app.services.hrc_script_gen import (
     _parse_seat_stacks,
     _position_bucket_open,
     _postflop_rank,
+    apply_is_pko_flag,
+    apply_real_raises,
+    build_real_raises_map,
+    threebet_multiplier,
+    threebet_sizings_bb,
 )
 from app.services.queue_export import derive_seats_in_preflop_order
 
@@ -1963,9 +1968,9 @@ def test_build_sizings_overrides_GG_HJ_open_deep():
     assert out["SIZES_OPEN_CO"] == [2.0]  # sem ALLIN — eff > 25
     # Nenhum 3-bet/4-bet na mão
     assert "SIZES_3BET_IP" not in out
-    # pt42b — CASO B: HJ open em 5-handed → candidato IP único = BU.
-    # Eff(HJ, BU) = min(42483-600, 40000)/300 = 133.33 BB > 35 → 3.0×opener.
-    assert out["SIZES_3BET_BU"] == [6.0]
+    # pt91 (Regra 2): o 3bet clássico já NÃO é emitido pelo gerador (calculado
+    # em runtime no JS por efetivo min(3bettor,opener)). Sem SIZES_3BET_<pos>.
+    assert "SIZES_3BET_BU" not in out
 
 
 def test_build_sizings_overrides_PS_BU_jam_shallow():
@@ -2002,11 +2007,9 @@ def test_build_sizings_overrides_WN_squeeze_3bet():
     )
     assert out["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener HJ → SIZES_OPEN_HJ
     assert out["SIZES_3BET_SQUEEZE_SB"] == [8.0]
-    # pt42b — CASO B: HJ open em 5-handed → candidatos IP = [CO, BU].
-    # Eff(HJ, CO) = min(338758, 163754)/8000 = 20.47 BB < 26 → 2.3×opener + ALLIN.
-    # Eff(HJ, BU) = min(338758, 615675)/8000 = 42.34 BB >= 35 → 3.0×opener.
-    assert out["SIZES_3BET_CO"] == [4.6, "ALLIN"]
-    assert out["SIZES_3BET_BU"] == [6.0]
+    # pt91 (Regra 2): 3bet clássico calculado no JS → não emitido aqui.
+    assert "SIZES_3BET_CO" not in out
+    assert "SIZES_3BET_BU" not in out
 
 
 def test_build_sizings_overrides_WPN_HJ_open_deep():
@@ -2021,11 +2024,9 @@ def test_build_sizings_overrides_WPN_HJ_open_deep():
         effective_stack_bb=eff,
     )
     assert out["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener HJ → SIZES_OPEN_HJ
-    # pt42b — CASO B: HJ open em 8-handed → candidatos IP = [CO, BU].
-    # Eff(HJ, CO) = min(107768, 34502)/1600 = 21.56 BB < 26 → 2.3×opener + ALLIN.
-    # Eff(HJ, BU) = min(107768, 448265)/1600 = 67.36 BB >= 35 → 3.0×opener.
-    assert out["SIZES_3BET_CO"] == [4.6, "ALLIN"]
-    assert out["SIZES_3BET_BU"] == [6.0]
+    # pt91 (Regra 2): 3bet clássico calculado no JS → não emitido aqui.
+    assert "SIZES_3BET_CO" not in out
+    assert "SIZES_3BET_BU" not in out
 
 
 def test_build_sizings_overrides_no_raises_returns_empty():
@@ -2086,41 +2087,6 @@ def test_build_sizings_overrides_drops_ALLIN_when_eff_at_action_above_threshold(
     assert out_above["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener C = idx0 5-handed = HJ
 
 
-def test_build_sizings_overrides_classic_3bet_uses_real_sizing_when_deep():
-    """pt42 — classic 3-bet usa o sizing REAL da HH como 1ª opção (antes,
-    pt25f, ignorava-o em favor do multiplier).
-
-    BU opens 3 BB, SB 3-bets 10 BB vs BU. Stacks 10000/100 = 100 BB.
-    eff_at_action no 3-bet: SB remaining 10000-50=9950, max_opp=BB 10000-100=9900.
-    eff = 9900/100 = 99 BB > 25 → 3-bet sem ALLIN: `[10.0]`.
-    """
-    hh = (
-        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 5-max Seat #5 is the button\n"
-        "Seat 1: A (10000 in chips)\n"
-        "Seat 2: B (10000 in chips)\n"
-        "Seat 3: C (10000 in chips)\n"
-        "Seat 4: D (10000 in chips)\n"
-        "Seat 5: E (10000 in chips)\n"
-        "A: posts small blind 50\n"
-        "B: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "C: folds\n"
-        "D: folds\n"
-        "E: raises 200 to 300\n"
-        "A: raises 700 to 1000\n"
-        "B: folds\n"
-        "*** SUMMARY ***\n"
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
-                                  effective_stack_bb=100.0)
-    assert out["SIZES_OPEN_BU"] == [3.0]
-    # SB 3-bets BU → bucket SIZES_3BET_SB_VS_OTHER. Sizing real (10 BB) é
-    # agora a 1ª opção (não há override do multiplier nem se ignora).
-    assert out["SIZES_3BET_SB_VS_OTHER"] == [10.0]
-
-
 def test_build_sizings_overrides_4bet_with_ratio():
     """4-bet OOP, original NÃO ALLIN. HH sintética: SB opens, BB 3-bets,
     SB 4-bets. Stacks 10000/100 = 100 BB (deep). 4-bet sai com pot_fraction
@@ -2150,9 +2116,8 @@ def test_build_sizings_overrides_4bet_with_ratio():
                                   effective_stack_bb=100.0)
     # Open by SB → SIZES_OPEN_SB.
     assert out["SIZES_OPEN_SB"] == [2.5]
-    # 3-bet by BB vs SB → SIZES_3BET_BB_VS_SB. Sizing real (7 BB) 1ª opção,
-    # sem ALLIN (eff > 25).
-    assert out["SIZES_3BET_BB_VS_SB"] == [7.0]
+    # pt91 (Regra 2): 3bet clássico (BB vs SB) calculado no JS → não emitido.
+    assert "SIZES_3BET_BB_VS_SB" not in out
     # 4-bet by SB (OOP vs BB). Pot fraction 0.43 (raise_inc 600 / pot_after_call 1400).
     assert out["SIZES_POT_4BET_OOP"] == [0.43]
 
@@ -2272,59 +2237,6 @@ def test_sb_allin_open_in_band_gets_size_and_allin():
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=13.73)
     assert out["SIZES_OPEN_SB"] == [2.5, "ALLIN"]
-
-
-def test_3bet_over_allin_open_eff_below_25_is_jam():
-    """pt70 B1 (mão real GG-6041006979): 3-bet sobre open ALL-IN com eff do
-    3-bettor ≤ 25 → ["ALLIN"] (já não 2.3×shove). Todos os candidatos curtos."""
-    hh = (
-        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (700 in chips)\n"      # UTG jam ~7 BB
-        "Seat 2: HJ_p (2000 in chips)\n"      # candidatos ~20 BB → eff vs si ≤ 25
-        "Seat 3: CO_p (2000 in chips)\n"
-        "Seat 4: BU_p (2000 in chips)\n"
-        "Seat 5: SB_p (2000 in chips)\n"
-        "Seat 6: BB_p (2000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "UTG_p: raises 600 to 700\n"
-        "HJ_p: folds\nCO_p: folds\nBU_p: folds\nSB_p: folds\nBB_p: folds\n"
-        "*** SUMMARY ***\n"
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
-                                  effective_stack_bb=7.0)
-    for var in ("SIZES_3BET_HJ", "SIZES_3BET_CO", "SIZES_3BET_BU"):
-        assert out[var] == ["ALLIN"], (var, out.get(var))
-
-
-def test_3bet_over_allin_open_eff_above_25_is_iso_size():
-    """pt70 B1: 3-bet sobre open ALL-IN com eff do 3-bettor > 25 →
-    [iso] = [2.5 × opener_to_bb], sem ALLIN. Candidatos deep."""
-    hh = (
-        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (1000 in chips)\n"     # UTG jam 10 BB → opener_to_bb=10
-        "Seat 2: HJ_p (6000 in chips)\n"      # candidatos 60 BB → eff 60 > 25
-        "Seat 3: CO_p (6000 in chips)\n"
-        "Seat 4: BU_p (6000 in chips)\n"
-        "Seat 5: SB_p (6000 in chips)\n"
-        "Seat 6: BB_p (6000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "UTG_p: raises 900 to 1000\n"
-        "HJ_p: folds\nCO_p: folds\nBU_p: folds\nSB_p: folds\nBB_p: folds\n"
-        "*** SUMMARY ***\n"
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
-                                  effective_stack_bb=10.0)
-    iso = round(_ISO_RAISE_OVER_ALLIN_MULT * 10.0, 2)   # 25.0
-    for var in ("SIZES_3BET_HJ", "SIZES_3BET_CO", "SIZES_3BET_BU"):
-        assert out[var] == [iso], (var, out.get(var))
 
 
 def test_default_for_classic_3bet_high_band_x3():
@@ -2460,60 +2372,6 @@ def test_open_allin_jam_position_SB_uses_blind_table():
 
 
 # Universal rule — end-to-end (3-bet clássico) ----------------------------
-
-def test_classic_3bet_allin_high_eff_uses_3x_opener():
-    """BU opens 2.5 BB, SB jams (3-bet clássico). Stacks deep (~50 BB
-    cada). eff_at_action no SB > 35 → default = 3.0 × 2.5 = 7.5 BB.
-    """
-    hh = _hh_5max(
-        [5000, 5000, 5000, 5000, 5000],
-        "C: folds\nD: folds\n"
-        "E: raises 200 to 250\n"
-        "A: raises 4700 to 5000\n"
-        "B: folds\n",
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
-                                  effective_stack_bb=50.0)
-    assert out["SIZES_OPEN_BU"] == [2.5]
-    # SB jam (5000 chips ≈ 5000 inicial × 0.95=4750 OK). 3-bet clássico
-    # vs BU → SIZES_3BET_SB_VS_OTHER. Default = 3 × 2.5 = 7.5.
-    assert out["SIZES_3BET_SB_VS_OTHER"] == [7.5, "ALLIN"]  # pt70 ordem
-
-
-def test_classic_3bet_allin_mid_eff_uses_27x_opener():
-    """eff bucket 26-35 → 2.7 × opener. Stacks ~30 BB."""
-    hh = _hh_5max(
-        [3000, 3000, 3000, 3000, 3000],
-        "C: folds\nD: folds\n"
-        "E: raises 200 to 250\n"
-        "A: raises 2700 to 3000\n"
-        "B: folds\n",
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
-                                  effective_stack_bb=30.0)
-    # Default = 2.7 × 2.5 = 6.75.
-    assert out["SIZES_3BET_SB_VS_OTHER"] == [6.75, "ALLIN"]  # pt70 ordem
-
-
-def test_classic_3bet_allin_low_eff_uses_23x_opener():
-    """eff < 26 → 2.3 × opener. Stacks ~20 BB."""
-    hh = _hh_5max(
-        [2000, 2000, 2000, 2000, 2000],
-        "C: folds\nD: folds\n"
-        "E: raises 200 to 250\n"
-        "A: raises 1700 to 2000\n"
-        "B: folds\n",
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
-                                  effective_stack_bb=20.0)
-    # Default = 2.3 × 2.5 = 5.75.
-    assert out["SIZES_3BET_SB_VS_OTHER"] == [5.75, "ALLIN"]  # pt70 ordem
-
-
-# Universal rule — end-to-end (squeeze) -----------------------------------
 
 def test_squeeze_allin_uses_3x_opener():
     """UTG opens 2.5 BB, HJ flats, BU squeeze-jam. eff > 8 e default = 3 × opener.
@@ -2759,116 +2617,6 @@ def test_template_postflop_force_checkdown_after_FLOP_for_all_lives():
 # ── pt42b — CASO A / CASO B / edge cases (3-bet IP por posição) ────────────
 
 
-def test_build_sizings_overrides_caso_B_no_3bet_real():
-    """pt42b — CASO B sozinho: 6-handed UTG open só (sem 3-bet real).
-    Esperar SIZES_3BET_<POS> para todos os candidatos IP [HJ, CO, BU].
-    Stacks 5000/BB=100 → 50 BB (bucket >=35) → 3.0×2 = 6.0 BB sem ALLIN.
-    """
-    hh = (
-        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (5000 in chips)\n"
-        "Seat 2: HJ_p (5000 in chips)\n"
-        "Seat 3: CO_p (5000 in chips)\n"
-        "Seat 4: BU_p (5000 in chips)\n"
-        "Seat 5: SB_p (5000 in chips)\n"
-        "Seat 6: BB_p (5000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "UTG_p: raises 100 to 200\n"
-        "HJ_p: folds\nCO_p: folds\nBU_p: folds\nSB_p: folds\nBB_p: folds\n"
-        "*** SUMMARY ***\n"
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(
-        hh, level_sb=50, level_bb=100, seats=seats,
-        effective_stack_bb=50.0,
-    )
-    # Open caught — eff > 25 → só [2.0]. opener = idx0 em 6-handed = UTG (pt92).
-    assert out["SIZES_OPEN_UTG"] == [2.0]
-    # CASO B — 3 candidatos IP, todos com eff(opener,candidate) ~= 48 BB (>=35).
-    assert out["SIZES_3BET_HJ"] == [6.0]
-    assert out["SIZES_3BET_CO"] == [6.0]
-    assert out["SIZES_3BET_BU"] == [6.0]
-    # CASO B só gera para IP — SB/BB ficam intocados.
-    assert "SIZES_3BET_SB_VS_OTHER" not in out
-    assert "SIZES_3BET_BB_VS_OTHER" not in out
-
-
-def test_build_sizings_overrides_caso_A_overrides_caso_B_in_3bettor_position():
-    """pt42b — CASO A sobrescreve CASO B. 6-handed: UTG open 2 BB + HJ 3-bet
-    6 BB. Esperar:
-    - SIZES_3BET_HJ = [6.0] (CASO A — sizing original da HH; eff > 25 → sem ALLIN).
-    - SIZES_3BET_CO/BU = [6.0] (CASO B — bucket default, eff >=35).
-    """
-    hh = (
-        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (5000 in chips)\n"
-        "Seat 2: HJ_p (5000 in chips)\n"
-        "Seat 3: CO_p (5000 in chips)\n"
-        "Seat 4: BU_p (5000 in chips)\n"
-        "Seat 5: SB_p (5000 in chips)\n"
-        "Seat 6: BB_p (5000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "UTG_p: raises 100 to 200\n"
-        "HJ_p: raises 400 to 600\n"
-        "CO_p: folds\nBU_p: folds\nSB_p: folds\nBB_p: folds\nUTG_p: folds\n"
-        "*** SUMMARY ***\n"
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(
-        hh, level_sb=50, level_bb=100, seats=seats,
-        effective_stack_bb=50.0,
-    )
-    assert out["SIZES_OPEN_UTG"] == [2.0]   # opener = idx0 em 6-handed = UTG (pt92)
-    # CASO A — HJ 3-betou (sizing real 6 BB; eff spot >25 → só [6.0]).
-    assert out["SIZES_3BET_HJ"] == [6.0]
-    # CASO B — CO/BU ficaram, bucket >=35 → 6.0 também.
-    assert out["SIZES_3BET_CO"] == [6.0]
-    assert out["SIZES_3BET_BU"] == [6.0]
-
-
-def test_build_sizings_overrides_eff_dual_short_vs_deep():
-    """pt42b — eff dual: 6-handed UTG opens 2 BB. CO tem stack short (20 BB);
-    BU deep (60 BB). Esperar buckets diferentes por candidato:
-    - SIZES_3BET_CO: eff(UTG, CO) = min(UTG_remaining, CO=2000)/100 = 20 BB
-      < 26 → 2.3×2 = 4.6 + ALLIN.
-    - SIZES_3BET_BU: eff(UTG, BU) = min(UTG_remaining=4800, BU=6000)/100 = 48
-      BB >=35 → 3.0×2 = 6.0.
-    """
-    hh = (
-        "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (5000 in chips)\n"
-        "Seat 2: HJ_p (5000 in chips)\n"
-        "Seat 3: CO_p (2000 in chips)\n"
-        "Seat 4: BU_p (6000 in chips)\n"
-        "Seat 5: SB_p (5000 in chips)\n"
-        "Seat 6: BB_p (5000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "UTG_p: raises 100 to 200\n"
-        "HJ_p: folds\nCO_p: folds\nBU_p: folds\nSB_p: folds\nBB_p: folds\n"
-        "*** SUMMARY ***\n"
-    )
-    seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(
-        hh, level_sb=50, level_bb=100, seats=seats,
-        effective_stack_bb=20.0,
-    )
-    # HJ_p stack 5000 → eff(UTG, HJ) = min(4800, 5000)/100 = 48 BB >=35.
-    assert out["SIZES_3BET_HJ"] == [6.0]
-    # CO short → bucket <26 → 4.6 + ALLIN.
-    assert out["SIZES_3BET_CO"] == [4.6, "ALLIN"]
-    # BU deep → bucket >=35 → 6.0.
-    assert out["SIZES_3BET_BU"] == [6.0]
-
-
 def test_build_sizings_overrides_HU_no_caso_B():
     """pt42b — HU (2-handed): labels=[BU/SB, BB]. Opener BU/SB → candidates=[].
     Esperar NENHUM SIZES_3BET_<POS> IP. (BB-3-bet vai para SIZES_3BET_BB_VS_SB
@@ -2897,83 +2645,143 @@ def test_build_sizings_overrides_HU_no_caso_B():
         assert var not in out
 
 
-def test_build_sizings_overrides_open_jam_caso_B_still_generated():
-    """pt42b/pt70 — open-jam UTG ainda gera CASO B (decisão #3 do Web), mas
-    com a LEI B1 (3-bet sobre open ALL-IN): o size já NÃO é 2.3×shove.
-    6-handed, UTG abre ALLIN (1500/BB=100 = 15 BB → jam). Candidatos HJ/CO/BU
-    têm 5000 (50 BB). eff do 3-bettor vs vivos não-all-in (exclui o opener
-    all-in) = min(5000, 5000)/100 = 50 BB > 25 → iso = 2.5 × 15 = 37.5 (sem
-    ALLIN, eff>25). SIZES_OPEN_OTHERS = [2.0, ALLIN] (ordem pt70).
-    """
+# ── pt91 (Regra 2 do Rui) — sizing de 3bet por efetivo (mirror do JS) ──────
+
+def test_threebet_multiplier_ip_bands():
+    """IP: <20 → 2.3 fixo; 20..50 interp 2.3→3.0; >50 → 3.0."""
+    assert threebet_multiplier(10.0, True) == 2.3
+    assert threebet_multiplier(19.99, True) == 2.3
+    assert threebet_multiplier(20.0, True) == 2.3          # início da interp
+    assert round(threebet_multiplier(35.0, True), 4) == 2.65   # 2.3+(15/30)*0.7
+    assert threebet_multiplier(50.0, True) == 3.0
+    assert threebet_multiplier(60.0, True) == 3.0
+
+
+def test_threebet_multiplier_op_bands():
+    """OP: <20 → 2.5 fixo; 20..50 interp 2.5→4.0; >50 → 4.0."""
+    assert threebet_multiplier(10.0, False) == 2.5
+    assert threebet_multiplier(20.0, False) == 2.5
+    assert round(threebet_multiplier(35.0, False), 4) == 3.25  # 2.5+(15/30)*1.5
+    assert threebet_multiplier(50.0, False) == 4.0
+    assert threebet_multiplier(70.0, False) == 4.0
+
+
+def test_threebet_sizings_bb_ip_gate():
+    """IP: <18 → [ALLIN]; 18..40 → [size, ALLIN]; >=40 → [size]. open=2bb."""
+    assert threebet_sizings_bb(10.0, True, 2.0) == ["ALLIN"]
+    assert threebet_sizings_bb(17.99, True, 2.0) == ["ALLIN"]
+    # eff=18 (>=18, <40) → [size, ALLIN]; eff<20 → x=2.3 → 4.6
+    assert threebet_sizings_bb(18.0, True, 2.0) == [4.6, "ALLIN"]
+    # eff=40 (>=40) → só size; x=interp(40)=2.7667 → 5.53
+    assert threebet_sizings_bb(40.0, True, 2.0) == [5.53]
+    # deep → x=3.0 → 6.0, sem ALLIN
+    assert threebet_sizings_bb(60.0, True, 2.0) == [6.0]
+
+
+def test_threebet_sizings_bb_op_gate():
+    """OP: <20 → [ALLIN]; 20..45 → [size, ALLIN]; >=45 → [size]. open=2bb."""
+    assert threebet_sizings_bb(15.0, False, 2.0) == ["ALLIN"]
+    assert threebet_sizings_bb(19.99, False, 2.0) == ["ALLIN"]
+    # eff=20 (>=20, <45) → [size, ALLIN]; x=2.5 → 5.0
+    assert threebet_sizings_bb(20.0, False, 2.0) == [5.0, "ALLIN"]
+    # eff=45 (>=45) → só size; x=interp(45)=3.75 → 7.5
+    assert threebet_sizings_bb(45.0, False, 2.0) == [7.5]
+    # deep → x=4.0 → 8.0, sem ALLIN
+    assert threebet_sizings_bb(50.0, False, 2.0) == [8.0]
+
+
+def test_threebet_sizings_bb_size_scales_with_open():
+    """`x` multiplica o raise inicial (open). open=3bb, IP eff=60 → 3.0×3=9.0."""
+    assert threebet_sizings_bb(60.0, True, 3.0) == [9.0]
+
+
+# ── pt91 (Regra 3 do Rui) — flag IS_PKO no template ────────────────────────
+
+def test_apply_is_pko_flag_default_false_unchanged():
+    txt = "x\nlet IS_PKO = false;\ny\n"
+    assert apply_is_pko_flag(txt, False) == txt          # no-op quando não-PKO
+    assert apply_is_pko_flag(txt, True) == "x\nlet IS_PKO = true;\ny\n"
+
+
+def test_apply_is_pko_flag_missing_line_is_noop():
+    txt = "sem flag aqui\n"
+    assert apply_is_pko_flag(txt, True) == txt           # warning + no-op
+
+
+# ── pt91 (preservação da ação real) — REAL_PREFLOP_RAISES ──────────────────
+
+def test_build_real_raises_map_keys_by_position_and_bets():
+    """Open (bets=2) + 3bet (bets=3) → mapa keyed por posição+bets; all-in →
+    sentinela "ALLIN"."""
     hh = (
         "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (1500 in chips)\n"
-        "Seat 2: HJ_p (5000 in chips)\n"
-        "Seat 3: CO_p (5000 in chips)\n"
-        "Seat 4: BU_p (5000 in chips)\n"
-        "Seat 5: SB_p (5000 in chips)\n"
-        "Seat 6: BB_p (5000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
+        "Table 'T' 5-max Seat #5 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "Seat 3: C (10000 in chips)\n"
+        "Seat 4: D (10000 in chips)\n"
+        "Seat 5: E (10000 in chips)\n"
+        "A: posts small blind 50\n"
+        "B: posts big blind 100\n"
         "*** HOLE CARDS ***\n"
-        "UTG_p: raises 1400 to 1500\n"
-        "HJ_p: folds\nCO_p: folds\nBU_p: folds\nSB_p: folds\nBB_p: folds\n"
+        "C: folds\nD: folds\n"
+        "E: raises 200 to 300\n"      # BU open 3 BB (bets=2)
+        "A: raises 9650 to 9950\n"    # SB 3-bet all-in (bets=3)
+        "B: folds\n"
         "*** SUMMARY ***\n"
     )
     seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(
-        hh, level_sb=50, level_bb=100, seats=seats,
-        effective_stack_bb=15.0,
-    )
-    # Open ALLIN (1500 = 100% stack) + default 2 BB (ordem pt70 [size, ALLIN]).
-    # opener = idx0 em 6-handed = UTG (pt92).
-    assert out["SIZES_OPEN_UTG"] == [2.0, "ALLIN"]
-    # pt70 LEI B1: CASO B sobre open ALL-IN → iso = 2.5 × opener_to_bb(15) = 37.5
-    # (eff do 3-bettor 50 BB > 25 → sem ALLIN). Já NÃO é 2.3×shove.
-    assert out["SIZES_3BET_HJ"] == [37.5]
-    assert out["SIZES_3BET_CO"] == [37.5]
-    assert out["SIZES_3BET_BU"] == [37.5]
+    m = build_real_raises_map(hh, 50, 100, seats)
+    # bets=2 (open) → 3 BB; bets=3 (3-bet) → "ALLIN". Posição varia com o botão,
+    # por isso valida pelos valores (labels = _POSITION_LABELS_BY_N, ex. BTN/SB).
+    opens = {pos: d[2] for pos, d in m.items() if 2 in d}
+    threebets = {pos: d[3] for pos, d in m.items() if 3 in d}
+    assert 3.0 in opens.values()
+    assert "ALLIN" in threebets.values()
 
 
-def test_build_sizings_overrides_3bet_squeeze_does_not_trigger_caso_A_dispatch():
-    """pt42b — squeeze IP cai em SIZES_3BET_SQUEEZE_IP, NÃO em SIZES_3BET_<POS>.
-    Logo CASO B gera SIZES_3BET_<POS> com bucket default mesmo na posição
-    do squeezer.
-
-    6-handed: UTG open + CO call + BU squeeze (3-bet com callers_before=1).
-    """
+def test_build_real_raises_map_empty_when_walk():
+    """Walk-to-BB / sem raises → mapa vazio."""
     hh = (
         "Hand #X: Test - Level1 (50/100) - 2026/01/01\n"
-        "Table 'T' 6-max Seat #4 is the button\n"
-        "Seat 1: UTG_p (5000 in chips)\n"
-        "Seat 2: HJ_p (5000 in chips)\n"
-        "Seat 3: CO_p (5000 in chips)\n"
-        "Seat 4: BU_p (5000 in chips)\n"
-        "Seat 5: SB_p (5000 in chips)\n"
-        "Seat 6: BB_p (5000 in chips)\n"
-        "SB_p: posts small blind 50\n"
-        "BB_p: posts big blind 100\n"
-        "*** HOLE CARDS ***\n"
-        "UTG_p: raises 100 to 200\n"
-        "HJ_p: folds\n"
-        "CO_p: calls 200\n"
-        "BU_p: raises 600 to 800\n"
-        "SB_p: folds\nBB_p: folds\nUTG_p: folds\nCO_p: folds\n"
-        "*** SUMMARY ***\n"
+        "Table 'T' 6-max Seat #1 is the button\n"
+        "Seat 1: A (10000 in chips)\n"
+        "Seat 2: B (10000 in chips)\n"
+        "B: posts small blind 50\nA: posts big blind 100\n"
+        "*** HOLE CARDS ***\nB: folds\n*** SUMMARY ***\n"
     )
     seats = derive_seats_in_preflop_order(hh)
-    out = build_sizings_overrides(
-        hh, level_sb=50, level_bb=100, seats=seats,
-        effective_stack_bb=50.0,
+    assert build_real_raises_map(hh, 50, 100, seats) == {}
+
+
+def test_apply_real_raises_injects_literal():
+    txt = "x\nlet REAL_PREFLOP_RAISES = {};\ny\n"
+    out = apply_real_raises(txt, {"BU": {2: 3.0}, "SB": {3: "ALLIN"}})
+    assert 'let REAL_PREFLOP_RAISES = {"BU":{"2":3.0},"SB":{"3":"ALLIN"}};' in out
+    assert apply_real_raises(txt, {}) == txt          # vazio → no-op
+
+
+def test_generate_hrc_script_preserves_real_open_in_js():
+    """A ação real do opener entra no REAL_PREFLOP_RAISES do .js gerado — mesmo
+    que a Regra 1 colapse o nó (o size real sobrevive via preservação)."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    js, *_ = generate_hrc_script_for_hand(_HH_GG_REAL, 150, 300, seats)
+    assert "let REAL_PREFLOP_RAISES = {" in js
+    assert "let REAL_PREFLOP_RAISES = {};" not in js   # foi preenchido
+
+
+def test_generate_hrc_script_for_hand_threads_is_pko():
+    """is_pko=True → o .js gerado contém `let IS_PKO = true;`; False → false."""
+    seats = derive_seats_in_preflop_order(_HH_GG_REAL)
+    js_pko, *_ = generate_hrc_script_for_hand(
+        _HH_GG_REAL, 150, 300, seats, is_pko=True,
     )
-    # BU foi squeezer (callers_before=1) → SIZES_3BET_SQUEEZE_IP (legacy).
-    assert "SIZES_3BET_SQUEEZE_IP" in out
-    # CASO B continua a gerar SIZES_3BET_HJ/CO/BU (BU NÃO recebe CASO A
-    # porque foi squeeze, não 3-bet clássico) — só CASO B com bucket default.
-    assert out["SIZES_3BET_HJ"] == [6.0]
-    assert out["SIZES_3BET_CO"] == [6.0]
-    assert out["SIZES_3BET_BU"] == [6.0]
+    js_no, *_ = generate_hrc_script_for_hand(
+        _HH_GG_REAL, 150, 300, seats, is_pko=False,
+    )
+    assert "let IS_PKO = true;" in js_pko
+    assert "let IS_PKO = false;" in js_no
+    assert "let IS_PKO = true;" not in js_no
 
 
 # ── generate_hrc_script_for_hand — pipeline completo ──────────────────────

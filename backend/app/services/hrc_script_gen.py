@@ -632,6 +632,16 @@ def _compute_default_for_5bet(action: dict) -> Optional[float]:
 
 
 # ── pt42b — Helpers para 3-bet IP por posição ────────────────────────────
+# ⚠️ OBSOLETO desde pt91 (Regra 2 do Rui): o 3-bet clássico passou a ser
+# calculado em runtime pelo template JS (getSizings3Bets) por efetivo
+# min(3bettor,opener) + IP/OP. `build_sizings_overrides` JÁ NÃO chama estes
+# helpers (`_apply_caso_a/b_3bet_ip`, `_default_3bet_for_candidate`,
+# `_candidate_3bet_positions_ip`, `_eff_spot_specific_bb`,
+# `_eff_3bettor_vs_live_nonallin`, `_bb_3bet_default_vs_open`,
+# `_compute_default_for_classic_3bet`). Mantidos só porque ainda têm testes
+# unitários diretos; candidatos a remoção num cleanup. NÃO reintroduzir no
+# pipeline — a fonte da verdade do 3bet clássico é o JS + `threebet_sizings_bb`.
+#
 # Substitui a regra única `SIZES_3BET_IP` por arrays diferenciados por
 # posição candidata IP. Aplica-se SÓ a 3-bet clássico (não squeeze, não
 # SB/BB). Cada posição candidata recebe um sizing calibrado pela sua eff
@@ -928,6 +938,48 @@ def _apply_caso_a_3bet_ip(
     return _array_for_raise(action_with_spot_eff, default)
 
 
+# ── pt91 (Regra 2 do Rui) — sizing de 3bet por efetivo (MIRROR do JS) ────
+# Estes dois helpers são o MIRROR EXACTO de threeBetMultiplier / threeBetSizings
+# no template JS (mtt_advanced_canonical_2026.js). NÃO são usados em runtime — o
+# 3bet clássico passou a ser calculado pelo HRC nó-a-nó via JS (getSizings3Bets),
+# por efetivo = min(stack total do 3bettor, stack total do opener). Existem para
+# (a) testar a matemática da regra no suite Python e (b) documentar a spec.
+# ⚠️ Manter em sync com o JS — drift cross-language conhecido (à la
+# #POSITION-LABELS-PYTHON-JS-DRIFT).
+
+
+def threebet_multiplier(eff_bb: float, is_ip: bool) -> float:
+    """Multiplicador "x" do 3bet sobre o raise inicial (open), por efetivo + IP/OP.
+
+    IP: <20 → 2.3 fixo; 20..50 interp linear 2.3→3.0; >50 → 3.0
+    OP: <20 → 2.5 fixo; 20..50 interp linear 2.5→4.0; >50 → 4.0
+    """
+    lo_x = 2.3 if is_ip else 2.5
+    hi_x = 3.0 if is_ip else 4.0
+    if eff_bb < 20:
+        return lo_x
+    if eff_bb > 50:
+        return hi_x
+    return lo_x + (eff_bb - 20.0) / (50.0 - 20.0) * (hi_x - lo_x)
+
+
+def threebet_sizings_bb(eff_bb: float, is_ip: bool, open_to_bb: float) -> list:
+    """Array de 3bet em BB ("ALLIN" como sentinela) por efetivo + IP/OP.
+
+    IP: <18 → ["ALLIN"]; 18..40 → [size, "ALLIN"]; >=40 → [size]
+    OP: <20 → ["ALLIN"]; 20..45 → [size, "ALLIN"]; >=45 → [size]
+    size = round(multiplicador(eff) × open_to_bb, 2).
+    """
+    lo = 18.0 if is_ip else 20.0
+    hi = 40.0 if is_ip else 45.0
+    size = round(threebet_multiplier(eff_bb, is_ip) * open_to_bb, 2)
+    if eff_bb < lo:
+        return ["ALLIN"]
+    if eff_bb < hi:
+        return [size, "ALLIN"]
+    return [size]
+
+
 # ── Helpers de array (compositores) ─────────────────────────────────────
 
 
@@ -1023,14 +1075,11 @@ def build_sizings_overrides(
     if not actions:
         return overrides
 
-    # pt42b — opener é referência para CASO B (todos os candidatos IP) e
-    # CASO A (3-bettor real, sobrescreve CASO B). No-op se HH não tem
-    # opener (walk-to-BB, limp pot).
+    # pt91 (Regra 2 do Rui): o 3bet CLÁSSICO (IP/OP, incl. SB/BB) deixou de ser
+    # gerado em Python — passou a ser calculado pelo HRC nó-a-nó via JS
+    # (getSizings3Bets), por efetivo min(3bettor,opener). O bloco CASO A/B
+    # (pt42b) foi descontinuado. Só o SQUEEZE mantém override Python.
     opener_action = next((a for a in actions if a["bet_count"] == 1), None)
-    if opener_action:
-        _apply_caso_b_3bet_overrides(
-            opener_action, seats, hh_text, level_sb, level_bb, overrides,
-        )
     opener_position = opener_action.get("position") if opener_action else None
 
     for a in actions:
@@ -1044,33 +1093,13 @@ def build_sizings_overrides(
             continue
 
         if bc == 2:
+            # pt91 (Regra 2): só o SQUEEZE mantém override Python. O 3bet
+            # clássico (IP/OP/SB/BB) é calculado em runtime pelo template JS.
             var = _bucket_3bet(a, opener_position)
-            if not var:
-                continue
-            if var.startswith("SIZES_3BET_SQUEEZE_"):
-                # Squeeze — lógica pt42 actual (fora do scope pt42b).
-                if var not in overrides:
-                    default = _compute_default_for_squeeze(a)
-                    overrides[var] = _array_for_raise(a, default)
-            elif var in (
-                "SIZES_3BET_SB_VS_BB", "SIZES_3BET_SB_VS_OTHER",
-                "SIZES_3BET_BB_VS_SB", "SIZES_3BET_BB_VS_OTHER",
-                "SIZES_3BET_IP",  # fallback defensivo (posição não esperada)
-            ):
-                # SB ou fallback IP — lógica pt42 actual; BB — tabela pt70
-                # (mult × open) como default não-jam (só materializa em all-in).
-                if var not in overrides:
-                    if var.startswith("SIZES_3BET_BB_"):
-                        default = _bb_3bet_default_vs_open(a)
-                    else:
-                        default = _compute_default_for_classic_3bet(a)
-                    overrides[var] = _array_for_raise(a, default)
-            else:
-                # pt42b — IP por posição (CASO A: sobrescreve CASO B sempre).
-                if opener_action:
-                    overrides[var] = _apply_caso_a_3bet_ip(
-                        a, opener_action, seats, hh_text, level_sb, level_bb,
-                    )
+            if (var and var.startswith("SIZES_3BET_SQUEEZE_")
+                    and var not in overrides):
+                default = _compute_default_for_squeeze(a)
+                overrides[var] = _array_for_raise(a, default)
             continue
 
         if bc in (3, 4):
@@ -1186,12 +1215,88 @@ def apply_sizings_overrides(template_text: str, overrides: dict) -> str:
     return out
 
 
+def build_real_raises_map(
+    hh_text: str, level_sb: int, level_bb: int, seats: list,
+) -> dict:
+    """pt91 (preservação da ação real) — `{position: {bets: size}}` das raises
+    REAIS preflop da mão.
+
+    - `bets` = `bet_count + 1` (open=2, 3bet=3, 4bet=4, 5bet=5) para casar com o
+      `1 + ctx.getBetCount()` do template (`getSizingsPreflop`).
+    - `size` = `to_amount_bb` (BB) ou `"ALLIN"` se a acção foi all-in.
+    - keyed pela `position` do parser (= `_POSITION_LABELS_BY_N`, igual ao
+      `positionLabelForIdx` do template → o lookup bate).
+
+    `{}` se não há raises (walk/limp). Squeeze (3bet com callers) entra na mesma
+    como bets=3 — é a acção real do nó e tem de ser preservada.
+    """
+    out: dict = {}
+    if not hh_text or not seats:
+        return out
+    actions = _parse_preflop_actions(hh_text, seats, level_sb, level_bb)
+    for a in actions:
+        pos = a.get("position")
+        if not pos:
+            continue
+        bets = (a.get("bet_count") or 0) + 1
+        val = "ALLIN" if a.get("is_all_in") else a.get("to_amount_bb")
+        if val is None:
+            continue
+        out.setdefault(pos, {})[bets] = val
+    return out
+
+
+_REAL_RAISES_RE = re.compile(
+    r"^let\s+REAL_PREFLOP_RAISES\s*=\s*\{\}\s*;\s*$", re.MULTILINE,
+)
+
+
+def apply_real_raises(template_text: str, real_map: dict) -> str:
+    """pt91 — fixa `let REAL_PREFLOP_RAISES = {...};` no template a partir do mapa.
+
+    `json.dumps` produz um literal JS válido (chaves int → strings; "ALLIN"
+    string). No-op (+ warning) se a linha placeholder não existir ou o mapa
+    vazio (mantém o default `{}` = comportamento só-regras).
+    """
+    if not real_map:
+        return template_text
+    import json
+    literal = json.dumps(real_map, separators=(",", ":"))
+    new_text, n = _REAL_RAISES_RE.subn(
+        f"let REAL_PREFLOP_RAISES = {literal};", template_text, count=1,
+    )
+    if n == 0:
+        logger.warning("apply_real_raises: linha placeholder não encontrada no template")
+        return template_text
+    return new_text
+
+
+_IS_PKO_FLAG_RE = re.compile(r"^let\s+IS_PKO\s*=\s*(?:true|false)\s*;\s*$", re.MULTILINE)
+
+
+def apply_is_pko_flag(template_text: str, is_pko: bool) -> str:
+    """pt91 (Regra 3) — fixa `let IS_PKO = true|false;` no template.
+
+    O default no template é `false`; só re-escrevemos quando `is_pko` é True
+    (mantém o diff mínimo e o comportamento não-PKO byte-a-byte igual ao de
+    hoje). Se a linha não existir (template antigo), no-op com warning.
+    """
+    if not is_pko:
+        return template_text
+    new_text, n = _IS_PKO_FLAG_RE.subn("let IS_PKO = true;", template_text, count=1)
+    if n == 0:
+        logger.warning("apply_is_pko_flag: linha `let IS_PKO` não encontrada no template")
+        return template_text
+    return new_text
+
+
 def generate_hrc_script_for_hand(
     hh_text: str,
     level_sb: int,
     level_bb: int,
     seats: list,
     template_path: Optional[str] = None,
+    is_pko: bool = False,
 ) -> tuple:
     """Pipeline completo: ler template + parsear HH + aplicar overrides.
 
@@ -1217,11 +1322,16 @@ def generate_hrc_script_for_hand(
         return None, {}, None, err
 
     effective_bb = compute_effective_stack_bb(hh_text, level_bb)
+    real_map = build_real_raises_map(hh_text, level_sb, level_bb, seats)
     overrides = build_sizings_overrides(
         hh_text, level_sb, level_bb, seats, effective_bb,
     )
     if not overrides:
-        return template, {}, effective_bb, None
+        out = apply_is_pko_flag(template, is_pko)
+        out = apply_real_raises(out, real_map)
+        return out, {}, effective_bb, None
 
     out = apply_sizings_overrides(template, overrides)
+    out = apply_is_pko_flag(out, is_pko)
+    out = apply_real_raises(out, real_map)
     return out, overrides, effective_bb, None
