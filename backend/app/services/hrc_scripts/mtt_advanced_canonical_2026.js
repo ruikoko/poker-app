@@ -392,7 +392,11 @@ function getSizings3Bets(ctx) {
 	let raiser = ctx.getLastRaiseAction().getPlayer();
 	let callers = ctx.getFlatCallCount();
 
-	if (callers > 0)
+	// pt91 — squeeze SÓ se houver um caller VIVO e NÃO-all-in além do opener.
+	// Um shortie all-in atrás (ex.: SB auto-all-in pela ante, 0,05bb) é side-pot,
+	// NÃO faz squeeze a sério -> cai no 3bet normal (dinâmico, Regra 2). Sem isto,
+	// o getFlatCallCount conta o all-in e o nó ia para getSizingsSqueeze (fixo 11).
+	if (callers > 0 && hasLiveNonAllInCaller(ctx, player, raiser))
 		return getSizingsSqueeze(ctx, player, callers);
 
 	let isIP = ctx.isPlayerInPosition(player, raiser);
@@ -464,6 +468,22 @@ function totalStackChips(ctx, p) {
 
 function totalChipsThisStreet(ctx, p) {
 	return ctx.getPotState().getChipsActive(p);
+}
+
+// pt91 — há um oponente VIVO e NÃO-all-in além do opener? Define "squeeze a
+// sério" (caller vivo a jogar) vs um 3bet com um shortie all-in atrás (side-pot).
+function hasLiveNonAllInCaller(ctx, player, raiser) {
+	let state = ctx.getPotState();
+	for (let q = 0; q < ctx.getNumberOfPlayers(); q++) {
+		if (q == player || q == raiser)
+			continue;
+		if (state.hasPlayerFolded(q))
+			continue;
+		if (state.isPlayerAllIn(q))
+			continue;
+		return true;
+	}
+	return false;
 }
 
 // pt91 (Regra 3) — há algum adversário vivo (não-foldado) com stack total
