@@ -15,6 +15,7 @@ from app.services.queue_export import (
     _strip_commas_from_amounts,
     compute_hero_bounty,
     _crown_to_total_factor,
+    _override_icm_chips_in_blob,
     build_queue_zip,
 )
 
@@ -412,6 +413,109 @@ def test_build_queue_zip_skips_pko_without_ts_bounty():
         manifest = json.loads(zf.read("manifest.json"))
     assert manifest["total_in_zip"] == 0
     assert manifest["skipped"][0]["reason"] == "pko_without_ts_bounty"
+
+
+# ── #ICM-CHIPS-USE-TS-FINAL-FIELD-GG: override do total de fichas do ICM ───────
+
+def test_override_icm_chips_replaces_chips_in_all_structures():
+    blob = {
+        "name": "/", "folders": [],
+        "structures": [
+            {"name": "A", "chips": 1409980.0, "prizes": {}},
+            {"name": "B", "chips": None},
+        ],
+    }
+    out = _override_icm_chips_in_blob(blob, 1510000.0)
+    assert out["structures"][0]["chips"] == 1510000.0
+    assert out["structures"][1]["chips"] == 1510000.0
+    # não-destrutivo: o blob original fica intacto
+    assert blob["structures"][0]["chips"] == 1409980.0
+    # preserva os outros campos
+    assert out["structures"][0]["prizes"] == {}
+    assert out["structures"][0]["name"] == "A"
+
+
+def test_override_icm_chips_passthrough_when_not_dict():
+    assert _override_icm_chips_in_blob(None, 100.0) is None
+    assert _override_icm_chips_in_blob("x", 100.0) == "x"
+
+
+def test_override_icm_chips_passthrough_when_no_structures():
+    blob = {"name": "/", "folders": []}
+    out = _override_icm_chips_in_blob(blob, 100.0)
+    assert out == {"name": "/", "folders": []}
+
+
+# Payout blob com o `chips` da estimativa do lobby (subcontado).
+_ICM_PAYOUT_BLOB = {
+    "name": "/", "folders": [],
+    "structures": [{
+        "name": "Speed Racer Bounty Europe $108",
+        "chips": 1409980.0,            # foto do lobby (~141 entradas)
+        "prizes": {"1": 1000.0},
+        "bountyType": None, "progressiveFactor": None,
+    }],
+}
+
+
+def _gg_vanilla_hand():
+    # GG, formato NÃO-gated (vanilla) → sem gate de bounty; passa as fases.
+    return {
+        "id": 1, "hand_id": "GG-1", "site": "GGPoker",
+        "tournament_number": "292447656", "tournament_format": "vanilla",
+        "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP},
+    }
+
+
+def test_build_queue_zip_applies_icm_override_when_chips_by_key_present():
+    import json
+    import zipfile
+    import io as _io
+    hand = _gg_vanilla_hand()
+    key = ("GGPoker", "292447656")
+    zb = build_queue_zip(
+        [hand], {key: _ICM_PAYOUT_BLOB},
+        bounty_by_key={},
+        chips_by_key={key: {
+            "total_chips": 1510000.0, "total_players": 151,
+            "starting_stack": 10000.0,
+        }},
+    )
+    with zipfile.ZipFile(_io.BytesIO(zb)) as zf:
+        payouts = json.loads(zf.read("GG-1/payouts.json"))
+        manifest = json.loads(zf.read("manifest.json"))
+    # payouts.json leva o total derivado do TS, não a foto do lobby
+    assert payouts["structures"][0]["chips"] == 1510000.0
+    # auditoria no manifest
+    inc = manifest["hands_included"][0]
+    assert inc["icm_chips_source"] == "ts_final"
+    assert inc["icm_chips"] == 1510000.0
+    assert inc["icm_total_players"] == 151
+    assert inc["icm_starting_stack"] == 10000.0
+
+
+def test_build_queue_zip_keeps_lobby_estimate_when_no_chips_by_key():
+    import json
+    import zipfile
+    import io as _io
+    hand = _gg_vanilla_hand()
+    key = ("GGPoker", "292447656")
+    zb = build_queue_zip(
+        [hand], {key: _ICM_PAYOUT_BLOB},
+        bounty_by_key={},
+        chips_by_key={},  # torneio não validado → sem override
+    )
+    with zipfile.ZipFile(_io.BytesIO(zb)) as zf:
+        payouts = json.loads(zf.read("GG-1/payouts.json"))
+        manifest = json.loads(zf.read("manifest.json"))
+    # mantém a estimativa do lobby
+    assert payouts["structures"][0]["chips"] == 1409980.0
+    inc = manifest["hands_included"][0]
+    assert inc["icm_chips_source"] == "lobby_estimate"
+    assert inc["icm_chips"] is None
+    assert inc["icm_total_players"] is None
+    assert inc["icm_starting_stack"] is None
 
 
 # Passo 4: drop SHOWDOWN sem shows

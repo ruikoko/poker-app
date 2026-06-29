@@ -17,6 +17,7 @@ com `aggressor_source` (via `classify_aggressor_source`, partilhado com
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -285,6 +286,128 @@ def lookup_ts_meta(rows: list[dict]) -> dict:
         }
         for r in prows
     }
+
+
+def _fresh_starting_stack(apa) -> Optional[float]:
+    """#ICM-CHIPS-USE-TS-FINAL-FIELD-GG — salvaguarda da "mão fresca".
+
+    Dado o `all_players_actions` (JSONB) da mão MAIS ANTIGA de um torneio,
+    devolve o stack inicial (em fichas) SE a mão é mesmo a entrada do torneio:
+      - `_meta.level == 1` (Nível 1); E
+      - todos os jogadores têm o MESMO stack (1 só valor distinto — ninguém
+        ainda ganhou/perdeu fichas); E
+      - esse stack é REDONDO (sem parte fraccionária, ex. 10000); E
+      - se o Hero está identificado, o seu stack bate com o comum.
+
+    Qualquer falha → None (o caller não faz override; fica a estimativa do
+    lobby). Nunca lança.
+    """
+    if isinstance(apa, str):
+        try:
+            apa = json.loads(apa)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(apa, dict):
+        return None
+    meta = apa.get("_meta")
+    if not isinstance(meta, dict) or meta.get("level") != 1:
+        return None
+    stacks: list[float] = []
+    hero_stack: Optional[float] = None
+    for k, v in apa.items():
+        if k == "_meta" or not isinstance(v, dict):
+            continue
+        s = v.get("stack")
+        if not isinstance(s, (int, float)) or isinstance(s, bool) or s <= 0:
+            return None
+        stacks.append(float(s))
+        if v.get("is_hero"):
+            hero_stack = float(s)
+    if not stacks:
+        return None
+    if len({round(s, 6) for s in stacks}) != 1:
+        return None
+    common = stacks[0]
+    if common != int(common):
+        return None
+    if hero_stack is not None and round(hero_stack, 6) != round(common, 6):
+        return None
+    return common
+
+
+def lookup_icm_chips(rows: list[dict]) -> dict:
+    """#ICM-CHIPS-USE-TS-FINAL-FIELD-GG — total de fichas do torneio para o ICM,
+    derivado do campo FINAL do TS (não da foto parcial do lobby).
+
+    O `chips` que o HRC usa para o ICM vem hoje da estimativa do lobby
+    (`average_stack × players_left` lida no momento da SS); em registo tardio
+    subconta. Aqui calcula-se o total verdadeiro:
+
+        total_chips = TS.total_players × starting_stack
+
+    com `starting_stack` lido da mão MAIS ANTIGA do torneio (`_fresh_starting_stack`,
+    validada como Nível 1 / stacks iguais e redondos).
+
+    Devolve `{(site, tn): {total_chips, total_players, starting_stack}}` APENAS
+    para torneios em que: site == 'GGPoker', existe TS com `total_players > 0`,
+    e a 1ª mão é fresca. Caso contrário a chave fica de fora → o override não se
+    aplica (mantém-se a estimativa do lobby).
+
+    GG-only por desenho: WN/PS/WPN nunca entram (o parser de TS é GG-only desde
+    pt38; e os outros sites gravam a estimativa do lobby na mesma). Query em
+    LOTE (espelho de `lookup_ts_meta`). Defensivo: `{}` em falha/sem-chaves.
+    """
+    tnums = list({
+        r["tournament_number"] for r in rows
+        if r.get("site") == "GGPoker" and r.get("tournament_number")
+    })
+    if not tnums:
+        return {}
+    try:
+        ts_rows = query(
+            """SELECT tournament_number, total_players
+                 FROM tournament_summaries
+                WHERE site = 'GGPoker' AND tournament_number = ANY(%s)
+                  AND total_players IS NOT NULL AND total_players > 0""",
+            (tnums,),
+        )
+    except Exception:
+        logger.exception("lookup_icm_chips: TS query falhou")
+        return {}
+    players_by_tn = {r["tournament_number"]: int(r["total_players"]) for r in ts_rows}
+    if not players_by_tn:
+        return {}
+
+    try:
+        # Mão mais antiga (entrada) por torneio, em lote.
+        hand_rows = query(
+            """SELECT DISTINCT ON (tournament_number)
+                      tournament_number, all_players_actions
+                 FROM hands
+                WHERE site = 'GGPoker' AND tournament_number = ANY(%s)
+                  AND played_at >= '2026-01-01'
+                ORDER BY tournament_number, played_at ASC""",
+            (list(players_by_tn.keys()),),
+        )
+    except Exception:
+        logger.exception("lookup_icm_chips: query da 1ª mão falhou")
+        return {}
+
+    out: dict = {}
+    for r in hand_rows:
+        tn = r["tournament_number"]
+        total_players = players_by_tn.get(tn)
+        if not total_players:
+            continue
+        starting_stack = _fresh_starting_stack(r.get("all_players_actions"))
+        if not starting_stack:
+            continue
+        out[("GGPoker", tn)] = {
+            "total_chips": float(total_players) * float(starting_stack),
+            "total_players": total_players,
+            "starting_stack": float(starting_stack),
+        }
+    return out
 
 
 def lookup_players_left(rows: list[dict]) -> dict:
