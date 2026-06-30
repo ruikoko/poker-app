@@ -1250,7 +1250,8 @@ def set_anon_map_override(payload: dict = Body(...),
     Hero). Ancora-se nas BLINDS (decisão do Rui via gold+HH), não no stack. Re-deriva
     o apa HASH-keyed do raw, aplica o mapa DADO, escreve player_names + apa enriquecido,
     re-dispara villain_rules. VALIDA nicks DISTINTOS (recusa seats colados).
-    Body: {hand_id, anon_map:{hash:nick, "Hero":nick}}."""
+    Body: {hand_id, anon_map:{hash:nick,"Hero":nick}, bounties?:{nick:coroa_usd}}.
+    Bounties (coroa $ da gold) corrigem a leitura errada do table-SS Vision."""
     import json as _json
     from app.routers.screenshot import _enrich_all_players_actions
     hand_id = payload.get("hand_id")
@@ -1273,6 +1274,17 @@ def set_anon_map_override(payload: dict = Body(...),
         apa = _json.loads(apa)
     if isinstance(pn, str):
         pn = _json.loads(pn)
+    pn = pn or {}
+    # pt95: override dos bounties pela COROA $ da gold (a coroa DOURADA = bounty em $;
+    # corrige leitura errada do table-SS Vision, que pôs valores que não batem com a
+    # coroa). ⚠️ NÃO é a chama LARANJA = VPIP (CLAUDE.md). Body: {nick: coroa_usd}.
+    bounties = payload.get("bounties") or {}
+    if bounties:
+        pl = pn.get("players_list") or []
+        for _e in pl:
+            if _e.get("name") in bounties:
+                _e["bounty_value_usd"] = bounties[_e["name"]]
+        pn["players_list"] = pl
     hashes = [k for k in apa if k != "_meta"]
     missing = [h for h in hashes if h not in anon_map]
     vision_data = {"players_list": (pn or {}).get("players_list") or []}
