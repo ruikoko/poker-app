@@ -2411,9 +2411,12 @@ _FRESH_FINISH_FIND_TIMEOUT_S = 30.0      # R3 fresco: esperar o Finish NASCER
 _HOT_FINISH_FIND_TIMEOUT_S = 8.0         # R3 quente
 _FRESH_NASH_TIMEOUT_S = 40.0             # popup Nash (fresco)
 _FRESH_EXPORT_DLG_TRIES = 40             # #32770 (fresco) ~20s (era 16 ~8s)
-# min_children do gate R1: 1 deixa a ESTABILIDADE ser o sinal (calibra-se no 1º
-# smoke fresco — ler o `children=N` estável do HRC pronto antes de subir o piso).
-_FRESH_MIN_CHILDREN = 1
+# min_children do gate R1: calibrado no smoke pt93 (HRC pronto = children=123
+# estável, validado no Beelink). Piso = ~metade (60) — bem acima de qualquer estado
+# "shell/a-acordar" (rejeita falsos-prontos a meio do arranque) e com margem para
+# variação entre sessões/versões do HRC. A estabilidade (N ciclos) + UI-viva
+# continuam a ser os sinais principais.
+_FRESH_MIN_CHILDREN = 60
 
 
 def _count_hrc_procs():
