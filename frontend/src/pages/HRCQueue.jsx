@@ -311,6 +311,7 @@ export default function HRCQueuePage() {
   // (o filtro é a lente; o X é seleção durável). Guarda hand_id strings.
   const [selected, setSelected] = useState(() => new Set())
   const [showSelected, setShowSelected] = useState(false)  // "ver só marcadas"
+  const [showReprocess, setShowReprocess] = useState(false) // pt92 — separador re-processar
   const [sendBusy, setSendBusy] = useState(false)
   const [sendResult, setSendResult] = useState(null)       // {released, skipped, ...} | {error}
 
@@ -509,9 +510,15 @@ export default function HRCQueuePage() {
     .filter(Boolean).length + (speedRacer ? 1 : 0)
 
   // ── Seleção manual (release por hand_id) ──────────────────────────────────
-  // `visible` = o que a tabela mostra: lista filtrada, ou (em "ver marcadas") só
-  // as marcadas, ignorando os filtros. A seleção NUNCA deriva de `filtered`.
-  const visible = showSelected ? hands.filter(h => selected.has(h.hand_id)) : filtered
+  // pt92 — separador "Re-processar (offset corrigido)": mãos repostas (offset
+  // antigo na posição errada) marcadas com `reprocess_reason`. Mantidas à parte
+  // das normais para o Rui as seleccionar de uma vez.
+  const reprocessHands = hands.filter(h => h.reprocess_reason)
+  // `visible` = o que a tabela mostra: marcadas / re-processar / lista filtrada.
+  // A seleção NUNCA deriva de `filtered`.
+  const visible = showSelected
+    ? hands.filter(h => selected.has(h.hand_id))
+    : (showReprocess ? reprocessHands : filtered)
   const toggleSel = handId => setSelected(s => {
     const n = new Set(s); n.has(handId) ? n.delete(handId) : n.add(handId); return n
   })
@@ -739,6 +746,16 @@ export default function HRCQueuePage() {
               Selecionar todas (visíveis: {visible.length})
             </button>
             <span style={{ fontWeight: 700, color: selected.size ? 'var(--accent)' : 'var(--muted)' }}>{selected.size} marcadas</span>
+            {/* pt92 — separador "Re-processar (offset corrigido)" */}
+            {reprocessHands.length > 0 && (
+              <button onClick={() => { setShowReprocess(v => !v); setShowSelected(false) }}
+                title="Mãos repostas com o offset corrigido — selecciona todas e envia"
+                style={{ padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer',
+                  background: showReprocess ? 'rgba(245,158,11,0.18)' : 'transparent',
+                  border: '1px solid rgba(245,158,11,0.55)', color: '#f59e0b' }}>
+                ↻ Re-processar (offset corrigido) ({reprocessHands.length})
+              </button>
+            )}
             {selected.size > 0 && (
               <>
                 <label style={{ ...SEL_LABEL, cursor: 'pointer' }}>

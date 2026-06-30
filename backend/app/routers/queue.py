@@ -89,6 +89,14 @@ def ensure_hrc_queue_release_schema():
         "ALTER TABLE hrc_queue_release "
         "ADD COLUMN IF NOT EXISTS requeue_epoch INT NOT NULL DEFAULT 0"
     )
+    # pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES) — marcador de re-processamento: mãos
+    # já `done` cujo resultado ficou MAU (offset na posição errada) e foram
+    # repostas para re-correr com o fix. NULL = normal; set → aparecem no
+    # separador "Re-processar (offset corrigido)" do painel /hrc. Limpa-se quando
+    # chega um novo `done` (POST /results). hand-level → vive em `hands`.
+    execute(
+        "ALTER TABLE hands ADD COLUMN IF NOT EXISTS reprocess_reason TEXT"
+    )
 
 
 def _released_ids() -> set:
@@ -520,6 +528,51 @@ def queue_clear_released(current_user=Depends(require_auth_or_api_key)):
     return {"cleared": n}
 
 
+@router.post("/hrc/reset-done")
+def queue_reset_done(payload: dict = Body(...),
+                     current_user=Depends(require_auth_or_api_key)):
+    """pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES) — repõe mãos `done` ESPECÍFICAS para
+    re-processar (resultado antigo ficou na posição errada do offset). SEGURO:
+    actua **só** sobre os `hand_ids` passados — NUNCA um reset geral.
+
+    Por cada mão com job `done`: apaga o `hrc_job` (→ volta a elegível) + marca
+    `hands.reprocess_reason = reason` (default 'offset_fix_pt92') → aparece no
+    separador "Re-processar (offset corrigido)". A mão NÃO é libertada aqui — o
+    Rui selecciona-a e envia manualmente. Body: {hand_ids:[...], reason?}.
+    """
+    hand_ids = payload.get("hand_ids") or []
+    reason = (payload.get("reason") or "offset_fix_pt92").strip()
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    if len(hand_ids) > 500:
+        raise HTTPException(400, "máximo 500 mãos por chamada")
+    reset, skipped = [], []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT h.id, j.status AS job_status FROM hands h "
+            "LEFT JOIN hrc_jobs j ON j.hand_db_id = h.id WHERE h.hand_id = %s",
+            (hid,),
+        )
+        if not rows:
+            skipped.append({"hand_id": hid, "reason": "mão não encontrada"})
+            continue
+        row = rows[0]
+        if row["job_status"] != "done":
+            skipped.append({"hand_id": hid,
+                            "reason": f"não está 'done' (estado={row['job_status'] or 'sem job'})"})
+            continue
+        # apaga o job done → re-elegível; marca para o separador de re-processo.
+        execute("DELETE FROM hrc_jobs WHERE hand_db_id = %s AND status = 'done'",
+                (row["id"],))
+        execute("DELETE FROM hrc_queue_release WHERE hand_db_id = %s", (row["id"],))
+        execute("UPDATE hands SET reprocess_reason = %s WHERE id = %s",
+                (reason, row["id"]))
+        reset.append(hid)
+    logger.info("queue/hrc reset-done: reset=%d skipped=%d reason=%s",
+                len(reset), len(skipped), reason)
+    return {"reset": reset, "skipped": skipped}
+
+
 # Colunas que `build_queue_zip` consome — espelham `select_andar1_rows`
 # (anti-drift: mesma forma de row para a maquinaria per-mão e batch).
 _HAND_COLS = (
@@ -675,6 +728,10 @@ async def upload_hrc_result(
         # pt92 ② — cacheia o verdict de verificação já aqui (eager), para o
         # GET /hrc/verify não precisar de re-puxar+re-analisar o zip. Best-effort.
         cache_verify_for_hand(hand_db_id)
+        # pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES) — mão re-processada → sai do
+        # separador "Re-processar" (limpa o marcador).
+        execute("UPDATE hands SET reprocess_reason = NULL "
+                "WHERE id = %s AND reprocess_reason IS NOT NULL", (hand_db_id,))
 
     action = "inserted" if row.get("inserted") else "updated"
     logger.info(

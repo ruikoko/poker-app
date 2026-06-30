@@ -159,3 +159,19 @@ def test_pending_ts_hands_reason_mapping():
     assert by_tn["T1"]["reason"] == "needs_ts_import"
     assert by_tn["T2"]["reason"] == "mystery_unsupported"
     assert by_tn["T1"]["n_hands"] == 99
+
+
+def test_andar1_sql_selects_reprocess_reason():
+    """pt92 — o Andar 1 traz `reprocess_reason` (marcador do separador
+    'Re-processar (offset corrigido)' no painel /hrc)."""
+    captured = {}
+
+    def fake_query(sql, params):
+        captured["sql"] = sql
+        return []
+
+    dt = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    with patch("app.services.hrc_queue.query", side_effect=fake_query):
+        hrc_queue.select_andar1_rows(["icm pko"], ["new"], dt, dt)
+
+    assert "reprocess_reason" in captured["sql"]

@@ -148,7 +148,7 @@ def select_andar1_rows(
         SELECT id, hand_id, site, tournament_number, tournament_name,
                tournament_format, raw, player_names, played_at,
                position, study_state, hm3_tags, discord_tags,
-               context_table_ss_id, hero_cards
+               context_table_ss_id, hero_cards, reprocess_reason
           FROM hands
          WHERE played_at >= '2026-01-01'
            AND site = ANY(%s)
@@ -608,6 +608,8 @@ def eligible_hands(
             "seats_occupied": seats,
             "stack_hero_bb": _hero_stack_bb(hh, bb),
             "aggressor_source": src,
+            # pt92 — marcador "Re-processar (offset corrigido)" p/ o separador da UI.
+            "reprocess_reason": h.get("reprocess_reason"),
             "has_payout": blob is not None,
             "starting_bounty": (
                 bounties.get((h["site"], h["tournament_number"])) or {}
