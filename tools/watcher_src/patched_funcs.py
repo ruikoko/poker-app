@@ -618,10 +618,22 @@ def _wait_for_finish_ready(hwnd_wizard):
     """
     btn = _find_finish_button(hwnd_wizard)
     if not btn:
-        print('   [WARN] [finish-wait] botao Finish nao encontrado via Win32 '
-              '(hwnd_wizard=%r); polling saltado, slow-click segue cego'
-              % (hwnd_wizard,))
-        return
+        # pt93 R3 (#HRC-FRESH-CONTROLS-NOT-READY): HRC fresco — o Finish (child-window
+        # SWT) ainda nao nasceu. Pollar ate aparecer em vez de slow-click CEGO. Budget
+        # maior se _HRC_FRESH. Se nunca aparecer -> raise (fail-limpo): o main loop
+        # marca .failed e a fila avanca (a mao re-tenta em HRC ja quente).
+        _budget = (_FRESH_FINISH_FIND_TIMEOUT_S if globals().get('_HRC_FRESH')
+                   else _HOT_FINISH_FIND_TIMEOUT_S)
+        print('   [finish-wait] Finish ainda nao nasceu — a aguardar ate %.0fs '
+              '(fresh=%s)...' % (_budget, globals().get('_HRC_FRESH')))
+        _fd = time.time() + _budget
+        while time.time() < _fd and not btn:
+            time.sleep(0.5)
+            btn = _find_finish_button(hwnd_wizard)
+        if not btn:
+            print('   [WARN] [finish-wait] Finish nunca apareceu em %.0fs — wizard '
+                  'nao pronto; bail-limpo' % _budget)
+            raise RuntimeError('WIZARD_FINISH_NEVER_APPEARED')
 
     deadline = time.time() + _FINISH_WAIT_PHASE1_TIMEOUT_S
     saw_disabled = False
@@ -1549,7 +1561,10 @@ def start_calculation_selected_subtree(wpos, ci_target):
         zip parcial silenciosamente (cenário pt27 GG-5944816316).
     """
     _click_calculate_button(wpos)                         # passo 1a
-    popup_rect = _wait_for_nash_popup()                   # passo 1b
+    # pt93 R3: budget maior se _HRC_FRESH (popup Nash lento num HRC fresco).
+    _nash_to = (_FRESH_NASH_TIMEOUT_S if globals().get('_HRC_FRESH')
+                else _NASH_POPUP_WAIT_TIMEOUT_S)
+    popup_rect = _wait_for_nash_popup(timeout=_nash_to)   # passo 1b
     if popup_rect is None:
         print(f'   [WARN] start_calculation_selected_subtree(ci={ci_target}): '
               'popup não detectado; flow degrada para no-op')
@@ -2065,8 +2080,10 @@ def export_strategies(export_path):
     pyautogui.press('enter')
 
     # 2) Localizar o diálogo #32770 (título vazio → não via _find_export_hwnd)
+    # pt93 R3: budget maior se _HRC_FRESH (controlos do HRC fresco lentos a nascer).
     dlg = None
-    for _ in range(16):
+    _tries = _FRESH_EXPORT_DLG_TRIES if globals().get('_HRC_FRESH') else 16
+    for _ in range(_tries):
         time.sleep(0.5)
         dlg = _find_export_dialog()
         if dlg:
@@ -2381,10 +2398,104 @@ def _running_hrc_path():
         return None
 
 
+# ── pt93 — prontidão dos controlos do HRC fresco + anti-duplo ────────────────
+# #HRC-FRESH-CONTROLS-NOT-READY: a janela 'HRC Pro' aparece CEDO; os widgets SWT
+# (Finish/menus/diálogos = child-windows nativas, pt30) só respondem depois. A
+# corrida ao vivo (8 mãos) provou: falha SÓ na 1ª mão após o HRC abrir/reiniciar
+# (3/3 frescas falham; 5/5 quentes OK), com 1 só HRC (o duplo não foi o driver).
+# Orçamentos extra SÓ na 1ª mão fresca (mãos quentes mantêm o caminho leve).
+# #HRC-DOUBLE-INSTANCE (guarda): garantir EXACTAMENTE 1 hrc.exe no ponto de export.
+_HRC_FRESH = False                       # set em _restart_hrc / open-from-zero; clear no fim da 1ª mão
+_FRESH_CONTROLS_READY_TIMEOUT_S = 90.0   # gate R1 (sai cedo quando estável)
+_FRESH_FINISH_FIND_TIMEOUT_S = 30.0      # R3 fresco: esperar o Finish NASCER
+_HOT_FINISH_FIND_TIMEOUT_S = 8.0         # R3 quente
+_FRESH_NASH_TIMEOUT_S = 40.0             # popup Nash (fresco)
+_FRESH_EXPORT_DLG_TRIES = 40             # #32770 (fresco) ~20s (era 16 ~8s)
+# min_children do gate R1: 1 deixa a ESTABILIDADE ser o sinal (calibra-se no 1º
+# smoke fresco — ler o `children=N` estável do HRC pronto antes de subir o piso).
+_FRESH_MIN_CHILDREN = 1
+
+
+def _count_hrc_procs():
+    """Nº de processos hrc.exe vivos (tasklist). 0 em erro (defensivo)."""
+    try:
+        import subprocess
+        out = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq hrc.exe',
+                              '/FO', 'CSV', '/NH'],
+                             capture_output=True, text=True, timeout=10)
+        return sum(1 for ln in (out.stdout or '').splitlines()
+                   if 'hrc.exe' in ln.lower())
+    except Exception as e:
+        print('   [WARN] _count_hrc_procs: %s' % e)
+        return 0
+
+
+def _hrc_ui_thread_responsive(hwnd, timeout_ms=2000):
+    """True se a janela bombeia mensagens (UI thread viva, não a construir/pendurada).
+    SendMessageTimeout(WM_NULL, SMTO_ABORTIFHUNG): devolve 0 se a thread está hung."""
+    try:
+        res = wintypes.DWORD(0)
+        return bool(_pt30_user32.SendMessageTimeoutW(
+            hwnd, 0x0, 0, 0, 0x0002, timeout_ms, ctypes.byref(res)))
+    except Exception:
+        return False
+
+
+def _count_child_windows(hwnd):
+    """Nº de child-windows (widgets SWT) da janela. Sinal de UI construída."""
+    n = [0]
+
+    def _enum(ch, lp):
+        n[0] += 1
+        return True
+
+    try:
+        _pt30_user32.EnumChildWindows(hwnd, _PT30_WNDENUMPROC(_enum), 0)
+    except Exception:
+        return 0
+    return n[0]
+
+
+def _wait_hrc_controls_ready(timeout_s=_FRESH_CONTROLS_READY_TIMEOUT_S,
+                             stable_cycles=3, min_children=_FRESH_MIN_CHILDREN):
+    """pt93 R1 (#HRC-FRESH-CONTROLS-NOT-READY): prontidão REAL dos controlos —
+    (a) UI thread a bombear mensagens, (b) árvore de child-windows construída e
+    ESTÁVEL N ciclos. Substitui o grace cego de 8s. Sai cedo quando estável;
+    `timeout_s` é TETO (cold-start é lento). Devolve True se ficou pronto."""
+    t0 = time.time()
+    last = -1
+    stable = 0
+    while time.time() - t0 < timeout_s:
+        try:
+            hrc = find_hrc()
+        except Exception:
+            hrc = None
+        hwnd = getattr(hrc, '_hWnd', None) if hrc else None
+        if hwnd and _hrc_ui_thread_responsive(hwnd):
+            c = _count_child_windows(hwnd)
+            if c >= min_children and c == last:
+                stable += 1
+                if stable >= stable_cycles:
+                    time.sleep(2)
+                    print('   [HRC] controlos prontos (children=%d estáveis, UI viva)'
+                          % c)
+                    return True
+            else:
+                stable = 1 if c >= min_children else 0
+                last = c
+        else:
+            stable = 0
+        time.sleep(0.5)
+    print('   [WARN] _wait_hrc_controls_ready: timeout %.0fs (last_children=%d)'
+          % (timeout_s, last))
+    return False
+
+
 def _restart_hrc():
     """change 2 (#HRC-WATCHER-TAB-ACCUMULATION): mata o hrc.exe e relança-o do
-    MESMO path (capturado antes do kill; fallback ao HRC_EXE do módulo). Higiene
-    de memória — a cada _RESTART_EVERY_N_HANDS mãos."""
+    MESMO path. pt93: confirm-kill (o /IM é best-effort — cross-user pode falhar)
+    + esperar a JANELA existir antes de devolver (para o ensure_hrc seguinte NÃO
+    lançar um 2º HRC) + marcar _HRC_FRESH (a 1ª mão a seguir é fresca)."""
     import subprocess
     exe = _running_hrc_path()
     print('   [HRC-RESTART] hrc.exe path=%r — a matar...' % exe)
@@ -2393,7 +2504,19 @@ def _restart_hrc():
                        capture_output=True, text=True, timeout=20)
     except Exception as e:
         print('   [WARN] taskkill hrc.exe: %s' % e)
-    time.sleep(4)
+    # pt93 #HRC-DOUBLE-INSTANCE: confirmar 0 procs antes do Popen; re-taskkill 1x.
+    for _ in range(20):                    # ~10s
+        if _count_hrc_procs() == 0:
+            break
+        time.sleep(0.5)
+    else:
+        print('   [WARN] [HRC-RESTART] hrc.exe vivo após taskkill — re-tentar')
+        try:
+            subprocess.run(['taskkill', '/F', '/IM', 'hrc.exe'],
+                           capture_output=True, text=True, timeout=20)
+        except Exception:
+            pass
+        time.sleep(1)
     launch = exe or globals().get('HRC_EXE')
     if not launch:
         print('   [WARN] _restart_hrc: sem path do HRC — ensure_hrc tentará abrir')
@@ -2403,6 +2526,14 @@ def _restart_hrc():
         print('   [HRC-RESTART] relançado: %s' % launch)
     except Exception as e:
         print('   [WARN] _restart_hrc relançar (%s): %s' % (launch, e))
+        return
+    globals()['_HRC_FRESH'] = True         # pt93 R2 — 1ª mão a seguir é FRESCA
+    # esperar a JANELA existir (a prontidão completa é o gate R1 no setup_hand) —
+    # para o ensure_hrc seguinte encontrar o HRC e NÃO lançar um 2º.
+    for _ in range(60):                    # ~30s
+        if find_hrc() is not None:
+            break
+        time.sleep(0.5)
 
 
 def _wait_hrc_responsive(stable_cycles=3, timeout_s=45):
@@ -2762,24 +2893,47 @@ def setup_hand(hand_name, hand_path):
     # wizard-não-abriu NÃO marca _HRC_WINDOW_DIRTY → sem restart duplicado.
     # Loop guard: a mão falhada é sempre marcada .failed e a fila avança; o
     # restart é 1x por mão (aqui, no arranque) — nunca um ciclo de restart sem fim.
+    # pt93 #HRC-DOUBLE-INSTANCE (guarda): >1 hrc.exe (órfão) → reconciliar p/ 1 via
+    # restart. Seguro: a mão anterior já exportou + fechou a tab. `_hrc_existed_before`
+    # serve para detectar open-from-zero (marcar fresco) mais abaixo.
+    _hrc_existed_before = _count_hrc_procs() > 0
+    _double = _count_hrc_procs() > 1
+    if _double:
+        print('   [WARN] [HRC] %d processos hrc.exe vivos — reconciliar p/ 1 via restart'
+              % _count_hrc_procs())
     _post_window_dirty = globals().get('_HRC_WINDOW_DIRTY', False)
-    if _post_window_dirty or _HANDS_DONE_SINCE_RESTART >= _RESTART_EVERY_N_HANDS:
-        _why = ('mão anterior falhou pós-abertura-de-janela (cálculo/finish/export)'
+    if _double or _post_window_dirty or _HANDS_DONE_SINCE_RESTART >= _RESTART_EVERY_N_HANDS:
+        _why = ('%d hrc.exe vivos (duplo)' % _count_hrc_procs() if _double
+                else 'mão anterior falhou pós-abertura-de-janela (cálculo/finish/export)'
                 if _post_window_dirty
                 else '%d mãos desde o último reinício (>= %d)'
                      % (_HANDS_DONE_SINCE_RESTART, _RESTART_EVERY_N_HANDS))
         print('   [HRC-RESTART] %s — a reiniciar o HRC...' % _why)
-        _restart_hrc()
+        _restart_hrc()                       # já marca _HRC_FRESH + espera a janela
         globals()['_HANDS_DONE_SINCE_RESTART'] = 0
         globals()['_HRC_WINDOW_DIRTY'] = False
-        # _wait_hrc_responsive corre logo abaixo (health-check pós-arranque).
+    # pt93 #HRC-DOUBLE-INSTANCE: guard anti-duplo do ensure_hrc SEM swap — se há
+    # processo mas a janela ainda não responde, esperar a janela ANTES do ensure_hrc
+    # (que senão lançaria um 2º HRC).
+    if _count_hrc_procs() >= 1 and find_hrc() is None:
+        for _ in range(60):                  # ~30s
+            if find_hrc() is not None:
+                break
+            time.sleep(0.5)
     hrc = ensure_hrc()
     if not hrc:
         print('   ERRO: HRC Pro não iniciou!')
         return False
-    # pt68 change 2b — health-check (mitiga o cold-start race do setup-failed
-    # 02:14): esperar o HRC responsivo + grace ANTES do 1º setup.
-    _wait_hrc_responsive()
+    if not _hrc_existed_before:              # pt93 R2 — ensure_hrc abriu do zero → fresco
+        globals()['_HRC_FRESH'] = True
+    # pt93 R1+R2 — gate de prontidão REAL dos controlos SÓ na 1ª mão fresca (a
+    # corrida provou que é aí que falha). Mãos quentes mantêm o caminho leve (8s).
+    # _HRC_FRESH só se limpa no FIM (export OK) — Finish/Nash/#32770 usam o budget.
+    if globals().get('_HRC_FRESH'):
+        print('   [HRC] 1ª mão após abrir/reiniciar — a aguardar prontidão dos controlos...')
+        _wait_hrc_controls_ready()
+    else:
+        _wait_hrc_responsive()
 
     # pt28-v3 (#PASTE-FAILED-HRC-REJECTED-CLIPBOARD root cause):
     # Smoke pt28-v2 expos que o HRC le o clipboard automaticamente quando
@@ -3058,6 +3212,8 @@ def setup_hand(hand_name, hand_path):
 
     # pt79: fim LIMPO — o HRC não ficou sujo; cancela o restart-antes-da-próxima.
     globals()['_HRC_WINDOW_DIRTY'] = False
+    # pt93 R2 — 1ª mão fresca concluída; mãos seguintes são quentes (caminho leve).
+    globals()['_HRC_FRESH'] = False
 
     # pt87 — só [QUEUED] se o zip está mesmo no disco e íntegro. Senão devolve
     # None → try_setup (main loop) marca .failed e o watcher AVANÇA (sem congelar
