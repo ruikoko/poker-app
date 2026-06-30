@@ -105,6 +105,24 @@ def test_andar1_sql_excludes_done_hrc_jobs():
     assert "NOT EXISTS" in sql
 
 
+def test_andar1_sql_excludes_set_aside_hands():
+    """pt92 (fila manual) — o SQL do Andar 1 exclui mãos postas DE LADO
+    (hrc_jobs.meta_json.set_aside='true') da elegibilidade/lista."""
+    captured = {}
+
+    def fake_query(sql, params):
+        captured["sql"] = sql
+        return []
+
+    dt = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    with patch("app.services.hrc_queue.query", side_effect=fake_query):
+        hrc_queue.select_andar1_rows(["icm pko"], ["new"], dt, dt)
+
+    sql = captured["sql"]
+    assert "meta_json ->> 'set_aside'" in sql
+    assert "= 'true'" in sql
+
+
 def test_lookup_bounties_maps_and_coerces_decimal():
     rows = [
         {"site": "GGPoker", "tournament_number": "T1",

@@ -297,8 +297,7 @@ export default function HRCQueuePage() {
   const [stBusy, setStBusy] = useState({})  // id -> 'busy'|'err'
   const [pending, setPending] = useState(null)   // pt41 — banner D1 (PKO sem TS)
   const [pendingOpen, setPendingOpen] = useState(false)
-  const [gate, setGate] = useState(null)         // pt68 — gate da fila (disparo manual)
-  const [batchN, setBatchN] = useState('')
+  const [gate, setGate] = useState(null)         // pt92 — contadores da fila (manual)
   const [gateBusy, setGateBusy] = useState(false)
   const [sent, setSent] = useState(null)         // pt83 — Enviadas (released + estado)
   const [sentMarks, setSentMarks] = useState({}) // hand_id -> 'por_resolver' (flip otimista)
@@ -314,13 +313,17 @@ export default function HRCQueuePage() {
   const [sendBusy, setSendBusy] = useState(false)
   const [sendResult, setSendResult] = useState(null)       // {released, skipped, ...} | {error}
 
-  async function doTrigger(count) {
+  // pt92 — limpar/pausar a fila: des-liberta tudo. O adapter para de puxar até
+  // nova seleção manual ('Enviar ao HRC'). Não há mais "Disparar tudo".
+  async function doClearReleased() {
+    if (!window.confirm('Limpar a fila? Tira TODAS as mãos libertadas — o adapter '
+      + 'deixa de puxar até enviares mãos manualmente.')) return
     setGateBusy(true)
     try {
-      await queue.trigger(count || undefined)
+      await queue.clearReleased()
       setGate(await queue.gate())
     } catch (e) {
-      console.error('trigger falhou:', e)
+      console.error('clear-released falhou:', e)
       setError(String(e.message || e))
     } finally {
       setGateBusy(false)
@@ -546,39 +549,29 @@ export default function HRCQueuePage() {
         </div>
       )}
 
-      {/* pt68 — Gate da fila: disparo manual. O adapter só recebe mãos libertadas. */}
+      {/* pt92 — Fila 100% MANUAL: sem 'abrir/fechar' nem disparo em lote. Só
+          'Enviar ao HRC' (seleção) liberta mãos; o adapter só puxa as libertadas. */}
       {gate && (
         <div style={{
           marginBottom: 14, padding: 14, borderRadius: 8,
-          border: `1px solid ${gate.gate === 'open' ? 'rgba(34,197,94,0.4)' : 'rgba(148,163,184,0.35)'}`,
-          background: gate.gate === 'open' ? 'rgba(34,197,94,0.07)' : 'rgba(148,163,184,0.06)',
+          border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(148,163,184,0.06)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <span style={{
-              fontSize: 13, fontWeight: 700,
-              color: gate.gate === 'open' ? '#22c55e' : '#94a3b8',
-            }}>
-              {gate.gate === 'open' ? '🟢 FILA ABERTA' : '🔴 FILA FECHADA'}
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8' }}>
+              📋 FILA MANUAL
             </span>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-              {gate.released_pending} em curso · {gate.not_released} à espera de disparo · {gate.eligible_total} elegíveis · {gate.done_of_released} do lote já feitas
+              {gate.released_pending} em curso · {gate.not_released} disponíveis · {gate.eligible_total} elegíveis · {gate.done_of_released} já feitas
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-            <button onClick={() => doTrigger(null)} disabled={gateBusy || gate.not_released === 0}
-              style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 6, background: 'var(--accent)', border: 'none', color: '#fff', cursor: gateBusy ? 'wait' : 'pointer', opacity: (gateBusy || gate.not_released === 0) ? 0.5 : 1 }}>
-              Disparar tudo ({gate.not_released})
-            </button>
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>ou lote de</span>
-            <input type="number" min="1" value={batchN} onChange={e => setBatchN(e.target.value)} placeholder="N"
-              style={{ width: 64, background: 'var(--card,#161b22)', color: 'inherit', border: '1px solid var(--border,#30363d)', borderRadius: 6, padding: '5px 8px' }} />
-            <button onClick={() => doTrigger(parseInt(batchN, 10))} disabled={gateBusy || !batchN || parseInt(batchN, 10) <= 0 || gate.not_released === 0}
-              style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 6, background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: gateBusy ? 'wait' : 'pointer', opacity: (gateBusy || !batchN) ? 0.5 : 1 }}>
-              Disparar lote
+            <button onClick={doClearReleased} disabled={gateBusy || gate.released_total === 0}
+              style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 6, background: 'transparent', border: '1px solid rgba(239,68,68,0.5)', color: '#ef4444', cursor: gateBusy ? 'wait' : 'pointer', opacity: (gateBusy || gate.released_total === 0) ? 0.5 : 1 }}>
+              Limpar fila ({gate.released_total})
             </button>
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-            O adapter só recebe mãos <b>libertadas</b>. A fila auto-fecha quando o lote é consumido. (O download manual per-mão abaixo NÃO é gated.)
+            O adapter só recebe mãos que <b>selecionares e enviares</b> ("Enviar ao HRC" abaixo). "Limpar fila" des-liberta tudo (pausa). As <b>postas de lado</b> não aparecem aqui.
           </div>
         </div>
       )}

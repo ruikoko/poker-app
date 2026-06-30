@@ -208,6 +208,15 @@ def select_andar1_rows(
                   WHERE j.hand_db_id = hands.id
                     AND j.status = 'done'
                )
+           -- Manual-only (pt92): mãos postas DE LADO (set-aside — tipicamente as
+           -- grandes/veneno) saem da elegibilidade e da lista, para não serem
+           -- selecionadas/servidas por engano. Marcador durável: hrc_jobs com
+           -- meta_json.set_aside=true (escrito por POST /hrc/set-aside).
+           AND NOT EXISTS (
+                 SELECT 1 FROM hrc_jobs j
+                  WHERE j.hand_db_id = hands.id
+                    AND (j.meta_json ->> 'set_aside') = 'true'
+               )
          ORDER BY played_at {order}
         """,
         (ALLOWED_SITES, after_dt, before_dt, states_list, tags_norm, tags_norm,

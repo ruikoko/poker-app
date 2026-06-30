@@ -448,48 +448,32 @@ def queue_verify_batch(current_user=Depends(require_auth_or_api_key)):
 
 @router.get("/hrc/gate")
 def queue_gate(current_user=Depends(require_auth_or_api_key)):
-    """Estado do gate da fila HRC (pt68). `gate` = 'open' se há lote libertado
-    por consumir, senão 'closed'."""
+    """Contadores da fila HRC. pt92: a fila é 100% MANUAL — não há 'abrir/fechar'
+    nem disparo em lote; só 'Enviar ao HRC' (POST /hrc/release) liberta mãos.
+    Devolve contagens para o painel (sem campo 'gate' open/closed)."""
     eligible = _eligible_rows()
     elig_ids = {h["id"] for h in eligible}
     released = _released_ids()
     pending = elig_ids & released            # libertadas E ainda elegíveis (não-done)
     return {
-        "gate": "open" if pending else "closed",
-        "eligible_total": len(elig_ids),      # elegíveis não-done (todas)
-        "released_pending": len(pending),     # do lote, ainda por consumir (em curso)
-        "not_released": len(elig_ids - released),  # elegíveis à espera de disparo
+        "eligible_total": len(elig_ids),      # elegíveis não-done, não-set-aside (todas)
+        "released_pending": len(pending),     # libertadas, ainda por consumir (em curso)
+        "not_released": len(elig_ids - released),  # disponíveis (por enviar manualmente)
         "released_total": len(released),
         "done_of_released": len(released - elig_ids),  # libertadas já consumidas (done)
     }
 
 
-@router.post("/hrc/trigger")
-def queue_trigger(
-    count: Optional[int] = Query(None, description="nº de mãos a libertar (omitir = todas)"),
-    current_user=Depends(require_auth_or_api_key),
-):
-    """Liberta um lote para o adapter ('Disparar'). Liberta as `count` mãos
-    elegíveis ainda-não-libertadas mais ANTIGAS (por `played_at`); sem `count`,
-    liberta TODAS. Idempotente (ON CONFLICT DO NOTHING)."""
-    if count is not None and count <= 0:
-        raise HTTPException(400, "count deve ser > 0")
-    eligible = _eligible_rows()
-    released = _released_ids()
-    to_release = [h for h in eligible if h["id"] not in released]
-    to_release.sort(key=lambda h: (h.get("played_at") is None, h.get("played_at")))
-    if count is not None:
-        to_release = to_release[:count]
-    batch_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    for h in to_release:
-        execute(
-            "INSERT INTO hrc_queue_release (hand_db_id, batch_id) VALUES (%s, %s) "
-            "ON CONFLICT (hand_db_id) DO NOTHING",
-            (h["id"], batch_id),
-        )
-    logger.info("queue/hrc trigger: released=%d batch=%s", len(to_release), batch_id)
-    return {"released": len(to_release), "batch_id": batch_id,
-            "remaining_not_released": len(eligible) - len(released) - len(to_release)}
+@router.post("/hrc/clear-released")
+def queue_clear_released(current_user=Depends(require_auth_or_api_key)):
+    """pt92 — Limpa/pausa a fila: remove TODAS as mãos de `hrc_queue_release` →
+    o adapter deixa de puxar até nova seleção manual ('Enviar ao HRC'). NÃO toca
+    em `hands` nem escreve `hrc_jobs` (não marca nada failed/set-aside) — só
+    des-liberta. Devolve {cleared}."""
+    n = query("SELECT count(*) AS n FROM hrc_queue_release")[0]["n"]
+    execute("DELETE FROM hrc_queue_release")
+    logger.info("queue/hrc clear-released: cleared=%d", n)
+    return {"cleared": n}
 
 
 # Colunas que `build_queue_zip` consome — espelham `select_andar1_rows`

@@ -406,9 +406,10 @@ export const queue = {
     a.remove()
     URL.revokeObjectURL(url)
   },
-  // Gate da fila HRC (pt68 — disparo manual)
+  // Contadores da fila HRC (pt92 — fila 100% manual, sem disparo em lote)
   gate: () => req('GET', '/queue/hrc/gate'),
-  trigger: (count) => req('POST', `/queue/hrc/trigger${count ? `?count=${count}` : ''}`),
+  // pt92 — limpa/pausa a fila (des-liberta tudo; o adapter para de puxar)
+  clearReleased: () => req('POST', '/queue/hrc/clear-released'),
 }
 
 // ── SS de mesa (contexto players_left p/ HRC) ───────────────────────────────
