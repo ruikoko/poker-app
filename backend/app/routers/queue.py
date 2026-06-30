@@ -424,25 +424,69 @@ def _verify_origin(h: dict) -> dict:
     return {"origin_kind": "hh_text", "capture_url": None}
 
 
+def _compute_verify_entry(h: dict, zip_bytes: bytes) -> dict:
+    """pt92 ② — corre verify_hand + monta a entry (verdict/scale/checks/origin)
+    que o painel consome. Determinístico por (mão, zip) → cacheável."""
+    from app.services.hrc_verify import verify_hand
+    res = verify_hand(h, zip_bytes)
+    return {"hand_id": res["hand_id"], "site": h.get("site"),
+            "verdict": res["verdict"], "scale": res["scale"],
+            "checks": res["checks"], **_verify_origin(h)}
+
+
+def cache_verify_for_hand(hand_db_id: int) -> Optional[dict]:
+    """pt92 ② — calcula e GRAVA o verdict de verificação de uma mão resolvida em
+    `hrc_jobs.verify_json`. Best-effort (devolve None em falha; não levanta).
+    Usado no POST /results (eager) e no 1º /verify de cada mão (lazy backfill)."""
+    try:
+        rows = query(
+            "SELECT h.hand_id, h.site, h.tournament_format, h.raw, "
+            "       h.all_players_actions, h.context_table_ss_id, j.result_zip "
+            "FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
+            "WHERE h.id = %s AND j.status = 'done' AND j.result_zip IS NOT NULL",
+            (hand_db_id,),
+        )
+        if not rows:
+            return None
+        h = dict(rows[0])
+        entry = _compute_verify_entry(h, bytes(h["result_zip"]))
+        execute("UPDATE hrc_jobs SET verify_json = %s WHERE hand_db_id = %s",
+                (json.dumps(entry), hand_db_id))
+        return entry
+    except Exception:
+        logger.exception("cache_verify_for_hand falhou hand_db_id=%s", hand_db_id)
+        return None
+
+
 @router.get("/hrc/verify")
 def queue_verify_batch(current_user=Depends(require_auth_or_api_key)):
-    """pt85 — verify C1-C5 em lote sobre todas as resolvidas. Read-only."""
+    """pt85 — verify C1-C5 em lote sobre todas as resolvidas. Read-only.
+
+    pt92 ②: lê o cache `hrc_jobs.verify_json` (SEM puxar o result_zip). Mãos sem
+    cache (legadas) são calculadas + cacheadas UMA vez (lazy backfill) — só essas
+    puxam o zip. Após a 1ª passagem, o endpoint não toca em nenhum zip → instantâneo.
+    """
     from collections import Counter
-    from app.services.hrc_verify import verify_hand
-    rows = query(
-        "SELECT h.hand_id, h.site, h.tournament_format, h.raw, h.all_players_actions, "
-        "       h.context_table_ss_id, j.result_zip "
+    # 1. Cacheadas — só o JSON pequeno, zero zips.
+    cached = query(
+        "SELECT j.verify_json AS v FROM hrc_jobs j "
+        "WHERE j.status = 'done' AND j.result_zip IS NOT NULL "
+        "  AND j.verify_json IS NOT NULL")
+    out = [r["v"] for r in cached if r["v"]]
+    # 2. Sem cache (legadas) — puxa o zip UMA vez, calcula, cacheia.
+    uncached = query(
+        "SELECT h.id, h.hand_id, h.site, h.tournament_format, h.raw, "
+        "       h.all_players_actions, h.context_table_ss_id, j.result_zip "
         "FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
         "WHERE j.status = 'done' AND j.result_zip IS NOT NULL "
-        "ORDER BY h.site, h.played_at")
-    out, vc = [], Counter()
-    for r in rows:
+        "  AND j.verify_json IS NULL")
+    for r in uncached:
         h = dict(r)
-        res = verify_hand(h, bytes(h["result_zip"]))
-        vc[res["verdict"]] += 1
-        out.append({"hand_id": res["hand_id"], "site": h["site"],
-                    "verdict": res["verdict"], "scale": res["scale"],
-                    "checks": res["checks"], **_verify_origin(h)})
+        entry = _compute_verify_entry(h, bytes(h["result_zip"]))
+        execute("UPDATE hrc_jobs SET verify_json = %s WHERE hand_db_id = %s",
+                (json.dumps(entry), h["id"]))
+        out.append(entry)
+    vc = Counter(e.get("verdict") for e in out)
     return {"total": len(out), "summary": dict(vc), "hands": out}
 
 
@@ -628,6 +672,9 @@ async def upload_hrc_result(
             meta_json=meta_aug,
             error=None,
         )
+        # pt92 ② — cacheia o verdict de verificação já aqui (eager), para o
+        # GET /hrc/verify não precisar de re-puxar+re-analisar o zip. Best-effort.
+        cache_verify_for_hand(hand_db_id)
 
     action = "inserted" if row.get("inserted") else "updated"
     logger.info(

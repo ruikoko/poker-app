@@ -40,11 +40,18 @@ def ensure_hrc_jobs_schema():
         "CREATE INDEX IF NOT EXISTS idx_hrc_jobs_status_submitted_at "
         "ON hrc_jobs (status, submitted_at);"
     )
+    # pt92 (#HRC-QUEUE-SLOW-OPEN ②) — cache do verdict de verificação (C1-C5) por
+    # mão. Calculado uma vez (no POST /results ou no 1º /verify) → o GET /hrc/verify
+    # deixa de re-puxar+re-analisar o result_zip de todas as resolvidas a cada vez.
+    alter_verify = (
+        "ALTER TABLE hrc_jobs ADD COLUMN IF NOT EXISTS verify_json JSONB;"
+    )
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
             cur.execute(idx_status)
+            cur.execute(alter_verify)
         conn.commit()
     finally:
         conn.close()
