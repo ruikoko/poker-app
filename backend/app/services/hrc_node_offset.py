@@ -310,47 +310,46 @@ def _is_all_in_effective(
 def offset_within_bucket(
     action: dict,
     raiser_stack_bb: Optional[float] = None,
+    *,
+    bucket_rows: Optional[int] = None,
 ) -> int:
-    """Offset do nó do raiser DENTRO do seu bucket na Strategy Table (0, 1 ou 2).
+    """Offset do nó do raiser DENTRO do seu bucket na Strategy Table.
 
     A Strategy Table HRC mostra, por posição, os sizings por ordem ASCENDENTE
-    de tamanho — e o nó **ALLIN** (= stack do jogador) é sempre o **maior**, logo
-    o **ÚLTIMO** do bucket:
-      - non-SB:  `[small/min-raise, ALLIN]`            → small=0 ; **jam=1**
-      - SB:      `[Complete, small/min-raise, ALLIN]`  → Complete=0 ; small=1 ; **jam=2**
-    O nó-alvo é a acção REAL do agressor: um small-raise é o 1º nó de raise; um
-    **jam** (all-in efectivo, `_is_all_in_effective`) é o nó **ALLIN** (último).
+    de tamanho; o nó **ALLIN** (= stack) é o **maior** → a **ÚLTIMA** linha do
+    bucket. O Complete da SB (limp) é a 1ª. O nó-alvo é a acção REAL do agressor:
+      - Complete/limp da SB                       → 0 (1ª linha).
+      - small-raise                               → 1ª linha de raise (SB:1 / non-SB:0).
+      - **jam** (all-in efectivo)                 → **ÚLTIMA** linha = `bucket_rows - 1`.
 
-    pt67 (#HRC-NODE-OFFSET-OFFBY1-REVERT-PT61): REVERTE o pt61
-    (#HRC-NODE-OFFSET-SB-JAM-OFFBY1), que colapsara isto para `0` (non-SB) / `1`
-    (SB raise) — assumindo que o alvo é sempre o 1º nó. A 1ª smoke REAL da
-    navegação (3ª volta pt67, provas visuais do Rui) desmentiu-o: o jam é o
-    **último** nó (ALLIN), não o primeiro. O pt61 era teoria "EM BUFFER" nunca
-    validada em smoke. Cross-check (offsets confirmados visualmente / packs de
-    6 Jun): GG-6029013400 (HJ jam 9.01/stack 9.16) → 7; GG-6039094225 (SB jam
-    6.35/stack 6.47) → 14; GG-6028190109 (HJ small 2.0/stack 34.5) → 2.
+    pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES, FIX): o jam deixa de assumir um layout
+    FIXO (`non-SB→1` / `SB→2`, que pressupunha um nó small SEMPRE presente). O
+    bucket do abridor pode ter **COLAPSADO para 1 linha** (Regra 1, eff≤9; ou o
+    size É o all-in → array `[ALLIN]`), e aí o jam está no índice **0** (non-SB) /
+    **1** (SB, depois do Complete), não 1/2. Agora o índice deriva do nº REAL de
+    linhas — `bucket_rows`, calculado pelo caller via `count_lines_for_position`
+    (a MESMA lógica de colapso das outras posições) → o jam aponta sempre para a
+    última linha existente. Verificado tree-a-tree (pt92): GG-6113941263 SB jam
+    (2 linhas) → 1; WN-…-13 CO jam (1 linha) → 0; GG-6114196293 CO jam (1) → 0.
 
-    ⚠️ Latente (#HRC-NODE-OFFSET-IMPLICIT-LINES, LOW): a convenção assume 2 nós
-    non-SB / 3 SB. Se um open-jam de stack muito curto não tiver nó small
-    separado, o within podia ficar +1 comprido. A `count_lines_for_position`
-    tem a assunção-irmã (linhas implícitas ALLIN/min do HRC). Por isso a
-    confirmação VISUAL do nó é critério OBRIGATÓRIO de toda a smoke de navegação.
+    `bucket_rows` ausente → fallback legacy (assume o layout cheio: SB jam=2 /
+    non-SB jam=1) — só para chamadas directas/testes que não o passam; o
+    `compute_target_node_offset` passa-o SEMPRE.
     """
     pos = (action.get("position") or "").upper()
     action_type = (action.get("type") or "").lower()
     is_jam = _is_all_in_effective(action.get("size_bb"), raiser_stack_bb)
 
-    # pt91: a ação REAL do agressor é SEMPRE preservada no template
-    # (preserveRealRaise) → o nó dela existe sempre no bucket. Por isso o
-    # within volta à lógica pt67 (NÃO colapsa por Regra 1; um small é o 1º nó,
-    # um jam é o nó ALLIN/último). O índice exacto (small vs implicit-all-in)
-    # é calibrado no smoke visual do Beelink (#HRC-NODE-OFFSET-IMPLICIT-LINES).
     if pos == "SB":
         # SB tem o nó Complete (limp) prepended antes dos raises.
         if action_type in ("complete", "limp", "call"):
             return 0
-        return 2 if is_jam else 1
-    return 1 if is_jam else 0
+        if is_jam:
+            return (bucket_rows - 1) if bucket_rows else 2  # última linha
+        return 1   # 1º small-raise (a seguir ao Complete)
+    if is_jam:
+        return (bucket_rows - 1) if bucket_rows else 1      # última linha
+    return 0       # 1º small-raise
 
 
 # ── Aggressor stack derivation ──────────────────────────────────────────
@@ -488,8 +487,23 @@ def compute_target_node_offset(
             effective_bb=eff_p, is_pko=is_pko, own_total_bb=own_p,
             yet_to_act_short_or_allin=yet_short_p,
         )
-    # within-bucket do raiser: a ação real é sempre preservada no template
-    # (preserveRealRaise) → o nó dela existe sempre. Lógica pt67 (sem colapso
-    # Regra 1); índice exacto calibrado no smoke (#IMPLICIT-LINES).
-    offset += offset_within_bucket(aggressor_real_action, raiser_stack_bb)
+    # within-bucket do raiser: pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES FIX) — o
+    # nº REAL de linhas do bucket do PRÓPRIO abridor vem do `count_lines_for_position`
+    # (a MESMA lógica de colapso Regra 1/limiar das outras posições), para o jam
+    # apontar para a ÚLTIMA linha existente (e não para um índice fixo que
+    # pressupunha um nó small sempre presente → saltava de posição).
+    if totals:
+        eff_a, own_a, yet_a = _open_node_eff_and_shortie(
+            position, seats_at_table, totals,
+        )
+    else:
+        eff_a, own_a, yet_a = None, None, False
+    abridor_rows = count_lines_for_position(
+        position, overrides, stacks.get(position),
+        effective_bb=eff_a, is_pko=is_pko, own_total_bb=own_a,
+        yet_to_act_short_or_allin=yet_a,
+    )
+    offset += offset_within_bucket(
+        aggressor_real_action, raiser_stack_bb, bucket_rows=abridor_rows,
+    )
     return offset

@@ -249,13 +249,20 @@ def test_offset_GG6029013400_8max_HJ_jam_returns_7():
     assert compute_target_node_offset(agg, 8, overrides, raiser_stack_bb=9.16) == 7
 
 
-def test_offset_GG6039094225_8max_SB_jam_returns_14():
+def test_offset_GG6039094225_8max_SB_jam_returns_13():
     """GG-6039094225: 8-max, SB jam 6.35bb (stack 6.47). Só SIZES_OPEN_SB
-    overridden; OTHERS/BU caem no default 2. UTG..BTN = 6×2 = 12; SB jam = ALLIN
-    (within 2) → 14. (Prod dava 13.)"""
+    overridden; OTHERS/BU caem no default 2. UTG..BTN = 6×2 = 12.
+
+    pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES FIX): o within do SB jam passa a derivar
+    do `count_lines(SB)` = 2 (Complete+ALLIN) → within 1 → **13** (era 14, com o
+    within fixo=2 do pt67). ⚠️ pt67 confirmou 14 VISUALMENTE; mas a SB é a ÚLTIMA
+    posição → tanto 13 (linha SB) como 14 (linha SB seguinte) aterram na **SB**
+    (LEI B: qualquer linha da posição-âncora recalcula o ponto de decisão). A
+    mudança é cosmética para o LANDING; alinha o within com a contagem real de
+    linhas (confirmada tree-a-tree em GG-6113941263 SB jam, pt92)."""
     overrides = {"SIZES_OPEN_SB": ["ALLIN"]}
     agg = {"type": "raise", "size_bb": 6.35, "position": "SB"}
-    assert compute_target_node_offset(agg, 8, overrides, raiser_stack_bb=6.47) == 14
+    assert compute_target_node_offset(agg, 8, overrides, raiser_stack_bb=6.47) == 13
 
 
 def test_offset_GG6028190109_6max_HJ_small_returns_2():
@@ -630,16 +637,64 @@ def test_compute_offset_pko_iso_shifts_anchor():
 
 def test_compute_offset_rule1_collapse_shifts_anchor():
     """Rule 1 (format-agnóstico) nas FOLDADAS antes do raiser: mesa toda curta
-    (8 BB) → cada open hipotético colapsa para 1 linha (era 2). O within do
-    raiser NÃO colapsa (ação real preservada → lógica pt67, jam=1).
+    (8 BB) → cada open hipotético colapsa para 1 linha (era 2). pt92
+    (#HRC-NODE-OFFSET-IMPLICIT-LINES FIX): o within do raiser **TAMBÉM** colapsa
+    agora — o bucket do CO a 8 BB (Regra 1, eff≤9) tem 1 só linha (ALLIN), logo o
+    jam está no índice 0, não 1.
 
     Nota: o efetivo é capado pelo MAIOR vivo atrás — um único curto numa mesa
     funda NÃO colapsa uma posição cedo (ela ainda joga deep vs as fundas)."""
     totals = {"UTG": 8.0, "HJ": 8.0, "CO": 8.0,
               "BTN": 8.0, "SB": 8.0, "BB": 8.0}
     agg = {"position": "CO", "type": "raise", "size_bb": 8.0}  # jam (~stack)
-    # Sem totais: UTG(2)+HJ(2)+within(jam=1) = 5.
+    # Sem totais (count_lines legacy, stack 8 → bucket 2 linhas): UTG(2)+HJ(2)
+    # +within(jam, bucket=2 → 1) = 5.
     assert compute_target_node_offset(agg, 6, {}, 8.0, totals) == 5
-    # Com totais (Rule 1 nas foldadas): UTG(1)+HJ(1)+within(jam=1) = 3.
+    # Com totais (Rule 1 nas foldadas E no abridor): UTG(1)+HJ(1)+within(jam,
+    # bucket do CO colapsado a 1 → 0) = 2. (Antes do fix dava 3, com within fixo=1.)
     assert compute_target_node_offset(
-        agg, 6, {}, 8.0, totals, position_total_bb=totals) == 3
+        agg, 6, {}, 8.0, totals, position_total_bb=totals) == 2
+
+
+# ── pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES FIX) — within do jam deriva do nº REAL
+#    de linhas do bucket (count_lines), não de um índice fixo. Regressão dos casos
+#    verificados tree-a-tree na pt92 (2 que erravam → CO; SB jam → linha certa). ──
+
+def test_within_bucket_uses_real_rows_non_sb_jam_collapsed():
+    """non-SB jam num bucket COLAPSADO a 1 linha (Regra 1) → within 0 (não 1).
+    Era o bug: o jam aterrava +1 → posição seguinte."""
+    action = {"position": "CO", "type": "raise", "size_bb": 7.0}
+    assert offset_within_bucket(action, raiser_stack_bb=7.1, bucket_rows=1) == 0
+    # bucket com small+allin (2 linhas) → jam na última = 1 (comportamento cheio)
+    assert offset_within_bucket(action, raiser_stack_bb=7.1, bucket_rows=2) == 1
+
+
+def test_within_bucket_uses_real_rows_sb_jam_collapsed():
+    """SB jam: bucket [Complete, ALLIN] (2 linhas) → within 1; [Complete, small,
+    ALLIN] (3) → 2."""
+    action = {"position": "SB", "type": "raise", "size_bb": 4.24}
+    assert offset_within_bucket(action, raiser_stack_bb=4.37, bucket_rows=2) == 1
+    assert offset_within_bucket(action, raiser_stack_bb=4.37, bucket_rows=3) == 2
+
+
+def test_within_bucket_legacy_fallback_without_bucket_rows():
+    """Sem bucket_rows (chamadas directas/legacy) → mantém o layout cheio
+    (non-SB jam=1, SB jam=2) — back-compat."""
+    assert offset_within_bucket({"position": "CO", "type": "raise", "size_bb": 7.0},
+                                raiser_stack_bb=7.1) == 1
+    assert offset_within_bucket({"position": "SB", "type": "raise", "size_bb": 6.35},
+                                raiser_stack_bb=6.47) == 2
+
+
+def test_pt92_collapse_fix_lands_on_co_not_btn():
+    """Reproduz o padrão das 2 mãos que ERRARAM (WN-…-13, GG-6114196293): abridor
+    CO em jam → bucket colapsado → offset aponta para o CO, não para o BTN.
+
+    Caso GG-6114196293: 4-max (CO,BTN,SB), CO é o 1º opener e faz jam curto.
+    rows_before(0) + within(jam, bucket 1 linha → 0) = 0 = a linha do CO."""
+    totals = {"CO": 2.7, "BTN": 25.0, "SB": 25.0, "BB": 25.0}
+    agg = {"position": "CO", "type": "raise", "size_bb": 2.55}
+    off = compute_target_node_offset(agg, 4, {}, raiser_stack_bb=2.68,
+                                     position_stacks_bb=totals,
+                                     position_total_bb=totals)
+    assert off == 0   # CO (1ª linha). Antes do fix dava 1 → BTN.
