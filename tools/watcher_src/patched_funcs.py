@@ -1254,6 +1254,50 @@ def _wait_for_nash_popup(timeout=_NASH_POPUP_WAIT_TIMEOUT_S,
     return None
 
 
+def _fg_title():
+    """Título da janela em foreground ('' se vazio/erro). pt95."""
+    try:
+        fg = _pt30_user32.GetForegroundWindow()
+        n = _pt30_user32.GetWindowTextLengthW(fg)
+        if n <= 0:
+            return ''
+        buf = ctypes.create_unicode_buffer(n + 1)
+        _pt30_user32.GetWindowTextW(fg, buf, n + 1)
+        return buf.value
+    except Exception:
+        return ''
+
+
+def _ensure_hrc_foreground(retries=3):
+    """pt95 (#HRC-FOCUS-ROBUSTNESS): põe a janela principal do HRC em foreground
+    antes de um clique/teclado crítico (Play da 2ª run, trigger do export). Sem
+    isto, se o foco foi roubado (ex. GG-6100869991 foreground='Program Manager'),
+    o clique/teclas caem no vazio e o popup/diálogo nunca abre. find_hrc +
+    activate + SetForegroundWindow, confirma pelo título 'HRC'. Best-effort:
+    devolve True se ficou em foreground, False senão (o caller segue + tem retry)."""
+    try:
+        hrc = find_hrc()
+    except Exception:
+        hrc = None
+    if not hrc:
+        return False
+    hwnd = getattr(hrc, '_hWnd', None)
+    for _ in range(max(1, retries)):
+        try:
+            hrc.activate()
+        except Exception:
+            pass
+        if hwnd:
+            try:
+                _pt30_user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+        time.sleep(0.25)
+        if 'HRC' in (_fg_title() or ''):
+            return True
+    return False
+
+
 def _click_calculate_button(wpos=None):
     """Click no botão verde Calculate (Play) no main UI HRC.
 
@@ -1305,6 +1349,7 @@ def _click_calculate_button(wpos=None):
     print('   [calc-diag pre-click] coord=(%d,%d) hrc_window=(%d,%d,%d,%d) '
           'foreground=%s'
           % (abs_x, abs_y, hrc.left, hrc.top, hrc.width, hrc.height, fg_info))
+    _ensure_hrc_foreground()                              # pt95: foco garantido antes do click do Play
     pyautogui.click(abs_x, abs_y)
     time.sleep(0.3)
 
@@ -1629,6 +1674,15 @@ def start_calculation_selected_subtree(wpos, ci_target):
     _nash_to = (_FRESH_NASH_TIMEOUT_S if globals().get('_HRC_FRESH')
                 else _NASH_POPUP_WAIT_TIMEOUT_S)
     popup_rect = _wait_for_nash_popup(timeout=_nash_to)   # passo 1b
+    # pt95 (#HRC-FOCUS-ROBUSTNESS): 1 retry com foreground garantido. A 6099449000
+    # tinha foco OK ('HRC Pro') e o popup não abriu na mesma → o retry é essencial
+    # (não basta garantir foco); a 6100869991 tinha foreground='Program Manager'
+    # (foco roubado) → o _ensure dentro do _click + este retry cobrem ambos.
+    if popup_rect is None:
+        print('   [WARN] [calc] popup Nash não abriu — retry com foreground garantido')
+        _ensure_hrc_foreground()
+        _click_calculate_button(wpos)
+        popup_rect = _wait_for_nash_popup(timeout=_nash_to)
     if popup_rect is None:
         print(f'   [WARN] start_calculation_selected_subtree(ci={ci_target}): '
               'popup não detectado; flow degrada para no-op')
@@ -2131,30 +2185,42 @@ def export_strategies(export_path):
         print('   [export] ERRO: HRC não encontrado')
         return None
 
-    # 1) Abrir menu Hand → Export Strategies (sequência OG preservada)
-    pyautogui.click(hrc.left + 300, hrc.top + 154)
-    time.sleep(0.5)
-    pyautogui.press('escape')
-    time.sleep(0.3)
-    pyautogui.click(hrc.left + 60, hrc.top + 43)
-    time.sleep(0.6)
-    for _ in range(4):
-        pyautogui.press('down')
-        time.sleep(0.15)
-    pyautogui.press('enter')
-
-    # 2) Localizar o diálogo #32770 (título vazio → não via _find_export_hwnd)
-    # pt93 R3: budget maior se _HRC_FRESH (controlos do HRC fresco lentos a nascer).
-    dlg = None
-    _tries = _FRESH_EXPORT_DLG_TRIES if globals().get('_HRC_FRESH') else 16
-    for _ in range(_tries):
+    # 1) Abrir menu Hand → Export Strategies (sequência OG preservada).
+    # pt95 (#HRC-FOCUS-ROBUSTNESS): foreground garantido + 2 tentativas de trigger.
+    # Os 4 export-fails (6104597115/6108969314/6108662346/6113996195) = o #32770
+    # não apareceu em ~8s (foco roubado e/ou diálogo lento após 2ª run pesada).
+    # Budget hot 16→24/tentativa + re-trigger com foreground se a 1ª não abrir.
+    def _trigger_export_menu():
+        _ensure_hrc_foreground()
+        pyautogui.click(hrc.left + 300, hrc.top + 154)
         time.sleep(0.5)
-        dlg = _find_export_dialog()
+        pyautogui.press('escape')
+        time.sleep(0.3)
+        pyautogui.click(hrc.left + 60, hrc.top + 43)
+        time.sleep(0.6)
+        for _ in range(4):
+            pyautogui.press('down')
+            time.sleep(0.15)
+        pyautogui.press('enter')
+
+    # 2) Localizar o diálogo #32770 (título vazio → não via _find_export_hwnd).
+    # pt93 R3: budget maior se _HRC_FRESH (controlos do HRC fresco lentos a nascer).
+    _tries = _FRESH_EXPORT_DLG_TRIES if globals().get('_HRC_FRESH') else 24
+    dlg = None
+    for _attempt in range(2):
+        _trigger_export_menu()
+        for _ in range(_tries):
+            time.sleep(0.5)
+            dlg = _find_export_dialog()
+            if dlg:
+                break
         if dlg:
             break
+        print('   [WARN] [export] #32770 não apareceu (tentativa %d/2) — '
+              're-trigger com foreground garantido' % (_attempt + 1))
     if not dlg:
         print('   [WARN] [export] diálogo Export Strategies (#32770) não '
-              'encontrado em ~8s — export desta mão abortado')
+              'encontrado após 2 tentativas — export desta mão abortado')
         return None
     print('   [export] diálogo #32770 hwnd=%d' % dlg)
     _pt30_user32.SetForegroundWindow(dlg)
