@@ -261,6 +261,18 @@ Construção planeada na Fase 3. Componentes:
 
 ---
 
+### 6.1 Qualidade da biblioteca melhorada (pt92, 29-30 Jun 2026 — LIVE)
+
+Três fixes (todos em produção) que melhoram directamente a **fidelidade das árvores** que entram (ou entrarão) na biblioteca GTO:
+
+1. **`#OFFSET-WITHIN-BUCKET-JAM` (`db16888`)** — o **nó-alvo da 2ª run** (Selected Subtree) deixou de cair na posição **errada** quando o abridor abre em **all-in/jam**. Antes, o `offset_within_bucket` assumia um layout fixo no bucket do abridor; quando o bucket colapsa para 1 linha (Regra 1, eff≤9, ou o size *é* o all-in) o realce caía **uma posição à frente** do abridor → a 2ª run calculava o **ponto de decisão errado** → **árvore contaminada**. O fix faz o `offset_within_bucket` **derivar do `count_lines_for_position`** (a mesma contagem das posições anteriores) → os três sítios (template `shouldAddPreflopAllIn`, `count_lines_for_position`, `offset_within_bucket`) partilham **uma** lógica de contagem e não podem divergir. **46 árvores `done` contaminadas** foram repostas e re-processadas (`POST /hrc/reset-done` + separador "Re-processar (offset corrigido)" no painel `/hrc`). **Método de verificação novo:** reconstruir as **linhas reais da Strategy Table a partir do tree exportado** (`settings.json` + `nodes/` via `sequence`/`actions`) para confirmar **tree-a-tree** onde o offset aterra.
+2. **`#ICM-CHIPS-USE-TS-FINAL-FIELD-GG` (`842d64f`)** — o **total de fichas** que alimenta o ICM passou a vir do **campo final do TS** (`total_players × stack inicial`) em vez da estimativa parcial do lobby → ICM mais fiel (GG + TS; WN/PS/WPN e GG-sem-TS inalterados).
+3. **Regras de sizing (pt91)** — sizings per-hand mais correctos (3 regras do Rui + preservação da acção real + fix do squeeze).
+
+**Acesso ao tree exportado (read-only):** `parse_hrc_zip` (`backend/app/routers/gto.py:70`) lê `settings.json` + `equity.json` + `nodes/` (cada nó com `player`/`street`/`sequence`/`actions`/`hands`/`children`). Foi a base da verificação de offset tree-a-tree na pt92 — útil para qualquer auditoria futura da estrutura das árvores.
+
+---
+
 ## 7. Plano de evolução (3 fases)
 
 ### Fase 1 — Robot exporta trees úteis e ciclo fechado

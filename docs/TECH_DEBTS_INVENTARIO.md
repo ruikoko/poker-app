@@ -6,6 +6,41 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## pt92 (29-30 Jun 2026 — índice de navegação, fila manual, painel rápido, ICM, FT)
+
+**Tudo LIVE em produção.** Sessão grande: fix do índice de navegação do HRC (`#OFFSET-WITHIN-BUCKET-JAM`) + re-process das mãos contaminadas, fila HRC 100% manual, painel `/hrc` rápido, ICM via TS, regras de sizing pt91, regras de FT seladas (a implementar).
+
+### Índice de navegação do HRC (2ª run / Selected Subtree)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#OFFSET-WITHIN-BUCKET-JAM` | ✅ **FIXED (commit `db16888`)** | **Descoberto por verificação VISUAL do Rui** (o realce caía no **BTN** em vez do **CO**). **Problema:** o `offset_within_bucket` (`hrc_node_offset.py`) assumia layout **FIXO** no bucket do abridor (jam non-SB→1, SB jam→2). Quando o abridor abre em **ALL-IN/jam curto** e o bucket **COLAPSA para 1 linha** (Regra 1, eff≤9; ou o size **É** o all-in → array `[ALLIN]`), o código contava **+1 linha** → o realce caía **SEMPRE uma posição À FRENTE** do abridor (ou no **clamp** da última linha, escondendo o erro na SB). **Padrão:** erra **só** quando o abridor abre em jam; acerta sempre em min-raise deep. **Fix:** o `offset_within_bucket` passa a **DERIVAR** o nº real de linhas chamando `count_lines_for_position` (a **mesma** lógica de colapso da Regra 1 que já conta as posições anteriores). `within = count_lines(abridor)-1` (jam) / `0` (Complete/small non-SB) / `1` (SB small). Os **três** sítios — template `shouldAddPreflopAllIn`, `count_lines_for_position`, `offset_within_bucket` — partilham **UMA** lógica de contagem → não podem divergir. **Variante uniforme** (SB jam 14→13; cosmético — a SB é a última linha, **mesmo landing**; alinha com a árvore real). **+4 testes regressão; suite 1144 passed; validado tree-a-tree em 5 mãos** (as 2 que erravam — `WN-…-13`, `GG-6114196293` — caem agora no **CO**). **Importância:** prepara o FT — como o offset deriva da contagem, quando o FT mudar a contagem (template+count_lines juntos), o offset segue automaticamente. |
+| Re-process das contaminadas | ✅ **FEITO (commit `b15129e`)** | **Scan:** das **110** done, **46** tinham abridor em all-in (**34** caíram na posição errada — resultados maus — + **12** SB-última, clamp provavelmente salvou, re-processadas por garantia); as outras **64** (min-raise deep) estavam certas, intocadas. **Mecanismo:** `POST /api/queue/hrc/reset-done` (aceita **SÓ** a lista de IDs confirmados — **NUNCA** reset geral) + coluna `hands.reprocess_reason` + separador **"↻ Re-processar (offset corrigido)"** no painel `/hrc` com "selecionar todas". **As 46 repostas** (reset 46, skipped 0; 46 re-elegíveis, 64 done restantes). Rui seleccionou e enviou as 46 ao HRC — a processar na noite de 30/06. **PENDENTE: confirmar que ficaram boas.** |
+| `#HRC-EXPORT-DIALOG` | 🟡 **NOVO — registado, não prioritário** | `WN-4872606583034478607-2` (ZENITH nível 23) falhou no export (**"Save-As não persistiu em 180s"**). Bug de **UI do export do HRC**, **NÃO** índice nem RAM. `job=failed`, sem zip. |
+
+### Fila HRC + painel `/hrc`
+
+| ID | Sev | Resumo |
+|---|---|---|
+| Fila HRC 100% MANUAL | ✅ **FEITO (commit `84bd63b`)** | **"Disparar tudo" REMOVIDO** (botão + `POST /trigger`); gate → **contadores**; novo `POST /hrc/clear-released` ("Limpar fila"); `select_andar1_rows` **exclui mãos set-aside** (`hrc_jobs.meta_json.set_aside='true'`). Reset operacional: 124→0. ⚠️ **ABERTO:** falta **gatilho UI para "pôr de lado"** (exclusão armada, sem botão). |
+| `#HRC-QUEUE-SLOW-OPEN` | ✅ **FIXED (commits `2f463d7` ① + `f2be50e` ②)** | Abertura do painel `/hrc` **~14s** porque o `GET /hrc/verify` puxava **~809 MB** de result_zips (106 done) + parse a **CADA** abertura, a crescer com cada mão feita. **①** verify **FORA** da abertura → botão "Verificar resolvidas" (abertura **~14s→~0,4s**). **②** cache `hrc_jobs.verify_json` (eager no `POST /results` + lazy backfill) → `/verify` **16s→0,4s** (provado). **+3 testes.** |
+
+### ICM + sizing pt91
+
+| ID | Sev | Resumo |
+|---|---|---|
+| `#ICM-CHIPS-USE-TS-FINAL-FIELD-GG` | ✅ **FIXED (commit `842d64f`, merge `3d24df0`)** *(reclassifica o "SÓ REGISTADO" da secção 29 Jun abaixo)* | O `chips` do `payouts.json` (total de fichas p/ ICM) vinha da estimativa do lobby (subconta em registo tardio); passa a **`total_players` (do TS) × stack inicial** (1ª mão **fresca**: Nível 1, stacks iguais e redondos), **GG+TS only**, override em `build_queue_zip` + auditoria no manifest (`icm_chips_source`). WN/PS/WPN e GG-sem-TS inalterados. **Validado:** tn 292447656 → 1 409 980 → **1 510 000**. **+18 testes.** |
+| `#SQUEEZE-LIVE-CALLER-PT91` | ✅ **FIXED (commits `d64f47e`/`df93989`/`08757c9`, merge `1c958a5`)** | Regras de sizing pt91: 3 regras do Rui + **preservação da ação real** + mirror do offset + **fix do squeeze** — um shortie all-in atrás (side-pot) deixa de disparar o squeeze fixo; cai no 3bet normal (helper `hasLiveNonAllInCaller`). |
+
+### Pendentes (definidos, NÃO em produção)
+
+| ID | Sev | Resumo |
+|---|---|---|
+| Regras de FT (open) | 🔵 **DEFINIDAS e SELADAS — a implementar** | Em `project_ft_open_sizing_rules_pending.md`. **Implementar SÓ depois** das 46 re-processadas confirmadas. **FT-1 (limiar):** tag `-ft` → `IS_FT` → open-all-in sobe 25→**35bb efetivas** (`<9` só all-in · `9-35` min+all-in · `>35` só min; BvB→35; 3bets intocados). **FT-2 (fake all-in):** `IS_FT`+eff≤9 → além do all-in, **raise para 85% do stack NOMINAL** (raise-to 0.85×nominal; arredondamento fichas→BB; a app calcula, o gerador injeta via `ctx.sizingBigBlinds`). **Acoplamento obrigatório (#IMPLICIT-LINES):** as 2 mudam template (`shouldAddPreflopAllIn`) **E** `count_lines_for_position` **EM CONJUNTO** (a FT-2 cria linha nova); exige smoke visual dedicado. **Descoberta:** o override `stage 'FT'→'MTT'` (por `players_left`) é **INOFENSIVO** para o sizing — só afeta o equity model (ICM, que sai certo); os limiares de all-in não têm hoje noção de FT (fixos 25/30bb, decididos por stack efetivo + `IS_PKO`). |
+| Secção **Marcadas/captura** — pedidos do Rui | 🟡 **EM ABERTO (por definir)** | (a) **Expor as 11 tags na UI** (hoje só 5 botões; faltam `-ft`, `pos-nko`, `speed-racer` — todas em `ALLOWED_TRIAGE_TAGS`). (b) **Editar nomes à mão** → confirmar a atribuição (mãos vêm do IT, desanon por stack, "por verificar") → passar **unverified→verified** (novo `match_method='manual_confirmed'` em `VERIFIED_MATCH_METHODS`). (c) **Propagar nome por HASH GG** dentro do torneio (mesmo jogador = mesmo hash; confirmar um nome propaga aos outros) — **a confirmar:** as mãos do IT carregam o hash GG? (d) **Investigar** porque a fila só mostra **~5** mãos quando há **382** `table_ss` "por verificar" (predicado exige sem tag + sem discord + não-triada → onde estão as ~377?). |
+
+---
+
 ## 29 Jun 2026 — fidelidade do total de fichas ICM (lobby parcial vs campo final)
 
 | ID | Sev | Resumo |

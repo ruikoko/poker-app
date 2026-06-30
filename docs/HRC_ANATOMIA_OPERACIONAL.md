@@ -180,6 +180,8 @@ avançar. A última página termina com "Finish".
 | Implicação de Other Tables = 0 | Matematicamente equivalente a FT ICM com N jogadores. Cálculo enviesado se o torneio tem mais jogadores em outras mesas |
 | Workaround actual | Se `meta.json.stage='MTT'` + `players_left` presentes, preenche Remaining Players. Senão, salta a página clicando "Next" (deixa Other Tables = 0) |
 
+> **Facto (pt92) — o override `stage 'FT'->'MTT'` é INOFENSIVO para o sizing.** No watcher (`patched_funcs.py`), quando `players_left` está setado o `stage` é forçado a `'MTT'` (log `[override] stage 'FT' -> 'MTT' because players_left=N`). Isto **só** decide se o wizard entra nesta página MTT-Stacks (input do ICM multi-mesa); o **modelo de equity sai certo** (Malmuth-Harville ICM continua o escolhido). Os **limiares de all-in do open NÃO têm hoje qualquer noção de stage/FT** — são fixos (25 BB geral, 30 BB BvB) decididos só por **stack efetivo + `IS_PKO`** (ver §3.4.2). Por isso o fix de FT (§16) **não passa** por este stage; entra por um sinal novo `IS_FT` (tag `-ft`).
+
 ### 3.4 Página Scripting
 
 | Item | Valor |
@@ -1127,7 +1129,7 @@ importa é **aterrar na POSIÇÃO certa** — a linha exacta (small-raise vs jam
   mantém-se (aterra na acção real, mais limpo) mas **não era a causa de lixo**.
 - **O veneno real é a POSIÇÃO ERRADA:** `#HRC-NODE-OFFSET-IMPLICIT-LINES` — quando a
   contagem de linhas erra, o offset salta para **outra posição** → scope errado = lixo
-  genuíno. **17/70 mãos** expostas (ver TECH_DEBTS). É aqui que o esforço deve ir.
+  genuíno. **✅ CORRIGIDO em pt92 (`#OFFSET-WITHIN-BUCKET-JAM`, `db16888`) — ver §14.5.**
 - **Reavaliar apagados/quarentenados:** os resultados da **3ª volta #400** (âncora R2.00,
   nunca entrou na BD — 413) e o **#225 job 9** (18:16, âncora SB small-raise, **apagado**
   por mim sob a leitura errada) **NÃO eram lixo** — eram âmbito equivalente. O #225 está a
@@ -1142,6 +1144,78 @@ volta** concluiu âmbito equivalente em **29,5 min**. Discrepância **por explic
 semântica do CI? variância do Monte Carlo? estado inicial diferente (1ª run mais/menos
 convergida)? Registado para investigação — não bloqueia o fecho do pt67 (navegação +
 semântica já validadas).
+
+### 14.5 ✅ FIX do índice — abridor em all-in (`#OFFSET-WITHIN-BUCKET-JAM`, pt92, `db16888`)
+
+Descoberto por **verificação visual do Rui** (o realce caía no **BTN** em vez do **CO**).
+
+- **Problema:** o `offset_within_bucket` assumia um layout **FIXO** no bucket do abridor —
+  `jam non-SB → 1` / `SB jam → 2`, **pressupondo que há SEMPRE um nó small-raise** antes do
+  ALLIN. Quando o abridor abre em **ALL-IN/jam** curto e o bucket **COLAPSA para 1 linha**
+  (Regra 1, eff≤9; ou o size **É** o all-in → array `[ALLIN]`), o jam está no índice **0**
+  (non-SB) / **1** (SB, depois do Complete), **não** 1/2. → o realce caía **sempre uma
+  posição À FRENTE** do abridor (ou era mascarado pelo *clamp* na última linha, na SB).
+- **Padrão:** erra **só** quando o abridor abre em **jam**; acerta sempre em min-raise deep.
+- **Fix:** o within passa a **DERIVAR o nº REAL de linhas** do bucket do abridor via
+  `count_lines_for_position` (a **MESMA** função/lógica de colapso da Regra 1 que já conta as
+  posições anteriores). `within = count_lines(abridor) - 1` (jam, = última linha) / `0`
+  (small non-SB) / `1` (SB small). **Os três sítios — template `shouldAddPreflopAllIn`,
+  `count_lines_for_position` e `offset_within_bucket` — passam a partilhar UMA contagem** →
+  não podem divergir. Variante **uniforme** (SB jam 14→13; cosmético — a SB é a última linha,
+  mesmo *landing* sob a LEI B; alinha com a árvore real). +4 testes de regressão; suite **1144
+  passed**.
+- **Método de verificação novo (pt92):** a **árvore exportada** (`settings.json` + `nodes/`
+  com `sequence`/`actions`) permite **reconstruir as linhas reais da Strategy Table**
+  (caminhar a linha "todos foldam" desde o nó 0) e confirmar **tree-a-tree** onde o offset
+  aterra — já **não depende só do olho**. Validado em **5 mãos**: as 2 que erravam
+  (`WN-…-13`, `GG-6114196293`, abridor **CO em jam**) caíam no BTN e passam a cair no **CO**.
+- **Mãos contaminadas:** scan de 110 `done` → **46** tinham abridor em all-in (**34** posição
+  errada + **12** SB-clamp); repostas via `#15` (`POST /hrc/reset-done`). As outras 64
+  (min-raise deep) estavam certas.
+- **Importância p/ o FT:** como o offset agora **deriva da contagem**, quando o FT (§16)
+  mudar a contagem (template + `count_lines` **juntos**) o offset **segue automaticamente**.
+
+---
+
+## 15. Fila HRC 100% MANUAL + re-processamento (pt92)
+
+A fila deixou de ter disparo automático em lote. **Estado LIVE:**
+
+- **"Disparar tudo" REMOVIDO** (botão + endpoint `POST /api/queue/hrc/trigger`). A **única**
+  via de libertar mãos ao adapter é a **selecção manual** → **"Enviar ao HRC"**
+  (`POST /api/queue/hrc/release`). Um disparo-geral acidental já não existe.
+- **`POST /api/queue/hrc/clear-released`** ("Limpar fila") — des-liberta tudo (pausa); o
+  adapter deixa de puxar até nova selecção. Não marca nada failed.
+- **`GET /hrc/gate`** passou a **contadores** (sem "aberta/fechada"); o painel mostra "📋 FILA
+  MANUAL".
+- **`select_andar1_rows` exclui set-aside** (`hrc_jobs.meta_json.set_aside='true'`) da
+  elegibilidade/lista — mãos postas de lado não são selecionáveis por engano.
+- **Separador "↻ Re-processar (offset corrigido)"** + **`POST /api/queue/hrc/reset-done`**
+  (aceita **só** a lista de `hand_ids` confirmados — **nunca** reset geral): apaga o
+  `hrc_job` `done` (→ re-elegível) + marca `hands.reprocess_reason`; a mão aparece num
+  separador próprio no `/hrc` com "selecionar todas", separada das normais. O marcador
+  limpa-se quando chega o novo `done` (`POST /results`). Usado em pt92 para repor as 46
+  mãos contaminadas pelo bug do offset (§14.5).
+
+## 16. Regras de FT (FUTURO — definidas/seladas, **NÃO em produção**)
+
+A implementar **só depois** de confirmadas as 46 re-processadas. Detalhe canónico em
+`project_ft_open_sizing_rules_pending.md`.
+
+- **Gatilho:** tag **`-ft`** → flag **`IS_FT`** (o **mesmo** sinal já cablado para escolher o
+  equity model). O `stage` FT/MTT (§3.3) **não** serve — não toca no sizing.
+- **FT-1 (limiar do open):** `IS_FT` → o open-all-in sobe de **25 para 35 BB efetivas**.
+  Faixas no open: `<9` só all-in · `9–35` **min-raise + all-in** (as duas) · `>35` só
+  min-raise. BvB → **35 geral** por agora. **3-bets não mexem.**
+- **FT-2 (fake all-in):** `IS_FT` + eff `≤9 BB` → **além** do all-in, junta um **raise PARA
+  85% do stack NOMINAL** (raise-to `0.85×nominal`, deixa ~15% atrás — jogada de ICM em FT
+  para poder foldar a um re-shove). Só no open. Arredondamento: **fichas → BB** (o mais
+  limpo). O HRC **não conhece** este size — a app calcula e o gerador injeta o BB já
+  calculado via `ctx.sizingBigBlinds` (o mesmo canal do size real da HH).
+- **⚠️ Acoplamento OBRIGATÓRIO (`#IMPLICIT-LINES`):** as duas regras mudam o **template**
+  (`shouldAddPreflopAllIn`) **E** o **`count_lines_for_position`** **EM CONJUNTO**. A FT-2
+  cria uma **linha nova** (o contador tem de a contar, senão o offset salta — §14.5). Exige
+  **smoke visual dedicado**.
 
 ---
 
