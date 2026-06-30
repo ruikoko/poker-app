@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.routers.hands import normalize_tag_key
-from app.services.derive_max_players import derive_max_players
+from app.services.derive_max_players import derive_max_players, hero_is_span_anchor
 
 logger = logging.getLogger("queue_export")
 
@@ -1753,11 +1753,17 @@ def build_queue_zip(
 
             # pt86c #HRC-ANCHOR-FALLS-TO-ROOT-NOT-HERO (Passo 1): sem raise
             # voluntário, tenta ancorar na 1ª DECISÃO do Hero (open do próprio
-            # Hero / complete da SB) em vez de cair na raiz. NÃO toca o caminho
-            # "real" (1º raiser) das mãos com raise. Limp de não-blind (#7) e
+            # Hero / complete da SB) em vez de cair na raiz. Limp de não-blind (#7) e
             # walk continuam fallback_root/skip (Passo 2 / nada a estudar).
+            # pt93 #HRC-ANCHOR-RAISE-AFTER-HERO-FOLD: a âncora do offset/2ª-run tem
+            # de seguir a MESMA regra do max_players — se o Hero FOLDOU first-in
+            # (antes de qualquer acção voluntária), a âncora é o HERO, MESMO que
+            # haja raise DEPOIS (derive_aggressor apanha o 1º raise de TODO o
+            # preflop → o raiser a jusante do fold do Hero → 2ª run no nó errado).
+            # `hero_is_span_anchor` é a fonte única partilhada com derive_max_players.
+            hero_first = hero_is_span_anchor(hh_text)
             noraise_anchor = None
-            if aggressor_source != "real" and _bb is not None:
+            if (aggressor_source != "real" or hero_first) and _bb is not None:
                 try:
                     noraise_anchor = derive_noraise_anchor(hh_text, _sb, _bb)
                 except Exception:

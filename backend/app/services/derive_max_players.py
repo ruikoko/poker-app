@@ -52,21 +52,30 @@ def _clamp(n: int) -> int:
     return min(max(n, 2), 6)
 
 
-def derive_max_players(hh_text: Optional[str]) -> int:
-    """Span âncora→BB em [2, 9]. Defensivo (parsing erro / degenerate) → 2."""
-    if not hh_text:
-        return 2
+def _span_anchor(hh_text: Optional[str]):
+    """(n, anchor_idx, anchor_kind) — FONTE ÚNICA da âncora do span preflop.
 
+    anchor_kind:
+      'hero_fold' = regra 1 (Hero foldou ANTES de qualquer acção voluntária);
+      'voluntary' = regra 2 (1ª acção voluntária — inclui o Hero a abrir);
+      None        = walk / sem ação voluntária / herói desconhecido / parsing falhou.
+
+    Partilhada por `derive_max_players` (span) e `hero_is_span_anchor` (gate do
+    offset/2ª-run em `build_queue_zip`) — anti-drift (#HRC-ANCHOR-RAISE-AFTER-HERO-FOLD:
+    o Hero folda first-in e o raise vem DEPOIS; ambas as decisões têm de ancorar no
+    Hero, não no raiser a jusante).
+    """
+    if not hh_text:
+        return 0, None, None
     # Import lazy: `queue_export` importa este módulo (ciclo a nível de módulo).
     from app.services.queue_export import (
         derive_seats_in_preflop_order,
         find_preflop_marker,
     )
-
     # Ordem preflop canónica: hrc_idx 0 = first-to-act (UTG), hrc_idx N−1 = BB.
     order = derive_seats_in_preflop_order(hh_text)
     if len(order) < 2:
-        return 2
+        return 0, None, None
     n = len(order)
     nick_to_idx = {e["nick"]: e["hrc_idx"] for e in order}
 
@@ -78,7 +87,7 @@ def derive_max_players(hh_text: Optional[str]) -> int:
     # Bloco preflop (cross-site, via marker canónico).
     start = find_preflop_marker(hh_text)
     if start is None:
-        return 2
+        return n, None, None
     ends = [
         e for e in (
             hh_text.find("*** FLOP ***", start),
@@ -88,26 +97,38 @@ def derive_max_players(hh_text: Optional[str]) -> int:
     end = min(ends) if ends else len(hh_text)
     preflop = hh_text[start:end]
 
-    # Âncora: percorre as ações por ordem. O 1º de:
-    #   (a) ação voluntária  → regra 2 (âncora = essa posição); OU
-    #   (b) fold do herói    → regra 1 (âncora = herói)
-    # determina a âncora.
-    anchor_idx: Optional[int] = None
+    # O 1º de: (a) acção voluntária → regra 2; (b) fold do Hero → regra 1.
     for m in _ACTION_RE.finditer(preflop):
         nick, kind = m.group(1).strip(), m.group(2)
         if nick not in nick_to_idx:
             continue
         if kind in _VOLUNTARY:
-            anchor_idx = nick_to_idx[nick]          # regra 2
-            break
+            return n, nick_to_idx[nick], "voluntary"
         if kind == "folds" and nick == hero:
-            anchor_idx = hero_idx                   # regra 1
-            break
+            return n, hero_idx, "hero_fold"
+    return n, None, None
 
-    if anchor_idx is None:
-        # Walk-to-BB / sem ação voluntária / herói desconhecido → SB-vs-BB (2)
-        # por convenção (HRC modela este spot degenerate como heads-up).
+
+def derive_max_players(hh_text: Optional[str]) -> int:
+    """Span âncora→BB em [2, 6]. Defensivo (parsing erro / degenerate) → 2.
+
+    Comportamento idêntico ao histórico; a âncora vem da fonte única `_span_anchor`.
+    """
+    n, anchor_idx, _kind = _span_anchor(hh_text)
+    if not n or anchor_idx is None:
+        # Walk-to-BB / sem ação voluntária / herói desconhecido / parsing →
+        # SB-vs-BB (2) por convenção (HRC modela este spot degenerate como heads-up).
         return 2
-
     # Span âncora→BB inclusive: BB = hrc_idx (n−1) → (n−1) − anchor_idx + 1 = n − anchor_idx.
     return _clamp(n - anchor_idx)
+
+
+def hero_is_span_anchor(hh_text: Optional[str]) -> bool:
+    """True SSE a âncora do span é o HERO porque ele FOLDOU first-in (regra 1) —
+    agiu (fold) ANTES de qualquer acção voluntária. NÃO inclui o Hero a abrir
+    (esse já é o agressor 'real' correcto, com sizing).
+
+    Usado por `build_queue_zip` para a âncora do offset/2ª-run respeitar a MESMA
+    regra que o `max_players` (#HRC-ANCHOR-RAISE-AFTER-HERO-FOLD).
+    """
+    return _span_anchor(hh_text)[2] == "hero_fold"
