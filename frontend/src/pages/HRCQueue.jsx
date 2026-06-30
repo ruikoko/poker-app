@@ -304,6 +304,7 @@ export default function HRCQueuePage() {
   const [rqBusy, setRqBusy] = useState({})       // hand_id -> 'busy'|'err'
   // pt85 (#HRC-VERIFY) — badge por linha (batch) + expand de detalhe (single)
   const [verify, setVerify] = useState(null)     // { total, summary, byId: {hand_id->entry} }
+  const [verifyBusy, setVerifyBusy] = useState(false)  // pt92 — verify em lote sob-demanda
   const [vOpen, setVOpen] = useState(null)        // hand_id da linha expandida (1 de cada vez)
   const [vDetail, setVDetail] = useState({})      // hand_id -> result single | 'busy' | 'err'
   // pt69 — seleção manual mão-a-mão → release(hand_ids). PERSISTE ao filtrar
@@ -382,6 +383,23 @@ export default function HRCQueuePage() {
   }
 
   // pt85 — abre/fecha o detalhe de verificação de uma Enviada; fetch single lazy.
+  // pt92 — verify EM LOTE sob-demanda (botão). Fora da abertura porque puxa os
+  // result_zip de todas as resolvidas. Recarrega o sumário + os badges por linha.
+  async function loadVerify() {
+    setVerifyBusy(true)
+    try {
+      const ver = await queue.verify()
+      setVerify(ver && {
+        total: ver.total, summary: ver.summary || {},
+        byId: Object.fromEntries((ver.hands || []).map(v => [v.hand_id, v])),
+      })
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setVerifyBusy(false)
+    }
+  }
+
   async function toggleVerify(handId) {
     if (vOpen === handId) { setVOpen(null); return }
     setVOpen(handId)
@@ -402,10 +420,13 @@ export default function HRCQueuePage() {
     setMarks({}); setStBusy({}); setSentMarks({}); setRqBusy({})
     setVOpen(null); setVDetail({})
     try {
-      const [out, pend, g, snt, ver] = await Promise.all([
+      // pt92 (#HRC-QUEUE-SLOW-OPEN): o verify EM LOTE (queue.verify) ficou FORA da
+      // abertura — puxava o result_zip de TODAS as resolvidas (~809 MB / ~14 s) a
+      // cada open, crescendo com o nº de mãos feitas. Agora é sob-demanda (botão
+      // "Verificar resolvidas" → loadVerify). A abertura passa a ~0,4 s.
+      const [out, pend, g, snt] = await Promise.all([
         hrc.eligible(), hrc.pendingTs(),
         queue.gate().catch(() => null), queue.sent().catch(() => null),
-        queue.verify().catch(() => null),
       ])
       setData(out)
       // Poda marcadas órfãs (mãos que saíram da elegibilidade — enviadas/resolvidas)
@@ -414,10 +435,7 @@ export default function HRCQueuePage() {
       setPending(pend)
       setGate(g)
       setSent(snt)
-      setVerify(ver && {
-        total: ver.total, summary: ver.summary || {},
-        byId: Object.fromEntries((ver.hands || []).map(v => [v.hand_id, v])),
-      })
+      setVerify(null)   // limpa o lote anterior; recarrega só a pedido
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -884,14 +902,24 @@ export default function HRCQueuePage() {
             <Chip color="#22c55e">resolvida {sent.sent.filter(s => curSentState(s) === 'resolvida').length}</Chip>
             <Chip color="#eab308">por resolver {sent.sent.filter(s => curSentState(s) === 'por_resolver').length}</Chip>
             <Chip color="#ef4444">cancelada {sent.sent.filter(s => curSentState(s) === 'cancelada').length}</Chip>
-            {verify && verify.total > 0 && (
+            <span style={{ color: 'var(--border)' }}>|</span>
+            {/* pt92 — verify em lote sob-demanda (fora da abertura: pesado) */}
+            {verify && verify.total > 0 ? (
               <>
-                <span style={{ color: 'var(--border)' }}>|</span>
                 <span style={{ fontSize: 11 }}>verificação HH↔HRC:</span>
                 <Chip color="#22c55e">✓ {verify.summary.ok || 0}</Chip>
                 <Chip color="#eab308">⚠ {verify.summary.warn || 0}</Chip>
                 <Chip color="#ef4444">✗ {verify.summary.fail || 0}</Chip>
+                <button onClick={loadVerify} disabled={verifyBusy}
+                  style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: verifyBusy ? 'wait' : 'pointer' }}>
+                  {verifyBusy ? 'a verificar…' : '↻'}
+                </button>
               </>
+            ) : (
+              <button onClick={loadVerify} disabled={verifyBusy}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 6, background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: verifyBusy ? 'wait' : 'pointer' }}>
+                {verifyBusy ? 'a verificar…' : 'Verificar resolvidas'}
+              </button>
             )}
           </div>
           {sent.sent.length === 0 ? (
