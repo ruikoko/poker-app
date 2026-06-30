@@ -600,6 +600,70 @@ def _record_tree_stats_and_maybe_abort(hwnd_wizard, build_seconds):
         % (gb1, gb2, why, read1.get("nodes"), build_seconds))
 
 
+# ── pt94 (#HRC-TREE-GIGANTE RELIGADO) — guarda dos 15 GB no ponto pré-Finish ──
+# O abort do pt90 (_record_tree_stats_and_maybe_abort) vivia atrás do gatilho
+# "Finish disabled→enabled" (Fase 2 do _wait_for_finish_ready), que FALHA SEMPRE
+# (Fase 1 expira → return antes da Fase 2) → o OCR nunca corria → mãos de 17 GB
+# passavam (GG-6104909587). Religa-se aqui: ponto FIXO e fiável (após setup_scripting,
+# ANTES do Finish = antes da 1ª run = antes da RAM), desacoplado do gatilho partido.
+_TREE_READ_TIMEOUT_S = 30.0   # teto p/ o painel computar+estabilizar antes de desistir
+_TREE_READ_POLL_S = 0.5
+_TREE_STABLE_TOL_GB = 0.05    # 2 leituras dentro disto = painel estável
+
+
+def _cancel_wizard(hwnd_wizard):
+    """Cancela o wizard 'Hand Setup' SEM Finish (a run não arranca). Tenta o botão
+    Cancel (class Button, texto 'cancel') via BM_CLICK; fallback WM_CLOSE à janela.
+    Best-effort — se falhar, o raise marca .failed e o restart/open_wizard da mão
+    seguinte recupera. ⚠️ WM_CLOSE pode disparar 'Discard?' (a validar no smoke)."""
+    try:
+        btn = _find_button_by_text(hwnd_wizard, lambda t: t == 'cancel')
+        if btn:
+            _pt30_user32.SendMessageW(btn, BM_CLICK, 0, 0)
+            print('   [cancel] wizard cancelado (botão Cancel, BM_CLICK)')
+            return
+        if hwnd_wizard:
+            _pt30_user32.SendMessageW(hwnd_wizard, 0x0010, 0, 0)   # WM_CLOSE
+            print('   [cancel] wizard fechado (WM_CLOSE — sem botão Cancel)')
+    except Exception as e:
+        print('   [WARN] _cancel_wizard: %s' % e)
+
+
+def _tree_guard_pre_finish(hwnd_wizard):
+    """pt94 (#HRC-TREE-GIGANTE RELIGADO): lê o tamanho da tree no painel ANTES do
+    Finish e cancela a mão se > TREE_GB_ABORT_LIMIT → a run NUNCA arranca, RAM nunca
+    comida. Poll OCR até o painel ESTABILIZAR (2 leituras OK iguais). FAIL-OPEN em
+    tudo: OCR falhado / nunca estabiliza / leituras discordam → NÃO aborta (segue p/
+    Finish), loga ocr_ok:false. Só levanta com confiança (≥2 leituras estáveis > 15)."""
+    deadline = time.time() + _TREE_READ_TIMEOUT_S
+    last_gb = None
+    stable_gb = None
+    while time.time() < deadline:
+        try:
+            r = _capture_tree_stats_safe(hwnd_wizard)
+        except Exception:
+            r = None
+        gb = r.get("gb") if (isinstance(r, dict) and r.get("ok")) else None
+        if gb is not None:
+            if last_gb is not None and abs(gb - last_gb) < _TREE_STABLE_TOL_GB:
+                stable_gb = gb
+                break
+            last_gb = gb
+        time.sleep(_TREE_READ_POLL_S)
+    if stable_gb is None:
+        print('   [WARN] [tree-guard] painel não estabilizou em %.0fs (ocr_ok:false) '
+              '— FAIL-OPEN, segue p/ Finish' % _TREE_READ_TIMEOUT_S)
+        return
+    if stable_gb > TREE_GB_ABORT_LIMIT:
+        print('   [tree-guard] tree %.1f GB > %.1f — CANCELAR pré-Finish '
+              '(run não arranca, RAM não comida)' % (stable_gb, TREE_GB_ABORT_LIMIT))
+        _cancel_wizard(hwnd_wizard)
+        raise RuntimeError('tree gigante: %.1f GB > %.1f GB — cancelada pré-Finish'
+                           % (stable_gb, TREE_GB_ABORT_LIMIT))
+    print('   [tree-guard] tree %.1f GB <= %.1f — OK, segue p/ Finish'
+          % (stable_gb, TREE_GB_ABORT_LIMIT))
+
+
 def _wait_for_finish_ready(hwnd_wizard):
     """pt30 (#WIZARD-FINISH-DISABLED-DURING-TREE-CALC): aguarda a transicao
     enabled->disabled->enabled do botao Finish, para confirmar que o HRC
@@ -3054,6 +3118,10 @@ def setup_hand(hand_name, hand_path):
     # slow-click, senao o click cai num botao disabled (causa do smoke pt29-v3
     # falhar). Diagnostico SWT pt30 confirmou que o Win32 ve o Finish.
     _hwnd_wizard = getattr(win, '_hWnd', None) or _resolve_wizard_hwnd()
+    # pt94 (#HRC-TREE-GIGANTE RELIGADO): ler o tamanho da tree no painel ANTES do
+    # Finish (ponto-de-não-retorno) e CANCELAR se > 15 GB → a run nunca arranca,
+    # RAM nunca comida. Fail-open (OCR mau → segue normal). Pode raise → .failed.
+    _tree_guard_pre_finish(_hwnd_wizard)
     _wait_for_finish_ready(_hwnd_wizard)
 
     # pt29 (#WIZARD-FINISH-NO-STATE-CHECK): forcar foco no wizard antes do
