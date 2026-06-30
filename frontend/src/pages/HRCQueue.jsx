@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { API_ROOT, hands as handsApi, hrc, queue } from '../api/client'
+import { dateTimeLisbon } from '../utils/datetime'
 
 // Cores por cenário do aggressor (espelha build_queue_zip / classify_aggressor_source).
 const SRC_COLOR = {
@@ -948,7 +949,7 @@ export default function HRCQueuePage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
-                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'estado', 'acções'].map(h => (
+                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'concluída', 'estado', 'acções'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
                     ))}
                   </tr>
@@ -972,6 +973,10 @@ export default function HRCQueuePage() {
                         <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtTs(s.played_at)}</td>
                         <td style={{ padding: '7px 10px' }}>{s.site}</td>
                         <td style={{ padding: '7px 10px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.tournament_name || '—'}</td>
+                        <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}
+                            title={s.completed_at ? 'Momento em que o watcher devolveu o resultado (hora de Lisboa)' : ''}>
+                          {s.completed_at ? dateTimeLisbon(s.completed_at, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+                        </td>
                         <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
                           <Chip color={meta.c}>{meta.label}</Chip>
                           {st === 'por_resolver' && fmtAge(s.released_at) && (
