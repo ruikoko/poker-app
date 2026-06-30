@@ -1242,6 +1242,69 @@ def force_redeanon_table_ss(payload: dict = Body(...),
     return {"redeanon": done, "skipped": skipped}
 
 
+@router.post("/set-anon-map")
+def set_anon_map_override(payload: dict = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """pt95: override MANUAL do anon_map (hash→nick) de UMA mão GG, quando a desanon
+    automática COLOU seats (ex. GG-6113994321: o stack-match deu a um vilão o nome do
+    Hero). Ancora-se nas BLINDS (decisão do Rui via gold+HH), não no stack. Re-deriva
+    o apa HASH-keyed do raw, aplica o mapa DADO, escreve player_names + apa enriquecido,
+    re-dispara villain_rules. VALIDA nicks DISTINTOS (recusa seats colados).
+    Body: {hand_id, anon_map:{hash:nick, "Hero":nick}}."""
+    import json as _json
+    from app.routers.screenshot import _enrich_all_players_actions
+    hand_id = payload.get("hand_id")
+    anon_map = payload.get("anon_map") or {}
+    if not hand_id or not isinstance(anon_map, dict) or not anon_map:
+        raise HTTPException(400, "hand_id + anon_map (dict não-vazio) obrigatórios")
+    vals = list(anon_map.values())
+    if len(set(vals)) != len(vals):
+        raise HTTPException(400, "anon_map com nicks DUPLICADOS — seats colados, recusado")
+    hrows = query("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
+    if not hrows:
+        raise HTTPException(404, "mão não encontrada")
+    hand_db_id = hrows[0]["id"]
+    if not _reparse_apa_hash_keyed(hand_db_id):
+        raise HTTPException(422, "re-parse do raw falhou (sem HH?)")
+    rows = query("SELECT all_players_actions apa, player_names pn FROM hands WHERE id = %s",
+                 (hand_db_id,))
+    apa = rows[0]["apa"]; pn = rows[0]["pn"]
+    if isinstance(apa, str):
+        apa = _json.loads(apa)
+    if isinstance(pn, str):
+        pn = _json.loads(pn)
+    hashes = [k for k in apa if k != "_meta"]
+    missing = [h for h in hashes if h not in anon_map]
+    vision_data = {"players_list": (pn or {}).get("players_list") or []}
+    enriched = _enrich_all_players_actions(apa, anon_map, vision_data)
+    # anti-fusão pós-enrich: nº de jogadores tem de manter-se (nicks distintos → 0 colapso)
+    enriched_players = [k for k in enriched if k != "_meta"]
+    if len(enriched_players) != len(hashes):
+        raise HTTPException(500, "fusão de seats pós-enrich (%d→%d) — abortado"
+                            % (len(hashes), len(enriched_players)))
+    new_pn = {**(pn or {}), "anon_map": anon_map, "match_method": "table_ss",
+              "source": "manual_blinds_override", "deanon_partial": bool(missing)}
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE hands SET all_players_actions = %s, player_names = %s "
+                        "WHERE id = %s",
+                        (_json.dumps(enriched), _json.dumps(new_pn), hand_db_id))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        from app.services.villain_rules import apply_villain_rules
+        apply_villain_rules(hand_db_id)
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error("apply_villain_rules falhou hand %s: %s", hand_db_id, e)
+    logger.info("table-ss set-anon-map: %s mapped=%d distinct=%d partial=%s",
+                hand_id, len(anon_map), len(set(vals)), bool(missing))
+    return {"status": "set", "hand_id": hand_id, "mapped": len(anon_map),
+            "hashes": len(hashes), "missing": missing,
+            "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing)}
+
+
 # pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).
 _REPROCESS_ELIGIBLE_SQL = (
     "FROM table_ss_processing_log "

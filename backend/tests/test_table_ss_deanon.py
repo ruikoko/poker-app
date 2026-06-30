@@ -239,3 +239,22 @@ def test_rekey_apa_round_trip_restaura_hashes():
     # 3) _meta preservado + os dados por banco mantêm-se
     assert back["_meta"] == {"bb": 100, "sb": 50}
     assert back["5e26839e"]["position"] == "BTN"
+
+
+# ── pt95 — override por blinds: garantia anti-fusão de seats ──────────────────
+def test_enrich_mapa_distinto_nao_funde_seats():
+    """O override por blinds (set-anon-map) tem de NÃO colapsar seats: um anon_map
+    com nicks DISTINTOS enriquece sem fundir (3 hashes → 3 nomes distintos). Um mapa
+    com nick repetido (o bug da 4321: vilão = nome do Hero) FUNDE 2 seats em 1 — é
+    isso que o endpoint recusa (dedup + contagem pós-enrich)."""
+    from app.routers.screenshot import _enrich_all_players_actions
+    apa = {"_meta": {"bb": 4000},
+           "Hero": {"position": "MP"}, "5e26839e": {"position": "UTG"},
+           "d6e6f5c9": {"position": "SB"}}
+    vision = {"players_list": []}
+    good = {"Hero": "Lauro Dermio", "5e26839e": "Karluz", "d6e6f5c9": "iLuckYou3000"}
+    e = _enrich_all_players_actions(apa, good, vision)
+    assert sorted(k for k in e if k != "_meta") == ["Karluz", "Lauro Dermio", "iLuckYou3000"]
+    bad = {"Hero": "Lauro Dermio", "5e26839e": "Lauro Dermio", "d6e6f5c9": "iLuckYou3000"}
+    eb = _enrich_all_players_actions(apa, bad, vision)
+    assert len([k for k in eb if k != "_meta"]) == 2  # colapsou → o endpoint barra isto
