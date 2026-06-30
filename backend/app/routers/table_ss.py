@@ -25,7 +25,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile
 
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
@@ -1155,6 +1155,57 @@ def trigger_reconcile_table_ss(current_user=Depends(require_auth)):
     (consultas + updates, sem Vision). Usado p.ex. após backfill de nomes para
     re-ligar as SS já importadas (#FIX-B3 + pt54). Devolve o tally."""
     return reconcile_table_ss(hand_ids=None)
+
+
+@router.post("/redeanon")
+def force_redeanon_table_ss(payload: dict = Body(...),
+                            current_user=Depends(require_auth_or_api_key)):
+    """pt93 (#HRC-REIMPORT-REDEANON-CASADAS, caso pontual): força a re-corrida da
+    desanon por table-SS para mãos `hand_ids` ESPECÍFICAS cuja SS já está casada
+    (success) mas o `anon_map` ficou VAZIO — um re-import de HH esvaziou-o sem
+    re-disparar a desanon (o `reconcile` só re-corre quando o MATCH muda, e este
+    não mudou). MESMO matcher (não muda nada nele) — só re-corre sobre os seats
+    guardados. Caso real: GG-6113994321 (PKO com bounty achatado no solve).
+    Body: {hand_ids:[...]}. Devolve {redeanon, skipped}."""
+    hand_ids = payload.get("hand_ids") or []
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    if len(hand_ids) > 200:
+        raise HTTPException(400, "máximo 200 mãos por chamada")
+    from app.services.table_ss_deanon import deanonymize_hand_from_table_ss
+    done, skipped = [], []
+    for hid in hand_ids:
+        hrows = query("SELECT id FROM hands WHERE hand_id = %s", (hid,))
+        if not hrows:
+            skipped.append({"hand_id": hid, "reason": "mão não encontrada"})
+            continue
+        srows = query(
+            "SELECT vision_json FROM table_ss_processing_log "
+            "WHERE matched_hand_id = %s AND result = 'success' "
+            "AND vision_json IS NOT NULL ORDER BY id DESC LIMIT 1",
+            (hid,),
+        )
+        if not srows:
+            skipped.append({"hand_id": hid, "reason": "sem table-SS casada (success)"})
+            continue
+        vj = srows[0]["vision_json"]
+        if isinstance(vj, str):
+            import json as _json
+            try:
+                vj = _json.loads(vj)
+            except (ValueError, TypeError):
+                vj = {}
+        seats = (vj or {}).get("seats") or []
+        if not seats:
+            skipped.append({"hand_id": hid, "reason": "table-SS sem seats"})
+            continue
+        res = deanonymize_hand_from_table_ss(
+            hrows[0]["id"], seats, (vj or {}).get("hero_nick"))
+        done.append({"hand_id": hid, "status": res.get("status"),
+                     "mapped": res.get("mapped"),
+                     "deanon_partial": res.get("deanon_partial")})
+    logger.info("table-ss redeanon: done=%d skipped=%d", len(done), len(skipped))
+    return {"redeanon": done, "skipped": skipped}
 
 
 # pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).
