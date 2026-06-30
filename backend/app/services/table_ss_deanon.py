@@ -178,6 +178,21 @@ def deanonymize_hand_from_table_ss(
             apa_raw = json.loads(apa_raw)
         except (ValueError, TypeError):
             apa_raw = {}
+    # pt95 (#REDEANON-NOT-IDEMPOTENT): se a mão já foi desanonimizada, o apa está
+    # name-keyed (o `_enrich_all_players_actions` abaixo renomeia hash→name).
+    # Re-correr SEM re-keyar faria o `build_anon_map_from_seats` usar os NOMES como
+    # chave → mapa name→name (corrompe — foi o que partiu a GG-6113994321 ao
+    # re-correr o /redeanon ~20×). Re-keyar a hashes ANTES, via o anon_map
+    # existente — exactamente o que o `reconcile_tournament_deanon` faz (l.411).
+    _prev_pn = h.get("player_names") or {}
+    if isinstance(_prev_pn, str):
+        try:
+            _prev_pn = json.loads(_prev_pn)
+        except (ValueError, TypeError):
+            _prev_pn = {}
+    _prev_map = _prev_pn.get("anon_map") or {}
+    if _prev_map:
+        apa_raw = _rekey_apa_to_hashes(apa_raw, _prev_map)
     # apa placeholder-only (só _meta) → nada a mapear.
     if not [k for k in apa_raw if k != "_meta"]:
         return {"status": "no_map", "hand_db_id": hand_db_id, "reason": "apa_meta_only"}

@@ -1157,6 +1157,37 @@ def trigger_reconcile_table_ss(current_user=Depends(require_auth)):
     return reconcile_table_ss(hand_ids=None)
 
 
+def _reparse_apa_hash_keyed(hand_db_id: int) -> bool:
+    """pt95 (#REDEANON-NOT-IDEMPOTENT, restauro): re-deriva o `all_players_actions`
+    HASH-keyed do raw HH (via parser GG) e remove o `anon_map`. Restaura mãos cujo
+    apa ficou name-keyed (e o anon_map name→name) por re-corridas do /redeanon — a
+    ÚNICA fonte de verdade dos hashes é o raw HH. Devolve True se restaurou."""
+    import json as _json
+    from app.parsers.gg_hands import parse_hands
+    rows = query("SELECT raw FROM hands WHERE id = %s", (hand_db_id,))
+    if not rows or not (rows[0]["raw"] or "").strip():
+        return False
+    parsed, _errs = parse_hands(rows[0]["raw"].encode("utf-8"), "reparse.txt")
+    if not parsed:
+        return False
+    fresh_apa = parsed[0].get("all_players_actions") or {}
+    if not [k for k in fresh_apa if k != "_meta"]:
+        return False
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE hands SET all_players_actions = %s, "
+                "player_names = (COALESCE(player_names, '{}'::jsonb) - 'anon_map') "
+                "WHERE id = %s",
+                (_json.dumps(fresh_apa), hand_db_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return True
+
+
 @router.post("/redeanon")
 def force_redeanon_table_ss(payload: dict = Body(...),
                             current_user=Depends(require_auth_or_api_key)):
@@ -1168,6 +1199,7 @@ def force_redeanon_table_ss(payload: dict = Body(...),
     guardados. Caso real: GG-6113994321 (PKO com bounty achatado no solve).
     Body: {hand_ids:[...]}. Devolve {redeanon, skipped}."""
     hand_ids = payload.get("hand_ids") or []
+    reparse = bool(payload.get("reparse"))   # pt95: restaura apa hash-keyed do raw 1º
     if not isinstance(hand_ids, list) or not hand_ids:
         raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
     if len(hand_ids) > 200:
@@ -1199,6 +1231,8 @@ def force_redeanon_table_ss(payload: dict = Body(...),
         if not seats:
             skipped.append({"hand_id": hid, "reason": "table-SS sem seats"})
             continue
+        if reparse:
+            _reparse_apa_hash_keyed(hrows[0]["id"])   # pt95: apa hash-keyed do raw 1º
         res = deanonymize_hand_from_table_ss(
             hrows[0]["id"], seats, (vj or {}).get("hero_nick"))
         done.append({"hand_id": hid, "status": res.get("status"),

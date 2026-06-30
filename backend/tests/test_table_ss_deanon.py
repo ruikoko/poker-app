@@ -213,3 +213,29 @@ def test_existing_match_method_variants():
     assert _existing_match_method(None) is None
     assert _existing_match_method({}) is None
     assert _existing_match_method("not json") is None
+
+
+# ── pt95 (#REDEANON-NOT-IDEMPOTENT) — round-trip do re-key ────────────────────
+def test_rekey_apa_round_trip_restaura_hashes():
+    """O fix de idempotência: o `_enrich_all_players_actions` renomeia o apa
+    hash→name; `_rekey_apa_to_hashes` (via o anon_map) tem de RESTAURAR as chaves
+    hash. Sem isto, re-correr a desanon usaria os NOMES como chave → mapa
+    name→name (o que partiu a GG-6113994321). Testa a invariante do fix."""
+    from app.routers.screenshot import _enrich_all_players_actions
+    apa_hash = {
+        "_meta": {"bb": 100, "sb": 50},
+        "5e26839e": {"position": "BTN", "vpip": True},
+        "b6b2d9ab": {"position": "CO", "vpip": False},
+    }
+    anon_map = {"5e26839e": "Karluz", "b6b2d9ab": "Galego"}
+    vision = {"players_list": [{"name": "Karluz", "bounty_pct": 5},
+                               {"name": "Galego", "bounty_pct": 3}]}
+    # 1) enrich renomeia hash→name (a causa da corrupção)
+    name_apa = _enrich_all_players_actions(apa_hash, anon_map, vision)
+    assert set(k for k in name_apa if k != "_meta") == {"Karluz", "Galego"}
+    # 2) o re-key restaura as chaves hash (o fix de idempotência)
+    back = _rekey_apa_to_hashes(name_apa, anon_map)
+    assert set(k for k in back if k != "_meta") == {"5e26839e", "b6b2d9ab"}
+    # 3) _meta preservado + os dados por banco mantêm-se
+    assert back["_meta"] == {"bb": 100, "sb": 50}
+    assert back["5e26839e"]["position"] == "BTN"
