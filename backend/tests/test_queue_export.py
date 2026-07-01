@@ -4033,3 +4033,44 @@ BBplayer: checks
     assert entry["aggressor_source"] == "fallback_root"
     assert entry["target_node_offset"] == 0
     assert entry["aggressor_real_action"]["source"] == "fallback_root"
+
+
+# ── pt95 (#TABLE-SS-BOUNTY-UNDERREAD) — guarda dura coroa >= base/2 ──────────
+def test_build_queue_zip_skips_bounty_below_half_base():
+    """A coroa (bounty_value_usd) é o KO instantâneo = METADE do bounty → nunca <
+    base/2. Um valor abaixo (a Vision do table-SS leu a chama VPIP % em vez da coroa $)
+    → skip 'bounty_below_half_base', não solve com prémios errados."""
+    hand = {
+        "id": 1, "hand_id": "GG-LOWB", "site": "GGPoker",
+        "tournament_number": "111", "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP,
+                         "players_list": [{"name": "X", "bounty_value_usd": 27.0}]},
+        "tournament_format": "PKO",
+    }
+    blob = build_queue_zip(
+        [hand], {("GGPoker", "111"): _fake_payout_blob()},
+        bounty_by_key={("GGPoker", "111"): {"starting_bounty": 100.0}},
+    )
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    assert manifest["total_in_zip"] == 0
+    assert manifest["skipped"][0]["reason"] == "bounty_below_half_base"
+
+
+def test_build_queue_zip_keeps_bounty_at_half_base():
+    """Coroa == base/2 (fresh) passa a guarda (não é skipada por bounty)."""
+    hand = {
+        "id": 1, "hand_id": "GG-OKB", "site": "GGPoker",
+        "tournament_number": "111", "raw": SAMPLE_GG_RAW_FULL,
+        "player_names": {"anon_map": SAMPLE_GG_ANON_MAP,
+                         "players_list": [{"name": "X", "bounty_value_usd": 50.0}]},
+        "tournament_format": "PKO",
+    }
+    blob = build_queue_zip(
+        [hand], {("GGPoker", "111"): _fake_payout_blob()},
+        bounty_by_key={("GGPoker", "111"): {"starting_bounty": 100.0}},
+    )
+    zf = _zipfile.ZipFile(_io.BytesIO(blob))
+    manifest = _json.loads(zf.read("manifest.json"))
+    reasons = [s.get("reason") for s in manifest.get("skipped", [])]
+    assert "bounty_below_half_base" not in reasons

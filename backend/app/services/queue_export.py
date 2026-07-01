@@ -1647,6 +1647,29 @@ def build_queue_zip(
                 skipped.append({"hand_id": hand_id, "reason": "pko_without_ts_bounty"})
                 continue
 
+            # pt95 (#TABLE-SS-BOUNTY-UNDERREAD): guarda dura ≥ base÷2. A coroa
+            # (bounty_value_usd) é o KO instantâneo = METADE do bounty → NUNCA < base÷2.
+            # Se a Vision do table-SS leu a chama (VPIP %) em vez da coroa ($), o valor
+            # cai abaixo do piso → bounty mal lido → SKIP (não solve prémios errados).
+            # GG PKO com base do TS only. Regenera-se re-lendo a SS original (não a
+            # comprimida). Não apanha os casos raros em que o VPIP calha ≥ base÷2.
+            if site == "GGPoker" and fmt in TS_GATED_FORMATS and starting_bounty:
+                _pn = h.get("player_names") or {}
+                if isinstance(_pn, str):
+                    try:
+                        _pn = json.loads(_pn)
+                    except (ValueError, TypeError):
+                        _pn = {}
+                _floor = float(starting_bounty) / 2.0
+                _below = [e.get("name") for e in (_pn.get("players_list") or [])
+                          if e.get("bounty_value_usd") is not None
+                          and float(e["bounty_value_usd"]) < _floor]
+                if _below:
+                    skipped.append({"hand_id": hand_id,
+                                    "reason": "bounty_below_half_base",
+                                    "detail": {"floor": _floor, "below": _below[:8]}})
+                    continue
+
             hh_text = convert_gg_hh_to_pokerstars_compatible(h, bounty_ctx=bctx)
             if not hh_text:
                 skipped.append({"hand_id": hand_id, "reason": "no_raw_hh"})

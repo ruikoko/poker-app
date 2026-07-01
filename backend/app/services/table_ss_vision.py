@@ -63,7 +63,7 @@ _TABLE_PROMPT = (
     '  "hero_nick": "<hero screen name>" | null,\n'
     '  "seats": [ {"nick": "<exact screen name under the avatar>", '
     '"stack_bb": <float stack in BIG BLINDS> | "ALLIN" | null, '
-    '"bounty_usd": <float $ value in the gold badge above the avatar> | null, '
+    '"bounty_usd": <float DOLLAR $ in the GOLD CROWN badge above the avatar> | null, '
     '"is_hero": <true for the bottom-center hero seat, else false>} ]\n'
     "}\n\n"
     "RULES:\n"
@@ -74,8 +74,17 @@ _TABLE_PROMPT = (
     "seat's avatar (preserve case and punctuation). stack_bb = that seat's stack "
     "in BIG BLINDS (convert from chips by dividing by big_blind if shown in "
     "chips; use the literal 'ALLIN' string if the seat shows All-In; null if "
-    "unreadable). bounty_usd = the $ value in the GOLD badge above the avatar "
-    "(the KO/PKO bounty), null if none. is_hero = true only for the bottom-center "
+    "unreadable).\n"
+    "  * bounty_usd = the DOLLAR amount ($) in the GOLD/YELLOW CROWN badge above the "
+    "avatar (the KO/PKO bounty). A MONEY value: $50, $75, $215. In a PKO it is NEVER "
+    "tiny — at least about $50 (half the bounty buy-in), often much more. null if no "
+    "crown.\n"
+    "  * There is ALSO an ORANGE/RED FLAME badge near the avatar showing a PERCENT (%) "
+    "— the player's VPIP statistic (e.g. 16%, 27%, 43%). IGNORE the flame — it is NOT "
+    "the bounty. NEVER put the flame percent into bounty_usd. A small number like 16, "
+    "20, 27, 43 is the FLAME percent, NOT the crown bounty; only the gold crown DOLLAR "
+    "($) goes in bounty_usd.\n"
+    "  is_hero = true only for the bottom-center "
     "hero seat. Do NOT include empty seats. Read each nick carefully — they feed "
     "an exact name match.\n"
     "- hero_position is the HERO seat relative to the dealer BUTTON (the 'D' "
