@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { hands as handsApi, screenshots } from '../api/client'
+import { hands as handsApi, screenshots, captureTriage } from '../api/client'
 import TagEditor from '../components/TagEditor'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
@@ -33,6 +33,7 @@ export default function HandDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [tssZoom, setTssZoom] = useState(false)
 
   const refreshHand = () => {
     handsApi.get(id).then(h => setHand(h)).catch(e => setError(e.message))
@@ -134,6 +135,46 @@ export default function HandDetailPage() {
 
       {/* ── MESA + ACÇÕES + SHOWDOWN (Tech Debt #8 — renderer canónico) ── */}
       <HandHistoryViewer hand={hand} />
+
+      {/* ── CAPTURA DA MESA (table-SS) — só GG; imagem inline p/ confirmar a
+             desanon sem sair da fila "Mãos suspeitas". Winamax/PS/WPN: não aparece. */}
+      {hand.site === 'GGPoker' && (
+        <div style={{ background: '#0f1117', borderRadius: 8, padding: 16, marginTop: 14 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 10 }}>📷 CAPTURA DA MESA (TABLE-SS)</div>
+          {hand.context_table_ss_id ? (
+            <>
+              <img
+                src={captureTriage.imageUrl(hand.context_table_ss_id)}
+                alt="Captura table-SS"
+                style={{ width: '100%', maxWidth: 760, borderRadius: 6, border: '1px solid #2a2d3a', display: 'block', cursor: 'zoom-in' }}
+                onClick={() => setTssZoom(true)}
+              />
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>captura #{hand.context_table_ss_id} · clica para ampliar</div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: '#eab308' }}>Sem captura table-SS ligada a esta mão.</div>
+          )}
+        </div>
+      )}
+
+      {/* Overlay fullscreen da captura table-SS (mesmo padrão do placeholder) */}
+      {tssZoom && hand.context_table_ss_id && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, cursor: 'pointer' }}
+          onClick={() => setTssZoom(false)}
+        >
+          <img
+            src={captureTriage.imageUrl(hand.context_table_ss_id)}
+            alt="Captura table-SS"
+            style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }}
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setTssZoom(false)}
+            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}
+          >✕</button>
+        </div>
+      )}
     </div>
   )
 }
