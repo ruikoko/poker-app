@@ -45,7 +45,11 @@ logger = logging.getLogger("table_ss_deanon")
 
 MATCH_METHOD = "table_ss"
 # match_methods que NÃO devemos sobrescrever (match real já existente).
-_REAL_MATCH_METHODS = frozenset({"anchors_stack_elimination_v2"})
+# #IT-MATCHER-GOLD-MANDA: 'position_v3' é o deanon da GOLD (replayer, por posição
+# — screenshot.py:886), o método PREMIUM. Estava fora deste conjunto → ligar um IT
+# sobrescrevia os nomes da Gold. Agora protegido: o table-SS nunca escreve por cima
+# da Gold (Gold manda). 'anchors_stack_elimination_v2' = fallback stack do replayer.
+_REAL_MATCH_METHODS = frozenset({"anchors_stack_elimination_v2", "position_v3"})
 
 
 def _seats_to_vision_data(seats: list[dict], hero_nick: Optional[str]) -> dict:

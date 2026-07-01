@@ -139,6 +139,57 @@ def _site_from_filename(filename: Optional[str]) -> Optional[str]:
     `parse_table_ss_filename`. None → fallback Vision."""
     return parse_table_ss_filename(filename)["site"]
 
+
+# #IT-MATCHER-CASCADE — o NOME do ficheiro do IT carrega o HAND-ID da mão (o grupo
+# `_<dígitos>-<YYYYMMDDHHMMSS>-<idx>`), a MESA e as BLINDS. O hand-id é a âncora
+# MAIS FIÁVEL (casa 1:1). Nenhum destes campos vem da Vision — vêm do nome.
+_IT_HAND_NUM_RE = re.compile(r"_(\d+)-\d{14}-\d+(?:\.[a-z0-9]+)?$", re.I)
+_IT_FN_TABLE_RE = re.compile(r"- Table (\d+)")
+_IT_FN_BLINDS_RE = re.compile(r"Blinds ([\d,]+) _ ([\d,]+)")
+_HH_TABLE_RE = re.compile(r"Table '(\d+)'")
+
+
+def _parse_it_hand_fields(filename: Optional[str]) -> dict:
+    """Extrai do NOME do ficheiro IT (não da Vision): hand_num (str; o hand-id da
+    GG — pode vir TRUNCADO quando o título é longo, ex. Speed Racer), table (int),
+    sb/bb (int). Campos None quando ausentes."""
+    out = {"hand_num": None, "table": None, "sb": None, "bb": None}
+    if not filename:
+        return out
+    m = _IT_HAND_NUM_RE.search(filename)
+    if m:
+        out["hand_num"] = m.group(1)
+    mt = _IT_FN_TABLE_RE.search(filename)
+    if mt:
+        out["table"] = int(mt.group(1))
+    mb = _IT_FN_BLINDS_RE.search(filename)
+    if mb:
+        out["sb"] = int(mb.group(1).replace(",", ""))
+        out["bb"] = int(mb.group(2).replace(",", ""))
+    return out
+
+
+def _hand_by_exact_id(hand_id: str) -> Optional[dict]:
+    """A mão GG com este hand_id EXATO (guard rails do resolver: 2026+, sem
+    mtt_archive). None se não existe. É o Tier 1 do matcher IT."""
+    rows = query(
+        """SELECT id, hand_id, tournament_number, tournament_name, site, played_at, raw
+             FROM hands
+            WHERE hand_id = %s AND played_at >= '2026-01-01'
+              AND study_state != 'mtt_archive'
+            LIMIT 1""",
+        (hand_id,),
+    )
+    return dict(rows[0]) if rows else None
+
+
+def _hh_table_number(raw: Optional[str]) -> Optional[int]:
+    """Nº de mesa da HH GG (linha `Table '<N>'`). None se ausente."""
+    if not raw:
+        return None
+    m = _HH_TABLE_RE.search(raw)
+    return int(m.group(1)) if m else None
+
 # pt39 — o buy_in da SS de mesa vem como string com moeda ("€50", "$108"),
 # ao contrário do lobby (float). Parse para (total_float, currency) p/ alimentar
 # o discriminador buy_in do TIER 0 do resolver.
@@ -230,13 +281,54 @@ def ensure_table_ss_processing_log_schema():
 
 # ── Link da mão (hands.context_table_ss_id) ──────────────────────────────────
 
+def _principal_rank(reason: Optional[str]) -> int:
+    """Força do match para escolher a captura PRINCIPAL numa colisão. Tier 1
+    (hand-id do nome) é a âncora mais forte; tempo/nome vêm a seguir."""
+    if not reason:
+        return 1
+    if reason == "filename_hand_id":
+        return 3
+    if (reason.startswith("physical") or reason.startswith("single_tn")
+            or reason.startswith("disambiguated") or reason == "filename_tn"):
+        return 2
+    return 1
+
+
+def _new_capture_wins_principal(cur, new_ss: int, cur_ss: int) -> bool:
+    """Colisão (#IT-MATCHER-COLISOES): nova captura (new_ss) vs. principal actual
+    (cur_ss) na MESMA mão. Vence o match mais forte (hand-id > tempo); empate →
+    captured_at mais cedo; empate → ss_id menor. Determinístico → o resultado é o
+    mesmo por qualquer ordem de processamento."""
+    cur.execute(
+        "SELECT id, reason_detail, captured_at FROM table_ss_processing_log "
+        "WHERE id IN (%s, %s)", (new_ss, cur_ss),
+    )
+    rows = {r["id"]: r for r in cur.fetchall()}
+    a, b = rows.get(new_ss), rows.get(cur_ss)
+    if not b:
+        return True          # principal actual desapareceu → nova assume
+    if not a:
+        return False
+    ra, rb = _principal_rank(a["reason_detail"]), _principal_rank(b["reason_detail"])
+    if ra != rb:
+        return ra > rb
+    ca, cb = a["captured_at"], b["captured_at"]
+    if ca and cb and ca != cb:
+        return ca < cb
+    return new_ss < cur_ss
+
+
 def _apply_hand_link(cur, ss_id: int, matched_hand_db_id: Optional[int]) -> None:
     """Reconcilia `hands.context_table_ss_id` para esta SS (id=ss_id), DENTRO da
-    transacção do `cur`. Invariante: depois disto, APENAS a mão casada (ou
-    nenhuma) aponta para a SS — desliga qualquer mão obsoleta que ainda aponte
-    para ela e liga a nova. Idempotente: re-correr com o mesmo match não muda
-    nada. É a primitiva única de (des)ligação usada pelo upload e pelo reconcile
-    (#FIX-B3 pt50)."""
+    transacção do `cur`. Desliga mãos OBSOLETAS que ainda apontem para esta
+    captura mas já não são o match. Idempotente: re-correr com o mesmo match não
+    muda nada. Primitiva única usada pelo upload e pelo reconcile (#FIX-B3 pt50).
+
+    #IT-MATCHER-COLISOES: VÁRIAS capturas podem casar a MESMA mão (2 prints da
+    mesma mão = duplicados legítimos). A coluna guarda a captura PRINCIPAL (1 por
+    mão); as restantes ficam SECUNDÁRIAS (têm `matched_hand_id` no log, mas não
+    possuem o context). A escolha da principal é DETERMINÍSTICA (ver
+    `_new_capture_wins_principal`) → ordem-independente."""
     if matched_hand_db_id is None:
         # Sem match → desliga qualquer mão que ainda aponte para esta SS.
         cur.execute(
@@ -251,11 +343,19 @@ def _apply_hand_link(cur, ss_id: int, matched_hand_db_id: Optional[int]) -> None
         "WHERE context_table_ss_id = %s AND id <> %s",
         (ss_id, matched_hand_db_id),
     )
-    # …e liga a mão casada.
+    # …e assume a principal SÓ se vencer a que lá está (ou se estiver livre).
     cur.execute(
-        "UPDATE hands SET context_table_ss_id = %s WHERE id = %s",
-        (ss_id, matched_hand_db_id),
+        "SELECT context_table_ss_id FROM hands WHERE id = %s",
+        (matched_hand_db_id,),
     )
+    row = cur.fetchone()
+    current = row.get("context_table_ss_id") if row else None
+    if (current is None or current == ss_id
+            or _new_capture_wins_principal(cur, ss_id, current)):
+        cur.execute(
+            "UPDATE hands SET context_table_ss_id = %s WHERE id = %s",
+            (ss_id, matched_hand_db_id),
+        )
 
 
 # ── UPSERT (+ atomic link em hands) ──────────────────────────────────────────
@@ -359,24 +459,35 @@ def _upsert_table_ss_log(
 
 # ── Match temporal mão → resolver-desambigua ─────────────────────────────────
 
-def _find_candidate_hands(captured_at: datetime, site: str) -> list[dict]:
-    """Mãos do mesmo site com played_at dentro de ±TABLE_SS_MATCH_WINDOW_S de
-    captured_at, ordenadas por proximidade. Guard rails iguais ao resolver
-    (2026+, sem mtt_archive, tournament_number presente)."""
+def _find_candidate_hands(
+    captured_at: datetime, site: str, table: Optional[int] = None
+) -> list[dict]:
+    """Candidatas do mesmo site pela REGRA FÍSICA: a captura mostra a mão A
+    DECORRER, i.e. a última que começou ANTES (ou no instante) da captura — NUNCA
+    a seguinte. Antes ordenava por ABS(proximidade) → escolhia a mais próxima, que
+    era muitas vezes a mão SEGUINTE (a hora empurra a captura ~1 mão à frente = a
+    origem das 209 "suspeitas"). Agora: `played_at <= captured_at`, ORDER BY
+    played_at DESC → o [0] é a mão-a-decorrer. Quando o nome dá a MESA (GG), filtra
+    por mesa (100% fiável) — encurta o multi-tabling ao feltro certo. Guard rails
+    iguais ao resolver (2026+, sem mtt_archive, tournament_number presente)."""
     lo = captured_at - timedelta(seconds=TABLE_SS_MATCH_WINDOW_S)
-    hi = captured_at + timedelta(seconds=TABLE_SS_MATCH_WINDOW_S)
+    params = [site, lo, captured_at]
+    table_clause = ""
+    if table is not None:
+        table_clause = " AND substring(raw from 'Table ''(\\d+)''') = %s"
+        params.append(str(table))
     rows = query(
-        """
+        f"""
         SELECT id, hand_id, tournament_number, tournament_name, site, played_at
           FROM hands
          WHERE played_at >= '2026-01-01'
            AND site = %s
            AND played_at BETWEEN %s AND %s
            AND tournament_number IS NOT NULL
-           AND study_state != 'mtt_archive'
-         ORDER BY ABS(EXTRACT(EPOCH FROM (played_at - %s)))
+           AND study_state != 'mtt_archive'{table_clause}
+         ORDER BY played_at DESC
         """,
-        (site, lo, hi, captured_at),
+        tuple(params),
     )
     return [dict(r) for r in rows]
 
@@ -480,7 +591,7 @@ def _resolve_match(
 
 def compute_table_ss_match(
     captured_at: Optional[datetime], site: Optional[str], vj: dict,
-    filename_tn: Optional[str] = None,
+    filename_tn: Optional[str] = None, filename: Optional[str] = None,
 ) -> dict:
     """R — a ÚNICA função de match da SS de mesa. Dado o read guardado da SS
     (captured_at UTC, site, vision_json) + o conjunto ACTUAL de mãos na BD,
@@ -508,6 +619,25 @@ def compute_table_ss_match(
         "tournament_number": None, "matched_hand_id": None,
         "matched_hand_db_id": None,
     }
+
+    # ── TIER 1 — HAND-ID do nome (âncora mais fiável; casa 1:1) ──────────────────
+    # #IT-MATCHER-CASCADE: o número no nome do ficheiro é o HAND-ID da mão. Se
+    # INTEIRO (10 dígitos) e a mão GG existe → casa AQUI, imediato, SEM passar pela
+    # hora (era a hora que empurrava a captura 1 mão à frente = as 209 "suspeitas").
+    # Guarda: a MESA do nome tem de bater com a da HH (100% fiável); se não bate, o
+    # número aponta mão errada (raro) → cai para os tiers seguintes.
+    fields = _parse_it_hand_fields(filename)
+    if site == "GGPoker" and fields["hand_num"] and len(fields["hand_num"]) == 10:
+        cand = _hand_by_exact_id(f"GG-{fields['hand_num']}")
+        if cand:
+            hh_table = _hh_table_number(cand.get("raw"))
+            if fields["table"] is None or hh_table is None or hh_table == fields["table"]:
+                return {
+                    "result": "success", "reason_detail": "filename_hand_id",
+                    "site": site, "tournament_number": cand["tournament_number"],
+                    "matched_hand_id": cand["hand_id"],
+                    "matched_hand_db_id": cand["id"],
+                }
 
     # #TABLE-SS-FILENAME-TN — formato NOVO: o tn vem do NOME do ficheiro e é
     # AUTORITÁRIO. Match por site + tn + hora mais próxima, SEM passar pelo
@@ -541,7 +671,7 @@ def compute_table_ss_match(
         base["tournament_number"] = tn
         return base
 
-    candidates = _find_candidate_hands(captured_at, site)
+    candidates = _find_candidate_hands(captured_at, site, table=fields["table"])
     m = _resolve_match(captured_at, vj, site, candidates)
     if m["matched"]:
         return {
@@ -644,7 +774,8 @@ def reconcile_table_ss(hand_ids=None) -> dict:
         # #TABLE-SS-FILENAME-TN: re-parseia o tn do nome guardado (autoritário).
         _ftn = parse_table_ss_filename(r.get("original_filename"))["tournament_number"]
         desired = compute_table_ss_match(
-            r.get("captured_at"), r.get("site"), vj, filename_tn=_ftn)
+            r.get("captured_at"), r.get("site"), vj, filename_tn=_ftn,
+            filename=r.get("original_filename"))
         if _persist_table_ss_match(
             r["id"], desired,
             prev_result=r.get("result"),
@@ -981,7 +1112,8 @@ async def _process_table_ss(
     #    O upload deixa de ter caminho de match próprio: grava o read e chama R.
     #    #TABLE-SS-FILENAME-TN: passa o tn do filename (autoritário) quando existe.
     desired = compute_table_ss_match(
-        captured_at, site, vj, filename_tn=_parsed_fn["tournament_number"])
+        captured_at, site, vj, filename_tn=_parsed_fn["tournament_number"],
+        filename=filename)
     out["site"] = desired["site"]          # R pode ter re-corrigido a site
     out["result"] = desired["result"]
     out["reason_detail"] = desired["reason_detail"]
@@ -1094,7 +1226,8 @@ async def _reprocess_failed_row(row: dict) -> dict:
 
     # Match determinístico (a MESMA função R do upload/reconcile) + persist + link.
     desired = compute_table_ss_match(
-        captured_at, site, vj, filename_tn=_parsed["tournament_number"])
+        captured_at, site, vj, filename_tn=_parsed["tournament_number"],
+        filename=filename)
     _persist_table_ss_match(
         ss_id, desired, prev_result="vision_failed", prev_matched_hand_id=None)
     if desired["result"] == "success":

@@ -4,7 +4,7 @@ Pattern de mocks alinhado com test_lobby_sync.py (asyncio.run + unittest.mock).
 """
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -680,7 +680,7 @@ def test_compute_match_trusts_passed_site():
     """pt56: o site já é autoritário (do nome) — compute confia nele e procura
     candidatos nesse site, SEM re-corrigir (_correct_site não é chamado)."""
     seen = {}
-    def fake_find(captured_at, site):
+    def fake_find(captured_at, site, table=None):
         seen["site"] = site
         return []
     with patch("app.routers.table_ss.tv._correct_site") as mcorrect, \
@@ -691,6 +691,78 @@ def test_compute_match_trusts_passed_site():
     assert d["site"] == "PokerStars"          # usa o site passado, intacto
     assert seen["site"] == "PokerStars"
     mcorrect.assert_not_called()               # já não re-corrige no matching
+
+
+# ── #IT-MATCHER-CASCADE: número do nome (Tier 1), regra física, colisões ─────
+
+_FN_FULL = ("GGPoker-Daily Hyper $50 _ Buy-in $50 - Blinds 125 _ 250 - Table 8"
+            "_!)@(#_$&%^_6083293101-20260616171101-4.png")
+_FN_TRUNC = ("GGPoker-Speed Racer Bounty Europe $108 [10 BB] _ Buy-in $108 - "
+             "Blinds 5,000 _ 10,000 - Table 8_!)@(#_$&%^_61-20260626204636-117.png")
+
+
+def test_parse_it_hand_fields_full_and_truncated():
+    f = table_ss._parse_it_hand_fields(_FN_FULL)
+    assert f == {"hand_num": "6083293101", "table": 8, "sb": 125, "bb": 250}
+    t = table_ss._parse_it_hand_fields(_FN_TRUNC)
+    assert t == {"hand_num": "61", "table": 8, "sb": 5000, "bb": 10000}
+
+
+def test_tier1_matches_by_filename_hand_id():
+    cand = {"id": 42, "hand_id": "GG-6083293101", "tournament_number": "T9",
+            "tournament_name": "Daily Hyper $50", "site": "GGPoker",
+            "played_at": CAP, "raw": "Table '8' 6-max Seat #5 is the button"}
+    with patch("app.routers.table_ss._hand_by_exact_id", return_value=cand):
+        d = table_ss.compute_table_ss_match(CAP, "GGPoker", {}, filename=_FN_FULL)
+    assert d["result"] == "success"
+    assert d["reason_detail"] == "filename_hand_id"
+    assert d["matched_hand_id"] == "GG-6083293101"
+    assert d["matched_hand_db_id"] == 42
+
+
+def test_tier1_rejects_when_table_mismatch():
+    # HH diz mesa 8; o nome diz mesa 9 → Tier 1 recusa e cai para os seguintes.
+    fn = _FN_FULL.replace("- Table 8", "- Table 9")
+    cand = {"id": 42, "hand_id": "GG-6083293101", "tournament_number": "T9",
+            "tournament_name": "X", "site": "GGPoker", "played_at": CAP,
+            "raw": "Table '8' 6-max Seat #5 is the button"}
+    with patch("app.routers.table_ss._hand_by_exact_id", return_value=cand), \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[]), \
+         patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, [])):
+        d = table_ss.compute_table_ss_match(CAP, "GGPoker", {}, filename=fn)
+    assert d["reason_detail"] != "filename_hand_id"
+
+
+def test_tier1_skips_when_number_truncated():
+    # número truncado (<10 díg.) NÃO aciona Tier 1 → nem consulta a mão por id.
+    with patch("app.routers.table_ss._hand_by_exact_id") as mex, \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[]), \
+         patch("app.routers.table_ss.resolve_tournament_number", return_value=(None, [])):
+        table_ss.compute_table_ss_match(CAP, "GGPoker", {}, filename=_FN_TRUNC)
+    mex.assert_not_called()
+
+
+def test_principal_rank_ordering():
+    assert table_ss._principal_rank("filename_hand_id") == 3
+    assert table_ss._principal_rank("single_tn") == 2
+    assert table_ss._principal_rank("disambiguated_by_name") == 2
+    assert table_ss._principal_rank(None) == 1
+
+
+def test_collision_number_beats_time_and_earlier_wins():
+    cur = MagicMock()
+    # Tier 1 (nova) vence tempo (actual), por rank.
+    cur.fetchall.return_value = [
+        {"id": 100, "reason_detail": "filename_hand_id", "captured_at": CAP},
+        {"id": 50, "reason_detail": "single_tn", "captured_at": CAP},
+    ]
+    assert table_ss._new_capture_wins_principal(cur, 100, 50) is True
+    # empate de rank → captured_at mais cedo vence (a nova é mais tarde → perde).
+    cur.fetchall.return_value = [
+        {"id": 100, "reason_detail": "single_tn", "captured_at": CAP + timedelta(minutes=1)},
+        {"id": 50, "reason_detail": "single_tn", "captured_at": CAP},
+    ]
+    assert table_ss._new_capture_wins_principal(cur, 100, 50) is False
 
 
 # ── pt56: site a partir do NOME do ficheiro (determinístico) ────────────────
