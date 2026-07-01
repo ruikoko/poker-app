@@ -1287,7 +1287,7 @@ def table_ss_image(ss_id: int, current_user=Depends(require_auth)):
 
 
 @router.post("/reconcile")
-def trigger_reconcile_table_ss(current_user=Depends(require_auth)):
+def trigger_reconcile_table_ss(current_user=Depends(require_auth_or_api_key)):
     """Corre o reconcile R sobre TODAS as SS de mesa (recalcula match de raiz,
     re-persiste, inclui as `tm_ambiguous`/`no_match_to_hand`). Síncrono mas leve
     (consultas + updates, sem Vision). Usado p.ex. após backfill de nomes para
