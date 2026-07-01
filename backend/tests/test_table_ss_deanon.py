@@ -258,3 +258,54 @@ def test_enrich_mapa_distinto_nao_funde_seats():
     bad = {"Hero": "Lauro Dermio", "5e26839e": "Lauro Dermio", "d6e6f5c9": "iLuckYou3000"}
     eb = _enrich_all_players_actions(apa, bad, vision)
     assert len([k for k in eb if k != "_meta"]) == 2  # colapsou → o endpoint barra isto
+
+
+# ── pt96 (#DESANON-HERO-BUTTON-ANCHOR) — âncora Hero+botão + propagação circular ──
+def _seat(nick, hero=False, btn=False):
+    return {"nick": nick, "is_hero": hero, "is_button": btn}
+
+def test_hero_button_anchor_4321_horario_e_invertido():
+    """A roda alinha 8/8 (ground-truth 4321). O botão (2ª âncora) detecta e corrige a
+    direcção quando a Vision lê ao contrário."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"d6e6f5c9":"SB","bd3f7c55":"BB","5e26839e":"UTG","ff3d6eb4":"UTG1",
+              "Hero":"MP","b6b2d9ab":"MP1","d24da2fa":"CO","dc7499e7":"BTN"}
+    gold = {"Hero":"Lauro Dermio","b6b2d9ab":"Galeguinhoo","d24da2fa":"ajolotee",
+            "dc7499e7":"theheroguy","d6e6f5c9":"iLuckYou3000","bd3f7c55":"rickzera",
+            "5e26839e":"Karluz","ff3d6eb4":"MIRALINE"}
+    img_ok = [_seat("Lauro Dermio", hero=True), _seat("Galeguinhoo"), _seat("ajolotee"),
+              _seat("theheroguy", btn=True), _seat("iLuckYou3000"), _seat("rickzera"),
+              _seat("Karluz"), _seat("MIRALINE")]
+    m, alarm = build_anon_map_by_hero_button(img_ok, hh_pos, 8)
+    assert alarm is None and m == gold
+    img_inv = [img_ok[0]] + img_ok[1:][::-1]          # Vision leu ao contrário
+    m2, a2 = build_anon_map_by_hero_button(img_inv, hh_pos, 8)
+    assert a2 is None and m2 == gold                  # botão reverte -> 8/8
+
+def test_hero_button_regra_dura_hero_fixo():
+    """Hero fica no índice 0 -> nunca a um vilão (o bug dos 15)."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"d6e6f5c9":"SB","bd3f7c55":"BB","5e26839e":"UTG","ff3d6eb4":"UTG1",
+              "Hero":"MP","b6b2d9ab":"MP1","d24da2fa":"CO","dc7499e7":"BTN"}
+    img = [_seat("Lauro Dermio", hero=True), _seat("Galeguinhoo"), _seat("ajolotee"),
+           _seat("theheroguy", btn=True), _seat("iLuckYou3000"), _seat("rickzera"),
+           _seat("Karluz"), _seat("MIRALINE")]
+    m, _ = build_anon_map_by_hero_button(img, hh_pos, 8)
+    assert m["Hero"] == "Lauro Dermio"                # Hero nunca a vilão
+    assert list(m.values()).count("Lauro Dermio") == 1  # sem duplicado do Hero
+
+def test_hero_button_salvaguarda_sitting_out():
+    """Contagens diferem (sitting-out/mesa incompleta) -> alarme, NÃO desanon às cegas."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"h1":"SB","h2":"BB","Hero":"UTG","h3":"CO","h4":"BTN"}  # 5 na HH
+    img = [_seat("A", hero=True), _seat("B"), _seat("C")]              # 3 na imagem
+    m, alarm = build_anon_map_by_hero_button(img, hh_pos, 5)
+    assert m == {} and alarm and "seat_count_mismatch" in alarm
+
+def test_hero_button_headsup():
+    """Heads-up (2-max, SB=botão): sem BTN label -> salta checagem do botão, 2 seats ok."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"Hero":"BB","h1":"SB"}
+    img = [_seat("HeroNick", hero=True), _seat("Villain", btn=True)]
+    m, alarm = build_anon_map_by_hero_button(img, hh_pos, 2)
+    assert alarm is None and m == {"Hero":"HeroNick","h1":"Villain"}

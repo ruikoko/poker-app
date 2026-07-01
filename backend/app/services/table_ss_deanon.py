@@ -124,6 +124,72 @@ def build_anon_map_from_seats(
     return _build_anon_to_real_map(matched_hand, vision_data)
 
 
+def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: int):
+    """pt96 (#DESANON-HERO-BUTTON-ANCHOR): desanon do table-SS por ÂNCORA Hero+botão +
+    propagação circular — TEXTO (HH) manda na estrutura, imagem só dá NOMES, stacks NÃO
+    entram. Método primário do table-SS (substitui o stack-elimination, que trocava
+    nicks em stacks próximos).
+
+    Args:
+        image_seats: lista ORDENADA (horário do Hero) de dicts {nick, is_hero, is_button}
+                     da Vision estendida.
+        hh_pos: {hash: position} da HH (SB/BB/BTN/UTG/... por hash, do parser).
+        num_players: nº de jogadores da HH.
+
+    Devolve (anon_map hash→nick, alarm). **alarm != None → NÃO desanonimizar às cegas**
+    (mão para revisão): contagens diferem (sitting-out/mesa incompleta), botão não bate,
+    sem Hero, etc. Regra dura: o Hero fica no índice 0 fixo → NUNCA mapeado a um vilão.
+    """
+    from app.parsers.gg_hands import POSITION_MAPS
+    pm = POSITION_MAPS.get(num_players)
+    if not pm:
+        return {}, "hh_no_position_map_%s" % num_players
+    by_pos = {p: h for h, p in (hh_pos or {}).items()}
+    # roda da HH: horário por seat_num (SB, BB, ..., CO, BTN), rodada p/ Hero no índice 0
+    cw = ["SB", "BB"] + pm[:-3] + ["BTN"]
+    order = [by_pos[p] for p in cw if p in by_pos]
+    if "Hero" not in order:
+        return {}, "hh_no_hero"
+    hi = order.index("Hero")
+    hh_wheel = order[hi:] + order[:hi]
+    btn_hash = by_pos.get("BTN")
+    btn_idx_hh = hh_wheel.index(btn_hash) if btn_hash in hh_wheel else None
+
+    # SALVAGUARDA 1: contagens diferem (sitting-out / mesa incompleta) → alarme, não cegar.
+    if len(image_seats or []) != len(hh_wheel):
+        return {}, "seat_count_mismatch_img%d_hh%d" % (len(image_seats or []), len(hh_wheel))
+
+    # roda da imagem: Hero no índice 0
+    heroes = [i for i, s in enumerate(image_seats) if s.get("is_hero")]
+    if len(heroes) != 1:
+        return {}, "image_hero_count_%d" % len(heroes)
+    img = image_seats[heroes[0]:] + image_seats[:heroes[0]]
+
+    # 2ª ÂNCORA (botão) fixa a direcção — a "horário" da Vision não é consistente.
+    if btn_idx_hh is not None:  # heads-up (2-max) não tem BTN → salta a checagem
+        btns = [i for i, s in enumerate(img) if s.get("is_button")]
+        if len(btns) != 1:
+            return {}, "image_button_count_%d" % len(btns)
+        if btns[0] == btn_idx_hh:
+            pass  # horário coincide
+        elif btns[0] == (len(img) - btn_idx_hh) % len(img):
+            img = [img[0]] + img[1:][::-1]  # direcção invertida → reverter (Hero fixo)
+        else:
+            return {}, "button_mismatch_img%d_hh%d" % (btns[0], btn_idx_hh)
+
+    # mapear pela roda alinhada. Hero (índice 0) fixo → nunca a um vilão.
+    anon_map = {}
+    for k in range(len(hh_wheel)):
+        nick = (img[k].get("nick") or "").strip()
+        if not nick:
+            return {}, "image_empty_nick_at_%d" % k
+        anon_map[hh_wheel[k]] = nick
+    # sanidade: nicks distintos (2 seats com o mesmo nome = leitura má) → alarme.
+    if len(set(anon_map.values())) != len(anon_map):
+        return {}, "duplicate_nicks"
+    return anon_map, None
+
+
 def _existing_match_method(player_names: Any) -> Optional[str]:
     pn = player_names
     if isinstance(pn, str):
@@ -197,7 +263,22 @@ def deanonymize_hand_from_table_ss(
     if not [k for k in apa_raw if k != "_meta"]:
         return {"status": "no_map", "hand_db_id": hand_db_id, "reason": "apa_meta_only"}
 
-    anon_map = build_anon_map_from_seats(h, seats, hero_nick)
+    # pt96 (#DESANON-HERO-BUTTON-ANCHOR): se a Vision deu is_button (pipeline novo), usa a
+    # ÂNCORA Hero+botão (PRIMÁRIO — texto manda na estrutura, imagem só dá nomes, stacks
+    # NÃO entram). Alarme (sitting-out / botão não bate) → mão para REVISÃO, NÃO escreve
+    # às cegas (nunca sai com nomes trocados em silêncio). Sem is_button (dados antigos) →
+    # fallback stack-elimination (o método antigo, que trocava nicks em stacks próximos).
+    if any(s.get("is_button") for s in (seats or [])):
+        hh_pos = {k: (v or {}).get("position")
+                  for k, v in apa_raw.items() if k != "_meta"}
+        n_players = len([k for k in apa_raw if k != "_meta"])
+        anon_map, alarm = build_anon_map_by_hero_button(seats, hh_pos, n_players)
+        if alarm:
+            logger.info("[table_ss_deanon] hand %s ÂNCORA alarme=%s → revisão (não escreve)",
+                        hand_db_id, alarm)
+            return {"status": "review_alarm", "hand_db_id": hand_db_id, "alarm": alarm}
+    else:
+        anon_map = build_anon_map_from_seats(h, seats, hero_nick)
     if not anon_map:
         return {"status": "no_map", "hand_db_id": hand_db_id}
 

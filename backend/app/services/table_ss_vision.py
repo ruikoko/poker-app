@@ -64,11 +64,17 @@ _TABLE_PROMPT = (
     '  "seats": [ {"nick": "<exact screen name under the avatar>", '
     '"stack_bb": <float stack in BIG BLINDS> | "ALLIN" | null, '
     '"bounty_usd": <float DOLLAR $ in the GOLD CROWN badge above the avatar> | null, '
-    '"is_hero": <true for the bottom-center hero seat, else false>} ]\n'
+    '"is_hero": <true for the bottom-center hero seat, else false>, '
+    '"is_button": <true for the seat with the dealer BUTTON (D chip), else false>} ]\n'
     "}\n\n"
     "RULES:\n"
-    "- HERO is the seat at the BOTTOM-CENTER of the table whose hole cards are "
-    "face-up/visible. hero_nick is that seat's screen name.\n"
+    "- HERO is the seat at the BOTTOM-CENTER of the table (the auto-centered hero "
+    "position). Identify it by POSITION ONLY — the hero is ALWAYS at bottom-center. DO "
+    "NOT rely on hole cards: if the hero FOLDED the cards are gone but the seat is STILL "
+    "the bottom-center one. hero_nick is that seat's screen name.\n"
+    "- is_button = the seat that has the dealer BUTTON (the 'D' dealer chip); exactly one.\n"
+    "- The seats array MUST be in CLOCKWISE order STARTING FROM THE HERO (hero is the "
+    "first element, then clockwise around the table) — used to align seats to the HH.\n"
     "- seats: return EVERY seated player at the table (one object per occupied "
     "seat, including the hero). nick = the exact screen name shown under that "
     "seat's avatar (preserve case and punctuation). stack_bb = that seat's stack "
@@ -223,6 +229,7 @@ def _coerce_seats(value: Any) -> list[dict]:
             "stack_bb": _coerce_stack_bb(s.get("stack_bb")),
             "bounty_usd": _coerce_float(s.get("bounty_usd")),
             "is_hero": bool(s.get("is_hero")),
+            "is_button": bool(s.get("is_button")),   # pt96: 2ª âncora (fixa a direcção)
         })
     return out
 
