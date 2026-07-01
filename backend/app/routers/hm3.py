@@ -27,7 +27,8 @@ from app.db import get_conn, query
 from app.hero_names import HERO_NAMES_ALL, detect_site_from_hh
 from app.routers.screenshot import _enrich_hand_from_orphan_entry
 from app.ingest_filters import is_pre_2026
-from app.services.hm3_tag_aliases import apply_hm3_tag_aliases
+from app.services.hm3_tag_aliases import apply_hm3_tag_aliases  # noqa: F401 (back-compat)
+from app.services.tags_canonical import canonicalize_tag
 from app.services.entry_service import create_entry
 
 router = APIRouter(prefix="/api/hm3", tags=["hm3"])
@@ -778,7 +779,10 @@ async def import_hm3(
         if key not in hands_map:
             hands_map[key] = {"tags": [], "row": row}
         tag = row.get("tag", "").strip()
-        tag = apply_hm3_tag_aliases(tag)
+        # Fonte única: canonicaliza (superset dos aliases HM3 antigos — GTw,
+        # nota++ — + toda a rede de formas). Preserva as HM3 adormecidas e
+        # 'nota ex' (passthrough); nunca deita fora.
+        tag = canonicalize_tag(tag) or ""
         if tag and tag not in hands_map[key]["tags"]:
             hands_map[key]["tags"].append(tag)
 

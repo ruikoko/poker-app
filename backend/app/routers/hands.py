@@ -1497,6 +1497,14 @@ def update_hand(hand_pk: int, body: HandUpdate, current_user=Depends(require_aut
     if not updates:
         raise HTTPException(status_code=400, detail="Nada para actualizar")
 
+    # Fonte única — grava sempre a forma canónica (cobre o TagEditor e qualquer
+    # cliente). Preserva o que não reconhece (HM3 adormecidas, 'nota ex',
+    # custom); nunca deita fora. Só normaliza formas reconhecidas.
+    from app.services.tags_canonical import canonicalize_tags
+    for _tag_field in ("hm3_tags", "discord_tags"):
+        if isinstance(updates.get(_tag_field), list):
+            updates[_tag_field] = canonicalize_tags(updates[_tag_field])
+
     # Se mudar para 'resolved', registar studied_at
     if updates.get("study_state") == "resolved":
         updates["studied_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1559,6 +1567,37 @@ def get_hand_screenshot(hand_pk: int, current_user=Depends(require_auth)):
 
 
 # ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@router.post("/admin/canonicalize-tags")
+def admin_canonicalize_tags(confirm: bool = False, current_user=Depends(require_auth)):
+    """Backfill único: canonicaliza `hm3_tags`/`discord_tags` das mãos onde a
+    forma gravada difere da canónica (ex.: 'icm pko ft'→'icm-pko-ft', 'pos pko
+    FT'→'pos-pko-ft'). SÓ toca o que MUDA; preserva o resto (adormecidas, 'nota
+    ex', custom — a `canonicalize_tags` faz passthrough). `confirm=false`
+    (default) = ENSAIO (não escreve); `confirm=true` = aplica. Idempotente."""
+    from app.services.tags_canonical import canonicalize_tags
+    rows = query(
+        "SELECT id, hand_id, hm3_tags, discord_tags FROM hands "
+        "WHERE (hm3_tags IS NOT NULL AND hm3_tags <> '{}') "
+        "   OR (discord_tags IS NOT NULL AND discord_tags <> '{}')"
+    )
+    changes = []
+    for r in rows:
+        patch = {}
+        for field in ("hm3_tags", "discord_tags"):
+            before = list(r.get(field) or [])
+            after = canonicalize_tags(before)
+            if before != after:
+                patch[field] = {"before": before, "after": after}
+        if patch:
+            changes.append({"id": r["id"], "hand_id": r["hand_id"], **patch})
+            if confirm:
+                for field, d in patch.items():
+                    execute(f"UPDATE hands SET {field} = %s WHERE id = %s",
+                            (d["after"], r["id"]))
+    return {"dry_run": not confirm, "n_changed": len(changes),
+            "changes": changes[:200]}
+
 
 @router.post("/admin/reset-all")
 def admin_reset_all(current_user=Depends(require_auth)):

@@ -504,15 +504,25 @@ def process_type(session, sub, endpoint, exts, label, live, window=None):
 # 'nota' → tag 'nota' (dispara Vilões, regra C). Sem família de fase.
 # EXTENSÍVEL: o Rui cria mais pastas no IT → acrescenta-se aqui a linha. Subpasta
 # fora desta tabela → processada SEM tag (não inventa) + aviso.
+# ⚠️ MIRROR do cliente. A AUTORIDADE é o backend `app/services/tags_canonical.py`
+# (`canonicalize_tag`), que canonicaliza o folder_tag recebido. Este mapa só
+# precisa de MANDAR uma forma reconhecível por pasta; o backend faz o resto.
 IT_FOLDER_TAGS = {
     "icm":         "icm",
     "icm pko":     "icm-pko",
     "pko pos":     "pos-pko",
-    "npko pos":    "pos-nko",      # canónica existente (HM3_REAL_TAGS); simétrica de pos-pko
+    "pos pko":     "pos-pko",      # forma directa (além da invertida "pko pos")
+    "npko pos":    "pos-nko",      # nome ANTIGO "NPKO Pos" (histórico mantido)
+    "nko pos":     "pos-nko",      # 🆕 "NKO Pos" (renomeada)
     "icm pko ft":  "icm-pko-ft",   # FT MANUAL — pasta de mesa final escolhida pelo Rui
     "pko pos ft":  "pos-pko-ft",   # FT MANUAL
+    "icm ft":      "icm-ft",       # 🆕 pasta "ICM FT"
+    "nko pos ft":  "pos-nko-ft",   # 🆕 pasta "NKO Pos FT"
+    "pos nko ft":  "pos-nko-ft",   # 🆕 forma directa
     "speedracer":  "speed-racer",
     "speed racer": "speed-racer",  # tolera grafia com espaço
+    "speed racer ft": "speed-racer-ft",  # 🆕 pasta "Speed Racer FT"
+    "speedracer ft":  "speed-racer-ft",
     "nota":        "nota",         # → Vilões (regra C); sem fase pré/pós
 }
 

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from app.auth import require_auth
 from app.db import get_conn, query
+from app.services.tags_canonical import canonicalize_tag
 
 router = APIRouter(prefix="/api/capture-triage", tags=["capture-triage"])
 logger = logging.getLogger("capture_triage")
@@ -157,6 +158,9 @@ def tag_capture_triage(hand_id: str, body: TagBody, current_user=Depends(require
         raise HTTPException(
             400, f"tag inválida: {tag!r} (permitidas: {sorted(ALLOWED_TRIAGE_TAGS)} ou {DISCARD})"
         )
+    # Fonte única (idempotente aqui: ALLOWED_TRIAGE_TAGS já são canónicas) —
+    # garante a forma canónica gravada mesmo que a lista mude no futuro.
+    tag = canonicalize_tag(tag) or tag
 
     # Aplica a tag em discord_tags (semântica de canal, union distinct) + marca
     # resolved. apply_villain_rules a seguir (lê discord_tags actuais). pt73 — se

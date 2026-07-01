@@ -811,6 +811,11 @@ def _apply_folder_tag_to_hand(
     None → conn própria + commit."""
     if not matched_hand_db_id or not base_tag:
         return
+    # Fonte única — canonicaliza o folder_tag que chega do IT (o appimport pode
+    # mandar o nome da pasta, ex. "NKO Pos"→pos-nko). Passthrough para o que não
+    # reconhece (não inventa nem deita fora). O sufixo '-ft' é aplicado depois.
+    from app.services.tags_canonical import canonicalize_tag
+    base_tag = canonicalize_tag(base_tag) or base_tag
     final_tag = _final_folder_tag(base_tag, vision_json)
     ft_source = _folder_tag_ft_source(base_tag, vision_json)   # pt73: 'manual'/'auto'/None
     own = conn is None
