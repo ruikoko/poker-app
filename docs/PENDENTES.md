@@ -1,5 +1,13 @@
 # Pendentes — backlog vivo
 
+## ★ pt97 (1 Jul 2026, Web) — pós crachá/guardião/tags/saúde GG
+
+- **Fase 2 da "Saúde das mãos GG" (ações):** hoje a secção só MOSTRA (Fase 1, `a3deb74`). A Fase 2 traz as ações e **absorve a "Marcadas por captura"**: tag de **1-clique** (11 tags canónicas), **corrigir nomes** (via `/set-anon-map`), confirmar **unverified→verified**, e **propagação de nome por hash no torneio** (1 confirmação → ~3 mãos tagadas; o hash segue o jogador entre mesas — `DESANON_ANATOMIA §3.3`). Herdar: estado `capture_triage`, `folder_ft_source`, `apply_villain_rules`.
+- **2 mãos de CAPTURA TROCADA por resolver** (a captura pertence a outra mão — não é erro de nomes): `GG-6104057685` (dona verdadeira `GG-6104057552`, hoje sem captura) · `GG-6105043278` (dona `GG-6105043116`). **Bloqueadas por 2 primitivas que NÃO existem:** (1) **"reverter uma mão a anónima"** (repor `player_names={}` + apa hash-keyed do raw + limpar villains + `context_table_ss_id=NULL`) — hoje tirar a captura NÃO reverte, a mão fica com o anon_map errado; (2) **guarda que protege `position_v3`** (`_REAL_MATCH_METHODS` só tem `anchors_stack_elimination_v2` → ligar uma captura IT a uma mão gold **clobbera** o position_v3). Só depois destas duas é seguro religar a Gold/IT certa.
+- **2 mãos em CONFLITO DE TAGS (formato)** a resolver — a mesma mão (`GG-6117985931`) com `icm` (não-PKO) + `icm-pko` (PKO). Ver R1 em `TAGS_CANONICO.md`.
+- **Enforcement das 2 regras de incompatibilidade de tags** (R1 formato, R2 fase) — definidas em `TAGS_CANONICO.md`, hoje só **sinalizadas** (Saúde GG), não impedidas na escrita.
+- **Decisão Gold-vence-IT — via premium:** onde o IT falha (captura trocada / nomes por verificar), **descarregar a Gold** dessa mão (casa 1:1 exato). 0 Golds à espera nas 382 só-IT; é acção manual do Rui.
+
 ## ★ 1 Jul 2026 — pendências pós-frentes (bounties + desanon por âncora)
 - **Build do watcher (foco + guarda de TEMPO):** o foco (`#HRC-FOCUS-ROBUSTNESS`, `049cd4b` em `watcher-gate`, NÃO buildado) + a **guarda de tempo** (teto **5h/1ª run** decidido; falta o **print do painel do HRC com o tempo** + escrever o OCR do tempo em `tree_stats.py`) — **um build só** com `min_children=60`.
 - **Pontas dos bounties (histórico):** **1 presa** (`GG-6102580840`, seat `G Sieemshchikov` — reread OCR l/i não casou) + **2 por rever** (`6101135610` parcial, `6104865113` sem imagem em Transferências) + **5 seats truncados**. Consertam re-lendo a coroa certa.

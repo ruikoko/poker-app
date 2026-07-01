@@ -36,6 +36,7 @@ pipeline que manda mãos a um solver (**HRC**) num mini-PC (Beelink) via um robo
 | **`docs/WATCHER_FLUXO.md`** | o que o watcher DEVE fazer por mão (spec canónico) — antes de mexer no `tools/watcher_src`. |
 | **`docs/GTO_BRAIN.md`** | o GTO Brain (`gto_trees`/`gto_nodes`, tab GTO do replayer, pipeline `.zip`→árvores). |
 | **`docs/DESANON_ANATOMIA.md`** | a desanonimização/match GG (nicks reais na mão anónima) — `table_ss*.py`, `screenshot.py`. **§3.2.3 = método actual (âncora Hero+botão).** |
+| **`docs/TAGS_CANONICO.md`** | **FONTE DE VERDADE das tags de estudo** (vocabulário GG+HM3, significados, 2 regras de incompatibilidade, pastas do IT, `services/tags_canonical.py`). Lê antes de mexer em tags/normalização/gates que lêem tags. |
 | **`docs/GLOSSARIO_POKER.md`** | um termo de poker não óbvio (dicionário de consulta, não leitura corrida). |
 
 ## 3. DOCS VIVOS vs IMUTÁVEIS (importante para não te confundires)

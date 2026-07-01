@@ -49,25 +49,37 @@ Match por `hand_id = GG-{TM_number}`, com o TM extraído do nome do ficheiro do 
 > **Gold image (pt75, 2026-06-18):** a "gold image" = a **descarga completa da mão** pelo
 > botão do replayer GG (não um screenshot). A GG **NÃO desenha rótulo de posição por seat**;
 > as siglas (UTG/MP/CO/BTN/SB/BB) vivem no **LOG DE ACÇÃO** (painel inferior, uma linha por
-> acção). É daí que a Vision as lê (ver §3.2.2). Blinds do nome do ficheiro continuam
-> não-fiáveis (só o hand-id presta).
+> acção). É daí que a Vision as lê (ver §3.2.2).
+>
+> **★ FIABILIDADE DO NOME DO FICHEIRO DA GOLD (corrigido pt97, provado, 6 exemplos):**
+> ao contrário do que se dizia, na **Gold** (descarga do replayer) o nome é
+> **FIÁVEL** para três coisas: (1) o **TM/hand-id** casa **1:1 EXATO** com a HH
+> (a Gold carrega a identidade da mão); (2) a **hora** = hora de **jogo em UTC**
+> (a HH está em Lisboa UTC+1) → **desvio FIXO −1h**, não é lixo; (3) as **blinds**
+> = blinds reais **em milhares** (`0.35/0.70` no nome = 350/700). *(Isto é a
+> GOLD; para o IT o número do nome NÃO é fiável — ver §2.2.)*
 
 ### 2.2 Table-SS ↔ mão GG
 
-> **★ DECISÃO pt73 (DECIDIDO / POR IMPLEMENTAR — ainda NÃO no código).**
+> **★ DECISÃO pt73 REVISTA em pt97 (2026-07-01): o hand-id do nome do ficheiro do IT
+> NÃO é fiável — a proposta "casar por ele, autoritário" foi ABANDONADA.**
 >
-> **PRIMÁRIO:** **hand ID extraído do nome do ficheiro** — o número TM imediatamente antes
-> do timestamp. Ex.: `...6081471864-20260615223557-127.png` → `GG-6081471864`.
-> Determinístico, sem Vision, sem tempo, sem stack. Confirmado nas HH (`#TM6081471864`,
-> `#TM6079987069` batem exactamente).
+> A pt73 propunha casar o table-SS pelo hand-id embutido no nome. A análise por
+> **fit de stacks** (Vision vs HH) em pt97 desmentiu a premissa: das **244**
+> capturas IT com nº≠mão casada, só **~72 são trocas reais**; em **60** o match
+> por tempo estava **certo** e o nome errado; **101** ambíguas. **Razão:** a
+> captura do IT é tirada **segundos DEPOIS** do início da mão, e em multi-tabling
+> o número do nome anda uma mão à frente/atrás (aponta a mão **vizinha**). Casar
+> por ele partiria mais do que conserta.
 >
-> **Substitui** o match actual por **tempo + nome + fingerprint**, que é frágil: a captura
-> é tirada **segundos DEPOIS** do início da mão → em multi-tabling (média 3.2 torneios GG
-> concorrentes na janela ±5min, até 8) a hora sozinha erra a mão por segundos (a mais
-> próxima no tempo pode ser de OUTRA mesa).
+> **Conclusão (pt97):** o **IT** mantém o match por **tempo + nome + fingerprint**
+> (o que já existe). O sinal fiável de "captura trocada" é o **fit de stacks**, não
+> o nome (a secção "Saúde GG" mostra o nº≠mão como **suspeita**, não veredicto).
 >
-> **FALLBACK:** torneio + mesa + tempo **SÓ** quando o ID falta no nome (formato antigo,
-> ex.: `...Table 171_!)-20260605201233-19` sem TM — ver `img/89`).
+> **A GOLD é diferente:** o TM do nome da Gold casa **1:1 EXATO** (§2.1) — é o
+> único match por-número fiável. **Regra do Rui: "quando há Gold, casa-se por aí"**
+> (já acontece nas **132** mãos com Gold + IT, 0 trocas). Onde o IT falhar, a via
+> premium é **descarregar a Gold** dessa mão (ver §2.3).
 
 **Estado HOJE no código (até a decisão ser implementada):** o table-SS casa por uma função
 determinística `compute_table_ss_match` (`table_ss.py`, pt50), **por tempo** (janela ±5min),
@@ -77,9 +89,18 @@ com:
 - **Desambiguação multi-tn** por **nome fiel** da imagem (`name_tokens_subset`, pt54/pt58) e,
   no plano `PLAN_2026-06-02-table-ss-gg-match.md`, **fingerprint** (hero_stack_bb ±20% + big_blind).
 
-A decisão pt73 torna o **fingerprint e o nome-directo obsoletos/reduzidos a fallback** para
-o caso GG com TM no nome — passam a ser usados só quando o hand_id falta (ver
-`#TABLE-SS-GG-MULTITABLING-MATCH`).
+**(pt97) O fingerprint/nome-directo do IT MANTÊM-SE** — a reversão da pt73 (acima)
+significa que o table-SS continua a casar por tempo+nome+fingerprint; não há chave
+por-número fiável para o IT (ver `#TABLE-SS-GG-MULTITABLING-MATCH`).
+
+### 2.3 Gold vence IT — alcance e via premium (pt97)
+
+Das **9263** mãos GG 2026: **332** têm Gold (`position_v3`), **382** têm só IT
+(`table_ss`), **8549** sem imagem. Das 382 só-IT, **0** têm uma Gold à espera — o
+IT é frágil precisamente porque **nunca lhe foi descarregada Gold**. Nas **132**
+mãos com Gold **e** IT, a Gold **já ganha** (position_v3), 0 trocas. **Solução onde
+o IT falha (captura trocada / nomes por verificar): descarregar a Gold** dessa mão
+— casa 1:1 exato e substitui o IT frágil. É a via premium (decisão do Rui).
 
 ---
 
@@ -207,10 +228,27 @@ texto**): a âncora é o **HERO** (não SB/BB) + o **BOTÃO**.
   **sem stack utilizável** (all-in/null) ficam **POR MAPEAR** (hash mantido) +
   `player_names.deanon_partial=true`. **Nome em falta é honesto; nome trocado é veneno.**
 - **Votação cross-mão por torneio** (`vote_tournament_maps` / `reconcile_tournament_deanon`,
-  pt71 E6), fundada no **invariante observado-e-vigiado: o hash GG é fixo por jogador
-  DENTRO do torneio** (forense Jun-2026: 0 violações cross-torneio em 1059 hashes). A maioria
-  por torneio corrige swaps do per-mão; cada captura nova acrescenta um voto e retro-corrige.
-  Vigiada na Saúde do Import (`capture_deanon_agreement`).
+  pt71 E6), fundada no invariante:
+  > **★ (corrigido/reforçado pt97) O hash GG SEGUE o jogador ATRAVÉS DE MESAS dentro do
+  > torneio** — não é só "fixo dentro do torneio" em abstracto; o **mesmo hash = a mesma
+  > pessoa mesmo quando muda de mesa e de posição**. **Prova (Rui à imagem):** Daily Hyper
+  > $80 (tn `293321688`) — `95c4411e` = "Jailinrabei" e `2b3f299a` = "Daniel Fili" aparecem em
+  > **mesas E posições diferentes** com o mesmo nick. (Forense Jun-2026: 0 violações
+  > cross-torneio em 1059 hashes.)
+  >
+  > ⚠️ **Engano desmascarado:** no Daily Main (tn `293616024`) deram **0 cruzamentos** de hash
+  > entre mãos e concluiu-se "a GG re-embaralha hashes entre mesas" — **FALSO**. Nesse torneio
+  > **ninguém seguiu o Rui de mesa** (por isso 0 cruzamentos), não porque o hash mude. O hash
+  > é estável; a ausência de cruzamentos foi de amostra, não da mecânica.
+  A maioria por torneio corrige swaps do per-mão; cada captura nova acrescenta um voto e
+  retro-corrige. Vigiada na Saúde do Import (`capture_deanon_agreement`).
+
+  > **Alcance da propagação por hash (pt97, só mãos TAGADAS):** 75 torneios GG 2026 com ≥2
+  > mãos tagadas · **484** tagadas · **1126** hashes distintos. **1 confirmação de nome
+  > propaga a ~3 mãos tagadas** (média global 2,98) → corta a nomeação de **3352 → 1126
+  > (−66%)**. Muito **enviesado pela fase**: mesa final (poucos jogadores, muitas mãos) 5–13;
+  > início/multi-mesa 1,5–2. **Decisão do Rui: nomear TODOS os vilões.** O universo de estudo
+  > são as **mãos TAGADAS** (507 GG tagadas; 377 das 382 "só IT" são tagadas), não as 9263.
 
 > **⚠️ LIÇÃO — "0 swaps cross-torneio" NÃO é prova de correcção.** A votação prova
 > **consistência** (o mesmo hash recebe o mesmo nome em todas as mãos do torneio), **não**

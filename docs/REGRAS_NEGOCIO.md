@@ -36,6 +36,30 @@ Complementa `docs/VISAO_PRODUTO.md` (visão alta) e `docs/MAPA_ACOPLAMENTO.md` (
 - SS GGPoker (`.png`, `.jpg`, `.webp`).
 - HH em texto (qualquer sala) — upload de ficheiro `.txt`.
 - ZIPs (HHs em massa) — caminho separado para o GG (não vem via HM3 .bat porque é anonimizada).
+
+### 1.4. Fluxo de TAGGING do Rui (como as tags nascem — documentado pt97)
+
+Como a tag de estudo entra depende da sala:
+
+- **HM3 (Winamax / WPN / PokerStars):** o Rui **taga DENTRO do HM3** (marca a mão na
+  própria ferramenta). O `.bat`/appimport **puxa só as mãos tagadas** do período. A tag
+  viaja em `hm3_tags`. *(Nota: o Rui usa o mesmo vocabulário canónico da GG — `pos-pko`,
+  `icm-pko`… — não os literais teóricos do HM3. Ver `TAGS_CANONICO.md`.)*
+- **GG (e CoinPoker):** o HM3 **não funciona** (mãos anónimas). O Rui taga tirando um
+  **PRINT da mesa** e escolhendo a **PASTA** (do Intuitive Tables) onde o print cai — **a
+  subpasta É a tag**. O appimport importa das pastas; a tag vem da **subpasta do print** e
+  entra em `discord_tags` (nome histórico). O mapa pasta→tag vive na fonte única
+  `services/tags_canonical.py`.
+
+**Acoplamento tag ↔ captura (GG):** na GG a tag e a captura IT entram **SEMPRE juntas**
+(tag sem captura = 0 exceções). Consequência: uma **captura mal casada leva a tag E os
+nomes JUNTOS** para a mão errada. O universo de estudo são as **mãos TAGADAS** (≈507 GG),
+não todas.
+
+**Enganos a apanhar** (a secção "Saúde GG" ajuda a vê-los): (1) **tag errada** (pasta
+errada); (2) **Gold sem tag** (descarrega a Gold mas esquece de tagar → mão com nomes mas
+fora do Estudo); (3) **taga mas esquece a Gold** (fica com o IT frágil); (4) **captura
+trocada** (o print casou na mão vizinha).
 - Outras imagens (contexto).
 
 ---
