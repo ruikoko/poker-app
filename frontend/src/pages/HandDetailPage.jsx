@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { hands as handsApi, screenshots } from '../api/client'
-import { HERO_NAMES_ALL } from '../heroNames'
 import TagEditor from '../components/TagEditor'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
@@ -228,7 +227,7 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
           <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 12 }}>MESA ({playersList.length} JOGADORES)</div>
           {playersList.map((p, i) => {
             const nameLower = (p.name || '').toLowerCase()
-            const isHero = p.name === hero || HERO_NAMES_ALL.has(nameLower)
+            const isHero = p.name === hero || String(p.name).toLowerCase() === 'hero'
             const isSb = p.name === visionSb
             const isBb = p.name === visionBb
             const label = isSb ? 'SB' : isBb ? 'BB' : null

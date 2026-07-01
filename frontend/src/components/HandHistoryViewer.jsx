@@ -21,7 +21,6 @@
 
 import React from 'react'
 import { parseHH, formatBB, formatActionLabel } from '../lib/handParser'
-import { HERO_NAMES_ALL } from '../heroNames'
 import { DeanonBanner } from './DeanonBadge'
 import PokerCard from './PokerCard'
 
@@ -166,7 +165,7 @@ export default function HandHistoryViewer({ hand }) {
           MESA ({players.length} {players.length === 1 ? 'JOGADOR' : 'JOGADORES'})
         </div>
         {players.map((p, i) => {
-          const isHero = p.is_hero || HERO_NAMES_ALL.has(String(p.name).toLowerCase())
+          const isHero = p.isHero || String(p.name).toLowerCase() === 'hero'
           // Hotfix: usar startStack (intacto desde init em parseHH) em vez de stack
           // (mutado durante parsing — fica a 0 para jogadores all-in).
           const stackLabel = formatTableStack(p.startStack, bb)
@@ -282,7 +281,7 @@ export default function HandHistoryViewer({ hand }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {showdownPlayers.map((p, i) => {
-              const isHero = p.isHero || HERO_NAMES_ALL.has(String(p.name).toLowerCase())
+              const isHero = p.isHero || String(p.name).toLowerCase() === 'hero'
               return (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 14, padding: '6px 0',
