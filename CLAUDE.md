@@ -45,8 +45,11 @@ O Beelink tem **SEMPRE exatamente 1** watcher exe — o **activo**. Nunca dois, 
 
 - **🔥 Chama LARANJA = VPIP do jogador (uma %).** NÃO é bounty, NÃO é "percentagem de bounty". É a frequência com que o jogador entra em pote.
 - **👑 Coroa DOURADA = bounty, valor em $.** É ISTO o bounty (PKO/KO).
+- **🟢 Valor VERDE (metade) numa coroa ALHEIA = TRANSFERÊNCIA de KO (pt95, verificação visual do Rui).** Quando um jogador está a ser ELIMINADO, o bounty dele **NÃO aparece na coroa própria** — aparece como um valor **VERDE** (= o KO **instantâneo = METADE** do total) na coroa de **quem o elimina**. A coroa DOURADA ($) do eliminador é a bounty **própria** dele; o VERDE ao lado é a do **eliminado**. Logo um jogador a ser eliminado pode ter a coroa própria ausente/ilegível → a leitura-padrão da Vision **não o apanha** (fica "por rever" — **NÃO inventar**). Para o ler, lê-se o **valor verde** na coroa do eliminador (e o total do eliminado = verde × 2). Caso real: GG-6114944767 — `arieloo` eliminado, bounty dele a verde na coroa do `mirroring`.
 
 **No código o campo `bounty_pct` guarda a CHAMA LARANJA = o VPIP — o NOME É ENGANADOR.** O bounty real (coroa) está em **`bounty_value_usd`**. Qualquer cálculo de bounty (IRE, ko_units, etc.) usa `bounty_value_usd`, **nunca** `bounty_pct`. Rename do campo deferido por backward-compat — ver `#FIELD-BOUNTY-PCT-MISNAMED` (`screenshot.py`). Se vês `bounty_pct` e pensas "bounty", pára: é VPIP.
+
+**⚠️ pt95 (`#TABLE-SS-BOUNTY-UNDERREAD`):** a Vision do **table-SS** (`table_ss_vision.py`) andava a ler a **CHAMA (%)** e a metê-la no `bounty_usd` (a coroa) — o prompt nem mencionava a chama. **77/278 mãos PKO table-SS GG (28%) tinham ≥1 bounty mal lido**; a coroa é o **instantâneo = metade** → **nunca < base÷2** (base = `tournament_summaries.buy_in_bounty`). Fix: prompt distingue coroa $ vs chama % (chama só mencionada p/ IGNORAR, **não gravada**) + **guarda dura** em `queue_export.build_queue_zip` (GG PKO com coroa < base÷2 → skip `bounty_below_half_base`, não solve com prémios errados). A Vision lê a **original** no upload; a compressão 1280/JPEG85 é só p/ guardar (não degrada a leitura ao vivo, mas limita o re-read do histórico da cópia guardada).
 
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
