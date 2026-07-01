@@ -252,6 +252,13 @@ def ensure_table_ss_processing_log_schema():
         "ALTER TABLE table_ss_processing_log "
         "ADD COLUMN IF NOT EXISTS folder_tag TEXT;"
     )
+    # #GG-HEALTH-ACTIONS (Ação 3): decisão do Rui sobre uma suspeita de troca —
+    # 'moved' (aceitou, captura movida) / 'kept' (rejeitou, fica onde está) / NULL
+    # (por rever). O painel exclui as revistas (swap_review IS NOT NULL).
+    alter_swap_review = (
+        "ALTER TABLE table_ss_processing_log "
+        "ADD COLUMN IF NOT EXISTS swap_review TEXT;"
+    )
     idx_uploaded = (
         "CREATE INDEX IF NOT EXISTS idx_table_ss_uploaded_at "
         "ON table_ss_processing_log (uploaded_at DESC);"
@@ -271,6 +278,7 @@ def ensure_table_ss_processing_log_schema():
             cur.execute(sql)
             cur.execute(alter_img)
             cur.execute(alter_folder_tag)
+            cur.execute(alter_swap_review)
             cur.execute(idx_uploaded)
             cur.execute(idx_result)
             cur.execute(idx_tn_captured)
@@ -286,6 +294,8 @@ def _principal_rank(reason: Optional[str]) -> int:
     (hand-id do nome) é a âncora mais forte; tempo/nome vêm a seguir."""
     if not reason:
         return 1
+    if reason == "manual_link":         # o Rui escolheu — âncora mais forte
+        return 4
     if reason == "filename_hand_id":
         return 3
     if (reason.startswith("physical") or reason.startswith("single_tn")
@@ -1293,6 +1303,96 @@ def trigger_reconcile_table_ss(current_user=Depends(require_auth_or_api_key)):
     (consultas + updates, sem Vision). Usado p.ex. após backfill de nomes para
     re-ligar as SS já importadas (#FIX-B3 + pt54). Devolve o tally."""
     return reconcile_table_ss(hand_ids=None)
+
+
+# ── #GG-HEALTH-ACTIONS — Ações 2/3: linkar captura à mão + decisão de troca ───
+
+def _manual_link_ss(ss_id: int, hand_id: Optional[str]) -> dict:
+    """Liga (ou desliga, hand_id=None) uma captura table-SS a uma mão ESCOLHIDA
+    manualmente, reusando O MATCHER (persist + link + deanon com Gold-manda + tag).
+    NÃO adivinha (a mão vem do Rui). Reversível: re-chamar com outra mão / None.
+    Levanta ValueError('ss_not_found'|'hand_not_found')."""
+    rows = query(
+        "SELECT id, site, vision_json, folder_tag, result, matched_hand_id "
+        "FROM table_ss_processing_log WHERE id=%s", (ss_id,))
+    if not rows:
+        raise ValueError("ss_not_found")
+    r = rows[0]
+    if hand_id:
+        h = query("SELECT id, hand_id, tournament_number FROM hands WHERE hand_id=%s",
+                  (hand_id,))
+        if not h:
+            raise ValueError("hand_not_found")
+        h = h[0]
+        desired = {"result": "success", "reason_detail": "manual_link", "site": r["site"],
+                   "tournament_number": h["tournament_number"],
+                   "matched_hand_id": h["hand_id"], "matched_hand_db_id": h["id"]}
+    else:
+        desired = {"result": "no_match_to_hand", "reason_detail": "manual_unlink",
+                   "site": r["site"], "tournament_number": None,
+                   "matched_hand_id": None, "matched_hand_db_id": None}
+    _persist_table_ss_match(ss_id, desired, prev_result=r["result"],
+                            prev_matched_hand_id=r["matched_hand_id"])
+    if desired["result"] == "success":
+        # Gold manda: _deanon_after_match salta se a mão já tem position_v3.
+        _deanon_after_match(desired["matched_hand_db_id"], r["vision_json"])
+        _apply_folder_tag_to_hand(desired["matched_hand_db_id"], r["folder_tag"],
+                                  r["vision_json"])
+    return {"result": desired["result"], "matched_hand_id": desired["matched_hand_id"]}
+
+
+def _set_swap_review(ss_id: int, value: Optional[str]) -> None:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE table_ss_processing_log SET swap_review=%s WHERE id=%s",
+                        (value, ss_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@router.post("/{ss_id}/link")
+def link_table_ss(ss_id: int, payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Ação 2 (órfãs) — liga a captura à mão ESCOLHIDA pelo Rui (a app NÃO adivinha
+    pelo número do ficheiro). Gold manda. Reversível: re-link, ou hand_id=null →
+    desliga. Idempotente. Body: {hand_id: 'GG-...'|null}."""
+    try:
+        return _manual_link_ss(ss_id, payload.get("hand_id"))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{ss_id}/swap-review")
+def swap_review_table_ss(ss_id: int, payload: dict = Body(...),
+                         current_user=Depends(require_auth_or_api_key)):
+    """Ação 3 (suspeita de troca) — decisão do Rui. Body: {decision}.
+    'accept' → move a captura para GG-<nº do ficheiro> (reusa o link) + marca
+    'moved'. 'reject' → fica onde está, marca 'kept' (sai do painel). 'review' →
+    limpa a marca (por rever)."""
+    decision = payload.get("decision")
+    rows = query("SELECT id, original_filename FROM table_ss_processing_log WHERE id=%s",
+                 (ss_id,))
+    if not rows:
+        raise HTTPException(404, "captura não existe")
+    if decision == "accept":
+        num = _parse_it_hand_fields(rows[0]["original_filename"])["hand_num"]
+        if not num or len(num) < 10:
+            raise HTTPException(422, "nº do ficheiro truncado/ausente — sem ACEITAR automático")
+        try:
+            res = _manual_link_ss(ss_id, f"GG-{num}")
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+        _set_swap_review(ss_id, "moved")
+        return {"decision": "accept", **res}
+    if decision == "reject":
+        _set_swap_review(ss_id, "kept")
+        return {"decision": "reject"}
+    if decision == "review":
+        _set_swap_review(ss_id, None)
+        return {"decision": "review"}
+    raise HTTPException(400, "decision inválida (accept|reject|review)")
 
 
 def _reparse_apa_hash_keyed(hand_db_id: int) -> bool:

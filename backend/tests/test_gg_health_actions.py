@@ -1,0 +1,127 @@
+"""Tests das Ações da Saúde GG (#GG-HEALTH-ACTIONS): tagar / linkar / swap-review."""
+import pytest
+from unittest.mock import patch, MagicMock
+from fastapi import HTTPException
+
+from app.routers import gg_health, table_ss
+
+
+# ── Ação 1 — tagar ───────────────────────────────────────────────────────────
+def test_tag_format_conflict_detection():
+    assert gg_health._tag_format_conflict("icm-pko", "Vanilla") == "pko_tag_on_vanilla"
+    assert gg_health._tag_format_conflict("icm", "PKO") == "vanilla_tag_on_bounty"
+    assert gg_health._tag_format_conflict("pos-nko", "Mystery KO") == "vanilla_tag_on_bounty"
+    assert gg_health._tag_format_conflict("icm-pko", "PKO") is None      # consistente
+    assert gg_health._tag_format_conflict("nota", "Vanilla") is None     # neutra
+
+
+def test_tag_needs_confirm_on_format_conflict_no_write():
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": [], "tournament_format": "Vanilla"}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn") as mconn:
+        res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"})
+    assert res["needs_confirm"] is True and res["applied"] == 0
+    mconn.assert_not_called()                 # não escreve sem confirm
+
+
+def test_tag_idempotent_when_already_present():
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["icm-pko"], "tournament_format": "PKO"}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn", return_value=MagicMock()):
+        res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"})
+    assert res["applied"] == 0                 # já tem → no-op
+
+
+def test_tag_applies_new_tag():
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": [], "tournament_format": "PKO"}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn", return_value=MagicMock()), \
+         patch("app.services.villain_rules.apply_villain_rules"):
+        res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"})
+    assert res["applied"] == 1 and res["tag"] == "icm-pko"
+
+
+def test_tag_invalid_rejected():
+    with pytest.raises(HTTPException):
+        gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "xpto-nonsense"})
+
+
+# ── Ação 2 — link manual (Gold manda vive dentro do _deanon_after_match) ─────
+def test_manual_link_success_deanons_and_tags():
+    log = [{"id": 5, "site": "GGPoker", "vision_json": {"seats": [{"nick": "a"}]},
+            "folder_tag": "pos-pko", "result": "no_match_to_hand", "matched_hand_id": None}]
+    hand = [{"id": 42, "hand_id": "GG-9", "tournament_number": "T1"}]
+
+    def q(sql, params=None):
+        return log if "table_ss_processing_log" in sql else (hand if "FROM hands" in sql else [])
+
+    with patch.object(table_ss, "query", side_effect=q), \
+         patch.object(table_ss, "_persist_table_ss_match") as mp, \
+         patch.object(table_ss, "_deanon_after_match") as md, \
+         patch.object(table_ss, "_apply_folder_tag_to_hand") as mt:
+        res = table_ss._manual_link_ss(5, "GG-9")
+    assert res == {"result": "success", "matched_hand_id": "GG-9"}
+    mp.assert_called_once()
+    md.assert_called_once_with(42, {"seats": [{"nick": "a"}]})   # deanon (com guarda Gold)
+    mt.assert_called_once()
+
+
+def test_manual_link_unlink_does_not_deanon():
+    log = [{"id": 5, "site": "GGPoker", "vision_json": {}, "folder_tag": None,
+            "result": "success", "matched_hand_id": "GG-9"}]
+    with patch.object(table_ss, "query",
+                      side_effect=lambda s, p=None: log if "processing_log" in s else []), \
+         patch.object(table_ss, "_persist_table_ss_match"), \
+         patch.object(table_ss, "_deanon_after_match") as md:
+        res = table_ss._manual_link_ss(5, None)
+    assert res["result"] == "no_match_to_hand"
+    md.assert_not_called()
+
+
+def test_manual_link_hand_not_found_raises():
+    log = [{"id": 5, "site": "GGPoker", "vision_json": {}, "folder_tag": None,
+            "result": "x", "matched_hand_id": None}]
+    with patch.object(table_ss, "query",
+                      side_effect=lambda s, p=None: log if "processing_log" in s else []):
+        with pytest.raises(ValueError):
+            table_ss._manual_link_ss(5, "GG-inexistente")
+
+
+# ── Ação 3 — swap-review ─────────────────────────────────────────────────────
+_TRUNC = "GGPoker-Speed Racer $108 - Table 8_!)@(#_$&%^_61-20260626204636-117.png"
+_FULL = "GGPoker-Daily Hyper $50 - Table 8_!)@(#_$&%^_6083293101-20260616171101-4.png"
+
+
+def test_swap_accept_truncated_number_422():
+    log = [{"id": 5, "original_filename": _TRUNC}]
+    with patch.object(table_ss, "query", return_value=log):
+        with pytest.raises(HTTPException) as e:
+            table_ss.swap_review_table_ss(5, {"decision": "accept"})
+    assert e.value.status_code == 422
+
+
+def test_swap_accept_full_number_moves_and_marks():
+    log = [{"id": 5, "original_filename": _FULL}]
+    with patch.object(table_ss, "query", return_value=log), \
+         patch.object(table_ss, "_manual_link_ss",
+                      return_value={"result": "success", "matched_hand_id": "GG-6083293101"}) as ml, \
+         patch.object(table_ss, "_set_swap_review") as ms:
+        res = table_ss.swap_review_table_ss(5, {"decision": "accept"})
+    ml.assert_called_once_with(5, "GG-6083293101")
+    ms.assert_called_once_with(5, "moved")
+    assert res["decision"] == "accept"
+
+
+def test_swap_reject_sets_kept():
+    with patch.object(table_ss, "query", return_value=[{"id": 5, "original_filename": "x.png"}]), \
+         patch.object(table_ss, "_set_swap_review") as ms:
+        res = table_ss.swap_review_table_ss(5, {"decision": "reject"})
+    assert res["decision"] == "reject"
+    ms.assert_called_once_with(5, "kept")
+
+
+def test_swap_review_clears_mark():
+    with patch.object(table_ss, "query", return_value=[{"id": 5, "original_filename": "x.png"}]), \
+         patch.object(table_ss, "_set_swap_review") as ms:
+        table_ss.swap_review_table_ss(5, {"decision": "review"})
+    ms.assert_called_once_with(5, None)

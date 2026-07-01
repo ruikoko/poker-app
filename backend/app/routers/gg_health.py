@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from app.auth import require_auth
-from app.db import query
-from app.services.tags_canonical import normalize_tag_key
+from app.auth import require_auth, require_auth_or_api_key
+from app.db import query, get_conn
+from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 
 router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
 
@@ -85,6 +85,7 @@ def _it_rows() -> list[dict]:
     # legítimos: casaram uma mão, mas outra captura é a principal). #IT-MATCHER-COLISOES.
     rows = query(
         f"""SELECT l.id AS ss_id, l.original_filename AS fname, l.matched_hand_id,
+                   l.swap_review,
                    h.id AS hand_db_id, h.hand_id, h.discord_tags, h.hm3_tags,
                    h2.id AS dup_db_id, h2.hand_id AS dup_hand_id,
                    h2.discord_tags AS dup_discord_tags, h2.hm3_tags AS dup_hm3_tags
@@ -124,6 +125,7 @@ def _it_rows() -> list[dict]:
             "hand_db_id": hand_db_id,
             "matched": matched,
             "secondary": secondary,
+            "swap_reviewed": r.get("swap_review") is not None,
             "num_matches": num_matches,
             "tags": list(disc or []) + list(hm3 or []),
             "conflicts": _tag_conflicts(disc, hm3) if matched else [],
@@ -148,7 +150,9 @@ def _group_pred(key):
     if key == "orphans":
         return lambda im: not im["matched"]
     if key == "swap_suspects":
-        return lambda im: im["source"] == "it" and im["matched"] and im["num_matches"] is False
+        # exclui as já revistas pelo Rui (Ação 3: 'moved'/'kept' → saem do painel).
+        return lambda im: (im["source"] == "it" and im["matched"]
+                           and im["num_matches"] is False and not im.get("swap_reviewed"))
     if key == "tag_conflicts":
         return lambda im: bool(im["conflicts"])
     if key == "all":
@@ -200,3 +204,79 @@ def list_images(
         "group": group, "total": total, "page": page, "page_size": page_size,
         "images": rows[start:start + page_size],
     }
+
+
+# ── #GG-HEALTH-ACTIONS — Ação 1: tagar (multi-select, aviso de conflito) ──────
+_TAG_BUTTONS = ["icm", "icm-pko", "pos-pko", "pos-nko", "speed-racer",
+                "icm-ft", "icm-pko-ft", "pos-pko-ft", "pos-nko-ft",
+                "speed-racer-ft", "nota"]
+_PKO_TAGS = {"icm-pko", "pos-pko", "speed-racer",
+             "icm-pko-ft", "pos-pko-ft", "speed-racer-ft"}
+_VAN_TAGS = {"icm", "pos-nko", "icm-ft", "pos-nko-ft"}
+_BOUNTY_FMT = {"PKO", "Super KO", "Mystery KO"}
+
+
+def _tag_format_conflict(tag_canon, tournament_format):
+    """A tag contradiz o formato REAL do torneio? (a app sabe o formato)."""
+    fmt = (tournament_format or "").strip()
+    if tag_canon in _PKO_TAGS and fmt == "Vanilla":
+        return "pko_tag_on_vanilla"
+    if tag_canon in _VAN_TAGS and fmt in _BOUNTY_FMT:
+        return "vanilla_tag_on_bounty"
+    return None
+
+
+@router.get("/tag-buttons")
+def tag_buttons(current_user=Depends(require_auth)):
+    return {"tags": _TAG_BUTTONS}
+
+
+@router.post("/tag")
+def gg_health_tag(payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Ação 1 — taga N mãos com UMA tag canónica (multi-select). Normaliza na
+    escrita, `union distinct` em discord_tags, dispara apply_villain_rules. Se a
+    tag contradizer o formato do torneio → devolve `needs_confirm` + warnings (não
+    grava sem confirm). Idempotente (mão que já tem a tag → no-op)."""
+    hand_ids = payload.get("hand_ids") or []
+    # only_known=True: aceita SÓ tags reconhecidas (canónicas); string arbitrária
+    # → None → 400 (o endpoint não deixa criar tags fora do vocabulário).
+    canon = canonicalize_tag(payload.get("tag"), only_known=True)
+    confirm = bool(payload.get("confirm"))
+    if not canon:
+        raise HTTPException(400, "tag inválida (usar as tags canónicas)")
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    if len(hand_ids) > 500:
+        raise HTTPException(400, "máx 500 mãos por chamada")
+    rows = query("SELECT id, hand_id, discord_tags, tournament_format "
+                 "FROM hands WHERE hand_id = ANY(%s)", (hand_ids,))
+    warnings = []
+    for r in rows:
+        c = _tag_format_conflict(canon, r["tournament_format"])
+        if c:
+            warnings.append({"hand_id": r["hand_id"], "conflict": c,
+                             "tournament_format": r["tournament_format"]})
+    if warnings and not confirm:
+        return {"applied": 0, "needs_confirm": True, "warnings": warnings, "tag": canon}
+    applied = 0
+    conn = get_conn()
+    try:
+        for r in rows:
+            existing = {canonicalize_tag(t) for t in (r["discord_tags"] or [])}
+            if canon in existing:
+                continue                       # idempotente: já tem a tag
+            new_tags = list(r["discord_tags"] or []) + [canon]
+            with conn.cursor() as cur:
+                cur.execute("UPDATE hands SET discord_tags=%s WHERE id=%s",
+                            (new_tags, r["id"]))
+            conn.commit()
+            try:
+                from app.services.villain_rules import apply_villain_rules
+                apply_villain_rules(r["id"])
+            except Exception:
+                pass
+            applied += 1
+    finally:
+        conn.close()
+    return {"applied": applied, "tag": canon, "warnings": warnings, "needs_confirm": False}
