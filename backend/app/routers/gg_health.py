@@ -80,44 +80,55 @@ def _gold_rows() -> list[dict]:
 
 
 def _it_rows() -> list[dict]:
+    # h = mão PRINCIPAL (a que aponta para esta captura via context_table_ss_id).
+    # h2 = mão do matched_hand_id do log — para as capturas SECUNDÁRIAS (duplicados
+    # legítimos: casaram uma mão, mas outra captura é a principal). #IT-MATCHER-COLISOES.
     rows = query(
         f"""SELECT l.id AS ss_id, l.original_filename AS fname, l.matched_hand_id,
-                   h.id AS hand_db_id, h.hand_id, h.discord_tags, h.hm3_tags
+                   h.id AS hand_db_id, h.hand_id, h.discord_tags, h.hm3_tags,
+                   h2.id AS dup_db_id, h2.hand_id AS dup_hand_id,
+                   h2.discord_tags AS dup_discord_tags, h2.hm3_tags AS dup_hm3_tags
               FROM table_ss_processing_log l
               LEFT JOIN hands h ON h.context_table_ss_id = l.id
+              LEFT JOIN hands h2 ON h2.hand_id = l.matched_hand_id
              WHERE l.img_b64 IS NOT NULL AND l.site = 'GGPoker'"""
     )
     out = []
     for r in rows:
         m = _FNUM_IT.search(r.get("fname") or "")
         fnum = m.group(1) if m else None
-        linked = r.get("hand_db_id") is not None
-        matched_hid = r.get("hand_id") or r.get("matched_hand_id")
-        # None = indeterminado (órfã, ou sem nº no ficheiro). True/False só quando
-        # há mão ligada E nº embutido → aí sim dá para comparar (suspeita de troca).
-        if not linked or fnum is None:
+        principal = r.get("hand_db_id") is not None
+        # SECUNDÁRIA = não é a principal, mas casou uma mão existente (duplicado).
+        secondary = (not principal) and r.get("dup_db_id") is not None
+        matched = principal or secondary
+        hand_db_id = r.get("hand_db_id") if principal else (r.get("dup_db_id") if secondary else None)
+        matched_hid = (r.get("hand_id") if principal
+                       else (r.get("dup_hand_id") if secondary else r.get("matched_hand_id")))
+        disc = r.get("discord_tags") if principal else r.get("dup_discord_tags")
+        hm3 = r.get("hm3_tags") if principal else r.get("dup_hm3_tags")
+        # num_matches: None se não casou ou sem nº. Nº inteiro → igualdade; nº
+        # TRUNCADO (título longo, ex. Speed Racer) → PREFIXO da mão (dois sinais
+        # concordam; evita "suspeita" falsa em mãos que o matcher já acertou).
+        if not matched or fnum is None:
             num_matches = None
         elif len(fnum) >= 10:
             num_matches = (matched_hid == f"GG-{fnum}")
         else:
-            # #IT-MATCHER-CASCADE: nº TRUNCADO no nome (título longo cortou o fim do
-            # hand-id, ex. Speed Racer) → casa se for PREFIXO da mão ligada (dois
-            # sinais concordam). Sem isto, o painel marcava "suspeita" a mãos que o
-            # matcher já acertou (ex. 611478361 -> GG-6114783618).
             num_matches = bool(matched_hid) and matched_hid.startswith(f"GG-{fnum}")
         out.append({
             "source": "it",
             "image_url": f"/api/table-ss/image/{r['ss_id']}",
             "filename": r.get("fname"),
             "filename_num": fnum,
-            "hand_id": matched_hid if linked else None,
-            "hand_db_id": r.get("hand_db_id"),
-            "matched": linked,
-            "num_matches": num_matches,     # None p/ órfã; True/False p/ ligada
-            "tags": list(r.get("discord_tags") or []) + list(r.get("hm3_tags") or []),
-            "conflicts": _tag_conflicts(r.get("discord_tags"), r.get("hm3_tags")) if linked else [],
-            "has_tag": bool(r.get("discord_tags") or r.get("hm3_tags")),
-            "state": "casou" if linked else "órfã",
+            "hand_id": matched_hid if matched else None,
+            "hand_db_id": hand_db_id,
+            "matched": matched,
+            "secondary": secondary,
+            "num_matches": num_matches,
+            "tags": list(disc or []) + list(hm3 or []),
+            "conflicts": _tag_conflicts(disc, hm3) if matched else [],
+            "has_tag": bool(disc or hm3),
+            "state": "duplicada" if secondary else ("casou" if principal else "órfã"),
         })
     return out
 
