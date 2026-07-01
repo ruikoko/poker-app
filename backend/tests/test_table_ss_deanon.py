@@ -309,3 +309,33 @@ def test_hero_button_headsup():
     img = [_seat("HeroNick", hero=True), _seat("Villain", btn=True)]
     m, alarm = build_anon_map_by_hero_button(img, hh_pos, 2)
     assert alarm is None and m == {"Hero":"HeroNick","h1":"Villain"}
+
+
+def test_direcao_por_stacks_sem_botao():
+    """Sem botão fiável, os STACKS desempatam a direcção (1 de 2). Hero fixo; nomes pela
+    ordem. Inócuo — os stacks não atribuem nicks."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"h1":"SB","h2":"BB","Hero":"UTG","h3":"MP","h4":"CO","h5":"BTN"}  # 6-max
+    hh_st = {"h1":10.0,"h2":20.0,"Hero":30.0,"h3":40.0,"h4":50.0,"h5":60.0}
+    # wheel=[Hero,h3,h4,h5,h1,h2] stacks [30,40,50,60,10,20]
+    img = [{"nick":"A","is_hero":True,"stack_bb":30},{"nick":"B","stack_bb":40},
+           {"nick":"C","stack_bb":50},{"nick":"D","stack_bb":60},
+           {"nick":"E","stack_bb":10},{"nick":"F","stack_bb":20}]
+    m,a = build_anon_map_by_hero_button(img, hh_pos, 6, hh_st)
+    assert a is None and m == {"Hero":"A","h3":"B","h4":"C","h5":"D","h1":"E","h2":"F"}
+    img_rev = [img[0]] + img[1:][::-1]                 # Vision leu ao contrário
+    m2,a2 = build_anon_map_by_hero_button(img_rev, hh_pos, 6, hh_st)
+    assert a2 is None and m2 == m                      # stacks revertem -> mesmo mapa
+
+def test_botao_stacks_discordam_alarme():
+    """Botão diz uma direcção, stacks dizem outra → ALARME (não escreve)."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"h1":"SB","h2":"BB","Hero":"UTG","h4":"CO","h5":"BTN"}  # 5-max
+    hh_st = {"h1":10.0,"h2":20.0,"Hero":30.0,"h4":40.0,"h5":50.0}
+    # wheel=[Hero,h4,h5,h1,h2] stacks [30,40,50,10,20]; btn(h5) idx 2
+    # stacks -> fwd; botão colocado no idx 3 -> rev  => discordam
+    img = [{"nick":"A","is_hero":True,"stack_bb":30},{"nick":"B","stack_bb":40},
+           {"nick":"C","stack_bb":50},{"nick":"D","stack_bb":10,"is_button":True},
+           {"nick":"E","stack_bb":20}]
+    m,a = build_anon_map_by_hero_button(img, hh_pos, 5, hh_st)
+    assert m == {} and a == "button_stack_direction_disagree"

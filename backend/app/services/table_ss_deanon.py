@@ -124,7 +124,16 @@ def build_anon_map_from_seats(
     return _build_anon_to_real_map(matched_hand, vision_data)
 
 
-def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: int):
+def _num_stack(x):
+    """stack_bb → float; 'ALLIN'/None/inválido → None."""
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: int,
+                                  hh_stacks: dict = None):
     """pt96 (#DESANON-HERO-BUTTON-ANCHOR): desanon do table-SS por ÂNCORA Hero+botão +
     propagação circular — TEXTO (HH) manda na estrutura, imagem só dá NOMES, stacks NÃO
     entram. Método primário do table-SS (substitui o stack-elimination, que trocava
@@ -165,17 +174,53 @@ def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: 
         return {}, "image_hero_count_%d" % len(heroes)
     img = image_seats[heroes[0]:] + image_seats[:heroes[0]]
 
-    # 2ª ÂNCORA (botão) fixa a direcção — a "horário" da Vision não é consistente.
-    if btn_idx_hh is not None:  # heads-up (2-max) não tem BTN → salta a checagem
-        btns = [i for i, s in enumerate(img) if s.get("is_button")]
-        if len(btns) != 1:
-            return {}, "image_button_count_%d" % len(btns)
-        if btns[0] == btn_idx_hh:
-            pass  # horário coincide
-        elif btns[0] == (len(img) - btn_idx_hh) % len(img):
-            img = [img[0]] + img[1:][::-1]  # direcção invertida → reverter (Hero fixo)
+    # DIRECÇÃO da roda (1 de 2). O Hero está FIXO (índice 0); falta só escolher horário
+    # vs invertido. 2ª âncora = BOTÃO; fallback = STACKS (SÓ para a direcção, NUNCA para
+    # mapear nomes — os nomes vêm da ordem). Botão+stacks concordam → alta confiança;
+    # discordam → alarme. Isto é inócuo (escolhe 1 de 2 sentidos, não atribui nicks).
+    if len(hh_wheel) <= 2:
+        direction = "fwd"                       # heads-up: 1 vilão, direcção trivial
+    else:
+        # (a) botão (2ª âncora)
+        btn_dir = None
+        if btn_idx_hh is not None:
+            btns = [i for i, s in enumerate(img) if s.get("is_button")]
+            if len(btns) == 1:
+                if btns[0] == btn_idx_hh:
+                    btn_dir = "fwd"
+                elif btns[0] == (len(img) - btn_idx_hh) % len(img):
+                    btn_dir = "rev"
+        # (b) stacks (fallback — só direcção; margem clara exigida)
+        stack_dir = None
+        if hh_stacks:
+            def _dir_err(rev):
+                seq = [img[0]] + (img[1:][::-1] if rev else img[1:])
+                e = cnt = 0.0
+                for k in range(1, len(hh_wheel)):
+                    a = _num_stack(seq[k].get("stack_bb"))
+                    b = _num_stack(hh_stacks.get(hh_wheel[k]))
+                    if a is not None and b is not None:
+                        e += abs(a - b); cnt += 1
+                return (e / cnt if cnt else None), cnt
+            eF, cF = _dir_err(False)
+            eR, cR = _dir_err(True)
+            if eF is not None and eR is not None and min(cF, cR) >= 2:
+                lo, hi2 = min(eF, eR), max(eF, eR)
+                if (hi2 - lo) / (lo + 0.5) >= 0.5:      # margem clara (>=50%)
+                    stack_dir = "fwd" if eF < eR else "rev"
+        # (c) decidir (cruzamento)
+        if btn_dir and stack_dir:
+            if btn_dir != stack_dir:
+                return {}, "button_stack_direction_disagree"
+            direction = btn_dir                 # concordam → alta confiança
+        elif btn_dir:
+            direction = btn_dir
+        elif stack_dir:
+            direction = stack_dir
         else:
-            return {}, "button_mismatch_img%d_hh%d" % (btns[0], btn_idx_hh)
+            return {}, "direction_unresolved"   # nem botão nem stacks decidem → revisão
+    if direction == "rev":
+        img = [img[0]] + img[1:][::-1]           # inverter (Hero fixo no 0)
 
     # mapear pela roda alinhada. Hero (índice 0) fixo → nunca a um vilão.
     anon_map = {}
@@ -271,8 +316,11 @@ def deanonymize_hand_from_table_ss(
     if any(s.get("is_button") for s in (seats or [])):
         hh_pos = {k: (v or {}).get("position")
                   for k, v in apa_raw.items() if k != "_meta"}
+        hh_stacks = {k: (v or {}).get("stack_bb")
+                     for k, v in apa_raw.items() if k != "_meta"}
         n_players = len([k for k in apa_raw if k != "_meta"])
-        anon_map, alarm = build_anon_map_by_hero_button(seats, hh_pos, n_players)
+        anon_map, alarm = build_anon_map_by_hero_button(
+            seats, hh_pos, n_players, hh_stacks)
         if alarm:
             logger.info("[table_ss_deanon] hand %s ÂNCORA alarme=%s → revisão (não escreve)",
                         hand_db_id, alarm)
