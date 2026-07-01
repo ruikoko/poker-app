@@ -345,6 +345,12 @@ export const captureTriage = {
   imageUrl: (id)         => `${BASE}/table-ss/image/${id}`,
 }
 
+// ── Mãos suspeitas (guardião de validação, read-only) ───────────────────────
+export const suspicious = {
+  list:  () => req('GET', '/suspicious-hands'),
+  count: () => req('GET', '/suspicious-hands/count'),
+}
+
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
 export const hrc = {
   upload: (file, opts = {}) => {

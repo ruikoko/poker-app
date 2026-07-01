@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import ImportModal from './ImportModal'
 import { useStudyTimer } from '../contexts/StudyTimerContext'
+import { suspicious } from '../api/client'
 
 const NAV = [
   { to: '/',            label: 'Dashboard' },
@@ -14,6 +15,7 @@ const NAV = [
   { to: '/hm3',         label: 'HM3' },
   { to: '/table-ss',    label: 'SS Mesa' },
   { to: '/marcadas-por-captura', label: 'Marcadas/captura' },
+  { to: '/suspeitas',   label: 'Mãos suspeitas', badge: 'suspicious' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
   { to: '/hrc',         label: 'HRC' },
@@ -123,6 +125,11 @@ const iconBtnStyle = (color, bg, border) => ({
 export default function Shell() {
   const { user, logout } = useAuth()
   const [importOpen, setImportOpen] = useState(false)
+  const [suspCount, setSuspCount] = useState(null)
+
+  useEffect(() => {
+    suspicious.count().then((c) => setSuspCount(c?.total ?? null)).catch(() => {})
+  }, [])
 
   return (
     <div className="app-shell">
@@ -130,14 +137,22 @@ export default function Shell() {
         <div className="sidebar-logo">poker<span>app</span></div>
 
         <nav>
-          {NAV.map(({ to, label }) => (
+          {NAV.map(({ to, label, badge }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
               className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
             >
-              {label}
+              <span>{label}</span>
+              {badge === 'suspicious' && suspCount > 0 && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, color: '#fff',
+                  background: '#ef4444', borderRadius: 9, padding: '1px 7px', minWidth: 18,
+                  textAlign: 'center',
+                }}>{suspCount}</span>
+              )}
             </NavLink>
           ))}
         </nav>

@@ -5,7 +5,8 @@
 - **Pontas dos bounties (histórico):** **1 presa** (`GG-6102580840`, seat `G Sieemshchikov` — reread OCR l/i não casou) + **2 por rever** (`6101135610` parcial, `6104865113` sem imagem em Transferências) + **5 seats truncados**. Consertam re-lendo a coroa certa.
 - **Desanon por âncora — VERIFICAÇÃO VISUAL do Rui** das 14 (fichas de verificação geradas: hand/torneio/hora + seat a seat + âncora que resolveu). + o `arieloo` (bounty a **verde** na coroa do `mirroring`, `GG-6114944767`).
 - **Inventário Vision:** 4 pontos Claude Sonnet 4.6 (table-SS, replayer, lobby, backoffice) + 1 OCR winsdk (`tree_stats`, watcher). Rever qualidade/prompts de cada.
-- **Guardião de validação automática** (pedido do Rui): detectar `bounty < base÷2` / vilão=nome do Hero / desanon `review_alarm` e **alertar** (não deixar passar em silêncio).
+- **Guardião de validação automática** (pedido do Rui): detectar `bounty < base÷2` / vilão=nome do Hero / desanon `review_alarm` e **alertar** (não deixar passar em silêncio). **v1 construída** — secção **"Mãos suspeitas"** (endpoint `GET /api/suspicious-hands`, page + badge na sidebar) cobre os **2 venenos PUROS** (bounty<½ ≈91 · nome-do-Hero-num-vilão =6). Falta: **veneno 3 (`review_alarm`)** — não é persistido, precisa de coluna/log próprio para ser listável.
+- **Reorganização da barra lateral (pedido do Rui):** o Rui quer **reavaliar a disposição/organização da sidebar mais tarde**, quando a app estiver ao gosto dele (ordem/agrupamento dos itens — ex. juntar as filas de revisão «Marcadas/captura» + «Mãos suspeitas»). Não mexer agora; só quando ele pedir.
 - **8549 (`#STUDY-STATE-REGRESSION-HH-IMPORT`):** Opção A (deixar). Opção B só COMPLETA (3 peças) em sessão dedicada — ver TECH_DEBTS.
 
 ## ★ pt91 (26–27 Jun 2026) — FECHO DE DIA (import Junho + Vision + fix posições HRC + GTO Nível 2 mapa técnico)

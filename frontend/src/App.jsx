@@ -20,6 +20,7 @@ import TableSSPage from './pages/TableSS'
 import LobbysPage from './pages/Lobbys'
 import ImportHealthPage from './pages/ImportHealth'
 import CaptureTriagePage from './pages/CaptureTriage'
+import SuspiciousHandsPage from './pages/SuspiciousHands'
 import { StudyTimerProvider } from './contexts/StudyTimerContext'
 
 function RequireAuth({ children }) {
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="hm3" element={<HM3Page />} />
           <Route path="table-ss" element={<TableSSPage />} />
           <Route path="marcadas-por-captura" element={<CaptureTriagePage />} />
+          <Route path="suspeitas" element={<SuspiciousHandsPage />} />
           <Route path="lobbys" element={<LobbysPage />} />
           <Route path="import-health" element={<ImportHealthPage />} />
           <Route path="stats" element={<StatsPage />} />

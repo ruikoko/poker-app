@@ -67,6 +67,33 @@ TS_GATED_FORMATS = ("pko", "super ko", "ko")
 WINAMAX_BOUNTY_FORMATS = ("pko", "super ko", "ko")
 
 
+def detect_bounty_below_half(player_names, starting_bounty):
+    """pt95 (#TABLE-SS-BOUNTY-UNDERREAD) — deteta lugares cuja coroa
+    (`bounty_value_usd`) é menor que `base÷2` (base = `tournament_summaries.
+    buy_in_bounty`). A coroa é o KO instantâneo = METADE do bounty → NUNCA
+    deve estar abaixo de base÷2; se está, a Vision provavelmente leu a chama
+    (VPIP %) em vez da coroa ($).
+
+    Pura (sem BD). Devolve lista de `{name, value, floor}` (vazia = ok).
+    Fonte única reusada pela guarda de `build_queue_zip` E pelo guardião
+    de validação (`/api/suspicious-hands`)."""
+    if not starting_bounty:
+        return []
+    pn = player_names
+    if isinstance(pn, str):
+        try:
+            pn = json.loads(pn)
+        except (ValueError, TypeError):
+            pn = {}
+    floor = float(starting_bounty) / 2.0
+    below = []
+    for e in ((pn or {}).get("players_list") or []):
+        v = e.get("bounty_value_usd")
+        if v is not None and float(v) < floor:
+            below.append({"name": e.get("name"), "value": float(v), "floor": floor})
+    return below
+
+
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
 # Ex: `Level17(2,500/5,000(600))` -> grupos: 17, 2,500, 5,000, 600.
 _LEVEL_RE = re.compile(
@@ -1654,20 +1681,12 @@ def build_queue_zip(
             # GG PKO com base do TS only. Regenera-se re-lendo a SS original (não a
             # comprimida). Não apanha os casos raros em que o VPIP calha ≥ base÷2.
             if site == "GGPoker" and fmt in TS_GATED_FORMATS and starting_bounty:
-                _pn = h.get("player_names") or {}
-                if isinstance(_pn, str):
-                    try:
-                        _pn = json.loads(_pn)
-                    except (ValueError, TypeError):
-                        _pn = {}
-                _floor = float(starting_bounty) / 2.0
-                _below = [e.get("name") for e in (_pn.get("players_list") or [])
-                          if e.get("bounty_value_usd") is not None
-                          and float(e["bounty_value_usd"]) < _floor]
+                _below = detect_bounty_below_half(h.get("player_names"), starting_bounty)
                 if _below:
                     skipped.append({"hand_id": hand_id,
                                     "reason": "bounty_below_half_base",
-                                    "detail": {"floor": _floor, "below": _below[:8]}})
+                                    "detail": {"floor": _below[0]["floor"],
+                                               "below": [b["name"] for b in _below][:8]}})
                     continue
 
             hh_text = convert_gg_hh_to_pokerstars_compatible(h, bounty_ctx=bctx)
