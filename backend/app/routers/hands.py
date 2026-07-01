@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 import logging
-from app.auth import require_auth
+from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, execute, execute_returning, get_conn
 from app.services.deanon_status import deanon_status_from_row
 
@@ -1569,7 +1569,7 @@ def get_hand_screenshot(hand_pk: int, current_user=Depends(require_auth)):
 # ── Admin endpoints ───────────────────────────────────────────────────────────
 
 @router.post("/admin/canonicalize-tags")
-def admin_canonicalize_tags(confirm: bool = False, current_user=Depends(require_auth)):
+def admin_canonicalize_tags(confirm: bool = False, current_user=Depends(require_auth_or_api_key)):
     """Backfill único: canonicaliza `hm3_tags`/`discord_tags` das mãos onde a
     forma gravada difere da canónica (ex.: 'icm pko ft'→'icm-pko-ft', 'pos pko
     FT'→'pos-pko-ft'). SÓ toca o que MUDA; preserva o resto (adormecidas, 'nota
