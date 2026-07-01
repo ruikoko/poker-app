@@ -97,8 +97,14 @@ def _it_rows() -> list[dict]:
         # há mão ligada E nº embutido → aí sim dá para comparar (suspeita de troca).
         if not linked or fnum is None:
             num_matches = None
-        else:
+        elif len(fnum) >= 10:
             num_matches = (matched_hid == f"GG-{fnum}")
+        else:
+            # #IT-MATCHER-CASCADE: nº TRUNCADO no nome (título longo cortou o fim do
+            # hand-id, ex. Speed Racer) → casa se for PREFIXO da mão ligada (dois
+            # sinais concordam). Sem isto, o painel marcava "suspeita" a mãos que o
+            # matcher já acertou (ex. 611478361 -> GG-6114783618).
+            num_matches = bool(matched_hid) and matched_hid.startswith(f"GG-{fnum}")
         out.append({
             "source": "it",
             "image_url": f"/api/table-ss/image/{r['ss_id']}",
