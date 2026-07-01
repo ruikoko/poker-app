@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ggHealth } from '../api/client'
+import { ggHealth, API_ROOT } from '../api/client'
 
 // "Saúde das mãos GG" — Fase 1 (só mostrar). Dashboard de números + listas por
 // imagem. Só GG. Lê, não escreve. Absorve (Fase 2) a "Marcadas por captura".
@@ -44,13 +44,25 @@ function NumBadge({ im }) {
   return <span style={{ fontSize: 11, color: '#64748b' }}>—</span>
 }
 
-function Row({ im }) {
-  const body = (
+// A imagem serve-se pelo id do PRÓPRIO registo (IT → table_ss_processing_log.id;
+// Gold → entries.id), NUNCA pelo context_table_ss_id da mão (nulo nas órfãs).
+// O URL do backend é relativo (`/api/...`); prefixa-se API_ROOT (o host do
+// backend em produção — igual ao que o client faz nas chamadas JSON).
+function imgSrc(im) { return API_ROOT + im.image_url }
+
+function Row({ im, onZoom }) {
+  const src = imgSrc(im)
+  return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-      <img src={im.image_url} alt="" loading="lazy" style={{ width: 96, height: 60, objectFit: 'cover', borderRadius: 4, border: '1px solid #2a2d3a', flexShrink: 0, background: '#0b0d13' }} />
+      {/* Miniatura → clica abre a IMAGEM ampliada (lightbox), em TODOS os grupos (incl. órfãs). */}
+      <img src={src} alt="" loading="lazy" onClick={() => onZoom(src)}
+        style={{ width: 96, height: 60, objectFit: 'cover', borderRadius: 4, border: '1px solid #2a2d3a', flexShrink: 0, background: '#0b0d13', cursor: 'zoom-in' }} />
       <TipoBadge source={im.source} />
       <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#94a3b8', minWidth: 96 }}>{im.filename_num || '—'}</span>
-      <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: im.hand_id ? '#60a5fa' : '#64748b', minWidth: 130 }}>{im.hand_id || 'sem mão'}</span>
+      {/* hand_id → abre a mão (só quando há mão casada); órfã = texto cinza. */}
+      {im.hand_db_id
+        ? <Link to={`/hand/${im.hand_db_id}`} style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#60a5fa', minWidth: 130, textDecoration: 'none' }}>{im.hand_id}</Link>
+        : <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#64748b', minWidth: 130 }}>sem mão</span>}
       <NumBadge im={im} />
       <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
         {(im.tags || []).map((t, i) => <span key={i} style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.12)', padding: '1px 6px', borderRadius: 4 }}>{t}</span>)}
@@ -59,9 +71,16 @@ function Row({ im }) {
       <span style={{ fontSize: 11, color: im.state === 'órfã' ? '#f59e0b' : '#64748b', minWidth: 50, textAlign: 'right' }}>{im.state}</span>
     </div>
   )
-  return im.hand_db_id
-    ? <Link to={`/hand/${im.hand_db_id}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>{body}</Link>
-    : <div style={{ opacity: 0.85 }}>{body}</div>
+}
+
+function Lightbox({ src, onClose }) {
+  if (!src) return null
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, cursor: 'zoom-out' }}>
+      <img src={src} alt="" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
+      <button onClick={onClose} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', borderRadius: 8, padding: '4px 12px' }}>✕</button>
+    </div>
+  )
 }
 
 export default function GGHealth() {
@@ -70,6 +89,7 @@ export default function GGHealth() {
   const [group, setGroup] = useState(null)
   const [list, setList] = useState(null)
   const [page, setPage] = useState(1)
+  const [zoom, setZoom] = useState(null)   // src da imagem ampliada (lightbox)
 
   useEffect(() => { ggHealth.summary().then(setSum).catch(e => setErr(e.message)) }, [])
   useEffect(() => {
@@ -115,7 +135,7 @@ export default function GGHealth() {
           {!list ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
             <>
               <div style={{ ...card, overflow: 'hidden' }}>
-                {list.images.map((im, i) => <Row key={i} im={im} />)}
+                {list.images.map((im, i) => <Row key={i} im={im} onZoom={setZoom} />)}
                 {list.images.length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhuma imagem neste grupo.</div>}
               </div>
               {list.total > list.page_size && (
@@ -129,6 +149,8 @@ export default function GGHealth() {
           )}
         </div>
       )}
+
+      <Lightbox src={zoom} onClose={() => setZoom(null)} />
     </div>
   )
 }
