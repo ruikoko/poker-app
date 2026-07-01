@@ -1317,6 +1317,50 @@ def set_anon_map_override(payload: dict = Body(...),
             "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing)}
 
 
+@router.post("/set-bounties")
+def set_bounties_override(payload: dict = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """pt95 (#TABLE-SS-BOUNTY-UNDERREAD): override MANUAL dos bounties (coroa $) de UMA
+    mão, por nick. Actualiza SÓ `player_names.players_list[*].bounty_value_usd` — NÃO
+    toca anon_map/apa. Para consertar bounties mal lidos (a Vision leu a chama %) com a
+    coroa relida da SS original. Nicks não presentes no players_list ficam intactos +
+    devolvidos em `not_found` (não se inventa). Body: {hand_id, bounties:{nick:coroa}}."""
+    import json as _json
+    hand_id = payload.get("hand_id")
+    bounties = payload.get("bounties") or {}
+    if not hand_id or not isinstance(bounties, dict) or not bounties:
+        raise HTTPException(400, "hand_id + bounties (dict não-vazio) obrigatórios")
+    rows = query("SELECT id, player_names FROM hands WHERE hand_id = %s", (hand_id,))
+    if not rows:
+        raise HTTPException(404, "mão não encontrada")
+    pn = rows[0]["player_names"] or {}
+    if isinstance(pn, str):
+        pn = _json.loads(pn)
+    pl = pn.get("players_list") or []
+    updated = []
+    for e in pl:
+        nm = e.get("name")
+        if nm in bounties:
+            try:
+                e["bounty_value_usd"] = float(bounties[nm])
+                updated.append(nm)
+            except (ValueError, TypeError):
+                pass
+    pn["players_list"] = pl
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE hands SET player_names = %s WHERE id = %s",
+                        (_json.dumps(pn), rows[0]["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("table-ss set-bounties: %s updated=%d not_found=%d",
+                hand_id, len(updated), len(bounties) - len(updated))
+    return {"status": "set", "hand_id": hand_id, "updated": updated,
+            "not_found": [n for n in bounties if n not in updated]}
+
+
 # pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).
 _REPROCESS_ELIGIBLE_SQL = (
     "FROM table_ss_processing_log "
