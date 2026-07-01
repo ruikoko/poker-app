@@ -1,5 +1,13 @@
 # Pendentes — backlog vivo
 
+## ★ 1 Jul 2026 — pendências pós-frentes (bounties + desanon por âncora)
+- **Build do watcher (foco + guarda de TEMPO):** o foco (`#HRC-FOCUS-ROBUSTNESS`, `049cd4b` em `watcher-gate`, NÃO buildado) + a **guarda de tempo** (teto **5h/1ª run** decidido; falta o **print do painel do HRC com o tempo** + escrever o OCR do tempo em `tree_stats.py`) — **um build só** com `min_children=60`.
+- **Pontas dos bounties (histórico):** **1 presa** (`GG-6102580840`, seat `G Sieemshchikov` — reread OCR l/i não casou) + **2 por rever** (`6101135610` parcial, `6104865113` sem imagem em Transferências) + **5 seats truncados**. Consertam re-lendo a coroa certa.
+- **Desanon por âncora — VERIFICAÇÃO VISUAL do Rui** das 14 (fichas de verificação geradas: hand/torneio/hora + seat a seat + âncora que resolveu). + o `arieloo` (bounty a **verde** na coroa do `mirroring`, `GG-6114944767`).
+- **Inventário Vision:** 4 pontos Claude Sonnet 4.6 (table-SS, replayer, lobby, backoffice) + 1 OCR winsdk (`tree_stats`, watcher). Rever qualidade/prompts de cada.
+- **Guardião de validação automática** (pedido do Rui): detectar `bounty < base÷2` / vilão=nome do Hero / desanon `review_alarm` e **alertar** (não deixar passar em silêncio).
+- **8549 (`#STUDY-STATE-REGRESSION-HH-IMPORT`):** Opção A (deixar). Opção B só COMPLETA (3 peças) em sessão dedicada — ver TECH_DEBTS.
+
 ## ★ pt91 (26–27 Jun 2026) — FECHO DE DIA (import Junho + Vision + fix posições HRC + GTO Nível 2 mapa técnico)
 
 > ⚠️ **Reconciliação com a nota ditada do Rui:** 2 itens da nota de fecho avançaram NESTA
@@ -1012,6 +1020,20 @@ este caminho:
 > Nota: o **scan pt73** mostrou **0 mãos contaminadas hoje** (a superfície de screenshot-por-nome
 > está vazia post-wipe + replayer morto). O caminho está **latente**, não activo — é exactamente
 > por isso que se corrige **antes** de o reactivar, e não depois. → `#GG-DOWNLOAD-IMG-FILENAME-TIME-AND-BLINDS-UNRELIABLE`.
+
+---
+
+## #HRC-REIMPORT-REDEANON-CASADAS — melhoria futura (anotado pt93, NÃO agora)
+
+Um **re-import de HH** repõe `all_players_actions` cru + esvazia `player_names.anon_map`
+**sem re-disparar a desanon por table-SS**, porque o re-link só re-corre a desanon de SS
+**órfãs** (`no_match_to_hand`), não de SS **já casadas**. Resultado: uma mão GG que já estava
+desanonimizada volta a ficar com hashes (display) e, se for **PKO**, com **bounty achatado no
+solve HRC** (a injecção casa por nome → miss → todos no base). Aconteceu **1 vez** (GG-6113994321,
+por causa dos wipes/re-imports pt68/pt92). **Fix futuro:** o `import_` re-disparar a desanon para
+mãos com table-SS já casada (não só órfãs). Diferido por decisão do Rui (pt93) — não empilhar nas
+3 frentes em curso (gravação/âncora/bounty). O acidente actual resolve-se com **re-run** da desanon
+da própria mão. Cross-ref: `DESANON_ANATOMIA`, `#HRC-ANCHOR-RAISE-AFTER-HERO-FOLD`.
 
 ---
 

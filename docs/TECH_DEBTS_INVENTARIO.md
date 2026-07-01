@@ -6,6 +6,15 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 1 Jul 2026 — 2 frentes de QUALIDADE DE DADOS GG (bounties + desanon por âncora)
+
+| Tech debt | Estado | Resumo |
+|---|---|---|
+| **#TABLE-SS-BOUNTY-UNDERREAD** | ✅ FIXED (`824f23d`) + histórico 10/13 | A Vision do table-SS lia a **CHAMA (VPIP %)** para o `bounty_usd` (coroa $) — o prompt nem mencionava a chama → **77/278 PKO table-SS GG (28%)** com ≥1 bounty mal lido. Regra: coroa = KO instantâneo = **metade → nunca < base÷2** (GG/PS). Fix: prompt afinado (coroa$ vs chama%, **sem campo VPIP gravado**) + **guarda dura** `bounty_below_half_base` em `queue_export.build_queue_zip`. **Verde de KO** documentado (CLAUDE.md armadilha — eliminado → bounty a verde na coroa de quem o elimina, total=verde×2). A Vision lê a **original** no upload (compressão só p/ guardar). Histórico: **10 consertadas** (SS original full-quality de Transferências) fora da quarentena; **1 presa** (`6102580840`, seat `G Sieemshchikov`); **2 por rever** (`6101135610`, `6104865113`); 5 seats truncados por-rever. |
+| **#DESANON-HERO-BUTTON-ANCHOR** | ✅ FIXED (`72eaedc`) — **15/15, bug a 0** | Substitui o **stack-elimination** (trocava nicks em stacks próximos → 15 mãos com vilão=nome do Hero) pela **âncora Hero+botão + ordem circular**. Detalhe: `DESANON_ANATOMIA §3.2.3`. Vision estendido (`is_hero` POSICIONAL sem cartas + `is_button` + ordem circular); **stacks SÓ p/ a direcção** (nunca mapeiam nomes); Hero nunca a vilão; **salvaguarda** (img≠HH/direcção indecisa → alarme, não escreve). 19 testes. **Só GG.** |
+| **#STUDY-STATE-REGRESSION-HH-IMPORT** (8549) | **Decisão: Opção A (DEIXAR)** | As 8549 GG-sem-SS em `new` são **inócuas** (escondidas do Estudo pelo gate `match_method`+tag; 851 visíveis = 440 GG+SS + 395 WN + 14 WPN + 2 PS). **Mover→`mtt_archive` PRENDIA-AS** — as queries do table-SS têm `!= mtt_archive` (`table_ss.py:376/397/1396`) → o SS não as apanharia. **Opção B só COMPLETA (3 peças: migração + fix da entrada `import_.py:343/367` + tirar `!= mtt_archive` + promover archive→new na desanon)** em sessão dedicada — **NUNCA parcial**. |
+| **#HRC-FOCUS-ROBUSTNESS** | ⏸ código em `watcher-gate` (`049cd4b`), **NÃO buildado** | Foreground garantido antes de cliques críticos (Play/export) + retry. As 6 falhas foco/timing da corrida pt94. **Junta ao próximo build do watcher** (com a guarda de tempo). |
+
 ## pt92 (29-30 Jun 2026 — índice de navegação, fila manual, painel rápido, ICM, FT)
 
 **Tudo LIVE em produção.** Sessão grande: fix do índice de navegação do HRC (`#OFFSET-WITHIN-BUCKET-JAM`) + re-process das mãos contaminadas, fila HRC 100% manual, painel `/hrc` rápido, ICM via TS, regras de sizing pt91, regras de FT seladas (a implementar).

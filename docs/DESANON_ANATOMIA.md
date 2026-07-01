@@ -17,7 +17,7 @@ resolver uma resolve a outra — **não resolve**.
 | | Pergunta | O que responde | Sinal usado | Estado |
 |---|---|---|---|---|
 | **P1** | **QUAL é a mão?** | Liga a captura (SS) à mão GG certa na BD | hand_id / tempo / nome | ver §2 |
-| **P2** | **QUEM senta em que cadeira?** | Mapeia cada hash anónimo → nick real, na cadeira certa | âncora + stacks | ver §3 — **desenho fechado (§3.2.1), implementação pendente** |
+| **P2** | **QUEM senta em que cadeira?** | Mapeia cada hash anónimo → nick real, na cadeira certa | âncora (posição/botão); stacks só p/ direcção | **RESOLVIDO**: gold=`position_v3` (§3.2.2); table-SS=âncora Hero+botão (§3.2.3, pt96) |
 
 > **Por que importa a separação:** o hand_id do filename (decisão pt73, §2) resolve **só P1**
 > — diz qual é a mão, **não** quem são os jogadores. P2 continua a precisar de uma âncora
@@ -86,11 +86,15 @@ o caso GG com TM no nome — passam a ser usados só quando o hand_id falta (ver
 ## 3. Pergunta 2 — QUEM senta onde (hash → nick → cadeira)
 
 O hand_id resolve P1 mas **não traz nicks**. Para pôr cada nick real na cadeira certa é
-preciso uma âncora própria. **Para gold images GG (replayer) está RESOLVIDA e DEPLOYED por
-POSIÇÃO — `position_v3` (§3.2.2, pt75)**, o método primário. A âncora por **stack** (§3.1)
-fica como **fallback** (entries sem sigla) e continua a desanon das **185 table-SS**, onde
-mora o bug (§3.2). O desenho por SB/BB+botão+Herói (§3.2.1, 2026-06-16) mantém-se como a
-âncora futura do table-SS.
+preciso uma âncora própria. **Ambos os caminhos estão RESOLVIDOS e DEPLOYED:**
+- **Gold images GG (replayer): `position_v3` por POSIÇÃO** (§3.2.2, pt75).
+- **Table-SS: âncora Hero+botão** (§3.2.3, **pt96 2026-07-01**) — implementa o desenho
+  §3.2.1 (Hero+botão+ordem circular, stacks só p/ direcção). **Substituiu o
+  stack-elimination como primário** (este ficou fallback p/ dados antigos sem `is_button`).
+  As 15 mãos com "vilão = nome do Hero" (§3.2) ficaram consertadas 15/15, bug a **0**.
+
+A âncora por **stack** (§3.1) **deixou de ser primário** — é só fallback (entries/dados
+sem sigla nem `is_button`). O §3.2.1 **já não é "pendente"** — está implementado em §3.2.3.
 
 ### 3.1 Maquinaria actual (por stack — herança do pt7)
 `deanonymize_hand_from_table_ss()` (`table_ss_deanon.py`, pt71 E3) reutiliza
@@ -165,6 +169,38 @@ inclui LJ). `match_method='position_v3'`.
   dão **ambos `position_v3`**. Entries **sem** sigla caem no stack-elimination (§3.1), intacto.
 - **Prova:** 41 gold images de Junho (âncoras SB/BB 81/81; consistência entre mãos 54/55, 0
   inconsistências) + smoke ao vivo nos dois sentidos (nomes certos por cadeira). → `JOURNAL pt75`.
+
+### 3.2.3 ★ Âncora Hero+botão — desanon do TABLE-SS (FEITO + DEPLOYED, pt96 2026-07-01)
+
+**Método PRIMÁRIO do table-SS** — substitui o **stack-elimination** (§3.1) como primário
+(este fica só fallback para dados antigos sem `is_button`). É a **implementação do desenho
+§3.2.1** adaptada ao table-SS (que, ao contrário da gold, **NÃO tem secção de blinds em
+texto**): a âncora é o **HERO** (não SB/BB) + o **BOTÃO**.
+
+**Princípio:** TEXTO (HH) manda na estrutura; imagem só dá NOMES; **stacks NÃO mapeiam**.
+
+- **Vision estendido** (`table_ss_vision.py`): `is_hero` **POSICIONAL** (baixo-centro
+  auto-center, **IGNORA cartas** — o Hero foldado não tem cartas mas está sempre lá; furo
+  apanhado pelo Rui) + `is_button` (o 'D') + seats em **ordem CIRCULAR** (horário do Hero).
+- **Alinhamento** (`build_anon_map_by_hero_button`):
+  1. Roda da HH (`POSITION_MAPS`: SB,BB,…,BTN) rodada para o **Hero no índice 0**.
+  2. **2 âncoras** fixam a roda: Hero (índice 0) + a **DIRECÇÃO** (a "horário" da Vision
+     **NÃO é consistente** — ~50% invertida). A direcção vem do **BOTÃO**; se o 'D' se lê
+     mal (~50% das SS), **fallback: STACKS** — comparam img-vs-HH nas 2 hipóteses; a de
+     erro menor (margem ≥50%) dá a direcção. **Os stacks SÓ escolhem 1 de 2 sentidos —
+     NUNCA mapeiam nomes** (inócuo; radicalmente + seguro que o stack-elimination, que
+     usava stacks p/ escolher QUEM é cada um).
+  3. **Cruzamento:** botão+stacks concordam → alta confiança; **discordam → ALARME**.
+  4. **Regra dura:** Hero no índice 0 fixo → **NUNCA mapeado a um vilão** (a raiz do bug dos 15).
+  5. **SALVAGUARDA:** contagens img≠HH (sitting-out/mesa incompleta) / direcção indecisa →
+     **ALARME, NÃO escreve** (`status='review_alarm'`) — nunca sai com nomes trocados em silêncio.
+- **Resultado:** as **15 mãos** com "vilão = nome do Hero" (o stack-elimination trocava em
+  stacks próximos) **re-desanonimizadas 15/15**, bug sistémico a **0** (7 pelo botão, 7 pelo
+  fallback de stacks, 1 [a 4321] por override manual de blinds). Ensaio de leitura: 8/8 na
+  4321 ground-truth (Hero foldado sem cartas), 8/7/5/2-max. **19 testes**, commit `72eaedc`. **Só GG.**
+- **Código:** `build_anon_map_by_hero_button` + `_num_stack` (`table_ss_deanon.py`);
+  `deanonymize_hand_from_table_ss` prefere-o quando há `is_button`. Override manual:
+  `POST /api/table-ss/set-anon-map` (por blinds/gold) + `/set-bounties`.
 
 ### 3.3 Mitigações já no sítio (reduzem, não resolvem)
 - **Guarda anti-envenenamento** (`_filter_ambiguous_stackless`, pt71): ≥2 bancos não-herói
