@@ -47,6 +47,7 @@ from app.routers.table_ss import (
     ensure_table_ss_processing_log_schema,
 )
 from app.routers.suspicious import router as suspicious_router
+from app.routers.gg_health import router as gg_health_router
 from app.routers.capture_triage import (
     router as capture_triage_router,
     ensure_capture_triage_column,
@@ -344,6 +345,7 @@ app.include_router(table_ss_router)
 app.include_router(import_health_router)
 app.include_router(capture_triage_router)
 app.include_router(suspicious_router)
+app.include_router(gg_health_router)
 
 # Serve uploaded screenshots as static files
 import os

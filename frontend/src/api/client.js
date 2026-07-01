@@ -351,6 +351,12 @@ export const suspicious = {
   count: () => req('GET', '/suspicious-hands/count'),
 }
 
+// ── Saúde das mãos GG (vista por imagem, read-only) ─────────────────────────
+export const ggHealth = {
+  summary: () => req('GET', '/gg-health/summary'),
+  list: (group, page = 1) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}`),
+}
+
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
 export const hrc = {
   upload: (file, opts = {}) => {

@@ -14,6 +14,7 @@ const NAV = [
   { to: '/lobbys',      label: 'Lobbys' },
   { to: '/hm3',         label: 'HM3' },
   { to: '/table-ss',    label: 'SS Mesa' },
+  { to: '/gg-health',   label: 'Saúde GG' },
   { to: '/marcadas-por-captura', label: 'Marcadas/captura' },
   { to: '/suspeitas',   label: 'Mãos suspeitas', badge: 'suspicious' },
   { to: '/villains',    label: 'Vilões' },
