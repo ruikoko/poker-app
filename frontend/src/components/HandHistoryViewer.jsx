@@ -160,7 +160,7 @@ export default function HandHistoryViewer({ hand }) {
 
       {/* ── MESA ── */}
       <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1d2a' }}>
-        <DeanonBanner status={hand.deanon_status} />
+        <DeanonBanner status={hand.deanon_status} handId={hand.hand_id} />
         <div style={{ fontSize: 14, fontWeight: 700, color: '#94a3b8', marginBottom: 12, letterSpacing: 0.5 }}>
           MESA ({players.length} {players.length === 1 ? 'JOGADOR' : 'JOGADORES'})
         </div>

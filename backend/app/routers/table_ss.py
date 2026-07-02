@@ -1395,6 +1395,198 @@ def swap_review_table_ss(ss_id: int, payload: dict = Body(...),
     raise HTTPException(400, "decision inválida (accept|reject|review)")
 
 
+# ── Fase 1 do editor Saúde GG (A: suspeitas 2-candidatas + revert; E: verificada) ──
+
+def _revert_hand_to_anonymous(hand_db_id: int) -> dict:
+    """Primitiva "reverter mão à anónima" (Fase 1-A). Repõe o apa HASH-keyed do raw,
+    limpa `player_names` ({}), apaga `hand_villains` e desliga `context_table_ss_id`.
+
+    ⚠️ GUARDA (Gold-manda / Discord prevalece): só reverte se `match_method=='table_ss'`
+    (a desanon veio de uma captura table-SS). `position_v3` (Gold), Discord, ou null →
+    NÃO toca (devolve `reverted=False`). Reversível: re-ligar a captura re-deriva.
+    Devolve {reverted, match_method, reason?}."""
+    import json as _json
+    from app.parsers.gg_hands import parse_hands
+    rows = query("SELECT raw, player_names FROM hands WHERE id=%s", (hand_db_id,))
+    if not rows:
+        return {"reverted": False, "reason": "hand_not_found"}
+    pn = rows[0]["player_names"] or {}
+    if isinstance(pn, str):
+        try:
+            pn = _json.loads(pn)
+        except (ValueError, TypeError):
+            pn = {}
+    mm = pn.get("match_method")
+    if mm != "table_ss":                       # Gold/Discord/anónima → não tocar
+        return {"reverted": False, "reason": "not_table_ss", "match_method": mm}
+    raw = rows[0]["raw"] or ""
+    parsed, _errs = parse_hands(raw.encode("utf-8"), "revert.txt")
+    if not parsed or not parsed[0].get("all_players_actions"):
+        return {"reverted": False, "reason": "reparse_failed", "match_method": mm}
+    fresh_apa = parsed[0]["all_players_actions"]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE hands SET all_players_actions=%s, player_names='{}'::jsonb, "
+                "context_table_ss_id=NULL WHERE id=%s",
+                (_json.dumps(fresh_apa), hand_db_id))
+            cur.execute("DELETE FROM hand_villains WHERE hand_db_id=%s", (hand_db_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("revert-to-anon: hand %s revertida (era table_ss)", hand_db_id)
+    return {"reverted": True, "match_method": mm}
+
+
+def _hand_seats_for_id(hand_db_id: int) -> list:
+    """Seats de uma mão (do apa) p/ comparar com a captura: seat·posição·stack·nick·hero.
+    Nick só se mapeado (senão hash em `raw_hash`). Mesmo formato do `/hand-seats`."""
+    import json as _json
+    rows = query("SELECT all_players_actions apa, player_names pn FROM hands WHERE id=%s",
+                 (hand_db_id,))
+    if not rows:
+        return []
+    apa = rows[0]["apa"] or {}
+    pn = rows[0]["pn"] or {}
+    if isinstance(apa, str):
+        apa = _json.loads(apa)
+    if isinstance(pn, str):
+        pn = _json.loads(pn)
+    mapped = set((pn.get("anon_map") or {}).values())
+    seats = []
+    for k, info in apa.items():
+        if k == "_meta" or not isinstance(info, dict):
+            continue
+        name = info.get("real_name", k)
+        is_mapped = name in mapped
+        seats.append({
+            "seat": info.get("seat"), "position": info.get("position"),
+            "nick": name if is_mapped else None,
+            "raw_hash": None if is_mapped else name,
+            "stack": info.get("stack"), "stack_bb": info.get("stack_bb"),
+            "is_hero": bool(info.get("is_hero")), "mapped": is_mapped,
+        })
+    seats.sort(key=lambda s: (s["seat"] is None, s["seat"] if s["seat"] is not None else 0))
+    return seats
+
+
+@router.get("/{ss_id}/swap-candidates")
+def swap_candidates(ss_id: int, current_user=Depends(require_auth_or_api_key)):
+    """Fase 1-A (PRÉ-VISUALIZAÇÃO, read-only): as DUAS mãos candidatas de uma suspeita
+    de troca, p/ o Rui escolher a dona certa da captura. (a) `current` = a mão ligada
+    AGORA (matched_hand_id); (b) `filename` = a mão do NÚMERO do ficheiro (GG-<num>).
+    Cada uma com os seats (posição/stack/nick) p/ comparar com a imagem."""
+    rows = query("SELECT id, original_filename, matched_hand_id FROM "
+                 "table_ss_processing_log WHERE id=%s", (ss_id,))
+    if not rows:
+        raise HTTPException(404, "captura não existe")
+    r = rows[0]
+    fnum = _parse_it_hand_fields(r["original_filename"])["hand_num"]
+    filename_hand_id = f"GG-{fnum}" if fnum and len(fnum) >= 10 else None
+
+    def _cand(hid, role):
+        if not hid:
+            return {"role": role, "hand_id": None, "exists": False, "seats": []}
+        hr = query("SELECT id, (player_names->>'match_method') mm FROM hands WHERE hand_id=%s",
+                   (hid,))
+        if not hr:
+            return {"role": role, "hand_id": hid, "exists": False, "seats": []}
+        return {"role": role, "hand_id": hid, "hand_db_id": hr[0]["id"], "exists": True,
+                "match_method": hr[0]["mm"], "seats": _hand_seats_for_id(hr[0]["id"])}
+
+    return {
+        "capture": {"ss_id": ss_id, "image_url": f"/api/table-ss/image/{ss_id}",
+                    "filename": r["original_filename"], "filename_num": fnum},
+        "candidates": [_cand(r["matched_hand_id"], "current"),
+                       _cand(filename_hand_id, "filename")],
+        "same_hand": bool(filename_hand_id) and filename_hand_id == r["matched_hand_id"],
+    }
+
+
+@router.post("/{ss_id}/resolve-owner")
+def resolve_owner(ss_id: int, payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Fase 1-A (DECISÃO): o Rui escolhe a DONA certa da captura (`owner_hand_id`) entre
+    as 2 candidatas (ou null = nenhuma/desligar). O movimento INCLUI a limpeza da mão
+    antiga: se a mão que tinha a captura (`matched_hand_id`) era `table_ss` e deixa de
+    ser a dona, é REVERTIDA à anónima (fecha o buraco do Aceitar). Liga a nova via o
+    matcher (`_manual_link_ss`; Gold-manda intacto — salta se a nova é `position_v3`).
+    `dry_run=true` → só o plano, não grava. Body: {owner_hand_id: 'GG-...'|null, dry_run}."""
+    owner = payload.get("owner_hand_id")
+    dry = bool(payload.get("dry_run"))
+    rows = query("SELECT id, matched_hand_id FROM table_ss_processing_log WHERE id=%s", (ss_id,))
+    if not rows:
+        raise HTTPException(404, "captura não existe")
+    current = rows[0]["matched_hand_id"]
+    if owner:                                   # owner tem de existir
+        hr = query("SELECT id FROM hands WHERE hand_id=%s", (owner,))
+        if not hr:
+            raise HTTPException(422, f"mão {owner} não existe na base")
+    # A antiga a reverter = a que tem a captura AGORA, se != owner E se for table_ss.
+    revert_plan = None
+    if current and current != owner:
+        cr = query("SELECT id, (player_names->>'match_method') mm FROM hands WHERE hand_id=%s",
+                   (current,))
+        if cr and cr[0]["mm"] == "table_ss":
+            revert_plan = {"hand_id": current, "hand_db_id": cr[0]["id"], "match_method": "table_ss"}
+    plan = {"ss_id": ss_id, "current_hand": current, "owner": owner,
+            "will_link": owner, "will_revert": revert_plan, "keep": (owner == current)}
+    if dry:
+        return {"dry_run": True, "plan": plan}
+    if owner == current:                        # a ligação actual está certa → confirma
+        _set_swap_review(ss_id, "kept")
+        return {"decision": "kept", "plan": plan}
+    if revert_plan:                             # limpa a antiga (embutido no movimento)
+        _revert_hand_to_anonymous(revert_plan["hand_db_id"])
+    try:
+        res = _manual_link_ss(ss_id, owner)     # owner=None → desliga
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    _set_swap_review(ss_id, "moved")
+    return {"decision": "moved", "plan": plan, "link": res}
+
+
+@router.post("/verify-deanon")
+def verify_deanon(payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Fase 1-E: marca/desmarca uma mão como VERIFICADA por mim (Rui). Escreve o flag
+    ADITIVO `player_names.verified_by_user`; o `deanon_status` passa a 'verified' (o badge
+    ⚠ some). NÃO toca anon_map/apa/match_method/vilões — só o flag. Cura o downgrade do
+    `/set-anon-map` (mão editada à mão fica verificada por ti). Reversível
+    (verified=false remove). Body: {hand_id, verified: bool (default true)}."""
+    import json as _json
+    hand_id = payload.get("hand_id")
+    verified = payload.get("verified", True)
+    if not hand_id:
+        raise HTTPException(400, "hand_id obrigatório")
+    rows = query("SELECT id, site, player_names FROM hands WHERE hand_id=%s", (hand_id,))
+    if not rows:
+        raise HTTPException(404, "mão não encontrada")
+    pn = rows[0]["player_names"] or {}
+    if isinstance(pn, str):
+        try:
+            pn = _json.loads(pn)
+        except (ValueError, TypeError):
+            pn = {}
+    if verified:
+        pn["verified_by_user"] = True
+    else:
+        pn.pop("verified_by_user", None)
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE hands SET player_names=%s WHERE id=%s",
+                        (_json.dumps(pn), rows[0]["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    from app.services.deanon_status import deanon_status_from_row
+    status = deanon_status_from_row({"site": rows[0]["site"], "player_names": pn})
+    return {"status": "set", "hand_id": hand_id,
+            "verified_by_user": bool(verified), "deanon_status": status}
+
+
 def _reparse_apa_hash_keyed(hand_db_id: int) -> bool:
     """pt95 (#REDEANON-NOT-IDEMPOTENT, restauro): re-deriva o `all_players_actions`
     HASH-keyed do raw HH (via parser GG) e remove o `anon_map`. Restaura mãos cujo

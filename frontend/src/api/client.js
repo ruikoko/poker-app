@@ -450,6 +450,13 @@ export const tableSs = {
   link: (ssId, handId) => req('POST', `/table-ss/${ssId}/link`, { hand_id: handId }),
   // Ação 3 — decisão sobre suspeita de troca: 'accept' | 'reject' | 'review'.
   swapReview: (ssId, decision) => req('POST', `/table-ss/${ssId}/swap-review`, { decision }),
+  // Fase 1-A — as 2 mãos candidatas (pré-visualização) + escolher a dona (com dry-run).
+  swapCandidates: (ssId) => req('GET', `/table-ss/${ssId}/swap-candidates`),
+  resolveOwner: (ssId, ownerHandId, dryRun = false) =>
+    req('POST', `/table-ss/${ssId}/resolve-owner`, { owner_hand_id: ownerHandId, dry_run: dryRun }),
+  // Fase 1-E — marca/desmarca a mão como verificada por mim (badge some).
+  verifyDeanon: (handId, verified = true) =>
+    req('POST', '/table-ss/verify-deanon', { hand_id: handId, verified }),
 }
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────

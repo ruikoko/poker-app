@@ -123,7 +123,7 @@ export default function Replayer({ hand }) {
       </div>
 
       {/* pt76: aviso de desanon por verificar (stack/feltro) */}
-      <DeanonBanner status={hand?.deanon_status} />
+      <DeanonBanner status={hand?.deanon_status} handId={hand?.hand_id} />
 
       {/* Table */}
       <div style={{ position: 'relative', width: '100%', paddingTop: '55%', background: 'radial-gradient(ellipse at center,#0f2318,#0a1510 40%,#080d0f)' }}>

@@ -2,6 +2,8 @@
 // deanon_status === 'unverified' (mão GG cujos nomes vieram do feltro/stack,
 // não confirmados por posição). 'verified'/null → não mostra nada.
 // Derivado no backend a partir do match_method (ver services/deanon_status.py).
+import { useState } from 'react'
+import { tableSs } from '../api/client'
 
 const TOOLTIP =
   'Nomes atribuídos por aproximação de stacks (foto do feltro), ' +
@@ -26,21 +28,38 @@ export function DeanonBadge({ status }) {
 }
 
 // Faixa única — por cima da mesa (replayer) / acima dos seats (viewer).
-export function DeanonBanner({ status }) {
-  if (status !== 'unverified') return null
+// Fase 1-E: se receber `handId`, mostra o botão "verificada por mim" (marca o flag
+// aditivo verified_by_user → o badge some). Auto-esconde após confirmar.
+export function DeanonBanner({ status, handId }) {
+  const [hidden, setHidden] = useState(false)
+  const [busy, setBusy] = useState(false)
+  if (status !== 'unverified' || hidden) return null
+  const verify = async () => {
+    setBusy(true)
+    try { await tableSs.verifyDeanon(handId, true); setHidden(true) }
+    catch (e) { alert('Erro ao verificar: ' + (e.message || e)); setBusy(false) }
+  }
   return (
     <div
-      title={TOOLTIP}
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '7px 14px', margin: '0 0 10px',
         borderRadius: 6, fontSize: 12, fontWeight: 600,
         color: '#fbbf24', background: 'rgba(251,191,36,0.10)',
-        border: '1px solid rgba(251,191,36,0.30)', cursor: 'help',
+        border: '1px solid rgba(251,191,36,0.30)',
       }}
     >
-      <span style={{ fontSize: 14 }}>⚠</span>
-      <span>Nomes por verificar — {TOOLTIP.charAt(0).toLowerCase() + TOOLTIP.slice(1)}</span>
+      <span style={{ fontSize: 14 }} title={TOOLTIP}>⚠</span>
+      <span title={TOOLTIP} style={{ cursor: 'help' }}>
+        Nomes por verificar — {TOOLTIP.charAt(0).toLowerCase() + TOOLTIP.slice(1)}
+      </span>
+      {handId && (
+        <button onClick={verify} disabled={busy} style={{
+          marginLeft: 'auto', flexShrink: 0, cursor: busy ? 'wait' : 'pointer',
+          background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.45)',
+          color: '#4ade80', borderRadius: 5, fontSize: 11, fontWeight: 700, padding: '3px 10px',
+        }}>{busy ? '…' : '✓ verificada por mim'}</button>
+      )}
     </div>
   )
 }

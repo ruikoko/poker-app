@@ -51,7 +51,7 @@ function NumBadge({ im }) {
 
 function imgSrc(im) { return API_ROOT + im.image_url }
 
-function Row({ im, group, onZoom, selected, onToggleSel, onLink, onSwap }) {
+function Row({ im, group, onZoom, selected, onToggleSel, onLink, onResolve = () => {} }) {
   const src = imgSrc(im)
   const [orph, setOrph] = useState('')
   const isGoldNoTag = group === 'gold_no_tag'
@@ -84,26 +84,107 @@ function Row({ im, group, onZoom, selected, onToggleSel, onLink, onSwap }) {
           <button style={btn} onClick={() => onLink(im.ss_id, orph.trim())} disabled={!orph.trim()}>Ligar</button>
         </span>
       )}
-      {/* Ação 3 — decisão sobre a suspeita de troca. ACEITAR só se a mão do
-          número do ficheiro EXISTE (senão o move falha — "print atrasado"). */}
+      {/* Fase 1-A — resolver a suspeita escolhendo a dona certa (2 candidatas,
+          com limpeza da mão antiga embutida no movimento). */}
       {isSwap && (
-        <span style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
-          {im.accept_target_exists
-            ? <button style={{ ...btn, borderColor: '#22c55e', color: '#22c55e' }}
-                onClick={() => onSwap(im.ss_id, 'accept', im.filename_num)}>Aceitar</button>
-            : <button style={{ ...btn, opacity: 0.4, cursor: 'not-allowed' }} disabled
-                title={`mão GG-${im.filename_num} não existe na base`}>Aceitar</button>}
-          <button style={{ ...btn, borderColor: '#ef4444', color: '#f87171' }}
-            onClick={() => onSwap(im.ss_id, 'reject')}>Rejeitar</button>
-          <button style={btn} onClick={() => onSwap(im.ss_id, 'review')}>Rever</button>
-          {!im.accept_target_exists && (
-            <span style={{ fontSize: 10, color: '#f59e0b', maxWidth: 170, lineHeight: 1.2 }}>
-              mão GG-{im.filename_num} não existe — só Rejeitar/Rever
-            </span>
-          )}
-        </span>
+        <button style={{ ...btn, borderColor: '#818cf8', color: '#a5b4fc', flexShrink: 0 }}
+          onClick={() => onResolve(im)}>Resolver ▸</button>
       )}
       <span style={{ fontSize: 11, color: im.state === 'órfã' ? '#f59e0b' : '#64748b', minWidth: 50, textAlign: 'right' }}>{im.state}</span>
+    </div>
+  )
+}
+
+// Fase 1-A — mini-tabela de seats de uma mão candidata (para comparar com a imagem).
+function SeatMini({ seats }) {
+  if (!seats || !seats.length) return <div style={{ fontSize: 11, color: '#64748b' }}>sem seats</div>
+  return (
+    <div style={{ fontFamily: "'Fira Code',monospace", fontSize: 11 }}>
+      {seats.map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 8, color: s.is_hero ? '#fbbf24' : '#c9d1d9', lineHeight: 1.6 }}>
+          <span style={{ width: 36, color: '#64748b' }}>{s.position || '—'}</span>
+          <span style={{ width: 62, textAlign: 'right', color: '#94a3b8' }}>{s.stack_bb != null ? `${s.stack_bb}bb` : '—'}</span>
+          <span>{s.nick || (s.raw_hash ? `(${s.raw_hash})` : '—')}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CandCard({ cand, onPick, busy }) {
+  return (
+    <div style={{ ...card, padding: 12, flex: 1, minWidth: 220, opacity: cand.exists ? 1 : 0.55 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#60a5fa' }}>{cand.hand_id || 'sem mão'}</span>
+        <span style={{ fontSize: 10, color: '#64748b' }}>{cand.role === 'current' ? 'ligada agora' : 'nº do ficheiro'}</span>
+      </div>
+      {cand.exists
+        ? <SeatMini seats={cand.seats} />
+        : <div style={{ fontSize: 12, color: '#f59e0b' }}>não existe na base</div>}
+      {cand.exists && (
+        <button onClick={() => onPick(cand.hand_id)} disabled={busy} style={{
+          marginTop: 10, width: '100%', cursor: busy ? 'wait' : 'pointer',
+          background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.45)',
+          color: '#4ade80', borderRadius: 5, fontSize: 12, fontWeight: 700, padding: '5px 8px',
+        }}>✓ É esta a dona</button>
+      )}
+    </div>
+  )
+}
+
+// Fase 1-A — escolher a dona certa da captura (2 candidatas, com pré-visualização
+// dry-run da limpeza da mão antiga antes de gravar).
+function SwapModal({ im, onClose, onDone }) {
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    if (!im) return
+    setData(null); setErr(null)
+    tableSs.swapCandidates(im.ss_id).then(setData).catch(e => setErr(e.message))
+  }, [im])
+  if (!im) return null
+  const pick = async (owner) => {
+    setBusy(true)
+    try {
+      const dry = await tableSs.resolveOwner(im.ss_id, owner, true)
+      const rev = dry.plan && dry.plan.will_revert
+      const msg = `Marcar ${owner} como dona desta captura.`
+        + (rev ? `\n\nA mão ${rev.hand_id} (a antiga) volta a ANÓNIMA — limpa nomes, coroas e vilões.` : '')
+        + `\n\nConfirmar?`
+      if (!window.confirm(msg)) { setBusy(false); return }
+      await tableSs.resolveOwner(im.ss_id, owner, false)
+      onDone()
+    } catch (e) { setErr(e.message || String(e)); setBusy(false) }
+  }
+  const unlink = async () => {
+    if (!window.confirm('Desligar a captura de qualquer mão? (a antiga, se table_ss, volta a anónima)')) return
+    setBusy(true)
+    try { await tableSs.resolveOwner(im.ss_id, null, false); onDone() }
+    catch (e) { setErr(e.message || String(e)); setBusy(false) }
+  }
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ ...card, padding: 16, maxWidth: 920, width: '100%', maxHeight: '92vh', overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>Qual é a dona desta captura?</h3>
+          <button onClick={onClose} style={btn}>✕ fechar</button>
+        </div>
+        {err && <div style={{ color: '#fca5a5', marginBottom: 8, fontSize: 13 }}>Erro: {err}</div>}
+        {!data ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <img src={API_ROOT + data.capture.image_url} alt="" style={{ width: 300, maxWidth: '100%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
+            <div style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Ficheiro nº <b>{data.capture.filename_num || '—'}</b> — compara os stacks da imagem com cada mão e clica na dona.</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <CandCard cand={data.candidates[0]} onPick={pick} busy={busy} />
+                <CandCard cand={data.candidates[1]} onPick={pick} busy={busy} />
+              </div>
+              <button onClick={unlink} disabled={busy} style={{ ...btn, alignSelf: 'flex-start' }}>Nenhuma destas — desligar a captura</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -127,6 +208,7 @@ export default function GGHealth() {
   const [zoom, setZoom] = useState(null)
   const [selected, setSelected] = useState(new Set())   // Ação 1: hand_ids marcados
   const [msg, setMsg] = useState(null)
+  const [swapResolve, setSwapResolve] = useState(null)  // Fase 1-A: im em resolução
   // Pesquisa GLOBAL por nº de mão (só frontend: usa group=all, filtra localmente).
   const [q, setQ] = useState('')
   const [allImgs, setAllImgs] = useState(null)          // cache de TODAS as imagens
@@ -206,16 +288,7 @@ export default function GGHealth() {
     catch (e) { setMsg('Erro: ' + e.message) }
   }
 
-  // Ação 3 — decisão sobre suspeita (com confirmação nas que escrevem).
-  const swapAction = async (ssId, decision, fnum) => {
-    const prompts = {
-      accept: `ACEITAR: mover a captura para GG-${fnum}? (respeita a Gold)`,
-      reject: 'REJEITAR: manter onde está e tirar do painel?',
-    }
-    if (prompts[decision] && !window.confirm(prompts[decision])) return
-    try { await tableSs.swapReview(ssId, decision); setMsg('Feito.'); reload() }
-    catch (e) { setMsg('Erro: ' + (e.message || 'falhou')) }
-  }
+  // Fase 1-A — a suspeita resolve-se agora no SwapModal (escolher a dona certa).
 
   return (
     <div style={{ padding: 24, maxWidth: 1200 }}>
@@ -244,7 +317,7 @@ export default function GGHealth() {
                 {(results || []).map((im, i) => (
                   <Row key={i} im={im} group={null} onZoom={setZoom}
                     selected={selected} onToggleSel={() => {}}
-                    onLink={() => {}} onSwap={() => {}} />
+                    onLink={() => {}} onResolve={setSwapResolve} />
                 ))}
                 {(results || []).length === 0 && <div style={{ padding: 16, color: 'var(--muted)' }}>Nenhuma imagem com esse número.</div>}
               </div>
@@ -298,7 +371,7 @@ export default function GGHealth() {
                 {list.images.map((im, i) => (
                   <Row key={i} im={im} group={group} onZoom={setZoom}
                     selected={selected} onToggleSel={toggleSel}
-                    onLink={linkOrphan} onSwap={swapAction} />
+                    onLink={linkOrphan} onResolve={setSwapResolve} />
                 ))}
                 {list.images.length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhuma imagem neste grupo.</div>}
               </div>
@@ -315,6 +388,8 @@ export default function GGHealth() {
       )}
 
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
+      <SwapModal im={swapResolve} onClose={() => setSwapResolve(null)}
+        onDone={() => { setSwapResolve(null); setMsg('Suspeita resolvida.'); reload() }} />
     </div>
   )
 }
