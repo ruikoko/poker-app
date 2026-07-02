@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ggHealth, API_ROOT } from '../api/client'
+import { ggHealth, tableSs, API_ROOT } from '../api/client'
 
-// "Saúde das mãos GG" — Fase 1 (só mostrar). Dashboard de números + listas por
-// imagem. Só GG. Lê, não escreve. Absorve (Fase 2) a "Marcadas por captura".
+// "Saúde das mãos GG" — Fase 1 (mostrar) + Fase 2 (AÇÕES). Vista por IMAGEM.
+// Só GG. Ação 1: tagar (multi-select). Ação 2: ligar órfã à mão. Ação 3:
+// aceitar/rejeitar/rever suspeita. Confirmação nas Ações 2/3 (mexem em ligações).
 
 const NEEDS = [
   { key: 'gold_no_tag', label: 'Gold sem tag', color: '#eab308' },
@@ -16,8 +17,12 @@ const HEALTHY = [
   { key: 'it_matched', label: 'IT desanon', color: '#22c55e' },
 ]
 const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY].map(g => [g.key, g.label]))
+// As 11 tags canónicas (Ação 1) — espelho de _TAG_BUTTONS no backend.
+const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
+  'icm-ft', 'icm-pko-ft', 'pos-pko-ft', 'pos-nko-ft', 'speed-racer-ft', 'nota']
 
 const card = { background: 'var(--card,#161b22)', border: '1px solid var(--border,#30363d)', borderRadius: 8 }
+const btn = { background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 5, cursor: 'pointer', fontSize: 12, padding: '3px 8px' }
 
 function Panel({ g, value, onClick }) {
   return (
@@ -44,22 +49,25 @@ function NumBadge({ im }) {
   return <span style={{ fontSize: 11, color: '#64748b' }}>—</span>
 }
 
-// A imagem serve-se pelo id do PRÓPRIO registo (IT → table_ss_processing_log.id;
-// Gold → entries.id), NUNCA pelo context_table_ss_id da mão (nulo nas órfãs).
-// O URL do backend é relativo (`/api/...`); prefixa-se API_ROOT (o host do
-// backend em produção — igual ao que o client faz nas chamadas JSON).
 function imgSrc(im) { return API_ROOT + im.image_url }
 
-function Row({ im, onZoom }) {
+function Row({ im, group, onZoom, selected, onToggleSel, onLink, onSwap }) {
   const src = imgSrc(im)
+  const [orph, setOrph] = useState('')
+  const isGoldNoTag = group === 'gold_no_tag'
+  const isOrphan = group === 'orphans'
+  const isSwap = group === 'swap_suspects'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-      {/* Miniatura → clica abre a IMAGEM ampliada (lightbox), em TODOS os grupos (incl. órfãs). */}
+      {isGoldNoTag && (
+        <input type="checkbox" checked={selected.has(im.hand_id)} onChange={() => onToggleSel(im.hand_id)}
+          style={{ width: 16, height: 16, flexShrink: 0, cursor: 'pointer' }} />
+      )}
+      {/* Miniatura → clica abre a IMAGEM ampliada (lightbox). */}
       <img src={src} alt="" loading="lazy" onClick={() => onZoom(src)}
         style={{ width: 96, height: 60, objectFit: 'cover', borderRadius: 4, border: '1px solid #2a2d3a', flexShrink: 0, background: '#0b0d13', cursor: 'zoom-in' }} />
       <TipoBadge source={im.source} />
       <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#94a3b8', minWidth: 96 }}>{im.filename_num || '—'}</span>
-      {/* hand_id → abre a mão (só quando há mão casada); órfã = texto cinza. */}
       {im.hand_db_id
         ? <Link to={`/hand/${im.hand_db_id}`} style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#60a5fa', minWidth: 130, textDecoration: 'none' }}>{im.hand_id}</Link>
         : <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#64748b', minWidth: 130 }}>sem mão</span>}
@@ -68,6 +76,24 @@ function Row({ im, onZoom }) {
         {(im.tags || []).map((t, i) => <span key={i} style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.12)', padding: '1px 6px', borderRadius: 4 }}>{t}</span>)}
         {(im.conflicts || []).map((c, i) => <span key={'c' + i} style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#ef4444', padding: '1px 6px', borderRadius: 4 }}>conflito {c}</span>)}
       </span>
+      {/* Ação 2 — ligar órfã à mão escolhida pelo Rui. */}
+      {isOrphan && (
+        <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          <input value={orph} onChange={e => setOrph(e.target.value)} placeholder="GG-..."
+            style={{ width: 130, fontFamily: "'Fira Code',monospace", fontSize: 12, background: '#0b0d13', color: '#c9d1d9', border: '1px solid #30363d', borderRadius: 4, padding: '3px 6px' }} />
+          <button style={btn} onClick={() => onLink(im.ss_id, orph.trim())} disabled={!orph.trim()}>Ligar</button>
+        </span>
+      )}
+      {/* Ação 3 — decisão sobre a suspeita de troca. */}
+      {isSwap && (
+        <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          <button style={{ ...btn, borderColor: '#22c55e', color: '#22c55e' }}
+            onClick={() => onSwap(im.ss_id, 'accept', im.filename_num)}>Aceitar</button>
+          <button style={{ ...btn, borderColor: '#ef4444', color: '#f87171' }}
+            onClick={() => onSwap(im.ss_id, 'reject')}>Rejeitar</button>
+          <button style={btn} onClick={() => onSwap(im.ss_id, 'review')}>Rever</button>
+        </span>
+      )}
       <span style={{ fontSize: 11, color: im.state === 'órfã' ? '#f59e0b' : '#64748b', minWidth: 50, textAlign: 'right' }}>{im.state}</span>
     </div>
   )
@@ -89,19 +115,65 @@ export default function GGHealth() {
   const [group, setGroup] = useState(null)
   const [list, setList] = useState(null)
   const [page, setPage] = useState(1)
-  const [zoom, setZoom] = useState(null)   // src da imagem ampliada (lightbox)
+  const [zoom, setZoom] = useState(null)
+  const [selected, setSelected] = useState(new Set())   // Ação 1: hand_ids marcados
+  const [msg, setMsg] = useState(null)
 
-  useEffect(() => { ggHealth.summary().then(setSum).catch(e => setErr(e.message)) }, [])
+  const loadSummary = () => ggHealth.summary().then(setSum).catch(e => setErr(e.message))
+  useEffect(() => { loadSummary() }, [])
   useEffect(() => {
     if (!group) { setList(null); return }
     setList(null)
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
   }, [group, page])
 
-  const open = (k) => { setGroup(k); setPage(1) }
+  const open = (k) => { setGroup(k); setPage(1); setSelected(new Set()); setMsg(null) }
+  const reload = () => {
+    loadSummary()
+    ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
+  }
+  const toggleSel = (hid) => setSelected(s => {
+    const n = new Set(s); n.has(hid) ? n.delete(hid) : n.add(hid); return n
+  })
+
+  // Ação 1 — tagar as mãos selecionadas.
+  const applyTag = async (tag) => {
+    const ids = [...selected]
+    if (!ids.length) { setMsg('Seleciona pelo menos uma mão.'); return }
+    try {
+      let res = await ggHealth.tag(ids, tag, false)
+      if (res.needs_confirm) {
+        const w = (res.warnings || []).map(x => `${x.hand_id} (${x.tournament_format})`).join(', ')
+        if (!window.confirm(`A tag "${tag}" contradiz o formato do torneio em: ${w}.\nAplicar mesmo assim?`)) return
+        res = await ggHealth.tag(ids, tag, true)
+      }
+      setMsg(`${res.applied} mão(s) tagada(s) com "${tag}".`)
+      setSelected(new Set())
+      reload()
+    } catch (e) { setMsg('Erro: ' + e.message) }
+  }
+
+  // Ação 2 — ligar órfã à mão (com confirmação).
+  const linkOrphan = async (ssId, handId) => {
+    if (!handId) return
+    if (!window.confirm(`Ligar esta captura à mão ${handId}? (a Gold não é sobrescrita)`)) return
+    try { await tableSs.link(ssId, handId); setMsg(`Ligada a ${handId}.`); reload() }
+    catch (e) { setMsg('Erro: ' + e.message) }
+  }
+
+  // Ação 3 — decisão sobre suspeita (com confirmação nas que escrevem).
+  const swapAction = async (ssId, decision, fnum) => {
+    const prompts = {
+      accept: `ACEITAR: mover a captura para GG-${fnum}? (respeita a Gold)`,
+      reject: 'REJEITAR: manter onde está e tirar do painel?',
+    }
+    if (prompts[decision] && !window.confirm(prompts[decision])) return
+    try { await tableSs.swapReview(ssId, decision); setMsg('Feito.'); reload() }
+    catch (e) { setMsg('Erro: ' + (e.message || 'falhou')) }
+  }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1150 }}>
+    <div style={{ padding: 24, maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <h1 style={{ fontSize: 20, margin: 0 }}>Saúde das mãos GG</h1>
         {sum && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{sum.total_images} imagens · {sum.total_hands_with_image} mãos com imagem</span>}
@@ -118,10 +190,6 @@ export default function GGHealth() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             {HEALTHY.map(g => <Panel key={g.key} g={g} value={sum.healthy[g.key]} onClick={() => open(g.key)} />)}
           </div>
-          <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 20, maxWidth: 720 }}>
-            Vista por IMAGEM (uma mão pode ter Gold + IT = 2 imagens). "Suspeitas de troca" é o sinal
-            BRUTO nº≠mão (só IT) — badge amarelo, <b>não veredicto</b> (por fit só ~72 são reais). Clica num painel para ver a lista.
-          </p>
         </>
       )}
 
@@ -132,10 +200,31 @@ export default function GGHealth() {
             <h2 style={{ fontSize: 16, margin: 0 }}>{LABELS[group]}</h2>
             {list && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{list.total} imagens</span>}
           </div>
+
+          {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
+          {group === 'gold_no_tag' && (
+            <div style={{ ...card, padding: '10px 12px', marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+                Selecionadas: <b>{selected.size}</b> — carrega numa tag para aplicar a todas:
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {CANONICAL_TAGS.map(t => (
+                  <button key={t} style={{ ...btn, opacity: selected.size ? 1 : 0.4 }}
+                    disabled={!selected.size} onClick={() => applyTag(t)}>{t}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, color: '#93c5fd', fontSize: 13 }}>{msg}</div>}
+
           {!list ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
             <>
               <div style={{ ...card, overflow: 'hidden' }}>
-                {list.images.map((im, i) => <Row key={i} im={im} onZoom={setZoom} />)}
+                {list.images.map((im, i) => (
+                  <Row key={i} im={im} group={group} onZoom={setZoom}
+                    selected={selected} onToggleSel={toggleSel}
+                    onLink={linkOrphan} onSwap={swapAction} />
+                ))}
                 {list.images.length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhuma imagem neste grupo.</div>}
               </div>
               {list.total > list.page_size && (

@@ -355,6 +355,9 @@ export const suspicious = {
 export const ggHealth = {
   summary: () => req('GET', '/gg-health/summary'),
   list: (group, page = 1) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}`),
+  // Ação 1 — taga N mãos com UMA tag (multi-select). confirm=true força apesar do
+  // aviso de conflito de formato.
+  tag: (handIds, tag, confirm = false) => req('POST', '/gg-health/tag', { hand_ids: handIds, tag, confirm }),
 }
 
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
@@ -443,6 +446,10 @@ export const tableSs = {
     })
   },
   recent: (limit = 50) => req('GET', `/table-ss/recent?limit=${limit}`),
+  // Ação 2 — liga a captura à mão escolhida (handId=null → desliga). Gold manda.
+  link: (ssId, handId) => req('POST', `/table-ss/${ssId}/link`, { hand_id: handId }),
+  // Ação 3 — decisão sobre suspeita de troca: 'accept' | 'reject' | 'review'.
+  swapReview: (ssId, decision) => req('POST', `/table-ss/${ssId}/swap-review`, { decision }),
 }
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────

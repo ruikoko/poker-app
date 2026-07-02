@@ -118,6 +118,7 @@ def _it_rows() -> list[dict]:
             num_matches = bool(matched_hid) and matched_hid.startswith(f"GG-{fnum}")
         out.append({
             "source": "it",
+            "ss_id": r["ss_id"],               # p/ as Ações 2/3 (link / swap-review)
             "image_url": f"/api/table-ss/image/{r['ss_id']}",
             "filename": r.get("fname"),
             "filename_num": fnum,
