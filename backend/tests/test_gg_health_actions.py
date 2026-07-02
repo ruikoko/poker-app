@@ -112,6 +112,47 @@ def test_swap_accept_full_number_moves_and_marks():
     assert res["decision"] == "accept"
 
 
+def test_swap_accept_hand_not_found_returns_404():
+    # #SWAP-ACCEPT-GUARD: mão do número não existe → 404 (não falha em silêncio).
+    log = [{"id": 5, "original_filename": _FULL}]
+    with patch.object(table_ss, "query", return_value=log), \
+         patch.object(table_ss, "_manual_link_ss", side_effect=ValueError("hand_not_found")):
+        with pytest.raises(HTTPException) as e:
+            table_ss.swap_review_table_ss(5, {"decision": "accept"})
+    assert e.value.status_code == 404
+
+
+def _it_row(fname, **extra):
+    base = {"ss_id": 9, "fname": fname, "matched_hand_id": "GG-6083717670",
+            "swap_review": None, "hand_db_id": 22, "hand_id": "GG-6083717670",
+            "discord_tags": [], "hm3_tags": [], "dup_db_id": None, "dup_hand_id": None,
+            "dup_discord_tags": None, "dup_hm3_tags": None}
+    base.update(extra)
+    return base
+
+
+def test_it_rows_flags_accept_target_missing():
+    # #SWAP-ACCEPT-GUARD: a mão do número (GG-6083717709) NÃO existe → accept off.
+    main = [_it_row("x_6083717709-20260616220741-156.png")]
+
+    def q(sql, params=None):
+        return [] if "WHERE hand_id = ANY" in sql else main
+    with patch.object(gg_health, "query", side_effect=q):
+        out = gg_health._it_rows()
+    assert out[0]["filename_num"] == "6083717709"
+    assert out[0]["accept_target_exists"] is False
+
+
+def test_it_rows_flags_accept_target_present():
+    main = [_it_row("x_6083717709-20260616220741-156.png")]
+
+    def q(sql, params=None):
+        return [{"hand_id": "GG-6083717709"}] if "WHERE hand_id = ANY" in sql else main
+    with patch.object(gg_health, "query", side_effect=q):
+        out = gg_health._it_rows()
+    assert out[0]["accept_target_exists"] is True
+
+
 def test_swap_reject_sets_kept():
     with patch.object(table_ss, "query", return_value=[{"id": 5, "original_filename": "x.png"}]), \
          patch.object(table_ss, "_set_swap_review") as ms:

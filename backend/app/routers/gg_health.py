@@ -133,6 +133,18 @@ def _it_rows() -> list[dict]:
             "has_tag": bool(disc or hm3),
             "state": "duplicada" if secondary else ("casou" if principal else "órfã"),
         })
+    # #SWAP-ACCEPT-GUARD — a mão do NÚMERO do ficheiro (GG-<fnum>) existe na base?
+    # Se NÃO existir (caso dos "prints atrasados", cujo nº aponta a mão seguinte que
+    # não temos importada), o ACEITAR não tem destino → o frontend desativa o botão.
+    # Uma query única para todas as linhas.
+    targets = {f"GG-{im['filename_num']}" for im in out if im.get("filename_num")}
+    existing = set()
+    if targets:
+        existing = {row["hand_id"] for row in query(
+            "SELECT hand_id FROM hands WHERE hand_id = ANY(%s)", (list(targets),))}
+    for im in out:
+        fn = im.get("filename_num")
+        im["accept_target_exists"] = bool(fn) and (f"GG-{fn}" in existing)
     return out
 
 

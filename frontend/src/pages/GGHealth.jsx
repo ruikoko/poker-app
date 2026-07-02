@@ -84,14 +84,23 @@ function Row({ im, group, onZoom, selected, onToggleSel, onLink, onSwap }) {
           <button style={btn} onClick={() => onLink(im.ss_id, orph.trim())} disabled={!orph.trim()}>Ligar</button>
         </span>
       )}
-      {/* Ação 3 — decisão sobre a suspeita de troca. */}
+      {/* Ação 3 — decisão sobre a suspeita de troca. ACEITAR só se a mão do
+          número do ficheiro EXISTE (senão o move falha — "print atrasado"). */}
       {isSwap && (
-        <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          <button style={{ ...btn, borderColor: '#22c55e', color: '#22c55e' }}
-            onClick={() => onSwap(im.ss_id, 'accept', im.filename_num)}>Aceitar</button>
+        <span style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+          {im.accept_target_exists
+            ? <button style={{ ...btn, borderColor: '#22c55e', color: '#22c55e' }}
+                onClick={() => onSwap(im.ss_id, 'accept', im.filename_num)}>Aceitar</button>
+            : <button style={{ ...btn, opacity: 0.4, cursor: 'not-allowed' }} disabled
+                title={`mão GG-${im.filename_num} não existe na base`}>Aceitar</button>}
           <button style={{ ...btn, borderColor: '#ef4444', color: '#f87171' }}
             onClick={() => onSwap(im.ss_id, 'reject')}>Rejeitar</button>
           <button style={btn} onClick={() => onSwap(im.ss_id, 'review')}>Rever</button>
+          {!im.accept_target_exists && (
+            <span style={{ fontSize: 10, color: '#f59e0b', maxWidth: 170, lineHeight: 1.2 }}>
+              mão GG-{im.filename_num} não existe — só Rejeitar/Rever
+            </span>
+          )}
         </span>
       )}
       <span style={{ fontSize: 11, color: im.state === 'órfã' ? '#f59e0b' : '#64748b', minWidth: 50, textAlign: 'right' }}>{im.state}</span>
@@ -215,7 +224,9 @@ export default function GGHealth() {
               </div>
             </div>
           )}
-          {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, color: '#93c5fd', fontSize: 13 }}>{msg}</div>}
+          {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13,
+            color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd',
+            borderColor: /erro/i.test(msg) ? '#ef4444' : 'var(--border,#30363d)' }}>{msg}</div>}
 
           {!list ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
             <>
