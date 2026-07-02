@@ -223,6 +223,48 @@ texto**): a âncora é o **HERO** (não SB/BB) + o **BOTÃO**.
   `deanonymize_hand_from_table_ss` prefere-o quando há `is_button`. Override manual:
   `POST /api/table-ss/set-anon-map` (por blinds/gold) + `/set-bounties`.
 
+### 3.2.4 ⚠️ CASO A PROTEGER — jogador SENTADO-mas-SEM-CARTAS na Gold (N+1) → apa desliza
+
+**Sintoma (caso real `GG-6083771298`, Speed Racer Bounty $108, 2026-06-16):** na mesa há
+**6 sentados** mas a MÃO tem só **5** — um jogador (`Afonso Neto`) **acabara de se sentar
+e NÃO jogou** (sem cartas, `position=null` no `players_list` da Vision). A Vision lê **N+1
+nomes** (6) contra **N cadeiras** da HH (5). O `all_players_actions` ficou **corrompido**:
+`Afonso Neto` injectado no seat do BB, os nomes **deslizados uma posição**, um seat
+**colapsado** (5→4), o SB (`CORDEIRODEDEUS`) **perdido**.
+
+**⚠️ Nuance importante — o `anon_map` estava CERTO; o apa é que estava STALE.** O
+`position_v3` (§3.2.2) mapeia por **RÓTULO de posição** e por isso **descartou bem** o
+`Afonso Neto` (sem rótulo → `no_label` → não mapeado): o `anon_map`
+(`player_names`) ficou **correcto por posição**. A corrupção estava só no `all_players_actions`,
+escrito por **outro caminho (order/stack)** e **nunca reconciliado** com o `anon_map`. Ou seja:
+**dois escritores** (apa por um lado, `anon_map`/`match_method` por outro) **saíram
+inconsistentes** e nada o detecta. Esta mão era exactamente a **"1 diverge"** que o fix
+automático `#DESANON-GOLD-SCRAMBLE` (`reenrich-scrambled-gold`) **recusou escrever** — o seu
+gate de fichas FINAIS (`_stack_gate_ok`, Gold-vs-HH-final) **divergiu** (stacks Gold em unidade
+inconsistente / momento fim-vs-início — `#GOLD-STACK-CHIPS-UNIT-INCONSISTENT` +
+`#GOLD-STACK-MOMENT-END-NOT-START`) → skip conservador → apa ficou stale.
+
+**Porque é que a SALVAGUARDA img≠HH (§3.2.3) NÃO apanhou isto?** Porque essa salvaguarda
+(`build_anon_map_by_hero_button`, contagens img≠HH → alarme) vive **SÓ no método ÂNCORA do
+table-SS** (pt96). Esta mão foi desanonimizada pela **Gold `position_v3`**, um caminho
+**diferente**, que **não tem count-abort** — degrada por rótulo (o extra sem rótulo é
+silenciosamente largado). E a corrupção do apa veio de um **3º caminho (order/stack)** que
+**também não tem** guarda img≠HH. **A protecção N+1 NÃO é universal** — mora só na âncora.
+Cross-ref: `#DESANON-SITTING-OUT-NPLUS1-NO-UNIVERSAL-GUARD` (buraco registado).
+
+**Remediação (2026-07-02):** correcção MANUAL via `POST /api/table-ss/set-anon-map`
+(reparse do apa hash-keyed do RAW → aplica o `anon_map` de 5, **sem** `Afonso Neto` → 5 seats
+certos por posição, Hero=Lauro Dermio no BTN, sem duplicados). O `/set-anon-map` **não tem** o
+gate de fichas que travou o fix automático (confia no `anon_map` confirmado pelo Rui). **Efeito
+colateral:** o `match_method` passa `position_v3` → `table_ss`/`manual_blinds_override` (badge
+`deanon_status` **verified → unverified**) — dados certos, badge conservador.
+
+**Regra a proteger:** Gold com **sentado-sem-cartas** (mesa > mão) é caso normal, não erro do
+Rui — a Vision devolve N+1 e **qualquer mapeamento por ORDEM desliza**. O `position_v3` (por
+rótulo) é imune ao deslize; o perigo é o **apa escrito por um caminho de ORDEM** ficar
+inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon/enrich, tratar
+**img≠HH como sinal duro** e **assertar apa↔anon_map** (contagem de seats == hashes da HH).
+
 ### 3.3 Mitigações já no sítio (reduzem, não resolvem)
 - **Guarda anti-envenenamento** (`_filter_ambiguous_stackless`, pt71): ≥2 bancos não-herói
   **sem stack utilizável** (all-in/null) ficam **POR MAPEAR** (hash mantido) +
