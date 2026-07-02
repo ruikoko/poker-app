@@ -67,12 +67,14 @@ MTT_SCHEMA_STATEMENTS = [
         player_name TEXT NOT NULL,
         position TEXT,
         stack REAL,
-        bounty_pct TEXT,   -- ⚠️ guarda o VPIP (chama laranja), NÃO o bounty; nome enganador #FIELD-BOUNTY-PCT-MISNAMED
         country TEXT,
         vpip_action TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # bounty_pct (VPIP) eliminado — não era usado em nada, só criava confusão
+    # (#FIELD-BOUNTY-PCT-MISNAMED). DROP idempotente p/ BDs já em produção.
+    "ALTER TABLE hand_villains DROP COLUMN IF EXISTS bounty_pct",
     "CREATE INDEX IF NOT EXISTS idx_hand_villains_mtt_hand ON hand_villains(mtt_hand_id)",
     "CREATE INDEX IF NOT EXISTS idx_hand_villains_name ON hand_villains(player_name)",
     # Índice parcial para aba "Sem SS" do MTT: acelera GROUP BY por data em ~47k mãos GG sem match.
@@ -713,7 +715,6 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
             # Bounty/country do Vision
             vision_info = vision_by_name.get(player_name.lower(), {})
             stack = vision_info.get("stack") or seat_info.get("stack")
-            bounty_pct = vision_info.get("bounty_pct")
             country = vision_info.get("country")
 
             # ── Aplicar regras A∨B∨C∨D ──
@@ -730,12 +731,12 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
                 cur.execute(
                     """INSERT INTO hand_villains
                            (mtt_hand_id, hand_db_id, player_name, position, stack,
-                            bounty_pct, country, vpip_action, category)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            country, vpip_action, category)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (hand_db_id, player_name, category)
                        WHERE hand_db_id IS NOT NULL DO NOTHING""",
                     (mtt_hand_id, hand_db_id, player_name, position, stack,
-                     bounty_pct, country, vpip_action, cat)
+                     country, vpip_action, cat)
                 )
                 created += 1
 

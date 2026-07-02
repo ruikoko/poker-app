@@ -239,10 +239,7 @@ function VillainRow({ v }) {
           {Number(v.stack).toLocaleString()}
         </span>
       )}
-      {/* ⚠️ bounty_pct = VPIP (chama laranja), NÃO bounty (= bounty_value_usd, coroa $). #FIELD-BOUNTY-PCT-MISNAMED */}
-      {v.bounty_pct && (
-        <span style={{ fontSize: 11, color: '#f59e0b' }}>{v.bounty_pct}</span>
-      )}
+      {/* bounty_pct (VPIP) eliminado — não era usado, só criava confusão. */}
       {v.country && (
         <span style={{ fontSize: 11, color: '#64748b' }}>{v.country}</span>
       )}
@@ -300,7 +297,8 @@ function TournamentDetail({ hand, onDeleteHand, onDeleteScreenshot }) {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {Object.entries(hand.screenshot_players).map(([pos, data]) => {
               const name = typeof data === 'string' ? data : data?.name || '?'
-              const bounty = typeof data === 'object' ? (data?.bounty_pct || data?.bounty) : null
+              // bounty_pct (VPIP/chama) eliminado — a "coroa" real é bounty_value_usd.
+              const bounty = typeof data === 'object' ? data?.bounty : null
               const country = typeof data === 'object' ? (data?.country_flag || data?.country) : null
               return (
                 <div key={pos} style={{

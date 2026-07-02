@@ -208,10 +208,8 @@ def _build_candidates(hand: dict) -> list[dict]:
             "nick": name,
             "position": pdata.get("position"),
             "stack": vinfo.get("stack") or pdata.get("stack"),
-            # ⚠️ bounty_pct = VPIP (chama laranja 🔥), NÃO o bounty. O bounty
-            # (coroa dourada 👑 em $) é `bounty_value_usd`. Nome enganador —
-            # ver #FIELD-BOUNTY-PCT-MISNAMED / topo do CLAUDE.md.
-            "bounty_pct": vinfo.get("bounty_pct"),
+            # bounty_pct (VPIP) eliminado — não era usado em nada, só criava
+            # confusão (#FIELD-BOUNTY-PCT-MISNAMED).
             "country": vinfo.get("country"),
             "has_cards": has_cards,
             "has_vpip": has_vpip,
@@ -351,12 +349,12 @@ def _persist(conn, hand_db_id: int, hand: dict, candidates: list[dict]) -> tuple
                 cur.execute(
                     """INSERT INTO hand_villains
                            (mtt_hand_id, hand_db_id, player_name, position, stack,
-                            bounty_pct, country, vpip_action, category)
-                       VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                            country, vpip_action, category)
+                       VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (hand_db_id, player_name, category)
                        WHERE hand_db_id IS NOT NULL DO NOTHING""",
                     (hand_db_id, c["nick"], c["position"], c["stack"],
-                     c["bounty_pct"], c["country"], c["vpip_action"], cat),
+                     c["country"], c["vpip_action"], cat),
                 )
                 if cur.rowcount > 0:
                     n_villains += 1
