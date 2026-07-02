@@ -2120,6 +2120,262 @@ def trigger_backfill_gold_bounties(dry_run: bool = False,
     return backfill_gold_bounties(dry_run=dry_run)
 
 
+# ── Re-enrich do baralhamento Gold (#DESANON-GOLD-SCRAMBLE) ──────────────────
+# As mãos Gold (position_v3) cujo all_players_actions ficou STALE (enriquecido com
+# um mapa antigo/errado): nomes trocados de cadeira e/ou vilões largados como hash.
+# O anon_map GUARDADO está certo (validado por stack). Reconstrói o apa do RAW
+# (recupera os vilões largados) e re-enriquece pelo anon_map+seat + re-carrega as
+# coroas da Gold — tudo no mesmo passe. Só escreve as que passam o gate de fichas.
+
+_SS_SEAT_RE = re.compile(r"^Seat (\d+): (.+?) \(([\d,]+) in chips\)", re.M)
+_SS_LVL_RE = re.compile(r"Level\s*\d+\s*\(([\d,]+)/([\d,]+)(?:\(([\d,]+)\))?\)")
+
+
+def _ss_num(s: str) -> float:
+    return float(s.replace(",", ""))
+
+
+def _same_player(a: str, b: str) -> bool:
+    """True se a e b são o MESMO jogador módulo truncagem '..'/variação de OCR.
+    Evita marcar 'vunzigeviktor' vs 'vunzigevikt..' como baralhamento."""
+    ca = (a or "").rstrip(". ").lower()
+    cb = (b or "").rstrip(". ").lower()
+    if ca == cb:
+        return True
+    n = min(len(ca), len(cb), 6)
+    return n >= 4 and ca[:n] == cb[:n]
+
+
+def _seats_from_raw(raw: str) -> dict:
+    head = (raw or "").split("*** HOLE CARDS")[0]
+    return {int(m.group(1)): (m.group(2).strip(), _ss_num(m.group(3)))
+            for m in _SS_SEAT_RE.finditer(head)}
+
+
+def _final_chips_by_token(raw: str, seats: dict) -> dict:
+    """Fichas FINAIS por token (fim da mão): inicial − ante − comprometido_por_street
+    + uncalled + collected. #GOLD-STACK-MOMENT-END-NOT-START."""
+    tokens = {tok for (tok, _) in seats.values()}
+    idx_flop = raw.find("*** FLOP")
+    idx_turn = raw.find("*** TURN")
+    idx_river = raw.find("*** RIVER")
+    idx_show = raw.find("*** SHOW")
+    idx_sum = raw.find("*** SUMMARY")
+    ends = [i for i in (idx_flop, idx_turn, idx_river, idx_show, idx_sum) if i >= 0]
+    pre_end = min(ends) if ends else len(raw)
+    sections = [raw[:pre_end]]
+    if idx_flop >= 0:
+        e = min([i for i in (idx_turn, idx_river, idx_show, idx_sum) if i > idx_flop] or [len(raw)])
+        sections.append(raw[idx_flop:e])
+    if idx_turn >= 0:
+        e = min([i for i in (idx_river, idx_show, idx_sum) if i > idx_turn] or [len(raw)])
+        sections.append(raw[idx_turn:e])
+    if idx_river >= 0:
+        e = min([i for i in (idx_show, idx_sum) if i > idx_river] or [len(raw)])
+        sections.append(raw[idx_river:e])
+
+    ante = {t: 0.0 for t in tokens}
+    invested = {t: 0.0 for t in tokens}
+    won = {t: 0.0 for t in tokens}
+    for t in tokens:
+        te = re.escape(t)
+        for m in re.finditer(rf"^{te}: posts the ante ([\d,]+)", raw, re.M):
+            ante[t] += _ss_num(m.group(1))
+        for m in re.finditer(rf"Uncalled bet \(([\d,]+)\) returned to {te}\b", raw):
+            invested[t] -= _ss_num(m.group(1))
+        for m in re.finditer(rf"^{te} collected ([\d,]+) from", raw, re.M):
+            won[t] += _ss_num(m.group(1))
+    for text in sections:
+        for t in tokens:
+            commit = 0.0
+            for line in text.splitlines():
+                if not line.startswith(t + ":"):
+                    continue
+                mr = re.search(r"raises [\d,]+ to ([\d,]+)", line)
+                mb = re.search(r"posts (?:small|big) blind ([\d,]+)", line)
+                mstr = re.search(r"posts straddle ([\d,]+)", line)
+                mc = re.search(r"(?:calls|bets) ([\d,]+)", line)
+                if mr:
+                    commit = _ss_num(mr.group(1))          # "to Y" = total da street
+                elif mb:
+                    commit += _ss_num(mb.group(1))
+                elif mstr:
+                    commit += _ss_num(mstr.group(1))
+                elif mc:
+                    commit += _ss_num(mc.group(1))
+            invested[t] += commit
+    final = {}
+    for _s, (tok, init) in seats.items():
+        final[tok] = init - ante[tok] - invested[tok] + won[tok]
+    return final
+
+
+def _scramble_state(raw: str, anon_map: dict, apa: dict, seats: dict):
+    """Devolve (broken, incomplete). broken exclui truncagem/OCR do mesmo nome."""
+    players = {k: v for k, v in (apa or {}).items()
+               if k != "_meta" and isinstance(v, dict)}
+    apa_seats = {v.get("seat") for v in players.values() if isinstance(v.get("seat"), int)}
+    raw_seats = set(seats)
+    mism = [n for n, i in players.items()
+            if isinstance(i.get("seat"), int) and seats.get(i["seat"])
+            and anon_map.get(seats[i["seat"]][0])
+            and not _same_player(n, anon_map.get(seats[i["seat"]][0]))]
+    dropped = raw_seats - apa_seats
+    non_hero = {tok for (tok, _) in seats.values() if tok != "Hero"}
+    incomplete = not all(h in anon_map for h in non_hero)
+    return (bool(mism) or bool(dropped)), incomplete
+
+
+def _stack_gate_ok(seats: dict, anon_map: dict, gold: dict, final_chips: dict, bb: float):
+    """Gold(fim) vs fichas FINAIS da HH. Unit-agnóstico (Gold legado misto: BB ou fichas)."""
+    checked = matched = 0
+    for _s, (tok, _init) in seats.items():
+        name = anon_map.get(tok)
+        if not name:
+            continue
+        gv = gold.get(name.strip().lower())
+        if gv is None:
+            continue
+        fc = final_chips.get(tok)
+        if fc is None:
+            continue
+        checked += 1
+        fbb = fc / bb if bb else fc
+        if (abs(gv - fc) <= max(0.08 * max(fc, 1), 2 * bb)
+                or abs(gv - fbb) <= max(0.15 * max(fbb, 1), 1.0)):
+            matched += 1
+    return (checked > 0 and matched >= checked - 2), checked, matched
+
+
+def reenrich_scrambled_gold(dry_run: bool = False) -> dict:
+    """Re-enriquece as mãos Gold (position_v3) baralhadas: reconstrói o apa do RAW
+    (recupera vilões largados), re-enriquece por anon_map+seat + re-carrega coroas
+    da Gold (guarda ½-base). SÓ escreve as que passam o gate de fichas FINAIS.
+    Não toca nas já-certas, nas de truncagem, nas que reprovam o gate ou anon_map
+    incompleto. dry_run=True → não escreve, devolve o plano."""
+    from psycopg2.extras import Json
+    from app.parsers.gg_hands import parse_hands
+
+    base_rows = query("SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+                      "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL")
+    base_by_tn = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in base_rows}
+
+    rows = query("""SELECT h.id, h.hand_id, h.raw, h.tournament_number, h.player_names,
+                           h.all_players_actions,
+                           e.raw_json->'players_list' AS entry_players
+                      FROM hands h JOIN entries e ON e.id = h.entry_id
+                     WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
+                       AND h.player_names->>'match_method' = 'position_v3'""")
+
+    total = len(rows)
+    not_broken = incomplete = gate_fail = no_stack = written = 0
+    players_recovered = crowns_carried = crowns_rejected = 0
+    written_ids = []
+    fails = []
+    for r in rows:
+        raw = r["raw"] or ""
+        pn = r["player_names"] or {}
+        anon_map = pn.get("anon_map") or {}
+        apa = r["all_players_actions"] or {}
+        seats = _seats_from_raw(raw)
+        lm = _SS_LVL_RE.search(raw)
+        bb = _ss_num(lm.group(2)) if lm else None
+        if not bb or not seats:
+            not_broken += 1
+            continue
+
+        broken, is_incomplete = _scramble_state(raw, anon_map, apa, seats)
+        if not broken:
+            not_broken += 1
+            continue
+        if is_incomplete:
+            incomplete += 1
+            fails.append((r["hand_id"], "anon_map incompleto"))
+            continue
+
+        gold = {}
+        for p in (r["entry_players"] or []):
+            if isinstance(p, dict) and p.get("name"):
+                sv = p.get("stack_bb")
+                if sv is None:
+                    sv = p.get("stack_chips")
+                gold[p["name"].strip().lower()] = sv
+
+        final_chips = _final_chips_by_token(raw, seats)
+        ok, checked, _matched = _stack_gate_ok(seats, anon_map, gold, final_chips, bb)
+        if not ok:
+            if checked == 0:
+                no_stack += 1
+                fails.append((r["hand_id"], "sem stacks na Gold p/ validar"))
+            else:
+                gate_fail += 1
+                fails.append((r["hand_id"], "seats divergem"))
+            continue
+
+        # ── re-enrich: RAW → apa por-hash → nomes+coroas por anon_map+seat ──
+        parsed, _errs = parse_hands(raw.encode("utf-8"), r["hand_id"])
+        if not parsed or not parsed[0].get("all_players_actions"):
+            fails.append((r["hand_id"], "re-parse falhou"))
+            continue
+        hash_apa = parsed[0]["all_players_actions"]
+        old_players = sum(1 for k, v in apa.items()
+                          if k != "_meta" and isinstance(v, dict))
+        new_apa = _enrich_all_players_actions(
+            hash_apa, anon_map, {"players_list": r["entry_players"] or []})
+
+        # guarda ½-base nas coroas re-carregadas
+        base = base_by_tn.get(r["tournament_number"])
+        floor = base / 2 if base else None
+        for k, v in new_apa.items():
+            if k == "_meta" or not isinstance(v, dict):
+                continue
+            crown = v.get("bounty_value_usd") or 0
+            if crown > 0 and floor is not None and crown < floor:
+                v["bounty_value_usd"] = 0            # < ½-base → provável má leitura
+                crowns_rejected += 1
+            elif crown > 0:
+                crowns_carried += 1
+
+        new_players = sum(1 for k, v in new_apa.items()
+                          if k != "_meta" and isinstance(v, dict))
+        players_recovered += max(0, new_players - old_players)
+        written += 1
+        written_ids.append(r["hand_id"])
+        if not dry_run:
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET all_players_actions=%s WHERE id=%s",
+                                (Json(new_apa), r["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+
+    return {
+        "hands_scanned": total,
+        "not_broken_untouched": not_broken,
+        "written": written,
+        "players_recovered_from_hash": players_recovered,
+        "crowns_carried": crowns_carried,
+        "crowns_rejected_below_half": crowns_rejected,
+        "skipped_incomplete_anon_map": incomplete,
+        "skipped_gate_diverge": gate_fail,
+        "skipped_no_gold_stacks": no_stack,
+        "written_ids": written_ids,
+        "skipped_ids": fails,
+        "dry_run": dry_run,
+    }
+
+
+@router.post("/reenrich-scrambled-gold")
+def trigger_reenrich_scrambled_gold(dry_run: bool = False,
+                                    current_user=Depends(require_auth_or_api_key)):
+    """#DESANON-GOLD-SCRAMBLE — re-enriquece as mãos Gold baralhadas (nomes trocados/
+    vilões a hash) reconstruindo o apa do RAW + anon_map+seat + coroas. Só escreve as
+    que passam o gate de fichas FINAIS. `dry_run=true` → não escreve. Sem Vision."""
+    return reenrich_scrambled_gold(dry_run=dry_run)
+
+
 async def _backfill_worker(entry_ids: list, force: bool = False):
     """Worker assíncrono que processa entries 1 a 1 sequencialmente.
     force=True → re-Vision mesmo em entries já feitos e refresca os crowns nas
