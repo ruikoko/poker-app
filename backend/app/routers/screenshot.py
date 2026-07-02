@@ -28,7 +28,7 @@ from difflib import SequenceMatcher
 from itertools import permutations
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response
 from PIL import Image
-from app.auth import require_auth
+from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
 from app.hero_names import HERO_NAMES_ALL, ALL_NICKS_BY_SITE
 from app.ingest_filters import is_pre_2026
@@ -1013,6 +1013,11 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
         new_info = dict(info)
         new_info["real_name"] = real_name
         new_info["bounty_pct"] = vision_info.get("bounty_pct", 0)
+        # #GOLD-BOUNTY-CARRY: a coroa ($) já vem lida no vision (players_list do
+        # entry da Gold); copia-a na MESMA passagem que leva os nomes. Antes só se
+        # copiava o VPIP → as 332 mãos Gold ficavam sem coroas. Valor cru aqui; a
+        # guarda half-base vive no consumo (queue_export) e no backfill.
+        new_info["bounty_value_usd"] = vision_info.get("bounty_value_usd", 0)
         new_info["country"] = vision_info.get("country")
 
         enriched[real_name] = new_info
@@ -2040,6 +2045,79 @@ def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     if not rows:
         raise HTTPException(status_code=404, detail="Mão não encontrada")
     return dict(rows[0])
+
+
+# ── #GOLD-BOUNTY-CARRY — backfill das coroas nas mãos Gold (position_v3) ──────
+def backfill_gold_bounties(dry_run: bool = False) -> dict:
+    """Preenche as coroas ($ bounty) nas mãos GG desanon pela GOLD (position_v3)
+    que ficaram sem elas: copia `bounty_value_usd` do `players_list` do ENTRY da
+    Gold para o `all_players_actions` da mão. Reusa o entry guardado → 0 Vision.
+
+    Guarda half-base: coroa < base÷2 (base = tournament_summaries.buy_in_bounty)
+    → NÃO escreve (provável leitura errada). Hero com coroa 0 → salta (frente à
+    parte). Não toca nos NOMES (Gold manda) — só adiciona a coroa por jogador.
+    dry_run=True → não escreve, devolve o plano."""
+    from psycopg2.extras import Json
+    base_rows = query("SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+                      "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL")
+    base_by_tn = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in base_rows}
+
+    rows = query("""SELECT h.id, h.hand_id, h.tournament_number, h.all_players_actions,
+                           e.raw_json->'players_list' AS entry_players
+                      FROM hands h JOIN entries e ON e.id = h.entry_id
+                     WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
+                       AND h.player_names->>'match_method' = 'position_v3'""")
+    hands_filled = players_filled = players_rejected = no_base = 0
+    for r in rows:
+        apa = r["all_players_actions"]
+        if not isinstance(apa, dict):
+            continue
+        crowns = {}
+        for p in (r["entry_players"] or []):
+            if isinstance(p, dict) and p.get("name"):
+                crowns[p["name"].lower()] = p.get("bounty_value_usd")
+        base = base_by_tn.get(r["tournament_number"])
+        floor = base / 2 if base else None
+        if base is None:
+            no_base += 1
+        changed = False
+        for key, pdata in apa.items():
+            if key == "_meta" or not isinstance(pdata, dict):
+                continue
+            name = (pdata.get("real_name") or key).lower()
+            crown = crowns.get(name) or crowns.get(key.lower())
+            if not crown or crown <= 0:
+                continue                       # sem coroa / Hero-a-0 → salta
+            if floor is not None and crown < floor:
+                players_rejected += 1          # < base÷2 → mal lida, NÃO escreve
+                continue
+            if pdata.get("bounty_value_usd") != crown:
+                pdata["bounty_value_usd"] = crown
+                players_filled += 1
+                changed = True
+        if changed:
+            hands_filled += 1
+            if not dry_run:
+                conn = get_conn()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE hands SET all_players_actions=%s WHERE id=%s",
+                                    (Json(apa), r["id"]))
+                    conn.commit()
+                finally:
+                    conn.close()
+    return {"hands_scanned": len(rows), "hands_filled": hands_filled,
+            "players_filled": players_filled,
+            "players_rejected_below_half": players_rejected,
+            "hands_without_ts_base": no_base}
+
+
+@router.post("/backfill-gold-bounties")
+def trigger_backfill_gold_bounties(dry_run: bool = False,
+                                   current_user=Depends(require_auth_or_api_key)):
+    """#GOLD-BOUNTY-CARRY — preenche as coroas das mãos Gold (position_v3) a partir
+    do entry da Gold, com guarda half-base. `dry_run=true` → não escreve. Sem Vision."""
+    return backfill_gold_bounties(dry_run=dry_run)
 
 
 async def _backfill_worker(entry_ids: list, force: bool = False):
