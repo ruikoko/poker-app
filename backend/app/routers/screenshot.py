@@ -30,7 +30,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Backgro
 from PIL import Image
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
-from app.hero_names import HERO_NAMES_ALL, ALL_NICKS_BY_SITE
+from app.hero_names import HERO_NAMES_ALL, ALL_NICKS_BY_SITE, FRIEND_HEROES
 from app.ingest_filters import is_pre_2026
 from app.utils.timezones import utc_to_lisbon_naive
 
@@ -855,10 +855,20 @@ def _build_anon_to_real_map(hand_row: dict, vision_data: dict) -> dict:
 POSITION_V3_MATCH_METHOD = "position_v3"
 
 # Nicks-Hero conhecidos (lowercase) — usado para VERIFICAR o Hero lido pela
-# Vision antes de o escrever no seat 'Hero'. Inclui a lista global + os de GG.
-_KNOWN_HERO_NICKS = {n.strip().lower() for n in HERO_NAMES_ALL} | {
+# Vision antes de o escrever no seat 'Hero'. Inclui a lista global + os de GG,
+# MENOS os FRIEND_HEROES.
+# #DESANON-HERO-FRIEND-NICK-ACCEPTED: os friend-heroes (Karluz/flightrisk) são
+# VILÕES nas mãos do Rui. A Vision, no campo `hero`, às vezes lê o nick de um
+# vilão-amigo como sendo o Hero (raw_vision literal "HERO: Karluz" em
+# GG-6113127853/6113686726). Como estavam na whitelist, o guarda ACEITAVA-o e
+# escrevia anon_map["Hero"]="Karluz" → nome do vilão no seat do Hero, colidindo
+# com o vilão real (apa fundia 2 seats num "Karluz"). Excluí-los → o guarda
+# rejeita o friend-nick-como-Hero e deixa lacuna honesta. Raio medido: 0 Gold
+# legítimas com Hero=friend (as 2 únicas eram o bug). O Hero é lido pelo texto
+# AMARELO na gold (cue fiável — ver prompt da Vision).
+_KNOWN_HERO_NICKS = ({n.strip().lower() for n in HERO_NAMES_ALL} | {
     n.strip().lower() for n in ALL_NICKS_BY_SITE.get("GGPoker", [])
-}
+}) - {n.strip().lower() for n in FRIEND_HEROES}
 
 
 def _canon_position(p: str | None) -> str | None:
