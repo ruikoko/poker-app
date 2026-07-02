@@ -127,6 +127,42 @@ export default function GGHealth() {
   const [zoom, setZoom] = useState(null)
   const [selected, setSelected] = useState(new Set())   // Ação 1: hand_ids marcados
   const [msg, setMsg] = useState(null)
+  // Pesquisa GLOBAL por nº de mão (só frontend: usa group=all, filtra localmente).
+  const [q, setQ] = useState('')
+  const [allImgs, setAllImgs] = useState(null)          // cache de TODAS as imagens
+  const [loadingAll, setLoadingAll] = useState(false)
+
+  // Carrega todas as imagens uma vez (páginas de 300) para pesquisar sem folhear.
+  const ensureAll = () => {
+    if (allImgs || loadingAll) return
+    setLoadingAll(true)
+    ;(async () => {
+      try {
+        const PS = 300
+        const first = await ggHealth.list('all', 1, PS)
+        let imgs = first.images || []
+        const pages = Math.ceil((first.total || 0) / (first.page_size || PS))
+        for (let p = 2; p <= pages; p++) {
+          const r = await ggHealth.list('all', p, PS)
+          imgs = imgs.concat(r.images || [])
+        }
+        setAllImgs(imgs)
+      } catch (e) { setErr(e.message) }
+      finally { setLoadingAll(false) }
+    })()
+  }
+  useEffect(() => { if (q.trim()) ensureAll() }, [q])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const qt = q.trim()
+  const qDigits = qt.replace(/\D/g, '')
+  const results = qt && allImgs
+    ? allImgs.filter(im => {
+        const hid = (im.hand_id || '').toLowerCase()
+        const fn = im.filename_num || ''
+        return (qDigits && (fn.includes(qDigits) || hid.replace(/\D/g, '').includes(qDigits)))
+          || (!qDigits && hid.includes(qt.toLowerCase()))
+      })
+    : null
 
   const loadSummary = () => ggHealth.summary().then(setSum).catch(e => setErr(e.message))
   useEffect(() => { loadSummary() }, [])
@@ -189,7 +225,35 @@ export default function GGHealth() {
       </div>
       {err && <div style={{ ...card, padding: 16, color: '#ef4444', marginTop: 12 }}>Erro: {err}</div>}
 
-      {!group && sum && (
+      {/* Pesquisa GLOBAL por nº de mão — salta para a mão em qualquer grupo. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
+        <input value={q} onChange={e => setQ(e.target.value)}
+          placeholder="Procurar por nº de mão (ex. 6116735459)"
+          style={{ width: 320, fontFamily: "'Fira Code',monospace", fontSize: 13, background: '#0b0d13', color: '#c9d1d9', border: '1px solid #30363d', borderRadius: 6, padding: '6px 10px' }} />
+        {qt && <button style={btn} onClick={() => setQ('')}>✕ limpar</button>}
+      </div>
+
+      {qt && (
+        <div style={{ marginTop: 12 }}>
+          {loadingAll && !allImgs ? <div style={{ color: 'var(--muted)' }}>A procurar…</div> : (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px' }}>
+                {(results || []).length} resultado(s) para “{qt}”
+              </div>
+              <div style={{ ...card, overflow: 'hidden' }}>
+                {(results || []).map((im, i) => (
+                  <Row key={i} im={im} group={null} onZoom={setZoom}
+                    selected={selected} onToggleSel={() => {}}
+                    onLink={() => {}} onSwap={() => {}} />
+                ))}
+                {(results || []).length === 0 && <div style={{ padding: 16, color: 'var(--muted)' }}>Nenhuma imagem com esse número.</div>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {!qt && !group && sum && (
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '20px 0 8px' }}>Precisa de ti</div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -202,7 +266,7 @@ export default function GGHealth() {
         </>
       )}
 
-      {group && (
+      {!qt && group && (
         <div style={{ marginTop: 16 }}>
           <button onClick={() => setGroup(null)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>&larr; Dashboard</button>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '6px 0 12px' }}>

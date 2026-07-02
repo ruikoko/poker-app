@@ -354,7 +354,7 @@ export const suspicious = {
 // ── Saúde das mãos GG (vista por imagem, read-only) ─────────────────────────
 export const ggHealth = {
   summary: () => req('GET', '/gg-health/summary'),
-  list: (group, page = 1) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}`),
+  list: (group, page = 1, pageSize) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}${pageSize ? `&page_size=${pageSize}` : ''}`),
   // Ação 1 — taga N mãos com UMA tag (multi-select). confirm=true força apesar do
   // aviso de conflito de formato.
   tag: (handIds, tag, confirm = false) => req('POST', '/gg-health/tag', { hand_ids: handIds, tag, confirm }),
