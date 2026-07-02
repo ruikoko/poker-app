@@ -176,6 +176,7 @@ export default function Replayer({ hand }) {
                   <div style={{ fontSize: 11, fontWeight: p.isHero ? 700 : 500, color: p.isHero ? '#c7d2fe' : '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 85 }}>{p.name}</div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace' }}>{p.stackBB}BB</div>
                   {p.bounty != null && <div style={{ fontSize: 9, color: '#f59e0b' }}>{typeof p.bounty === 'string' ? p.bounty.replace('€', ' EUR') : `${p.bounty} EUR`}</div>}
+                  {p.bountyUsd != null && <div style={{ fontSize: 9, color: '#fcd34d', fontFamily: 'monospace' }} title="coroa ($ bounty)">${p.bountyUsd}</div>}
                 </div>
               </div>
             </div>

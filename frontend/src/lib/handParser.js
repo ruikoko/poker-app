@@ -141,6 +141,8 @@ export function parseHH(raw, apa) {
     stack: p.stack || 0,
     stackBB: p.stack_bb != null ? p.stack_bb : (bb > 1 ? +((p.stack || 0) / bb).toFixed(1) : 0),
     bounty: p.bounty,
+    bountyUsd: p.bounty_value_usd,          // coroa $ (Fase 2: mostrar/editar)
+    name_key: p.name,                        // chave p/ o editor de coroas (set-bounties)
     isHero: p.is_hero || String(p.name).toLowerCase() === 'hero',
     cards: [],
     folded: false,

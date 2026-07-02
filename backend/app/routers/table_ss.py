@@ -1750,45 +1750,83 @@ def set_anon_map_override(payload: dict = Body(...),
 @router.post("/set-bounties")
 def set_bounties_override(payload: dict = Body(...),
                           current_user=Depends(require_auth_or_api_key)):
-    """pt95 (#TABLE-SS-BOUNTY-UNDERREAD): override MANUAL dos bounties (coroa $) de UMA
-    mão, por nick. Actualiza SÓ `player_names.players_list[*].bounty_value_usd` — NÃO
-    toca anon_map/apa. Para consertar bounties mal lidos (a Vision leu a chama %) com a
-    coroa relida da SS original. Nicks não presentes no players_list ficam intactos +
-    devolvidos em `not_found` (não se inventa). Body: {hand_id, bounties:{nick:coroa}}."""
+    """pt95 (#TABLE-SS-BOUNTY-UNDERREAD) + Fase 2: override MANUAL das coroas ($) de UMA
+    mão, por nick. Actualiza `player_names.players_list[*].bounty_value_usd` **E**
+    `all_players_actions[nick].bounty_value_usd` (os 2 stores — display/IRE lêem o apa,
+    suspeitas/HRC lêem o players_list; ficam coerentes). Fase 2 aceita também:
+    - `confirm: [nick,...]`  → marca `bounty_confirmed=true` (aceita a coroa <½-base como
+      legítima; sai das suspeitas e do gate ½-base do HRC — exceção manual registada).
+    - `unconfirm: [nick,...]` → remove o flag.
+    - `dry_run: true` → devolve o PLANO (valores antes/depois + confirmações), não grava.
+    Nicks ausentes do players_list ficam intactos + devolvidos em `not_found` (não se
+    inventa). Body: {hand_id, bounties?:{nick:coroa}, confirm?:[], unconfirm?:[], dry_run?}."""
     import json as _json
     hand_id = payload.get("hand_id")
     bounties = payload.get("bounties") or {}
-    if not hand_id or not isinstance(bounties, dict) or not bounties:
-        raise HTTPException(400, "hand_id + bounties (dict não-vazio) obrigatórios")
-    rows = query("SELECT id, player_names FROM hands WHERE hand_id = %s", (hand_id,))
+    confirm = [n for n in (payload.get("confirm") or [])]
+    unconfirm = [n for n in (payload.get("unconfirm") or [])]
+    dry = bool(payload.get("dry_run"))
+    if not hand_id or (not bounties and not confirm and not unconfirm):
+        raise HTTPException(400, "hand_id + (bounties|confirm|unconfirm) obrigatórios")
+    rows = query("SELECT id, all_players_actions, player_names FROM hands WHERE hand_id = %s",
+                 (hand_id,))
     if not rows:
         raise HTTPException(404, "mão não encontrada")
     pn = rows[0]["player_names"] or {}
+    apa = rows[0]["all_players_actions"] or {}
     if isinstance(pn, str):
         pn = _json.loads(pn)
+    if isinstance(apa, str):
+        apa = _json.loads(apa)
     pl = pn.get("players_list") or []
-    updated = []
+    # apa indexado por real_name (a chave do dict) — mapa nick→entrada p/ patch coerente.
+    apa_by_name = {k: v for k, v in apa.items() if k != "_meta" and isinstance(v, dict)}
+    updated, confirmed, unconfirmed, plan = [], [], [], []
+    touched = set(bounties) | set(confirm) | set(unconfirm)
     for e in pl:
         nm = e.get("name")
+        if nm not in touched:
+            continue
+        entry = {"name": nm, "old": e.get("bounty_value_usd"),
+                 "was_confirmed": bool(e.get("bounty_confirmed"))}
         if nm in bounties:
             try:
-                e["bounty_value_usd"] = float(bounties[nm])
+                val = float(bounties[nm])
+                if not dry:
+                    e["bounty_value_usd"] = val
+                    if nm in apa_by_name:
+                        apa_by_name[nm]["bounty_value_usd"] = val
+                entry["new"] = val
                 updated.append(nm)
             except (ValueError, TypeError):
-                pass
+                entry["error"] = "valor inválido"
+        if nm in confirm:
+            if not dry:
+                e["bounty_confirmed"] = True
+            entry["confirm"] = True
+            confirmed.append(nm)
+        if nm in unconfirm:
+            if not dry:
+                e.pop("bounty_confirmed", None)
+            entry["confirm"] = False
+            unconfirmed.append(nm)
+        plan.append(entry)
+    not_found = [n for n in touched if n not in {p["name"] for p in plan}]
+    if dry:
+        return {"dry_run": True, "hand_id": hand_id, "plan": plan, "not_found": not_found}
     pn["players_list"] = pl
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE hands SET player_names = %s WHERE id = %s",
-                        (_json.dumps(pn), rows[0]["id"]))
+            cur.execute("UPDATE hands SET player_names=%s, all_players_actions=%s WHERE id=%s",
+                        (_json.dumps(pn), _json.dumps(apa), rows[0]["id"]))
         conn.commit()
     finally:
         conn.close()
-    logger.info("table-ss set-bounties: %s updated=%d not_found=%d",
-                hand_id, len(updated), len(bounties) - len(updated))
+    logger.info("table-ss set-bounties: %s updated=%d confirmed=%d unconfirmed=%d not_found=%d",
+                hand_id, len(updated), len(confirmed), len(unconfirmed), len(not_found))
     return {"status": "set", "hand_id": hand_id, "updated": updated,
-            "not_found": [n for n in bounties if n not in updated]}
+            "confirmed": confirmed, "unconfirmed": unconfirmed, "not_found": not_found}
 
 
 # pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).

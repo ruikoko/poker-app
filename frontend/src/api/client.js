@@ -457,6 +457,12 @@ export const tableSs = {
   // Fase 1-E — marca/desmarca a mão como verificada por mim (badge some).
   verifyDeanon: (handId, verified = true) =>
     req('POST', '/table-ss/verify-deanon', { hand_id: handId, verified }),
+  // Fase 2 — editar/confirmar coroas ($). Grava players_list + apa. confirm[] aceita
+  // uma coroa <½-base como legítima. dryRun → só o plano (pré-visualização).
+  setBounties: (handId, { bounties, confirm, unconfirm, dryRun } = {}) =>
+    req('POST', '/table-ss/set-bounties', {
+      hand_id: handId, bounties, confirm, unconfirm, dry_run: dryRun,
+    }),
 }
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────

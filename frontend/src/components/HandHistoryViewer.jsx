@@ -19,10 +19,11 @@
 //   hand: objecto vindo de GET /api/hands/{id}
 //         { raw, raw_resolved, all_players_actions, player_names, hero_cards, board, ... }
 
-import React from 'react'
+import React, { useState } from 'react'
 import { parseHH, formatBB, formatActionLabel } from '../lib/handParser'
 import { DeanonBanner } from './DeanonBadge'
 import PokerCard from './PokerCard'
+import { tableSs } from '../api/client'
 
 const STREET_COLORS = {
   preflop: '#6366f1',
@@ -116,7 +117,91 @@ function IreOpBadge({ ire }) {
   )
 }
 
-export default function HandHistoryViewer({ hand }) {
+// Fase 2 — coroa ($ bounty_value_usd) + editor. COM IRE: a coroa vai no hover/tap do
+// badge IRE (tooltip). SEM IRE (não acende): a coroa aparece no LUGAR do IRE. O ✎
+// abre o editor (valor + "aceitar <½-base") com pré-visualização dry-run.
+function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState(crown != null ? String(crown) : '')
+  const [accept, setAccept] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [tap, setTap] = useState(false)          // mobile: tap revela a coroa
+  const crownStr = crown != null ? `$${crown}` : null
+  const ireTip = ire
+    ? `Coroa ${crownStr || '—'} · Stack ${ire.stack_si.toFixed(2)} SI · KO ${ire.ko_units.toFixed(2)}`
+      + `${ire.is_active ? '' : ' · folded'}${ire.is_covered ? ' · covered' : ''}${ire.is_main ? ' · MAIN' : ''}`
+    : ''
+  const save = async () => {
+    setBusy(true)
+    try {
+      const num = val.trim() === '' ? null : Number(val)
+      if (num != null && (isNaN(num) || num < 0)) { alert('Valor inválido'); setBusy(false); return }
+      const body = {}
+      if (num != null && num !== crown) body.bounties = { [nameKey]: num }
+      if (accept) body.confirm = [nameKey]
+      if (!body.bounties && !body.confirm) { setEditing(false); setBusy(false); return }
+      const dry = await tableSs.setBounties(handId, { ...body, dryRun: true })
+      const pl = (dry.plan || [])[0] || {}
+      const msg = (body.bounties ? `Coroa de ${nameKey}: $${pl.old ?? '—'} → $${pl.new}` : `Coroa de ${nameKey} (sem mudança de valor)`)
+        + (accept ? `\nAceitar abaixo de ½-base como legítima (sai das suspeitas + gate HRC).` : '')
+        + `\n\nGravar?`
+      if (!window.confirm(msg)) { setBusy(false); return }
+      await tableSs.setBounties(handId, body)
+      setEditing(false)
+      onEdited && onEdited()
+    } catch (e) { alert('Erro: ' + (e.message || e)); setBusy(false) }
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, position: 'relative' }}>
+      {ire
+        ? <span title={ireTip} onClick={() => setTap(t => !t)} style={{
+            cursor: 'pointer', display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+            fontSize: 12, fontWeight: 700, fontFamily: 'monospace', color: '#c4b5fd', whiteSpace: 'nowrap',
+            background: ire.is_main ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.15)',
+            border: `1px solid rgba(124,58,237,${ire.is_main ? 0.6 : 0.3})`,
+          }}>IRE {ire.ire_pct}%</span>
+        : (crownStr && <span style={{
+            fontSize: 12, fontWeight: 700, fontFamily: 'monospace', color: '#fcd34d',
+            padding: '2px 8px', borderRadius: 4, background: 'rgba(252,211,77,0.10)',
+            border: '1px solid rgba(252,211,77,0.30)', whiteSpace: 'nowrap',
+          }} title="coroa (sem IRE aceso)">{crownStr}</span>)}
+      {ire && tap && crownStr && <span style={{ fontSize: 11, color: '#fcd34d', fontFamily: 'monospace' }}>{crownStr}</span>}
+      {!isHero && handId && (
+        <button onClick={() => setEditing(e => !e)} title="editar/confirmar coroa" style={{
+          background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 12, padding: 0,
+        }}>✎</button>
+      )}
+      {editing && (
+        <div onClick={e => e.stopPropagation()} style={{
+          position: 'absolute', top: '100%', right: 0, zIndex: 50, marginTop: 4,
+          background: '#161b22', border: '1px solid #30363d', borderRadius: 6, padding: 10, minWidth: 190,
+          boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Coroa $ de {nameKey}</div>
+          <input value={val} onChange={e => setVal(e.target.value)} placeholder="valor $" style={{
+            width: '100%', boxSizing: 'border-box', background: '#0b0d13', color: '#c9d1d9',
+            border: '1px solid #30363d', borderRadius: 4, padding: '4px 8px', fontFamily: 'monospace', fontSize: 12,
+          }} />
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, margin: '8px 0', color: '#cbd5e1' }}>
+            <input type="checkbox" checked={accept} onChange={e => setAccept(e.target.checked)} />
+            aceitar abaixo de ½-base
+          </label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={save} disabled={busy} style={{
+              flex: 1, cursor: busy ? 'wait' : 'pointer', background: 'rgba(34,197,94,0.15)',
+              border: '1px solid rgba(34,197,94,0.45)', color: '#4ade80', borderRadius: 4, fontSize: 12, fontWeight: 700, padding: '4px 8px',
+            }}>{busy ? '…' : 'Guardar'}</button>
+            <button onClick={() => setEditing(false)} style={{
+              background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 4, fontSize: 12, padding: '4px 8px', cursor: 'pointer',
+            }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </span>
+  )
+}
+
+export default function HandHistoryViewer({ hand, onEdited }) {
   if (!hand?.raw) return null
   const apa = hand.all_players_actions || {}
   const meta = apa._meta || {}
@@ -193,7 +278,8 @@ export default function HandHistoryViewer({ hand }) {
                   {typeof p.bounty === 'number' && p.bounty < 10 ? `${p.bounty}%` : `${p.bounty}€`}
                 </span>
               )}
-              <IreOpBadge ire={ireOp} />
+              <CrownCell crown={p.bountyUsd} ire={ireOp} isHero={isHero}
+                handId={hand.hand_id} nameKey={p.name_key || p.name} onEdited={onEdited} />
             </div>
           )
         })}

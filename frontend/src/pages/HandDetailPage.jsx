@@ -134,7 +134,7 @@ export default function HandDetailPage() {
       <AttachedImagesSection hand={hand} onChange={refreshHand} />
 
       {/* ── MESA + ACÇÕES + SHOWDOWN (Tech Debt #8 — renderer canónico) ── */}
-      <HandHistoryViewer hand={hand} />
+      <HandHistoryViewer hand={hand} onEdited={refreshHand} />
 
       {/* ── CAPTURA DA MESA (table-SS) — só GG; imagem inline p/ confirmar a
              desanon sem sair da fila "Mãos suspeitas". Winamax/PS/WPN: não aparece. */}

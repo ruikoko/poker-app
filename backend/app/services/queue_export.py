@@ -76,7 +76,12 @@ def detect_bounty_below_half(player_names, starting_bounty):
 
     Pura (sem BD). Devolve lista de `{name, value, floor}` (vazia = ok).
     Fonte única reusada pela guarda de `build_queue_zip` E pelo guardião
-    de validação (`/api/suspicious-hands`)."""
+    de validação (`/api/suspicious-hands`).
+
+    Fase 2 (aceitar <½ como legítima): seats com `bounty_confirmed=true` no
+    `players_list` são EXCEÇÃO manual do Rui (registada) — a coroa foi confirmada
+    à vista da Gold como real. Saltam a guarda (não entram em `below`). A guarda
+    ½-base fica INTACTA para todos os outros seats."""
     if not starting_bounty:
         return []
     pn = player_names
@@ -88,6 +93,8 @@ def detect_bounty_below_half(player_names, starting_bounty):
     floor = float(starting_bounty) / 2.0
     below = []
     for e in ((pn or {}).get("players_list") or []):
+        if e.get("bounty_confirmed"):        # aceite manualmente pelo Rui → exceção
+            continue
         v = e.get("bounty_value_usd")
         if v is not None and float(v) < floor:
             below.append({"name": e.get("name"), "value": float(v), "floor": floor})
