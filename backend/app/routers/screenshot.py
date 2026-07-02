@@ -2068,6 +2068,7 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
                      WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
                        AND h.player_names->>'match_method' = 'position_v3'""")
     hands_filled = players_filled = players_rejected = no_base = 0
+    players_via_trunc = players_ambiguous_trunc = players_overwritten = 0
     for r in rows:
         apa = r["all_players_actions"]
         if not isinstance(apa, dict):
@@ -2086,14 +2087,31 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
                 continue
             name = (pdata.get("real_name") or key).lower()
             crown = crowns.get(name) or crowns.get(key.lower())
+            via_trunc = False
+            # #GOLD-CROWN-CARRY-NAME-TRUNCATION: se o nome exato está AUSENTE (apa
+            # completo vs Gold truncado), casa por _same_player. Só quando ausente
+            # → protege o Hero-a-0 (nome presente com coroa 0) e as já-preenchidas.
+            if (not crown or crown <= 0) and name not in crowns and key.lower() not in crowns:
+                uniq = {crowns[g] for g in crowns
+                        if crowns.get(g) and crowns[g] > 0 and _same_player(name, g)}
+                if len(uniq) == 1:
+                    crown = uniq.pop()
+                    via_trunc = True
+                elif len(uniq) > 1:
+                    players_ambiguous_trunc += 1   # truncagem ambígua → NÃO escreve
             if not crown or crown <= 0:
                 continue                       # sem coroa / Hero-a-0 → salta
             if floor is not None and crown < floor:
                 players_rejected += 1          # < base÷2 → mal lida, NÃO escreve
                 continue
-            if pdata.get("bounty_value_usd") != crown:
+            prior = pdata.get("bounty_value_usd")
+            if prior != crown:
+                if prior and prior > 0:
+                    players_overwritten += 1   # já-preenchida a mudar (deve ser 0)
                 pdata["bounty_value_usd"] = crown
                 players_filled += 1
+                if via_trunc:
+                    players_via_trunc += 1
                 changed = True
         if changed:
             hands_filled += 1
@@ -2108,6 +2126,9 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
                     conn.close()
     return {"hands_scanned": len(rows), "hands_filled": hands_filled,
             "players_filled": players_filled,
+            "players_via_truncation": players_via_trunc,
+            "players_ambiguous_truncation": players_ambiguous_trunc,
+            "players_overwritten_already_filled": players_overwritten,
             "players_rejected_below_half": players_rejected,
             "hands_without_ts_base": no_base}
 

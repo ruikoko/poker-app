@@ -50,6 +50,38 @@ def test_backfill_fills_guards_halfbase_and_skips_hero0():
     mc.assert_not_called()                                 # dry_run NÃO escreve
 
 
+def test_backfill_matches_truncated_name_but_not_hero0():
+    # #GOLD-CROWN-CARRY-NAME-TRUNCATION: apa tem nome COMPLETO, Gold TRUNCADO.
+    base_rows = [{"tournament_number": "T1", "buy_in_bounty": 40.0}]   # floor=20
+    apa = {"_meta": {}, "vunzigeviktor": {"real_name": "vunzigeviktor"},
+           "Lauro Dermio": {"real_name": "Lauro Dermio",             # Hero, presente c/ 0
+                            "bounty_value_usd": 0}}
+    entry = [{"name": "vunzigevikt..", "bounty_value_usd": 40.0},     # truncado → casa
+             {"name": "Lauro Dermio", "bounty_value_usd": 0.0}]       # Hero-0, exacto
+    hands = [{"id": 1, "hand_id": "GG-1", "tournament_number": "T1",
+              "all_players_actions": apa, "entry_players": entry}]
+    res, mc = _run_backfill(base_rows, hands)
+    assert res["players_filled"] == 1
+    assert res["players_via_truncation"] == 1                # vunzigeviktor recuperado
+    assert res["players_overwritten_already_filled"] == 0    # nada já-preenchido mudou
+    assert apa["vunzigeviktor"]["bounty_value_usd"] == 40.0
+    assert apa["Lauro Dermio"]["bounty_value_usd"] == 0      # Hero-0 intacto (não fuzzy)
+    mc.assert_not_called()
+
+
+def test_backfill_ambiguous_truncation_not_written():
+    base_rows = []
+    apa = {"_meta": {}, "Andre": {"real_name": "Andre"}}
+    entry = [{"name": "Andrews", "bounty_value_usd": 30.0},
+             {"name": "Andrezin", "bounty_value_usd": 50.0}]   # 2 same_player distintos
+    hands = [{"id": 1, "hand_id": "GG-1", "tournament_number": "T9",
+              "all_players_actions": apa, "entry_players": entry}]
+    res, _ = _run_backfill(base_rows, hands)
+    assert res["players_filled"] == 0
+    assert res["players_ambiguous_truncation"] == 1
+    assert "bounty_value_usd" not in apa["Andre"]
+
+
 def test_backfill_no_base_still_fills_but_flags():
     # sem TS base → não há floor; escreve cru, mas conta em hands_without_ts_base.
     apa = {"A": {"real_name": "A"}}
