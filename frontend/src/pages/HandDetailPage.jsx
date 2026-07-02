@@ -289,15 +289,7 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
                 <span style={{ fontSize: 15, color: '#64748b', fontFamily: 'monospace', minWidth: 90, textAlign: 'right' }}>
                   {stackDisplay}
                 </span>
-                {/* ⚠️ bounty_pct = VPIP (chama laranja 🔥), NÃO bounty. O bounty
-                    (coroa 👑 $) é bounty_value_usd. Nome enganador — #FIELD-BOUNTY-PCT-MISNAMED. */}
-                {p.bounty_pct != null && p.bounty_pct > 0 && (
-                  <span style={{
-                    fontSize: 14, color: '#7dd3fc', fontWeight: 700,
-                    padding: '2px 8px', borderRadius: 4,
-                    background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.15)',
-                  }}>{p.bounty_pct}%</span>
-                )}
+                {/* chama (VPIP bounty_pct) removida — o Rui não a usa (#FIELD-BOUNTY-PCT-MISNAMED). */}
                 {p.country && (
                   <span style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace' }}>{p.country}</span>
                 )}
