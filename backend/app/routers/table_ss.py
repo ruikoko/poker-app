@@ -1896,16 +1896,22 @@ def seat_integrity_scan(tagged_only: bool = Query(False, description="só mãos 
     dist_mm, dist_ds = {}, {}
     total = 0
     last_id = 0
-    tag_clause = ("AND (COALESCE(array_length(hm3_tags,1),0) > 0 "
-                  "OR COALESCE(array_length(discord_tags,1),0) > 0)") if tagged_only else ""
+    tag_clause = ("AND (COALESCE(array_length(h.hm3_tags,1),0) > 0 "
+                  "OR COALESCE(array_length(h.discord_tags,1),0) > 0)") if tagged_only else ""
     while True:
         batch = query(
-            f"""SELECT id, hand_id, raw, all_players_actions, player_names,
-                      tournament_name, played_at::text AS played_at, hm3_tags, discord_tags
-                 FROM hands
-                WHERE site='GGPoker' AND played_at >= '2026-01-01'
-                  AND raw IS NOT NULL AND raw <> '' {tag_clause} AND id > %s
-                ORDER BY id LIMIT 500""",
+            f"""SELECT h.id, h.hand_id, h.raw, h.all_players_actions, h.player_names,
+                      h.tournament_name, h.played_at::text AS played_at,
+                      h.hm3_tags, h.discord_tags, h.context_table_ss_id, h.entry_id,
+                      (l.img_b64 IS NOT NULL) AS has_ts_img,
+                      e.entry_type,
+                      ((e.raw_json->>'img_b64') IS NOT NULL) AS has_gold_img
+                 FROM hands h
+                 LEFT JOIN table_ss_processing_log l ON l.id = h.context_table_ss_id
+                 LEFT JOIN entries e ON e.id = h.entry_id
+                WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
+                  AND h.raw IS NOT NULL AND h.raw <> '' {tag_clause} AND h.id > %s
+                ORDER BY h.id LIMIT 500""",
             (last_id,))
         if not batch:
             break
@@ -1926,10 +1932,15 @@ def seat_integrity_scan(tagged_only: bool = Query(False, description="só mãos 
             mm = pn.get("match_method") if isinstance(pn, dict) else None
             ds = deanon_status("GGPoker", mm, bool(isinstance(pn, dict) and pn.get("verified_by_user")))
             tags = list(r.get("hm3_tags") or []) + list(r.get("discord_tags") or [])
-            rec = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+            rec = {"hand_id": r["hand_id"], "hand_db_id": r["id"],
+                   "tournament_name": r["tournament_name"],
                    "played_at": r["played_at"], "tags": tags,
                    "seats_raw": sc["seats_raw"], "seats_apa": sc["seats_apa"],
-                   "match_method": mm, "deanon_status": ds}
+                   "match_method": mm, "deanon_status": ds,
+                   # imagens associadas (links no relatório; None = não existe)
+                   "table_ss_id": r["context_table_ss_id"] if r.get("has_ts_img") else None,
+                   "gold_entry_id": r["entry_id"] if r.get("has_gold_img") else None,
+                   "gold_type": r.get("entry_type") if r.get("has_gold_img") else None}
             if sc["a"]:
                 A.append(rec)
             if sc["b"]:
