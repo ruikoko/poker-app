@@ -1829,6 +1829,129 @@ def set_bounties_override(payload: dict = Body(...),
             "confirmed": confirmed, "unconfirmed": unconfirmed, "not_found": not_found}
 
 
+# ── Varrimento de integridade de lugares (READ-ONLY) — padrão da GG-6118579134 ──
+_SEAT_LINE_RE = re.compile(r"^\s*Seat\s+(\d+):\s*(.+?)\s*\(([\d,]+)\s+in chips\)", re.M)
+
+
+def _scan_hand_integrity(raw, apa, pn):
+    """Pura. Deteta o padrão da GG-6118579134 numa mão:
+    A) nº de linhas Seat (com fichas) no raw != nº de lugares no apa;
+    B) hashes do raw ausentes do anon_map (ignora 'Hero') — só se HÁ anon_map;
+    C) nomes do players_list ausentes dos VALORES do anon_map — só se HÁ anon_map.
+    B/C exigem anon_map não-vazio: sem anon_map a mão está 'ainda anónima', não 'partida'."""
+    if isinstance(apa, str):
+        try:
+            apa = json.loads(apa)
+        except (ValueError, TypeError):
+            apa = {}
+    if isinstance(pn, str):
+        try:
+            pn = json.loads(pn)
+        except (ValueError, TypeError):
+            pn = {}
+    apa = apa or {}
+    pn = pn or {}
+    anon = pn.get("anon_map") or {}
+    raw_hashes = [m[1].strip() for m in _SEAT_LINE_RE.findall(raw or "")]
+    seats_raw = len(raw_hashes)
+    seats_apa = len([k for k, v in apa.items() if k != "_meta" and isinstance(v, dict)])
+    b_missing = []
+    if anon:
+        keys = set(anon.keys())
+        b_missing = [h for h in raw_hashes if h != "Hero" and h not in keys]
+    c_loose = []
+    if anon:
+        vals = {str(v).strip().lower() for v in anon.values()}
+        c_loose = [e.get("name") for e in (pn.get("players_list") or [])
+                   if e.get("name") and str(e["name"]).strip().lower() not in vals]
+    return {"seats_raw": seats_raw, "seats_apa": seats_apa,
+            "a": seats_raw != seats_apa, "b": bool(b_missing), "c": bool(c_loose),
+            "unmapped_hashes": b_missing, "loose_names": c_loose}
+
+
+def _integrity_sanity_6118579134():
+    """Sanidade: a forma PARTIDA da GG-6118579134 (pré-correção) TEM de disparar A+B+C."""
+    raw = ("Seat 1: Hero (66,974 in chips)\nSeat 2: a3f63bd (72,502 in chips)\n"
+           "Seat 3: 83cf3150 (116,767 in chips)\nSeat 4: 860ceadf (83,611 in chips)\n"
+           "Seat 5: 67e5ea92 (190,490 in chips)\n")
+    apa = {"_meta": {}, "Lauro Dermio": {"seat": 1}, "leleye7311": {"seat": 2},
+           "lalaalalaa": {"seat": 3}, "Wally2fun": {"seat": 5}}   # 4 lugares (colapso)
+    pn = {"anon_map": {"Hero": "Lauro Dermio", "67e5ea92": "Wally2fun",
+                       "83cf3150": "lalaalalaa", "860ceadf": "leleye7311"},  # a3f63bd em falta
+          "players_list": [{"name": "MaLong07"}]}                            # nome solto
+    return _scan_hand_integrity(raw, apa, pn)
+
+
+@router.get("/seat-integrity-scan")
+def seat_integrity_scan(current_user=Depends(require_auth_or_api_key)):
+    """READ-ONLY. Varre GG 2026 à procura do padrão da GG-6118579134 (lugares colapsados
+    / hashes por mapear / nomes soltos). NÃO escreve nada. Batches de 500 por id (leve
+    em qualquer universo). Exclui a GG-6118579134 dos totais (já corrigida) + devolve o
+    sanity check (forma partida dela → dispara A+B+C)."""
+    from app.services.deanon_status import deanon_status
+    EXCLUDE = "GG-6118579134"
+    A, B, C = [], [], []
+    dist_mm, dist_ds = {}, {}
+    total = 0
+    last_id = 0
+    while True:
+        batch = query(
+            """SELECT id, hand_id, raw, all_players_actions, player_names,
+                      tournament_name, played_at::text AS played_at
+                 FROM hands
+                WHERE site='GGPoker' AND played_at >= '2026-01-01'
+                  AND raw IS NOT NULL AND raw <> '' AND id > %s
+                ORDER BY id LIMIT 500""",
+            (last_id,))
+        if not batch:
+            break
+        for r in batch:
+            last_id = r["id"]
+            total += 1
+            if r["hand_id"] == EXCLUDE:
+                continue
+            pn = r["player_names"] or {}
+            if isinstance(pn, str):
+                try:
+                    pn = json.loads(pn)
+                except (ValueError, TypeError):
+                    pn = {}
+            sc = _scan_hand_integrity(r["raw"], r["all_players_actions"], pn)
+            if not (sc["a"] or sc["b"] or sc["c"]):
+                continue
+            mm = pn.get("match_method") if isinstance(pn, dict) else None
+            ds = deanon_status("GGPoker", mm, bool(isinstance(pn, dict) and pn.get("verified_by_user")))
+            rec = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+                   "played_at": r["played_at"], "seats_raw": sc["seats_raw"],
+                   "seats_apa": sc["seats_apa"], "match_method": mm, "deanon_status": ds}
+            if sc["a"]:
+                A.append(rec)
+            if sc["b"]:
+                B.append({**rec, "unmapped_hashes": sc["unmapped_hashes"]})
+            if sc["c"]:
+                C.append({**rec, "loose_names": sc["loose_names"]})
+            dist_mm[mm or "∅(sem match)"] = dist_mm.get(mm or "∅(sem match)", 0) + 1
+            dist_ds[ds or "∅(sem badge)"] = dist_ds.get(ds or "∅(sem badge)", 0) + 1
+    setA = {x["hand_id"] for x in A}
+    setB = {x["hand_id"] for x in B}
+    setC = {x["hand_id"] for x in C}
+    union = setA | setB | setC
+    CAP = 400
+    return {
+        "scope": "GGPoker played_at>=2026-01-01 (raw presente); B/C só p/ mãos com anon_map",
+        "total_scanned": total,
+        "counts": {"A_seat_mismatch": len(A), "B_unmapped_hash": len(B),
+                   "C_loose_names": len(C), "affected_union": len(union)},
+        "intersections": {"A_and_B": len(setA & setB), "A_and_C": len(setA & setC),
+                          "B_and_C": len(setB & setC), "A_B_C": len(setA & setB & setC)},
+        "by_match_method": dist_mm,
+        "by_deanon_status": dist_ds,
+        "truncated": {k: (len(v) > CAP) for k, v in (("A", A), ("B", B), ("C", C))},
+        "affected": {"A": A[:CAP], "B": B[:CAP], "C": C[:CAP]},
+        "sanity_6118579134_broken_shape": _integrity_sanity_6118579134(),
+    }
+
+
 # pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).
 _REPROCESS_ELIGIBLE_SQL = (
     "FROM table_ss_processing_log "
