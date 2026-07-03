@@ -1883,24 +1883,28 @@ def _integrity_sanity_6118579134():
 
 
 @router.get("/seat-integrity-scan")
-def seat_integrity_scan(current_user=Depends(require_auth_or_api_key)):
+def seat_integrity_scan(tagged_only: bool = Query(False, description="só mãos com etiqueta (hm3_tags OU discord_tags) — universo de estudo"),
+                        current_user=Depends(require_auth_or_api_key)):
     """READ-ONLY. Varre GG 2026 à procura do padrão da GG-6118579134 (lugares colapsados
     / hashes por mapear / nomes soltos). NÃO escreve nada. Batches de 500 por id (leve
-    em qualquer universo). Exclui a GG-6118579134 dos totais (já corrigida) + devolve o
-    sanity check (forma partida dela → dispara A+B+C)."""
+    em qualquer universo). `tagged_only=true` → só mãos de ESTUDO (com ≥1 etiqueta em
+    hm3_tags ou discord_tags). Exclui a GG-6118579134 dos totais (já corrigida) + devolve
+    o sanity check (forma partida dela → dispara A+B+C)."""
     from app.services.deanon_status import deanon_status
     EXCLUDE = "GG-6118579134"
     A, B, C = [], [], []
     dist_mm, dist_ds = {}, {}
     total = 0
     last_id = 0
+    tag_clause = ("AND (COALESCE(array_length(hm3_tags,1),0) > 0 "
+                  "OR COALESCE(array_length(discord_tags,1),0) > 0)") if tagged_only else ""
     while True:
         batch = query(
-            """SELECT id, hand_id, raw, all_players_actions, player_names,
-                      tournament_name, played_at::text AS played_at
+            f"""SELECT id, hand_id, raw, all_players_actions, player_names,
+                      tournament_name, played_at::text AS played_at, hm3_tags, discord_tags
                  FROM hands
                 WHERE site='GGPoker' AND played_at >= '2026-01-01'
-                  AND raw IS NOT NULL AND raw <> '' AND id > %s
+                  AND raw IS NOT NULL AND raw <> '' {tag_clause} AND id > %s
                 ORDER BY id LIMIT 500""",
             (last_id,))
         if not batch:
@@ -1921,9 +1925,11 @@ def seat_integrity_scan(current_user=Depends(require_auth_or_api_key)):
                 continue
             mm = pn.get("match_method") if isinstance(pn, dict) else None
             ds = deanon_status("GGPoker", mm, bool(isinstance(pn, dict) and pn.get("verified_by_user")))
+            tags = list(r.get("hm3_tags") or []) + list(r.get("discord_tags") or [])
             rec = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
-                   "played_at": r["played_at"], "seats_raw": sc["seats_raw"],
-                   "seats_apa": sc["seats_apa"], "match_method": mm, "deanon_status": ds}
+                   "played_at": r["played_at"], "tags": tags,
+                   "seats_raw": sc["seats_raw"], "seats_apa": sc["seats_apa"],
+                   "match_method": mm, "deanon_status": ds}
             if sc["a"]:
                 A.append(rec)
             if sc["b"]:
@@ -1938,7 +1944,9 @@ def seat_integrity_scan(current_user=Depends(require_auth_or_api_key)):
     union = setA | setB | setC
     CAP = 400
     return {
-        "scope": "GGPoker played_at>=2026-01-01 (raw presente); B/C só p/ mãos com anon_map",
+        "scope": ("GGPoker 2026, SÓ etiquetadas (estudo)" if tagged_only
+                  else "GGPoker 2026 (todas)") + "; B/C só p/ mãos com anon_map",
+        "tagged_only": tagged_only,
         "total_scanned": total,
         "counts": {"A_seat_mismatch": len(A), "B_unmapped_hash": len(B),
                    "C_loose_names": len(C), "affected_union": len(union)},
