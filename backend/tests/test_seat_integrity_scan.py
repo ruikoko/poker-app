@@ -60,3 +60,22 @@ def test_loose_name_flags_C():
           "players_list": [{"name": "A"}, {"name": "Fantasma"}]}
     sc = _scan_hand_integrity(raw, apa, pn)
     assert sc["c"] and "Fantasma" in sc["loose_names"]
+
+
+# ── propagação por hash no torneio (hash fixo por jogador; conflito não propõe) ─
+from app.routers.table_ss import _propose_from_names
+
+
+def test_propagation_single_name_proposes():
+    r = _propose_from_names({"hangfish": ["GG-1", "GG-2", "GG-1"]})
+    assert r["propose"] == "hangfish" and r["from"] == ["GG-1", "GG-2"]
+
+
+def test_propagation_conflict_does_not_propose():
+    r = _propose_from_names({"hangfish": ["GG-1"], "outro": ["GG-2"]})
+    assert "conflict" in r and "propose" not in r
+    assert set(r["conflict"]) == {"hangfish", "outro"}
+
+
+def test_propagation_unknown_none():
+    assert _propose_from_names({}) is None

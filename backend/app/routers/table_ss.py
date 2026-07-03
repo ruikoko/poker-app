@@ -1971,6 +1971,116 @@ def seat_integrity_scan(tagged_only: bool = Query(False, description="só mãos 
     }
 
 
+# ── Ensaio da cura estrutural + propagação por hash (READ-ONLY) ──────────────
+
+def _propose_from_names(names_dict):
+    """names_dict = {nome: [hand_ids]} para um hash no torneio. Devolve:
+    - {"propose": nome, "from": [hand_ids]}  se HÁ exactamente 1 nome (hash fixo);
+    - {"conflict": {nome:[hand_ids]}}         se >1 nome (não propor);
+    - None                                    se desconhecido no torneio."""
+    if not names_dict:
+        return None
+    if len(names_dict) == 1:
+        nome = next(iter(names_dict))
+        return {"propose": nome, "from": sorted(set(names_dict[nome]))[:6]}
+    return {"conflict": {n: sorted(set(src))[:6] for n, src in names_dict.items()}}
+
+
+@router.get("/cure-preview")
+def cure_preview(ss_ids: str = Query("", description="ids de capturas table-ss (vírgula)"),
+                 current_user=Depends(require_auth_or_api_key)):
+    """READ-ONLY. Ensaio da cura estrutural + propagação por hash no torneio, para as
+    capturas `ss_ids`. NÃO escreve. Por mão ligada devolve: (1) MESA agora (apa guardado);
+    (2) DEPOIS da cura (reparse do raw + anon_map EXISTENTE; hash sem nome = branco, nunca
+    inventado); (3) propagação: para cada hash branco, o nome desse hash NOUTRAS mãos do
+    MESMO torneio (hash fixo por jogador). Conflito de nomes p/ o mesmo hash → mostra, não propõe."""
+    import json as _json
+    from app.parsers.gg_hands import parse_hands
+    ids = [int(x) for x in ss_ids.split(",") if x.strip().isdigit()]
+    if not ids:
+        raise HTTPException(400, "ss_ids (vírgula) obrigatório")
+    linked = []
+    for sid in ids:
+        r = query("SELECT matched_hand_id, original_filename FROM "
+                  "table_ss_processing_log WHERE id=%s", (sid,))
+        linked.append({"ss_id": sid,
+                       "hand_id": r[0]["matched_hand_id"] if r else None,
+                       "filename": r[0]["original_filename"] if r else None})
+    hand_ids = [l["hand_id"] for l in linked if l["hand_id"]]
+    hrows = query("SELECT hand_id, raw, all_players_actions, player_names, "
+                  "tournament_number, tournament_name FROM hands WHERE hand_id = ANY(%s)",
+                  (hand_ids,)) if hand_ids else []
+    hb = {h["hand_id"]: h for h in hrows}
+    tnums = sorted({h["tournament_number"] for h in hrows if h.get("tournament_number")})
+    # mapa do torneio: hash -> {nome -> [hand_ids]} (propagação, hash fixo por jogador)
+    thn = {}
+    for tn in tnums:
+        rows = query("SELECT hand_id, player_names FROM hands "
+                     "WHERE site='GGPoker' AND tournament_number=%s", (tn,))
+        m = {}
+        for r in rows:
+            pn = r["player_names"] or {}
+            if isinstance(pn, str):
+                try:
+                    pn = _json.loads(pn)
+                except (ValueError, TypeError):
+                    pn = {}
+            for k, v in (pn.get("anon_map") or {}).items():
+                if k == "Hero" or not isinstance(v, str):
+                    continue
+                m.setdefault(k, {}).setdefault(v.strip(), []).append(r["hand_id"])
+        thn[tn] = m
+
+    def _seatsort(z):
+        return (z["seat"] is None, z["seat"] if z["seat"] is not None else 0)
+
+    out = []
+    for l in linked:
+        hid = l["hand_id"]; h = hb.get(hid)
+        if not h:
+            out.append({"ss_id": l["ss_id"], "hand_id": hid, "error": "sem mão ligada"})
+            continue
+        pn = h["player_names"] or {}
+        if isinstance(pn, str):
+            pn = _json.loads(pn)
+        anon = pn.get("anon_map") or {}
+        apa = h["all_players_actions"] or {}
+        if isinstance(apa, str):
+            apa = _json.loads(apa)
+        mapped_names = set(anon.values())
+        now = []
+        for k, v in apa.items():
+            if k == "_meta" or not isinstance(v, dict):
+                continue
+            nm = v.get("real_name", k)
+            named = nm in mapped_names
+            now.append({"seat": v.get("seat"), "position": v.get("position"),
+                        "name": nm if named else None, "hash": None if named else nm})
+        now.sort(key=_seatsort)
+        parsed, _e = parse_hands((h["raw"] or "").encode("utf-8"), hid)
+        fresh = parsed[0].get("all_players_actions") if parsed else {}
+        tn = h.get("tournament_number")
+        after, blanks = [], []
+        for k, v in (fresh or {}).items():
+            if k == "_meta" or not isinstance(v, dict):
+                continue
+            if k == "Hero":
+                nm = anon.get("Hero") or pn.get("hero") or "Hero"; named = True
+            else:
+                nm = anon.get(k); named = nm is not None
+            after.append({"seat": v.get("seat"), "position": v.get("position"),
+                          "name": nm if named else None, "hash": None if named else k})
+            if not named:
+                blanks.append({"hash": k, "seat": v.get("seat"), "position": v.get("position"),
+                               "propagation": _propose_from_names(thn.get(tn, {}).get(k, {}))})
+        after.sort(key=_seatsort)
+        out.append({"ss_id": l["ss_id"], "hand_id": hid, "filename": l["filename"],
+                    "tournament_name": h.get("tournament_name"), "tournament_number": tn,
+                    "now_seats": len(now), "after_seats": len(after),
+                    "now": now, "after": after, "blanks": blanks})
+    return {"read_only": True, "linked": linked, "tournaments": tnums, "hands": out}
+
+
 # pt73 — query única das capturas recuperáveis (vision_failed COM imagem guardada).
 _REPROCESS_ELIGIBLE_SQL = (
     "FROM table_ss_processing_log "
