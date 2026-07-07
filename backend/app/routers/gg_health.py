@@ -17,6 +17,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, get_conn
+from app.services.ft_boundary import FT_CAP
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 
 router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
 _GG = "h.site = 'GGPoker' AND h.played_at >= '2026-01-01'"
 _FNUM_IT = re.compile(r"_(\d{9,10})-\d{14}-\d+\.(?:png|jpg|jpeg)$", re.I)
 _FNUM_GOLD = re.compile(r"#(\d{9,10})")
+_SEAT_RE = re.compile(r"(?m)^Seat \d+:")
 
 # Regras de conflito (chaves normalizadas) — 2 regras seladas.
 _PHASE_PAIRS = {  # base → ft (mesmo spot)
@@ -216,6 +218,88 @@ def list_images(
     return {
         "group": group, "total": total, "page": page, "page_size": page_size,
         "images": rows[start:start + page_size],
+    }
+
+
+# ── Matéria-prima para a validação 4b da propagação FT (SÓ LEITURA) ──────────
+def _count_seats(raw) -> int | None:
+    """Nº de sentados = linhas `Seat N:` do BLOCO DE SEATS (antes de HOLE CARDS).
+    Ignora as linhas `Seat N:` do `*** SUMMARY ***` (senão contava a dobrar).
+    None se sem raw/legível. (Fase 2 vai reusar/endurecer esta contagem.)"""
+    if not raw or not isinstance(raw, str):
+        return None
+    head = raw.split("*** HOLE CARDS ***", 1)[0]
+    if head == raw:                       # sem esse marcador → corta no 1º "*** "
+        idx = raw.find("*** ")
+        head = raw[:idx] if idx != -1 else raw
+    return len(_SEAT_RE.findall(head)) or None
+
+
+@router.get("/ft/raw-material")
+def ft_raw_material(current_user=Depends(require_auth_or_api_key)):
+    """Matéria-prima (SÓ LEITURA) para a validação 4b da propagação FT: torneios GG
+    2026 por DIA, com a pista de FT por torneio — o menor `players_left` visto
+    (lobby + capturas IT) e os sentados na mão mais tardia. O Rui usa isto para ir
+    buscar ao backoffice os prints de lobby dos torneios em que fez mesa final.
+
+    `ft_candidate` = `min_players_left <= FT_CAP` (ou, sem esse sinal, sentados da
+    última mão <= FT_CAP). Reutilizado pela Fase 3 (o preview/quarentena parte das
+    mesmas leituras) e RE-CORRÍVEL após o wipe+reimport (recomputa de raiz, nada
+    persistido). Ordenação: por dia (asc); dentro do dia, n_hands desc."""
+    aggs = query(
+        "SELECT h.tournament_number AS tn, MIN(h.played_at)::date AS day, "
+        "       MAX(h.tournament_name) AS name, COUNT(*) AS n_hands, "
+        "       MIN(l.players_left) AS min_pl_it "
+        "  FROM hands h "
+        "  LEFT JOIN table_ss_processing_log l "
+        "         ON l.id = h.context_table_ss_id AND l.players_left IS NOT NULL "
+        " WHERE " + _GG + " AND h.tournament_number IS NOT NULL "
+        " GROUP BY h.tournament_number"
+    )
+    lobby = {r["tn"]: r["min_pl"] for r in query(
+        "SELECT tournament_number AS tn, MIN(players_left) AS min_pl "
+        "  FROM lobby_processing_log WHERE tournament_number IS NOT NULL "
+        " GROUP BY tournament_number"
+    )}
+    latest = {r["tn"]: r["raw"] for r in query(
+        "SELECT DISTINCT ON (h.tournament_number) h.tournament_number AS tn, h.raw AS raw "
+        "  FROM hands h "
+        " WHERE " + _GG + " AND h.tournament_number IS NOT NULL "
+        " ORDER BY h.tournament_number, h.played_at DESC"
+    )}
+
+    rows = []
+    for a in aggs:
+        tn = a["tn"]
+        pls = [v for v in (a["min_pl_it"], lobby.get(tn)) if isinstance(v, int)]
+        min_pl = min(pls) if pls else None
+        seats = _count_seats(latest.get(tn))
+        ft_candidate = ((min_pl is not None and min_pl <= FT_CAP)
+                        or (min_pl is None and seats is not None and seats <= FT_CAP))
+        rows.append({
+            "tournament_number": tn,
+            "tournament_name": a["name"],
+            "day": a["day"].isoformat() if a["day"] else None,
+            "n_hands": a["n_hands"],
+            "min_players_left": min_pl,
+            "latest_hand_seats": seats,
+            "has_lobby": tn in lobby,
+            "ft_candidate": ft_candidate,
+        })
+
+    by_day: dict = {}
+    for r in rows:
+        by_day.setdefault(r["day"], []).append(r)
+    days = []
+    for day in sorted(by_day, key=lambda d: (d is None, d or "")):
+        ts = sorted(by_day[day], key=lambda r: r["n_hands"], reverse=True)
+        days.append({"day": day, "tournaments": ts,
+                     "ft_candidates": sum(1 for r in ts if r["ft_candidate"])})
+    return {
+        "scope": "GGPoker 2026",
+        "total_tournaments": len(rows),
+        "total_ft_candidates": sum(1 for r in rows if r["ft_candidate"]),
+        "days": days,
     }
 
 
