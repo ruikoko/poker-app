@@ -17,7 +17,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, get_conn
-from app.services.ft_boundary import FT_CAP
+from app.services.ft_boundary import FT_CAP, count_hh_seats
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 
 router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
@@ -25,7 +25,6 @@ router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
 _GG = "h.site = 'GGPoker' AND h.played_at >= '2026-01-01'"
 _FNUM_IT = re.compile(r"_(\d{9,10})-\d{14}-\d+\.(?:png|jpg|jpeg)$", re.I)
 _FNUM_GOLD = re.compile(r"#(\d{9,10})")
-_SEAT_RE = re.compile(r"(?m)^Seat \d+:")
 
 # Regras de conflito (chaves normalizadas) — 2 regras seladas.
 _PHASE_PAIRS = {  # base → ft (mesmo spot)
@@ -222,17 +221,9 @@ def list_images(
 
 
 # ── Matéria-prima para a validação 4b da propagação FT (SÓ LEITURA) ──────────
-def _count_seats(raw) -> int | None:
-    """Nº de sentados = linhas `Seat N:` do BLOCO DE SEATS (antes de HOLE CARDS).
-    Ignora as linhas `Seat N:` do `*** SUMMARY ***` (senão contava a dobrar).
-    None se sem raw/legível. (Fase 2 vai reusar/endurecer esta contagem.)"""
-    if not raw or not isinstance(raw, str):
-        return None
-    head = raw.split("*** HOLE CARDS ***", 1)[0]
-    if head == raw:                       # sem esse marcador → corta no 1º "*** "
-        idx = raw.find("*** ")
-        head = raw[:idx] if idx != -1 else raw
-    return len(_SEAT_RE.findall(head)) or None
+# F2: a contagem canónica de sentados vive em `services/ft_boundary.count_hh_seats`
+# (fonte única, endurecida lá). Alias mantém o nome local histórico.
+_count_seats = count_hh_seats
 
 
 @router.get("/ft/raw-material")

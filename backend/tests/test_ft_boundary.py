@@ -86,30 +86,82 @@ def test_correction_resolves_phase_conflict():
     assert _tag_conflicts(new, []) == []
 
 
+# ── count_hh_seats (fonte única F2, movida do gg_health) ──────────────────────
+def _raw(n_header, n_summary=0):
+    seats = "".join(f"Seat {i}: p{i} ({i}000 in chips)\n" for i in range(1, n_header + 1))
+    out = seats + "*** HOLE CARDS ***\naction\n"
+    if n_summary:
+        out += "*** SUMMARY ***\n" + "".join(
+            f"Seat {i}: p{i} folded\n" for i in range(1, n_summary + 1))
+    return out
+
+
+def test_count_hh_seats_ignores_summary_and_handles_empty():
+    assert fb.count_hh_seats(_raw(7, n_summary=7)) == 7   # não conta a dobrar
+    assert fb.count_hh_seats(_raw(9)) == 9
+    assert fb.count_hh_seats("") is None
+    assert fb.count_hh_seats(None) is None
+
+
+# ── _lobby_ft_boundary: gate open_tab='Info' (convenção 7 Jul) ────────────────
+def test_lobby_boundary_only_anchors_on_info_tab():
+    # SQL gateia por open_tab='Info' + final_table_size numérico; o mock devolve o
+    # print do Info (posted_at, N). Prize Pool nunca chega aqui (filtrado no WHERE).
+    def _q(sql, params=None):
+        assert "open_tab" in sql and "Info" in sql          # o gate está no SQL
+        assert "final_table_size" in sql
+        return [{"posted_at": T0, "n": 7}]
+    with patch.object(fb, "query", side_effect=_q):
+        b, n = fb._lobby_ft_boundary("T1")
+    assert b == T0 and n == 7
+
+
+def test_lobby_boundary_none_without_info_print():
+    with patch.object(fb, "query", return_value=[]):
+        assert fb._lobby_ft_boundary("T1") == (None, None)
+
+
+# ── cross-check HH (Adição 1, D2) ─────────────────────────────────────────────
+def test_cross_check_match_mismatch_and_illegible():
+    with patch.object(fb, "_first_hand_seats_after", return_value=7):
+        assert fb._cross_check("T1", T0, 7) == {"n": 7, "hh_seats": 7, "match": True}
+        assert fb._cross_check("T1", T0, 8) == {"n": 8, "hh_seats": 7, "match": False}
+    with patch.object(fb, "_first_hand_seats_after", return_value=None):
+        assert fb._cross_check("T1", T0, 7)["match"] is None     # HH ilegível → sem veredicto
+    with patch.object(fb, "_first_hand_seats_after", return_value=7):
+        assert fb._cross_check("T1", T0, None)["match"] is None  # N ausente → sem veredicto
+
+
 # ── compute_ft_boundary: prioridade lobby > IT-coerente; incoerente sinaliza ──
-def test_boundary_lobby_wins():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=T0):
+def test_boundary_lobby_wins_carries_n_and_cross_check():
+    with patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
+         patch.object(fb, "_first_hand_seats_after", return_value=7):
         d = fb.compute_ft_boundary("T1")
     assert d["source"] == "propagated_lobby" and d["boundary"] == T0
+    assert d["n"] == 7 and d["cross_check"]["match"] is True
 
 
 def test_boundary_incoherent_signals():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=None), \
-         patch.object(fb, "_it_ft_boundary", return_value=(None, False)):
+    with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+         patch.object(fb, "_it_ft_boundary", return_value=(None, False, None)):
         d = fb.compute_ft_boundary("T1")
     assert d["status"] == "incoherent_signal" and d["boundary"] is None
+    assert d["n"] is None and d["cross_check"] is None
 
 
-def test_boundary_coherent_it():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=None), \
-         patch.object(fb, "_it_ft_boundary", return_value=(T0, True)):
+def test_boundary_coherent_it_uses_players_left_as_n():
+    # via (b): N = players_left da fronteira (D2); cross-check com os sentados da HH
+    with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+         patch.object(fb, "_it_ft_boundary", return_value=(T0, True, 8)), \
+         patch.object(fb, "_first_hand_seats_after", return_value=8):
         d = fb.compute_ft_boundary("T1")
     assert d["source"] == "propagated_coherent" and d["boundary"] == T0
+    assert d["n"] == 8 and d["cross_check"]["match"] is True
 
 
 def test_boundary_none_when_no_signal():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=None), \
-         patch.object(fb, "_it_ft_boundary", return_value=(None, True)):
+    with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+         patch.object(fb, "_it_ft_boundary", return_value=(None, True, None)):
         d = fb.compute_ft_boundary("T1")
     assert d["status"] == "none" and d["boundary"] is None
 
@@ -149,6 +201,20 @@ def test_propagate_skips_hand_without_base_spot():
         res = fb.propagate_ft("T1", dry_run=True)
     assert res["n_changed"] == 0              # nada a corrigir (neutra / já -ft)
     mconn.assert_not_called()
+
+
+def test_propagate_surfaces_cross_check():
+    hands = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["icm"], "hm3_tags": [],
+              "folder_ft_source": None}]
+    cc = {"n": 7, "hh_seats": 9, "match": False}      # mismatch → o revisor tem de ver
+    with patch.object(fb, "compute_ft_boundary",
+                      return_value={"boundary": T0, "source": "propagated_lobby",
+                                    "status": "lobby", "n": 7, "cross_check": cc}), \
+         patch.object(fb, "query", side_effect=_fake_hands(hands)), \
+         patch.object(fb, "get_conn"):
+        res = fb.propagate_ft("T1", dry_run=True)
+    assert res["cross_checks"] == [{"tn": "T1", "source": "propagated_lobby",
+                                    "n": 7, "hh_seats": 9, "match": False}]
 
 
 def test_propagate_signals_incoherent_tournament():

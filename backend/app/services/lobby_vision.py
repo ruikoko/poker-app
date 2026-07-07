@@ -79,7 +79,9 @@ _LOBBY_PROMPT = (
     '    {"rank_from": <int>, "rank_to": <int>, "amount": <float>},\n'
     "    ...\n"
     "  ],\n"
-    '  "bounty_type_text": "<e.g. PKO 50%, Mystery KO>" | null\n'
+    '  "bounty_type_text": "<e.g. PKO 50%, Mystery KO>" | null,\n'
+    '  "open_tab": "Info" | "Prize Pool" | "Other" | null,\n'
+    '  "final_table_size": <int N players at the final table, from the Info tab only> | null\n'
     "}\n\n"
     "RULES:\n"
     "- prizes: ONLY the ranks that have a single individual payout shown\n"
@@ -104,6 +106,19 @@ _LOBBY_PROMPT = (
     "  'Remaining: X', 'X/Y' (where X is left, Y is entrants), or a 'Players'\n"
     "  count distinct from 'Entries'. If only one number is shown and it's\n"
     "  ambiguous, prefer null to guessing.\n"
+    "- open_tab: which TAB is currently OPEN/selected in this lobby view. GG\n"
+    "  tournament lobbies have tabs including 'Info' (tournament details) and\n"
+    "  'Prize Pool' (the payout table). Report 'Info' if the info/details panel is\n"
+    "  showing, 'Prize Pool' if the payout structure table is showing, 'Other' for\n"
+    "  any other tab, null if you cannot tell.\n"
+    "- final_table_size: ONLY when the 'Info' tab is open AND it shows text stating\n"
+    "  how many players/seats are at the FINAL TABLE -> the integer N. Accept ANY\n"
+    "  phrasing, with or without the word 'players' and with or without 'the', e.g.\n"
+    "  'N players at the final table', 'N players at final table', 'Final table: N',\n"
+    "  'N-handed final table', 'final table (N)', or a final-table section listing N\n"
+    "  seats. This is the SEAT COUNT of the final table, NOT players_left and NOT\n"
+    "  entrants. If the Info tab is not open or no final-table count is shown, set\n"
+    "  null. Do NOT guess.\n"
     "- Use null (or empty list for prize_ranges) for fields you cannot read\n"
     "  with confidence.\n"
     "- Do NOT invent values not visible in the screenshot.\n"

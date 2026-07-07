@@ -7,13 +7,20 @@ corrigindo a tag base → a sua `-ft` (icm→icm-ft, pos-pko→pos-pko-ft, …).
 do conflito de FASE e volta aos canais normais com a tag certa.
 
 Fontes da fronteira, por prioridade:
-  (a) PRINT DE LOBBY no início da FT — o `posted_at` do lobby É a fronteira (não
-      depende da Vision para a POSIÇÃO; o players_left só confirma que é FT).
-      Onde existe, MANDA (proveniência 'propagated_lobby').
-  (b) Sem lobby → players_left das capturas IT, com SALVAGUARDA DE COERÊNCIA: só
-      traça se o players_left descer de forma coerente (um valor isolado mal lido
-      quebra o padrão → rejeita e SINALIZA, não corrige). Fronteira = o 1º momento
-      `_ft_applies` (ocupados==restantes). Proveniência 'propagated_coherent'.
+  (a) PRINT DE LOBBY com a aba **Info** aberta (convenção 7 Jul) — é a aba onde se
+      lê "N players at the final table"; o `posted_at` desse print É a fronteira e o
+      `final_table_size` é o N. Prints de OUTRAS abas (Players/Prize Pool) NUNCA
+      ancoram (um Prize Pool com poucos restantes já é FT-a-decorrer, não o
+      arranque). MANDA onde existe (proveniência 'propagated_lobby').
+  (b) Sem print do Info → players_left das capturas IT, com SALVAGUARDA DE
+      COERÊNCIA: só traça se o players_left descer de forma coerente (um valor
+      isolado mal lido quebra o padrão → rejeita e SINALIZA, não corrige). Fronteira
+      = o 1º momento `_ft_applies` (ocupados==restantes); N = o players_left desse
+      momento. Proveniência 'propagated_coherent'.
+
+CROSS-CHECK (Adição 1, D2): o N (via a: `final_table_size`; via b: `players_left` da
+fronteira) cruza-se com os SENTADOS da 1ª mão GG >= fronteira (devem bater). Vive em
+`cross_check` do resultado; NÃO bloqueia nesta fase — quem decide quarentena é a F3.
 
 Puro quanto a escritas em modo dry_run (só lê). Idempotente: re-correr recomputa de
 raiz e o `-ft` não duplica (fail-safe). Reusa: lobby_processing_log (players_left,
@@ -23,6 +30,7 @@ hands.context_table_ss_id, hands.tournament_number/played_at, tags_canonical.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from app.db import query, get_conn
@@ -40,6 +48,23 @@ COHERENCE_TOL = 2
 # (logo nunca nasce conflito de 'formato').
 FT_BASE_SPOTS = frozenset({"icm", "icm-pko", "pos-pko", "pos-nko", "speed-racer"})
 
+# Contagem canónica de sentados de uma HH GG (fonte ÚNICA, F2 — o router gg-health
+# importa daqui). Linhas `Seat N:` do BLOCO DE SEATS (antes de HOLE CARDS); ignora
+# o bloco `*** SUMMARY ***` (senão contava a dobrar).
+_SEAT_RE = re.compile(r"(?m)^Seat \d+:")
+
+
+def count_hh_seats(raw) -> Optional[int]:
+    """Nº de sentados de uma HH GG = linhas `Seat N:` do bloco inicial. None se sem
+    raw/legível."""
+    if not raw or not isinstance(raw, str):
+        return None
+    head = raw.split("*** HOLE CARDS ***", 1)[0]
+    if head == raw:                       # sem esse marcador → corta no 1º "*** "
+        idx = raw.find("*** ")
+        head = raw[:idx] if idx != -1 else raw
+    return len(_SEAT_RE.findall(head)) or None
+
 
 # ── Detetor FT (réplica pura do _ft_applies do router, p/ evitar import circular) ─
 def _ft_applies(vision_json) -> bool:
@@ -56,17 +81,28 @@ def _ft_applies(vision_json) -> bool:
 
 # ── Fronteira ────────────────────────────────────────────────────────────────
 def _lobby_ft_boundary(tn: str):
-    """Fonte (a): 1º posted_at (Lisboa-naive) de um lobby do torneio com
-    players_left <= FT_CAP. None se não houver."""
+    """Fonte (a) — CONVENÇÃO 7 Jul: só o print de lobby com a aba **Info** aberta
+    marca o ARRANQUE da FT (é onde se lê 'N players at the final table'). Devolve
+    (posted_at, N=final_table_size) do print Info mais cedo com N legível; (None,
+    None) se não houver. Prints de outras abas (Players/Prize Pool) NUNCA ancoram.
+
+    O gate é `open_tab='Info'` + `final_table_size` legível (guarda `~ '^[0-9]+$'`
+    antes do cast → um valor malformado da Vision nunca rebenta a query)."""
     rows = query(
-        """SELECT MIN(posted_at) AS b
+        """SELECT posted_at,
+                  (vision_json->>'final_table_size')::int AS n
              FROM lobby_processing_log
             WHERE tournament_number = %s
-              AND players_left IS NOT NULL AND players_left <= %s
-              AND posted_at IS NOT NULL""",
-        (tn, FT_CAP),
+              AND posted_at IS NOT NULL
+              AND vision_json->>'open_tab' = 'Info'
+              AND vision_json->>'final_table_size' ~ '^[0-9]+$'
+            ORDER BY posted_at ASC
+            LIMIT 1""",
+        (tn,),
     )
-    return rows[0]["b"] if rows and rows[0]["b"] else None
+    if rows and rows[0]["posted_at"]:
+        return rows[0]["posted_at"], rows[0]["n"]
+    return None, None
 
 
 def _it_readings(tn: str) -> list[dict]:
@@ -109,33 +145,66 @@ def _coherent_readings(readings: list[dict]) -> tuple[list[dict], bool]:
 
 
 def _it_ft_boundary(tn: str):
-    """Fonte (b): (fronteira, coerente). Descarta o outlier isolado; fronteira = 1º
-    played_at (entre os readings COERENTES) onde _ft_applies. Genuinamente
-    incoerente → (None, False) [sinaliza, não corrige]."""
+    """Fonte (b): (fronteira, coerente, N). Descarta o outlier isolado; fronteira =
+    1º played_at (entre os readings COERENTES) onde _ft_applies e N = o `players_left`
+    desse momento (D2: N da fronteira = tamanho da FT). Genuinamente incoerente →
+    (None, False, None) [sinaliza, não corrige]."""
     readings = _it_readings(tn)
     if not readings:
-        return None, True                     # sem dados: coerente-vazio, sem fronteira
+        return None, True, None               # sem dados: coerente-vazio, sem fronteira
     kept, coherent = _coherent_readings(readings)
     if not coherent:
-        return None, False
+        return None, False, None
     for r in kept:                             # kept preserva ordem (played_at)
         if _ft_applies(r["vision_json"] or {}):
-            return r["played_at"], True
-    return None, True
+            return r["played_at"], True, r["players_left"]
+    return None, True, None
+
+
+# ── Cross-check HH (Adição 1, D2) ─────────────────────────────────────────────
+def _first_hand_seats_after(tn: str, boundary) -> Optional[int]:
+    """Sentados da 1ª mão GG do torneio com played_at >= fronteira. None se não
+    houver mão ou o raw for ilegível."""
+    rows = query(
+        """SELECT raw FROM hands
+            WHERE site='GGPoker' AND tournament_number = %s
+              AND played_at >= %s
+            ORDER BY played_at ASC LIMIT 1""",
+        (tn, boundary),
+    )
+    return count_hh_seats(rows[0]["raw"]) if rows else None
+
+
+def _cross_check(tn: str, boundary, n) -> dict:
+    """Cruza o N (mesa final) com os sentados da 1ª mão GG pós-fronteira. match=True
+    sse ambos legíveis e iguais; qualquer um ilegível → match=None (sem veredicto, não
+    bloqueia — a decisão de quarentena é F3)."""
+    hh_seats = _first_hand_seats_after(tn, boundary)
+    match = (hh_seats == n) if (n is not None and hh_seats is not None) else None
+    return {"n": n, "hh_seats": hh_seats, "match": match}
 
 
 def compute_ft_boundary(tn: str) -> dict:
     """Fronteira do torneio, fonte (a) MANDA sobre (b). Devolve
-    {boundary, source, status}. status ∈ {'lobby','coherent','incoherent_signal','none'}."""
-    lb = _lobby_ft_boundary(tn)
+    {boundary, source, status, n, cross_check}.
+
+    `n` = tamanho da mesa final: via (a) o `final_table_size` do print do Info; via
+    (b) o `players_left` da fronteira (D2). `cross_check` cruza esse N com os
+    sentados da 1ª mão GG >= fronteira — NÃO bloqueia nesta fase (quarentena é F3).
+    status ∈ {'lobby','coherent','incoherent_signal','none'}."""
+    lb, lb_n = _lobby_ft_boundary(tn)
     if lb is not None:
-        return {"boundary": lb, "source": "propagated_lobby", "status": "lobby"}
-    it_b, coherent = _it_ft_boundary(tn)
+        return {"boundary": lb, "source": "propagated_lobby", "status": "lobby",
+                "n": lb_n, "cross_check": _cross_check(tn, lb, lb_n)}
+    it_b, coherent, it_n = _it_ft_boundary(tn)
     if not coherent:
-        return {"boundary": None, "source": None, "status": "incoherent_signal"}
+        return {"boundary": None, "source": None, "status": "incoherent_signal",
+                "n": None, "cross_check": None}
     if it_b is not None:
-        return {"boundary": it_b, "source": "propagated_coherent", "status": "coherent"}
-    return {"boundary": None, "source": None, "status": "none"}
+        return {"boundary": it_b, "source": "propagated_coherent", "status": "coherent",
+                "n": it_n, "cross_check": _cross_check(tn, it_b, it_n)}
+    return {"boundary": None, "source": None, "status": "none",
+            "n": None, "cross_check": None}
 
 
 # ── Correção da tag (base → -ft), canónica, sem duplicar sufixo ───────────────
@@ -167,11 +236,16 @@ def ft_correct_array(tags) -> tuple[list, bool]:
 
 # ── Propagação ───────────────────────────────────────────────────────────────
 def _candidate_tns() -> list[str]:
-    """Torneios GG com ALGUM sinal de FT (lobby<=cap OU capturas IT com pl)."""
+    """Torneios GG com ALGUM sinal de FT: print do Info (via a), lobby<=cap, ou
+    capturas IT com players_left (via b). O ramo Info garante que um torneio cujo
+    ÚNICO sinal é um print do Info (players_left ilegível mas N legível) não escapa
+    ao varrimento 'todos os candidatos'."""
     rows = query(
         """SELECT DISTINCT tournament_number AS tn FROM lobby_processing_log
-            WHERE players_left IS NOT NULL AND players_left <= %s
-              AND tournament_number IS NOT NULL
+            WHERE tournament_number IS NOT NULL
+              AND ((players_left IS NOT NULL AND players_left <= %s)
+                   OR (vision_json->>'open_tab' = 'Info'
+                       AND vision_json->>'final_table_size' ~ '^[0-9]+$'))
            UNION
            SELECT DISTINCT h.tournament_number
              FROM hands h JOIN table_ss_processing_log l ON l.id=h.context_table_ss_id
@@ -187,11 +261,15 @@ def propagate_ft(tournament_number: Optional[str] = None, *, dry_run: bool = Fal
     candidatos). Só toca mãos GG do torneio com played_at >= fronteira que tenham
     uma tag base-spot a converter. dry_run=True → não escreve, devolve o plano.
 
-    Devolve {tournaments, changed:[{hand_id, from, to, source}], signaled:[tn], skipped}.
+    Devolve {tournaments, changed:[{hand_id, from, to, source}], signaled:[tn],
+    cross_checks:[{tn, source, n, hh_seats, match}], n_changed}. `cross_checks`
+    (D2) é o sinal que o revisor manual (dry-run → OK do Rui) inspeciona antes de
+    aprovar — um `match: false` avisa que a fronteira pode estar errada.
     """
     tns = [tournament_number] if tournament_number else _candidate_tns()
     changed: list[dict] = []
     signaled: list[str] = []
+    cross_checks: list[dict] = []
     touched_tns = 0
     for tn in tns:
         b = compute_ft_boundary(tn)
@@ -201,6 +279,7 @@ def propagate_ft(tournament_number: Optional[str] = None, *, dry_run: bool = Fal
         if not b["boundary"]:
             continue
         touched_tns += 1
+        cross_checks.append({"tn": tn, "source": b["source"], **(b.get("cross_check") or {})})
         rows = query(
             """SELECT id, hand_id, discord_tags, hm3_tags, folder_ft_source
                  FROM hands
@@ -222,7 +301,8 @@ def propagate_ft(tournament_number: Optional[str] = None, *, dry_run: bool = Fal
             if not dry_run:
                 _persist_ft_correction(h["id"], nd, nh, b["source"])
     return {"tournaments": touched_tns, "changed": changed,
-            "signaled": signaled, "n_changed": len(changed)}
+            "signaled": signaled, "cross_checks": cross_checks,
+            "n_changed": len(changed)}
 
 
 def _persist_ft_correction(hand_db_id: int, discord_tags, hm3_tags, source: str) -> None:
