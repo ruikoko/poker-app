@@ -85,6 +85,22 @@ def _ft_applies(vision_json) -> bool:
 
 
 # ── Fronteira ────────────────────────────────────────────────────────────────
+def _manual_ft_boundary(tn: str):
+    """Fonte (0) PRIMÁRIA (arquitetura 7 Jul) — 1ª mão GG do torneio com tag `-ft`
+    MANUAL do Rui: `folder_ft_source = 'manual'` (a PASTA do IT chamava-se `-ft`, ex.
+    "ICM PKO FT" → mesa final CONFIRMADA à mão; ver `_folder_tag_ft_source` em
+    `table_ss.py`). Devolve o `played_at` dessa mão, ou None. **Não-circular:** exclui
+    o `-ft` `'auto'` (adivinhado pela Vision OU pela nossa propagação). O snap-to-N
+    refina para trás (apanha as 2-3 mãos jogadas antes de o Rui marcar)."""
+    rows = query(
+        """SELECT MIN(played_at) AS b FROM hands
+            WHERE site='GGPoker' AND tournament_number = %s
+              AND folder_ft_source = 'manual'""",
+        (tn,),
+    )
+    return rows[0]["b"] if rows and rows[0]["b"] else None
+
+
 def _lobby_ft_boundary(tn: str):
     """Fonte (a) — CONVENÇÃO 7 Jul: só o print de lobby com a aba **Info** aberta
     marca o ARRANQUE da FT (é onde se lê 'N players at the final table'). Devolve
@@ -217,6 +233,32 @@ def _starts_drainage(seats_from_here: list, n: int) -> bool:
     return all(b <= a for a, b in zip(vals, vals[1:]))
 
 
+def _infer_ft_size(tn: str, boundary) -> Optional[int]:
+    """N inferido para a fonte (0) quando NÃO há lobby Info: o MÁX. de sentados na
+    janela do snap [boundary−3min, boundary] = tamanho de ARRANQUE da FT (a FT só
+    drena; a 1ª mão tem o máximo). None se sem mãos legíveis na janela."""
+    if boundary is None:
+        return None
+    lo = boundary - timedelta(minutes=SNAP_WINDOW_MIN)
+    rows = query(
+        "SELECT raw FROM hands WHERE site='GGPoker' AND tournament_number = %s "
+        "AND played_at >= %s AND played_at <= %s", (tn, lo, boundary))
+    seats = [s for s in (count_hh_seats(r["raw"]) for r in rows) if isinstance(s, int)]
+    return max(seats) if seats else None
+
+
+def _far_apart(a, b) -> bool:
+    """Dois momentos apontam a FT em instantes INCOMPATÍVEIS (para lá da janela do
+    snap)? Wall-clock em segundos (naive de hands e tz de lobby coexistem → normaliza
+    a naive). Defensivo: erro → False (não bloqueia por engano)."""
+    try:
+        a = a.replace(tzinfo=None) if getattr(a, "tzinfo", None) else a
+        b = b.replace(tzinfo=None) if getattr(b, "tzinfo", None) else b
+        return abs((a - b).total_seconds()) > SNAP_WINDOW_MIN * 60
+    except Exception:
+        return False
+
+
 def _snap_to_n(tn: str, boundary, n):
     """SNAP-TO-N — a fronteira computada (via-a print / via-b coherent) cai ~1 mão
     TARDE (o sinal chega segundos depois de a FT arrancar). Recua até
@@ -245,16 +287,39 @@ def compute_ft_boundary(tn: str) -> dict:
     """Fronteira do torneio, fonte (a) MANDA sobre (b). Devolve
     {boundary, source, status, n, cross_check}.
 
-    `n` = tamanho da mesa final: via (a) o `final_table_size` do print do Info; via
-    (b) o `players_left` da fronteira (D2). A fronteira computada passa pelo
-    **SNAP-TO-N** (recua à 1ª mão real da FT, `sentados==N`); o `cross_check` cruza
-    N com os sentados da 1ª mão GG >= fronteira JÁ SNAPPED — NÃO bloqueia nesta fase
-    (quarentena é F3). status ∈ {'lobby','coherent','incoherent_signal','none'}."""
-    lb, lb_n = _lobby_ft_boundary(tn)
+    CASCATA (arquitetura 7 Jul): **(0) tag manual → (a) lobby Info → (b) coerente →
+    none**. A fonte (0) VAZIA não mata o torneio (cai na salvaguarda). Toda a
+    fronteira passa pelo **SNAP-TO-N** (recua à 1ª mão real da FT, `sentados==N`); o
+    `cross_check` cruza N com os sentados da 1ª mão GG >= fronteira JÁ SNAPPED. `n` =
+    via (a) `final_table_size`; via (b) `players_left`; via (0) o do lobby se existir,
+    senão inferido (máx. de sentados na janela). NÃO bloqueia (quarentena é F3).
+    status ∈ {'manual','lobby','coherent','quarantine_disagreement','incoherent_signal','none'}."""
+    lb, lb_n = _lobby_ft_boundary(tn)          # salvaguarda: dá N + é a via (a)
+
+    # (0) PRIMÁRIA — tag -ft MANUAL do Rui.
+    m = _manual_ft_boundary(tn)
+    if m is not None:
+        n = lb_n if lb_n is not None else _infer_ft_size(tn, m)
+        m_snap = _snap_to_n(tn, m, n)
+        # DISCORDÂNCIA tag×lobby (momentos incompatíveis, p/ lá da janela) → quarentena.
+        if lb is not None:
+            lb_snap = _snap_to_n(tn, lb, lb_n)
+            if _far_apart(m_snap, lb_snap):
+                return {"boundary": None, "source": None,
+                        "status": "quarantine_disagreement", "n": lb_n,
+                        "cross_check": {"manual": str(m_snap), "lobby": str(lb_snap),
+                                        "match": False}}
+        return {"boundary": m_snap, "source": "manual_ft_tag", "status": "manual",
+                "n": lb_n if lb_n is not None else n,
+                "cross_check": _cross_check(tn, m_snap, lb_n)}
+
+    # (a) SALVAGUARDA — lobby Info (histórico sem tag manual).
     if lb is not None:
         snapped = _snap_to_n(tn, lb, lb_n)
         return {"boundary": snapped, "source": "propagated_lobby", "status": "lobby",
                 "n": lb_n, "cross_check": _cross_check(tn, snapped, lb_n)}
+
+    # (b) SALVAGUARDA — capturas coerentes (último degrau).
     it_b, coherent, it_n = _it_ft_boundary(tn)
     if not coherent:
         return {"boundary": None, "source": None, "status": "incoherent_signal",

@@ -134,7 +134,8 @@ def test_cross_check_match_mismatch_and_illegible():
 
 # ── compute_ft_boundary: prioridade lobby > IT-coerente; incoerente sinaliza ──
 def test_boundary_lobby_wins_carries_n_and_cross_check():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
+    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=7):
         d = fb.compute_ft_boundary("T1")
@@ -143,7 +144,8 @@ def test_boundary_lobby_wins_carries_n_and_cross_check():
 
 
 def test_boundary_incoherent_signals():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(None, False, None)):
         d = fb.compute_ft_boundary("T1")
     assert d["status"] == "incoherent_signal" and d["boundary"] is None
@@ -152,7 +154,8 @@ def test_boundary_incoherent_signals():
 
 def test_boundary_coherent_it_uses_players_left_as_n():
     # via (b): N = players_left da fronteira (D2); cross-check com os sentados da HH
-    with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(T0, True, 8)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=8):
@@ -162,10 +165,73 @@ def test_boundary_coherent_it_uses_players_left_as_n():
 
 
 def test_boundary_none_when_no_signal():
-    with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(None, True, None)):
         d = fb.compute_ft_boundary("T1")
     assert d["status"] == "none" and d["boundary"] is None
+
+
+# ── Fonte (0) — tag -ft MANUAL do Rui (arquitetura 7 Jul) ────────────────────
+def test_manual_source_wins_over_lobby_and_captures():
+    # tag manual presente → source=manual_ft_tag, mesmo com lobby/captures disponíveis
+    with patch.object(fb, "_manual_ft_boundary", return_value=T0), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
+         patch.object(fb, "_infer_ft_size", return_value=7), \
+         patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
+         patch.object(fb, "_first_hand_seats_after", return_value=7):
+        d = fb.compute_ft_boundary("T1")
+    assert d["source"] == "manual_ft_tag" and d["status"] == "manual"
+    assert d["boundary"] == T0 and d["n"] == 7   # N inferido (sem lobby)
+    # sem lobby não há N independente → cross-check sem veredicto (tag = verdade do Rui)
+    assert d["cross_check"]["match"] is None
+
+
+def test_manual_uses_lobby_n_when_present():
+    # N vem do lobby Info quando existe (não do inferido) + cross-check independente
+    with patch.object(fb, "_manual_ft_boundary", return_value=T0), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
+         patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
+         patch.object(fb, "_first_hand_seats_after", return_value=7):
+        d = fb.compute_ft_boundary("T1")
+    assert d["source"] == "manual_ft_tag" and d["n"] == 7
+    assert d["cross_check"]["match"] is True      # lobby N=7 vs 7 sentados
+
+
+def test_manual_vs_lobby_disagreement_quarantines():
+    # tag manual e lobby apontam momentos incompatíveis (> janela) → quarentena
+    late = T0 + timedelta(minutes=30)
+    with patch.object(fb, "_manual_ft_boundary", return_value=T0), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(late, 7)), \
+         patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b):
+        d = fb.compute_ft_boundary("T1")
+    assert d["status"] == "quarantine_disagreement" and d["boundary"] is None
+    assert d["cross_check"]["match"] is False
+
+
+def test_manual_empty_falls_through_to_lobby():
+    # fonte (0) vazia NÃO mata o torneio → cai na salvaguarda (a)
+    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
+         patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
+         patch.object(fb, "_first_hand_seats_after", return_value=7):
+        d = fb.compute_ft_boundary("T1")
+    assert d["source"] == "propagated_lobby"
+
+
+def test_manual_ft_boundary_query():
+    with patch.object(fb, "query", return_value=[{"b": T0}]):
+        assert fb._manual_ft_boundary("T1") == T0
+    with patch.object(fb, "query", return_value=[{"b": None}]):
+        assert fb._manual_ft_boundary("T1") is None
+
+
+def test_infer_ft_size_is_max_seats_in_window():
+    rows = [{"raw": _raw(4)}, {"raw": _raw(7)}, {"raw": _raw(6)}]
+    with patch.object(fb, "query", return_value=rows):
+        assert fb._infer_ft_size("T1", T0) == 7
+    with patch.object(fb, "query", return_value=[]):
+        assert fb._infer_ft_size("T1", T0) is None
 
 
 # ── propagate_ft dry_run: não escreve; idempotente ───────────────────────────
