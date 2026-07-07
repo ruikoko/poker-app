@@ -13,6 +13,12 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
 
 - **F1 ✅ (7 Jul)** — `_persist_ft_correction` grava `folder_ft_source='auto'` (não a via
   `propagated_*`, que poluía o filtro "-ft auto") + `CASE` preserva `'manual'` (pasta -ft manda). +1 teste.
+- **F2 ✅ (7 Jul)** — gate `open_tab='Info'` + cross-check HH; **snap-to-N + coerência pós-pico** (política da
+  fronteira, 5 casos reais); **fonte (0) tag manual** no topo da cascata `(0)→(a)→(b)→none`. Ver `REGISTO_CONCEITO 2026-07-07`.
+- **F3 ✅ (8 Jul)** — tabela `ft_boundary_review` + endpoints `GET /ft/preview`, `POST /ft/confirm|correct|promote`.
+  **Emenda:** confirmar/corrigir FIXA a fronteira mas **NÃO** promove; a escrita (`promote`, dry_run default,
+  `confirm=true`) é sempre o 2º passo explícito. Preview mostra fronteira+via (incl. fonte 0), N+sentados,
+  cross-check, mãos que mudam (from→to), avisos do fallback e mãos HRC stale. +13 testes. **UI = F4.**
 - **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
   da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
   `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas
@@ -46,7 +52,7 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
 
 - **`#FT-GUARD-BY-LOBBY-STATUS` — reforço do guarda por ESTADO do lobby.** Os lobbys GG mostram a **fase** no canto superior direito — **"Late Reg."** / **"Running"** — visível em **QUALQUER aba** (incluindo os prints de PRÉMIOS tirados a meio do torneio). Quando a Vision extrair um campo **`tournament_status`**, o guarda da via-b pode usar leituras de lobbys **"Late Reg." como PRÉ-PICO por definição** (reforça o `_post_peak_tail`, que hoje infere o pico só pelo máximo dos `players_left`). **A hora de fecho do late-reg (aba Info) NÃO serve** — só existe quando o Rui fez FT, e aí a **via-1 (print do Info) já resolve**. O mecanismo-base continua a ser o **pico** (funciona só com capturas IT, sem depender da Vision de lobby). Cross-ref `REGISTO_CONCEITO 2026-07-07` (política da fronteira).
 - **`#FT-N-FROM-NONGG-LOBBY` — N direto do lobby nas salas não-GG.** Os lobbys de **PS/Winamax/WPN** mostram o **tamanho da mesa final DIRETAMENTE** no lobby (ao contrário da GG, onde o N só aparece na aba **Info** — daí o gate `open_tab='Info'`). **Quando/se** o motor FT se estender **além da GG** (ou o snap quiser refinar tags manuais não-GG), o **N** dessas salas extrai-se de **qualquer print de lobby**, **sem** convenção de aba. Facilitador futuro. **Âmbito ATUAL do motor: só-GG** (a cobertura TOTAL de mãos é pré-condição da propagação e do cross-check; as não-GG têm nicks reais e tagam por HM3/pasta, sem o mecanismo de desanon que motiva a FT-propagation na GG).
-- **`#FT-ENSAIO-VIA-F3-ENDPOINT` — mover os ensaios para a F3.** Os ensaios dry-run desta política correram via **script read-only contra o proxy público** (`ballast.proxy.rlwy.net`) — serviu para calibrar. Quando a **F3 (preview/quarentena endpoint)** existir, os ensaios passam a correr **por lá** (mesmo caminho que a app usa, sem script local nem proxy). **Incluir no âmbito da F3.**
+- ~~**`#FT-ENSAIO-VIA-F3-ENDPOINT` — mover os ensaios para a F3.**~~ ✅ **FEITO (F3, 8 Jul):** os ensaios correm por `GET /api/gg-health/ft/preview` (mesmo caminho da app, sem script local nem proxy).
 
 ## ★ Infra — token Railway de vida curta (login manual repetido)
 

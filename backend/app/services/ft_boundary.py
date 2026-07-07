@@ -375,13 +375,41 @@ def _candidate_tns() -> list[str]:
            SELECT DISTINCT h.tournament_number
              FROM hands h JOIN table_ss_processing_log l ON l.id=h.context_table_ss_id
             WHERE h.site='GGPoker' AND l.players_left IS NOT NULL
+              AND h.tournament_number IS NOT NULL
+           UNION
+           SELECT DISTINCT h.tournament_number
+             FROM hands h
+            WHERE h.site='GGPoker' AND h.folder_ft_source='manual'
               AND h.tournament_number IS NOT NULL""",
         (FT_CAP,),
     )
     return [r["tn"] for r in rows if r["tn"]]
 
 
-def propagate_ft(tournament_number: Optional[str] = None, *, dry_run: bool = False) -> dict:
+def candidate_tns() -> list[str]:
+    """Público (F3 preview) — torneios GG com ALGUM sinal de FT (tag manual, lobby, IT)."""
+    return _candidate_tns()
+
+
+def via_b_diagnostics(tn: str):
+    """Diagnóstico da via-b (capturas) p/ o preview F3: a sequência de `players_left`,
+    a cauda pós-pico, se um outlier isolado foi descartado, e se a cauda é coerente.
+    None se o torneio não tem capturas IT."""
+    reads = _it_readings(tn)
+    if not reads:
+        return None
+    tail = _post_peak_tail(reads)
+    kept, coherent = _coherent_readings(tail)
+    return {
+        "players_left_sequence": [r["players_left"] for r in reads],
+        "post_peak_tail": [r["players_left"] for r in tail],
+        "outlier_dropped": len(kept) < len(tail),
+        "coherent": coherent,
+    }
+
+
+def propagate_ft(tournament_number: Optional[str] = None, *, dry_run: bool = False,
+                 boundary_override=None) -> dict:
     """Traça a fronteira e marca/corrige as mãos FT de um torneio (ou de todos os
     candidatos). Só toca mãos GG do torneio com played_at >= fronteira que tenham
     uma tag base-spot a converter. dry_run=True → não escreve, devolve o plano.
@@ -397,7 +425,13 @@ def propagate_ft(tournament_number: Optional[str] = None, *, dry_run: bool = Fal
     cross_checks: list[dict] = []
     touched_tns = 0
     for tn in tns:
-        b = compute_ft_boundary(tn)
+        # F3: fronteira CORRIGIDA à mão (POST /ft/correct) manda sobre a computada
+        # — só quando é um tn único (o override é por torneio).
+        if boundary_override is not None and tournament_number:
+            b = {"boundary": boundary_override, "source": "manual_override",
+                 "status": "override", "n": None, "cross_check": None}
+        else:
+            b = compute_ft_boundary(tn)
         if b["status"] == "incoherent_signal":
             signaled.append(tn)
             continue
@@ -474,3 +508,39 @@ def trigger_ft_propagation(tournament_number: Optional[str] = None) -> None:
                         res["tournaments"], res["n_changed"], len(res["signaled"]))
     except Exception as e:
         logger.error("[ft_boundary] propagate falhou: %s", e)
+
+
+# ── F3: tabela de revisão/quarentena da fronteira FT ─────────────────────────
+def ensure_ft_boundary_review_schema():
+    """Idempotente (chamada no lifespan). Um registo por torneio: o estado do ensaio
+    (status/boundary/source/n/seats) + a DECISÃO do Rui (pending/confirmed/corrected/
+    promoted) + override manual. Confirmar/corrigir FIXA a fronteira mas NÃO promove
+    — a escrita (promote) é sempre um 2º passo explícito."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ft_boundary_review (
+                    tournament_number TEXT PRIMARY KEY,
+                    status            TEXT NOT NULL,
+                    boundary          TIMESTAMP,
+                    source            TEXT,
+                    n_lobby           INTEGER,
+                    seats_first_hand  INTEGER,
+                    decision          TEXT NOT NULL DEFAULT 'pending',
+                    override_boundary TIMESTAMP,
+                    override_n        INTEGER,
+                    decided_by        TEXT,
+                    decided_at        TIMESTAMPTZ,
+                    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ft_review_decision "
+                "ON ft_boundary_review (decision)"
+            )
+        conn.commit()
+    finally:
+        conn.close()

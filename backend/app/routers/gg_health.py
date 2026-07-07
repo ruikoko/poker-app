@@ -12,12 +12,18 @@ LIVE. `nota`/`Timetell`/`For Review` são neutras no conflito.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, get_conn
-from app.services.ft_boundary import FT_CAP, count_hh_seats
+from app.services.ft_boundary import (
+    FT_CAP, count_hh_seats, compute_ft_boundary, propagate_ft,
+    candidate_tns, via_b_diagnostics,
+)
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 
 router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
@@ -368,3 +374,185 @@ def gg_health_tag(payload: dict = Body(...),
     finally:
         conn.close()
     return {"applied": applied, "tag": canon, "warnings": warnings, "needs_confirm": False}
+
+
+# ── F3: preview + revisão/quarentena + promoção da fronteira FT ──────────────
+def _ft_map_status(engine_status, cross_check) -> str:
+    """Motor(+cross-check) → enum da review: match/mismatch/n_unavailable/incoherent/none."""
+    cc = cross_check or {}
+    if engine_status in ("manual", "lobby", "coherent"):
+        m = cc.get("match")
+        return "match" if m is True else "mismatch" if m is False else "n_unavailable"
+    if engine_status == "quarantine_disagreement":
+        return "mismatch"
+    if engine_status == "incoherent_signal":
+        return "incoherent"
+    return "none"
+
+
+def _ft_warnings(d, diag) -> list:
+    w = []
+    st = d.get("status")
+    cc = d.get("cross_check") or {}
+    if st == "quarantine_disagreement":
+        w.append("tag manual e lobby discordam (p/ la da janela do snap) -> quarentena")
+    if st == "incoherent_signal":
+        w.append("capturas incoerentes (cauda pos-pico com 2+ saltos) -> sem fronteira")
+    if cc.get("match") is False and st != "quarantine_disagreement":
+        w.append(f"cross-check falhou: N={cc.get('n')} != sentados 1a mao={cc.get('hh_seats')}")
+    if cc.get("match") is None and d.get("boundary") is not None:
+        w.append("sem N independente para cross-check (fonte sem lobby Info)")
+    if diag:
+        if diag.get("outlier_dropped"):
+            w.append("via-b: outlier isolado descartado da sequencia de players_left")
+        if diag.get("coherent") is False:
+            w.append("via-b: sequencia pos-pico incoerente")
+    return w
+
+
+def _ft_hrc_stale(tn, boundary) -> list:
+    """Maos >= fronteira com job HRC — ficam STALE se a tag mudar (re-solve = F6)."""
+    rows = query(
+        "SELECT h.hand_id, j.status FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
+        "WHERE h.site='GGPoker' AND h.tournament_number = %s AND h.played_at >= %s "
+        "ORDER BY h.played_at ASC", (tn, boundary))
+    return [{"hand_id": r["hand_id"], "hrc_status": r["status"]} for r in rows]
+
+
+def _ft_get_review(tn):
+    rows = query("SELECT * FROM ft_boundary_review WHERE tournament_number=%s", (tn,))
+    return rows[0] if rows else None
+
+
+def _ft_who(current_user) -> str:
+    if isinstance(current_user, dict):
+        return str(current_user.get("email") or current_user.get("id") or "api")
+    return "api"
+
+
+def _ft_upsert_review(tn, d, *, decision, decided_by, override_boundary=None, override_n=None):
+    cc = d.get("cross_check") or {}
+    status = _ft_map_status(d.get("status"), cc)
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ft_boundary_review (tournament_number, status, boundary, "
+                "source, n_lobby, seats_first_hand, decision, override_boundary, "
+                "override_n, decided_by, decided_at, updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW()) "
+                "ON CONFLICT (tournament_number) DO UPDATE SET status=EXCLUDED.status, "
+                "boundary=EXCLUDED.boundary, source=EXCLUDED.source, "
+                "n_lobby=EXCLUDED.n_lobby, seats_first_hand=EXCLUDED.seats_first_hand, "
+                "decision=EXCLUDED.decision, override_boundary=EXCLUDED.override_boundary, "
+                "override_n=EXCLUDED.override_n, decided_by=EXCLUDED.decided_by, "
+                "decided_at=NOW(), updated_at=NOW()",
+                (tn, status, d.get("boundary"), d.get("source"), d.get("n"),
+                 cc.get("hh_seats"), decision, override_boundary, override_n, decided_by))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _ft_mark_promoted(tn, decided_by):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE ft_boundary_review SET decision='promoted', "
+                        "decided_by=%s, decided_at=NOW(), updated_at=NOW() "
+                        "WHERE tournament_number=%s", (decided_by, tn))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _ft_preview_for_tn(tn) -> dict:
+    d = compute_ft_boundary(tn)
+    cc = d.get("cross_check") or {}
+    diag = via_b_diagnostics(tn)
+    boundary = d.get("boundary")
+    changes, hrc_stale = [], []
+    if boundary is not None:
+        changes = propagate_ft(tn, dry_run=True).get("changed", [])
+        hrc_stale = _ft_hrc_stale(tn, boundary)
+    rev = _ft_get_review(tn)
+    return {
+        "tournament_number": tn,
+        "status": _ft_map_status(d.get("status"), cc),
+        "engine_status": d.get("status"), "source": d.get("source"),
+        "boundary": boundary.isoformat() if boundary else None,
+        "n_lobby": d.get("n"), "seats_first_hand": cc.get("hh_seats"),
+        "cross_check": cc or None, "changes": changes, "n_changes": len(changes),
+        "hrc_stale": hrc_stale, "warnings": _ft_warnings(d, diag), "via_b_diag": diag,
+        "decision": rev["decision"] if rev else "pending",
+        "override_boundary": rev["override_boundary"].isoformat()
+            if rev and rev.get("override_boundary") else None,
+        "override_n": rev.get("override_n") if rev else None,
+    }
+
+
+class FtTnBody(BaseModel):
+    tournament_number: str
+
+
+class FtCorrectBody(BaseModel):
+    tournament_number: str
+    override_boundary: Optional[datetime] = None
+    override_n: Optional[int] = None
+
+
+class FtPromoteBody(BaseModel):
+    tournament_number: str
+    confirm: bool = False
+
+
+@router.get("/ft/preview")
+def ft_preview(tn: Optional[str] = Query(None, description="Um torneio; omisso = todos os candidatos"),
+               current_user=Depends(require_auth_or_api_key)):
+    """Ensaio dry-run da fronteira FT (F3), SO LEITURA. Por torneio: fronteira+via
+    (incl. fonte 0/manual), N + sentados da 1a mao, cross-check, maos que mudariam
+    (from->to), avisos do fallback (outlier/sequencia) e maos HRC stale afetadas."""
+    tns = [tn] if tn else candidate_tns()
+    return {"tournaments": [_ft_preview_for_tn(t) for t in tns], "count": len(tns)}
+
+
+@router.post("/ft/confirm")
+def ft_confirm(body: FtTnBody, current_user=Depends(require_auth_or_api_key)):
+    """FIXA a fronteira COMPUTADA (decision='confirmed'). NAO promove — a escrita e o
+    2o passo (POST /ft/promote). Devolve o ensaio actualizado."""
+    d = compute_ft_boundary(body.tournament_number)
+    _ft_upsert_review(body.tournament_number, d, decision="confirmed",
+                      decided_by=_ft_who(current_user))
+    return {"ok": True, "preview": _ft_preview_for_tn(body.tournament_number)}
+
+
+@router.post("/ft/correct")
+def ft_correct(body: FtCorrectBody, current_user=Depends(require_auth_or_api_key)):
+    """CORRIGE a fronteira a mao (override_boundary/override_n; decision='corrected').
+    NAO promove. Devolve o ensaio actualizado."""
+    ob = body.override_boundary
+    if ob is not None and ob.tzinfo is not None:   # convencao Lisboa-naive
+        ob = ob.replace(tzinfo=None)
+    d = compute_ft_boundary(body.tournament_number)
+    _ft_upsert_review(body.tournament_number, d, decision="corrected",
+                      override_boundary=ob, override_n=body.override_n,
+                      decided_by=_ft_who(current_user))
+    return {"ok": True, "preview": _ft_preview_for_tn(body.tournament_number)}
+
+
+@router.post("/ft/promote")
+def ft_promote(body: FtPromoteBody, current_user=Depends(require_auth_or_api_key)):
+    """2o passo EXPLICITO — a escrita. Exige decisao previa (confirm/correct). dry_run
+    por defeito (confirm=false -> plano); confirm=true escreve as tags (base->-ft) das
+    maos >= fronteira e marca decision='promoted'. Usa a fronteira CORRIGIDA se
+    decision='corrected'."""
+    tn = body.tournament_number
+    rev = _ft_get_review(tn)
+    if not rev or rev["decision"] not in ("confirmed", "corrected"):
+        raise HTTPException(422, "decide primeiro (POST /ft/confirm ou /ft/correct) antes de promover")
+    override = rev["override_boundary"] if rev["decision"] == "corrected" else None
+    plan = propagate_ft(tn, dry_run=not body.confirm, boundary_override=override)
+    if not body.confirm:
+        return {"dry_run": True, "plan": plan}
+    _ft_mark_promoted(tn, _ft_who(current_user))
+    return {"dry_run": False, "result": plan}
