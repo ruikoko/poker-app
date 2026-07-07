@@ -42,6 +42,10 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   `players_left` da fronteira como N. A tabela do endpoint cruza-as (o Rui identifica-as por
   `min_players_left`/`latest_hand_seats`).
 
+## ★ Infra — token Railway de vida curta (login manual repetido)
+
+- **7 Jul 2026 — `#RAILWAY-TOKEN-SHORT-LIVED`.** O token OAuth do `railway` CLI **expira em ~minutos** e **não se auto-renova** no shell do Code (`invalid_grant: grant request is invalid`), obrigando o Rui a fazer `railway login` **3× numa só sessão** (entre esperas de suite de ~10 min o token morria). O acesso à BD de produção (queries read-only via proxy `ballast.proxy.rlwy.net`) e a confirmação de deploy dependem deste token. **Investigar um token de SERVIÇO/leitura de longa duração** (ex.: `RAILWAY_TOKEN` de projeto/serviço, ou um Postgres read-only URL fixo guardado como secret que o Code possa usar sem OAuth interativo) para isto deixar de depender do Rui a cada ~10 min. Não bloqueia trabalho; é fricção operacional. Ver memória `reference_railway_cli_auth`.
+
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 
 A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_COLAPSO.md`):
