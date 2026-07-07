@@ -179,6 +179,7 @@ export const lobbys = {
     const form = new FormData()
     form.append('file', file)
     if (opts.captured_at) form.append('captured_at', opts.captured_at)
+    if (opts.force) form.append('force', 'true')   // fura o dedup → refresca vision_json
     return fetch(`${BASE}/lobbys/upload`, {
       method: 'POST',
       credentials: 'include',

@@ -161,6 +161,48 @@ def _upsert_lobby_log(
             pass
 
 
+def _refresh_lobby_vision_json(
+    message_id: str, vision_json: Optional[dict], players_left: Optional[int]
+) -> int:
+    """#LOBBY-FORCE-REVISION — refresh CIRÚRGICO: reescreve SÓ `vision_json`
+    (+`players_left`) da row existente. NÃO toca result/tournament_number/posted_at/
+    source nem `tournament_payouts` — o refresh de leitura (FT: open_tab/
+    final_table_size) nunca degrada prémios já lidos. Devolve nº de rows afectadas
+    (0 = não existia). Defensivo: falhas de BD engolidas (não partem o upload)."""
+    try:
+        conn = get_conn()
+    except Exception as e:
+        logger.error(f"[lobby_log] refresh get_conn failed: {type(e).__name__}: {e}")
+        return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE lobby_processing_log "
+                "   SET vision_json = %s, "
+                "       players_left = COALESCE(%s, players_left), "
+                "       attempted_at = NOW(), "
+                "       attempt_count = attempt_count + 1 "
+                " WHERE discord_message_id = %s",
+                (json.dumps(vision_json) if vision_json else None,
+                 players_left, message_id),
+            )
+            n = cur.rowcount
+        conn.commit()
+        return n
+    except Exception as e:
+        logger.error(f"[lobby_log] refresh failed msg_id={message_id}: {type(e).__name__}: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 # ── Fallback ancorado no Hero (corrige sala mal lida pela Vision) ────────────
 # pt — #LOBBY-SITE-MISCLASS-HERO-ANCHOR. Quando o resolver primário (site + nome +
 # tempo) dá tm_not_found, este fallback usa as mãos do HERO à volta do captured_at
@@ -254,6 +296,7 @@ async def process_lobby_message(
     log_on_failure: bool = True,
     site_hint: Optional[str] = None,
     name_hint: Optional[str] = None,
+    refresh_vision_only: bool = False,
 ) -> dict:
     """Vision → parse → resolver → upsert payouts → log.
 
@@ -341,6 +384,16 @@ async def process_lobby_message(
     base["vision_json"] = vj
     base["prizes_count"] = len(vj.get("prizes") or {})
     base["players_left"] = players_left
+
+    # #LOBBY-FORCE-REVISION (F2/4b.1) — force=true no upload fura o dedup e re-corre
+    # a Vision; aqui só reescrevemos o vision_json (+players_left) da row existente
+    # — captura open_tab/final_table_size do prompt novo — SEM resolver torneio nem
+    # tocar tournament_payouts (D11/reconcile continuam donos dos payouts). Repõe a
+    # leitura do FT num print já processado sem risco de degradar prémios já lidos.
+    if refresh_vision_only:
+        n = _refresh_lobby_vision_json(message_id, vj, players_left)
+        base["result"] = "vision_refreshed" if n else "vision_refresh_no_row"
+        return base
 
     # WPN é sala de 1ª classe desde pt60 (ALLOWED_SITES do table_ss, resolver,
     # fila HRC); o gate do lobby ficou sem ela. Incluída para a skin WPN do Rui

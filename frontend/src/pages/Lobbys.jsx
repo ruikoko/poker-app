@@ -259,6 +259,7 @@ function Detail({ r }) {
 export default function LobbysPage() {
   const [items, setItems] = useState([])      // uploads desta sessão
   const [dragging, setDragging] = useState(false)
+  const [force, setForce] = useState(false)   // forçar releitura (fura o dedup)
   const inputRef = useRef(null)
   const keyRef = useRef(0)
 
@@ -278,13 +279,13 @@ export default function LobbysPage() {
       patch(e.key, { status: 'processing' })
       try {
         const captured_at = lastModifiedToLisbonNaiveISO(e.file.lastModified)
-        const r = await lobbys.upload(e.file, { captured_at })
+        const r = await lobbys.upload(e.file, { captured_at, force })
         patch(e.key, { status: classify(r), result: r })
       } catch (err) {
         patch(e.key, { status: 'error', result: { reason_detail: String(err.message || err) } })
       }
     }
-  }, [])
+  }, [force])
 
   const onDrop = useCallback((ev) => {
     ev.preventDefault(); setDragging(false)
@@ -303,6 +304,19 @@ export default function LobbysPage() {
         pipeline do sync. Um print qualquer que não seja lobby é <b>ignorado</b> (nada gravado).
         Cada ficheiro abre para o detalhe completo da extração e do import.
       </div>
+
+      {/* Forçar releitura — fura o dedup por conteúdo e re-corre a Vision (refresh
+          só do vision_json: open_tab/final_table_size; NÃO toca prémios/payouts). */}
+      <label style={{
+        display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+        fontSize: 12, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none',
+      }}>
+        <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+        <span>
+          <b>Forçar releitura</b> (ignora o dedup e volta a correr a Vision) — refresca só
+          o <code>vision_json</code>; não altera prémios/payouts.
+        </span>
+      </label>
 
       {/* Drop zone */}
       <div

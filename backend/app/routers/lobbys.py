@@ -56,6 +56,7 @@ async def upload_lobby_ss(
     captured_at: Optional[str] = Form(None),
     site_hint: Optional[str] = Form(None),
     name_hint: Optional[str] = Form(None),
+    force: bool = Form(False),
     current_user=Depends(require_auth),
 ):
     """2ª via de lobby (fora do Discord) — 1 SS da pasta de Capturas do Windows,
@@ -69,7 +70,14 @@ async def upload_lobby_ss(
     única do Intuitive Tables, deriva o site do NOME do ficheiro (e, no GG, o nome
     do torneio). Esses hints têm PRECEDÊNCIA sobre a Vision em
     `process_lobby_message` (rede de segurança p/ capturas cortadas). Sem os campos
-    (Discord, LOBBY_DIR), o comportamento é o de sempre."""
+    (Discord, LOBBY_DIR), o comportamento é o de sempre.
+
+    #LOBBY-FORCE-REVISION — `force=true` FURA o dedup por conteúdo e re-corre a
+    Vision no ficheiro fresco, mas em modo **refresh-only**: reescreve só o
+    `vision_json` (open_tab/final_table_size/players_left) da row existente; NÃO
+    resolve torneio nem toca `tournament_payouts`. Serve o FT (repor a leitura de um
+    print já processado) sem risco nos prémios. A resolução do tn fica para o passo
+    separado `POST /api/lobbys/reconcile`."""
     content = await file.read()
     if not content:
         raise HTTPException(400, "Ficheiro vazio")
@@ -102,7 +110,7 @@ async def upload_lobby_ss(
         "FROM lobby_processing_log WHERE discord_message_id = %s",
         (file_hash,),
     )
-    if existing:
+    if existing and not force:
         e = existing[0]
         vj = e.get("vision_json") or {}
         return {
@@ -125,10 +133,11 @@ async def upload_lobby_ss(
         posted_at=posted_at, source_prefix="file_lobby_vision",
         log_on_failure=False,  # não-lobby (falha de Vision) → não persiste nada
         site_hint=site_hint, name_hint=name_hint,   # pt63 — precedência do filename
+        refresh_vision_only=bool(existing) and force,  # force + já existia → só refresh
     )
     is_lobby = res.get("result") not in _NON_LOBBY
     return {
-        "is_lobby": is_lobby, "dedup": False,
+        "is_lobby": is_lobby, "dedup": False, "forced": bool(existing) and force,
         "result": res.get("result"), "reason_detail": res.get("reason_detail"),
         "site": res.get("site"),
         "tournament_name": res.get("tournament_name"),
