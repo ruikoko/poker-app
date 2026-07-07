@@ -161,6 +161,15 @@ def _upsert_lobby_log(
             pass
 
 
+def _is_info_tab(vision_json) -> bool:
+    """#LOBBY-INFO-NO-PAYOUT (regra 7 Jul) — o print com a aba **Info** aberta marca
+    só o ARRANQUE da FT (fronteira + final_table_size) e NÃO é fonte de prémios (na
+    aba Info os prémios saem a zeros/fichas). Onde isto for True, o pipeline resolve
+    o tn e grava vision_json/players_left mas NUNCA escreve tournament_payouts."""
+    return (isinstance(vision_json, dict)
+            and (vision_json.get("open_tab") or "").strip() == "Info")
+
+
 def _refresh_lobby_vision_json(
     message_id: str, vision_json: Optional[dict], players_left: Optional[int]
 ) -> int:
@@ -457,6 +466,26 @@ async def process_lobby_message(
         base["result"] = result
         base["reason_detail"] = reason
         base["candidates"] = candidates
+        return base
+
+    # #LOBBY-INFO-NO-PAYOUT (regra 7 Jul) — o print da aba Info marca só o ARRANQUE
+    # da FT; NÃO é fonte de prémios. Resolve o tn e grava vision_json/players_left
+    # (o motor FT lê daí), mas NUNCA escreve tournament_payouts: sendo sempre o
+    # ÚLTIMO print do torneio, esmagaria por last-write-wins os payouts bons das
+    # abas de prémios (a D11 só protege manual/backoffice). Mesma família do
+    # refresh_vision_only, que também retorna antes do upsert_payout.
+    if _is_info_tab(vj):
+        _upsert_lobby_log(
+            message_id=message_id, channel_id=channel_id,
+            result="success",
+            reason_detail="info_tab_no_payout",
+            site=site, tournament_name=name, tournament_number=tn,
+            vision_json=vj, posted_at=posted_at, players_left=players_left,
+        )
+        base["result"] = "success"
+        base["reason_detail"] = "info_tab_no_payout"
+        base["tournament_number"] = tn
+        base["action"] = None            # não escreveu payout (só marca a FT)
         return base
 
     # #SYNC-RECENT-RESPECT-MANUAL (pt43) — guarda de precedência D11
@@ -840,6 +869,23 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
             continue
 
         resolved += 1
+        # #LOBBY-INFO-NO-PAYOUT (regra 7 Jul) — print da aba Info nunca escreve
+        # payout (só marca a FT). Resolve o tn e passa a success, sem tocar
+        # tournament_payouts. Espelha o gate de process_lobby_message.
+        if _is_info_tab(vj):
+            item["action"] = "info_ft_marker"
+            if not dry_run:
+                _upsert_lobby_log(
+                    message_id=r["discord_message_id"], channel_id=None,
+                    result="success",
+                    reason_detail="reconcile: info_tab_no_payout",
+                    site=site, tournament_name=name, tournament_number=tn,
+                    vision_json=vj, posted_at=posted_at,
+                    players_left=_coerce_players_left(vj),
+                )
+            items.append(item)
+            continue
+
         # Precedência D11: lobby é a fonte de menor prioridade — NÃO sobrescreve
         # manual:/backoffice_vision: já presentes. Espelha process_lobby_message.
         existing = query(
