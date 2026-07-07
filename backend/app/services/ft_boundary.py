@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import timedelta
 from typing import Optional
 
 from app.db import query, get_conn
@@ -42,6 +43,10 @@ logger = logging.getLogger("ft_boundary")
 FT_CAP = 9
 # Tolerância de jitter da Vision na verificação de coerência (fonte b).
 COHERENCE_TOL = 2
+# Janela do SNAP-TO-N: recuar até 3 min da fronteira computada à procura da 1ª mão
+# REAL da FT (sentados == N). Cobre os gaps observados (38-51 s) com folga sem
+# apanhar a mesa PRÉ-FT do Hero (a ~5-6 min, com contagens diferentes).
+SNAP_WINDOW_MIN = 3
 
 # Tags-spot BASE que têm variante de fase '-ft' (formas canónicas). A '-ft' é
 # mudança de FASE, ortogonal ao FORMATO → converter base→-ft NUNCA muda PKO/não-PKO
@@ -144,15 +149,32 @@ def _coherent_readings(readings: list[dict]) -> tuple[list[dict], bool]:
     return vals, False                             # vários saltos → incoerente
 
 
+def _post_peak_tail(readings: list[dict]) -> list[dict]:
+    """Q-A (política 7 Jul) — corta as leituras à **CAUDA DESCENDENTE PÓS-PICO**. O
+    PICO do players_left = fecho do late-reg (com re-entradas, o pico FINAL); a
+    subida ANTES do pico é vida normal do torneio, NÃO incoerência. Devolve as
+    leituras do ÚLTIMO pico em diante (dentro da cauda mantém-se o rigor do
+    `_coherent_readings`: descarte de 1 outlier, incoerente com 2+ saltos)."""
+    vals = [r for r in readings
+            if isinstance(r.get("players_left"), int) and not isinstance(r.get("players_left"), bool)]
+    if len(vals) <= 1:
+        return vals
+    mx = max(r["players_left"] for r in vals)
+    peak = max(i for i, r in enumerate(vals) if r["players_left"] == mx)  # último pico
+    return vals[peak:]
+
+
 def _it_ft_boundary(tn: str):
-    """Fonte (b): (fronteira, coerente, N). Descarta o outlier isolado; fronteira =
-    1º played_at (entre os readings COERENTES) onde _ft_applies e N = o `players_left`
-    desse momento (D2: N da fronteira = tamanho da FT). Genuinamente incoerente →
+    """Fonte (b): (fronteira, coerente, N). Avalia SÓ a cauda descendente pós-pico
+    (Q-A); dentro dela descarta o outlier isolado; fronteira = 1º played_at (entre
+    os readings COERENTES) onde _ft_applies e N = o `players_left` desse momento
+    (D2: N da fronteira = tamanho da FT). Cauda genuinamente incoerente →
     (None, False, None) [sinaliza, não corrige]."""
     readings = _it_readings(tn)
     if not readings:
         return None, True, None               # sem dados: coerente-vazio, sem fronteira
-    kept, coherent = _coherent_readings(readings)
+    tail = _post_peak_tail(readings)           # Q-A: só a cauda pós-pico (late-reg)
+    kept, coherent = _coherent_readings(tail)
     if not coherent:
         return None, False, None
     for r in kept:                             # kept preserva ordem (played_at)
@@ -184,25 +206,63 @@ def _cross_check(tn: str, boundary, n) -> dict:
     return {"n": n, "hh_seats": hh_seats, "match": match}
 
 
+# ── SNAP-TO-N (política da fronteira, 7 Jul) ─────────────────────────────────
+def _starts_drainage(seats_from_here: list, n: int) -> bool:
+    """A sequência de sentados a partir de um candidato INICIA a drenagem da FT?
+    True sse o 1º == N e a sequência (ignorando ilegíveis) é NÃO-CRESCENTE — a FT só
+    perde jogadores (7→6→5…); a mesa PRÉ-FT do Hero volta a SUBIR (…3→7) → quebra."""
+    vals = [s for s in seats_from_here if isinstance(s, int)]
+    if not vals or vals[0] != n:
+        return False
+    return all(b <= a for a, b in zip(vals, vals[1:]))
+
+
+def _snap_to_n(tn: str, boundary, n):
+    """SNAP-TO-N — a fronteira computada (via-a print / via-b coherent) cai ~1 mão
+    TARDE (o sinal chega segundos depois de a FT arrancar). Recua até
+    `SNAP_WINDOW_MIN` e devolve o played_at da mão MAIS CEDO com `sentados == N` que
+    INICIA a drenagem (==N seguida de mãos ≤N). Se não houver → devolve a fronteira
+    computada (fallback Q-B: segue para o cross-check normal → mismatch → quarentena
+    F3/F4, nunca promove às cegas)."""
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0 or boundary is None:
+        return boundary
+    lo = boundary - timedelta(minutes=SNAP_WINDOW_MIN)
+    rows = query(
+        """SELECT played_at, raw FROM hands
+            WHERE site='GGPoker' AND tournament_number = %s
+              AND played_at >= %s AND played_at <= %s
+            ORDER BY played_at ASC""",
+        (tn, lo, boundary),
+    )
+    seats = [count_hh_seats(r["raw"]) for r in rows]
+    for i in range(len(rows)):
+        if _starts_drainage(seats[i:], n):
+            return rows[i]["played_at"]
+    return boundary                            # sem mão ==N na janela → fallback
+
+
 def compute_ft_boundary(tn: str) -> dict:
     """Fronteira do torneio, fonte (a) MANDA sobre (b). Devolve
     {boundary, source, status, n, cross_check}.
 
     `n` = tamanho da mesa final: via (a) o `final_table_size` do print do Info; via
-    (b) o `players_left` da fronteira (D2). `cross_check` cruza esse N com os
-    sentados da 1ª mão GG >= fronteira — NÃO bloqueia nesta fase (quarentena é F3).
-    status ∈ {'lobby','coherent','incoherent_signal','none'}."""
+    (b) o `players_left` da fronteira (D2). A fronteira computada passa pelo
+    **SNAP-TO-N** (recua à 1ª mão real da FT, `sentados==N`); o `cross_check` cruza
+    N com os sentados da 1ª mão GG >= fronteira JÁ SNAPPED — NÃO bloqueia nesta fase
+    (quarentena é F3). status ∈ {'lobby','coherent','incoherent_signal','none'}."""
     lb, lb_n = _lobby_ft_boundary(tn)
     if lb is not None:
-        return {"boundary": lb, "source": "propagated_lobby", "status": "lobby",
-                "n": lb_n, "cross_check": _cross_check(tn, lb, lb_n)}
+        snapped = _snap_to_n(tn, lb, lb_n)
+        return {"boundary": snapped, "source": "propagated_lobby", "status": "lobby",
+                "n": lb_n, "cross_check": _cross_check(tn, snapped, lb_n)}
     it_b, coherent, it_n = _it_ft_boundary(tn)
     if not coherent:
         return {"boundary": None, "source": None, "status": "incoherent_signal",
                 "n": None, "cross_check": None}
     if it_b is not None:
-        return {"boundary": it_b, "source": "propagated_coherent", "status": "coherent",
-                "n": it_n, "cross_check": _cross_check(tn, it_b, it_n)}
+        snapped = _snap_to_n(tn, it_b, it_n)
+        return {"boundary": snapped, "source": "propagated_coherent", "status": "coherent",
+                "n": it_n, "cross_check": _cross_check(tn, snapped, it_n)}
     return {"boundary": None, "source": None, "status": "none",
             "n": None, "cross_check": None}
 

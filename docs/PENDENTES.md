@@ -42,6 +42,11 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   `players_left` da fronteira como N. A tabela do endpoint cruza-as (o Rui identifica-as por
   `min_players_left`/`latest_hand_seats`).
 
+## ★ Melhorias futuras da propagação FT (registadas 7 Jul, NÃO agora)
+
+- **`#FT-GUARD-BY-LOBBY-STATUS` — reforço do guarda por ESTADO do lobby.** Os lobbys GG mostram a **fase** no canto superior direito — **"Late Reg."** / **"Running"** — visível em **QUALQUER aba** (incluindo os prints de PRÉMIOS tirados a meio do torneio). Quando a Vision extrair um campo **`tournament_status`**, o guarda da via-b pode usar leituras de lobbys **"Late Reg." como PRÉ-PICO por definição** (reforça o `_post_peak_tail`, que hoje infere o pico só pelo máximo dos `players_left`). **A hora de fecho do late-reg (aba Info) NÃO serve** — só existe quando o Rui fez FT, e aí a **via-1 (print do Info) já resolve**. O mecanismo-base continua a ser o **pico** (funciona só com capturas IT, sem depender da Vision de lobby). Cross-ref `REGISTO_CONCEITO 2026-07-07` (política da fronteira).
+- **`#FT-ENSAIO-VIA-F3-ENDPOINT` — mover os ensaios para a F3.** Os ensaios dry-run desta política correram via **script read-only contra o proxy público** (`ballast.proxy.rlwy.net`) — serviu para calibrar. Quando a **F3 (preview/quarentena endpoint)** existir, os ensaios passam a correr **por lá** (mesmo caminho que a app usa, sem script local nem proxy). **Incluir no âmbito da F3.**
+
 ## ★ Infra — token Railway de vida curta (login manual repetido)
 
 - **7 Jul 2026 — `#RAILWAY-TOKEN-SHORT-LIVED`.** O token OAuth do `railway` CLI **expira em ~minutos** e **não se auto-renova** no shell do Code (`invalid_grant: grant request is invalid`), obrigando o Rui a fazer `railway login` **3× numa só sessão** (entre esperas de suite de ~10 min o token morria). O acesso à BD de produção (queries read-only via proxy `ballast.proxy.rlwy.net`) e a confirmação de deploy dependem deste token. **Investigar um token de SERVIÇO/leitura de longa duração** (ex.: `RAILWAY_TOKEN` de projeto/serviço, ou um Postgres read-only URL fixo guardado como secret que o Code possa usar sem OAuth interativo) para isto deixar de depender do Rui a cada ~10 min. Não bloqueia trabalho; é fricção operacional. Ver memória `reference_railway_cli_auth`.

@@ -135,6 +135,7 @@ def test_cross_check_match_mismatch_and_illegible():
 # ── compute_ft_boundary: prioridade lobby > IT-coerente; incoerente sinaliza ──
 def test_boundary_lobby_wins_carries_n_and_cross_check():
     with patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
+         patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=7):
         d = fb.compute_ft_boundary("T1")
     assert d["source"] == "propagated_lobby" and d["boundary"] == T0
@@ -153,6 +154,7 @@ def test_boundary_coherent_it_uses_players_left_as_n():
     # via (b): N = players_left da fronteira (D2); cross-check com os sentados da HH
     with patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(T0, True, 8)), \
+         patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=8):
         d = fb.compute_ft_boundary("T1")
     assert d["source"] == "propagated_coherent" and d["boundary"] == T0
@@ -244,3 +246,80 @@ def test_persist_writes_auto_not_via_string_and_preserves_manual():
     # params = (discord_tags, hm3_tags, hand_db_id) — a via ficou de fora
     assert params == (["icm-ft"], [], 7)
     mconn.commit.assert_called_once()
+
+
+# ── SNAP-TO-N + cauda pós-pico (política da fronteira, 7 Jul) ─────────────────
+def _hand_at(secs, seats):
+    return {"played_at": T0 + timedelta(seconds=secs), "raw": _raw(seats)}
+
+
+def test_starts_drainage_unit():
+    assert fb._starts_drainage([7, 7, 6, 5], 7) is True
+    assert fb._starts_drainage([7, 5, 4, 7], 7) is False   # sobe no fim (mesa pré-FT)
+    assert fb._starts_drainage([4, 3, 7], 7) is False       # não começa em N
+    assert fb._starts_drainage([7], 7) is True
+    assert fb._starts_drainage([7, None, 6], 7) is True     # ignora ilegível
+    assert fb._starts_drainage([], 7) is False
+
+
+def test_snap_hits_ft_start():
+    # (a) gap real 51 s: pré-FT 4,3 depois FT 7 @ −51s; boundary 7 @ 0. snap → −51s
+    rows = [_hand_at(-120, 4), _hand_at(-80, 3), _hand_at(-51, 7), _hand_at(-5, 7)]
+    with patch.object(fb, "query", return_value=rows):
+        assert fb._snap_to_n("T", T0, 7) == T0 + timedelta(seconds=-51)
+
+
+def test_snap_ignores_pre_ft_table_seven():
+    # (b) 7 pré-FT (mesa cheia do Hero) que DEPOIS sobe → não ancora no 1º 7,
+    # ancora no início da drenagem (2º 7 seguido de 6)
+    rows = [_hand_at(-160, 7), _hand_at(-120, 5), _hand_at(-90, 4),
+            _hand_at(-40, 7), _hand_at(-5, 6)]
+    with patch.object(fb, "query", return_value=rows):
+        assert fb._snap_to_n("T", T0, 7) == T0 + timedelta(seconds=-40)
+
+
+def test_snap_no_match_falls_back():
+    # (c) nenhuma mão ==N na janela → fallback à fronteira computada
+    rows = [_hand_at(-120, 5), _hand_at(-80, 4), _hand_at(-30, 3)]
+    with patch.object(fb, "query", return_value=rows):
+        assert fb._snap_to_n("T", T0, 7) == T0
+
+
+def test_snap_noop_without_n_or_boundary():
+    assert fb._snap_to_n("T", T0, None) == T0
+    assert fb._snap_to_n("T", None, 7) is None
+
+
+def _read(pl, occ, secs=0):
+    return {"played_at": T0 + timedelta(minutes=secs), "players_left": pl,
+            "vision_json": {"players_left": pl,
+                            "seats": [{"nick": f"p{i}"} for i in range(occ)]}}
+
+
+def test_post_peak_tail_trims_late_reg_rise():
+    r = [_read(35, 0), _read(37, 0), _read(40, 0), _read(52, 0),
+         _read(23, 0), _read(15, 0), _read(5, 0), _read(5, 0)]
+    assert [x["players_left"] for x in fb._post_peak_tail(r)] == [52, 23, 15, 5, 5]
+
+
+def test_post_peak_tail_keeps_monotone_decreasing():
+    r = [_read(100, 0), _read(40, 0), _read(8, 0)]
+    assert [x["players_left"] for x in fb._post_peak_tail(r)] == [100, 40, 8]
+
+
+def test_it_boundary_anchors_late_reg_by_tail():
+    # (d) late-reg: sobe 35→52 (pré-pico, ignorado) depois cai; FT deteta-se na
+    # cauda (reading de 5 players com 5 sentados == 5 → _ft_applies)
+    reads = [_read(35, 0, 0), _read(52, 0, 5), _read(15, 0, 20), _read(5, 5, 30)]
+    with patch.object(fb, "_it_readings", return_value=reads):
+        b, coh, n = fb._it_ft_boundary("T")
+    assert coh is True and n == 5 and b == T0 + timedelta(minutes=30)
+
+
+def test_it_boundary_incoherent_dirty_tail():
+    # (e) cauda pós-pico com 2+ saltos (não fixável com 1 outlier) → incoerente
+    reads = [_read(100, 0, 0), _read(20, 0, 5), _read(80, 0, 10),
+             _read(30, 0, 15), _read(70, 0, 20)]
+    with patch.object(fb, "_it_readings", return_value=reads):
+        b, coh, n = fb._it_ft_boundary("T")
+    assert coh is False and b is None
