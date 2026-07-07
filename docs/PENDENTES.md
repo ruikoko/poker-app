@@ -19,6 +19,29 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   leituras: fronteira + cross-check) e **RE-CORRÍVEL após o wipe+reimport** (recomputa de raiz, nada
   persistido) → serve de sanity-check pós-reimport. +3 testes.
 
+- **CONVENÇÃO do print de arranque da FT (via 1) — 7 Jul, ver `REGISTO_CONCEITO 2026-07-07`.** A fonte
+  (a) do motor só pode ancorar em lobbys com a **aba "Info" ABERTA** (`vision_json.open_tab=='Info'`),
+  onde se lê "N players at the final table"; o N vem daí (`final_table_size`). Prints de outras abas
+  (Players/Prize Pool) **nunca** ancoram. **A `lobby_vision` WIP já tem `open_tab` + `final_table_size`**
+  (lado da Vision) → **commitar/deployar com a F2**; o `ft_boundary._lobby_ft_boundary` tem de passar a
+  **gatear por `open_tab='Info'`** (hoje usa `players_left<=FT_CAP` de qualquer print — corrigir na F2
+  ANTES de ligar a escrita).
+
+- **★ Caso de teste da 4b — VIA 1 ponta-a-ponta (Daily Hyper $60, 2 Jul):** started 17:45, 172 entradas;
+  **print do Info ~19:19 → "7 players at the final table", 7/172 restantes** (Hero **Lauro Dermio**, 5º,
+  7 BB). Teste: fronteira **pelo print do Info** + **N=7** + cross-check com os sentados da 1ª mão
+  pós-fronteira (deve dar 7). **Controlo NEGATIVO:** 2º print do mesmo nome nessa noite — **edição das
+  21:27, 169 entradas, nível 13, 107 restantes, aba Prize Pool** → o motor **não** o pode usar como
+  fronteira nem confundir a edição. ⚠️ **Dependências para correr:** (1) confirmar que a HH+TS do Daily
+  Hyper entraram (tournament_number + nº de mãos — pendente `railway login`); (2) a via-1 só corre com a
+  `lobby_vision` nova **deployada** e o print do Info **re-Visionado** (senão o `vision_json` não traz
+  `open_tab`/`final_table_size`).
+
+- **4 FTs de Jun (16-26) — testam a VIA 2 (fallback) + cross-check D2.** Não têm print do Info (o Rui só
+  começou a tirá-los a 2 Jul) → fronteira por `players_left` coerente das capturas IT + cross-check com
+  `players_left` da fronteira como N. A tabela do endpoint cruza-as (o Rui identifica-as por
+  `min_players_left`/`latest_hand_seats`).
+
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 
 A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_COLAPSO.md`):
