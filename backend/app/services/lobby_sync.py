@@ -22,6 +22,7 @@ from typing import Optional
 from app.db import get_conn, query
 from app.ingest_filters import is_pre_2026
 from app.services import lobby_vision, tournament_resolver, payouts_service
+from app.services.payout_coherence import check_vj_payout_coherent
 
 logger = logging.getLogger("lobby_sync")
 
@@ -31,7 +32,7 @@ _anthropic_sem = asyncio.Semaphore(1)
 _VALID_RESULTS = frozenset({
     "success", "vision_failed", "json_invalid", "site_undetected",
     "tm_not_found", "tm_ambiguous", "no_attachments", "pre_2026_skip",
-    "upsert_error",
+    "upsert_error", "payout_incoherent",
 })
 
 
@@ -517,6 +518,22 @@ async def process_lobby_message(
             base["existing_source"] = cur_src
             return base
 
+    # #PAYOUT-COHERENCE (guarda 7 Jul) — Vision alucinada (prémio>pool, soma>pool,
+    # escada que sobe) → NÃO escreve payout (branco é honesto; payout errado envenena
+    # o ICM). Independente do gate do Info: apanha alucinação em qualquer aba.
+    ok_coh, coh_reason = await asyncio.to_thread(check_vj_payout_coherent, site, tn, vj)
+    if not ok_coh:
+        _upsert_lobby_log(
+            message_id=message_id, channel_id=channel_id,
+            result="payout_incoherent", reason_detail=coh_reason,
+            site=site, tournament_name=name, tournament_number=tn,
+            vision_json=vj, posted_at=posted_at, players_left=players_left,
+        )
+        base["result"] = "payout_incoherent"
+        base["reason_detail"] = coh_reason
+        base["tournament_number"] = tn
+        return base
+
     blob = lobby_vision.build_hrc_payouts_blob(vj)
     try:
         upsert_res = await asyncio.to_thread(
@@ -819,7 +836,7 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
     else:
         rows = query(sql)
 
-    scanned = resolved = written = skipped_prec = still = 0
+    scanned = resolved = written = skipped_prec = still = incoherent = 0
     items: list[dict] = []
 
     for r in rows:
@@ -910,6 +927,23 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
             items.append(item)
             continue
 
+        # #PAYOUT-COHERENCE — mesma guarda no reconcile (antes de escrever).
+        ok_coh, coh_reason = check_vj_payout_coherent(site, tn, vj)
+        if not ok_coh:
+            incoherent += 1
+            item["action"] = "payout_incoherent"
+            item["reason"] = coh_reason
+            if not dry_run:
+                _upsert_lobby_log(
+                    message_id=r["discord_message_id"], channel_id=None,
+                    result="payout_incoherent", reason_detail=coh_reason,
+                    site=site, tournament_name=name, tournament_number=tn,
+                    vision_json=vj, posted_at=posted_at,
+                    players_left=_coerce_players_left(vj),
+                )
+            items.append(item)
+            continue
+
         item["action"] = "written"
         item["existing_source"] = cur_src or None
         if not dry_run:
@@ -931,11 +965,11 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
 
     logger.info(
         "[lobby_reconcile] scanned=%d resolved=%d written=%d skipped_precedence=%d "
-        "still_unresolved=%d dry_run=%s",
-        scanned, resolved, written, skipped_prec, still, dry_run,
+        "incoherent=%d still_unresolved=%d dry_run=%s",
+        scanned, resolved, written, skipped_prec, incoherent, still, dry_run,
     )
     return {
         "scanned": scanned, "resolved": resolved, "written": written,
-        "skipped_precedence": skipped_prec, "still_unresolved": still,
-        "dry_run": dry_run, "items": items,
+        "skipped_precedence": skipped_prec, "incoherent": incoherent,
+        "still_unresolved": still, "dry_run": dry_run, "items": items,
     }

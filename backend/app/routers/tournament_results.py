@@ -14,6 +14,7 @@ from app.db import query
 from app.services.image_utils import detect_image_mime
 from app.services import tournament_result_vision as bv
 from app.services import tournament_resolver, payouts_service
+from app.services.payout_coherence import check_vj_payout_coherent
 
 router = APIRouter(prefix="/api/tournament-results", tags=["tournament-results"])
 logger = logging.getLogger("tournament_results")
@@ -166,6 +167,15 @@ async def _process_one(
         vj = vj_revalidated
 
     out["ss_likely_truncated"] = bool(vj.get("_ss_likely_truncated"))
+
+    # #PAYOUT-COHERENCE (guarda 7 Jul) — Vision alucinada (prémio>pool, soma>pool,
+    # escada que sobe) → NÃO escreve payout (vale p/ TODAS as fontes Vision, incl.
+    # backoffice). Corre também em dry_run (o preview mostra a incoerência).
+    ok_coh, coh_reason = await asyncio.to_thread(check_vj_payout_coherent, "GGPoker", tn, vj)
+    if not ok_coh:
+        out["result"] = "payout_incoherent"
+        out["error"] = coh_reason
+        return out
 
     # skip_existing — D11 precedência manual > backoffice > lobby.
     if skip_existing:

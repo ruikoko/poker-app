@@ -574,8 +574,8 @@ def test_reconcile_idempotent_second_run_is_noop():
         mq.side_effect = _make_query([], precedence=[])
         r2 = lobby_sync.reconcile_lobby_logs()
         assert r2 == {"scanned": 0, "resolved": 0, "written": 0,
-                      "skipped_precedence": 0, "still_unresolved": 0,
-                      "dry_run": False, "items": []}
+                      "skipped_precedence": 0, "incoherent": 0,
+                      "still_unresolved": 0, "dry_run": False, "items": []}
 
 
 # ── 5. _resolve_via_hero_anchor (fallback ancorado no Hero) ──────────────────

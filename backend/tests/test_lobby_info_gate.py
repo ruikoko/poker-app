@@ -10,13 +10,14 @@ PNG = b"\x89PNG\r\n\x1a\nx"
 POSTED = datetime(2026, 7, 2, 19, 19, 25)   # Lisboa naive, 2026
 
 
-def _run_full(vj, **kw):
-    """process_lobby_message com Vision/resolver/payout mockados; devolve
-    (res, upsert_payout_mock, log_mock)."""
+def _run_full(vj, coherence=(True, None), **kw):
+    """process_lobby_message com Vision/resolver/payout/coerência mockados; devolve
+    (res, upsert_payout_mock, log_mock). `coherence` = veredicto da guarda de payouts."""
     from app.services import lobby_sync
     with patch.object(lobby_sync, "_upsert_lobby_log") as mlog, \
          patch.object(lobby_sync, "_resolve_via_hero_anchor", return_value=None), \
          patch.object(lobby_sync, "query", return_value=[]), \
+         patch.object(lobby_sync, "check_vj_payout_coherent", return_value=coherence), \
          patch.object(lobby_sync.lobby_vision, "extract_lobby_payout_json", return_value="{}"), \
          patch.object(lobby_sync.lobby_vision, "parse_and_validate_lobby_json", return_value=vj), \
          patch.object(lobby_sync.lobby_vision, "build_hrc_payouts_blob",
@@ -71,6 +72,17 @@ def test_no_open_tab_still_writes_payout():
           "players_left": 50, "prizes": {"1": 100.0}}
     _, mpay, _ = _run_full(vj)
     mpay.assert_called_once()
+
+
+def test_incoherent_payout_not_written():
+    # #PAYOUT-COHERENCE — guarda diz incoerente → NÃO escreve, log payout_incoherent.
+    vj = {"site": "GGPoker", "tournament_name": "Daily Hyper $60",
+          "open_tab": "Prize Pool", "prizes": {"1": 269061.0}}
+    res, mpay, mlog = _run_full(vj, coherence=(False, "prize_gt_pool"))
+    assert res["result"] == "payout_incoherent"
+    assert res["reason_detail"] == "prize_gt_pool"
+    mpay.assert_not_called()
+    assert mlog.call_args.kwargs["result"] == "payout_incoherent"
 
 
 # ── reconcile_lobby_logs ──────────────────────────────────────────────────────
