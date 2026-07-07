@@ -1,5 +1,45 @@
 # Pendentes — backlog vivo
 
+## ★ Propagação FT (`ft_boundary`) — em construção faseada (plano APROVADO, 7 Jul)
+
+Plano de wiring aprovado (7 Jul) com emenda + decisões D1-D5. Ordem: **F1** corrigir 2
+incompatibilidades → **F2** Adição 1 (cross-check HH) → **F3** tabela + endpoints ensaio/quarentena →
+**F4** UI da quarentena → **F4b** validação empírica contra torneios reais → **F5** ligar gatilhos +
+botão promover → **F6** re-solve das mãos HRC stale. Escrita **sempre manual** (dry-run → OK do Rui);
+**CONFIRMAR/CORRIGIR na quarentena fixa a fronteira e devolve o ensaio** (2 passos: decidir a
+fronteira ≠ aprovar a escrita). Decisões: D1 quarentena se N ilegível; D2 cross-check também no
+fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 manter as 2 escritas do
+`_ft_applies`; D5 construir ANTES do wipe (é cura do core).
+
+- **F1 ✅ (7 Jul)** — `_persist_ft_correction` grava `folder_ft_source='auto'` (não a via
+  `propagated_*`, que poluía o filtro "-ft auto") + `CASE` preserva `'manual'` (pasta -ft manda). +1 teste.
+- **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
+  da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
+  `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas
+  leituras: fronteira + cross-check) e **RE-CORRÍVEL após o wipe+reimport** (recomputa de raiz, nada
+  persistido) → serve de sanity-check pós-reimport. +3 testes.
+
+## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
+
+A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_COLAPSO.md`):
+**os dados actuais da app vão ser APAGADOS e REIMPORTADOS.** Consequência directa no backlog:
+
+- **(a) A cura de DADOS históricos foi ABANDONADA.** As "pontas" de bounties/desanon
+  históricos (1 presa `GG-6102580840`, 2 por rever, 5 seats truncados, mãos consertadas à
+  mão, lote das 44 partidas) **podem morrer com o wipe** → **NÃO as trabalhar sem o Rui
+  confirmar** que ainda fazem sentido depois do reimport. O esforço mudou de "curar os dados"
+  para **"curar o CORE"** (o código que produz o apa) para que os mesmos dados entrem
+  direitos quando reimportados.
+- **(b) `#HRC-REIMPORT-REDEANON-CASADAS` DEIXA de ser diferível — prioridade SUBIU.** Sem
+  ele, o reimport de HH **parte a desanon das mãos com captura já casada** (repõe o apa cru +
+  esvazia o `anon_map` sem re-disparar a desanon das SS **casadas**, só das órfãs). Passa de
+  "melhoria futura, NÃO agora" (pt93) a **pré-requisito do wipe**. Ver secção própria abaixo.
+- **(c) A decisão do CORE (apa indexado por HASH em vez de nome) está NÃO APROVADA.** É
+  decisão do **Rui**, não backlog do Code — há uma desconfiança dele por resolver (`APA §B.4`:
+  como convivem o nível-mão [hash] e o nível-jogador [nome dos Vilões]). **Não escrever código
+  do core** até o Rui aprovar o desenho. O §C do doc (mapa de acoplamento do apa, ~15-18
+  sítios) é o Passo 1 já feito.
+
 ## ★ pt97 (1 Jul 2026, Web) — pós crachá/guardião/tags/saúde GG
 
 - **Fase 2 da "Saúde das mãos GG" (ações):** hoje a secção só MOSTRA (Fase 1, `a3deb74`). A Fase 2 traz as ações e **absorve a "Marcadas por captura"**: tag de **1-clique** (11 tags canónicas), **corrigir nomes** (via `/set-anon-map`), confirmar **unverified→verified**, e **propagação de nome por hash no torneio** (1 confirmação → ~3 mãos tagadas; o hash segue o jogador entre mesas — `DESANON_ANATOMIA §3.3`). Herdar: estado `capture_triage`, `folder_ft_source`, `apply_villain_rules`.
@@ -1033,7 +1073,15 @@ este caminho:
 
 ---
 
-## #HRC-REIMPORT-REDEANON-CASADAS — melhoria futura (anotado pt93, NÃO agora)
+## #HRC-REIMPORT-REDEANON-CASADAS — 🔴 PRÉ-REQUISITO DO WIPE (subiu de prioridade em 3 Jul)
+
+> **⚠️ Re-priorizado (3 Jul 2026).** Deixou de ser "melhoria futura, NÃO agora" (pt93). Com a
+> decisão de **apagar + reimportar** todos os dados (ver `APA_INDEXACAO_E_COLAPSO.md` e o banner
+> ★★ no topo deste ficheiro), este passa a ser **bloqueador do reimport**: sem ele, o reimport
+> **parte a desanon de TODAS as mãos GG com captura já casada** (não só de 1 mão pontual). O
+> "acidente 1 vez" descrito abaixo torna-se a regra no dia do wipe. **Fix a fazer ANTES do
+> reimport:** o `import_` (e o `import_hm3`) re-dispararem a desanon por table-SS para mãos com
+> SS **casada** (não só as órfãs `no_match_to_hand`).
 
 Um **re-import de HH** repõe `all_players_actions` cru + esvazia `player_names.anon_map`
 **sem re-disparar a desanon por table-SS**, porque o re-link só re-corre a desanon de SS
