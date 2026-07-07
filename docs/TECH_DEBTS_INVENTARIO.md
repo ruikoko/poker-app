@@ -6,6 +6,12 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 7 Jul 2026 — baseline de testes: âncora sem-raise erra a posição (pré-existente)
+
+| Tech debt | Estado | Resumo |
+|---|---|---|
+| **#NORAISE-ANCHOR-POSITION-MISLABEL** | 🔴 aberto · **pré-existente** (não no baseline conhecido) · investigação diferida p/ depois da frente FT | **Sintoma:** `test_noraise_anchor.py::test_nonblind_limp_before_hero_returns_none` (linha 101) falha — `_resolve_position_for_nick(hh, "P1")` devolve **`'UTG'`** onde o teste espera **`'MP'`** (`assert 'UTG' == 'MP'`). Layout: 6-max, **Hero=BTN**, P1 limpa (call não-blind) antes do Hero. A resolução de posição da **âncora sem-raise** (`derive_noraise_anchor`/`_resolve_position_for_nick` em `services/queue_export.py`, feature **pt86c**) **rotula mal a cadeira**. Neste caso concreto o `derive_noraise_anchor` ainda devolve `None` (limp de não-blind → nó não modelado), mas o helper de posição está **factualmente errado** e a posição alimenta as **leis de âncora/offset do HRC** — **âncora em posição errada é o veneno real** (`REGRAS_NEGOCIO §16`; cai fora do ponto de decisão certo → âmbito errado = lixo, tal como `#HRC-NODE-OFFSET-IMPLICIT-LINES`). **Provado PRÉ-EXISTENTE (não introduzido pela F2):** `git stash` das mudanças F2 + correr o teste no HEAD limpo (`8a3d75c`) → **falha idêntica** (`assert 'UTG' == 'MP'`, `+ UTG`). **Não estava no baseline conhecido**, que os journals descreviam como **só Postgres-local** (5 falhas de `OperationalError` sem BD local) — esta 6ª é **lógica pura**, não de ambiente, e passou despercebida. **Âmbito:** só o caminho da âncora sem-raise; não toca a frente FT. **Próximo:** investigar a derivação de posição em `queue_export` (contagem de cadeiras a partir do BTN vs blinds em 6-max) **depois** da frente FT. Descoberto na suite da F2 (7 Jul). |
+
 ## 2 Jul 2026 — desanon: sentado-sem-cartas (N+1) sem guarda universal
 
 | Tech debt | Estado | Resumo |
