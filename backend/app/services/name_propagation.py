@@ -544,11 +544,33 @@ def ensure_name_quarantine_schema(conn=None) -> None:
             conn.close()
 
 
-# ── escrita dos preenchimentos (formato Fase 2: apa hash-keyed) ───────────────
+# ── escrita dos preenchimentos (apa hash-keyed OU legado name-keyed) ──────────
+
+def _fill_entry(apa: dict, anon: dict, hsh: str, name: str, verified: bool) -> bool:
+    """Aplica UM preenchimento/correcção ao apa+anon_map (muta in-place). Robusto ao
+    FORMATO do apa: chave-hash (Fase 2) OU legado chave-NOME. Se `hsh` não é chave do apa
+    (apa name-keyed), acha a entrada pelo NOME actual (`anon_map[hsh]` → `apa[nome]`) e
+    corrige o `real_name` (o leitor mostra `real_name || chave`). Sem a via legado, o
+    `_write_fills` saltava name-keyed em silêncio (caso 9306: 0 escritas / N planeadas).
+    Devolve True se escreveu. Idempotente."""
+    entry = apa.get(hsh)
+    if not isinstance(entry, dict):
+        cur_name = anon.get(hsh)                 # apa legado: entrada sob o nome actual
+        entry = apa.get(cur_name) if cur_name else None
+    if not isinstance(entry, dict):
+        return False
+    if (entry.get("real_name") or "") == name and anon.get(hsh) == name:
+        return False                             # já certo
+    entry["real_name"] = name
+    entry["name_source"] = PROPAGATION_MATCH_METHOD
+    entry["name_verified"] = bool(verified)
+    anon[hsh] = name
+    return True
+
 
 def _write_fills(conn, db_id: int, fills: dict, verified_fills: dict) -> int:
-    """Escreve os preenchimentos numa mao. Idempotente: salta hashes que ja tem o nome.
-    Preenche SO hashes que sao chave do apa (nao inventa). Devolve n escrito."""
+    """Escreve os preenchimentos/correcções numa mao. Idempotente. Robusto ao formato do
+    apa (hash-keyed OU legado name-keyed) via `_fill_entry`. Devolve n escrito."""
     with conn.cursor() as cur:
         cur.execute("SELECT all_players_actions apa, player_names pn FROM hands WHERE id=%s", (db_id,))
         row = cur.fetchone()
@@ -557,18 +579,8 @@ def _write_fills(conn, db_id: int, fills: dict, verified_fills: dict) -> int:
         apa = _as_dict(row["apa"])
         pn = _as_dict(row["pn"])
         anon = pn.get("anon_map") if isinstance(pn.get("anon_map"), dict) else {}
-        written = 0
-        for hsh, name in fills.items():
-            entry = apa.get(hsh)
-            if not isinstance(entry, dict):
-                continue
-            if (entry.get("real_name") or "") == name and anon.get(hsh) == name:
-                continue
-            entry["real_name"] = name
-            entry["name_source"] = PROPAGATION_MATCH_METHOD
-            entry["name_verified"] = bool(verified_fills.get(hsh))
-            anon[hsh] = name
-            written += 1
+        written = sum(1 for hsh, name in fills.items()
+                      if _fill_entry(apa, anon, hsh, name, bool(verified_fills.get(hsh))))
         if not written:
             return 0
         pn["anon_map"] = anon

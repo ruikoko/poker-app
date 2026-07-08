@@ -209,6 +209,36 @@ def test_propagation_idempotent_skips_own_names():
     assert plan["changes"] == []
 
 
+def test_fill_entry_hash_keyed():
+    apa = {"_meta": {}, "5ee4d246": {"real_name": "Vadzim Khazanau", "seat": 6}}
+    anon = {"5ee4d246": "Vadzim Khazanau"}
+    assert np._fill_entry(apa, anon, "5ee4d246", "OHmyBUDDHA", True) is True
+    assert apa["5ee4d246"]["real_name"] == "OHmyBUDDHA"
+    assert anon["5ee4d246"] == "OHmyBUDDHA"
+
+
+def test_fill_entry_name_keyed_legacy():
+    # apa LEGADO name-keyed: 5ee4d246 NÃO é chave; a entrada vive sob o nome actual.
+    apa = {"_meta": {}, "Vadzim Khazanau": {"real_name": "Vadzim Khazanau", "seat": 6}}
+    anon = {"5ee4d246": "Vadzim Khazanau"}
+    assert np._fill_entry(apa, anon, "5ee4d246", "OHmyBUDDHA", True) is True
+    assert apa["Vadzim Khazanau"]["real_name"] == "OHmyBUDDHA"   # corrige a entrada legado
+    assert anon["5ee4d246"] == "OHmyBUDDHA"                      # anon_map (hash) fica certo
+
+
+def test_fill_entry_idempotent():
+    apa = {"5ee4d246": {"real_name": "OHmyBUDDHA"}}
+    anon = {"5ee4d246": "OHmyBUDDHA"}
+    assert np._fill_entry(apa, anon, "5ee4d246", "OHmyBUDDHA", True) is False   # já certo
+
+
+def test_fill_entry_missing_entry_returns_false():
+    # hash sem entrada nem no apa nem via nome → não inventa
+    apa = {"_meta": {}, "other": {"real_name": "X"}}
+    anon = {}
+    assert np._fill_entry(apa, anon, "5ee4d246", "OHmyBUDDHA", True) is False
+
+
 def test_apply_propagation_dry_run_returns_plan():
     seed = _hand("GG-seed", "position_v3", {"3b4cd0c7": "Alice"}, ["3b4cd0c7"])
     tagged = _hand("GG-tag", "table_ss", {}, ["3b4cd0c7"], tagged=True, hid=42)
