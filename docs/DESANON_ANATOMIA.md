@@ -271,12 +271,17 @@ inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon
   `player_names.deanon_partial=true`. **Nome em falta é honesto; nome trocado é veneno.**
 - **Votação cross-mão por torneio** (`vote_tournament_maps` / `reconcile_tournament_deanon`,
   pt71 E6), fundada no invariante:
-  > **★ (corrigido/reforçado pt97) O hash GG SEGUE o jogador ATRAVÉS DE MESAS dentro do
-  > torneio** — não é só "fixo dentro do torneio" em abstracto; o **mesmo hash = a mesma
-  > pessoa mesmo quando muda de mesa e de posição**. **Prova (Rui à imagem):** Daily Hyper
-  > $80 (tn `293321688`) — `95c4411e` = "Jailinrabei" e `2b3f299a` = "Daniel Fili" aparecem em
-  > **mesas E posições diferentes** com o mesmo nick. (Forense Jun-2026: 0 violações
-  > cross-torneio em 1059 hashes.)
+  > **★ (corrigido/reforçado pt97; COMPROVADO SISTEMATICAMENTE 8 Jul) O hash GG SEGUE o jogador
+  > ATRAVÉS DE MESAS dentro do torneio** — não é só "fixo dentro do torneio" em abstracto; o
+  > **mesmo hash = a mesma pessoa mesmo quando muda de mesa e de posição**. **Prova (Rui à
+  > imagem):** Daily Hyper $80 (tn `293321688`) — `95c4411e` = "Jailinrabei" e `2b3f299a` =
+  > "Daniel Fili" aparecem em **mesas E posições diferentes** com o mesmo nick. (Forense Jun-2026:
+  > 0 violações cross-torneio em 1059 hashes.)
+  > **★ CONFIRMAÇÃO SISTEMÁTICA (8 Jul 2026, read-only):** varridos **25 torneios GG 2026 ≥100
+  > mãos = 38 488 aparições de hash → 0 violações** do invariante posicional (nenhum hash em 2
+  > mesas à MESMA hora); **40 hashes seguem o jogador entre mesas** (ex.: `4deef1ff` nas mesas
+  > 125/5/94, 326 aparições). Passa de "provado (1 torneio)" a **lei comprovada**. Números:
+  > `REGISTO_CONCEITO 2026-07-08`, `JOURNAL_2026-07-08.md`, `REGRAS_NEGOCIO §23`.
   >
   > ⚠️ **Engano desmascarado:** no Daily Main (tn `293616024`) deram **0 cruzamentos** de hash
   > entre mãos e concluiu-se "a GG re-embaralha hashes entre mesas" — **FALSO**. Nesse torneio
@@ -299,6 +304,28 @@ inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon
 > **consistentemente errada** — e a votação consente nesse erro em vez de o apanhar. O teste
 > que de facto valida a correcção é o **fit** (stacks Vision vs stacks HH, §3.2), não o
 > agreement da votação. Consistência ≠ correcção.
+
+### 3.4 Sistema misto de desanon por hash — APROVADO (core, 8 Jul 2026)
+
+Com o invariante comprovado (§3.3), o Rui **aprovou** a mudança do core: o apa passa a
+**indexado pela identidade da HH** (hash na GG; nick real nas outras salas) e os nomes
+**propagam-se por hash dentro do torneio**. Desenho canónico: **`APA_INDEXACAO_E_COLAPSO §B.6`**.
+Resumo do que importa à desanon:
+
+- **Só-tagadas:** a propagação **escreve só nas mãos TAGADAS** (universo de estudo, <20%); **lê**
+  de todas as mãos com desanon.
+- **Só fonte FORTE semeia** — classificação (de `services/deanon_status.py`): **FORTE** =
+  `deanon_status == 'verified'` = `match_method == 'position_v3'` (Gold por posição) **OU**
+  `player_names.verified_by_user` (confirmação manual do Rui); **FRACA** = `unverified` =
+  `table_ss` / `anchors_stack_elimination*` (stack/feltro). **A via FRACA NÃO propaga** — no
+  máximo preenche branco "por verificar" na própria mão. *(Caso `90abe28`/"V Bartko" §A.5 do APA:
+  a fraca errou 7× consistente; propagar confirmaria o erro.)*
+- **Guardas:** (b) nome já noutro hash do torneio → **branco + quarentena** (`TaWebon` em 2
+  hashes); (c) conflito no mesmo hash → forte vence fraca, forte-vs-forte → branco + quarentena;
+  (d) **branco é honesto, nome errado é veneno** (a lei de §3.3/§A.5). Dry-run (8 Jul): 437 mãos
+  tagadas resolvidas por propagação, 8 venenos genuínos + 9 merges de OCR, 24 brancos.
+- **Fase 1 (leitores a `real_name || chave`) FEITA e LIVE** (`d9c504f`); Fases 2 (writer) e 3
+  (propagação + quarentena de nomes na Saúde GG) **pendentes**, com OK do Rui entre cada.
 
 ---
 

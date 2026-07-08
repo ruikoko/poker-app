@@ -749,3 +749,44 @@ ALLINs → árvore **igual ou menor**. O 30 mantém-se nos blinds (guerras curta
 stack individual de cada posição + limiar SB→30/resto→25 + colapso (size ≥ stack → vira ALLIN)
 + Complete-SB. Fecha o `#HRC-NODE-OFFSET-IMPLICIT-LINES` (a contagem por `len(array)` errava a
 âncora da 2ª run). Cross-ref `§16`, `§17`, `HRC_ANATOMIA`, `TECH_DEBTS` (pt85–pt86).
+
+## §20. Hierarquia de fontes da fronteira FT — LEI do Rui (7 Jul 2026)
+
+A **fronteira da mesa final (FT)** de um torneio computa-se por uma cascata **fixa**, da mais
+fiável para a salvaguarda: **(0) tag `-ft` MANUAL** (o Rui marcou a FT à mão —
+`folder_ft_source='manual'`, estrito) → **(a) lobby aba Info** (`open_tab='Info'` + N=
+`final_table_size`) → **(b) capturas IT coerentes** (1 mesa, snap + pós-pico) → **(none)**
+(sem FT). **As TAGS mandam; lobbys/capturas são salvaguarda** para o histórico sem tags. A
+fonte (0) vazia **não mata** o torneio (cai na salvaguarda). `none` é **desfecho correcto, não
+falha**. A **escrita das tags `-ft` é SEMPRE por aprovação manual** (ensaio → confirmar →
+promover). Anatomia completa: `FT_BOUNDARY_ANATOMIA.md`; origem: `REGISTO_CONCEITO 2026-07-07`.
+
+## §21. Papéis dos prints de lobby POR ABA — LEI (7 Jul 2026)
+
+O print de lobby com a aba **Info** aberta serve **APENAS** para marcar o arranque da FT
+(fronteira + `final_table_size`) e **NUNCA escreve `tournament_payouts`** — na aba Info os
+prémios não são fiáveis (`#LOBBY-VISION-CHIPS-AS-PRIZES`). Continua a resolver o `tn` e a gravar
+`vision_json`/`players_left`. Os prints das **outras abas** (Prize Pool/Players) mantêm o
+comportamento de payouts (precedências D11). **Porquê:** o print do Info é sempre o ÚLTIMO do
+torneio → sem o gate esmagaria os payouts bons por last-write-wins. Gate em `lobby_sync`
+(`_is_info_tab`). Ver `FT_BOUNDARY_ANATOMIA §6`, `#LOBBY-INFO-NO-PAYOUT`.
+
+## §22. Guarda de coerência dos payouts — LEI (7 Jul 2026)
+
+Nenhuma leitura Vision de payouts se grava se for **incoerente**: (a) um prémio > pool; (b)
+soma dos prémios > pool × 1.05; (c) escada de prémios não-monótona. **Referência do pool: TS >
+Vision** (`tournament_summaries.prize_pool` se existir, senão o pool lido pela Vision).
+**Incoerente → NÃO escreve** (fail-safe). É a 2ª defesa (independente do gate do Info, §21):
+apanha Vision alucinada em **qualquer** aba. `services/payout_coherence.py`. Ver
+`#PAYOUT-COHERENCE`.
+
+## §23. Invariante do hash GG — LEI comprovada (8 Jul 2026)
+
+**Dentro de um torneio GG, cada hash = UMA pessoa, fixo do início ao fim, e SEGUE o jogador
+entre mesas.** Comprovado sistematicamente (read-only): **25 torneios GG 2026 ≥100 mãos =
+38 488 aparições de hash → 0 violações** do invariante posicional (nenhum hash em 2 mesas à
+mesma hora); 40 hashes seguem o jogador entre mesas. **Consequência:** o hash é a **âncora
+fiável de identidade** no torneio; os conflitos de NOME que aparecem (hash→2 nomes; 1 nome→2
+hashes) são **bug da desanon** (nome mal atribuído ao hash), **não** do hash. É a base da
+propagação por hash (core aprovado — `APA_INDEXACAO_E_COLAPSO §B.6`). Evidência:
+`REGISTO_CONCEITO 2026-07-08`, `JOURNAL_2026-07-08.md`, `DESANON_ANATOMIA §3.3`.

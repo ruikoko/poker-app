@@ -1,11 +1,11 @@
 # Pendentes — backlog vivo
 
-## ★ Propagação FT (`ft_boundary`) — em construção faseada (plano APROVADO, 7 Jul)
+## ✅ Propagação FT (`ft_boundary`) — F1–F5 CONSTRUÍDA POR INTEIRO e LIVE (8 Jul); F6 dormente
 
-Plano de wiring aprovado (7 Jul) com emenda + decisões D1-D5. Ordem: **F1** corrigir 2
-incompatibilidades → **F2** Adição 1 (cross-check HH) → **F3** tabela + endpoints ensaio/quarentena →
-**F4** UI da quarentena → **F4b** validação empírica contra torneios reais → **F5** ligar gatilhos +
-botão promover → **F6** re-solve das mãos HRC stale. Escrita **sempre manual** (dry-run → OK do Rui);
+**Frente FECHADA (LIVE, `main`→`874bd7e`).** Anatomia consolidada: **`docs/FT_BOUNDARY_ANATOMIA.md`**.
+Só falta o **wipe+reimport** (teste de aceitação — as `-ft` entram a sério quando as mãos de FT
+chegarem com tags base) e a **F6** (dormente, 0 solves afectados). Plano original (histórico) +
+estado por fase abaixo. Escrita **sempre manual** (dry-run → OK do Rui);
 **CONFIRMAR/CORRIGIR na quarentena fixa a fronteira e devolve o ensaio** (2 passos: decidir a
 fronteira ≠ aprovar a escrita). Decisões: D1 quarentena se N ilegível; D2 cross-check também no
 fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 manter as 2 escritas do
@@ -46,12 +46,11 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
 - **F6 (re-solve das mãos HRC stale) — DORMENTE.** Quando uma mão >= fronteira que foi promovida a `-ft` tiver
   um `hrc_jobs` associado, o solve fica stale (a tag pode mudar o equity model) e precisa de re-solve. Hoje **0
   solves afectados** (o preview mostra a contagem "HRC stale" — está a 0). Acende sozinha quando aparecer a 1ª.
-- **★ Teste do invariante dos hashes GG (8 Jul, read-only) — EVIDÊNCIA para a decisão do CORE (apa-por-hash),
-  que continua NÃO APROVADA e é do Rui.** 25 torneios GG 2026 ≥100 mãos = 38 488 aparições → **0 violações** do
-  invariante posicional (hash nunca em 2 mesas à mesma hora); 40 hashes seguem o jogador entre mesas. Conflitos
-  de nome = **bug da desanon**, não do hash. Caso 293321688: 6 mãos FT sem nomes → 100% resolúveis por propagação
-  de hash (ressalva: 3 nomes conflituosos → resolver nome-por-hash primeiro). Números em `JOURNAL_2026-07-08.md`,
-  `REGISTO_CONCEITO 2026-07-08`. **Nada implementado** — bate certo com `APA_INDEXACAO_E_COLAPSO §B.4`.
+- **★ Teste do invariante dos hashes GG (8 Jul, read-only) — a EVIDÊNCIA que fundou a APROVAÇÃO do core.**
+  25 torneios GG 2026 ≥100 mãos = 38 488 aparições → **0 violações** do invariante posicional (hash nunca em
+  2 mesas à mesma hora); 40 hashes seguem o jogador entre mesas. Conflitos de nome = **bug da desanon**, não do
+  hash. Números em `JOURNAL_2026-07-08.md`, `REGISTO_CONCEITO 2026-07-08`, agora **LEI** em `REGRAS_NEGOCIO §23`.
+  **Com esta evidência o Rui APROVOU o core (8 Jul)** → ver a secção "★★ CORE — apa por hash" abaixo.
 - **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
   da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
   `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas
@@ -87,7 +86,10 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
 - **`#FT-N-FROM-NONGG-LOBBY` — N direto do lobby nas salas não-GG.** Os lobbys de **PS/Winamax/WPN** mostram o **tamanho da mesa final DIRETAMENTE** no lobby (ao contrário da GG, onde o N só aparece na aba **Info** — daí o gate `open_tab='Info'`). **Quando/se** o motor FT se estender **além da GG** (ou o snap quiser refinar tags manuais não-GG), o **N** dessas salas extrai-se de **qualquer print de lobby**, **sem** convenção de aba. Facilitador futuro. **Âmbito ATUAL do motor: só-GG** (a cobertura TOTAL de mãos é pré-condição da propagação e do cross-check; as não-GG têm nicks reais e tagam por HM3/pasta, sem o mecanismo de desanon que motiva a FT-propagation na GG).
 - ~~**`#FT-ENSAIO-VIA-F3-ENDPOINT` — mover os ensaios para a F3.**~~ ✅ **FEITO (F3, 8 Jul):** os ensaios correm por `GET /api/gg-health/ft/preview` (mesmo caminho da app, sem script local nem proxy).
 
-## ★ Infra — token Railway de vida curta (login manual repetido)
+## ✅ Infra — token Railway de vida curta (MITIGADO via ficheiro local, 8 Jul)
+
+**Resolvido na prática:** DB reads por `~/.pokerapp_db_ro.env` (fora do repo, só-leitura) +
+deploys por OpenAPI/liveness → railway CLI dispensado do fluxo. Detalhe da causa e do setup abaixo.
 
 - **7 Jul 2026 — `#RAILWAY-TOKEN-SHORT-LIVED` (investigado, causa provável com evidência).** O `railway` CLI obriga a `railway login` **de ~1 em ~1 h** (4× num dia). **FACTOS medidos:** (a) `user.tokenExpiresAt` no `config.json` = **exatamente 1 h após o login** → o *access token* tem TTL de **1 hora**; (b) CLI **4.40.0**, pacote npm **datado 21 Abr, INALTERADO** → **não foi upgrade do CLI**; (c) **UM só** `config.json` (`C:\Users\User\.railway\config.json`), partilhado pelo shell do Code e pelo login do Rui (mtime segue os logins) → **NÃO** é o problema dos "dois ficheiros de sessão"; (d) o *refresh* falha com `invalid_grant` quando o access token expira. **CAUSA PROVÁVEL:** o access token dura 1 h e o **refresh automático está partido** — como o CLI não mudou, a mudança é do lado do **servidor Railway** (política de refresh/rotação de refresh-tokens mais estrita, recente — bate com "começou há poucos dias"), possivelmente **agravada pelas chamadas frequentes/concorrentes** do Code (pollers de deploy a cada 15 s + queries em paralelo) que correm o rotativo do refresh-token. **FIX DEFINITIVO:** (1) **DB reads** — guardar o **URL público do Postgres** (`ballast.proxy.rlwy.net:37559`) num ficheiro **gitignored** que o shell lê → psycopg2 direto, **sem railway, sem expiração** (âmbito = leitura a 1 BD); (2) **deploy status** — `RAILWAY_TOKEN` (project token, env `production`) cobre `railway status`/redeploy (o docs diz que é deploy-scoped; **não** cobre `railway variables`), OU dispensa-se (push→auto-deploy confirma-se por `/openapi.json` + liveness). Mitigação imediata do Code: **deixar de correr pollers `railway status` de 15 s** (usar OpenAPI/liveness). Ver memória `reference_railway_cli_auth`.
   - **SETUP escolhido (7 Jul, via 1):** as DB reads passam por um ficheiro **fora do repo, gitignored, só-leitura** — `~/.pokerapp_db_ro.env` (mode 600) com o URL público do Postgres. O shell lê `DBURL=$(cat ~/.pokerapp_db_ro.env)`; **nunca** se imprime o URL/creds em outputs nem entra em commits. Deploys: só OpenAPI/liveness (railway CLI dispensado do fluxo normal). **⚠️ ROTAÇÃO OBRIGATÓRIA:** se estas credenciais **alguma vez aparecerem num output/commit/log**, **rodar já** a password do Postgres no Railway (dashboard → serviço Postgres → variáveis) e regenerar o ficheiro. O ficheiro guarda a password viva do `DATABASE_URL` do `poker-app` (host público `ballast.proxy.rlwy.net`).
@@ -119,12 +121,18 @@ as com desanon). **Só fonte FORTE semeia** (`position_v3` OU `verified_by_user`
 Guardas: (b) nome-já-noutro-hash → branco+quarentena; (c) conflito no mesmo hash forte-vs-forte →
 branco+quarentena; (d) branco honesto > nome errado.
 
-**FASES (leitores → writer; ordem obrigatória):**
-- **Fase 0 — dry-run** ✅ (8 Jul, read-only, números abaixo). O Rui vê antes da fase 1.
-- **Fase 1 — leitores** → `real_name || chave` (frontend `handParser`; backend `villain_rules._build_candidates`,
-  `ire._assemble_ire`, `_resolve_hashes_in_raw`, `mtt`, `hands` filtro, `table_ss` reparações). Comportamento idêntico.
-- **Fase 2 — writer**: `_enrich_all_players_actions` deixa de re-indexar por nome (chave = hash/nick; `real_name`=atributo).
-- **Fase 3 — propagação** (só tagadas, guardas b/c) + **quarentena de nomes na Saúde GG ao estilo da FT**. Escrita só por aprovação.
+**FASES (leitores → writer; ordem obrigatória; OK do Rui entre cada):**
+- **Fase 0 — dry-run** ✅ (8 Jul, read-only, números abaixo). Aprovado pelo Rui.
+- **Fase 1 — leitores ✅ FEITA e LIVE (`d9c504f`, 8 Jul)** → `real_name || chave`. 7 leitores migrados
+  (`villain_rules._build_candidates`, `ire._assemble_ire`, `hand_service._resolve_hashes_in_raw`, `mtt`
+  `seat_to_name`, `hands` filtro `villain`, `table_ss.set_bounties`, frontend `handParser`). Byte-idêntico:
+  premissa `real_name==chave` provada em toda a BD (68 664 entradas, 0 divergem); +6 testes antigo==novo; suite
+  1306 passed (6 falhas pré-existentes: 5 Postgres-local + `#NORAISE-ANCHOR`).
+- **Fase 2 — writer** (PENDENTE, só com OK do Rui): `_enrich_all_players_actions` deixa de re-indexar por nome
+  (chave = hash/nick; `real_name`=atributo).
+- **Fase 3 — propagação** (PENDENTE): só tagadas, guardas b/c + **quarentena de nomes na Saúde GG ao estilo da
+  FT**. Inclui o **OCR-merge dos 9 conflitos "mesmo-hash"** (matching tolerante, família `#GOLD-CROWN-CARRY-NAME-TRUNCATION`;
+  auto-merge se inequívoco, 1-clique senão) e os 8 "nome→2-hashes" em quarentena pura. Escrita só por aprovação.
 
 **DRY-RUN (laboratório atual, sistema misto):**
 - **98 torneios GG tagados / 738 mãos tagadas.** 80 têm ≥1 semente FORTE; 18 sem semente (propagação dá 0 → branco honesto).

@@ -6,6 +6,35 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 7–8 Jul 2026 — frente FT (F1–F5) + core aprovado (apa-por-hash) + Fase 1 leitores
+
+Sessão longa. Frente FT construída por inteiro e LIVE; decisão do core APROVADA + Fase 1
+(leitores). Detalhe: `JOURNAL_2026-07-08.md`, `FT_BOUNDARY_ANATOMIA.md`, `APA_INDEXACAO_E_COLAPSO §B.6`.
+
+**Fechados:**
+- ✅ **`#FT-ENSAIO-VIA-F3-ENDPOINT`** — os ensaios da FT correm por `GET /api/gg-health/ft/preview`
+  (mesmo caminho da app), não por script local/proxy. (F3, 8 Jul.)
+- ✅ **`#RAILWAY-TOKEN-SHORT-LIVED`** (mitigado) — DB reads passam por `~/.pokerapp_db_ro.env`
+  (URL público, só-leitura, fora do repo); deploys por OpenAPI/liveness. Railway CLI dispensado
+  do fluxo. Causa provável: access token TTL 1h + refresh partido server-side (CLI inalterado).
+- ✅ **Gate de candidatos FT 99→6** — o ramo IT do `_candidate_tns` passou de `players_left IS NOT
+  NULL` (qualquer captura) para `<= FT_CAP`; corrige a lista impossível e a lentidão do painel.
+
+**Abertos / registados:**
+- 🟡 **`#LOBBY-VISION-CHIPS-AS-PRIZES`** — a Vision do lobby na aba **Info** lê fichas como prémios
+  (caso Daily Hyper $60, print `-101`). Motiva o gate `#LOBBY-INFO-NO-PAYOUT` (§21). Não escreve
+  payouts do Info → sem sintoma; fica registado p/ quando/se se quiser payouts multi-aba robustos.
+- 🟡 **`#NORAISE-ANCHOR-POSITION-MISLABEL`** (pré-existente, `queue_export`) — `test_noraise_anchor`
+  falha (`'UTG' == 'MP'`): âncora de mão sem raise etiqueta a posição errada. Baseline registada
+  na secção abaixo (7 Jul). Não é da FT nem do apa.
+- 🟢 **`#FT-GUARD-BY-LOBBY-STATUS`** (futuro) — reforçar o guarda pós-pico com `tournament_status`
+  (Late Reg./Running) do lobby. Ver `PENDENTES` (melhorias futuras FT).
+- 🟢 **`#FT-N-FROM-NONGG-LOBBY`** (futuro) — N direto do lobby nas salas não-GG (âmbito atual: só-GG).
+- 🟢 **OCR-merge da Fase 3 do core** — os conflitos "mesmo-hash→nomes-dif" do dry-run (9 casos) são
+  variantes OCR/truncação do mesmo nome → resolvem-se na **Fase 3** com matching tolerante
+  (família do `#GOLD-CROWN-CARRY-NAME-TRUNCATION`): auto-merge se inequívoco, 1-clique senão. Os
+  "nome→2-hashes" (8) ficam quarentena pura. Ver `APA_INDEXACAO_E_COLAPSO §B.6.6`.
+
 ## 7 Jul 2026 — baseline de testes: âncora sem-raise erra a posição (pré-existente)
 
 | Tech debt | Estado | Resumo |

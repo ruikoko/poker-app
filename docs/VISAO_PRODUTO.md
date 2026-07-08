@@ -86,6 +86,13 @@ Critérios (basta cumprir um — regras A∨C∨D, definidas em `_classify_villa
 - **Regra C** — Canal Discord `nota` em `discord_tags` com match SS↔HH real (não `discord_placeholder_*`).
 - **Regra D** — Non-hero é nick em `FRIEND_HEROES` (`backend/app/hero_names.py` — actualmente Karluz, flightrisk). Independente de tag; dispara sempre que o nick aparece como non-hero numa mão com nicks reais. Permite ver mãos de amigos sem o Rui ter de marcá-las.
 
+#### Saúde GG — qualidade dos dados GG (capacidades novas, Jul 2026)
+
+Painel dedicado à qualidade da desanonimização GG (só GG; PS/WN/WPN têm nicks reais nativos). Duas capacidades novas:
+
+- **Propagação de mesa final (FT).** A app detecta a **fronteira da FT por torneio** e propõe converter as tags de estudo base (`icm`, `pos-pko`, …) na variante `-ft` a partir daí — a máquina calcula sozinha, o Rui **aprova** (a escrita das tags é sempre manual). Anatomia: `docs/FT_BOUNDARY_ANATOMIA.md`.
+- **Desanon por hash (core, aprovado 8 Jul).** Com o invariante do hash comprovado (o mesmo hash = a mesma pessoa no torneio inteiro), os nomes reais **propagam-se por hash** pelas mãos tagadas do torneio (só via forte semeia; branco honesto > nome errado). Em construção faseada; anatomia: `docs/APA_INDEXACAO_E_COLAPSO §B.6` + `docs/DESANON_ANATOMIA §3.4`.
+
 ## Regra de cross-post Discord
 
 > ⚠️ **HISTÓRICO (Discord descontinuado, Jun 2026).** Não há cross-post novo do Discord. O que
