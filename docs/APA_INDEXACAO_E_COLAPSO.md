@@ -172,6 +172,13 @@ Ordem **leitores → writer** (janela sem partir, garantida por `real_name || ch
 4. **Fase 3 — propagação por torneio** (só tagadas, guardas a–d) + **quarentena de nomes** numa
    **secção nova na Saúde GG ao estilo da FT** (conflitos b/c → decisão do Rui: escolher o nome
    certo por hash / manter branco). Escrita SÓ por aprovação; branco é o desfecho seguro.
+   - **Sub-tipo OCR do dry-run (decisão do Rui, 8 Jul):** os conflitos "mesmo-hash→nomes-dif" que
+     são **variantes de OCR/truncação do MESMO nome** (`wvvMasteRwvw`/`wvwMasteRwvw`,
+     `Footloose`/`Footlose`) resolvem-se com **matching tolerante a variantes/truncagem** — a
+     **mesma família** do name-matching truncation-tolerant que já existe no **backfill das coroas
+     Gold** (`#GOLD-CROWN-CARRY-NAME-TRUNCATION`). **Auto-merge** quando a distância é mínima e
+     inequívoca; **1-clique na quarentena** quando não. Os conflitos "nome→2-hashes" ficam
+     **quarentena PURA** (decisão do Rui caso a caso — pelo invariante, 2 hashes = 2 pessoas).
 
 ---
 
