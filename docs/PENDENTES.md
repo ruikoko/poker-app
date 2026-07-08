@@ -26,6 +26,12 @@ não por pessoa): `DESANON_ANATOMIA §3.3`, `REGRAS_NEGOCIO §24`, `REGISTO_CONC
   + re-entradas resolvidas à primeira).
 - **Deferido:** upgrade automático fraco→`position_v3` (só decisão manual verificada corrige hoje); misread
   "Diego Emperador" no hash `93d63976` (outro nome-real-lugar-errado, fora do cartão OHmyBUDDHA).
+- **★ D (decisão de arquitetura, 8 Jul) — `#STACK-ELIMINATION-ABANDON`:** abandonar de vez a
+  **stack-elimination** como método de desanon do table-SS (usada nas 185 capturas antigas + painel
+  SB/BB ~10/19 mal-lidos, `#STACK-LEGACY-TABLE-SS-AND-PANEL`). Substituir pela **âncora Hero+botão**
+  (`#DESANON-HERO-BUTTON-ANCHOR`) em TODA a table-SS. **FORA do pré-wipe** (os 185 são dados condenados
+  + o core cure neutraliza o veneno: o fraco não semeia, os cartões `strong_weak_mismatch` apanham a
+  divergência). Entra pós-wipe se o Rui quiser table-SS 100% por âncora. Esforço M.
 
 ## ✅ Propagação FT (`ft_boundary`) — F1–F5 CONSTRUÍDA POR INTEIRO e LIVE (8 Jul); F6 dormente
 

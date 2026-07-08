@@ -762,9 +762,12 @@ def reconcile_table_ss(hand_ids=None) -> dict:
     chega uma mão melhor (vai além do relink B.1, que só re-tentava órfãs).
 
     Determinístico e idempotente: re-correr sem dados novos não muda nada (o
-    link só é tocado quando o match muda de facto). Disparado fire-and-forget
-    após cada import. `hand_ids=[]` → curto-circuita (nada importado). Devolve
-    {checked, changed, success, orphan, ambiguous}.
+    link só é tocado quando o match muda de facto). O re-desanon + re-tag correm
+    para TODO match success (não só quando `changed`) — no reimport o hand_id não
+    muda mas a mão em BD é nova e anónima (#HRC-REIMPORT-REDEANON-CASADAS); o
+    `_deanon_after_match` é idempotente (salta Discord/position_v3). Disparado
+    fire-and-forget após cada import. `hand_ids=[]` → curto-circuita (nada
+    importado). Devolve {checked, changed, success, orphan, ambiguous}.
     """
     if hand_ids is not None and len(hand_ids) == 0:
         return {"checked": 0, "changed": 0, "success": 0,
@@ -792,15 +795,15 @@ def reconcile_table_ss(hand_ids=None) -> dict:
             prev_matched_hand_id=r.get("matched_hand_id"),
         ):
             changed += 1
-            # Estágio 3-b: o match MUDOU para uma mão nova → desanonimiza-a
-            # (gated GG-sem-Discord). Só quando muda, para não re-correr em
-            # cada reconcile de import. Rows antigas sem `seats` → no-op.
-            if desired["result"] == "success":
-                _deanon_after_match(desired["matched_hand_db_id"], vj)
-                # pt72 — re-aplica a tag da pasta à mão (nova) casada.
-                _apply_folder_tag_to_hand(
-                    desired["matched_hand_db_id"], r.get("folder_tag"), vj)
+        # Estágio 3-b: re-desanon + re-tag SEMPRE que o match é success — NÃO só quando
+        # `changed`. #HRC-REIMPORT-REDEANON-CASADAS: no reimport o hand_id (GG-{tm}) é o
+        # MESMO mas a mão em BD é NOVA e anónima → `changed=False`; sem isto as mãos com
+        # captura casada voltavam ANÓNIMAS + sem tag no reimport. Idempotente: o
+        # `_deanon_after_match` salta Discord/position_v3 e re-mapeia determinístico dos
+        # `seats`; a folder-tag é upsert. Rows sem `seats` → no-op.
         if desired["result"] == "success":
+            _deanon_after_match(desired["matched_hand_db_id"], vj)
+            _apply_folder_tag_to_hand(desired["matched_hand_db_id"], r.get("folder_tag"), vj)
             n_success += 1
         elif desired["result"] == "tm_ambiguous":
             n_amb += 1
