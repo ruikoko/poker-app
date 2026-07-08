@@ -155,7 +155,10 @@ _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
 # Linhas de post de blind, cross-site (GG/PS com colon, WN/WPN sem).
 # Ex.: "Hero: posts small blind 200" | "Dvstrr posts small blind 1000".
 _POSTS_BLIND_RE = re.compile(
-    r"^(.+?):?\s+posts (small|big) blind\s+([\d,.]+)", re.MULTILINE
+    # `(?:the )?` — WPN escreve "posts the small blind" (GG/WN/PS: "posts small blind").
+    # Sem isto, o dead-button WPN não confirmava as blinds → derive_seats devolvia []
+    # → a mão inteira caía da fila HRC (#PARSER-SEATS-FAILURES).
+    r"^(.+?):?\s+posts (?:the )?(small|big) blind\s+([\d,.]+)", re.MULTILINE
 )
 # Labels de late position por distância ao botão (vocab Rui): 1 antes do
 # botão = CO, 2 = HJ, 3 = MP, 4 = UTG1, 5 = UTG, 6 = UTG2.

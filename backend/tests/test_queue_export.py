@@ -1201,6 +1201,31 @@ def test_seats_WPN_real_sample():
     assert positions == ["UTG", "UTG1", "MP", "HJ", "CO", "BTN", "SB", "BB"]
 
 
+def test_seats_wpn_dead_button_posts_the_blind():
+    """#PARSER-SEATS-FAILURES (caso real WPN-2763573867): dead button (Seat 6 VAZIO) +
+    WPN escreve "posts THE small/big blind". Sem o `(?:the )?` o parse das blinds dava {}
+    → `_blinds_match` False → derive_seats [] → a mão inteira caía da fila HRC."""
+    hh = (
+        "Game Hand #1 - $30k GTD Tournament #1 - Holdem (No Limit) - "
+        "Level 16 (4000.00/8000.00) - 2026/06/21 16:19:22 UTC\n"
+        "Table '3' 8-max Seat #6 is the button\n"        # Seat 6 VAZIO (dead button)
+        "Seat 1: IgLa (57425.00)\n"
+        "Seat 2: Iveybluffallin (117110.00)\n"
+        "Seat 3: RiverJules (98000.00)\n"
+        "Seat 4: pokerrr83 (567152.00)\n"
+        "Seat 7: cringemeariver (67362.00)\n"
+        "Seat 8: TackoFold (115000.00)\n"
+        "cringemeariver posts the small blind 4000.00\n"
+        "TackoFold posts the big blind 8000.00\n"
+        "*** HOLE CARDS ***\n*** SUMMARY ***\n"
+    )
+    seats = derive_seats_in_preflop_order(hh)
+    assert len(seats) == 6                                # já não cai da fila
+    by_pos = {s["position"]: s["nick"] for s in seats}
+    assert by_pos["SB"] == "cringemeariver"              # Seat 7 = 1º depois do botão morto
+    assert by_pos["BB"] == "TackoFold"                   # Seat 8 = 2º
+
+
 def test_seats_no_button_returns_empty():
     """Defensive: header sem 'Seat #N is the button' → []."""
     hh = "Some HH header without button info\nSeat 1: Foo (100 in chips)\nSeat 2: Bar (200 in chips)\n*** HOLE CARDS ***\n"
