@@ -298,11 +298,14 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote }) {
 function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onPromote }) {
   return (
     <div style={{ ...card, marginBottom: 8, overflow: 'hidden' }}>
-      <div onClick={onToggle} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer' }}>
+      <div onClick={onToggle} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .1s' }}>▸</span>
         <span style={{ fontFamily: mono, fontWeight: 700 }}>{c.tournament_number}</span>
         <span style={{ fontSize: 13 }}>{c.tournament_name || '—'}</span>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{c.day || ''} · {c.n_hands} mãos</span>
+        {c.status && <Pill map={FT_STATUS} k={c.status} />}
+        {c.section === 'ready' && c.n != null && <span style={{ fontSize: 11, color: 'var(--muted)' }}>N={c.n}</span>}
+        {c.partial_coverage && <span style={{ fontSize: 11, fontWeight: 700, color: '#000', background: '#fbbf24', padding: '1px 7px', borderRadius: 5 }}>⚠ cobertura parcial (N={c.n})</span>}
         <span style={{ marginLeft: 'auto' }}><Pill map={FT_DECISION} k={c.decision} /></span>
       </div>
       {expanded && (
@@ -347,19 +350,33 @@ function FtQuarantinePanel() {
     return r
   })
   if (!list) return <div style={{ color: 'var(--muted)' }}>A carregar candidatos…</div>
+  const rowsOf = (items) => items.map(c => (
+    <FtRow key={c.tournament_number} c={c} expanded={expanded === c.tournament_number}
+      onToggle={() => toggle(c.tournament_number)} full={full[c.tournament_number]}
+      busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} />
+  ))
+  const needs = list.filter(c => c.section === 'needs')
+  const ready = list.filter(c => c.section === 'ready')
+  const done = list.filter(c => c.section === 'done')
+  const SecHead = ({ label, hint, color }) => (
+    <div style={{ margin: '18px 0 8px' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{hint}</div>
+    </div>
+  )
   return (
     <div>
       {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13, color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd' }}>{msg}</div>}
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-        {list.length} candidato(s). Clica num torneio para ver o ensaio. <b>Confirmar</b>/<b>Corrigir</b> fixa a
-        fronteira; <b>Promover</b> é o passo separado (mostra o plano dry-run antes de escrever).
-      </div>
-      {list.map(c => (
-        <FtRow key={c.tournament_number} c={c} expanded={expanded === c.tournament_number}
-          onToggle={() => toggle(c.tournament_number)} full={full[c.tournament_number]}
-          busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} />
-      ))}
-      {list.length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhum torneio candidato.</div>}
+      <SecHead label={`Precisam de ti (${needs.length})`} color="#f59e0b"
+        hint="exige decisão tua — o motor não fixou fronteira ou o cross-check discorda. Corrige/investiga." />
+      {needs.length ? rowsOf(needs) : <div style={{ padding: 12, color: '#22c55e', fontSize: 13 }}>✓ Nada a decidir.</div>}
+      <SecHead label={`Prontas a aprovar (${ready.length})`} color="#22c55e"
+        hint="match limpo — expande, vê o ensaio (dry-run), Confirmar fixa a fronteira e Promover escreve (com confirmação explícita)." />
+      {ready.length ? rowsOf(ready) : <div style={{ padding: 12, color: 'var(--muted)', fontSize: 13 }}>— Nenhuma pronta.</div>}
+      {done.length > 0 && (<>
+        <SecHead label={`Concluídas (${done.length})`} color="var(--muted)" hint="já promovidas." />
+        {rowsOf(done)}
+      </>)}
     </div>
   )
 }

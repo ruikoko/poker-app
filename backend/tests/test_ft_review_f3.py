@@ -128,11 +128,35 @@ def test_promote_corrected_uses_override_boundary(mrev, mmark, mp):
     assert mp.call_args.kwargs["boundary_override"] == T0
 
 
-# ── F4: /summary conta ft_quarantine (candidatos - promovidos) ───────────────
-def test_summary_counts_ft_quarantine():
+# ── F4: /summary conta SÓ a secção 'needs' (Precisam de ti) ──────────────────
+def test_summary_counts_only_needs_section():
     from app.routers.gg_health import summary
     with patch("app.routers.gg_health._all_images", return_value=[]), \
-         patch("app.routers.gg_health.candidate_tns", return_value=["A", "B", "C"]), \
-         patch("app.routers.gg_health.query", return_value=[{"tournament_number": "A"}]):
+         patch("app.routers.gg_health._ft_candidate_list", return_value=[
+             {"section": "needs"}, {"section": "needs"},
+             {"section": "ready"}, {"section": "done"}]):
         res = summary(current_user=None)
-    assert res["needs_you"]["ft_quarantine"] == 2   # 3 candidatos − 1 promovido
+    assert res["needs_you"]["ft_quarantine"] == 2   # só as 'needs' (não ready/done)
+
+
+# ── F4: _ft_candidate_list classifica secções (needs/ready/done) ─────────────
+def test_candidate_list_classifies_sections():
+    from app.routers import gg_health as ggh
+    MATCH = {"boundary": T0, "source": "propagated_coherent", "status": "coherent",
+             "n": 7, "cross_check": {"n": 7, "hh_seats": 7, "match": True}}
+    NONE = {"boundary": None, "source": None, "status": "none", "n": None, "cross_check": None}
+    cb = {"m": MATCH, "n": NONE, "p": MATCH}
+
+    def _q(sql, params=None):
+        if "MAX(tournament_name)" in sql:
+            return [{"tn": t, "name": "X", "day": None, "n_hands": 10} for t in ("m", "n", "p")]
+        if "decision FROM ft_boundary_review" in sql:
+            return [{"tournament_number": "p", "decision": "promoted"}]
+        return []
+    with patch.object(ggh, "candidate_tns", return_value=["m", "n", "p"]), \
+         patch.object(ggh, "compute_ft_boundary", side_effect=lambda tn: cb[tn]), \
+         patch.object(ggh, "query", side_effect=_q), \
+         patch.object(ggh, "_ft_partial_coverage", return_value=False):
+        lst = ggh._ft_candidate_list()
+    by = {c["tournament_number"]: c["section"] for c in lst}
+    assert by == {"m": "ready", "n": "needs", "p": "done"}   # match→ready, none→needs, promoted→done

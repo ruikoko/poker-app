@@ -12,7 +12,7 @@ LIVE. `nota`/`Timetell`/`For Review` são neutras no conflito.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -190,14 +190,12 @@ def summary(current_user=Depends(require_auth)):
         p = _group_pred(key)
         return sum(1 for im in imgs if p(im))
 
-    # F4: quarentena FT = candidatos (com sinal de FT) ainda NÃO promovidos. Contagem
-    # LEVE (2 queries) — o detalhe por torneio vive em GET /ft/preview. Defensivo: se
-    # a tabela ainda não existir (pré-deploy) → 0.
+    # F4: "Precisam de ti" (ft_quarantine) conta SÓ os que exigem decisão do Rui
+    # (secção 'needs' — none-com-sinal/mismatch/disagreement/n_unavailable/incoherent),
+    # NÃO os match limpos (secção 'ready') nem os já promovidos. Gate apertado → poucos
+    # candidatos → compute barato. Defensivo: pré-deploy/tabela ausente → 0.
     try:
-        cands = set(candidate_tns())
-        promoted = {r["tournament_number"] for r in query(
-            "SELECT tournament_number FROM ft_boundary_review WHERE decision='promoted'")}
-        ft_quarantine = len(cands - promoted)
+        ft_quarantine = sum(1 for c in _ft_candidate_list() if c["section"] == "needs")
     except Exception:
         ft_quarantine = 0
 
@@ -538,10 +536,25 @@ def _ft_preview_for_tn(tn, full=False) -> dict:
     return out
 
 
+def _ft_partial_coverage(tn, boundary, n) -> bool:
+    """COBERTURA PARCIAL da via-b: a fronteira ancorou num N pequeno (ex. 5) mas a FT
+    arrancou MAIOR (houve mãos com > N sentados, <= FT_CAP, nos ~20 min antes) → o
+    boundary perde as 1ªs mãos da FT. Visível na linha (não escondido)."""
+    if not n or boundary is None:
+        return False
+    rows = query(
+        "SELECT raw FROM hands WHERE site='GGPoker' AND tournament_number=%s "
+        "AND played_at < %s AND played_at >= %s ORDER BY played_at",
+        (tn, boundary, boundary - timedelta(minutes=20)))
+    seats = [s for s in (count_hh_seats(r["raw"]) for r in rows) if isinstance(s, int)]
+    return any(n < s <= FT_CAP for s in seats)
+
+
 def _ft_candidate_list() -> list:
-    """Lista LEVE de candidatos (3 queries TOTAL, sem compute por tn): tn + nome +
-    dia + nº de mãos + decisão. O ensaio pesado por torneio pede-se com `?tn=`.
-    Ordena: pendentes primeiro, depois por dia."""
+    """Lista dos candidatos (gate APERTADO: só sinal forte de FT → poucos), com o
+    STATUS computado e a SECÇÃO: 'needs' (Precisam de ti — exige decisão), 'ready'
+    (Prontas a aprovar — match limpo), 'done' (já promovido). Compute por tn é barato
+    porque o gate é apertado. Ordena needs → ready → done, depois por dia."""
     tns = candidate_tns()
     if not tns:
         return []
@@ -555,12 +568,31 @@ def _ft_candidate_list() -> list:
         "WHERE tournament_number = ANY(%s)", (tns,))}
     out = []
     for tn in tns:
+        d = compute_ft_boundary(tn)
+        cc = d.get("cross_check") or {}
+        status = _ft_map_status(d.get("status"), cc)
+        decision = dec.get(tn, "pending")
+        boundary = d.get("boundary")
+        if decision == "promoted":
+            section = "done"
+        elif status == "match":
+            section = "ready"      # match limpo → Prontas a aprovar
+        else:
+            section = "needs"      # none-com-sinal / mismatch / disagreement / ... → Precisam de ti
         m = meta.get(tn) or {}
         day = m.get("day")
-        out.append({"tournament_number": tn, "tournament_name": m.get("name"),
-                    "day": day.isoformat() if day else None, "n_hands": m.get("n_hands"),
-                    "decision": dec.get(tn, "pending")})
-    out.sort(key=lambda r: (r["decision"] != "pending", r["day"] or ""))
+        out.append({
+            "tournament_number": tn, "tournament_name": m.get("name"),
+            "day": day.isoformat() if day else None, "n_hands": m.get("n_hands"),
+            "section": section, "status": status, "engine_status": d.get("status"),
+            "source": d.get("source"),
+            "boundary": boundary.isoformat() if boundary else None,
+            "n": d.get("n"), "seats_first_hand": cc.get("hh_seats"), "match": cc.get("match"),
+            "partial_coverage": _ft_partial_coverage(tn, boundary, d.get("n")) if (section == "ready") else False,
+            "decision": decision,
+        })
+    order = {"needs": 0, "ready": 1, "done": 2}
+    out.sort(key=lambda r: (order.get(r["section"], 3), r["day"] or ""))
     return out
 
 

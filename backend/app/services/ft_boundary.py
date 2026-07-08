@@ -361,10 +361,11 @@ def ft_correct_array(tags) -> tuple[list, bool]:
 
 # ── Propagação ───────────────────────────────────────────────────────────────
 def _candidate_tns() -> list[str]:
-    """Torneios GG com ALGUM sinal de FT: print do Info (via a), lobby<=cap, ou
-    capturas IT com players_left (via b). O ramo Info garante que um torneio cujo
-    ÚNICO sinal é um print do Info (players_left ilegível mas N legível) não escapa
-    ao varrimento 'todos os candidatos'."""
+    """Torneios GG com sinal FORTE de FT: tag manual (fonte 0), print do Info (via a),
+    lobby players_left<=cap, ou captura IT com **players_left <= FT_CAP** (perto da FT,
+    via b). O ramo IT exige <=cap (não `IS NOT NULL`) — uma captura a MEIO do torneio
+    (players_left>9) NÃO é sinal de FT (era a causa do ruído 99→6). O ramo Info cobre
+    o torneio cujo único sinal é o print do Info (players_left ilegível, N legível)."""
     rows = query(
         """SELECT DISTINCT tournament_number AS tn FROM lobby_processing_log
             WHERE tournament_number IS NOT NULL
@@ -374,14 +375,14 @@ def _candidate_tns() -> list[str]:
            UNION
            SELECT DISTINCT h.tournament_number
              FROM hands h JOIN table_ss_processing_log l ON l.id=h.context_table_ss_id
-            WHERE h.site='GGPoker' AND l.players_left IS NOT NULL
+            WHERE h.site='GGPoker' AND l.players_left <= %s
               AND h.tournament_number IS NOT NULL
            UNION
            SELECT DISTINCT h.tournament_number
              FROM hands h
             WHERE h.site='GGPoker' AND h.folder_ft_source='manual'
               AND h.tournament_number IS NOT NULL""",
-        (FT_CAP,),
+        (FT_CAP, FT_CAP),
     )
     return [r["tn"] for r in rows if r["tn"]]
 

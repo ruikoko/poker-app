@@ -19,11 +19,13 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   **Emenda:** confirmar/corrigir FIXA a fronteira mas **NÃO** promove; a escrita (`promote`, dry_run default,
   `confirm=true`) é sempre o 2º passo explícito. Preview mostra fronteira+via (incl. fonte 0), N+sentados,
   cross-check, mãos que mudam (from→to), avisos do fallback e mãos HRC stale. +13 testes.
-- **F4 ✅ (8 Jul)** — UI da quarentena na Saúde GG: grupo `ft_quarantine` (needs_you do `/summary`). Lista LEVE
-  de candidatos (tn/nome/dia/decisão, 3 queries) → clicar expande o **ensaio FULL** por torneio (fetch `?tn=`):
-  lado-a-lado (lobby N · fronteira+via · 1ª mão/sentados · cross-check), avisos + sequência da via-b, mãos que
-  mudam (from→to), decisão visível. Ações **Confirmar/Corrigir** (fixam) + **Promover** (plano dry-run → escrita
-  explícita). Perf: o all-preview NÃO computa por tn (era ~5s/tn); detalhe pesado só on-demand. **Rui valida à vista.**
+- **F4 ✅ (8 Jul)** — UI da quarentena na Saúde GG: grupo `ft_quarantine`. **Gate APERTADO** (validação do Rui:
+  o ramo IT do `_candidate_tns` passou de `players_left IS NOT NULL` [qualquer captura, mesmo a meio] para
+  `<= FT_CAP` → **99→6**, resolve também a lentidão). **DUAS secções** (nomes do Rui): **"Precisam de ti"**
+  (só o que exige decisão — `none`-com-sinal/mismatch/disagreement/n_unavailable/incoherent; é o que `/summary`
+  conta) e **"Prontas a aprovar"** (match limpo — ensaio dry-run → Confirmar → Promover/escrita explícita; a
+  **cobertura parcial N=5** fica VISÍVEL na linha). Lista compacta → clicar expande o ensaio FULL por torneio
+  (fetch `?tn=`): lado-a-lado, avisos + sequência da via-b, mãos que mudam (from→to). **Rui valida à vista.**
 - **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
   da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
   `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas
