@@ -46,6 +46,15 @@ _TIER0_WINDOW_HOURS = 24
 #   anterior, em que um instance já-começado dentro das 24h era apanhado).
 _PRESTART_BACK_HOURS = 12
 _PRESTART_FWD_HOURS = 2
+# #META-START-TIME (item 9) — tolerância late-reg SÓ para GG, no INTERVALO SEM TS.
+# tournaments_meta.start_time (TIER 1) e MIN(played_at) (TIER 2) são a 1ª MÃO, não o
+# arranque agendado; num lobby GG (prestart) a 1ª mão entra depois do post por
+# (agendado−post)+late-reg — pode passar de 2h em campos fundos. As não-GG não sofrem
+# (o lobby traz start_time_iso da Vision → ramo-1, ancora no arranque real). +6h cobre
+# o late-reg profundo e fica muito aquém do 2×/dia GG (~12h): um irmão só-por-nome cai
+# fora, ou (se <6h) gera AMBIG→None honesto (nunca mis-resolve). TIER 0/TS intocado
+# (usa `anchor` próprio); só toca o window dos TIER 1/2, i.e. o intervalo sem TS.
+_GG_PRESTART_FWD_HOURS = 6
 # Ramo-1 do _decide_window (start-centered, TIER 1/2): forward alargado de 2h
 # para 4h — a 1ª hand importada entra ~1-2h depois do start (late-reg/deep MTT;
 # empírico pt41), e ±2h era marginal.
@@ -182,6 +191,7 @@ def _decide_window(
     posted_at_hint: Optional[datetime],
     window_hours: float,
     anchor_mode: str = "during_play",
+    site: Optional[str] = None,
 ) -> Optional[tuple[datetime, datetime]]:
     """Aplica a precedencia de janela temporal (TIER 1/2).
 
@@ -207,9 +217,12 @@ def _decide_window(
         if posted_at_hint.tzinfo is not None:
             posted_at_hint = posted_at_hint.replace(tzinfo=None)
         if anchor_mode == "prestart":
+            # #META-START-TIME (item 9): GG usa forward alargado (late-reg) porque
+            # a coluna start_time dos TIER 1/2 é a 1ª mão, não o arranque agendado.
+            fwd = _GG_PRESTART_FWD_HOURS if site == "GGPoker" else _PRESTART_FWD_HOURS
             return (
                 posted_at_hint - timedelta(hours=_PRESTART_BACK_HOURS),
-                posted_at_hint + timedelta(hours=_PRESTART_FWD_HOURS),
+                posted_at_hint + timedelta(hours=fwd),
             )
         return (
             posted_at_hint - timedelta(hours=12),
@@ -399,7 +412,7 @@ def resolve_tournament_number(
         return _ret(None, [], None)
 
     patterns = [f"%{t}%" for t in tokens]
-    window = _decide_window(start_time_iso, posted_at_hint, window_hours, anchor_mode)
+    window = _decide_window(start_time_iso, posted_at_hint, window_hours, anchor_mode, site)
 
     # TIER 0 — tournament_summaries (autoritativo). pt39: nome + buy_in +
     # janela start_time ancorada no posted_at_hint (instância em curso).

@@ -622,6 +622,35 @@ def test_trackA_decide_window_ramo2_during_play_unchanged():
     assert hi == datetime(2026, 5, 19, 15, 30)
 
 
+# ── #META-START-TIME (item 9): late-reg forward SÓ GG, no intervalo sem TS ─────
+
+def test_meta_gg_prestart_forward_widened_to_6h():
+    """GG lobby (prestart): forward alargado p/ +6h (a 1ª mão = start_time dos
+    TIER 1/2 entra depois do post por agendado+late-reg). Non-GG fica em +2h."""
+    posted = datetime(2026, 5, 19, 16, 0)
+    lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart", site="GGPoker")
+    assert lo == datetime(2026, 5, 19, 4, 0)
+    assert hi == datetime(2026, 5, 19, 22, 0)          # +6h (era +2h)
+    # 1ª mão a +4h (late-reg fundo) agora DENTRO; antes (+2h) ficava fora
+    assert lo <= datetime(2026, 5, 19, 20, 0) <= hi
+
+
+def test_meta_nongg_prestart_forward_unchanged_2h():
+    """Winamax/PS (prestart): forward INALTERADO em +2h — não sofrem do defeito
+    (o lobby traz start_time_iso da Vision → ramo-1)."""
+    posted = datetime(2026, 5, 19, 16, 0)
+    lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart", site="Winamax")
+    assert hi == datetime(2026, 5, 19, 18, 0)          # +2h, como antes
+
+
+def test_meta_gg_during_play_not_widened():
+    """GG during_play (table-ss): NÃO alargado — a tolerância é só p/ o lobby
+    (prestart). Mantém [posted−12h, posted−30min]."""
+    posted = datetime(2026, 5, 19, 16, 0)
+    lo, hi = _decide_window(None, posted, 2.0, site="GGPoker")   # default during_play
+    assert hi == datetime(2026, 5, 19, 15, 30)
+
+
 def test_clean_drops_trailing_table_suffix():
     assert clean_tournament_name("ZENITH #005") == "ZENITH"
     assert clean_tournament_name("GALACTICA #000") == "GALACTICA"
