@@ -37,7 +37,7 @@ def test_dry_run_lista_todas_sem_mover():
     try:
         gold, parent = _setup(tmp, ["a_#1.png", "b_#2.png", "c_#3.jpg"])
         res = A.process_gold_dir(_Session(), live=False)
-        assert res == (3, 0)
+        assert res == (3, 0, 0)
         # dry-run não move nada
         assert len(A._imgs_in(gold)) == 3
         assert len(os.listdir(os.path.join(parent, "done", "gold"))) == 0
@@ -51,7 +51,7 @@ def test_ao_vivo_envia_e_move_para_done_gold():
         gold, parent = _setup(tmp, ["a_#1.png", "b_#2.png"])
         s = _Session(200)
         res = A.process_gold_dir(s, live=True)
-        assert res == (2, 0)
+        assert res == (2, 0, 0)
         assert all(u.endswith("/api/screenshots") for u in s.posts)
         assert len(s.posts) == 2
         # moveu para done/gold e esvaziou a GOLD_DIR (sai da Documents)
@@ -66,7 +66,7 @@ def test_falha_fica_para_retry():
     try:
         gold, parent = _setup(tmp, ["a_#1.png"])
         res = A.process_gold_dir(_Session(500), live=True)
-        assert res == (0, 1)
+        assert res == (0, 1, 0)
         # falha → não move (fica na GOLD_DIR p/ retry)
         assert len(A._imgs_in(gold)) == 1
         assert len(os.listdir(os.path.join(parent, "done", "gold"))) == 0
@@ -81,7 +81,7 @@ def test_segunda_corrida_nao_reenvia_dedup_cliente():
         A.process_gold_dir(_Session(200), live=True)   # 1ª corrida: move tudo
         s2 = _Session(200)
         res2 = A.process_gold_dir(s2, live=True)        # 2ª corrida
-        assert res2 == (0, 0)
+        assert res2 == (0, 0, 0)
         assert s2.posts == []                            # nada reenviado
     finally:
         shutil.rmtree(tmp)

@@ -820,6 +820,9 @@ def parse_args(argv=None):
                    help="ENVIA a sério (e move). Sem esta flag = dry-run (só plano).")
     p.add_argument("--lobby-dir", dest="lobby_dir", action="store_true",
                    help="Lê também a LOBBY_DIR externa (2ª via manual; off por defeito).")
+    p.add_argument("--only", dest="only", default=None,
+                   choices=["gg_hh", "gg_ts", "manual", "it", "gold", "lobby"],
+                   help="Corre SÓ este canal (cano-a-cano). Sem esta flag = todos.")
     p.add_argument("--desde", dest="desde", default=None, metavar="YYYY-MM-DD",
                    help="Janela das IMAGENS (it/manual/lobby): dia-de-jogo inicial. "
                         "Sobrepõe IMPORT_DESDE da config. HH/TS entram SEMPRE por inteiro.")
@@ -877,16 +880,28 @@ def main(argv=None, overrides=None):
         session = requests.Session()
         login(session)
 
+    # --only: corre SÓ um canal (cano-a-cano). Canais saltados devolvem vazios
+    # (mesma forma) para o RESUMO não quebrar.
+    def _run(ch):
+        return args.only is None or args.only == ch
+    if args.only:
+        print(f"\n[--only {args.only}] a correr SÓ este canal; os outros são saltados.")
+    _EMPTY_IT = {"mesa": 0, "lobby": 0, "nonlobby": 0, "skip": 0, "retry": 0,
+                 "fail": 0, "fora": 0, "untagged_folder": 0}
+
     totals = {}
     for sub, endpoint, exts, label in TYPES:
-        w = img_window if sub == "manual" else None   # HH/TS nunca filtrados
-        totals[sub] = process_type(session, sub, endpoint, exts, label, live, window=w)
+        if _run(sub):
+            w = img_window if sub == "manual" else None   # HH/TS nunca filtrados
+            totals[sub] = process_type(session, sub, endpoint, exts, label, live, window=w)
+        else:
+            totals[sub] = (0, 0, 0, 0)
 
-    it_counts = process_it_mixed(session, live, window=img_window)
-    lobby_sub_res = process_lobby_subdir(session, live, window=img_window)
-    gold_res = process_gold_dir(session, live, window=img_window)   # gold images (GOLD_DIR externa); janela por data do NOME (pt91)
-    lobby_res = process_lobby_dir(session, live, window=img_window) if args.lobby_dir else None
-    if not args.lobby_dir:
+    it_counts = process_it_mixed(session, live, window=img_window) if _run("it") else dict(_EMPTY_IT)
+    lobby_sub_res = process_lobby_subdir(session, live, window=img_window) if _run("lobby") else (0, 0, 0, 0)
+    gold_res = process_gold_dir(session, live, window=img_window) if _run("gold") else None
+    lobby_res = process_lobby_dir(session, live, window=img_window) if (args.lobby_dir and _run("lobby")) else None
+    if not args.lobby_dir and _run("lobby"):
         print("\n── lobby (LOBBY_DIR externa): 2ª via manual — salto (usa --lobby-dir)")
 
     print("\n" + "═" * 56)
