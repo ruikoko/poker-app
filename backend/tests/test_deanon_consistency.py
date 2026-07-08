@@ -31,6 +31,31 @@ def test_healthy_hand_ok():
     assert lvl == "ok" and viols == []
 
 
+# Raw REAL tem secção *** SUMMARY *** que REPETE "Seat N: …" (folded/showed). O
+# seat_count tem de contar seats DISTINTOS, não linhas — senão conta 5+5=10 e o C0
+# bloqueia toda a mão com resumo (regressão apanhada no reimport, Cano 3).
+_RAW_WITH_SUMMARY = _RAW + (
+    "*** HOLE CARDS ***\n"
+    f"{H1}: folds\n"
+    "Hero: raises 200 to 300\n"
+    "*** SUMMARY ***\n"
+    "Total pot 500 | Rake 0\n"
+    f"Seat 1: {H1} folded before Flop\n"
+    f"Seat 2: {H2} folded before Flop\n"
+    f"Seat 3: {H3} (small blind) folded before Flop\n"
+    f"Seat 4: {H4} (big blind) showed [As 3c] and won (500)\n"
+    "Seat 5: Hero (button) folded before Flop\n"
+)
+
+
+def test_healthy_hand_with_summary_section_ok():
+    # 5 seats no cabeçalho + 5 repetidos no SUMMARY = 10 linhas 'Seat N:', mas 5 DISTINTOS.
+    # Antes do fix: seat_count=10 != apa5 → 'block' (count:apa5_ne_hh10). Com o fix: 'ok'.
+    lvl, viols = assert_deanon_consistency(_RAW_WITH_SUMMARY, _healthy_apa(), _ANON)
+    assert lvl == "ok", f"guarda bloqueou uma mão sã com SUMMARY: {viols}"
+    assert viols == []
+
+
 def test_gg_6083771298_afonso_n_plus_1_blocks():
     # §3.2.4: Afonso Neto INJETADO, SB (CORDEIRODEDEUS) PERDIDO, seat colapsado 5→4.
     corrupt = {

@@ -252,7 +252,11 @@ def _existing_match_method(player_names: Any) -> Optional[str]:
 # ── Guarda UNIVERSAL de consistência de desanon (#DESANON-SITTING-OUT-NPLUS1) ──
 
 _SEAT_HASH_RE = re.compile(r'^Seat \d+: ([0-9a-f]{4,8}) \(', re.M)   # hashes anón
-_SEAT_ANY_RE = re.compile(r'^Seat \d+: ', re.M)                      # todos os seats
+# nº do seat (grupo). Contamos seats DISTINTOS (set), não linhas: o GG/PS repete
+# "Seat N: …" na secção *** SUMMARY *** (folded/showed) → contar linhas duplicava o
+# seat_count (~2×) e a guarda C0 bloqueava TODA a mão com resumo (regressão apanhada
+# no reimport, Cano 3). `raw_hashes` já é set (dedup header+summary), só isto faltava.
+_SEAT_NUM_RE = re.compile(r'^Seat (\d+):', re.M)
 _HASHLIKE_RE = re.compile(r'^[0-9a-f]{4,8}$')
 
 
@@ -272,7 +276,7 @@ def assert_deanon_consistency(raw, apa, anon_map, *, vision_seat_count=None,
     apa = apa if isinstance(apa, dict) else {}
     anon = anon_map or {}
     raw_hashes = set(_SEAT_HASH_RE.findall(raw))
-    seat_count = len(_SEAT_ANY_RE.findall(raw))
+    seat_count = len(set(_SEAT_NUM_RE.findall(raw)))   # seats DISTINTOS (ignora repetição no SUMMARY)
     # Sem HH parseável (placeholder / raw vazio) OU sem hashes anón (não-GG, nicks reais) →
     # a guarda não tem contra o quê validar → ABSTÉM-SE (não bloqueia).
     if seat_count == 0 or not raw_hashes:
