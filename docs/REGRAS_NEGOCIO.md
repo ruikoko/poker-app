@@ -790,3 +790,27 @@ fiável de identidade** no torneio; os conflitos de NOME que aparecem (hash→2 
 hashes) são **bug da desanon** (nome mal atribuído ao hash), **não** do hash. É a base da
 propagação por hash (core aprovado — `APA_INDEXACAO_E_COLAPSO §B.6`). Evidência:
 `REGISTO_CONCEITO 2026-07-08`, `JOURNAL_2026-07-08.md`, `DESANON_ANATOMIA §3.3`.
+
+## §24. Re-entrada — 1 pessoa pode ter N hashes; guardas de jusante — LEI (8 Jul 2026)
+
+**O hash GG é fixo por ENTRADA, não por pessoa** (complementa §23): num torneio **re-entry**,
+um re-buy do MESMO humano gera **hash NOVO**. O invariante 1-hash=1-pessoa (§23) mantém-se; o
+**inverso** 1-pessoa=1-hash **NÃO vale**. Logo o mesmo nome em 2 hashes **nem sempre é veneno** —
+pode ser re-entrada (caso canónico **Olisadebee**: `b0b40d2c`/`d07fa3d8`, aparições disjuntas no
+tempo, nunca co-presentes, nick exacto, 2º stack = bala fresca).
+
+**Decisão no cartão de conflito (quarentena de nomes):** nick exacto + FORTE dos 2 lados +
+janelas disjuntas (nunca co-presentes) → **"Mesma pessoa (re-entrada)"** (nome válido nos DOIS
+hashes). **Sempre clique do Rui** (nunca auto-resolve). Nick igual + **co-presentes na mesma
+mão** → impossível ser 1 pessoa → **veneno duro** (quarentena).
+
+**Guardas de jusante (LEI — nenhuma lógica futura as pode violar):**
+1. **Re-entrada NUNCA funde os 2 hashes num registo.** São entradas distintas: **stacks, mãos e
+   stats separados**. **Só o NOME é partilhado.**
+2. **O bounty é POR ENTRADA, não por nome.** A re-entrada volta à **bounty base**. Nenhum cálculo
+   pode assumir *mesmo-nome ⇒ mesma-bounty*.
+3. **Vilões** já agregam por NOME → as 2 entradas caem no **mesmo vilão**: **correcto por
+   construção, nada a mudar.**
+
+Implementação: `reentry_hint` + decisão `reentry` em `services/name_propagation.py`; verbo no
+`NamePropagationPanel`. Ver `DESANON_ANATOMIA §3.3`, `REGISTO_CONCEITO 2026-07-08`.

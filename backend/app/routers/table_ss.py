@@ -1273,6 +1273,41 @@ async def upload_table_ss(
     )
 
 
+@router.post("/attach-to-hand")
+async def attach_ss_to_hand(
+    file: UploadFile = File(...),
+    hand_id: str = Form(...),
+    filename: Optional[str] = Form(None),
+    current_user=Depends(require_auth),
+):
+    """OBRA 2b (cartão de conflito de nomes na Saúde GG): o Rui anexa uma Gold/captura
+    do disco a uma mão ESCOLHIDA (que a app não tinha imagem — ex. a forte GG-6083716159).
+    Corre a Vision (persiste a captura com a imagem), depois FORÇA o link a essa mão
+    reusando `_manual_link_ss` (o mesmo primitivo da Ação 2 das órfãs): Gold-manda no
+    deanon (salta se já `position_v3`), aplica a folder-tag, e liga
+    `hands.context_table_ss_id` → a miniatura passa a aparecer no lado do conflito.
+    Idempotente (dedup por file_hash). A app NÃO adivinha a mão — vem do Rui."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Ficheiro vazio")
+    fname = filename or file.filename or "attach.png"
+    # 1) Vision + persist (o matcher automático pode não casar; forçamos a seguir).
+    await _process_table_ss(content, fname, source="manual_attach")
+    # 2) ss_id da row acabada de gravar (chave = file_hash).
+    fh = hashlib.sha256(content).hexdigest()
+    rows = query("SELECT id FROM table_ss_processing_log WHERE file_hash=%s", (fh,))
+    if not rows:
+        raise HTTPException(500, "captura não gravada")
+    ss_id = rows[0]["id"]
+    # 3) força o link à mão ESCOLHIDA pelo Rui (deanon salta se já position_v3).
+    try:
+        res = _manual_link_ss(ss_id, hand_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True, "ss_id": ss_id,
+            "image_url": f"/api/table-ss/image/{ss_id}", **res}
+
+
 @router.get("/image/{ss_id}")
 def table_ss_image(ss_id: int, current_user=Depends(require_auth)):
     """Serve a imagem comprimida (JPEG) guardada para uma SS de mesa.

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { hands as handsApi, screenshots, captureTriage } from '../api/client'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { hands as handsApi, screenshots, captureTriage, ggHealth } from '../api/client'
 import TagEditor from '../components/TagEditor'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
@@ -25,6 +25,26 @@ function PosBadge({ pos }) {
   return <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 5, fontSize: 14, fontWeight: 700, letterSpacing: 0.5, color: c, background: `${c}18`, border: `1px solid ${c}30`, minWidth: 38, textAlign: 'center' }}>{pos}</span>
 }
 
+
+// OBRA 3 — selo "nome em revisão": esta mão GG está num conflito de nomes pendente?
+// Link p/ o cartão na Saúde GG. Some quando o conflito se resolve (a review deixa de
+// estar 'pending'). Só GG (os conflitos de nome são GG-only).
+function ReviewSeal({ hand }) {
+  const [st, setSt] = useState(null)
+  useEffect(() => {
+    if (!hand?.hand_id || hand.site !== 'GGPoker') { setSt(null); return }
+    ggHealth.namesHandStatus(hand.hand_id).then(setSt).catch(() => setSt(null))
+  }, [hand?.hand_id, hand?.site])
+  if (!st?.in_conflict) return null
+  const c = st.conflicts?.[0] || {}
+  return (
+    <Link to="/gg-health?panel=name_quarantine" style={{ display: 'flex', alignItems: 'center', gap: 8,
+      textDecoration: 'none', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.4)',
+      borderRadius: 6, padding: '8px 12px', marginBottom: 14, color: '#c4b5fd', fontSize: 13 }}>
+      ⚠ nome em revisão — esta mão está num conflito de nomes pendente{c.conflict_key ? ` (${c.conflict_key})` : ''}. Resolver na Saúde GG →
+    </Link>
+  )
+}
 
 export default function HandDetailPage() {
   const { id } = useParams()
@@ -92,6 +112,9 @@ export default function HandDetailPage() {
           )}
         </div>
       </div>
+
+      {/* ── OBRA 3: selo "nome em revisão" (conflito de nomes pendente) ── */}
+      <ReviewSeal hand={hand} />
 
       {/* ── INFO GRID — FIRST THING ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>

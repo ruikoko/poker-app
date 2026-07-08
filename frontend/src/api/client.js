@@ -375,6 +375,8 @@ export const ggHealth = {
   namesChoose: (b) => req('POST', '/gg-health/names/choose', b),
   namesMerge: (b) => req('POST', '/gg-health/names/merge', b),
   namesDismiss: (b) => req('POST', '/gg-health/names/dismiss', b),
+  namesReentry: (b) => req('POST', '/gg-health/names/reentry', b),
+  namesHandStatus: (handId) => req('GET', `/gg-health/names/hand-status?hand_id=${encodeURIComponent(handId)}`),
   namesApply: (tn = null, dryRun = false) => req('POST', '/gg-health/names/apply', { tournament_number: tn, dry_run: dryRun }),
 }
 
@@ -464,6 +466,20 @@ export const tableSs = {
     })
   },
   recent: (limit = 50) => req('GET', `/table-ss/recent?limit=${limit}`),
+  // OBRA 2b — anexa uma Gold/captura do disco a uma mão ESCOLHIDA (Vision + força link).
+  attachToHand: (file, handId) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('hand_id', handId)
+    if (file?.name) form.append('filename', file.name)
+    return fetch(`${BASE}/table-ss/attach-to-hand`, {
+      method: 'POST', credentials: 'include', body: form,
+    }).then(async (r) => {
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.detail || `Erro ${r.status}`)
+      return data
+    })
+  },
   // Ação 2 — liga a captura à mão escolhida (handId=null → desliga). Gold manda.
   link: (ssId, handId) => req('POST', `/table-ss/${ssId}/link`, { hand_id: handId }),
   // Ação 3 — decisão sobre suspeita de troca: 'accept' | 'reject' | 'review'.

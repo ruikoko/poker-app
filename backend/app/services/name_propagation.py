@@ -80,6 +80,24 @@ def hand_hashes(hand) -> set:
     return set(_SEAT_RE.findall(hand.get("raw") or ""))
 
 
+_SEAT_FULL_RE = re.compile(r'^Seat (\d+): (.+?) \(([\d,]+)', re.M)   # seat/nome-ou-hash/stack
+
+
+def seat_block(raw) -> list:
+    """Bloco de Seats do raw (seat/hash/stack) — a matéria do cruzamento posição+stack
+    que o Rui usa p/ decidir. Lê a 1ª número da linha como stack (GG `(20000 in chips)`,
+    WN `(19245, 50€ bounty)`). Só o ROSTER do topo (antes do 1º `***`) — evita apanhar
+    as linhas `Seat N: X won (...)` do SUMMARY. Hero/nicks reais aparecem tal-e-qual."""
+    raw = raw or ""
+    cut = raw.find("*** ")
+    header = raw[:cut] if cut != -1 else raw
+    out = []
+    for m in _SEAT_FULL_RE.finditer(header):
+        out.append({"seat": int(m.group(1)), "hash": m.group(2).strip(),
+                    "stack": int(m.group(3).replace(",", ""))})
+    return out
+
+
 # ── construção do mapa hash→nome (guardas a/b/c + OCR-merge) ──────────────────
 
 def _lev(a: str, b: str) -> int:
@@ -211,14 +229,19 @@ def conflict_sides(hands: list, item: dict) -> list:
     cands = item.get("candidates") or []
     sides = []
 
-    def _appear_for(match) -> list:
-        """match(hand) -> (matches: bool, display_name: str|None)."""
+    def _appear_for(match, disputed_hash) -> list:
+        """match(hand) -> (matches: bool, display_name: str|None). `disputed_hash` = a
+        chave em disputa neste lado (p/ destacar o seat no bloco de Seats do raw)."""
         out = []
         for h in hands:
             ok, nm = match(h)
             if ok:
+                seats = seat_block(h.get("raw"))
+                for s in seats:
+                    s["disputed"] = (s["hash"] == disputed_hash)
                 out.append({"hand_id": h.get("hand_id"), "db_id": h.get("id"),
-                            "name": nm, "source": "strong" if _is_strong(h) else "weak"})
+                            "name": nm, "source": "strong" if _is_strong(h) else "weak",
+                            "seats": seats})
         out.sort(key=lambda a: (a["source"] != "strong", a["hand_id"] or ""))
         return out
 
@@ -227,7 +250,7 @@ def conflict_sides(hands: list, item: dict) -> list:
             def _m(h, hc=hc):
                 am = _anon_map(_pn(h))
                 return (hc in am, am.get(hc))
-            appear = _appear_for(_m)
+            appear = _appear_for(_m, hc)
             name = next((a["name"] for a in appear if a["source"] == "strong"),
                         appear[0]["name"] if appear else key)
             sides.append({"kind": "hash", "hash": hc, "name": name,
@@ -239,11 +262,62 @@ def conflict_sides(hands: list, item: dict) -> list:
             def _m(h, nnorm=nnorm):
                 nm = _anon_map(_pn(h)).get(key)
                 return (bool(nm) and _norm(nm) == nnorm, nm)
-            appear = _appear_for(_m)
+            appear = _appear_for(_m, key)
             sides.append({"kind": "name", "name": nv,
                           "db_ids": [a["db_id"] for a in appear if a.get("db_id")],
                           "appearances": appear})
     return sides
+
+
+# ── classificador de RE-ENTRADA (o hash é fixo por ENTRADA, não por pessoa) ───
+
+def reentry_hint(hands: list, item: dict) -> dict:
+    """Para um conflito `name_2_hash`, avalia se os 2 hashes são a MESMA pessoa por
+    RE-ENTRADA. Base: o hash GG é fixo por ENTRADA — um re-buy gera hash NOVO p/ o
+    mesmo humano (o invariante 1-hash=1-pessoa continua; o inverso 1-pessoa=1-hash NÃO
+    vale em torneios re-entry). Sinais:
+      - `same_nick`  : mesmo nick EXATO nos 2 lados (nicks GG são únicos por conta);
+      - `both_strong`: fonte FORTE dos dois lados (position_v3 / verificado);
+      - `disjoint_windows`: janelas de aparição SEM sobreposição (um lado todo antes
+        do outro) — coerente com sair e voltar a entrar;
+      - `co_present` : os 2 hashes na MESMA mão → IMPOSSÍVEL ser 1 pessoa → VENENO duro.
+    `likely_reentry` = same_nick ∧ both_strong ∧ disjoint ∧ ¬co_present. A decisão é
+    SEMPRE clique do Rui (isto só PRÉ-SELECCIONA o verbo; nunca auto-resolve).
+    Ver `DESANON_ANATOMIA §3.3`, `REGISTO_CONCEITO 2026-07-08` (Olisadebee)."""
+    if item.get("kind") != "name_2_hash":
+        return {"applies": False}
+    cands = item.get("candidates") or []
+    if len(cands) != 2:
+        return {"applies": False}
+    ha, hb = cands
+    co_present = False
+    times = {ha: [], hb: []}
+    strong = {ha: False, hb: False}
+    names = {ha: set(), hb: set()}
+    for h in hands:
+        hs = hand_hashes(h)
+        has_a, has_b = ha in hs, hb in hs
+        if has_a and has_b:
+            co_present = True
+        am = _anon_map(_pn(h))
+        st = _is_strong(h)
+        pat = h.get("played_at")
+        for hx in (ha, hb):
+            if hx in am:
+                names[hx].add(_norm(am[hx]))
+                strong[hx] = strong[hx] or st
+                if pat is not None:
+                    times[hx].append(pat)
+    disjoint = None
+    if times[ha] and times[hb]:
+        disjoint = (max(times[ha]) < min(times[hb])) or (max(times[hb]) < min(times[ha]))
+    same_nick = bool(names[ha] and names[ha] == names[hb])
+    both_strong = strong[ha] and strong[hb]
+    likely = bool(same_nick and both_strong and disjoint is True and not co_present)
+    return {
+        "applies": True, "co_present": co_present, "disjoint_windows": disjoint,
+        "same_nick": same_nick, "both_strong": both_strong, "likely_reentry": likely,
+    }
 
 
 # ── plano de propagação (só-tagadas; preenche brancos) ───────────────────────
@@ -400,7 +474,8 @@ def apply_propagation(hands: list, clean_map: dict, *, conn=None, dry_run: bool 
 
 def _load_tournament_hands(conn, tn: str) -> list:
     with conn.cursor() as cur:
-        cur.execute("""SELECT id, hand_id, site, raw, player_names, hm3_tags, discord_tags
+        cur.execute("""SELECT id, hand_id, site, raw, player_names, hm3_tags, discord_tags,
+                              played_at
                        FROM hands WHERE site='GGPoker' AND tournament_number=%s
                        AND played_at >= '2026-01-01'""", (tn,))
         return [dict(r) for r in cur.fetchall()]
@@ -427,6 +502,15 @@ def _apply_decisions_to_map(clean: dict, quarantine: list, decisions: dict):
             still.append(q)
             continue
         if dec["decision"] == "dismissed":
+            continue
+        if dec["decision"] == "reentry" and q["kind"] == "name_2_hash":
+            # RE-ENTRADA: os 2 hashes são a mesma pessoa (entradas distintas) → o nome
+            # fica válido nos DOIS. Sai da quarentena; ambos elegíveis p/ propagação.
+            # NÃO funde registos (stacks/mãos/stats separados) — só o NOME é partilhado.
+            nm = dec.get("chosen_name") or q.get("name")
+            if nm:
+                for hsh in q.get("candidates", []):
+                    clean[hsh] = {"name": nm, "verified": True}
             continue
         if dec["decision"] in ("chosen", "merged") and dec.get("chosen_name"):
             if q["kind"] == "same_hash":

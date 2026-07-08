@@ -290,6 +290,28 @@ inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon
   A maioria por torneio corrige swaps do per-mão; cada captura nova acrescenta um voto e
   retro-corrige. Vigiada na Saúde do Import (`capture_deanon_agreement`).
 
+  > **★ RE-ENTRADA — o hash é fixo por ENTRADA, NÃO por pessoa (Olisadebee, 8 Jul 2026).**
+  > O invariante posicional (**1 hash = 1 pessoa**) mantém-se; mas o **inverso** (1 pessoa =
+  > 1 hash) **NÃO vale em torneios re-entry**: um re-buy do MESMO humano gera um **hash NOVO**.
+  > Logo o mesmo nome pode legitimamente estar em **2 hashes** — não é sempre veneno. **Caso
+  > canónico Olisadebee** (Rui, cruzamento posição+stack ao chip nas 2 Gold): `b0b40d2c` e
+  > `d07fa3d8` = a MESMA pessoa por re-entry. **Prova:** as aparições de `d07fa3d8` (~20:50,
+  > ids 6159/6202/6236) são **todas ANTERIORES** às de `b0b40d2c` (~21:25, ids 6515/7027/7043);
+  > **nunca co-ocorrem**; **mesmo nick EXATO** nas duas Gold (nicks GG são únicos por conta);
+  > o stack do 2º ≈ **bala fresca**.
+  > **Distinção operacional no cartão «nome→2 lugares» (§3.4 / quarentena de nomes):**
+  > - **nick EXATO + FORTE dos 2 lados + janelas de aparição SEM sobreposição (nunca
+  >   co-presentes)** → provável **re-entrada** → pré-selecciona o verbo *"Mesma pessoa
+  >   (re-entrada)"* (o nome fica válido nos DOIS hashes). **A decisão é SEMPRE clique do
+  >   Rui** — nunca auto-resolve (`reentry_hint` em `name_propagation.py`).
+  > - **nick igual + CO-PRESENTES na mesma mão** → **IMPOSSÍVEL** ser 1 pessoa → **veneno
+  >   real, quarentena dura** (a desanon meteu o nome errado num hash).
+  > **GUARDAS de jusante (regras — `REGRAS_NEGOCIO §24`):** a re-entrada **NUNCA funde** os 2
+  > hashes num registo (entradas distintas: **stacks/mãos/stats separados**; só o NOME é
+  > partilhado); o **bounty é POR ENTRADA** (re-entrada volta à bounty base — nenhuma lógica
+  > pode assumir mesmo-nome ⇒ mesma-bounty). Os **Vilões** já agregam por NOME → as 2 entradas
+  > caem no mesmo vilão, **correcto por construção, nada a mudar**.
+
   > **Alcance da propagação por hash (pt97, só mãos TAGADAS):** 75 torneios GG 2026 com ≥2
   > mãos tagadas · **484** tagadas · **1126** hashes distintos. **1 confirmação de nome
   > propaga a ~3 mãos tagadas** (média global 2,98) → corta a nomeação de **3352 → 1126

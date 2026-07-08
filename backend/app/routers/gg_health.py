@@ -11,6 +11,7 @@ LIVE. `nota`/`Timetell`/`For Review` são neutras no conflito.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -743,8 +744,8 @@ def _np_tagged_gg_tns() -> list:
 
 
 def _np_load_hands(tn) -> list:
-    return [dict(r) for r in query("""SELECT id, hand_id, site, raw, player_names, hm3_tags, discord_tags
-        FROM hands WHERE site='GGPoker' AND tournament_number=%s AND played_at >= '2026-01-01'""", (tn,))]
+    return [dict(r) for r in query("""SELECT id, hand_id, site, raw, player_names, hm3_tags, discord_tags,
+        played_at FROM hands WHERE site='GGPoker' AND tournament_number=%s AND played_at >= '2026-01-01'""", (tn,))]
 
 
 def _images_for_hands(db_ids: list) -> list:
@@ -834,10 +835,12 @@ def np_quarantine(current_user=Depends(require_auth)):
     items = []
     for r in rows:
         it = dict(r)
-        sides = _np.conflict_sides(hands_of(it["tournament_number"]), it)
+        hs = hands_of(it["tournament_number"])
+        sides = _np.conflict_sides(hs, it)
         for s in sides:
             s["images"] = _images_for_hands(s.pop("db_ids", []))
         it["sides"] = sides
+        it["reentry"] = _np.reentry_hint(hs, it)   # pré-selecciona "Mesma pessoa (re-entrada)"
         items.append(it)
     return {"items": items, "count": len(items)}
 
@@ -892,6 +895,32 @@ def np_merge(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)
 def np_dismiss(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)):
     """DISPENSAR -> o(s) hash(es) ficam BRANCOS (honesto). Escreve so na review."""
     return _np_decide(body, "dismissed", _ft_who(current_user))
+
+
+@router.post("/names/reentry")
+def np_reentry(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)):
+    """MESMA PESSOA (RE-ENTRADA) -> o nome fica valido nos DOIS hashes (entradas
+    distintas do mesmo humano). So `name_2_hash`. Sai da quarentena; ambos os hashes
+    elegiveis p/ propagacao. NAO funde registos (stacks/maos/stats separados; so o
+    nome e partilhado). O bounty e POR ENTRADA (re-entrada volta a base). Ver
+    DESANON_ANATOMIA §3.3."""
+    if body.kind != "name_2_hash":
+        raise HTTPException(400, "re-entrada so em name_2_hash")
+    if not body.chosen_name:
+        body.chosen_name = body.conflict_key    # o nome do conflito
+    return _np_decide(body, "reentry", _ft_who(current_user))
+
+
+@router.get("/names/hand-status")
+def np_hand_status(hand_id: str = Query(...), current_user=Depends(require_auth)):
+    """OBRA 3 — selo "nome em revisao" na mao: esta mao esta envolvida nalgum conflito
+    de nomes PENDENTE? Devolve {in_conflict, conflicts:[{tournament_number, kind,
+    conflict_key}]}. O detalhe da mao mostra o selo + link p/ a Saude GG; some quando
+    o conflito se resolve (a review deixa de estar 'pending')."""
+    rows = query("""SELECT tournament_number, kind, conflict_key FROM name_quarantine_review
+                    WHERE decision='pending' AND hands @> %s::jsonb""",
+                 (json.dumps([hand_id]),))
+    return {"in_conflict": bool(rows), "conflicts": [dict(r) for r in rows]}
 
 
 class NpApplyBody(BaseModel):

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ggHealth, tableSs, API_ROOT } from '../api/client'
 
 // "Saúde das mãos GG" — Fase 1 (mostrar) + Fase 2 (AÇÕES). Vista por IMAGEM.
@@ -449,14 +449,66 @@ function FtQuarantinePanel() {
 
 // ── Fase 3: painel da propagação de nomes por hash + quarentena ──────────────
 
+// Bloco de Seats do raw (OBRA 2a): a matéria do cruzamento posição+stack que o Rui usou
+// à mão. Hash em disputa destacado.
+function SeatBlock({ seats }) {
+  return (
+    <div style={{ margin: '3px 0 6px 14px', border: '1px solid #21262d', borderRadius: 5, overflow: 'hidden' }}>
+      {(seats || []).map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 8, fontSize: 11, fontFamily: mono, padding: '2px 8px',
+          background: s.disputed ? 'rgba(167,139,250,0.16)' : 'transparent',
+          color: s.disputed ? '#c4b5fd' : '#94a3b8' }}>
+          <span style={{ width: 34, color: '#64748b' }}>#{s.seat}</span>
+          <span style={{ flex: 1, fontWeight: s.disputed ? 700 : 400 }}>{s.hash}{s.disputed ? ' ◀' : ''}</span>
+          <span style={{ color: '#fbbf24' }}>{(s.stack ?? 0).toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Uma aparição (mão) no lado: linha clicável (Link) + fonte + toggle Seats + anexar imagem.
+function HandAppearance({ a, busy, onAttach }) {
+  const [open, setOpen] = useState(false)
+  const fileRef = useRef(null)
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+        {a.seats?.length > 0 && (
+          <span onClick={() => setOpen(o => !o)} title="ver Seats do raw"
+            style={{ cursor: 'pointer', color: '#64748b', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .1s', width: 10 }}>▸</span>
+        )}
+        {a.db_id
+          ? <Link to={`/hand/${a.db_id}`} style={{ fontFamily: mono, color: '#60a5fa', textDecoration: 'none' }}>{a.hand_id}</Link>
+          : <span style={{ fontFamily: mono, color: '#64748b' }}>{a.hand_id || '—'}</span>}
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '0 6px', borderRadius: 4,
+          color: a.source === 'strong' ? '#86efac' : '#fbbf24',
+          background: a.source === 'strong' ? 'rgba(34,197,94,0.12)' : 'rgba(251,191,36,0.12)' }}>
+          {a.source === 'strong' ? 'forte' : 'fraca'}</span>
+        <span style={{ color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+        {a.hand_id && (
+          <>
+            <button disabled={busy} style={{ ...btn, fontSize: 10, padding: '1px 6px' }}
+              title="Anexar Gold/captura do disco a esta mão (corre a Vision + liga)"
+              onClick={() => fileRef.current?.click()}>+ imagem</button>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) onAttach(a.hand_id, f); e.target.value = '' }} />
+          </>
+        )}
+      </div>
+      {open && a.seats?.length > 0 && <SeatBlock seats={a.seats} />}
+    </div>
+  )
+}
+
 // Um LADO do conflito: o candidato (hash ou variante de nome) com as suas mãos
-// (clicáveis + fonte forte/fraca) e as imagens dessas mãos (miniatura → lightbox).
-// É com as imagens que o Rui reconhece qual dos lugares é o jogador verdadeiro.
-function SideColumn({ side, isHash, actionLabel, onAct, busy, onZoom }) {
+// (clicáveis + fonte forte/fraca + Seats), as imagens dessas mãos (miniatura → lightbox)
+// e o "+ imagem" por mão. É com as imagens/Seats que o Rui reconhece o jogador.
+function SideColumn({ side, isHash, actionLabel, onAct, busy, onZoom, onAttach }) {
   const appear = side.appearances || []
   const imgs = side.images || []
   return (
-    <div style={{ ...card, padding: 10, flex: 1, minWidth: 240, background: '#0d1017' }}>
+    <div style={{ ...card, padding: 10, flex: 1, minWidth: 260, background: '#0d1017' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         {isHash
           ? <code style={{ fontSize: 13, color: '#c9d1d9' }}>{side.hash}</code>
@@ -473,43 +525,42 @@ function SideColumn({ side, isHash, actionLabel, onAct, busy, onZoom }) {
               style={{ width: 92, height: 60, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
           ))}
         </div>
-      ) : <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>— sem imagens guardadas destas mãos</div>}
+      ) : <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>— sem imagens guardadas (usa «+ imagem» numa mão p/ anexar a Gold)</div>}
       <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 }}>
         {appear.length} mão(s)
       </div>
-      <div style={{ maxHeight: 150, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {appear.map((a, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-            {a.db_id
-              ? <Link to={`/hand/${a.db_id}`} style={{ fontFamily: mono, color: '#60a5fa', textDecoration: 'none' }}>{a.hand_id}</Link>
-              : <span style={{ fontFamily: mono, color: '#64748b' }}>{a.hand_id || '—'}</span>}
-            <span style={{ fontSize: 10, fontWeight: 700, padding: '0 6px', borderRadius: 4,
-              color: a.source === 'strong' ? '#86efac' : '#fbbf24',
-              background: a.source === 'strong' ? 'rgba(34,197,94,0.12)' : 'rgba(251,191,36,0.12)' }}>
-              {a.source === 'strong' ? 'forte' : 'fraca'}</span>
-            <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-          </div>
-        ))}
+      <div style={{ maxHeight: 220, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {appear.map((a, i) => <HandAppearance key={i} a={a} busy={busy} onAttach={onAttach} />)}
       </div>
     </div>
   )
 }
 
-function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onZoom }) {
+function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, onAttach, onZoom }) {
   const [custom, setCustom] = useState('')
   const isHash = it.kind !== 'same_hash'   // name_2_hash → lados são hashes; same_hash → variantes
   const sides = it.sides || []
+  const re = it.reentry || {}
+  const showReentry = isHash && re.applies && !re.co_present   // co-presentes → nunca re-entrada
   return (
     <div style={{ ...card, padding: 12, marginBottom: 10 }}>
       <div style={{ fontSize: 13, marginBottom: 8 }}>
         Torneio <b>{it.tournament_number}</b> · {isHash
-          ? <>o nome <b>{it.conflict_key}</b> foi atribuído a <b>2 lugares</b> — só um é o jogador. <span style={{ color: 'var(--muted)' }}>Vê as imagens de cada lado e escolhe «É este».</span></>
+          ? <>o nome <b>{it.conflict_key}</b> está em <b>2 lugares</b>. <span style={{ color: 'var(--muted)' }}>Ou é um lugar errado (escolhe «É este»), ou é a MESMA pessoa por re-entrada.</span></>
           : <>o hash <code>{it.conflict_key}</code> foi lido com <b>nomes diferentes</b>. <span style={{ color: 'var(--muted)' }}>Confirma qual a leitura certa.</span></>}
       </div>
+      {/* Sinal de re-entrada / veneno duro (co-presentes) */}
+      {isHash && re.applies && (
+        re.co_present
+          ? <div style={{ fontSize: 12, color: '#fca5a5', marginBottom: 8 }}>⛔ os 2 hashes aparecem na MESMA mão → impossível ser 1 pessoa (veneno real).</div>
+          : re.likely_reentry
+            ? <div style={{ fontSize: 12, color: '#86efac', marginBottom: 8 }}>↻ provável <b>re-entrada</b>: mesmo nick, fontes fortes dos 2 lados, janelas sem sobreposição. Confirma tu.</div>
+            : <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{re.same_nick ? 'mesmo nick' : 'nicks diferentes'}{re.disjoint_windows === false ? ' · janelas sobrepõem-se' : re.disjoint_windows ? ' · janelas disjuntas' : ''}{re.both_strong ? '' : ' · falta fonte forte num lado'}.</div>
+      )}
       {sides.length > 0 ? (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {sides.map((s, i) => (
-            <SideColumn key={i} side={s} isHash={isHash} busy={busy} onZoom={onZoom}
+            <SideColumn key={i} side={s} isHash={isHash} busy={busy} onZoom={onZoom} onAttach={onAttach}
               actionLabel={isHash ? 'É este' : 'É esta'}
               onAct={() => isHash ? onChoose(it, it.conflict_key, s.hash) : onMerge(it, s.name)} />
           ))}
@@ -525,6 +576,11 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onZoom }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+        {showReentry && (
+          <button disabled={busy} style={{ ...btn, borderColor: re.likely_reentry ? '#22c55e' : '#818cf8', color: re.likely_reentry ? '#86efac' : '#a5b4fc', fontWeight: re.likely_reentry ? 700 : 500 }}
+            onClick={() => onReentry(it)} title="Os 2 hashes são a mesma pessoa (re-entrada) — o nome fica válido nos dois">
+            ↻ Mesma pessoa (re-entrada)</button>
+        )}
         {!isHash && <>
           <span style={{ color: 'var(--muted)', fontSize: 12 }}>ou outro nome:</span>
           <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="nome certo"
@@ -562,6 +618,8 @@ function NamePropagationPanel() {
   const onChoose = wrap(async (it, name, hash) => { await ggHealth.namesChoose({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key, chosen_name: name, chosen_hash: hash }); setMsg('Nome escolhido e propagado.') })
   const onMerge = wrap(async (it, name) => { await ggHealth.namesMerge({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key, chosen_name: name }); setMsg('Variantes fundidas e propagadas.') })
   const onDismiss = wrap(async (it) => { await ggHealth.namesDismiss({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key }); setMsg('Dispensado — fica branco.') })
+  const onReentry = wrap(async (it) => { await ggHealth.namesReentry({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key, chosen_name: it.conflict_key }); setMsg('Re-entrada confirmada — o nome fica nos dois lugares.') })
+  const onAttach = wrap(async (handId, file) => { const r = await tableSs.attachToHand(file, handId); setMsg(`Imagem anexada a ${handId} (${r.result || 'ok'}).`) })
 
   return (
     <div>
@@ -589,7 +647,8 @@ function NamePropagationPanel() {
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{quar.length} conflito(s) a decidir:</div>
             {quar.map((it, i) => (
               <NameConflictCard key={i} it={it} busy={busy}
-                onChoose={onChoose} onMerge={onMerge} onDismiss={onDismiss} onZoom={setZoom} />
+                onChoose={onChoose} onMerge={onMerge} onDismiss={onDismiss}
+                onReentry={onReentry} onAttach={onAttach} onZoom={setZoom} />
             ))}
           </>
         )}
@@ -601,7 +660,9 @@ function NamePropagationPanel() {
 export default function GGHealth() {
   const [sum, setSum] = useState(null)
   const [err, setErr] = useState(null)
-  const [group, setGroup] = useState(null)
+  const [searchParams] = useSearchParams()
+  // Deep-link do selo "nome em revisão" (OBRA 3): ?panel=name_quarantine abre o painel.
+  const [group, setGroup] = useState(searchParams.get('panel') || null)
   const [list, setList] = useState(null)
   const [page, setPage] = useState(1)
   const [zoom, setZoom] = useState(null)

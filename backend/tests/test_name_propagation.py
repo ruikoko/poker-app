@@ -1,20 +1,25 @@
 """APA §B.6 Fase 3 — propagação de nomes por hash. Testes das guardas + motor (puros)."""
+from datetime import datetime
+
 from app.services import name_propagation as np
 
 
-def _hand(hand_id, mm, anon_map, seats, *, tagged=True, verified=False, site="GGPoker", hid=None):
-    """Constrói uma linha de mão sintética. `seats` = lista de hashes (Hero implícito)."""
+def _hand(hand_id, mm, anon_map, seats, *, tagged=True, verified=False, site="GGPoker",
+          hid=None, played_at=None, stacks=None):
+    """Constrói uma linha de mão sintética. `seats` = lista de hashes (Hero implícito).
+    `stacks` opcional = dict hash→stack (default 1000)."""
+    stacks = stacks or {}
     lines = ["Poker Hand #x", "Table '1' 8-max Seat #1 is the button",
              "Seat 1: Hero (1000 in chips)"]
     for i, h in enumerate(seats, start=2):
-        lines.append(f"Seat {i}: {h} (1000 in chips)")
+        lines.append(f"Seat {i}: {h} ({stacks.get(h, 1000)} in chips)")
     pn = {"match_method": mm, "anon_map": dict(anon_map)}
     if verified:
         pn["verified_by_user"] = True
     return {
         "id": hid if hid is not None else abs(hash(hand_id)) % 100000,
         "hand_id": hand_id, "site": site, "raw": "\n".join(lines) + "\n",
-        "player_names": pn,
+        "player_names": pn, "played_at": played_at,
         "hm3_tags": (["icm"] if tagged else []), "discord_tags": [],
     }
 
@@ -154,3 +159,82 @@ def test_conflict_sides_same_hash_one_side_per_variant():
     sd = next(s for s in sides if s["name"] == "Daniel Filipe")
     assert [a["hand_id"] for a in sd["appearances"]] == ["GG-1"]
     assert sd["db_ids"] == [1]
+
+
+# ── OBRA 2a — bloco de Seats do raw (seat/hash/stack + disputado) ─────────────
+
+def test_seat_block_parses_seat_hash_stack():
+    raw = ("Table x\nSeat 1: Hero (30000 in chips)\n"
+           "Seat 2: 3b4cd0c7 (20,000 in chips)\nSeat 3: 89ef4cba (40000, 50€ bounty)\n")
+    sb = np.seat_block(raw)
+    assert [s["seat"] for s in sb] == [1, 2, 3]
+    assert sb[1] == {"seat": 2, "hash": "3b4cd0c7", "stack": 20000}   # vírgula limpa
+    assert sb[2]["stack"] == 40000                                     # WN "(40000, 50€ bounty)"
+
+
+def test_conflict_sides_appearances_carry_seats_with_disputed():
+    h1 = _hand("GG-1", "position_v3", {"3b4cd0c7": "Bob"}, ["3b4cd0c7", "89ef4cba"], hid=1)
+    item = {"kind": "name_2_hash", "conflict_key": "Bob",
+            "candidates": ["3b4cd0c7", "89ef4cba"]}
+    sides = np.conflict_sides([h1], item)
+    s = next(x for x in sides if x["hash"] == "3b4cd0c7")
+    ap = s["appearances"][0]
+    disputed = [x["hash"] for x in ap["seats"] if x["disputed"]]
+    assert disputed == ["3b4cd0c7"]                    # só o hash do lado é destacado
+
+
+# ── OBRA 1 — classificador de RE-ENTRADA + decisão 'reentry' ─────────────────
+
+_HA, _HB = "b0b40d2c", "d07fa3d8"   # os 2 hashes do Olisadebee (re-entry)
+
+
+def _reentry_item():
+    return {"kind": "name_2_hash", "name": "Olisadebee", "conflict_key": "Olisadebee",
+            "candidates": [_HA, _HB]}
+
+
+def test_reentry_hint_likely_when_disjoint_strong_same_nick():
+    early = _hand("GG-6159", "position_v3", {_HA: "Olisadebee"}, [_HA],
+                  played_at=datetime(2026, 5, 28, 20, 50))
+    late = _hand("GG-6515", "position_v3", {_HB: "Olisadebee"}, [_HB],
+                 played_at=datetime(2026, 5, 28, 21, 25))
+    hint = np.reentry_hint([early, late], _reentry_item())
+    assert hint["applies"] and hint["likely_reentry"] is True
+    assert hint["co_present"] is False and hint["disjoint_windows"] is True
+    assert hint["same_nick"] and hint["both_strong"]
+
+
+def test_reentry_hint_co_present_is_hard_poison():
+    # os 2 hashes na MESMA mão → impossível ser 1 pessoa → nunca re-entrada
+    both = _hand("GG-1", "position_v3", {_HA: "Olisadebee"}, [_HA, _HB],
+                 played_at=datetime(2026, 5, 28, 21, 0))
+    other = _hand("GG-2", "position_v3", {_HB: "Olisadebee"}, [_HB],
+                  played_at=datetime(2026, 5, 28, 21, 30))
+    hint = np.reentry_hint([both, other], _reentry_item())
+    assert hint["co_present"] is True and hint["likely_reentry"] is False
+
+
+def test_reentry_hint_overlapping_windows_not_likely():
+    a1 = _hand("GG-1", "position_v3", {_HA: "Olisadebee"}, [_HA], played_at=datetime(2026, 5, 28, 20, 50))
+    a2 = _hand("GG-2", "position_v3", {_HA: "Olisadebee"}, [_HA], played_at=datetime(2026, 5, 28, 21, 30))
+    b1 = _hand("GG-3", "position_v3", {_HB: "Olisadebee"}, [_HB], played_at=datetime(2026, 5, 28, 21, 0))
+    hint = np.reentry_hint([a1, a2, b1], _reentry_item())
+    assert hint["disjoint_windows"] is False and hint["likely_reentry"] is False
+
+
+def test_reentry_hint_weak_side_not_likely():
+    early = _hand("GG-1", "position_v3", {_HA: "Olisadebee"}, [_HA], played_at=datetime(2026, 5, 28, 20, 50))
+    late = _hand("GG-2", "table_ss", {_HB: "Olisadebee"}, [_HB], played_at=datetime(2026, 5, 28, 21, 25))
+    hint = np.reentry_hint([early, late], _reentry_item())
+    assert hint["both_strong"] is False and hint["likely_reentry"] is False
+
+
+def test_apply_decisions_reentry_puts_name_on_both_hashes():
+    quar = [{"kind": "name_2_hash", "name": "Olisadebee", "candidates": [_HA, _HB],
+             "hands": ["GG-6159", "GG-6515"]}]
+    decisions = {("name_2_hash", "Olisadebee"):
+                 {"decision": "reentry", "chosen_name": "Olisadebee", "chosen_hash": None}}
+    clean, still = np._apply_decisions_to_map({}, quar, decisions)
+    assert clean[_HA] == {"name": "Olisadebee", "verified": True}
+    assert clean[_HB] == {"name": "Olisadebee", "verified": True}   # nome nos DOIS
+    assert still == []                                              # sai da quarentena
