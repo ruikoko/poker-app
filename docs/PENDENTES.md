@@ -146,6 +146,31 @@ arrisca sair de uma base incompleta.
 - **Porquê pós-wipe:** o foco actual é a **casa limpa + wipe+reimport** (backend/dados); mexer no branch do
   watcher agora abre uma frente paralela sem necessidade. Fica arrumado quando o robot voltar a ser tocado.
 
+## ★ "Mãos suspeitas" (bounty < base÷2) — CICATRIZ confirmada → critério de aceitação do reimport (8 Jul)
+
+**Triagem read-only pedida pelo Rui.** A secção lista GG PKO/KO 2026 com ≥1 coroa gravada **< base÷2**
+(base = `tournament_summaries.buy_in_bounty`; = provável leitura da **chama/VPIP** em vez da coroa). Fix
+chama-vs-coroa = **`824f23d` (1 Jul)** (prompt distingue coroa$/chama% + guarda dura `crown >= base/2`).
+
+**Distribuição (112 mãos hoje):** **112/112 PRÉ-fix, 0 PÓS-fix.** Por `hands.created_at`: todas criadas
+**18–26 Jun** (< 1 Jul). Por `table_ss_processing_log.uploaded_at` (63 com SS de desanon casada): todas
+**18–26 Jun**; as 49 sem SS casada = 47 `table_ss` (log limpo em resets antigos) + 2 `position_v3`, mãos
+na mesma criadas pré-fix. **Zero** entries replayer/SS criadas após 1 Jul; **zero** uploads table-SS após
+1 Jul; o único caminho de escrita pós-fix (backfill gold-carry `6edf785`, 2 Jul) **TEM a guarda**
+(0 rejeitadas) e só **acrescenta** a coroas vazias → não criou estas.
+
+**Veredicto: CICATRIZ.** Escritas todas na desanon de Junho, antes do prompt chama/coroa. **Morrem no wipe.**
+→ **Critério de aceitação do reimport:** pós-reimport a secção deve nascer **~0** (só bordos legítimos de
+coroa-verde/eliminação). Se nascer alta, a leitura chama/coroa **regrediu**.
+
+**Nota de honestidade (não é furo que gerou as 112, é defesa-em-profundidade):** a protecção *sistémica* é
+o **PROMPT** (`824f23d`), não uma guarda universal na escrita. O enrich **live** (`screenshot.py:1044`,
+`_enrich_all_players_actions`) grava o `bounty_value_usd` da Vision **cru, sem** a guarda `crown>=base/2` —
+a guarda só existe nos **dois backfills** (`screenshot.py:2144/2395`) e no **gate do HRC**
+(`queue_export.py:1694`). Pós-reimport, um misread de bordo (coroa-verde/eliminação) pode aterrar na secção
+— o que é o comportamento desejado (é uma fila de revisão manual). Universalizar a guarda no live path fica
+como melhoria opcional, **não** pré-wipe.
+
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 
 A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_COLAPSO.md`):
