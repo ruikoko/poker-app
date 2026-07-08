@@ -368,6 +368,7 @@ export const ggHealth = {
     override_n: (overrideN === '' || overrideN == null) ? null : Number(overrideN),
   }),
   ftPromote: (tn, confirm = false) => req('POST', '/gg-health/ft/promote', { tournament_number: tn, confirm }),
+  ftDismiss: (tn) => req('POST', '/gg-health/ft/dismiss', { tournament_number: tn }),
 }
 
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────

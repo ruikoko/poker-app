@@ -496,6 +496,38 @@ def _ft_hrc_stale_count(tn, boundary) -> int:
     return r[0]["n"] if r else 0
 
 
+def _ft_images(tn) -> dict:
+    """TODAS as imagens que a app tem associadas ao torneio (regra 8 Jul), p/ o ensaio:
+    (1) capturas de MESA (table_ss, img_b64) com captured_at + players_left lido — as
+    que produziram a sequência que o Rui usa p/ decidir o Corrigir; (2) lobbys (sem
+    imagem guardada → leitura + hora); (3) outras imagens ligadas às mãos (gold/replayer
+    entries). Só URLs/metadados — read-only."""
+    caps = query(
+        "SELECT DISTINCT l.id AS ss_id, l.captured_at, l.players_left "
+        "FROM table_ss_processing_log l JOIN hands h ON h.context_table_ss_id = l.id "
+        "WHERE h.site='GGPoker' AND h.tournament_number=%s AND l.img_b64 IS NOT NULL "
+        "ORDER BY l.captured_at", (tn,))
+    table_ss = [{"ss_id": r["ss_id"], "image_url": f"/api/table-ss/image/{r['ss_id']}",
+                 "captured_at": r["captured_at"].isoformat() if r["captured_at"] else None,
+                 "players_left": r["players_left"]} for r in caps]
+    lob = query(
+        "SELECT posted_at, players_left, vision_json FROM lobby_processing_log "
+        "WHERE tournament_number=%s ORDER BY posted_at", (tn,))
+    lobby = [{"posted_at": r["posted_at"].isoformat() if r["posted_at"] else None,
+              "players_left": r["players_left"],
+              "open_tab": (r["vision_json"] or {}).get("open_tab"),
+              "final_table_size": (r["vision_json"] or {}).get("final_table_size"),
+              "note": "imagem não guardada"} for r in lob]
+    other = query(
+        "SELECT e.id AS ss_id, h.hand_id FROM entries e JOIN hands h ON h.entry_id = e.id "
+        "WHERE h.site='GGPoker' AND h.tournament_number=%s "
+        "AND (e.raw_json->>'img_b64') IS NOT NULL "
+        "AND e.entry_type IN ('screenshot','replayer_link') ORDER BY h.played_at", (tn,))
+    hand_imgs = [{"ss_id": r["ss_id"], "hand_id": r["hand_id"],
+                  "image_url": f"/api/screenshots/image/{r['ss_id']}"} for r in other]
+    return {"table_ss": table_ss, "lobby": lobby, "hand_images": hand_imgs}
+
+
 def _ft_preview_for_tn(tn, full=False) -> dict:
     """LEVE por defeito (lista de todos os candidatos — só status/fronteira/contagens);
     `full=True` (um tn) traz o detalhe pesado: mãos que mudam (from→to), lista HRC
@@ -521,7 +553,7 @@ def _ft_preview_for_tn(tn, full=False) -> dict:
         if full:
             diag = via_b_diagnostics(tn)
             out.update({"changes": [], "hrc_stale": [], "via_b_diag": diag,
-                        "warnings": _ft_warnings(d, diag)})
+                        "warnings": _ft_warnings(d, diag), "images": _ft_images(tn)})
         return out
     if full:
         changes = propagate_ft(tn, dry_run=True).get("changed", [])
@@ -529,7 +561,8 @@ def _ft_preview_for_tn(tn, full=False) -> dict:
         diag = via_b_diagnostics(tn)
         out.update({"changes": changes, "n_changes": len(changes),
                     "hrc_stale": hrc, "hrc_stale_count": len(hrc),
-                    "via_b_diag": diag, "warnings": _ft_warnings(d, diag)})
+                    "via_b_diag": diag, "warnings": _ft_warnings(d, diag),
+                    "images": _ft_images(tn)})
     else:
         out["n_changes"] = _ft_change_count(tn, boundary)
         out["hrc_stale_count"] = _ft_hrc_stale_count(tn, boundary)
@@ -572,8 +605,16 @@ def _ft_candidate_list() -> list:
         cc = d.get("cross_check") or {}
         status = _ft_map_status(d.get("status"), cc)
         decision = dec.get(tn, "pending")
+        # REVERSIBILIDADE do Dispensar: um torneio 'dismissed' volta a pending se entrar
+        # sinal novo FORTE (tag manual -ft OU print do Info) — não persiste no GET (só
+        # reflecte); o Rui volta a decidir. Nota "sinal novo pós-dispensa".
+        reactivated = False
+        if decision == "dismissed" and _ft_dismiss_reactivated(tn):
+            decision, reactivated = "pending", True
         boundary = d.get("boundary")
-        if decision == "promoted":
+        if decision == "dismissed":
+            section = "dismissed"  # Dispensados (sem FT — o Rui rebentou na bolha)
+        elif decision == "promoted":
             section = "done"
         elif status == "match":
             section = "ready"      # match limpo → Prontas a aprovar
@@ -589,11 +630,21 @@ def _ft_candidate_list() -> list:
             "boundary": boundary.isoformat() if boundary else None,
             "n": d.get("n"), "seats_first_hand": cc.get("hh_seats"), "match": cc.get("match"),
             "partial_coverage": _ft_partial_coverage(tn, boundary, d.get("n")) if (section == "ready") else False,
-            "decision": decision,
+            "decision": decision, "reactivated": reactivated,
         })
-    order = {"needs": 0, "ready": 1, "done": 2}
-    out.sort(key=lambda r: (order.get(r["section"], 3), r["day"] or ""))
+    order = {"needs": 0, "ready": 1, "done": 2, "dismissed": 3}
+    out.sort(key=lambda r: (order.get(r["section"], 4), r["day"] or ""))
     return out
+
+
+def _ft_dismiss_reactivated(tn) -> bool:
+    """Um torneio dispensado ganhou sinal novo FORTE desde a dispensa? (tag manual -ft
+    OU print do Info). Só se chama para os 'dismissed' (poucos)."""
+    from app.services.ft_boundary import _manual_ft_boundary, _lobby_ft_boundary
+    if _manual_ft_boundary(tn) is not None:
+        return True
+    lb, _n = _lobby_ft_boundary(tn)
+    return lb is not None
 
 
 class FtTnBody(BaseModel):
@@ -665,3 +716,17 @@ def ft_promote(body: FtPromoteBody, current_user=Depends(require_auth_or_api_key
         return {"dry_run": True, "plan": plan}
     _ft_mark_promoted(tn, _ft_who(current_user))
     return {"dry_run": False, "result": plan}
+
+
+@router.post("/ft/dismiss")
+def ft_dismiss(body: FtTnBody, current_user=Depends(require_auth_or_api_key)):
+    """DISPENSAR ("sem FT") — o Rui rebentou na bolha, não fez mesa final. Escreve
+    **APENAS** na `ft_boundary_review` (decision='dismissed' + decided_by/decided_at)
+    via `_ft_upsert_review`. **NÃO toca nas mãos** do torneio, **NÃO** remove/altera
+    tags (icm/nota/... = estudo de bolha válido, ficam intactas), **NÃO** mexe em
+    study_state/vilões/nada fora da tabela de revisão. Sai de "Precisam de ti"; o
+    /summary deixa de o contar. Reversível (ver `_ft_dismiss_reactivated`)."""
+    d = compute_ft_boundary(body.tournament_number)
+    _ft_upsert_review(body.tournament_number, d, decision="dismissed",
+                      decided_by=_ft_who(current_user))
+    return {"ok": True}

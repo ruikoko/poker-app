@@ -211,6 +211,7 @@ const FT_STATUS = {
 const FT_DECISION = {
   pending: ['pendente', '#64748b'], confirmed: ['confirmada', '#22c55e'],
   corrected: ['corrigida', '#818cf8'], promoted: ['promovida', '#22c55e'],
+  dismissed: ['dispensada', '#64748b'],
 }
 function Pill({ map, k }) {
   const [lbl, col] = map[k] || [k, '#64748b']
@@ -224,7 +225,7 @@ function Cell({ label, children }) {
 }
 const fmtT = (iso) => iso ? iso.replace('T', ' ').slice(0, 19) : '—'
 
-function FtCard({ t, busy, onConfirm, onCorrect, onPromote }) {
+function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onDismiss = () => {}, onZoom = () => {} }) {
   const [ob, setOb] = useState('')
   const [on_, setOn] = useState('')
   const [plan, setPlan] = useState(null)   // plano dry-run do promote
@@ -255,6 +256,44 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote }) {
           {t.via_b_diag.coherent === false ? ' — INCOERENTE' : ''}
         </div>
       )}
+      {t.images && (
+        <div style={{ marginTop: 10 }}>
+          {(t.images.table_ss || []).length > 0 && (<>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>
+              Capturas de mesa — players_left (verde = ≤9)
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {t.images.table_ss.map((im, i) => (
+                <div key={i} style={{ textAlign: 'center' }}>
+                  <img src={API_ROOT + im.image_url} alt="" loading="lazy"
+                    onClick={() => onZoom(API_ROOT + im.image_url)}
+                    style={{ width: 100, height: 66, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
+                  <div style={{ fontSize: 12, fontWeight: 700, color: (im.players_left != null && im.players_left <= 9) ? '#22c55e' : '#c9d1d9' }}>{im.players_left ?? '—'}</div>
+                  <div style={{ fontSize: 9, color: 'var(--muted)' }}>{(im.captured_at || '').slice(11, 16)}</div>
+                </div>
+              ))}
+            </div>
+          </>)}
+          {(t.images.lobby || []).length > 0 && (<>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '8px 0 3px' }}>Lobbys (imagem não guardada)</div>
+            {t.images.lobby.map((l, i) => (
+              <div key={i} style={{ fontSize: 11, color: 'var(--muted)', fontFamily: mono }}>
+                {(l.posted_at || '').replace('T', ' ').slice(0, 16)} · open_tab={l.open_tab || '—'} · pl={l.players_left ?? '—'}{l.final_table_size ? ` · N=${l.final_table_size}` : ''}
+              </div>
+            ))}
+          </>)}
+          {(t.images.hand_images || []).length > 0 && (<>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '8px 0 3px' }}>Outras imagens das mãos ({t.images.hand_images.length})</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {t.images.hand_images.map((im, i) => (
+                <img key={i} src={API_ROOT + im.image_url} alt="" loading="lazy" title={im.hand_id}
+                  onClick={() => onZoom(API_ROOT + im.image_url)}
+                  style={{ width: 76, height: 50, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
+              ))}
+            </div>
+          </>)}
+        </div>
+      )}
       {(t.changes || []).length > 0 && (
         <details style={{ marginTop: 8 }}>
           <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>{t.changes.length} mãos: from → to</summary>
@@ -280,7 +319,12 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote }) {
           Promover…
         </button>
         {!canPromote && <span style={{ fontSize: 11, color: 'var(--muted)' }}>(confirma/corrige primeiro)</span>}
+        <button style={{ ...btn, marginLeft: 'auto' }} disabled={busy}
+          onClick={() => { if (window.confirm(`Dispensar ${t.tournament_number} (sem FT)?\nNão toca nas mãos nem nas tags — só regista a decisão de fronteira.`)) onDismiss(t.tournament_number) }}>
+          Dispensar (sem FT)
+        </button>
       </div>
+      {t.reactivated && <div style={{ fontSize: 12, color: '#fbbf24', marginTop: 6 }}>⚠ sinal novo pós-dispensa — voltou a pendente</div>}
       {plan && (
         <div style={{ ...card, padding: 10, marginTop: 8, borderColor: '#22c55e' }}>
           <div style={{ fontSize: 12, marginBottom: 6 }}>
@@ -295,7 +339,7 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote }) {
   )
 }
 
-function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onPromote }) {
+function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onPromote, onDismiss, onZoom }) {
   return (
     <div style={{ ...card, marginBottom: 8, overflow: 'hidden' }}>
       <div onClick={onToggle} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer', flexWrap: 'wrap' }}>
@@ -311,7 +355,7 @@ function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onProm
       {expanded && (
         <div style={{ padding: '0 12px 10px', borderTop: '1px solid var(--border,#30363d)' }}>
           {full
-            ? <FtCard t={full} busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} />
+            ? <FtCard t={full} busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} onDismiss={onDismiss} onZoom={onZoom} />
             : <div style={{ padding: 12, color: 'var(--muted)' }}>A carregar ensaio…</div>}
         </div>
       )}
@@ -325,6 +369,7 @@ function FtQuarantinePanel() {
   const [expanded, setExpanded] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [zoom, setZoom] = useState(null)
   const loadList = () => ggHealth.ftPreview().then(r => setList(r.candidates || [])).catch(e => setMsg('Erro: ' + e.message))
   useEffect(() => { loadList() }, [])
   const loadFull = (tn) => ggHealth.ftPreview(tn)
@@ -349,15 +394,17 @@ function FtQuarantinePanel() {
     if (confirm) { setMsg(`${tn}: promovida.`); refresh(tn) }
     return r
   })
+  const onDismiss = wrap(async (tn) => { await ggHealth.ftDismiss(tn); setMsg(`${tn}: dispensada (sem FT) — mãos e tags intactas.`); refresh(tn) })
   if (!list) return <div style={{ color: 'var(--muted)' }}>A carregar candidatos…</div>
   const rowsOf = (items) => items.map(c => (
     <FtRow key={c.tournament_number} c={c} expanded={expanded === c.tournament_number}
       onToggle={() => toggle(c.tournament_number)} full={full[c.tournament_number]}
-      busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} />
+      busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} onDismiss={onDismiss} onZoom={setZoom} />
   ))
   const needs = list.filter(c => c.section === 'needs')
   const ready = list.filter(c => c.section === 'ready')
   const done = list.filter(c => c.section === 'done')
+  const dismissed = list.filter(c => c.section === 'dismissed')
   const SecHead = ({ label, hint, color }) => (
     <div style={{ margin: '18px 0 8px' }}>
       <div style={{ fontSize: 13, fontWeight: 700, color }}>{label}</div>
@@ -377,6 +424,12 @@ function FtQuarantinePanel() {
         <SecHead label={`Concluídas (${done.length})`} color="var(--muted)" hint="já promovidas." />
         {rowsOf(done)}
       </>)}
+      {dismissed.length > 0 && (<>
+        <SecHead label={`Dispensados (${dismissed.length})`} color="var(--muted)"
+          hint="sem FT (rebentou na bolha) — só anotação de fronteira; mãos e tags intactas. Volta a pendente se entrar sinal novo forte." />
+        {rowsOf(dismissed)}
+      </>)}
+      <Lightbox src={zoom} onClose={() => setZoom(null)} />
     </div>
   )
 }

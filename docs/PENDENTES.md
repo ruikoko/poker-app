@@ -25,7 +25,14 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   (só o que exige decisão — `none`-com-sinal/mismatch/disagreement/n_unavailable/incoherent; é o que `/summary`
   conta) e **"Prontas a aprovar"** (match limpo — ensaio dry-run → Confirmar → Promover/escrita explícita; a
   **cobertura parcial N=5** fica VISÍVEL na linha). Lista compacta → clicar expande o ensaio FULL por torneio
-  (fetch `?tn=`): lado-a-lado, avisos + sequência da via-b, mãos que mudam (from→to). **Rui valida à vista.**
+  (fetch `?tn=`): lado-a-lado, avisos + sequência da via-b, mãos que mudam (from→to).
+- **F4 afinações (8 Jul):** (1) **IMAGENS no ensaio** (`_ft_images`, preview FULL) — capturas de mesa (miniaturas
+  clicáveis/lightbox, ordenadas por `captured_at`, com o `players_left` por baixo, ≤9 a verde), lobbys (leitura +
+  hora, "imagem não guardada") e outras imagens das mãos. (2) **DISPENSAR ("sem FT")** — `POST /ft/dismiss` →
+  `decision='dismissed'` na `ft_boundary_review` APENAS (⚠️ **não toca mãos/tags/study_state/vilões** — guarda
+  testada: mãos intactas); sai de "Precisam de ti", `/summary` deixa de contar; secção **"Dispensados"**;
+  **reversível** — volta a pendente com sinal novo forte (tag manual -ft OU print do Info, `_ft_dismiss_reactivated`).
+  Caso real: 290775453/292235768 = bolha da FT (o Rui rebentou), o motor esteve certo em não ancorar → dispensados.
 - **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
   da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
   `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas

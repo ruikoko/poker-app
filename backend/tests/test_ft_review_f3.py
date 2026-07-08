@@ -46,8 +46,29 @@ def test_preview_single_tn(mc, mq, mp, mv):
     assert t["status"] == "match" and t["source"] == "manual_ft_tag"
     assert t["boundary"] == T0.isoformat() and t["n_lobby"] == 7 and t["seats_first_hand"] == 7
     assert t["n_changes"] == 1 and t["decision"] == "pending"
+    assert "images" in t   # regra 8 Jul: as imagens do torneio vêm no ensaio FULL
     # preview é SÓ LEITURA: só corre propagate em dry_run
     assert mp.call_args.kwargs.get("dry_run") is True
+
+
+def test_ft_images_assembles_all_sources():
+    from app.routers import gg_health as ggh
+
+    def _q(sql, params=None):
+        if "table_ss_processing_log l JOIN hands" in sql:
+            return [{"ss_id": 5, "captured_at": T0, "players_left": 9}]
+        if "FROM lobby_processing_log" in sql:
+            return [{"posted_at": T0, "players_left": 7,
+                     "vision_json": {"open_tab": "Info", "final_table_size": 7}}]
+        if "FROM entries e JOIN hands" in sql:
+            return [{"ss_id": 3, "hand_id": "GG-1"}]
+        return []
+    with patch.object(ggh, "query", side_effect=_q):
+        im = ggh._ft_images("T1")
+    assert im["table_ss"][0]["players_left"] == 9
+    assert im["table_ss"][0]["image_url"] == "/api/table-ss/image/5"
+    assert im["lobby"][0]["open_tab"] == "Info" and im["lobby"][0]["note"] == "imagem não guardada"
+    assert im["hand_images"][0]["image_url"] == "/api/screenshots/image/3"
 
 
 @patch("app.routers.gg_health._ft_candidate_list", return_value=[
@@ -140,6 +161,51 @@ def test_summary_counts_only_needs_section():
 
 
 # ── F4: _ft_candidate_list classifica secções (needs/ready/done) ─────────────
+_NONE_D = {"boundary": None, "source": None, "status": "none", "n": None, "cross_check": None}
+
+
+# ── F4 afinação: DISPENSAR — escreve SÓ na ft_boundary_review (mãos intactas) ──
+@patch("app.routers.gg_health.get_conn")
+@patch("app.routers.gg_health.compute_ft_boundary", return_value=_NONE_D)
+def test_dismiss_writes_only_ft_boundary_review(mc, mconn):
+    mcur = MagicMock()
+    mconn.return_value.cursor.return_value.__enter__.return_value = mcur
+    r = TestClient(_app()).post("/api/gg-health/ft/dismiss", json={"tournament_number": "T1"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    calls = [c[0][0] for c in mcur.execute.call_args_list]
+    # GUARDA: um único write, e SÓ na ft_boundary_review — NUNCA hands/tags/study_state/vilões
+    assert len(calls) == 1 and "ft_boundary_review" in calls[0]
+    low = calls[0].lower()
+    assert "hands" not in low and "study_state" not in low and "villain" not in low and "discord_tags" not in low
+    assert "dismissed" in mcur.execute.call_args[0][1]
+
+
+def _list_with(decision, reactivated):
+    from app.routers import gg_health as ggh
+
+    def _q(sql, params=None):
+        if "MAX(tournament_name)" in sql:
+            return [{"tn": "T1", "name": "X", "day": None, "n_hands": 5}]
+        if "decision FROM ft_boundary_review" in sql:
+            return [{"tournament_number": "T1", "decision": decision}]
+        return []
+    with patch.object(ggh, "candidate_tns", return_value=["T1"]), \
+         patch.object(ggh, "compute_ft_boundary", return_value=_NONE_D), \
+         patch.object(ggh, "query", side_effect=_q), \
+         patch.object(ggh, "_ft_dismiss_reactivated", return_value=reactivated):
+        return ggh._ft_candidate_list()[0]
+
+
+def test_dismissed_stays_dismissed_without_new_signal():
+    r = _list_with("dismissed", reactivated=False)
+    assert r["section"] == "dismissed" and r["reactivated"] is False
+
+
+def test_dismissed_reactivates_on_new_strong_signal():
+    r = _list_with("dismissed", reactivated=True)   # tag manual -ft OU print do Info
+    assert r["section"] == "needs" and r["reactivated"] is True and r["decision"] == "pending"
+
+
 def test_candidate_list_classifies_sections():
     from app.routers import gg_health as ggh
     MATCH = {"boundary": T0, "source": "propagated_coherent", "status": "coherent",
