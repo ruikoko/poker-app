@@ -43,6 +43,15 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   HRC stale + **aviso de cobertura parcial à vista**) → **Escrever** explícito → `propagate_ft(confirm=true)` →
   `promoted`, sai da secção. `review_status` = fonte única (services/ft_boundary). +6 testes. **F6** (re-solve HRC
   stale) fica dormente (hoje 0 solves afectados). **Frente FT F1–F5 construída por inteiro.**
+- **F6 (re-solve das mãos HRC stale) — DORMENTE.** Quando uma mão >= fronteira que foi promovida a `-ft` tiver
+  um `hrc_jobs` associado, o solve fica stale (a tag pode mudar o equity model) e precisa de re-solve. Hoje **0
+  solves afectados** (o preview mostra a contagem "HRC stale" — está a 0). Acende sozinha quando aparecer a 1ª.
+- **★ Teste do invariante dos hashes GG (8 Jul, read-only) — EVIDÊNCIA para a decisão do CORE (apa-por-hash),
+  que continua NÃO APROVADA e é do Rui.** 25 torneios GG 2026 ≥100 mãos = 38 488 aparições → **0 violações** do
+  invariante posicional (hash nunca em 2 mesas à mesma hora); 40 hashes seguem o jogador entre mesas. Conflitos
+  de nome = **bug da desanon**, não do hash. Caso 293321688: 6 mãos FT sem nomes → 100% resolúveis por propagação
+  de hash (ressalva: 3 nomes conflituosos → resolver nome-por-hash primeiro). Números em `JOURNAL_2026-07-08.md`,
+  `REGISTO_CONCEITO 2026-07-08`. **Nada implementado** — bate certo com `APA_INDEXACAO_E_COLAPSO §B.4`.
 - **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
   da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
   `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas
