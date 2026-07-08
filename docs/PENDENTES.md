@@ -133,9 +133,16 @@ branco+quarentena; (d) branco honesto > nome errado.
   de lugares por desenho; cobre os 2 sites do `mtt.py`; `_rekey_apa_to_hashes` no-op. **Guarda (b) mínima**
   no `/set-anon-map` (`_assert_no_duplicate_real_names` → 409 no nome-já-usado). Mãos antigas NÃO migram.
   +8 testes; suite alvo verde.
-- **Fase 3 — propagação** (PENDENTE): só tagadas, guardas b/c + **quarentena de nomes na Saúde GG ao estilo da
-  FT**. Inclui o **OCR-merge dos 9 conflitos "mesmo-hash"** (matching tolerante, família `#GOLD-CROWN-CARRY-NAME-TRUNCATION`;
-  auto-merge se inequívoco, 1-clique senão) e os 8 "nome→2-hashes" em quarentena pura. Escrita só por aprovação.
+- **Fase 3 — propagação ✅ FEITA e LIVE (`2c8fe8a`, 8 Jul):** motor `name_propagation.py` (só fonte forte
+  semeia; escreve só brancos das tagadas; `hash_propagation_v1`, não re-semeia). Guardas a–d. **OCR-merge
+  ENDURECIDO** (`_ocr_variant`: truncagem-prefixo OU dist. edição ≤1-2; rejeita "Daniel Filipe"/"Ferreira").
+  **Quarentena** `name_quarantine_review` + painel `NamePropagationPanel` (escolher/fundir/dispensar) +
+  endpoints `/names/*`. Gatilhos F&F + botão "Aplicar propagação". Dry-run: 494 cobertas, 104 preench., 9
+  quarentena; troféu 293321688 12/12. +11 testes.
+
+**✅ CORE CURADO — Fases 1-3 LIVE (`d9c504f`→`dc20ad1`→`2c8fe8a`).** Falta só o **wipe+reimport** (teste de
+aceitação: as tagadas GG entram desanonimizadas à primeira). Escolhas de scope registadas: preenche só
+brancos (upgrade fraco→forte = futuro); Gold-só usa o botão "Aplicar propagação".
 
 **DRY-RUN (laboratório atual, sistema misto):**
 - **98 torneios GG tagados / 738 mãos tagadas.** 80 têm ≥1 semente FORTE; 18 sem semente (propagação dá 0 → branco honesto).

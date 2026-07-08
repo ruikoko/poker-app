@@ -67,7 +67,12 @@ chega ao anon_map, e depois cai na re-indexação. (Frente futura: prompt da Vis
 
 ---
 
-## §B. Mudança do core — **✅ APROVADA COM DESENHO DO RUI (8 Jul 2026)**
+## §B. Mudança do core — **✅ APROVADA + IMPLEMENTADA (Fases 1-3 LIVE, 8 Jul 2026)**
+
+> **Estado (8 Jul, fim):** as **3 fases estão FEITAS e LIVE** — Fase 1 leitores (`d9c504f`), Fase 2
+> writer (`dc20ad1`), Fase 3 propagação + quarentena (`2c8fe8a`). O core está curado; falta só o
+> **wipe+reimport** (teste de aceitação: as tagadas GG entram desanonimizadas à primeira). Desenho
+> canónico em §B.6; estado por fase em §B.6.6.
 
 > **Estado: APROVADA.** O Rui aprovou em **8 Jul 2026**, com a evidência do invariante posicional
 > (25 torneios / 38 488 aparições de hash / **0 violações** — `REGISTO_CONCEITO 2026-07-08`,
@@ -172,16 +177,24 @@ Ordem **leitores → writer** (janela sem partir, garantida por `real_name || ch
    seats (MaLong07/4321) e a queda de lugares sem nome, por desenho. `_rekey_apa_to_hashes` fica no-op
    (mantido p/ mãos antigas). Guarda (b) mínima no `/set-anon-map` (`_assert_no_duplicate_real_names`:
    mesmo nome em 2+ chaves → 409). Mãos antigas NÃO migram. Campo `played` reservado (§B.3).
-4. **Fase 3 — propagação por torneio** (só tagadas, guardas a–d) + **quarentena de nomes** numa
-   **secção nova na Saúde GG ao estilo da FT** (conflitos b/c → decisão do Rui: escolher o nome
-   certo por hash / manter branco). Escrita SÓ por aprovação; branco é o desfecho seguro.
-   - **Sub-tipo OCR do dry-run (decisão do Rui, 8 Jul):** os conflitos "mesmo-hash→nomes-dif" que
-     são **variantes de OCR/truncação do MESMO nome** (`wvvMasteRwvw`/`wvwMasteRwvw`,
-     `Footloose`/`Footlose`) resolvem-se com **matching tolerante a variantes/truncagem** — a
-     **mesma família** do name-matching truncation-tolerant que já existe no **backfill das coroas
-     Gold** (`#GOLD-CROWN-CARRY-NAME-TRUNCATION`). **Auto-merge** quando a distância é mínima e
-     inequívoca; **1-clique na quarentena** quando não. Os conflitos "nome→2-hashes" ficam
-     **quarentena PURA** (decisão do Rui caso a caso — pelo invariante, 2 hashes = 2 pessoas).
+4. **Fase 3 — propagação por torneio ✅ FEITA e LIVE (`2c8fe8a`, 8 Jul)** — motor
+   `services/name_propagation.py`: lê o mapa hash→nome de todas as mãos com desanon, **só fonte FORTE
+   semeia**, escreve só nos **brancos das mãos TAGADAS** (`match_method=hash_propagation_v1`, "por
+   verificar"; nomes propagados **não re-semeiam** — sem cascata). Guardas a–d. **Auto-write** dos
+   casos limpos (gatilhos F&F em `import_`/`import_hm3`/reconcile + botão "Aplicar propagação"); a
+   **quarentena de nomes** (`name_quarantine_review`, irmã da FT) é sempre manual (painel
+   `NamePropagationPanel` na Saúde GG: escolher/fundir/dispensar). Decisões persistidas e respeitadas
+   por re-runs.
+   - **OCR-merge (decisão do Rui, 8 Jul; critério ENDURECIDO no `2c8fe8a`):** os "mesmo-hash→nomes-dif"
+     que são **variantes de OCR/truncação do MESMO nome** (`Footloose`/`Footlose`) **auto-fundem**;
+     mas o `_same_player` das coroas Gold (prefixo de 6) fundiria por erro **"Daniel Filipe"/"Daniel
+     Ferreira"** → usa-se `_ocr_variant` (truncagem-prefixo OU distância de edição ≤1-2), à prova do
+     reimport. Ambíguo → quarentena (1-clique). Os "nome→2-hashes" ficam **quarentena PURA** (2 hashes
+     = 2 pessoas). **Dry-run laboratório:** 494 cobertas, 104 preenchimentos, 22 auto-merged, 9
+     quarentena (8 veneno + 1 OCR). **Troféu 293321688:** 12/12 tagadas resolvidas, 0 quarentena.
+   - **Escolhas de scope (registadas):** preenche **só brancos** (não sobrescreve nome fraco existente;
+     upgrade fraco→forte = decisão futura do Rui). Gatilho de Gold-só (sem HH import) usa o botão
+     "Aplicar propagação" (os hooks de import cobrem o fluxo normal).
 
 ---
 

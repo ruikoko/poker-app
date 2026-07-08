@@ -324,10 +324,11 @@ Resumo do que importa à desanon:
   hashes); (c) conflito no mesmo hash → forte vence fraca, forte-vs-forte → branco + quarentena;
   (d) **branco é honesto, nome errado é veneno** (a lei de §3.3/§A.5). Dry-run (8 Jul): 437 mãos
   tagadas resolvidas por propagação, 8 venenos genuínos + 9 merges de OCR, 24 brancos.
-- **Fases 1 (leitores a `real_name || chave`, `d9c504f`) e 2 (writer sem re-indexar, `dc20ad1`) FEITAS
-  e LIVE**; a Fase 2 fecha por desenho a fusão de seats (MaLong07/4321) e a queda de lugares. **Fase 3**
-  (propagação por hash + quarentena de nomes na Saúde GG) **pendente**, com OK do Rui. Guarda (b) mínima
-  já no `/set-anon-map` (nome-já-usado → 409).
+- **Fases 1-3 FEITAS e LIVE** (`d9c504f` leitores → `dc20ad1` writer → `2c8fe8a` propagação). A Fase 2
+  fecha por desenho a fusão de seats (MaLong07/4321) e a queda de lugares; a Fase 3 propaga nomes fortes
+  pelos brancos das mãos tagadas do torneio (`name_propagation.py`, `match_method=hash_propagation_v1`,
+  guardas a–d, OCR-merge endurecido) com **quarentena de nomes** na Saúde GG (`NamePropagationPanel`).
+  **Core curado**; falta só o wipe+reimport (aceitação). Guarda (b) mínima também no `/set-anon-map` (409).
 
 ---
 

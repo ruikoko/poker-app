@@ -172,3 +172,8 @@ na lab data estão sem tag base ou já `-ft`). Acende quando aparecer a 1ª mão
 **Antes de mexer no motor:** ler `services/ft_boundary.py` + `REGISTO_CONCEITO 2026-07-07/07-08`.
 Escrita das tags `-ft` **só por aprovação manual**. O **wipe+reimport** é o teste de aceitação
 de toda a frente (as `-ft` entram a sério quando as mãos de FT chegarem com tags base).
+
+> **Irmã da FT:** a **quarentena de nomes** da propagação por hash (`name_quarantine_review`,
+> `NamePropagationPanel`, APA §B.6 Fase 3) segue o MESMO padrão desta frente — secção na Saúde GG,
+> decisões persistidas e respeitadas por re-runs, escrita manual nos casos de conflito. Motor em
+> `services/name_propagation.py`; ver `DESANON_ANATOMIA §3.4`.

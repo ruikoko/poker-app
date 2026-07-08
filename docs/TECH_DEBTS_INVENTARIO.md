@@ -12,6 +12,13 @@ Sessão longa. Frente FT construída por inteiro e LIVE; decisão do core APROVA
 (leitores). Detalhe: `JOURNAL_2026-07-08.md`, `FT_BOUNDARY_ANATOMIA.md`, `APA_INDEXACAO_E_COLAPSO §B.6`.
 
 **Fechados:**
+- ✅ **CORE apa-por-hash CURADO (Fases 1-3 LIVE)** — `d9c504f` leitores → `dc20ad1` writer →
+  `2c8fe8a` propagação + quarentena de nomes. Fecha a fusão de seats (MaLong07/4321) e a queda de
+  lugares por desenho; propaga nomes fortes pelos brancos das tagadas. Teste de aceitação = wipe+reimport.
+  Scope futuro (LOW, registado): `#APA-WEAK-TO-STRONG-UPGRADE` (propagação preenche só brancos, não
+  faz upgrade de nome fraco→forte) + `#APA-GOLD-ONLY-TRIGGER` (upload Gold-só usa o botão "Aplicar
+  propagação"; hooks de import cobrem o normal). `#OCR-MERGE-GOLD-CROWN-UNSAFE` resolvido com
+  `_ocr_variant` endurecido (distância de edição, rejeita colisão de 1º nome).
 - ✅ **`#FT-ENSAIO-VIA-F3-ENDPOINT`** — os ensaios da FT correm por `GET /api/gg-health/ft/preview`
   (mesmo caminho da app), não por script local/proxy. (F3, 8 Jul.)
 - ✅ **`#RAILWAY-TOKEN-SHORT-LIVED`** (mitigado) — DB reads passam por `~/.pokerapp_db_ro.env`
