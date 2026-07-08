@@ -44,3 +44,10 @@ O Code **só LÊ/TOCA paths explicitamente listados**: a **tabela dos intocávei
 **Facto associado (corrige o entendimento):** as **HH/TS do GG vivem no BACKOFFICE do Rui (fora do PC)**; é **ele** que as descarrega e coloca manualmente em `gg_hh`/`gg_ts`. **Nunca procurar no disco o que é do ritual manual dele** — se falta a GG, pede-se ao Rui, não se vasculha o disco.
 
 **Reafirmação de papéis (`PAPEIS_E_RESPONSABILIDADES`):** decisões de produto, dados e operação manual = **Rui**; Web e Code movem-se **dentro do que está descrito**; as autorizações funcionam como documentado — **nada se estende por iniciativa própria**.
+
+## 12. Mudanças à ARQUITETURA são produto — decidem-se COM o Rui ANTES (regra da arquitetura)
+Qualquer decisão que **transforme a arquitetura da app** apresenta-se ao **Rui ANTES de ficar decidida**, em **linguagem simples**, com as **opções** e o **custo de cada uma** (com números quando os houver). Conta como arquitetura, entre outros: **onde vivem as defesas/guardas** (write-time vs consumo vs backfill), **o que se grava cru vs validado**, **contratos entre camadas**, **fontes de verdade e a sua hierarquia**. Vale **mesmo quando a decisão parece "técnica"**: se define **o que entra na base** ou **como o sistema se protege**, é **produto**, e o produto é do Rui.
+
+**Fronteira:** correções de **bugs dentro da arquitetura existente** (um valor errado, um off-by-one, uma janela mal calibrada) **não** precisam disto — implementam-se no ciclo normal. **Mudanças à arquitetura** (mover uma guarda de sítio, passar a gravar validado onde se gravava cru, inverter uma hierarquia de fontes, criar/eliminar um contrato entre camadas) **precisam sempre** do quadro de decisão prévio.
+
+Nasceu (8 Jul) do caso "defesa das coroas": decidir que *a protecção sistémica é o prompt e a guarda `crown>=base/2` vive só nos backfills/gate (live path grava cru)* é uma escolha de **onde vivem as defesas** → é arquitetura → é do Rui. Ficou **reaberta** como decisão pendente e passou a existir esta regra.

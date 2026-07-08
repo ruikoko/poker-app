@@ -152,24 +152,30 @@ arrisca sair de uma base incompleta.
 (base = `tournament_summaries.buy_in_bounty`; = provável leitura da **chama/VPIP** em vez da coroa). Fix
 chama-vs-coroa = **`824f23d` (1 Jul)** (prompt distingue coroa$/chama% + guarda dura `crown >= base/2`).
 
-**Distribuição (112 mãos hoje):** **112/112 PRÉ-fix, 0 PÓS-fix.** Por `hands.created_at`: todas criadas
-**18–26 Jun** (< 1 Jul). Por `table_ss_processing_log.uploaded_at` (63 com SS de desanon casada): todas
-**18–26 Jun**; as 49 sem SS casada = 47 `table_ss` (log limpo em resets antigos) + 2 `position_v3`, mãos
-na mesma criadas pré-fix. **Zero** entries replayer/SS criadas após 1 Jul; **zero** uploads table-SS após
-1 Jul; o único caminho de escrita pós-fix (backfill gold-carry `6edf785`, 2 Jul) **TEM a guarda**
-(0 rejeitadas) e só **acrescenta** a coroas vazias → não criou estas.
+**Distribuição (107 mãos):** **107/107 PRÉ-fix, 0 PÓS-fix.** (⚠️ um scan intermédio deu 112 por o `LEFT JOIN
+table_ss` multiplicar mãos com >1 linha de log — **107 é o número certo**, bate com o contador da secção.)
+Por `hands.created_at`: todas criadas **18–26 Jun** (< 1 Jul). Por `table_ss_processing_log.uploaded_at`
+(63 com SS de desanon casada): todas **18–26 Jun**; as sem SS casada = `table_ss` (log limpo em resets
+antigos) + `position_v3`, mãos na mesma criadas pré-fix. **Zero** entries replayer/SS criadas após 1 Jul;
+**zero** uploads table-SS após 1 Jul; o único caminho de escrita pós-fix (backfill gold-carry `6edf785`,
+2 Jul) **TEM a guarda** (0 rejeitadas) e só **acrescenta** a coroas vazias → não criou estas.
+
+**Forma das 107 (perfil chama sistémica vs bordo):** seats abaixo-de-metade por mão →
+`{1:40, 2:20, 3:12, 4:7, 5:2, 6:2, 7:9, 8:15}`. Os **≥7 seats (24 mãos)** = mesa quase inteira lida como
+chama/VPIP = bug sistémico do prompt antigo (morre com o prompt novo). Os **1-seat (40)** = população onde
+um **bordo legítimo** (coroa-verde/eliminação: a coroa própria do eliminado some, aparece a verde na do
+eliminador) pode reaparecer pós-fix. 349 seats no total, 57 a `$0`.
 
 **Veredicto: CICATRIZ.** Escritas todas na desanon de Junho, antes do prompt chama/coroa. **Morrem no wipe.**
 → **Critério de aceitação do reimport:** pós-reimport a secção deve nascer **~0** (só bordos legítimos de
-coroa-verde/eliminação). Se nascer alta, a leitura chama/coroa **regrediu**.
+coroa-verde/eliminação, subconjunto dos 1-seat). Se nascer alta (ressurgirem mãos multi-seat), a leitura
+chama/coroa **regrediu**.
 
-**Nota de honestidade (não é furo que gerou as 112, é defesa-em-profundidade):** a protecção *sistémica* é
-o **PROMPT** (`824f23d`), não uma guarda universal na escrita. O enrich **live** (`screenshot.py:1044`,
-`_enrich_all_players_actions`) grava o `bounty_value_usd` da Vision **cru, sem** a guarda `crown>=base/2` —
-a guarda só existe nos **dois backfills** (`screenshot.py:2144/2395`) e no **gate do HRC**
-(`queue_export.py:1694`). Pós-reimport, um misread de bordo (coroa-verde/eliminação) pode aterrar na secção
-— o que é o comportamento desejado (é uma fila de revisão manual). Universalizar a guarda no live path fica
-como melhoria opcional, **não** pré-wipe.
+**⚠️ DECISÃO DE ARQUITETURA REABERTA (8 Jul, pendente do Rui — `FLUXO §12`):** onde vive a defesa das
+coroas. Não é furo que gerou as 107 (é defesa-em-profundidade). Hoje a protecção *sistémica* é o **PROMPT**
+(`824f23d`); a guarda `crown>=base/2` só existe nos **dois backfills** (`screenshot.py:2144/2395`) e no
+**gate do HRC** (`queue_export.py:1694`); o enrich **live** (`screenshot.py:1044`) grava o `bounty_value_usd`
+da Vision **cru**. **Quadro A vs B apresentado ao Rui** — aguarda decisão (não implementar até decidir).
 
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 
