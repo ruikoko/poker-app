@@ -1,5 +1,26 @@
 # Pendentes — backlog vivo
 
+## ✅ Sistema de nomes (quarentena Fase 3 + RE-ENTRADA + detetor de evidência dura) — LIVE (8 Jul)
+
+**LIVE (`main`→`5774bc2`).** Painel de conflitos de nomes na Saúde GG (grupo `name_quarantine`): mostra os
+**DOIS lados** de cada "nome→2 lugares" (mãos clicáveis + fonte forte/fraca + **Seats do raw** + imagens +
+**"+ imagem"** para anexar Gold do disco) + o **selo "nome em revisão"** na mão. Verbos: **É este /
+Escolher / Fundir / Mesma pessoa (re-entrada) / Dispensar**. Conceito re-entrada (o hash é por ENTRADA,
+não por pessoa): `DESANON_ANATOMIA §3.3`, `REGRAS_NEGOCIO §24`, `REGISTO_CONCEITO 2026-07-08`. Motor:
+`services/name_propagation.py`.
+
+- **Detetor `reentry_hint`** — `confirmed` (bust da 1ª + bala fresca da 2ª + gap curto) vs `likely` (só
+  sinais fracos). Usa mãos **SEATED** (não NAMED); `same_nick` compara só a leitura **FORTE** (ignora
+  misreads fracos). Nota de honestidade: falta de bust legível nunca despromove.
+- **Scrub** (`propagation_plan.corrected` + `_clean_stale_villains`): a decisão VERIFICADA **corrige** o
+  misread fraco na mão (não fica agarrado) e **limpa vilões stale**. Mão forte / mapa não-verificado intocado.
+- **⏳ PENDENTE do carimbo do Rui (3 cartões):** **OHmyBUDDHA** (`confirmed`), **M_R_Z_E_** (`confirmed`),
+  **Silin O** (`likely`). Ao carimbar OHmyBUDDHA, verificar à vista na mão `200072` que o "Vadzim" saiu do
+  Seat 6. **Quando a quarentena zerar → wipe+reimport** é o teste de aceitação (tagadas GG desanonimizadas
+  + re-entradas resolvidas à primeira).
+- **Deferido:** upgrade automático fraco→`position_v3` (só decisão manual verificada corrige hoje); misread
+  "Diego Emperador" no hash `93d63976` (outro nome-real-lugar-errado, fora do cartão OHmyBUDDHA).
+
 ## ✅ Propagação FT (`ft_boundary`) — F1–F5 CONSTRUÍDA POR INTEIRO e LIVE (8 Jul); F6 dormente
 
 **Frente FECHADA (LIVE, `main`→`874bd7e`).** Anatomia consolidada: **`docs/FT_BOUNDARY_ANATOMIA.md`**.
