@@ -488,7 +488,7 @@ def _find_candidate_hands(
         params.append(str(table))
     rows = query(
         f"""
-        SELECT id, hand_id, tournament_number, tournament_name, site, played_at
+        SELECT id, hand_id, tournament_number, tournament_name, site, played_at, raw
           FROM hands
          WHERE played_at >= '2026-01-01'
            AND site = %s
@@ -500,6 +500,30 @@ def _find_candidate_hands(
         tuple(params),
     )
     return [dict(r) for r in rows]
+
+
+# ── #WPN-PS-TABLE-SS-TIME-ONLY-MATCH: validação por NICKS (WPN/PS não têm nome fiável) ──
+_SEAT_NICK_RE = re.compile(r'^Seat \d+: (.+?) \(', re.M)
+_SS_NICK_MIN = 3          # nicks lidos mínimos para validar (senão sinal insuficiente)
+_SS_NICK_FIT_MIN = 0.5    # sobreposição mínima: metade dos nicks lidos batem com a mão
+
+
+def _ss_read_nicks(vj: dict) -> set:
+    """Nicks lidos pela Vision na captura de mesa (lowercased, sem vazios)."""
+    return {(s.get("nick") or "").strip().lower()
+            for s in (vj.get("seats") or []) if (s.get("nick") or "").strip()}
+
+
+def _hand_seat_nicks(raw) -> set:
+    """Nicks dos Seat lines da HH (lowercased). WPN/PS têm nicks REAIS."""
+    return {m.group(1).strip().lower() for m in _SEAT_NICK_RE.finditer(raw or "")}
+
+
+def _nick_fit(ss_nicks: set, raw) -> float:
+    """Fracção dos nicks LIDOS que aparecem nos seats da mão. 0..1."""
+    if not ss_nicks:
+        return 0.0
+    return len(ss_nicks & _hand_seat_nicks(raw)) / len(ss_nicks)
 
 
 def _find_closest_hand_by_tn(
@@ -564,8 +588,21 @@ def _resolve_match(
                 and not name_tokens_subset(ss_name, hand_name)):
             return {"matched": None, "tn": None, "ambiguous": False,
                     "reason": f"single_tn_name_mismatch:{ss_name}!={hand_name}"}
-        # SS sem nome lido, ou sala de nome genérico (WPN/PS) → leniente
-        # (proximidade temporal é o único sinal).
+        # #WPN-PS-TABLE-SS-TIME-ONLY-MATCH: WPN/PS não têm nome fiável (WPN=garantia
+        # genérica, PS=NULL) → antes casava só pela HORA (armadilha em multi-tabling:
+        # 2 mesas do mesmo torneio à mesma hora trocam). Agora valida por NICKS (as HH
+        # WPN/PS têm nicks reais; a Vision lê-os): escolhe o candidato de melhor
+        # sobreposição; divergência (fit < metade) → NÃO casa (orphan honesto). Só quando
+        # a SS leu ≥3 nicks (sinal suficiente); com menos, cai na proximidade temporal.
+        if site not in _NAME_RELIABLE_SITES:
+            ss_n = _ss_read_nicks(vj)
+            if len(ss_n) >= _SS_NICK_MIN:
+                c = max(candidates, key=lambda cd: _nick_fit(ss_n, cd.get("raw")))
+                fit = _nick_fit(ss_n, c.get("raw"))
+                if fit < _SS_NICK_FIT_MIN:
+                    return {"matched": None, "tn": None, "ambiguous": False,
+                            "reason": f"wpn_ps_nick_mismatch:{fit:.0%}"}
+        # SS sem nome lido, ou nicks insuficientes → leniente (proximidade temporal).
         return {"matched": c, "tn": c["tournament_number"], "ambiguous": False,
                 "reason": "single_tn"}
     # Multi-tabling: desambiguar pelo nome lido nesta SS.
