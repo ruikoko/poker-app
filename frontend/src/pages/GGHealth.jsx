@@ -448,40 +448,91 @@ function FtQuarantinePanel() {
 }
 
 // ── Fase 3: painel da propagação de nomes por hash + quarentena ──────────────
-function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss }) {
-  const [custom, setCustom] = useState('')
-  const cands = it.candidates || []
+
+// Um LADO do conflito: o candidato (hash ou variante de nome) com as suas mãos
+// (clicáveis + fonte forte/fraca) e as imagens dessas mãos (miniatura → lightbox).
+// É com as imagens que o Rui reconhece qual dos lugares é o jogador verdadeiro.
+function SideColumn({ side, isHash, actionLabel, onAct, busy, onZoom }) {
+  const appear = side.appearances || []
+  const imgs = side.images || []
   return (
-    <div style={{ ...card, padding: 12, marginBottom: 8 }}>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-        Torneio <b>{it.tournament_number}</b> · {it.kind === 'same_hash'
-          ? <>hash <code>{it.conflict_key}</code> lido com nomes diferentes</>
-          : <>nome <b>{it.conflict_key}</b> atribuído a 2 lugares (um está errado)</>}
-        {it.hands?.length ? <> · mãos: {it.hands.slice(0, 4).join(', ')}{it.hands.length > 4 ? '…' : ''}</> : null}
+    <div style={{ ...card, padding: 10, flex: 1, minWidth: 240, background: '#0d1017' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        {isHash
+          ? <code style={{ fontSize: 13, color: '#c9d1d9' }}>{side.hash}</code>
+          : <span style={{ fontSize: 13, fontWeight: 700 }}>{side.name}</span>}
+        {isHash && <span style={{ fontSize: 12, color: 'var(--muted)' }}>lê-se <b>{side.name}</b></span>}
+        <button disabled={busy} style={{ ...btn, marginLeft: 'auto', borderColor: '#22c55e', color: '#86efac', fontWeight: 700 }}
+          onClick={onAct} title="Este é o jogador verdadeiro — fica com o nome; o outro fica branco">{actionLabel}</button>
       </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        {it.kind === 'same_hash' ? (
-          <>
-            {cands.map(nm => (
-              <button key={nm} disabled={busy} style={btn} onClick={() => onMerge(it, nm)}
-                title="Estas são variantes do mesmo nome — fundir neste">{nm}</button>
-            ))}
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>ou outro:</span>
-            <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="nome certo"
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border,#30363d)', background: 'transparent', color: 'inherit', fontSize: 13 }} />
-            <button disabled={busy || !custom.trim()} style={btn} onClick={() => onChoose(it, custom.trim(), null)}>Escolher</button>
-          </>
-        ) : (
-          <>
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Qual lugar é <b>{it.conflict_key}</b>?</span>
-            {cands.map(h => (
-              <button key={h} disabled={busy} style={btn} onClick={() => onChoose(it, it.conflict_key, h)}
-                title="Este hash recebe o nome; o outro fica branco"><code>{h}</code></button>
-            ))}
-          </>
-        )}
-        <button disabled={busy} style={{ ...btn, borderColor: '#6b7280', color: '#9ca3af' }}
-          onClick={() => onDismiss(it)} title="Nenhum é fiável — fica branco (honesto)">Dispensar</button>
+      {imgs.length > 0 ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+          {imgs.map((im, i) => (
+            <img key={i} src={API_ROOT + im.image_url} alt="" loading="lazy" title={im.hand_id || ''}
+              onClick={() => onZoom(API_ROOT + im.image_url)}
+              style={{ width: 92, height: 60, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
+          ))}
+        </div>
+      ) : <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>— sem imagens guardadas destas mãos</div>}
+      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 }}>
+        {appear.length} mão(s)
+      </div>
+      <div style={{ maxHeight: 150, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {appear.map((a, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            {a.db_id
+              ? <Link to={`/hand/${a.db_id}`} style={{ fontFamily: mono, color: '#60a5fa', textDecoration: 'none' }}>{a.hand_id}</Link>
+              : <span style={{ fontFamily: mono, color: '#64748b' }}>{a.hand_id || '—'}</span>}
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '0 6px', borderRadius: 4,
+              color: a.source === 'strong' ? '#86efac' : '#fbbf24',
+              background: a.source === 'strong' ? 'rgba(34,197,94,0.12)' : 'rgba(251,191,36,0.12)' }}>
+              {a.source === 'strong' ? 'forte' : 'fraca'}</span>
+            <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onZoom }) {
+  const [custom, setCustom] = useState('')
+  const isHash = it.kind !== 'same_hash'   // name_2_hash → lados são hashes; same_hash → variantes
+  const sides = it.sides || []
+  return (
+    <div style={{ ...card, padding: 12, marginBottom: 10 }}>
+      <div style={{ fontSize: 13, marginBottom: 8 }}>
+        Torneio <b>{it.tournament_number}</b> · {isHash
+          ? <>o nome <b>{it.conflict_key}</b> foi atribuído a <b>2 lugares</b> — só um é o jogador. <span style={{ color: 'var(--muted)' }}>Vê as imagens de cada lado e escolhe «É este».</span></>
+          : <>o hash <code>{it.conflict_key}</code> foi lido com <b>nomes diferentes</b>. <span style={{ color: 'var(--muted)' }}>Confirma qual a leitura certa.</span></>}
+      </div>
+      {sides.length > 0 ? (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {sides.map((s, i) => (
+            <SideColumn key={i} side={s} isHash={isHash} busy={busy} onZoom={onZoom}
+              actionLabel={isHash ? 'É este' : 'É esta'}
+              onAct={() => isHash ? onChoose(it, it.conflict_key, s.hash) : onMerge(it, s.name)} />
+          ))}
+        </div>
+      ) : (
+        // fallback (backend antigo, sem `sides`): só os candidatos como botões
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {(it.candidates || []).map(c => (
+            <button key={c} disabled={busy} style={btn}
+              onClick={() => isHash ? onChoose(it, it.conflict_key, c) : onMerge(it, c)}>
+              {isHash ? <code>{c}</code> : c}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+        {!isHash && <>
+          <span style={{ color: 'var(--muted)', fontSize: 12 }}>ou outro nome:</span>
+          <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="nome certo"
+            style={{ ...inp, width: 160 }} />
+          <button disabled={busy || !custom.trim()} style={btn} onClick={() => onChoose(it, custom.trim(), null)}>Escolher</button>
+        </>}
+        <button disabled={busy} style={{ ...btn, marginLeft: 'auto', borderColor: '#6b7280', color: '#9ca3af' }}
+          onClick={() => onDismiss(it)} title="Nenhum é fiável — ambos ficam brancos (honesto)">Dispensar</button>
       </div>
     </div>
   )
@@ -492,6 +543,7 @@ function NamePropagationPanel() {
   const [quar, setQuar] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [zoom, setZoom] = useState(null)
 
   const load = () => {
     ggHealth.namesQuarantine().then(r => setQuar(r.items || [])).catch(e => setMsg('Erro: ' + e.message))
@@ -537,10 +589,11 @@ function NamePropagationPanel() {
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{quar.length} conflito(s) a decidir:</div>
             {quar.map((it, i) => (
               <NameConflictCard key={i} it={it} busy={busy}
-                onChoose={onChoose} onMerge={onMerge} onDismiss={onDismiss} />
+                onChoose={onChoose} onMerge={onMerge} onDismiss={onDismiss} onZoom={setZoom} />
             ))}
           </>
         )}
+      <Lightbox src={zoom} onClose={() => setZoom(null)} />
     </div>
   )
 }

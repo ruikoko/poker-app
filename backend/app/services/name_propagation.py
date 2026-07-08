@@ -194,6 +194,58 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", " ", (name or "").lower().rstrip(". ").strip())
 
 
+# ── lados de um conflito de quarentena (contexto p/ o Rui decidir) ────────────
+
+def conflict_sides(hands: list, item: dict) -> list:
+    """Para UM item de quarentena, devolve os LADOS (candidatos) com o contexto que o
+    Rui precisa p/ decidir: as aparições (mão + fonte forte/fraca) de cada lado. PURA —
+    NÃO lê imagens (o router junta-as por `db_ids`, que aqui só se coleccionam).
+
+    - `name_2_hash` (nome em 2 lugares): um lado por HASH candidato → as mãos onde esse
+      hash carrega o nome (é entre estes 2 lugares que o Rui escolhe qual é o jogador).
+    - `same_hash` (hash lido com nomes diferentes): um lado por VARIANTE de nome → as
+      mãos/aparições onde o hash foi lido como essa variante.
+    """
+    kind = item.get("kind")
+    key = item.get("conflict_key")
+    cands = item.get("candidates") or []
+    sides = []
+
+    def _appear_for(match) -> list:
+        """match(hand) -> (matches: bool, display_name: str|None)."""
+        out = []
+        for h in hands:
+            ok, nm = match(h)
+            if ok:
+                out.append({"hand_id": h.get("hand_id"), "db_id": h.get("id"),
+                            "name": nm, "source": "strong" if _is_strong(h) else "weak"})
+        out.sort(key=lambda a: (a["source"] != "strong", a["hand_id"] or ""))
+        return out
+
+    if kind == "name_2_hash":
+        for hc in cands:
+            def _m(h, hc=hc):
+                am = _anon_map(_pn(h))
+                return (hc in am, am.get(hc))
+            appear = _appear_for(_m)
+            name = next((a["name"] for a in appear if a["source"] == "strong"),
+                        appear[0]["name"] if appear else key)
+            sides.append({"kind": "hash", "hash": hc, "name": name,
+                          "db_ids": [a["db_id"] for a in appear if a.get("db_id")],
+                          "appearances": appear})
+    elif kind == "same_hash":
+        for nv in cands:
+            nnorm = _norm(nv)
+            def _m(h, nnorm=nnorm):
+                nm = _anon_map(_pn(h)).get(key)
+                return (bool(nm) and _norm(nm) == nnorm, nm)
+            appear = _appear_for(_m)
+            sides.append({"kind": "name", "name": nv,
+                          "db_ids": [a["db_id"] for a in appear if a.get("db_id")],
+                          "appearances": appear})
+    return sides
+
+
 # ── plano de propagação (só-tagadas; preenche brancos) ───────────────────────
 
 def propagation_plan(hands: list[dict], clean_map: dict) -> dict:

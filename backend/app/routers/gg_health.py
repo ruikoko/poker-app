@@ -747,6 +747,32 @@ def _np_load_hands(tn) -> list:
         FROM hands WHERE site='GGPoker' AND tournament_number=%s AND played_at >= '2026-01-01'""", (tn,))]
 
 
+def _images_for_hands(db_ids: list) -> list:
+    """TODAS as imagens que a app tem para um conjunto de mãos (por db_id), p/ o painel
+    de conflitos de nomes: capturas de MESA (table_ss, img_b64) + outras imagens ligadas
+    às mãos (gold/replayer). Só URLs/metadados — read-only. Espelha a regra 8 Jul da FT
+    (é com as imagens que o Rui reconhece o jogador), mas filtrada às mãos do lado."""
+    if not db_ids:
+        return []
+    out = []
+    caps = query(
+        "SELECT DISTINCT l.id AS ss_id, l.captured_at, h.hand_id "
+        "FROM table_ss_processing_log l JOIN hands h ON h.context_table_ss_id = l.id "
+        "WHERE h.id = ANY(%s) AND l.img_b64 IS NOT NULL ORDER BY l.captured_at", (db_ids,))
+    for r in caps:
+        out.append({"image_url": f"/api/table-ss/image/{r['ss_id']}", "kind": "table_ss",
+                    "hand_id": r["hand_id"],
+                    "captured_at": r["captured_at"].isoformat() if r["captured_at"] else None})
+    other = query(
+        "SELECT e.id AS ss_id, h.hand_id FROM entries e JOIN hands h ON h.entry_id = e.id "
+        "WHERE h.id = ANY(%s) AND (e.raw_json->>'img_b64') IS NOT NULL "
+        "AND e.entry_type IN ('screenshot','replayer_link') ORDER BY h.played_at", (db_ids,))
+    for r in other:
+        out.append({"image_url": f"/api/screenshots/image/{r['ss_id']}", "kind": "hand",
+                    "hand_id": r["hand_id"]})
+    return out
+
+
 def _np_preview_for_tn(tn) -> dict:
     hands = _np_load_hands(tn)
     clean, quar = _np.build_name_map(hands)
@@ -790,12 +816,30 @@ def np_preview(tn: Optional[str] = Query(None), current_user=Depends(require_aut
 
 @router.get("/names/quarantine")
 def np_quarantine(current_user=Depends(require_auth)):
-    """Lista as entradas de quarentena de nomes PENDENTES (por torneio) para o painel."""
+    """Lista as entradas de quarentena de nomes PENDENTES (por torneio) para o painel.
+    Cada item traz os DOIS lados do conflito (`sides`): por candidato, as mãos onde
+    aparece (com fonte forte/fraca) + as imagens dessas mãos — é com os dois lados lado
+    a lado (e as imagens) que o Rui reconhece qual dos lugares é o jogador verdadeiro."""
     rows = query("""SELECT tournament_number, kind, conflict_key, candidates, hands, decision,
                            chosen_name, chosen_hash, decided_by, decided_at
                     FROM name_quarantine_review WHERE decision='pending'
                     ORDER BY tournament_number, kind""")
-    return {"items": [dict(r) for r in rows], "count": len(rows)}
+    hcache: dict = {}
+
+    def hands_of(tn):
+        if tn not in hcache:
+            hcache[tn] = _np_load_hands(tn)
+        return hcache[tn]
+
+    items = []
+    for r in rows:
+        it = dict(r)
+        sides = _np.conflict_sides(hands_of(it["tournament_number"]), it)
+        for s in sides:
+            s["images"] = _images_for_hands(s.pop("db_ids", []))
+        it["sides"] = sides
+        items.append(it)
+    return {"items": items, "count": len(items)}
 
 
 class NpDecisionBody(BaseModel):

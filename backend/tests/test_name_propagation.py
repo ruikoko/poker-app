@@ -123,3 +123,34 @@ def test_apply_propagation_dry_run_returns_plan():
     clean, _ = np.build_name_map([seed, tagged])
     res = np.apply_propagation([seed, tagged], clean, dry_run=True)
     assert res["dry_run"] is True and res["fills_total"] == 1
+
+
+# ── conflict_sides — os DOIS lados com contexto (mãos + fonte) p/ o Rui decidir ─
+
+def test_conflict_sides_name_2_hash_two_sides_with_source():
+    h1 = _hand("GG-1", "position_v3", {"3b4cd0c7": "Bob"}, ["3b4cd0c7"], hid=1)
+    weak = _hand("GG-3", "table_ss", {"3b4cd0c7": "Bob"}, ["3b4cd0c7"], hid=3)   # via fraca
+    h2 = _hand("GG-2", "position_v3", {"89ef4cba": "Bob"}, ["89ef4cba"], hid=2)
+    item = {"kind": "name_2_hash", "conflict_key": "Bob",
+            "candidates": ["3b4cd0c7", "89ef4cba"]}
+    sides = np.conflict_sides([h1, weak, h2], item)
+    assert {s["hash"] for s in sides} == {"3b4cd0c7", "89ef4cba"}
+    s1 = next(s for s in sides if s["hash"] == "3b4cd0c7")
+    assert {a["hand_id"] for a in s1["appearances"]} == {"GG-1", "GG-3"}
+    assert {a["source"] for a in s1["appearances"]} == {"strong", "weak"}
+    assert s1["appearances"][0]["source"] == "strong"     # fortes primeiro
+    assert set(s1["db_ids"]) == {1, 3}
+    s2 = next(s for s in sides if s["hash"] == "89ef4cba")
+    assert [a["hand_id"] for a in s2["appearances"]] == ["GG-2"]
+
+
+def test_conflict_sides_same_hash_one_side_per_variant():
+    h1 = _hand("GG-1", "position_v3", {"3b4cd0c7": "Daniel Filipe"}, ["3b4cd0c7"], hid=1)
+    h2 = _hand("GG-2", "position_v3", {"3b4cd0c7": "Mikhail Petrov"}, ["3b4cd0c7"], hid=2)
+    item = {"kind": "same_hash", "conflict_key": "3b4cd0c7",
+            "candidates": ["Daniel Filipe", "Mikhail Petrov"]}
+    sides = np.conflict_sides([h1, h2], item)
+    assert {s["name"] for s in sides} == {"Daniel Filipe", "Mikhail Petrov"}
+    sd = next(s for s in sides if s["name"] == "Daniel Filipe")
+    assert [a["hand_id"] for a in sd["appearances"]] == ["GG-1"]
+    assert sd["db_ids"] == [1]

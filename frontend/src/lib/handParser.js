@@ -485,6 +485,37 @@ export function parseHH(raw, apa) {
       board: bc, ps: snap(),
       analysis: null, villainAnalysis: null,
     })
+  } else {
+    // ── Desfecho por folds (sem showdown): o vencedor leva o pote ─────────────
+    // Regra Rui (mão-troféu GG-6113127886): quando a mão acaba porque todos
+    // passam/desistem até sobrar UM jogador, o replay tem de terminar com a linha
+    // do desfecho (vencedor + pote) — senão parece acabar no fold do penúltimo.
+    // Vale p/ qualquer street que termine por folds. Guarda `alive===1` protege
+    // contra all-in multiway sem cartas mostradas (esses não são fold-out).
+    const alive = pState.filter(p => !p.folded)
+    if (alive.length === 1) {
+      const w = alive[0]
+      const wIdx = pState.indexOf(w)
+      const lastAction = [...steps].reverse().find(s => s.actor)
+      const street = lastAction?.street || 'preflop'
+      const board = lastAction?.board || []
+      // Walk = fim no pré-flop e o vencedor não agiu voluntariamente (só a blind).
+      const winnerActed = steps.some(s => s.actorIdx === wIdx &&
+        ['calls', 'bets', 'raises', 'checks'].includes(s.actionType))
+      const isWalk = street === 'preflop' && !winnerActed
+      const potBB = +(pot / bb).toFixed(1)
+      const action = isWalk
+        ? `leva o pote (${formatBB(potBB)}) sem ação — walk`
+        : `leva o pote (${formatBB(potBB)}) — sem showdown`
+      steps.push({
+        street, label: 'Desfecho',
+        action, actor: `${w.position} ${w.name}`, actorIdx: wIdx, isHero: w.isHero,
+        pot: Math.round(pot), potBB,
+        board: [...board], ps: snap(),
+        analysis: null, villainAnalysis: null,
+        outcome: true,
+      })
+    }
   }
 
   return { steps, heroIdx, players: pState, meta }
@@ -521,8 +552,8 @@ export function parseStreetsForDisplay(raw, apa) {
     if (step.board && step.board.length > byStreet[step.street].board.length) {
       byStreet[step.street].board = [...step.board]
     }
-    // Se step tem actor real (não é "Blinds posted" ou "X dealt" nem showdown marker)
-    if (step.actor && step.action && !/dealt|blinds posted|^showdown$/i.test(step.action)) {
+    // Se step tem actor real (não é "Blinds posted"/"X dealt"/showdown/desfecho)
+    if (step.actor && step.action && !step.outcome && !/dealt|blinds posted|^showdown$/i.test(step.action)) {
       // Separar "raises to X" etc
       const actionMatch = step.action.match(/^(folds|checks|calls|bets|raises)/i)
       const action = actionMatch ? actionMatch[1].toLowerCase() : step.action
