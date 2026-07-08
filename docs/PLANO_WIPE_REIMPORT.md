@@ -126,11 +126,112 @@ queries read-only dos critérios A/B acima (via `~/.pokerapp_db_ro.env`, só-lei
 - Operação de prod = **servidor / ritual manual do Rui**, nunca script local com credenciais
   (`feedback_no_local_prod_execution`). O Code prepara e mede; **o Rui puxa o gatilho**.
 
-## 9. Faseamento sugerido (para não engolir tudo de uma vez)
+## 9. ETAPA 1 — âmbito + GUIÃO SEQUENCIAL (documento de trabalho do dia do gatilho)
 
-Espelha o pt68: **Etapa 1** = um bloco pequeno de dias (validar os canos e os critérios num
-volume gerível) → ler o `import-health` + os critérios A/B → só depois **Etapa 2** = o resto.
-Assim um problema aparece cedo, num volume pequeno, e não contamina o reimport inteiro.
+### 9.0 Âmbito da Etapa 1 (decisão do Rui)
+
+**Etapa 1 = reimport DESDE 30 de Junho** — na prática os **2 dias de jogo do Rui: 30 Jun e 2 Jul**
+(janelas dia-de-jogo **15:00→15:00** cada). Porquê estes 2:
+- **2 Jul** traz a **mesa final (FT)** com **print da aba Info** → exercita a **cascata das 3
+  fontes** (§6 A4), incluindo as **capturas da pasta `ICM FT` ainda por importar** + o **`tn 295219051`
+  validado à mão** pelo Rui.
+- **30 Jun** acrescenta **volume e variedade** (mais mãos/torneios para os critérios terem massa).
+
+**Nota factual (medido read-only hoje, pré-reimport):** a BD atual vai só até **2 Jul 19:28** e tem
+apenas **91 mãos GG** desse dia (todas ainda anónimas/sem-tag), e **0** de 30 Jun. Ou seja: **o
+material destes 2 dias vive nas PASTAS do Rui, não na BD** — é precisamente o que a Etapa 1
+reimporta. Por isso os números de "matéria" abaixo são raciocinados **pelos canos**, não contados
+da BD atual.
+
+### 9.1 Papéis na Etapa 1 (quem faz o quê — LER)
+
+- **TODOS os imports são executados pelo RUI**, **manualmente, cano a cano**, pelas **opções
+  individuais de cada pipeline** — **NÃO** o `appimport`/`appmaster` a varrer tudo de uma vez.
+  Cada cano é o **ritual do Rui** (a sua página/opção, as suas pastas).
+- **O CODE não importa nada nem executa contra a produção.** O Code: (a) **prepara os comandos de
+  backup e de wipe** para o Rui executar (P5 + §4); (b) **MEDE depois de cada cano** — corre o
+  `import-health` + as queries read-only do critério aplicável — e diz "pode avançar" ou "pára,
+  isto não bate". Operação de prod = servidor/ritual do Rui (`feedback_no_local_prod_execution`).
+- **Cada cano é um CHECKPOINT:** só se avança para o cano seguinte com o anterior **conferido pelo
+  Code**. Um desvio grande pára a sequência (não se empilha erro).
+
+### 9.2 Matéria por critério nestes 2 dias (o que se mede vs o que transita)
+
+Transitar para a Etapa 2 por **falta de matéria** **NÃO conta como falha** — só quer dizer que
+estes 2 dias não têm o caso; mede-se quando aparecer.
+
+| Critério | Etapa 1 (30 Jun + 2 Jul)? | Porquê |
+|---|---|---|
+| **A2** tagadas GG desanon à primeira | ✅ **matéria** (o teste-mãe do core) | dias de jogo GG do Rui com capturas IT/Gold → tags + nicks reais. |
+| **A4** FT pelas 3 fontes | ✅ **matéria** (2 Jul) | print da aba Info + capturas `ICM FT` + `tn 295219051`. |
+| **A1** Mãos suspeitas (coroas) ~0 | ✅ **matéria provável** | se os torneios GG destes dias forem PKO/KO e o Rui importar o TS (base do bounty). |
+| **B1** guarda desanon (Hero-num-vilão / colapso) | ✅ **matéria** | há desanon GG → a guarda exercita-se. |
+| **B2** parser de seats | ✅ **matéria** | há HH GG a parsear. |
+| **B4** resolver lobbys GG no intervalo sem TS | ✅ **matéria provável** | se houver capturas de **lobby GG** destes dias. |
+| **B5** IRE (GG) | ✅ **matéria provável** | se houver GG PKO desanon. |
+| **B6/B7/B9** contagens / órfãos / study-state | ✅ **matéria** (sempre) | medem-se em qualquer import. |
+| **B8** tags canónicas | ✅ **matéria** | as tags entram com as capturas IT. |
+| **A3** re-entradas | ⏳ **só se aparecer** (transita senão) | precisa de um torneio re-entry nestes 2 dias; o detetor dispara se houver, senão Etapa 2. |
+| **B3** table-SS WPN/PS por nick | ⏳ **provável Etapa 2** | dias GG-dominantes; sem capturas WPN/PS não há o que validar. |
+| **B5** IRE **Winamax** | ⏳ **só se houver WN** | depende de haver mãos WN (HM3 não-GG) nestes dias. |
+
+### 9.3 O GUIÃO (por cano: **RUI faz** → **CODE mede** → só então avança)
+
+> Cada bloco é um checkpoint. O Rui importa **um** cano; o Code corre a medição; **só com o "pode
+> avançar" do Code** é que o Rui passa ao cano seguinte.
+
+**Cano 1 — HH GG (mãos anónimas).**
+- **Rui faz:** importa as **HH GG** de 30 Jun + 2 Jul pela opção **individual** de HH (a página
+  Importar / o pipeline de HH), das pastas `gg_hh`.
+- **Code mede:** `import-health` (pipeline `hh_ts`/hands) → **B2** (0 mãos perdidas por parser de
+  seats), **B6** (contagem de mãos GG por dia bate com o esperado), **B9** (entram anónimas,
+  escondidas do Estudo). *Gate:* contagens plausíveis + 0 falhas de parser.
+
+**Cano 2 — TS GG (autoritativo).**
+- **Rui faz:** importa os **Tournament Summaries** GG (botão TS em Torneios) das pastas `gg_ts`.
+- **Code mede:** `import-health` + confirma **TS inserted/updated**; verifica que os torneios dos
+  2 dias têm `buy_in_bounty` (base do bounty) → habilita **A1** e o **TIER 0** do resolver.
+  *Gate:* os torneios das mãos do Cano 1 têm TS.
+
+**Cano 3 — Capturas de MESA IT (table-SS): desanon + tags.**
+- **Rui faz:** carrega as **capturas do IT** (página **SS Mesa** / `/table-ss`), **incluindo a
+  pasta `ICM FT`** do 2 Jul, da pasta `it`.
+- **Code mede:** `import-health` (pipeline `mesa`) → **A2** (% de tagadas GG com `match_method`
+  real — o teste-mãe), **B1** (0 Hero-num-vilão, 0 colapso de lugares), **A1** (suspeitas coroas
+  ~0; multi-seat = alarme), **B8** (tags normalizadas), **B4** parcial. *Gate:* A2 alto + B1 a zero.
+
+**Cano 4 — Gold (replayer, `position_v3`): nomes fortes + coroas.**
+- **Rui faz:** corre a **lane individual do Gold** (a opção Gold do pipeline / `GOLD_DIR`), da
+  pasta `gold`. *(Confirmar a opção exata é ritual do Rui.)*
+- **Code mede:** **A2** (nomes **fortes** recuperados; a Gold vence o IT), **A1** (coroas Gold),
+  re-check **B1**. *Gate:* nomes fortes semeiam; coroas coerentes.
+
+**Cano 5 — Lobbys (payouts).**
+- **Rui faz:** carrega as **capturas de lobby** (página **Lobbys** / `/lobbys`), da pasta `lobby`
+  (ou Capturas).
+- **Code mede:** `import-health` (pipeline `lobby`) → **B4** (lobbys GG resolvem no intervalo sem
+  TS = fix item 9; falha = `tm_not_found` **honesto**, nunca mis-resolve) + payouts escritos.
+  *Gate:* 0 mis-resolves; pendentes reconciliam após o TS.
+
+**Cano 6 — HM3 não-GG (só se houver).**
+- **Rui faz:** corre o **`.bat` do HM3** (apphm3) se houver mãos **não-GG** (PS/WN/WPN) nestes 2
+  dias.
+- **Code mede:** `import-health` + **B9** (não-GG entram em `'new'`/Estudo com nicks). Se não
+  houver não-GG → **cano vazio, transita** (não é falha).
+
+**Cano 7 — Propagação de nomes + FT (fecho).**
+- **Rui faz:** deixa correr os **hooks de propagação** (fire-and-forget nos imports) ou carrega
+  **"Aplicar propagação"**; e na **Saúde GG** revê a **quarentena FT** e **aprova** as fronteiras
+  `-ft` (a escrita da tag `-ft` é **só por aprovação manual**).
+- **Code mede:** **A4** (FT pelas 3 fontes: `tn 295219051` + a pasta `ICM FT`; snap-to-N; 0 payout
+  pelo print do Info), **A3** (se surgiu algum cartão de re-entrada), e o **fecho de A2** (brancos
+  das tagadas preenchidos pelos fortes). *Gate:* FT aprovada e coerente; A2 no alvo.
+
+### 9.4 Fecho da Etapa 1 → Etapa 2
+
+Depois dos 7 canos conferidos, o **Code entrega o quadro de critérios A/B da Etapa 1** (o que bateu,
+o que transitou por falta de matéria, o que falhou). **A Etapa 2 (o resto do histórico) só arranca
+depois de o RUI ler esses critérios** e dar luz verde — nunca automaticamente.
 
 ## 10. Depois do wipe (fora do gatilho, para arrumar a seguir)
 
