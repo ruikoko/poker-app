@@ -11,15 +11,19 @@ def test_enrich_carries_bounty_value_usd():
     vision = {"players_list": [
         {"name": "Xatab4ik", "bounty_value_usd": 40.0, "bounty_pct": 40, "country": "RU"}]}
     out = _enrich_all_players_actions(apa, anon_map, vision)
-    assert out["Xatab4ik"]["bounty_value_usd"] == 40.0     # coroa copiada
-    assert out["Xatab4ik"]["real_name"] == "Xatab4ik"      # nome mantido
-    assert out["_meta"] == {"bb": 100}                     # _meta intacto
+    # Fase 2 (apa-por-hash, 8 Jul): a saída MANTÉM a chave da HH (hash); o nome é
+    # atributo (real_name). A coroa casa por real_name (Vision) mas escreve no hash.
+    assert out["hashA"]["bounty_value_usd"] == 40.0     # coroa copiada p/ o hash
+    assert out["hashA"]["real_name"] == "Xatab4ik"      # nome como atributo
+    assert "Xatab4ik" not in out                        # NÃO re-indexa por nome
+    assert out["_meta"] == {"bb": 100}                  # _meta intacto
 
 
 def test_enrich_defaults_bounty_zero_when_absent():
     apa = {"hashA": {"position": "BTN"}}
     out = _enrich_all_players_actions(apa, {"hashA": "X"}, {"players_list": []})
-    assert out["X"]["bounty_value_usd"] == 0               # sem vision → 0 (não parte)
+    assert out["hashA"]["bounty_value_usd"] == 0        # sem vision → 0 (não parte)
+    assert out["hashA"]["real_name"] == "X"             # nome como atributo (hash-keyed)
 
 
 def _run_backfill(base_rows, hands):

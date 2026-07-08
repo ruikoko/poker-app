@@ -8,7 +8,7 @@ testes garantem-no E provam que o mesmo código fica correcto quando a chave pas
 hash na Fase 2 (writer). Ver `APA_INDEXACAO_E_COLAPSO §B.2/§B.6`.
 """
 from app.services import ire
-from app.services.villain_rules import _build_candidates
+from app.services.villain_rules import _build_candidates, _filter_to_furthest_street
 from app.services.hand_service import _resolve_hashes_in_raw
 
 
@@ -72,14 +72,59 @@ def _meta():
 def test_build_candidates_old_equals_new():
     old = _build_candidates(_hand(_apa_old()))
     new = _build_candidates(_hand(_apa_new()))
-    assert old == new
+    # Tudo IDÊNTICO excepto o campo interno `key` (=chave da HH: nome no formato
+    # antigo, hash no novo) — usado só p/ re-indexar o apa no filtro de street.
+    strip = lambda cs: [{k: v for k, v in c.items() if k != "key"} for c in cs]
+    assert strip(old) == strip(new)
     assert [c["nick"] for c in old] == ["villainA", "villainB"]
+    assert [c["key"] for c in old] == ["villainA", "villainB"]     # antigo: chave=nome
+    assert [c["key"] for c in new] == ["3b4cd0c7", "89ef4cba"]     # novo: chave=hash
 
 
 def test_build_candidates_new_anon_skips_villains():
     # chave=hash, real_name vazio → identidade continua hash → _is_anon_hash → salta
     cand = _build_candidates(_hand(_apa_new_anon()))
     assert cand == []
+
+
+# ── _filter_to_furthest_street — re-indexa o apa pela CHAVE (não pelo nick) ────
+# Regressão APA §B.6: em mão desanon hash-keyed `nick != chave`; o filtro fazia
+# apa.get(nick) → falhava → street 0 p/ TODOS → dropava o vilão de showdown (all
+# mapeados: no-op; misto: drop silencioso dos mapeados). Fix: carregar `key`.
+
+def _apa_furthest(hero_key, a_key, b_key, a_real, b_real):
+    """villainA chega ao SHOWDOWN (street 5); villainB desiste no flop (street 2)."""
+    return {
+        "_meta": {"bb": 1000},
+        hero_key: {"is_hero": True, "stack": 30000, "position": "BTN", "seat": 1,
+                   "actions": {"preflop": ["Raise 2000"]}},
+        a_key:    {"stack": 20000, "position": "CO", "seat": 2, "cards": ["Qs", "Qd"],
+                   "actions": {"preflop": ["Call 2000"], "flop": ["Bet"],
+                               "turn": ["Bet"], "river": ["Bet"]}, "real_name": a_real},
+        b_key:    {"stack": 40000, "position": "SB", "seat": 3,
+                   "actions": {"preflop": ["Call 2000"], "flop": ["Fold"]}, "real_name": b_real},
+    }
+
+
+def test_filter_furthest_hash_keyed_keeps_showdown_villain():
+    # mão desanon hash-keyed: nick=villainA, chave=hash → o filtro TEM de acertar
+    # na street via a chave. Antes (apa.get(nick)) dava street 0 a ambos → devolvia
+    # OS DOIS (villainB indevido). Agora mantém só o de showdown.
+    apa = _apa_furthest("Hero", "3b4cd0c7", "89ef4cba", "villainA", "villainB")
+    cands = _build_candidates(_hand(apa))
+    kept = _filter_to_furthest_street(cands, apa)
+    assert [c["nick"] for c in kept] == ["villainA"]
+
+
+def test_filter_furthest_old_equals_new():
+    # paridade: name-keyed (antigo) e hash-keyed (novo) filtram ao MESMO resultado.
+    old = _apa_furthest("Hero", "villainA", "villainB", None, None)
+    for k in ("villainA", "villainB"):
+        old[k].pop("real_name", None)
+    new = _apa_furthest("Hero", "3b4cd0c7", "89ef4cba", "villainA", "villainB")
+    ko = _filter_to_furthest_street(_build_candidates(_hand(old)), old)
+    kn = _filter_to_furthest_street(_build_candidates(_hand(new)), new)
+    assert [c["nick"] for c in ko] == [c["nick"] for c in kn] == ["villainA"]
 
 
 # ── ire.compute_ire (via _assemble_ire) ──────────────────────────────────────

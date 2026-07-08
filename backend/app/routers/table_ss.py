@@ -2072,7 +2072,7 @@ def cure_preview(ss_ids: str = Query("", description="ids de capturas table-ss (
         for k, v in apa.items():
             if k == "_meta" or not isinstance(v, dict):
                 continue
-            nm = v.get("real_name", k)
+            nm = v.get("real_name") or k   # APA §B.6: real_name || chave ("" novo = por mapear → hash)
             named = nm in mapped_names
             now.append({"seat": v.get("seat"), "position": v.get("position"),
                         "name": nm if named else None, "hash": None if named else nm})
@@ -2500,7 +2500,7 @@ def hand_seats(
         for key, info in apa.items():
             if key == "_meta" or not isinstance(info, dict):
                 continue
-            name = info.get("real_name", key)
+            name = info.get("real_name") or key   # APA §B.6: real_name || chave (hash se por mapear)
             is_mapped = name in mapped_names
             seats.append({
                 "seat": info.get("seat"),

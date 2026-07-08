@@ -210,6 +210,10 @@ def _build_candidates(hand: dict) -> list[dict]:
         vinfo = vision_by_name.get(name.lower(), {})
         candidates.append({
             "nick": name,
+            # APA §B.6 (Fase 2): a CHAVE da HH (hash GG / nick nativo) para
+            # re-indexar o apa no filtro de street. `nick` é o real_name (pode
+            # ≠ chave em mão desanon hash-keyed) → NÃO serve p/ apa.get.
+            "key": key,
             "position": pdata.get("position"),
             "stack": vinfo.get("stack") or pdata.get("stack"),
             # bounty_pct (VPIP) eliminado — não era usado em nada, só criava
@@ -296,7 +300,12 @@ def _filter_to_furthest_street(candidates: list[dict], apa: dict) -> list[dict]:
 
     annotated = []
     for c in candidates:
-        pdata = apa.get(c["nick"]) if isinstance(apa, dict) else None
+        # APA §B.6 (Fase 2): indexar pela CHAVE da HH (hash), não pelo `nick`
+        # (real_name) — em mão desanon hash-keyed `nick != chave` → apa.get(nick)
+        # falhava e colapsava a street a 0 (dropava vilões mapeados / no-op no
+        # filtro). Fallback a `nick` p/ candidates legados sem `key`.
+        lookup = c.get("key", c["nick"])
+        pdata = apa.get(lookup) if isinstance(apa, dict) else None
         if not isinstance(pdata, dict):
             pdata = {}
         s = _street_reached(pdata.get("actions"), pdata.get("cards"))
