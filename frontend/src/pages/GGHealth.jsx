@@ -11,6 +11,7 @@ const NEEDS = [
   { key: 'orphans', label: 'Órfãs (sem mão)', color: '#f59e0b' },
   { key: 'swap_suspects', label: 'Suspeitas de troca', color: '#f59e0b' },
   { key: 'tag_conflicts', label: 'Conflito de tags', color: '#ef4444' },
+  { key: 'ft_quarantine', label: 'Fronteira FT (rever)', color: '#f59e0b' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
@@ -23,6 +24,8 @@ const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
 
 const card = { background: 'var(--card,#161b22)', border: '1px solid var(--border,#30363d)', borderRadius: 8 }
 const btn = { background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 5, cursor: 'pointer', fontSize: 12, padding: '3px 8px' }
+const mono = "'Fira Code',monospace"
+const inp = { fontFamily: mono, fontSize: 12, background: '#0b0d13', color: '#c9d1d9', border: '1px solid #30363d', borderRadius: 5, padding: '3px 6px' }
 
 function Panel({ g, value, onClick }) {
   return (
@@ -199,6 +202,168 @@ function Lightbox({ src, onClose }) {
   )
 }
 
+// ── F4: quarentena/ensaio da fronteira FT (por TORNEIO, não por imagem) ──────
+const FT_STATUS = {
+  match: ['✓ bate', '#22c55e'], mismatch: ['⚠ discorda', '#ef4444'],
+  n_unavailable: ['N indisponível', '#eab308'], incoherent: ['incoerente', '#f59e0b'],
+  none: ['sem sinal', '#64748b'],
+}
+const FT_DECISION = {
+  pending: ['pendente', '#64748b'], confirmed: ['confirmada', '#22c55e'],
+  corrected: ['corrigida', '#818cf8'], promoted: ['promovida', '#22c55e'],
+}
+function Pill({ map, k }) {
+  const [lbl, col] = map[k] || [k, '#64748b']
+  return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, color: col, background: col + '22' }}>{lbl}</span>
+}
+function Cell({ label, children }) {
+  return <div style={{ minWidth: 150 }}>
+    <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+    <div style={{ fontSize: 13, marginTop: 2 }}>{children}</div>
+  </div>
+}
+const fmtT = (iso) => iso ? iso.replace('T', ' ').slice(0, 19) : '—'
+
+function FtCard({ t, busy, onConfirm, onCorrect, onPromote }) {
+  const [ob, setOb] = useState('')
+  const [on_, setOn] = useState('')
+  const [plan, setPlan] = useState(null)   // plano dry-run do promote
+  const cc = t.cross_check || {}
+  const canPromote = t.decision === 'confirmed' || t.decision === 'corrected'
+  const staleN = t.hrc_stale_count ?? (t.hrc_stale || []).length
+  return (
+    <div style={{ padding: '4px 2px 6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+        <Pill map={FT_STATUS} k={t.status} />
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted)' }}>
+          {t.n_changes} mão(s) mudam · {staleN} HRC stale
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', paddingBottom: 6 }}>
+        <Cell label="lobby (N lido)">{t.n_lobby != null ? `N = ${t.n_lobby}` : '— (sem print Info)'}</Cell>
+        <Cell label="fronteira / via">{fmtT(t.boundary)}<br /><span style={{ color: '#818cf8' }}>{t.source || '—'}</span></Cell>
+        <Cell label="1ª mão pós-fronteira">{t.seats_first_hand != null ? `${t.seats_first_hand} sentados` : '—'}</Cell>
+        <Cell label="salvaguarda (cross-check)">
+          {cc.match === true ? '✓ N = sentados' : cc.match === false ? `✗ N=${cc.n} ≠ ${cc.hh_seats}` : '— (sem N independente)'}
+        </Cell>
+      </div>
+      {(t.warnings || []).map((w, i) => <div key={i} style={{ fontSize: 12, color: '#fbbf24', margin: '2px 0' }}>⚠ {w}</div>)}
+      {t.via_b_diag && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontFamily: mono }}>
+          players_left: [{(t.via_b_diag.players_left_sequence || []).join(', ')}]
+          {t.via_b_diag.outlier_dropped ? ' — outlier descartado' : ''}
+          {t.via_b_diag.coherent === false ? ' — INCOERENTE' : ''}
+        </div>
+      )}
+      {(t.changes || []).length > 0 && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>{t.changes.length} mãos: from → to</summary>
+          <div style={{ maxHeight: 160, overflow: 'auto', marginTop: 6 }}>
+            {t.changes.map((c, i) => (
+              <div key={i} style={{ fontSize: 11, fontFamily: mono }}>
+                {c.hand_id}: [{(c.from || []).join(', ')}] → [{(c.to || []).join(', ')}]
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+        <button style={btn} disabled={busy} onClick={() => onConfirm(t.tournament_number)}>Confirmar</button>
+        <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <input value={ob} onChange={e => setOb(e.target.value)} placeholder="corrigir fronteira (ISO)" style={{ ...inp, width: 180 }} />
+          <input value={on_} onChange={e => setOn(e.target.value)} placeholder="N" style={{ ...inp, width: 46 }} />
+          <button style={btn} disabled={busy} onClick={() => onCorrect(t.tournament_number, ob, on_)}>Corrigir</button>
+        </span>
+        <button style={{ ...btn, borderColor: canPromote ? '#22c55e' : '#30363d', opacity: canPromote ? 1 : 0.4 }}
+          disabled={busy || !canPromote}
+          onClick={async () => setPlan(await onPromote(t.tournament_number, false))}>
+          Promover…
+        </button>
+        {!canPromote && <span style={{ fontSize: 11, color: 'var(--muted)' }}>(confirma/corrige primeiro)</span>}
+      </div>
+      {plan && (
+        <div style={{ ...card, padding: 10, marginTop: 8, borderColor: '#22c55e' }}>
+          <div style={{ fontSize: 12, marginBottom: 6 }}>
+            Plano dry-run: <b>{(plan.plan?.changed || []).length}</b> mão(s) mudariam. Escrever agora?
+          </div>
+          <button style={{ ...btn, borderColor: '#22c55e' }} disabled={busy}
+            onClick={async () => { await onPromote(t.tournament_number, true); setPlan(null) }}>✓ Escrever (promover)</button>
+          <button style={{ ...btn, marginLeft: 6 }} onClick={() => setPlan(null)}>Cancelar</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onPromote }) {
+  return (
+    <div style={{ ...card, marginBottom: 8, overflow: 'hidden' }}>
+      <div onClick={onToggle} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .1s' }}>▸</span>
+        <span style={{ fontFamily: mono, fontWeight: 700 }}>{c.tournament_number}</span>
+        <span style={{ fontSize: 13 }}>{c.tournament_name || '—'}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{c.day || ''} · {c.n_hands} mãos</span>
+        <span style={{ marginLeft: 'auto' }}><Pill map={FT_DECISION} k={c.decision} /></span>
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 12px 10px', borderTop: '1px solid var(--border,#30363d)' }}>
+          {full
+            ? <FtCard t={full} busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} />
+            : <div style={{ padding: 12, color: 'var(--muted)' }}>A carregar ensaio…</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FtQuarantinePanel() {
+  const [list, setList] = useState(null)
+  const [full, setFull] = useState({})       // tn → ensaio full
+  const [expanded, setExpanded] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const loadList = () => ggHealth.ftPreview().then(r => setList(r.candidates || [])).catch(e => setMsg('Erro: ' + e.message))
+  useEffect(() => { loadList() }, [])
+  const loadFull = (tn) => ggHealth.ftPreview(tn)
+    .then(r => setFull(f => ({ ...f, [tn]: r.tournaments[0] })))
+    .catch(e => setMsg('Erro: ' + e.message))
+  const toggle = (tn) => {
+    if (expanded === tn) { setExpanded(null); return }
+    setExpanded(tn)
+    if (!full[tn]) loadFull(tn)
+  }
+  const refresh = (tn) => { loadFull(tn); loadList() }
+  const wrap = (fn) => async (...a) => {
+    setBusy(true); setMsg(null)
+    try { return await fn(...a) }
+    catch (e) { setMsg('Erro: ' + e.message) }
+    finally { setBusy(false) }
+  }
+  const onConfirm = wrap(async (tn) => { await ggHealth.ftConfirm(tn); setMsg(`${tn}: fronteira confirmada.`); refresh(tn) })
+  const onCorrect = wrap(async (tn, ob, n) => { await ggHealth.ftCorrect(tn, ob, n); setMsg(`${tn}: fronteira corrigida.`); refresh(tn) })
+  const onPromote = wrap(async (tn, confirm) => {
+    const r = await ggHealth.ftPromote(tn, confirm)
+    if (confirm) { setMsg(`${tn}: promovida.`); refresh(tn) }
+    return r
+  })
+  if (!list) return <div style={{ color: 'var(--muted)' }}>A carregar candidatos…</div>
+  return (
+    <div>
+      {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13, color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd' }}>{msg}</div>}
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+        {list.length} candidato(s). Clica num torneio para ver o ensaio. <b>Confirmar</b>/<b>Corrigir</b> fixa a
+        fronteira; <b>Promover</b> é o passo separado (mostra o plano dry-run antes de escrever).
+      </div>
+      {list.map(c => (
+        <FtRow key={c.tournament_number} c={c} expanded={expanded === c.tournament_number}
+          onToggle={() => toggle(c.tournament_number)} full={full[c.tournament_number]}
+          busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} />
+      ))}
+      {list.length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhum torneio candidato.</div>}
+    </div>
+  )
+}
+
 export default function GGHealth() {
   const [sum, setSum] = useState(null)
   const [err, setErr] = useState(null)
@@ -249,7 +414,7 @@ export default function GGHealth() {
   const loadSummary = () => ggHealth.summary().then(setSum).catch(e => setErr(e.message))
   useEffect(() => { loadSummary() }, [])
   useEffect(() => {
-    if (!group) { setList(null); return }
+    if (!group || group === 'ft_quarantine') { setList(null); return }
     setList(null)
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
   }, [group, page])
@@ -347,6 +512,7 @@ export default function GGHealth() {
             {list && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{list.total} imagens</span>}
           </div>
 
+          {group === 'ft_quarantine' ? <FtQuarantinePanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (
             <div style={{ ...card, padding: '10px 12px', marginBottom: 10 }}>
@@ -384,6 +550,7 @@ export default function GGHealth() {
               )}
             </>
           )}
+          </>)}
         </div>
       )}
 

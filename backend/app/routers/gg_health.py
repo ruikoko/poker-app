@@ -190,6 +190,17 @@ def summary(current_user=Depends(require_auth)):
         p = _group_pred(key)
         return sum(1 for im in imgs if p(im))
 
+    # F4: quarentena FT = candidatos (com sinal de FT) ainda NÃO promovidos. Contagem
+    # LEVE (2 queries) — o detalhe por torneio vive em GET /ft/preview. Defensivo: se
+    # a tabela ainda não existir (pré-deploy) → 0.
+    try:
+        cands = set(candidate_tns())
+        promoted = {r["tournament_number"] for r in query(
+            "SELECT tournament_number FROM ft_boundary_review WHERE decision='promoted'")}
+        ft_quarantine = len(cands - promoted)
+    except Exception:
+        ft_quarantine = 0
+
     return {
         "total_images": len(imgs),
         "total_hands_with_image": len(hands_with_img),
@@ -198,6 +209,7 @@ def summary(current_user=Depends(require_auth)):
             "orphans": n("orphans"),
             "swap_suspects": n("swap_suspects"),
             "tag_conflicts": n("tag_conflicts"),
+            "ft_quarantine": ft_quarantine,
         },
         "healthy": {
             "gold_matched": n("gold_matched"),
@@ -466,29 +478,90 @@ def _ft_mark_promoted(tn, decided_by):
         conn.close()
 
 
-def _ft_preview_for_tn(tn) -> dict:
+_FT_BASE = ["icm", "icm-pko", "pos-pko", "pos-nko", "speed-racer"]
+
+
+def _ft_change_count(tn, boundary) -> int:
+    """Contagem LEVE (1 query) das mãos que mudariam: >= fronteira COM tag base-spot."""
+    r = query(
+        "SELECT count(*) AS n FROM hands WHERE site='GGPoker' AND tournament_number=%s "
+        "AND played_at >= %s AND (discord_tags && %s OR hm3_tags && %s)",
+        (tn, boundary, _FT_BASE, _FT_BASE))
+    return r[0]["n"] if r else 0
+
+
+def _ft_hrc_stale_count(tn, boundary) -> int:
+    r = query(
+        "SELECT count(*) AS n FROM hands h JOIN hrc_jobs j ON j.hand_db_id=h.id "
+        "WHERE h.site='GGPoker' AND h.tournament_number=%s AND h.played_at >= %s",
+        (tn, boundary))
+    return r[0]["n"] if r else 0
+
+
+def _ft_preview_for_tn(tn, full=False) -> dict:
+    """LEVE por defeito (lista de todos os candidatos — só status/fronteira/contagens);
+    `full=True` (um tn) traz o detalhe pesado: mãos que mudam (from→to), lista HRC
+    stale, e a sequência da via-b. Evita o `propagate_ft` (double-compute) na lista."""
     d = compute_ft_boundary(tn)
     cc = d.get("cross_check") or {}
-    diag = via_b_diagnostics(tn)
     boundary = d.get("boundary")
-    changes, hrc_stale = [], []
-    if boundary is not None:
-        changes = propagate_ft(tn, dry_run=True).get("changed", [])
-        hrc_stale = _ft_hrc_stale(tn, boundary)
     rev = _ft_get_review(tn)
-    return {
+    out = {
         "tournament_number": tn,
         "status": _ft_map_status(d.get("status"), cc),
         "engine_status": d.get("status"), "source": d.get("source"),
         "boundary": boundary.isoformat() if boundary else None,
         "n_lobby": d.get("n"), "seats_first_hand": cc.get("hh_seats"),
-        "cross_check": cc or None, "changes": changes, "n_changes": len(changes),
-        "hrc_stale": hrc_stale, "warnings": _ft_warnings(d, diag), "via_b_diag": diag,
+        "cross_check": cc or None, "warnings": _ft_warnings(d, None),
         "decision": rev["decision"] if rev else "pending",
         "override_boundary": rev["override_boundary"].isoformat()
             if rev and rev.get("override_boundary") else None,
         "override_n": rev.get("override_n") if rev else None,
     }
+    if boundary is None:
+        out.update({"n_changes": 0, "hrc_stale_count": 0})
+        if full:
+            diag = via_b_diagnostics(tn)
+            out.update({"changes": [], "hrc_stale": [], "via_b_diag": diag,
+                        "warnings": _ft_warnings(d, diag)})
+        return out
+    if full:
+        changes = propagate_ft(tn, dry_run=True).get("changed", [])
+        hrc = _ft_hrc_stale(tn, boundary)
+        diag = via_b_diagnostics(tn)
+        out.update({"changes": changes, "n_changes": len(changes),
+                    "hrc_stale": hrc, "hrc_stale_count": len(hrc),
+                    "via_b_diag": diag, "warnings": _ft_warnings(d, diag)})
+    else:
+        out["n_changes"] = _ft_change_count(tn, boundary)
+        out["hrc_stale_count"] = _ft_hrc_stale_count(tn, boundary)
+    return out
+
+
+def _ft_candidate_list() -> list:
+    """Lista LEVE de candidatos (3 queries TOTAL, sem compute por tn): tn + nome +
+    dia + nº de mãos + decisão. O ensaio pesado por torneio pede-se com `?tn=`.
+    Ordena: pendentes primeiro, depois por dia."""
+    tns = candidate_tns()
+    if not tns:
+        return []
+    meta = {r["tn"]: r for r in query(
+        "SELECT tournament_number AS tn, MAX(tournament_name) AS name, "
+        "MIN(played_at)::date AS day, COUNT(*) AS n_hands "
+        "FROM hands WHERE site='GGPoker' AND tournament_number = ANY(%s) "
+        "GROUP BY tournament_number", (tns,))}
+    dec = {r["tournament_number"]: r["decision"] for r in query(
+        "SELECT tournament_number, decision FROM ft_boundary_review "
+        "WHERE tournament_number = ANY(%s)", (tns,))}
+    out = []
+    for tn in tns:
+        m = meta.get(tn) or {}
+        day = m.get("day")
+        out.append({"tournament_number": tn, "tournament_name": m.get("name"),
+                    "day": day.isoformat() if day else None, "n_hands": m.get("n_hands"),
+                    "decision": dec.get(tn, "pending")})
+    out.sort(key=lambda r: (r["decision"] != "pending", r["day"] or ""))
+    return out
 
 
 class FtTnBody(BaseModel):
@@ -511,9 +584,13 @@ def ft_preview(tn: Optional[str] = Query(None, description="Um torneio; omisso =
                current_user=Depends(require_auth_or_api_key)):
     """Ensaio dry-run da fronteira FT (F3), SO LEITURA. Por torneio: fronteira+via
     (incl. fonte 0/manual), N + sentados da 1a mao, cross-check, maos que mudariam
-    (from->to), avisos do fallback (outlier/sequencia) e maos HRC stale afetadas."""
-    tns = [tn] if tn else candidate_tns()
-    return {"tournaments": [_ft_preview_for_tn(t) for t in tns], "count": len(tns)}
+    (from->to), avisos do fallback (outlier/sequencia) e maos HRC stale afetadas.
+    Um `tn` -> detalhe FULL; sem `tn` -> lista LEVE de todos os candidatos (o detalhe
+    pesado por torneio pede-se com `?tn=`)."""
+    if tn:
+        return {"tournaments": [_ft_preview_for_tn(tn, full=True)], "count": 1}
+    lst = _ft_candidate_list()
+    return {"candidates": lst, "count": len(lst)}
 
 
 @router.post("/ft/confirm")

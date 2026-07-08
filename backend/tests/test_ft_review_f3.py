@@ -50,6 +50,17 @@ def test_preview_single_tn(mc, mq, mp, mv):
     assert mp.call_args.kwargs.get("dry_run") is True
 
 
+@patch("app.routers.gg_health._ft_candidate_list", return_value=[
+    {"tournament_number": "A", "tournament_name": "X", "day": "2026-06-01",
+     "n_hands": 10, "decision": "pending"}])
+def test_preview_all_returns_light_candidates(mlist):
+    r = TestClient(_app()).get("/api/gg-health/ft/preview")
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert "candidates" in j and j["count"] == 1
+    assert j["candidates"][0]["tournament_number"] == "A"
+
+
 # ── POST /ft/confirm — fixa, NÃO promove ─────────────────────────────────────
 @patch("app.routers.gg_health.via_b_diagnostics", return_value=None)
 @patch("app.routers.gg_health.propagate_ft", return_value={"changed": []})
@@ -115,3 +126,13 @@ def test_promote_corrected_uses_override_boundary(mrev, mmark, mp):
     c.post("/api/gg-health/ft/promote", json={"tournament_number": "T1", "confirm": True})
     # a fronteira CORRIGIDA (override) é passada ao propagate
     assert mp.call_args.kwargs["boundary_override"] == T0
+
+
+# ── F4: /summary conta ft_quarantine (candidatos - promovidos) ───────────────
+def test_summary_counts_ft_quarantine():
+    from app.routers.gg_health import summary
+    with patch("app.routers.gg_health._all_images", return_value=[]), \
+         patch("app.routers.gg_health.candidate_tns", return_value=["A", "B", "C"]), \
+         patch("app.routers.gg_health.query", return_value=[{"tournament_number": "A"}]):
+        res = summary(current_user=None)
+    assert res["needs_you"]["ft_quarantine"] == 2   # 3 candidatos − 1 promovido

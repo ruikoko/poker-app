@@ -359,6 +359,15 @@ export const ggHealth = {
   // Ação 1 — taga N mãos com UMA tag (multi-select). confirm=true força apesar do
   // aviso de conflito de formato.
   tag: (handIds, tag, confirm = false) => req('POST', '/gg-health/tag', { hand_ids: handIds, tag, confirm }),
+  // F4 — ensaio/quarentena da fronteira FT.
+  ftPreview: (tn) => req('GET', `/gg-health/ft/preview${tn ? `?tn=${encodeURIComponent(tn)}` : ''}`),
+  ftConfirm: (tn) => req('POST', '/gg-health/ft/confirm', { tournament_number: tn }),
+  ftCorrect: (tn, overrideBoundary, overrideN) => req('POST', '/gg-health/ft/correct', {
+    tournament_number: tn,
+    override_boundary: overrideBoundary || null,
+    override_n: (overrideN === '' || overrideN == null) ? null : Number(overrideN),
+  }),
+  ftPromote: (tn, confirm = false) => req('POST', '/gg-health/ft/promote', { tournament_number: tn, confirm }),
 }
 
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
