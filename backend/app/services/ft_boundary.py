@@ -511,6 +511,97 @@ def trigger_ft_propagation(tournament_number: Optional[str] = None) -> None:
         logger.error("[ft_boundary] propagate falhou: %s", e)
 
 
+# ── F5: gatilho de CÁLCULO (recompute + sync da review; NUNCA escreve tags) ───
+def review_status(engine_status, cross_check) -> str:
+    """Estado do motor (+cross-check) → enum da review (fonte única, usada pelo painel
+    e pelo refresh): match/mismatch/n_unavailable/incoherent/none."""
+    cc = cross_check or {}
+    if engine_status in ("manual", "lobby", "coherent"):
+        m = cc.get("match")
+        return "match" if m is True else "mismatch" if m is False else "n_unavailable"
+    if engine_status == "quarantine_disagreement":
+        return "mismatch"
+    if engine_status == "incoherent_signal":
+        return "incoherent"
+    return "none"
+
+
+def _review_row(tn):
+    rows = query("SELECT decision FROM ft_boundary_review WHERE tournament_number=%s", (tn,))
+    return rows[0] if rows else None
+
+
+def has_new_ft_signal(tn) -> bool:
+    """Sinal novo FORTE para reactivar um dispensado: tag manual -ft OU print do Info."""
+    if _manual_ft_boundary(tn) is not None:
+        return True
+    lb, _n = _lobby_ft_boundary(tn)
+    return lb is not None
+
+
+def _upsert_review_snapshot(tn, d, status, decision):
+    """Sincroniza o snapshot computado na review (status/boundary/source/n/seats +
+    decision). NÃO toca decided_by/decided_at/override — é cálculo, não decisão."""
+    cc = d.get("cross_check") or {}
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ft_boundary_review (tournament_number, status, boundary, "
+                "source, n_lobby, seats_first_hand, decision, updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,NOW()) "
+                "ON CONFLICT (tournament_number) DO UPDATE SET status=EXCLUDED.status, "
+                "boundary=EXCLUDED.boundary, source=EXCLUDED.source, "
+                "n_lobby=EXCLUDED.n_lobby, seats_first_hand=EXCLUDED.seats_first_hand, "
+                "decision=EXCLUDED.decision, updated_at=NOW()",
+                (tn, status, d.get("boundary"), d.get("source"), d.get("n"),
+                 cc.get("hh_seats"), decision))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def refresh_ft_boundaries(tournament_number: Optional[str] = None) -> dict:
+    """GATILHO DE CÁLCULO (fire-and-forget; **NUNCA escreve tags nas mãos**). Recomputa
+    o estado FT por torneio candidato e sincroniza a `ft_boundary_review`, RESPEITANDO
+    decisões já tomadas:
+      • `promoted` → NÃO recalcula (intocado);
+      • `confirmed`/`corrected` → mantêm a fronteira FIXADA (intocados);
+      • `dismissed` → só RENASCE (→ pending) se entrar sinal novo FORTE (tag manual -ft
+        OU print do Info); senão fica dispensado;
+      • pending/novo → snapshot do estado computado.
+    Idempotente: sem dados novos, recomputar dá o mesmo → mesma review, zero mudança
+    de decisão. Corre sobre os candidate_tns APERTADOS (gate FT_CAP) → leve."""
+    tns = [tournament_number] if tournament_number else _candidate_tns()
+    refreshed = reactivated = 0
+    for tn in tns:
+        row = _review_row(tn)
+        dec = row["decision"] if row else None
+        if dec in ("promoted", "confirmed", "corrected"):
+            continue                                  # respeita a decisão — intocado
+        d = compute_ft_boundary(tn)
+        status = review_status(d.get("status"), d.get("cross_check"))
+        if dec == "dismissed":
+            if has_new_ft_signal(tn):
+                _upsert_review_snapshot(tn, d, status, decision="pending")
+                reactivated += 1
+            continue                                  # sem sinal novo → fica dispensado
+        _upsert_review_snapshot(tn, d, status, decision="pending")
+        refreshed += 1
+    return {"refreshed": refreshed, "reactivated": reactivated}
+
+
+def trigger_ft_refresh(tournament_number: Optional[str] = None) -> None:
+    """Wrapper fire-and-forget (defensivo) p/ os hooks de import/reconcile."""
+    try:
+        res = refresh_ft_boundaries(tournament_number)
+        if res["refreshed"] or res["reactivated"]:
+            logger.info("[ft_refresh] refreshed=%d reactivated=%d",
+                        res["refreshed"], res["reactivated"])
+    except Exception as e:
+        logger.error("[ft_refresh] falhou: %s", e)
+
+
 # ── F3: tabela de revisão/quarentena da fronteira FT ─────────────────────────
 def ensure_ft_boundary_review_schema():
     """Idempotente (chamada no lifespan). Um registo por torneio: o estado do ensaio

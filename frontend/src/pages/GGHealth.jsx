@@ -225,7 +225,7 @@ function Cell({ label, children }) {
 }
 const fmtT = (iso) => iso ? iso.replace('T', ' ').slice(0, 19) : '—'
 
-function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onDismiss = () => {}, onZoom = () => {} }) {
+function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onApprove = () => {}, onDismiss = () => {}, onZoom = () => {} }) {
   const [ob, setOb] = useState('')
   const [on_, setOn] = useState('')
   const [plan, setPlan] = useState(null)   // plano dry-run do promote
@@ -307,6 +307,12 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onDismiss = () => {}
         </details>
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+        {t.status === 'match' && (
+          <button style={{ ...btn, borderColor: '#22c55e', fontWeight: 700 }} disabled={busy}
+            onClick={async () => setPlan(await onApprove(t.tournament_number))}>
+            Aprovar…
+          </button>
+        )}
         <button style={btn} disabled={busy} onClick={() => onConfirm(t.tournament_number)}>Confirmar</button>
         <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <input value={ob} onChange={e => setOb(e.target.value)} placeholder="corrigir fronteira (ISO)" style={{ ...inp, width: 180 }} />
@@ -328,8 +334,10 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onDismiss = () => {}
       {plan && (
         <div style={{ ...card, padding: 10, marginTop: 8, borderColor: '#22c55e' }}>
           <div style={{ fontSize: 12, marginBottom: 6 }}>
-            Plano dry-run: <b>{(plan.plan?.changed || []).length}</b> mão(s) mudariam. Escrever agora?
+            Plano dry-run: <b>{(plan.plan?.changed || []).length}</b> mão(s) mudariam.
+            {(t.hrc_stale_count ?? (t.hrc_stale || []).length) > 0 && <span> · <b>{t.hrc_stale_count ?? t.hrc_stale.length}</b> HRC stale (re-solve = F6)</span>} Escrever agora?
           </div>
+          {t.partial_coverage && <div style={{ fontSize: 12, color: '#fbbf24', marginBottom: 6 }}>⚠ cobertura parcial: N={t.n} — a fronteira via-b pode perder as 1ªs mãos da FT. Promove COM este aviso.</div>}
           <button style={{ ...btn, borderColor: '#22c55e' }} disabled={busy}
             onClick={async () => { await onPromote(t.tournament_number, true); setPlan(null) }}>✓ Escrever (promover)</button>
           <button style={{ ...btn, marginLeft: 6 }} onClick={() => setPlan(null)}>Cancelar</button>
@@ -339,7 +347,7 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onDismiss = () => {}
   )
 }
 
-function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onPromote, onDismiss, onZoom }) {
+function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onPromote, onApprove, onDismiss, onZoom }) {
   return (
     <div style={{ ...card, marginBottom: 8, overflow: 'hidden' }}>
       <div onClick={onToggle} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer', flexWrap: 'wrap' }}>
@@ -355,7 +363,7 @@ function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onProm
       {expanded && (
         <div style={{ padding: '0 12px 10px', borderTop: '1px solid var(--border,#30363d)' }}>
           {full
-            ? <FtCard t={full} busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} onDismiss={onDismiss} onZoom={onZoom} />
+            ? <FtCard t={full} busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} onApprove={onApprove} onDismiss={onDismiss} onZoom={onZoom} />
             : <div style={{ padding: 12, color: 'var(--muted)' }}>A carregar ensaio…</div>}
         </div>
       )}
@@ -395,11 +403,15 @@ function FtQuarantinePanel() {
     return r
   })
   const onDismiss = wrap(async (tn) => { await ggHealth.ftDismiss(tn); setMsg(`${tn}: dispensada (sem FT) — mãos e tags intactas.`); refresh(tn) })
+  // APROVAR (match limpo): fixa a fronteira (confirm) + devolve o plano dry-run; a
+  // escrita real só no clique "Escrever" do plano (onPromote confirm=true).
+  const onApprove = wrap(async (tn) => { await ggHealth.ftConfirm(tn); return await ggHealth.ftPromote(tn, false) })
   if (!list) return <div style={{ color: 'var(--muted)' }}>A carregar candidatos…</div>
   const rowsOf = (items) => items.map(c => (
     <FtRow key={c.tournament_number} c={c} expanded={expanded === c.tournament_number}
       onToggle={() => toggle(c.tournament_number)} full={full[c.tournament_number]}
-      busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote} onDismiss={onDismiss} onZoom={setZoom} />
+      busy={busy} onConfirm={onConfirm} onCorrect={onCorrect} onPromote={onPromote}
+      onApprove={onApprove} onDismiss={onDismiss} onZoom={setZoom} />
   ))
   const needs = list.filter(c => c.section === 'needs')
   const ready = list.filter(c => c.section === 'ready')

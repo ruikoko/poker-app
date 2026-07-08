@@ -22,7 +22,7 @@ from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, get_conn
 from app.services.ft_boundary import (
     FT_CAP, count_hh_seats, compute_ft_boundary, propagate_ft,
-    candidate_tns, via_b_diagnostics,
+    candidate_tns, via_b_diagnostics, review_status,
 )
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 
@@ -387,17 +387,7 @@ def gg_health_tag(payload: dict = Body(...),
 
 
 # ── F3: preview + revisão/quarentena + promoção da fronteira FT ──────────────
-def _ft_map_status(engine_status, cross_check) -> str:
-    """Motor(+cross-check) → enum da review: match/mismatch/n_unavailable/incoherent/none."""
-    cc = cross_check or {}
-    if engine_status in ("manual", "lobby", "coherent"):
-        m = cc.get("match")
-        return "match" if m is True else "mismatch" if m is False else "n_unavailable"
-    if engine_status == "quarantine_disagreement":
-        return "mismatch"
-    if engine_status == "incoherent_signal":
-        return "incoherent"
-    return "none"
+_ft_map_status = review_status   # fonte única em services/ft_boundary (F5)
 
 
 def _ft_warnings(d, diag) -> list:

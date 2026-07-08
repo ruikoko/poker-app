@@ -389,3 +389,57 @@ def test_it_boundary_incoherent_dirty_tail():
     with patch.object(fb, "_it_readings", return_value=reads):
         b, coh, n = fb._it_ft_boundary("T")
     assert coh is False and b is None
+
+
+# ── F5: refresh_ft_boundaries (gatilho de cálculo, respeita decisões) ─────────
+def test_review_status_mapping():
+    assert fb.review_status("manual", {"match": True}) == "match"
+    assert fb.review_status("lobby", {"match": False}) == "mismatch"
+    assert fb.review_status("coherent", {"match": None}) == "n_unavailable"
+    assert fb.review_status("quarantine_disagreement", None) == "mismatch"
+    assert fb.review_status("incoherent_signal", None) == "incoherent"
+    assert fb.review_status("none", None) == "none"
+
+
+_REFRESH_D = {"status": "none", "cross_check": None, "boundary": None, "source": None, "n": None}
+
+
+def test_refresh_respects_decisions_and_reactivates():
+    reviews = {"prom": {"decision": "promoted"}, "conf": {"decision": "confirmed"},
+               "corr": {"decision": "corrected"}, "dis1": {"decision": "dismissed"},
+               "dis2": {"decision": "dismissed"}, "pend": None}
+    upserts = []
+    with patch.object(fb, "_candidate_tns", return_value=list(reviews)), \
+         patch.object(fb, "_review_row", side_effect=lambda tn: reviews[tn]), \
+         patch.object(fb, "compute_ft_boundary", return_value=_REFRESH_D), \
+         patch.object(fb, "has_new_ft_signal", side_effect=lambda tn: tn == "dis2"), \
+         patch.object(fb, "_upsert_review_snapshot",
+                      side_effect=lambda tn, d, s, decision: upserts.append((tn, decision))):
+        res = fb.refresh_ft_boundaries()
+    up = {t for t, _ in upserts}
+    # promoted/confirmed/corrected NÃO recomputam (intocados)
+    assert not ({"prom", "conf", "corr"} & up)
+    # dismissed sem sinal fica dispensado; com sinal novo → reactiva (pending)
+    assert "dis1" not in up and ("dis2", "pending") in upserts
+    # pending/novo → snapshot pending
+    assert ("pend", "pending") in upserts
+    assert res == {"refreshed": 1, "reactivated": 1}   # pend / dis2
+
+
+def test_refresh_idempotent_no_decision_flip():
+    state = {"pend": None}   # persistência simulada: upsert escreve, _review_row lê
+    with patch.object(fb, "_candidate_tns", return_value=["pend"]), \
+         patch.object(fb, "_review_row", side_effect=lambda tn: state.get(tn)), \
+         patch.object(fb, "compute_ft_boundary", return_value=_REFRESH_D), \
+         patch.object(fb, "has_new_ft_signal", return_value=False), \
+         patch.object(fb, "_upsert_review_snapshot",
+                      side_effect=lambda tn, d, s, decision: state.__setitem__(tn, {"decision": decision})):
+        r1 = fb.refresh_ft_boundaries()
+        r2 = fb.refresh_ft_boundaries()
+    assert state["pend"]["decision"] == "pending"        # estável entre corridas
+    assert r1["reactivated"] == 0 and r2["reactivated"] == 0
+
+
+def test_trigger_ft_refresh_never_raises():
+    with patch.object(fb, "refresh_ft_boundaries", side_effect=RuntimeError("x")):
+        fb.trigger_ft_refresh()   # defensivo: engole a excepção, não rebenta o import

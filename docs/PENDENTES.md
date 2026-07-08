@@ -33,6 +33,16 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
   testada: mãos intactas); sai de "Precisam de ti", `/summary` deixa de contar; secção **"Dispensados"**;
   **reversível** — volta a pendente com sinal novo forte (tag manual -ft OU print do Info, `_ft_dismiss_reactivated`).
   Caso real: 290775453/292235768 = bolha da FT (o Rui rebentou), o motor esteve certo em não ancorar → dispensados.
+- **F5 ✅ (8 Jul) — LIGAR A MÁQUINA.** (1) **Gatilhos de CÁLCULO** (nunca escrevem tags): `refresh_ft_boundaries`
+  fire-and-forget em `import_`, `import_hm3`, `tournament_summaries` (`asyncio.create_task`) e no reconcile de
+  lobbys on-demand (thread daemon). Recomputa o estado por torneio e sincroniza a `ft_boundary_review`,
+  **RESPEITANDO decisões**: `promoted` não recalcula; `confirmed`/`corrected` mantêm a fronteira fixada;
+  `dismissed` só renasce (→pending) com sinal novo forte (`has_new_ft_signal`); pending/novo → snapshot.
+  **Idempotente** (recompute = mesmo resultado). **Perf:** F&F + gate apertado → não pesa nos imports. (2) **Fluxo
+  de APROVAÇÃO** na secção "Prontas a aprovar": **Aprovar** → confirm (fixa) + plano dry-run (mãos que mudam +
+  HRC stale + **aviso de cobertura parcial à vista**) → **Escrever** explícito → `propagate_ft(confirm=true)` →
+  `promoted`, sai da secção. `review_status` = fonte única (services/ft_boundary). +6 testes. **F6** (re-solve HRC
+  stale) fica dormente (hoje 0 solves afectados). **Frente FT F1–F5 construída por inteiro.**
 - **★ Endpoint `GET /api/gg-health/ft/raw-material` (SÓ LEITURA, `require_auth_or_api_key`)** — matéria-prima
   da F4b: torneios GG 2026 por dia com pista de FT (`min_players_left` + `latest_hand_seats` +
   `has_lobby` + `ft_candidate`). **REUTILIZADO pela Fase 3** (o preview/quarentena parte das mesmas

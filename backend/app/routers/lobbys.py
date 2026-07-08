@@ -176,7 +176,15 @@ def reconcile_lobbys(
     `message_ids` (opcional): restringe a um LOTE específico — não toca nos
     restantes pendentes. Omisso = comportamento GLOBAL de sempre. Ver
     reconcile_lobby_logs (`message_ids=[]` curto-circuita → no-op)."""
-    return reconcile_lobby_logs(message_ids=message_ids, dry_run=dry_run)
+    res = reconcile_lobby_logs(message_ids=message_ids, dry_run=dry_run)
+    # F5: o reconcile pode ter escrito payouts que mudam o sinal de FT → trigger
+    # refresh das fronteiras (fire-and-forget, thread daemon; NUNCA escreve tags).
+    # Só quando escreve mesmo (não em dry_run).
+    if not dry_run:
+        import threading
+        from app.services.ft_boundary import trigger_ft_refresh
+        threading.Thread(target=trigger_ft_refresh, daemon=True).start()
+    return res
 
 
 @router.post("/sync-recent")

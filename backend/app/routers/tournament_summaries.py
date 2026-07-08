@@ -539,6 +539,15 @@ async def import_tournament_summaries(
             logger.error(f"[ts_import] lobby reconcile falhou: {exc}")
 
     asyncio.create_task(_lobby_reconcile_async())
+
+    # ── Trigger refresh das fronteiras FT (F5) — recomputa/sincroniza a review;
+    # respeita decisões; NUNCA escreve tags. Fire-and-forget.
+    from app.services.ft_boundary import trigger_ft_refresh
+
+    async def _ft_refresh_async():
+        await asyncio.to_thread(trigger_ft_refresh)
+
+    asyncio.create_task(_ft_refresh_async())
     return result
 
 

@@ -533,6 +533,16 @@ async def import_file(
 
         asyncio.create_task(_lobby_reconcile_async())
 
+        # ── Trigger refresh das fronteiras FT (F5) — recomputa o estado por torneio e
+        # sincroniza a review/painel. RESPEITA decisões (promoted/confirmed/corrected
+        # intocados; dismissed só renasce c/ sinal novo). NUNCA escreve tags. F&F.
+        from app.services.ft_boundary import trigger_ft_refresh
+
+        async def _ft_refresh_async():
+            await asyncio.to_thread(trigger_ft_refresh)
+
+        asyncio.create_task(_ft_refresh_async())
+
         return {
             "import_type": "hands",
             "entry_id": entry_id,
