@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any, Optional
 
 from app.services.deanon_status import deanon_status
@@ -271,19 +271,84 @@ def conflict_sides(hands: list, item: dict) -> list:
 
 # ── classificador de RE-ENTRADA (o hash é fixo por ENTRADA, não por pessoa) ───
 
+# bala fresca ≈ starting stack (BANDA, não `>=`): um re-buy dá ~o stack de arranque, NUNCA
+# muito mais — um stack grande herdado (jogador acumulado, não re-buy) fica FORA em cima.
+# A banda é generosa em baixo porque o `start_stack` é MEDIDO (max na 1ª mão conhecida) e
+# pode vir sobrestimado (líder), enquanto o re-buy real = arranque verdadeiro.
+_FRESH_STACK_LO = 0.80          # tolerância em baixo (antes/blinds + erro de medição do start)
+_FRESH_STACK_HI = 1.15          # em cima: exclui "stack herdado grande" (>start)
+_REBUY_GAP_MAX_S = 60 * 60      # gap curto = <= 1h (minutos-a-1h; "minutos, não horas")
+
+
+def _iso(dt):
+    try:
+        return dt.isoformat()
+    except Exception:
+        return None
+
+
+def _stack_in(raw, h):
+    for s in seat_block(raw):
+        if s["hash"] == h:
+            return s["stack"]
+    return None
+
+
+def _tournament_start_stack(hands: list):
+    """Stack de arranque do torneio = MAIOR stack na 1ª mão cronológica (na mão 1 todos
+    têm a bala full). Coverage gap (1ª mão conhecida é já mid-torneio) → sobrestima o
+    arranque → a bala fresca falha o teste → NÃO promove a confirmed (fica likely) —
+    conservador por desenho (a nota de honestidade: só promover por presença de dados)."""
+    dated = [h for h in hands if h.get("played_at") is not None and h.get("raw")]
+    if not dated:
+        return None
+    first = min(dated, key=lambda h: h.get("played_at"))
+    return max((s["stack"] for s in seat_block(first.get("raw"))), default=None)
+
+
+def _line_about(t: str, h: str) -> bool:
+    """A linha do raw é SOBRE o hash `h`? (acção `<h>: …` / `<h> collected …` / SUMMARY
+    `Seat N: <h> …`). Evita colisão por prefixo exigindo `:`/espaço/`(` a seguir."""
+    return (t.startswith(h + ":") or t.startswith(h + " ")
+            or bool(re.search(r'Seat \d+:\s*' + re.escape(h) + r'\b', t)))
+
+
+def _all_in_and_result(raw, h) -> tuple:
+    """Na mão (raw), o hash `h` foi ALL-IN e COLECTOU o pote? Devolve (all_in, collected).
+    Bust = all_in ∧ ¬collected (foi com tudo e o pote foi para outro)."""
+    all_in = collected = False
+    for line in (raw or "").splitlines():
+        t = line.strip()
+        if not _line_about(t, h):
+            continue
+        low = t.lower()
+        if "all-in" in low:
+            all_in = True
+        if "collected" in low or "and won" in low or " won (" in low or "wins" in low:
+            collected = True
+    return all_in, collected
+
+
 def reentry_hint(hands: list, item: dict) -> dict:
     """Para um conflito `name_2_hash`, avalia se os 2 hashes são a MESMA pessoa por
     RE-ENTRADA. Base: o hash GG é fixo por ENTRADA — um re-buy gera hash NOVO p/ o
     mesmo humano (o invariante 1-hash=1-pessoa continua; o inverso 1-pessoa=1-hash NÃO
-    vale em torneios re-entry). Sinais:
-      - `same_nick`  : mesmo nick EXATO nos 2 lados (nicks GG são únicos por conta);
-      - `both_strong`: fonte FORTE dos dois lados (position_v3 / verificado);
-      - `disjoint_windows`: janelas de aparição SEM sobreposição (um lado todo antes
-        do outro) — coerente com sair e voltar a entrar;
-      - `co_present` : os 2 hashes na MESMA mão → IMPOSSÍVEL ser 1 pessoa → VENENO duro.
-    `likely_reentry` = same_nick ∧ both_strong ∧ disjoint ∧ ¬co_present. A decisão é
-    SEMPRE clique do Rui (isto só PRÉ-SELECCIONA o verbo; nunca auto-resolve).
-    Ver `DESANON_ANATOMIA §3.3`, `REGISTO_CONCEITO 2026-07-08` (Olisadebee)."""
+    vale em torneios re-entry).
+
+    SINAIS FRACOS (sempre): `same_nick` (nick exacto), `both_strong` (fonte forte dos 2
+    lados), `disjoint_windows` (janelas sem sobreposição), `co_present` (2 hashes na mesma
+    mão → VENENO duro). `likely_reentry` = same_nick ∧ both_strong ∧ disjoint ∧ ¬co_present.
+
+    EVIDÊNCIA DURA na HH (promove a `level='confirmed'`):
+      1. **BUST da 1ª entrada** — na ÚLTIMA mão do hash EARLY (última aparição), ele foi
+         all-in e o pote foi para outro (`_all_in_and_result`).
+      2. **BALA FRESCA da 2ª** — o stack inicial do hash LATE na 1ª mão dele ≈ starting
+         stack do torneio (`>= _FRESH_STACK_FRAC × start`).
+      3. **GAP curto** entre o bust e a 1ª mão do late (<= 1h).
+    `level` ∈ {`confirmed`, `likely`, None}. **Nota de honestidade:** a ausência de bust
+    legível (não-GG, HH em falta) NUNCA despromove um `likely` — só a PRESENÇA de evidência
+    promove a `confirmed`. A decisão é SEMPRE clique do Rui.
+    Ver `DESANON_ANATOMIA §3.3`, `REGISTO_CONCEITO 2026-07-08` (Olisadebee/AmigoCrypto)."""
     if item.get("kind") != "name_2_hash":
         return {"applies": False}
     cands = item.get("candidates") or []
@@ -291,9 +356,11 @@ def reentry_hint(hands: list, item: dict) -> dict:
         return {"applies": False}
     ha, hb = cands
     co_present = False
-    times = {ha: [], hb: []}
-    strong = {ha: False, hb: False}
-    names = {ha: set(), hb: set()}
+    # SEATED = mãos onde o hash está nos SEATS do raw (jogou, tenha nome ou não) → janelas
+    # + bust/rebuy. NAMED = mãos onde tem nome no apa → nick/força. (Distinção crítica: o
+    # bust está na última mão JOGADA, que pode NÃO estar desanonimizada.)
+    seated = {ha: [], hb: []}
+    strong_names = {ha: [], hb: []}   # leituras de FONTE FORTE (o nick fiável)
     for h in hands:
         hs = hand_hashes(h)
         has_a, has_b = ha in hs, hb in hs
@@ -301,23 +368,60 @@ def reentry_hint(hands: list, item: dict) -> dict:
             co_present = True
         am = _anon_map(_pn(h))
         st = _is_strong(h)
-        pat = h.get("played_at")
-        for hx in (ha, hb):
-            if hx in am:
-                names[hx].add(_norm(am[hx]))
-                strong[hx] = strong[hx] or st
-                if pat is not None:
-                    times[hx].append(pat)
+        for hx, seated_here in ((ha, has_a), (hb, has_b)):
+            if seated_here and h.get("played_at") is not None:
+                seated[hx].append(h)
+            if hx in am and st:
+                strong_names[hx].append(_norm(am[hx]))
+    for hx in (ha, hb):
+        seated[hx].sort(key=lambda h: h.get("played_at"))
+    appear = seated
+    ta = [h.get("played_at") for h in seated[ha]]
+    tb = [h.get("played_at") for h in seated[hb]]
     disjoint = None
-    if times[ha] and times[hb]:
-        disjoint = (max(times[ha]) < min(times[hb])) or (max(times[hb]) < min(times[ha]))
-    same_nick = bool(names[ha] and names[ha] == names[hb])
-    both_strong = strong[ha] and strong[hb]
-    likely = bool(same_nick and both_strong and disjoint is True and not co_present)
-    return {
-        "applies": True, "co_present": co_present, "disjoint_windows": disjoint,
-        "same_nick": same_nick, "both_strong": both_strong, "likely_reentry": likely,
-    }
+    if ta and tb:
+        disjoint = (max(ta) < min(tb)) or (max(tb) < min(ta))
+    # `same_nick` compara a leitura de FONTE FORTE (dominante) de cada lado, TOLERANTE a
+    # OCR — ignora misreads FRACOS (ex.: "Vadzim Khazanau" fraco sobre um "OHmyBUDDHA"
+    # forte, que mascarava um re-entry real). Caso OHmyBUDDHA (293643156).
+    na = Counter(strong_names[ha]).most_common(1)[0][0] if strong_names[ha] else None
+    nb = Counter(strong_names[hb]).most_common(1)[0][0] if strong_names[hb] else None
+    same_nick = bool(na and nb and (na == nb or _ocr_variant(na, nb)))
+    both_strong = bool(strong_names[ha] and strong_names[hb])
+    weak_ok = bool(same_nick and both_strong and disjoint is True and not co_present)
+
+    out = {"applies": True, "co_present": co_present, "disjoint_windows": disjoint,
+           "same_nick": same_nick, "both_strong": both_strong,
+           "likely_reentry": weak_ok, "level": ("likely" if weak_ok else None)}
+    if not weak_ok or not ta or not tb:
+        return out
+
+    # early = quem tem a 1ª janela; a sua ÚLTIMA mão deve ser o bust
+    if max(ta) < min(tb):
+        early, elist, late, llist = ha, appear[ha], hb, appear[hb]
+    else:
+        early, elist, late, llist = hb, appear[hb], ha, appear[ha]
+    last, first = elist[-1], llist[0]
+    all_in, collected = _all_in_and_result(last.get("raw"), early)
+    bust_lost = all_in and not collected
+    start_stack = _tournament_start_stack(hands)
+    fresh_stack = _stack_in(first.get("raw"), late)
+    fresh = bool(start_stack and fresh_stack and
+                 start_stack * _FRESH_STACK_LO <= fresh_stack <= start_stack * _FRESH_STACK_HI)
+    try:
+        gap_s = int((first.get("played_at") - last.get("played_at")).total_seconds())
+    except Exception:
+        gap_s = None
+    gap_short = gap_s is not None and 0 <= gap_s <= _REBUY_GAP_MAX_S
+    confirmed = bool(bust_lost and fresh and gap_short)
+    out["level"] = "confirmed" if confirmed else "likely"
+    out["bust"] = {"hash": early, "hand_id": last.get("hand_id"), "db_id": last.get("id"),
+                   "played_at": _iso(last.get("played_at")), "all_in": all_in, "lost": bust_lost}
+    out["rebuy"] = {"hash": late, "hand_id": first.get("hand_id"), "db_id": first.get("id"),
+                    "played_at": _iso(first.get("played_at")), "stack": fresh_stack,
+                    "start_stack": start_stack, "fresh": fresh}
+    out["gap_seconds"] = gap_s
+    return out
 
 
 # ── plano de propagação (só-tagadas; preenche brancos) ───────────────────────
@@ -331,28 +435,42 @@ def propagation_plan(hands: list[dict], clean_map: dict) -> dict:
     resolved = 0
     tagged = [h for h in hands if _is_tagged(h)]
     quarantine_hashes = set()   # preenchido pelo caller p/ não contar como branco
+    corrections_total = 0
     for h in tagged:
         vill = hand_hashes(h)
         if not vill:
             continue
         own = _anon_map(_pn(h))          # hashes já com nome nesta mão
-        fills, ver_fills = {}, {}
+        hand_weak = not _is_strong(h)    # só corrige misreads em mãos FRACAS
+        fills, ver_fills, corrected = {}, {}, {}
         for v in vill:
-            if v in own:
-                continue                 # já tem nome (não sobrescreve)
-            if v in clean_map:
-                fills[v] = clean_map[v]["name"]
-                if clean_map[v]["verified"]:
+            cur = own.get(v)
+            mapped = clean_map.get(v)
+            if mapped is None:
+                if cur is None:
+                    blanks.add(v)
+                continue
+            if cur is None:
+                fills[v] = mapped["name"]     # preenche branco
+                if mapped["verified"]:
                     ver_fills[v] = True
-            else:
-                blanks.add(v)
+            elif mapped["verified"] and hand_weak and _norm(cur) != _norm(mapped["name"]):
+                # CORRECÇÃO: um nome VERIFICADO (decisão do Rui: re-entrada/escolher/fundir)
+                # vence um misread FRACO existente diferente — a leitura errada NÃO fica
+                # agarrada à mão a contaminar. (Mão FORTE ou mapa não-verificado → intocado:
+                # o upgrade fraco→position_v3 continua deferido.)
+                fills[v] = mapped["name"]
+                ver_fills[v] = True
+                corrected[v] = cur
+                corrections_total += 1
+            # else: já tem o nome certo / mapa forte-não-verificado / mão forte → não toca
         # "resolvida" = todos os vilões com nome (próprio OU preenchido)
         if all((v in own) or (v in fills) for v in vill):
             resolved += 1
         if fills:
             changes.append({
                 "hand_id": h.get("hand_id"), "db_id": h.get("id"),
-                "fills": fills, "verified_fills": ver_fills,
+                "fills": fills, "verified_fills": ver_fills, "corrected": corrected,
             })
     return {
         "changes": changes,
@@ -362,6 +480,7 @@ def propagation_plan(hands: list[dict], clean_map: dict) -> dict:
             "hands_with_fills": len(changes),
             "hands_resolved_after": resolved,
             "fills_total": sum(len(c["fills"]) for c in changes),
+            "corrections_total": corrections_total,
             "blank_hashes": len(blanks),
         },
     }
@@ -441,9 +560,27 @@ def _write_fills(conn, db_id: int, fills: dict, verified_fills: dict) -> int:
     return written
 
 
+def _clean_stale_villains(conn, db_id: int) -> int:
+    """Apaga viloes STALE de uma mao: linhas em `hand_villains` cujo `player_name` JA NAO
+    e um `real_name` do apa (ex.: o misread 'Vadzim Khazanau' depois de corrigido para
+    'OHmyBUDDHA') — a leitura errada nao fica agarrada a mao a contaminar os Viloes. So
+    remove nomes ausentes do apa (os viloes validos ficam intactos → sem duplo-incremento
+    de `villain_notes`)."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT all_players_actions apa FROM hands WHERE id=%s", (db_id,))
+        row = cur.fetchone()
+        apa = _as_dict(row["apa"]) if row else {}
+        valid = [n for n in {(v.get("real_name") or "") for k, v in apa.items()
+                             if k != "_meta" and isinstance(v, dict)} if n]
+        cur.execute("DELETE FROM hand_villains WHERE hand_db_id=%s AND NOT (player_name = ANY(%s))",
+                    (db_id, valid or [""]))
+        return cur.rowcount
+
+
 def apply_propagation(hands: list, clean_map: dict, *, conn=None, dry_run: bool = True) -> dict:
     """Aplica o plano as maos tagadas. dry_run=True devolve so o plano. Escreve
-    idempotentemente e re-avalia viloes nas maos alteradas."""
+    idempotentemente, re-avalia viloes nas maos alteradas e LIMPA viloes stale (misreads
+    corrigidos)."""
     plan = propagation_plan(hands, clean_map)
     if dry_run:
         return {"dry_run": True, **plan["stats"], "changes": plan["changes"]}
@@ -452,6 +589,7 @@ def apply_propagation(hands: list, clean_map: dict, *, conn=None, dry_run: bool 
         from app.db import get_conn
         conn = get_conn()
     written_hands = []
+    stale_removed = 0
     try:
         for ch in plan["changes"]:
             if _write_fills(conn, ch["db_id"], ch["fills"], ch["verified_fills"]):
@@ -461,13 +599,15 @@ def apply_propagation(hands: list, clean_map: dict, *, conn=None, dry_run: bool 
         for db_id in written_hands:
             try:
                 apply_villain_rules(db_id, conn=conn)
+                stale_removed += _clean_stale_villains(conn, db_id)
             except Exception:
                 logger.exception("apply_villain_rules falhou hand %s", db_id)
         conn.commit()
     finally:
         if own:
             conn.close()
-    return {"dry_run": False, "hands_written": len(written_hands), **plan["stats"]}
+    return {"dry_run": False, "hands_written": len(written_hands),
+            "stale_villains_removed": stale_removed, **plan["stats"]}
 
 
 # ── review da quarentena (decisoes persistidas, respeitadas por re-runs) ──────

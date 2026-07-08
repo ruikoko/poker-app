@@ -304,6 +304,20 @@ inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon
   >   co-presentes)** → provável **re-entrada** → pré-selecciona o verbo *"Mesma pessoa
   >   (re-entrada)"* (o nome fica válido nos DOIS hashes). **A decisão é SEMPRE clique do
   >   Rui** — nunca auto-resolve (`reentry_hint` em `name_propagation.py`).
+  > - **DOIS NÍVEIS (a verificação do AmigoCrypto virou detector):**
+  >   - **`confirmed`** — **evidência DURA na HH**: (1) **BUST** da 1ª entrada (na ÚLTIMA
+  >     mão SEATED do hash early, ele foi all-in e o pote foi para outro); (2) **BALA
+  >     FRESCA** da 2ª (stack inicial do late ≈ starting stack, banda `[0.80, 1.15]×`);
+  >     (3) **GAP curto** (<=1h). O cartão mostra "re-entrada confirmada (bust às HH:MM,
+  >     re-compra +Xm)" com a mão do bust clicável. Casos reais: **AmigoCrypto** (bust
+  >     18:18 all-in perdido → re-buy +2m24s, 25 750), **M_R_Z_E_** (bust → re-buy +54s,
+  >     bala 100 000 exacta).
+  >   - **`likely`** — só os sinais fracos (bust não legível: HH em falta, ou a 2ª entrada
+  >     já cresceu no gap de cobertura → não pristine). É o comportamento actual.
+  >   - **Nota de honestidade:** a ausência de bust legível **nunca DESPROMOVE** um
+  >     `likely`; só a **presença** de evidência **promove** a `confirmed`. Usa SEATED (mãos
+  >     jogadas), não NAMED (desanonimizadas) — o bust está na última mão jogada, que pode
+  >     não estar desanonimizada.
   > - **nick igual + CO-PRESENTES na mesma mão** → **IMPOSSÍVEL** ser 1 pessoa → **veneno
   >   real, quarentena dura** (a desanon meteu o nome errado num hash).
   > **GUARDAS de jusante (regras — `REGRAS_NEGOCIO §24`):** a re-entrada **NUNCA funde** os 2
@@ -311,6 +325,13 @@ inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon
   > partilhado); o **bounty é POR ENTRADA** (re-entrada volta à bounty base — nenhuma lógica
   > pode assumir mesmo-nome ⇒ mesma-bounty). Os **Vilões** já agregam por NOME → as 2 entradas
   > caem no mesmo vilão, **correcto por construção, nada a mudar**.
+  > **SCRUB do misread ao resolver (não fica agarrado a contaminar):** ao decidir o cartão
+  > (re-entrada / escolher / fundir → nome **VERIFICADO**), a propagação **CORRIGE** esse hash
+  > nas mãos **tagadas FRACAS** onde ele tinha um misread diferente (ex.: `5ee4d246`
+  > "Vadzim Khazanau" fraco → "OHmyBUDDHA"), e **limpa vilões stale** (`hand_villains` com
+  > `player_name` que já não é `real_name` do apa). Mão FORTE / mapa não-verificado **intocado**
+  > (o upgrade fraco→`position_v3` continua deferido). `propagation_plan` (`corrected`),
+  > `_clean_stale_villains`.
 
   > **Alcance da propagação por hash (pt97, só mãos TAGADAS):** 75 torneios GG 2026 com ≥2
   > mãos tagadas · **484** tagadas · **1126** hashes distintos. **1 confirmação de nome

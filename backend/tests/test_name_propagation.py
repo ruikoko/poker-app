@@ -5,20 +5,22 @@ from app.services import name_propagation as np
 
 
 def _hand(hand_id, mm, anon_map, seats, *, tagged=True, verified=False, site="GGPoker",
-          hid=None, played_at=None, stacks=None):
+          hid=None, played_at=None, stacks=None, extra_lines=""):
     """Constrói uma linha de mão sintética. `seats` = lista de hashes (Hero implícito).
-    `stacks` opcional = dict hash→stack (default 1000)."""
+    `stacks` opcional = dict hash→stack (default 1000). `extra_lines` = acções do raw
+    (all-in / collected) p/ o detector de bust."""
     stacks = stacks or {}
     lines = ["Poker Hand #x", "Table '1' 8-max Seat #1 is the button",
              "Seat 1: Hero (1000 in chips)"]
     for i, h in enumerate(seats, start=2):
         lines.append(f"Seat {i}: {h} ({stacks.get(h, 1000)} in chips)")
+    raw = "\n".join(lines) + "\n" + (extra_lines or "")
     pn = {"match_method": mm, "anon_map": dict(anon_map)}
     if verified:
         pn["verified_by_user"] = True
     return {
         "id": hid if hid is not None else abs(hash(hand_id)) % 100000,
-        "hand_id": hand_id, "site": site, "raw": "\n".join(lines) + "\n",
+        "hand_id": hand_id, "site": site, "raw": raw,
         "player_names": pn, "played_at": played_at,
         "hm3_tags": (["icm"] if tagged else []), "discord_tags": [],
     }
@@ -110,6 +112,40 @@ def test_propagation_fills_only_tagged_blanks():
     assert 42 in ids and 43 not in ids          # só a tagada é preenchida
     fill = next(c for c in plan["changes"] if c["db_id"] == 42)
     assert fill["fills"]["3b4cd0c7"] == "Alice"
+
+
+def test_propagation_corrects_weak_misread_when_map_verified():
+    # mão FRACA (table_ss) com misread "Vadzim Khazanau" no hash; mapa VERIFICADO diz
+    # "OHmyBUDDHA" (decisão de re-entrada) → corrige (não deixa a leitura errada agarrada).
+    tagged_weak = _hand("GG-072", "table_ss", {"5ee4d246": "Vadzim Khazanau"},
+                        ["5ee4d246"], tagged=True, hid=9306)
+    clean = {"5ee4d246": {"name": "OHmyBUDDHA", "verified": True}}
+    plan = np.propagation_plan([tagged_weak], clean)
+    ch = next(c for c in plan["changes"] if c["db_id"] == 9306)
+    assert ch["fills"]["5ee4d246"] == "OHmyBUDDHA"     # sobrescreve o misread
+    assert ch["corrected"]["5ee4d246"] == "Vadzim Khazanau"
+    assert plan["stats"]["corrections_total"] == 1
+
+
+def test_propagation_does_not_correct_strong_hand():
+    # mão FORTE (position_v3) com um nome diferente NÃO é sobrescrita mesmo por mapa verificado
+    strong = _hand("GG-s", "position_v3", {"5ee4d246": "Real Name"}, ["5ee4d246"],
+                   tagged=True, hid=1)
+    clean = {"5ee4d246": {"name": "OHmyBUDDHA", "verified": True}}
+    plan = np.propagation_plan([strong], clean)
+    assert plan["stats"]["corrections_total"] == 0
+    assert plan["changes"] == []
+
+
+def test_propagation_does_not_overwrite_when_map_unverified():
+    # mapa NÃO-verificado (position_v3, por verificar) NÃO sobrescreve nome fraco existente
+    # (o upgrade fraco→forte continua deferido — só decisão MANUAL corrige).
+    weak = _hand("GG-w", "table_ss", {"5ee4d246": "Old Weak"}, ["5ee4d246"],
+                 tagged=True, hid=2)
+    clean = {"5ee4d246": {"name": "New Strong", "verified": False}}
+    plan = np.propagation_plan([weak], clean)
+    assert plan["stats"]["corrections_total"] == 0
+    assert plan["changes"] == []
 
 
 def test_propagation_idempotent_skips_own_names():
@@ -238,3 +274,78 @@ def test_apply_decisions_reentry_puts_name_on_both_hashes():
     assert clean[_HA] == {"name": "Olisadebee", "verified": True}
     assert clean[_HB] == {"name": "Olisadebee", "verified": True}   # nome nos DOIS
     assert still == []                                              # sai da quarentena
+
+
+# ── OBRA (upgrade) — evidência DURA: bust + bala fresca + gap → 'confirmed' ────
+
+_EARLY, _LATE, _WINNER = "e4224f2", "e8b6dae9", "0e0cafc0"
+_START = 25000
+_D = lambda hh, mm: datetime(2026, 6, 23, hh, mm)   # noqa: E731
+
+
+def _amigo_item():
+    return {"kind": "name_2_hash", "name": "AmigoCrypto", "conflict_key": "AmigoCrypto",
+            "candidates": [_EARLY, _LATE]}
+
+
+def _bust_extra():
+    return ("e4224f2: calls 12836 and is all-in\n"
+            "e4224f2: shows [Ad Jd] (two pair, Jacks and Fives)\n"
+            "0e0cafc0 collected 45832 from pot\n"
+            "Seat 3: 0e0cafc0 (small blind) showed [Td Tc] and won (45832)\n")
+
+
+def _amigo_hands(*, bust=True, late_stack=_START):
+    # 1ª mão do torneio (arranque, define start_stack = 25000)
+    start = _hand("GG-A0", "position_v3", {_EARLY: "AmigoCrypto"}, [_EARLY, _WINNER],
+                  stacks={_EARLY: _START, _WINNER: _START}, played_at=_D(17, 32), hid=10)
+    # ÚLTIMA mão do early: bust (all-in perdido) OU normal (não legível)
+    extra = _bust_extra() if bust else "e4224f2: folds\n"
+    last = _hand("GG-6107814611", "position_v3", {_EARLY: "AmigoCrypto"}, [_EARLY, _WINNER],
+                 stacks={_EARLY: 13000, _WINNER: 20000}, played_at=_D(18, 18),
+                 extra_lines=extra, hid=11)
+    # 1ª mão do late (re-buy): stack fresco, 2m24s depois
+    rebuy = _hand("GG-6107814854", "position_v3", {_LATE: "AmigoCrypto"}, [_LATE, _WINNER],
+                  stacks={_LATE: late_stack, _WINNER: 30000}, played_at=_D(18, 20), hid=12)
+    return [start, last, rebuy]
+
+
+def test_reentry_confirmed_bust_lost_fresh_bala_short_gap():
+    hint = np.reentry_hint(_amigo_hands(), _amigo_item())
+    assert hint["level"] == "confirmed"
+    assert hint["bust"]["hash"] == _EARLY and hint["bust"]["lost"] is True
+    assert hint["bust"]["hand_id"] == "GG-6107814611" and hint["bust"]["db_id"] == 11
+    assert hint["rebuy"]["hash"] == _LATE and hint["rebuy"]["fresh"] is True
+    assert hint["rebuy"]["start_stack"] == _START
+    assert hint["gap_seconds"] == 120                       # 18:18 → 18:20 = 2 min
+
+
+def test_reentry_bust_not_legible_stays_likely_not_demoted():
+    # última mão do early NÃO mostra all-in (coverage/HH) → não promove, mas NÃO despromove
+    hint = np.reentry_hint(_amigo_hands(bust=False), _amigo_item())
+    assert hint["level"] == "likely"
+    assert hint["likely_reentry"] is True
+    assert hint["bust"]["lost"] is False
+
+
+def test_reentry_big_inherited_stack_not_fresh_stays_likely():
+    # 2ª entrada com stack GRANDE (2× arranque) = herdado, não re-buy → fora da banda
+    hint = np.reentry_hint(_amigo_hands(late_stack=_START * 2), _amigo_item())
+    assert hint["rebuy"]["fresh"] is False
+    assert hint["level"] == "likely"                        # bust legível mas bala não-fresca
+
+
+def test_reentry_same_nick_ignores_weak_misread():
+    # OHmyBUDDHA: um lado tem leitura FORTE "OHmyBUDDHA" + misread FRACO "Vadzim Khazanau".
+    # O same_nick usa só a FORTE → não se deixa enganar pelo misread → re-entry detectável.
+    early_strong = _hand("GG-1", "position_v3", {_EARLY: "OHmyBUDDHA"}, [_EARLY, _WINNER],
+                         stacks={_EARLY: _START, _WINNER: _START}, played_at=_D(19, 15), hid=1)
+    early_weak = _hand("GG-2", "table_ss", {_EARLY: "Vadzim Khazanau"}, [_EARLY, _WINNER],
+                       stacks={_EARLY: 5000, _WINNER: 20000}, played_at=_D(19, 25),
+                       extra_lines=_bust_extra().replace("e4224f2", _EARLY), hid=2)
+    late = _hand("GG-3", "position_v3", {_LATE: "OHmyBUDDHA"}, [_LATE, _WINNER],
+                 stacks={_LATE: _START, _WINNER: 30000}, played_at=_D(19, 27), hid=3)
+    item = {"kind": "name_2_hash", "conflict_key": "OHmyBUDDHA", "candidates": [_EARLY, _LATE]}
+    hint = np.reentry_hint([early_strong, early_weak, late], item)
+    assert hint["same_nick"] is True          # FORTE dos 2 lados = OHmyBUDDHA (ignora o fraco)
+    assert hint["level"] == "confirmed"        # bust (early_weak) + bala fresca + gap curto

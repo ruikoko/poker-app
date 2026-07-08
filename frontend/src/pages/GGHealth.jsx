@@ -541,7 +541,9 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
   const isHash = it.kind !== 'same_hash'   // name_2_hash → lados são hashes; same_hash → variantes
   const sides = it.sides || []
   const re = it.reentry || {}
-  const showReentry = isHash && re.applies && !re.co_present   // co-presentes → nunca re-entrada
+  // re-entrada exige o MESMO nick (conta única) e nunca co-presentes; nicks diferentes
+  // (ex. OHmyBUDDHA) não são re-entrada → não oferece o verbo.
+  const showReentry = isHash && re.applies && !re.co_present && re.same_nick
   return (
     <div style={{ ...card, padding: 12, marginBottom: 10 }}>
       <div style={{ fontSize: 13, marginBottom: 8 }}>
@@ -549,13 +551,17 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
           ? <>o nome <b>{it.conflict_key}</b> está em <b>2 lugares</b>. <span style={{ color: 'var(--muted)' }}>Ou é um lugar errado (escolhe «É este»), ou é a MESMA pessoa por re-entrada.</span></>
           : <>o hash <code>{it.conflict_key}</code> foi lido com <b>nomes diferentes</b>. <span style={{ color: 'var(--muted)' }}>Confirma qual a leitura certa.</span></>}
       </div>
-      {/* Sinal de re-entrada / veneno duro (co-presentes) */}
+      {/* Sinal de re-entrada / veneno duro (co-presentes) + EVIDÊNCIA DURA */}
       {isHash && re.applies && (
         re.co_present
           ? <div style={{ fontSize: 12, color: '#fca5a5', marginBottom: 8 }}>⛔ os 2 hashes aparecem na MESMA mão → impossível ser 1 pessoa (veneno real).</div>
-          : re.likely_reentry
-            ? <div style={{ fontSize: 12, color: '#86efac', marginBottom: 8 }}>↻ provável <b>re-entrada</b>: mesmo nick, fontes fortes dos 2 lados, janelas sem sobreposição. Confirma tu.</div>
-            : <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{re.same_nick ? 'mesmo nick' : 'nicks diferentes'}{re.disjoint_windows === false ? ' · janelas sobrepõem-se' : re.disjoint_windows ? ' · janelas disjuntas' : ''}{re.both_strong ? '' : ' · falta fonte forte num lado'}.</div>
+          : re.level === 'confirmed'
+            ? <div style={{ fontSize: 12.5, color: '#86efac', marginBottom: 8, background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 6, padding: '6px 10px' }}>
+                ✓ <b>re-entrada confirmada</b> — <code>{re.bust?.hash}</code> bustou às <b>{(re.bust?.played_at || '').slice(11, 16)}</b> (all-in perdido{re.bust?.db_id ? <> · <Link to={`/hand/${re.bust.db_id}`} style={{ color: '#60a5fa' }}>{re.bust.hand_id}</Link></> : ''}), re-compra <b>+{Math.max(0, Math.round((re.gap_seconds || 0) / 60))}m</b> depois com bala fresca <b>{(re.rebuy?.stack ?? 0).toLocaleString()}</b> (arranque ~{(re.rebuy?.start_stack ?? 0).toLocaleString()}).
+              </div>
+            : re.likely_reentry
+              ? <div style={{ fontSize: 12, color: '#a5b4fc', marginBottom: 8 }}>↻ provável <b>re-entrada</b>: mesmo nick, fortes dos 2 lados, janelas sem sobreposição{re.bust && !re.bust.lost ? ' — sem bust legível na app (fica provável)' : ''}. Confirma tu.</div>
+              : <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{re.same_nick ? 'mesmo nick' : 'nicks diferentes'}{re.disjoint_windows === false ? ' · janelas sobrepõem-se' : re.disjoint_windows ? ' · janelas disjuntas' : ''}{re.both_strong ? '' : ' · falta fonte forte num lado'}.</div>
       )}
       {sides.length > 0 ? (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -577,9 +583,9 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
         {showReentry && (
-          <button disabled={busy} style={{ ...btn, borderColor: re.likely_reentry ? '#22c55e' : '#818cf8', color: re.likely_reentry ? '#86efac' : '#a5b4fc', fontWeight: re.likely_reentry ? 700 : 500 }}
+          <button disabled={busy} style={{ ...btn, borderColor: re.level === 'confirmed' ? '#22c55e' : re.likely_reentry ? '#22c55e' : '#818cf8', color: re.likely_reentry ? '#86efac' : '#a5b4fc', fontWeight: re.likely_reentry ? 700 : 500 }}
             onClick={() => onReentry(it)} title="Os 2 hashes são a mesma pessoa (re-entrada) — o nome fica válido nos dois">
-            ↻ Mesma pessoa (re-entrada)</button>
+            ↻ Mesma pessoa (re-entrada{re.level === 'confirmed' ? ' confirmada' : ''})</button>
         )}
         {!isHash && <>
           <span style={{ color: 'var(--muted)', fontSize: 12 }}>ou outro nome:</span>
