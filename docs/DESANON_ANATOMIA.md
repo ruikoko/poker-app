@@ -332,6 +332,13 @@ inconsistente com o `anon_map` correcto. Ao tocar em qualquer caminho de desanon
   > `player_name` que já não é `real_name` do apa). Mão FORTE / mapa não-verificado **intocado**
   > (o upgrade fraco→`position_v3` continua deferido). `propagation_plan` (`corrected`),
   > `_clean_stale_villains`.
+  > **★ kind `strong_weak_mismatch` (buraco de core tapado):** um hash com nome **FORTE X** +
+  > leitura(s) **FRACA(s) divergente(s)** (Y≠X, não OCR-variante) passava em **silêncio** (só os
+  > fortes semeiam). O `build_name_map` passa a emitir um **cartão** (não-bloqueante: o hash mantém
+  > o forte no mapa) — o Rui **confirma o forte → scrub das fracas** (mesma mecânica). Caso `93d63976`
+  > (Vadzim forte + 4 "Diego Emperador" fracas). Varrimento da BD (pré-wipe): **59 hashes / 93 mãos
+  > tagadas / 98 torneios**. Serve o **pipeline pós-wipe** (a via fraca repete o padrão). O upgrade
+  > **automático** fraco→forte continua deferido. Ver `REGISTO_CONCEITO 2026-07-08`.
 
   > **Alcance da propagação por hash (pt97, só mãos TAGADAS):** 75 torneios GG 2026 com ≥2
   > mãos tagadas · **484** tagadas · **1126** hashes distintos. **1 confirmação de nome

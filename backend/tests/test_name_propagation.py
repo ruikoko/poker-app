@@ -70,6 +70,57 @@ def test_guard_c_same_hash_different_names_quarantines():
     assert len(q) == 1 and set(q[0]["candidates"]) == {"Daniel Filipe", "Mikhail Petrov"}
 
 
+# ── strong_weak_mismatch — hash com FORTE X + FRACA divergente Y (novo kind) ──
+
+def test_strong_weak_mismatch_detected():
+    # 93d63976: FORTE "Vadzim Khazanau" + FRACA "Diego Emperador" → cartão; forte mantém-se
+    strong = _hand("GG-s", "position_v3", {"93d63976": "Vadzim Khazanau"}, ["93d63976"], hid=1)
+    weak = _hand("GG-w", "table_ss", {"93d63976": "Diego Emperador"}, ["93d63976"], hid=2)
+    clean, quar = np.build_name_map([strong, weak])
+    assert clean["93d63976"]["name"] == "Vadzim Khazanau"     # o FORTE fica no mapa (propaga)
+    m = [q for q in quar if q["kind"] == "strong_weak_mismatch"]
+    assert len(m) == 1 and m[0]["hash"] == "93d63976"
+    assert set(m[0]["candidates"]) == {"Vadzim Khazanau", "Diego Emperador"}
+    assert m[0]["hands"] == ["GG-w"]                          # a mão da leitura fraca
+
+
+def test_strong_weak_mismatch_ignores_ocr_variant():
+    # FRACA que é só truncagem/OCR do forte → NÃO é mismatch (é o mesmo jogador)
+    strong = _hand("GG-s", "position_v3", {"3b4cd0c7": "Footloose r.."}, ["3b4cd0c7"], hid=1)
+    weak = _hand("GG-w", "table_ss", {"3b4cd0c7": "Footlose r.."}, ["3b4cd0c7"], hid=2)
+    _, quar = np.build_name_map([strong, weak])
+    assert [q for q in quar if q["kind"] == "strong_weak_mismatch"] == []
+
+
+def test_strong_weak_mismatch_needs_strong_seed():
+    # só leituras FRACAS (sem forte) → não semeia nem gera cartão (guarda (a) manda)
+    weak = _hand("GG-w", "table_ss", {"3b4cd0c7": "Diego"}, ["3b4cd0c7"], hid=2)
+    clean, quar = np.build_name_map([weak])
+    assert clean == {} and [q for q in quar if q["kind"] == "strong_weak_mismatch"] == []
+
+
+def test_apply_decisions_strong_weak_mismatch_confirms_strong():
+    # confirmar o forte (decision 'chosen') → hash fica VERIFICADO (dispara o scrub das fracas)
+    quar = [{"kind": "strong_weak_mismatch", "hash": "93d63976", "name": "Vadzim Khazanau",
+             "candidates": ["Diego Emperador", "Vadzim Khazanau"], "hands": ["GG-w"]}]
+    clean = {"93d63976": {"name": "Vadzim Khazanau", "verified": False}}
+    decisions = {("strong_weak_mismatch", "93d63976"):
+                 {"decision": "chosen", "chosen_name": "Vadzim Khazanau", "chosen_hash": None}}
+    clean2, still = np._apply_decisions_to_map(clean, quar, decisions)
+    assert clean2["93d63976"] == {"name": "Vadzim Khazanau", "verified": True}
+    assert still == []
+
+
+def test_conflict_sides_strong_weak_mismatch_marks_source():
+    strong = _hand("GG-s", "position_v3", {"93d63976": "Vadzim Khazanau"}, ["93d63976"], hid=1)
+    weak = _hand("GG-w", "table_ss", {"93d63976": "Diego Emperador"}, ["93d63976"], hid=2)
+    item = {"kind": "strong_weak_mismatch", "conflict_key": "93d63976",
+            "candidates": ["Diego Emperador", "Vadzim Khazanau"]}
+    sides = np.conflict_sides([strong, weak], item)
+    assert next(s for s in sides if s["name"] == "Vadzim Khazanau")["appearances"][0]["source"] == "strong"
+    assert next(s for s in sides if s["name"] == "Diego Emperador")["appearances"][0]["source"] == "weak"
+
+
 # ── OCR-merge — variantes do mesmo nome fundem-se (não vão à quarentena) ──────
 
 def test_ocr_merge_truncation_variants():

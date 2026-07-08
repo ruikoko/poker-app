@@ -538,8 +538,12 @@ function SideColumn({ side, isHash, actionLabel, onAct, busy, onZoom, onAttach }
 
 function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, onAttach, onZoom }) {
   const [custom, setCustom] = useState('')
-  const isHash = it.kind !== 'same_hash'   // name_2_hash → lados são hashes; same_hash → variantes
+  const isHash = it.kind === 'name_2_hash'          // name_2_hash → lados são hashes
+  const isMismatch = it.kind === 'strong_weak_mismatch'
   const sides = it.sides || []
+  // No mismatch, o lado FORTE (com aparições 'strong') é o nome a confirmar.
+  const strongSide = sides.find(s => (s.appearances || []).some(a => a.source === 'strong'))
+  const strongName = strongSide?.name
   const re = it.reentry || {}
   // re-entrada exige o MESMO nick (conta única) e nunca co-presentes; nicks diferentes
   // (ex. OHmyBUDDHA) não são re-entrada → não oferece o verbo.
@@ -549,7 +553,9 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
       <div style={{ fontSize: 13, marginBottom: 8 }}>
         Torneio <b>{it.tournament_number}</b> · {isHash
           ? <>o nome <b>{it.conflict_key}</b> está em <b>2 lugares</b>. <span style={{ color: 'var(--muted)' }}>Ou é um lugar errado (escolhe «É este»), ou é a MESMA pessoa por re-entrada.</span></>
-          : <>o hash <code>{it.conflict_key}</code> foi lido com <b>nomes diferentes</b>. <span style={{ color: 'var(--muted)' }}>Confirma qual a leitura certa.</span></>}
+          : isMismatch
+            ? <>o hash <code>{it.conflict_key}</code> foi lido <b style={{ color: '#86efac' }}>FORTE como {strongName}</b> mas tem leituras <b style={{ color: '#fbbf24' }}>fracas divergentes</b>. <span style={{ color: 'var(--muted)' }}>Confirma o forte (limpa as fracas) ou dispensa.</span></>
+            : <>o hash <code>{it.conflict_key}</code> foi lido com <b>nomes diferentes</b>. <span style={{ color: 'var(--muted)' }}>Confirma qual a leitura certa.</span></>}
       </div>
       {/* Sinal de re-entrada / veneno duro (co-presentes) + EVIDÊNCIA DURA */}
       {isHash && re.applies && (
@@ -567,8 +573,10 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {sides.map((s, i) => (
             <SideColumn key={i} side={s} isHash={isHash} busy={busy} onZoom={onZoom} onAttach={onAttach}
-              actionLabel={isHash ? 'É este' : 'É esta'}
-              onAct={() => isHash ? onChoose(it, it.conflict_key, s.hash) : onMerge(it, s.name)} />
+              actionLabel={isHash ? 'É este' : (isMismatch && s.name === strongName) ? 'Confirmar (forte)' : 'É esta'}
+              onAct={() => isHash ? onChoose(it, it.conflict_key, s.hash)
+                : isMismatch ? onChoose(it, s.name, null)
+                : onMerge(it, s.name)} />
           ))}
         </div>
       ) : (
@@ -576,7 +584,7 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {(it.candidates || []).map(c => (
             <button key={c} disabled={busy} style={btn}
-              onClick={() => isHash ? onChoose(it, it.conflict_key, c) : onMerge(it, c)}>
+              onClick={() => isHash ? onChoose(it, it.conflict_key, c) : isMismatch ? onChoose(it, c, null) : onMerge(it, c)}>
               {isHash ? <code>{c}</code> : c}</button>
           ))}
         </div>
@@ -586,6 +594,12 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
           <button disabled={busy} style={{ ...btn, borderColor: re.level === 'confirmed' ? '#22c55e' : re.likely_reentry ? '#22c55e' : '#818cf8', color: re.likely_reentry ? '#86efac' : '#a5b4fc', fontWeight: re.likely_reentry ? 700 : 500 }}
             onClick={() => onReentry(it)} title="Os 2 hashes são a mesma pessoa (re-entrada) — o nome fica válido nos dois">
             ↻ Mesma pessoa (re-entrada{re.level === 'confirmed' ? ' confirmada' : ''})</button>
+        )}
+        {isMismatch && strongName && (
+          <button disabled={busy} style={{ ...btn, borderColor: '#22c55e', color: '#86efac', fontWeight: 700 }}
+            onClick={() => onChoose(it, strongName, null)}
+            title="Confirma o nome forte no hash → propaga e limpa as leituras fracas divergentes">
+            ✓ Confirmar o forte ({strongName})</button>
         )}
         {!isHash && <>
           <span style={{ color: 'var(--muted)', fontSize: 12 }}>ou outro nome:</span>

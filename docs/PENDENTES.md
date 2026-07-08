@@ -14,6 +14,12 @@ não por pessoa): `DESANON_ANATOMIA §3.3`, `REGRAS_NEGOCIO §24`, `REGISTO_CONC
   misreads fracos). Nota de honestidade: falta de bust legível nunca despromove.
 - **Scrub** (`propagation_plan.corrected` + `_clean_stale_villains`): a decisão VERIFICADA **corrige** o
   misread fraco na mão (não fica agarrado) e **limpa vilões stale**. Mão forte / mapa não-verificado intocado.
+- **★ kind `strong_weak_mismatch` (novo, LIVE):** hash com nome FORTE X + leitura(s) FRACA(s) divergente(s)
+  (Y≠X, não OCR) → **cartão** (detectado no `build_name_map`; não-bloqueante, o forte propaga na mesma).
+  Confirmar o forte → scrub das fracas. Tapa o buraco de core (passava em silêncio; ex. `93d63976`
+  Vadzim+Diego). Varrimento pré-wipe: **59 hashes / 93 mãos tagadas / 98 torneios** — serve o **pipeline
+  pós-wipe**. O upgrade **automático** fraco→`position_v3` continua **deferido** (este cartão é a via
+  manual pelo circuito normal).
 - **⏳ PENDENTE do carimbo do Rui (3 cartões):** **OHmyBUDDHA** (`confirmed`), **M_R_Z_E_** (`confirmed`),
   **Silin O** (`likely`). Ao carimbar OHmyBUDDHA, verificar à vista na mão `200072` que o "Vadzim" saiu do
   Seat 6. **Quando a quarentena zerar → wipe+reimport** é o teste de aceitação (tagadas GG desanonimizadas

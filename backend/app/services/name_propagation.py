@@ -157,22 +157,25 @@ def build_name_map(hands: list[dict]) -> tuple[dict, list[dict]]:
     Só FORTES semeiam. Devolve (clean_map, quarantine).
 
     clean_map: {hash: {"name": str, "verified": bool}}
-    quarantine: [{"kind": "same_hash"|"name_2_hash", "hash"/"name", "candidates":[...],
-                  "hands": [hand_id,...]}]
+    quarantine: [{"kind": "same_hash"|"name_2_hash"|"strong_weak_mismatch", "hash"/"name",
+                  "candidates":[...], "hands": [hand_id,...]}]
     """
-    # 1) recolher nomes fortes por hash (com proveniência)
+    # 1) recolher nomes FORTES por hash (semeiam) + FRACOS por hash (p/ o mismatch)
     hash_names: dict[str, list[str]] = defaultdict(list)
     hash_verified: dict[str, bool] = defaultdict(bool)
     hash_hands: dict[str, set] = defaultdict(set)
+    weak_names: dict[str, list[tuple]] = defaultdict(list)   # hash -> [(name, hand_id)]
     for h in hands:
-        if not _is_strong(h):
-            continue
         pn = _pn(h)
-        ver = _verified_by_user(pn)
-        for hsh, name in _anon_map(pn).items():
-            hash_names[hsh].append(name)
-            hash_verified[hsh] = hash_verified[hsh] or ver
-            hash_hands[hsh].add(h.get("hand_id"))
+        if _is_strong(h):
+            ver = _verified_by_user(pn)
+            for hsh, name in _anon_map(pn).items():
+                hash_names[hsh].append(name)
+                hash_verified[hsh] = hash_verified[hsh] or ver
+                hash_hands[hsh].add(h.get("hand_id"))
+        else:
+            for hsh, name in _anon_map(pn).items():
+                weak_names[hsh].append((name, h.get("hand_id")))
 
     quarantine: list[dict] = []
     tentative: dict[str, dict] = {}   # hash -> {name, verified}
@@ -204,6 +207,23 @@ def build_name_map(hands: list[dict]) -> tuple[dict, list[dict]]:
                 "kind": "name_2_hash", "name": tentative[hs[0]]["name"],
                 "candidates": sorted(hs),
                 "hands": sorted({x for h in hs for x in hash_hands[h] if x}),
+            })
+
+    # 4) NOVO — strong_weak_mismatch: hash com nome FORTE X + leitura(s) FRACA(s)
+    # divergente(s) (Y != X e não OCR-variante de X). Hoje passavam em silêncio (só os
+    # fortes semeiam) → misread fraco ficava agarrado (caso 93d63976 "Vadzim" forte + 4
+    # "Diego Emperador" fracas). O hash MANTÉM o nome forte no mapa (não-bloqueante); o
+    # cartão é p/ confirmar o forte → scrub das fracas. Só p/ hashes que ficaram em `clean`.
+    for hsh, info in clean.items():
+        strongset = set(hash_names.get(hsh, []))
+        snorm = {_norm(s) for s in strongset}
+        mism = [(nm, hid) for (nm, hid) in weak_names.get(hsh, [])
+                if _norm(nm) not in snorm and not any(_ocr_variant(nm, s) for s in strongset)]
+        if mism:
+            quarantine.append({
+                "kind": "strong_weak_mismatch", "hash": hsh, "name": info["name"],
+                "candidates": sorted({info["name"]} | {m[0] for m in mism}),
+                "hands": sorted({m[1] for m in mism if m[1]}),
             })
     return clean, quarantine
 
@@ -256,7 +276,7 @@ def conflict_sides(hands: list, item: dict) -> list:
             sides.append({"kind": "hash", "hash": hc, "name": name,
                           "db_ids": [a["db_id"] for a in appear if a.get("db_id")],
                           "appearances": appear})
-    elif kind == "same_hash":
+    elif kind in ("same_hash", "strong_weak_mismatch"):
         for nv in cands:
             nnorm = _norm(nv)
             def _m(h, nnorm=nnorm):
@@ -622,7 +642,7 @@ def _load_tournament_hands(conn, tn: str) -> list:
 
 
 def _quar_key(q: dict) -> str:
-    return q["hash"] if q["kind"] == "same_hash" else q["name"]
+    return q["hash"] if q["kind"] in ("same_hash", "strong_weak_mismatch") else q["name"]
 
 
 def _load_decisions(conn, tn: str) -> dict:
@@ -653,7 +673,8 @@ def _apply_decisions_to_map(clean: dict, quarantine: list, decisions: dict):
                     clean[hsh] = {"name": nm, "verified": True}
             continue
         if dec["decision"] in ("chosen", "merged") and dec.get("chosen_name"):
-            if q["kind"] == "same_hash":
+            if q["kind"] in ("same_hash", "strong_weak_mismatch"):
+                # confirma o nome no hash (VERIFICADO) → propaga + scruba as fracas divergentes
                 clean[q["hash"]] = {"name": dec["chosen_name"], "verified": True}
             elif dec.get("chosen_hash"):
                 clean[dec["chosen_hash"]] = {"name": dec["chosen_name"], "verified": True}
