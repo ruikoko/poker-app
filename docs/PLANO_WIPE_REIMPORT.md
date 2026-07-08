@@ -37,7 +37,13 @@ Nenhum destes é opcional. O wipe só arranca com todos verdes.
 | P1 | **`#HRC-REIMPORT-REDEANON-CASADAS` fechado** (item 1 da casa-limpa) | ✅ LIVE | Sem ele, ao reimportar as HH por cima, as capturas casadas **não re-desanonimizavam** (o `_persist_table_ss_match` comparava o `hand_id` string, via `changed=False`) → **todas** as mãos GG com captura casada nasciam **anónimas**. Era o pré-requisito nº1 do wipe. |
 | P2 | **Guarda universal de desanon** (item 2, `#DESANON-SITTING-OUT-NPLUS1`) | ✅ LIVE | Impede, na reingestão, o nome do Hero num vilão e o colapso de lugares N+1. Branco honesto > nome errado. |
 | P3 | **Restantes fixes da casa-limpa deployados** (itens 3–9) | ✅ LIVE (`ca1134b`) | parser-seats (4), WPN/PS por nick (5), trio IRE (6/8), resolver late-reg GG (9). Confirmar cada um no backend deployado (OpenAPI/liveness), não só em `main`. |
-| P4 | **Quarentena de nomes a ZERO** | ⏳ 3 cartões pendentes do carimbo do Rui: **OHmyBUDDHA** (`confirmed`), **M_R_Z_E_** (`confirmed`), **Silin O** (`likely`) | Enquanto houver conflitos por decidir, o pipeline de propagação não está calibrado à mão-cheia. Carimbar → a quarentena zera → o reimport testa a propagação limpa. |
+| P4 | **Quarentena de nomes a ZERO** | ✅ **FEITO** — os 3 cartões carimbados pelo Rui (**OHmyBUDDHA** `confirmed`, **M_R_Z_E_** `confirmed`, **Silin O** `likely`). A quarentena pendente mostra agora só os **58 `strong_weak_mismatch`**, que **NÃO contam** (ver nota abaixo). | Estava a calibrar o pipeline de propagação à mão-cheia. Feito → o reimport testa a propagação limpa. |
+
+> **Nota P4 — os 58 `strong_weak_mismatch` não são pendências.** São o **kind novo** (hash com nome
+> FORTE X + leitura FRACA divergente Y) a disparar sobre os **dados velhos condenados** — espécimes,
+> não trabalho por fazer. Decisão do Rui registada: **ignorar; o wipe leva-os**. Serviram só para
+> **provar que a deteção dispara** no pipeline (os imports futuros voltam a apanhar o padrão, aí sim
+> para resolver). Logo **não contam** para o critério "quarentena a zero" — o gate P4 está cumprido.
 | P5 | **Backup lógico restore-VERIFICADO** | ritual pt47/pt68 | O único “desfazer”. Backup completo + **restaurar num destino de teste e confirmar contagens** ANTES de qualquer TRUNCATE. Sem restore verificado, não há gatilho. |
 | P6 | **Fila HRC vazia / fechada; `hrc_jobs` sem trabalho pendente** | a confirmar no dia | O reimport muda os `id`s (RESTART IDENTITY) — qualquer `hand_db_id` em voo fica órfão. |
 
@@ -142,4 +148,5 @@ Assim um problema aparece cedo, num volume pequeno, e não contamina o reimport 
 3. `#NORAISE-ANCHOR` ✅ (fechado-por-arrasto) · 4. `#PARSER-SEATS-FAILURES` ✅ ·
 5. `#WPN-PS-TABLE-SS-TIME-ONLY-MATCH` ✅ · 6. `#IRE-CL` ✅ · 7. `#IRE-SK` (deferido a D, aguarda
 fração instantânea empírica do Rui) · 8. `#IRE-VB` ✅ · 9. `#META-START-TIME` (re-escopado
-GG-only) ✅. **Falta só carimbar os 3 cartões de nomes (P4) e o ritual de backup (P5).**
+GG-only) ✅. **P4 (cartões de nomes) FEITO.** Falta só o **P5 — ritual de backup restore-verificado
+no dia do gatilho** — e a leitura calma deste plano pelo Rui.
