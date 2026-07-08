@@ -543,6 +543,16 @@ async def import_file(
 
         asyncio.create_task(_ft_refresh_async())
 
+        # ── Trigger propagação de nomes por hash (APA §B.6 Fase 3) — quando entra
+        # desanon forte nova, o mapa re-espalha nos brancos das tagadas do torneio.
+        # F&F, idempotente, respeita a quarentena. Auto-write só dos casos sem ambiguidade.
+        from app.services.name_propagation import trigger_name_propagation
+
+        async def _name_prop_async():
+            await asyncio.to_thread(trigger_name_propagation)
+
+        asyncio.create_task(_name_prop_async())
+
         return {
             "import_type": "hands",
             "entry_id": entry_id,

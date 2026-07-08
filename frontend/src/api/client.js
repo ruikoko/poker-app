@@ -369,6 +369,13 @@ export const ggHealth = {
   }),
   ftPromote: (tn, confirm = false) => req('POST', '/gg-health/ft/promote', { tournament_number: tn, confirm }),
   ftDismiss: (tn) => req('POST', '/gg-health/ft/dismiss', { tournament_number: tn }),
+  // Fase 3 — propagação de nomes por hash + quarentena de nomes.
+  namesPreview: (tn) => req('GET', `/gg-health/names/preview${tn ? `?tn=${encodeURIComponent(tn)}` : ''}`),
+  namesQuarantine: () => req('GET', '/gg-health/names/quarantine'),
+  namesChoose: (b) => req('POST', '/gg-health/names/choose', b),
+  namesMerge: (b) => req('POST', '/gg-health/names/merge', b),
+  namesDismiss: (b) => req('POST', '/gg-health/names/dismiss', b),
+  namesApply: (tn = null, dryRun = false) => req('POST', '/gg-health/names/apply', { tournament_number: tn, dry_run: dryRun }),
 }
 
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────

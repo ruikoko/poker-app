@@ -12,6 +12,7 @@ const NEEDS = [
   { key: 'swap_suspects', label: 'Suspeitas de troca', color: '#f59e0b' },
   { key: 'tag_conflicts', label: 'Conflito de tags', color: '#ef4444' },
   { key: 'ft_quarantine', label: 'Fronteira FT (rever)', color: '#f59e0b' },
+  { key: 'name_quarantine', label: 'Nomes em conflito', color: '#a78bfa' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
@@ -446,6 +447,104 @@ function FtQuarantinePanel() {
   )
 }
 
+// ── Fase 3: painel da propagação de nomes por hash + quarentena ──────────────
+function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss }) {
+  const [custom, setCustom] = useState('')
+  const cands = it.candidates || []
+  return (
+    <div style={{ ...card, padding: 12, marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+        Torneio <b>{it.tournament_number}</b> · {it.kind === 'same_hash'
+          ? <>hash <code>{it.conflict_key}</code> lido com nomes diferentes</>
+          : <>nome <b>{it.conflict_key}</b> atribuído a 2 lugares (um está errado)</>}
+        {it.hands?.length ? <> · mãos: {it.hands.slice(0, 4).join(', ')}{it.hands.length > 4 ? '…' : ''}</> : null}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        {it.kind === 'same_hash' ? (
+          <>
+            {cands.map(nm => (
+              <button key={nm} disabled={busy} style={btn} onClick={() => onMerge(it, nm)}
+                title="Estas são variantes do mesmo nome — fundir neste">{nm}</button>
+            ))}
+            <span style={{ color: 'var(--muted)', fontSize: 12 }}>ou outro:</span>
+            <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="nome certo"
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border,#30363d)', background: 'transparent', color: 'inherit', fontSize: 13 }} />
+            <button disabled={busy || !custom.trim()} style={btn} onClick={() => onChoose(it, custom.trim(), null)}>Escolher</button>
+          </>
+        ) : (
+          <>
+            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Qual lugar é <b>{it.conflict_key}</b>?</span>
+            {cands.map(h => (
+              <button key={h} disabled={busy} style={btn} onClick={() => onChoose(it, it.conflict_key, h)}
+                title="Este hash recebe o nome; o outro fica branco"><code>{h}</code></button>
+            ))}
+          </>
+        )}
+        <button disabled={busy} style={{ ...btn, borderColor: '#6b7280', color: '#9ca3af' }}
+          onClick={() => onDismiss(it)} title="Nenhum é fiável — fica branco (honesto)">Dispensar</button>
+      </div>
+    </div>
+  )
+}
+
+function NamePropagationPanel() {
+  const [agg, setAgg] = useState(null)
+  const [quar, setQuar] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const load = () => {
+    ggHealth.namesQuarantine().then(r => setQuar(r.items || [])).catch(e => setMsg('Erro: ' + e.message))
+    ggHealth.namesApply(null, true).then(setAgg).catch(() => {})   // dry-run agregado leve
+  }
+  useEffect(() => { load() }, [])
+
+  const wrap = (fn) => async (...a) => {
+    setBusy(true); setMsg(null)
+    try { await fn(...a); load() } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
+  }
+  const apply = wrap(async () => {
+    const r = await ggHealth.namesApply()
+    setMsg(`Propagação aplicada: ${r.hands_written} mãos escritas, ${r.fills} nomes. Quarentena: ${r.quarantine_pending}.`)
+  })
+  const onChoose = wrap(async (it, name, hash) => { await ggHealth.namesChoose({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key, chosen_name: name, chosen_hash: hash }); setMsg('Nome escolhido e propagado.') })
+  const onMerge = wrap(async (it, name) => { await ggHealth.namesMerge({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key, chosen_name: name }); setMsg('Variantes fundidas e propagadas.') })
+  const onDismiss = wrap(async (it) => { await ggHealth.namesDismiss({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key }); setMsg('Dispensado — fica branco.') })
+
+  return (
+    <div>
+      <div style={{ ...card, padding: 12, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, marginBottom: 8 }}>
+          A propagação copia nomes de <b>fonte forte</b> (Gold/verificada) para os mesmos hashes nas
+          mãos <b>tagadas</b> do torneio. Casos limpos escrevem-se automaticamente; conflitos ficam aqui.
+        </div>
+        {agg && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: 'var(--muted)' }}>
+            <span>Preenchimentos: <b style={{ color: 'inherit' }}>{agg.fills}</b></span>
+            <span>Quarentena pendente: <b style={{ color: '#a78bfa' }}>{agg.quarantine_pending}</b></span>
+            <span>Torneios: {agg.tournaments}</span>
+          </div>
+        )}
+        <button disabled={busy} style={{ ...btn, marginTop: 10 }} onClick={apply}>
+          {busy ? 'A aplicar…' : '⤵ Aplicar propagação (casos limpos)'}
+        </button>
+      </div>
+      {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13,
+        color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd' }}>{msg}</div>}
+      {!quar ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> :
+        quar.length === 0 ? <div style={{ ...card, padding: 16, color: '#22c55e' }}>✓ Sem nomes em conflito.</div> : (
+          <>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{quar.length} conflito(s) a decidir:</div>
+            {quar.map((it, i) => (
+              <NameConflictCard key={i} it={it} busy={busy}
+                onChoose={onChoose} onMerge={onMerge} onDismiss={onDismiss} />
+            ))}
+          </>
+        )}
+    </div>
+  )
+}
+
 export default function GGHealth() {
   const [sum, setSum] = useState(null)
   const [err, setErr] = useState(null)
@@ -496,7 +595,7 @@ export default function GGHealth() {
   const loadSummary = () => ggHealth.summary().then(setSum).catch(e => setErr(e.message))
   useEffect(() => { loadSummary() }, [])
   useEffect(() => {
-    if (!group || group === 'ft_quarantine') { setList(null); return }
+    if (!group || group === 'ft_quarantine' || group === 'name_quarantine') { setList(null); return }
     setList(null)
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
   }, [group, page])
@@ -594,7 +693,8 @@ export default function GGHealth() {
             {list && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{list.total} imagens</span>}
           </div>
 
-          {group === 'ft_quarantine' ? <FtQuarantinePanel /> : (<>
+          {group === 'ft_quarantine' ? <FtQuarantinePanel /> :
+           group === 'name_quarantine' ? <NamePropagationPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (
             <div style={{ ...card, padding: '10px 12px', marginBottom: 10 }}>

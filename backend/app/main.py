@@ -285,6 +285,8 @@ async def lifespan(app: FastAPI):
     ensure_capture_triage_column()
     ensure_hrc_jobs_schema()
     ensure_ft_boundary_review_schema()
+    from app.services.name_propagation import ensure_name_quarantine_schema
+    ensure_name_quarantine_schema()
     ensure_hrc_schema()
     from app.routers.queue import ensure_hrc_queue_release_schema
     ensure_hrc_queue_release_schema()

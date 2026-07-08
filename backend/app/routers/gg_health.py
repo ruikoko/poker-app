@@ -199,6 +199,13 @@ def summary(current_user=Depends(require_auth)):
     except Exception:
         ft_quarantine = 0
 
+    # Fase 3: quarentena de NOMES pendente (propagação por hash). Defensivo → 0.
+    try:
+        r = query("SELECT COUNT(*) c FROM name_quarantine_review WHERE decision='pending'")
+        name_quarantine = int(r[0]["c"]) if r else 0
+    except Exception:
+        name_quarantine = 0
+
     return {
         "total_images": len(imgs),
         "total_hands_with_image": len(hands_with_img),
@@ -208,6 +215,7 @@ def summary(current_user=Depends(require_auth)):
             "swap_suspects": n("swap_suspects"),
             "tag_conflicts": n("tag_conflicts"),
             "ft_quarantine": ft_quarantine,
+            "name_quarantine": name_quarantine,
         },
         "healthy": {
             "gold_matched": n("gold_matched"),
@@ -720,3 +728,143 @@ def ft_dismiss(body: FtTnBody, current_user=Depends(require_auth_or_api_key)):
     _ft_upsert_review(body.tournament_number, d, decision="dismissed",
                       decided_by=_ft_who(current_user))
     return {"ok": True}
+
+
+# ═══ APA §B.6 Fase 3 — propagacao de nomes por hash: preview + quarentena ═════
+
+from app.services import name_propagation as _np
+
+
+def _np_tagged_gg_tns() -> list:
+    rows = query("""SELECT DISTINCT tournament_number FROM hands
+        WHERE site='GGPoker' AND played_at >= '2026-01-01' AND tournament_number IS NOT NULL
+          AND (COALESCE(array_length(hm3_tags,1),0)>0 OR COALESCE(array_length(discord_tags,1),0)>0)""")
+    return [r["tournament_number"] for r in rows]
+
+
+def _np_load_hands(tn) -> list:
+    return [dict(r) for r in query("""SELECT id, hand_id, site, raw, player_names, hm3_tags, discord_tags
+        FROM hands WHERE site='GGPoker' AND tournament_number=%s AND played_at >= '2026-01-01'""", (tn,))]
+
+
+def _np_preview_for_tn(tn) -> dict:
+    hands = _np_load_hands(tn)
+    clean, quar = _np.build_name_map(hands)
+    conn = get_conn()
+    try:
+        decisions = _np._load_decisions(conn, tn)
+    finally:
+        conn.close()
+    clean, quar = _np._apply_decisions_to_map(clean, quar, decisions)
+    plan = _np.propagation_plan(hands, clean)
+    return {
+        "tournament_number": tn,
+        "map_size": len(clean),
+        "quarantine": quar,
+        "stats": plan["stats"],
+        "changes": plan["changes"],
+    }
+
+
+@router.get("/names/preview")
+def np_preview(tn: Optional[str] = Query(None), current_user=Depends(require_auth_or_api_key)):
+    """Ensaio da propagacao de nomes (Fase 3), SO LEITURA. Com `tn` -> detalhe (mapa,
+    quarentena, maos que mudam). Sem `tn` -> agregado sobre todos os GG tagados."""
+    if tn:
+        return _np_preview_for_tn(tn)
+    agg = {"tournaments": 0, "with_map": 0, "fills": 0, "resolved": 0, "blanks": 0,
+           "quarantine": 0, "tagged": 0}
+    per = []
+    for t in _np_tagged_gg_tns():
+        p = _np_preview_for_tn(t)
+        s = p["stats"]; nq = len(p["quarantine"])
+        agg["tournaments"] += 1
+        agg["with_map"] += 1 if p["map_size"] else 0
+        agg["fills"] += s["fills_total"]; agg["resolved"] += s["hands_resolved_after"]
+        agg["blanks"] += s["blank_hashes"]; agg["quarantine"] += nq; agg["tagged"] += s["tagged_hands"]
+        if s["fills_total"] or nq:
+            per.append({"tournament_number": t, "fills": s["fills_total"],
+                        "quarantine": nq, "hands_with_fills": s["hands_with_fills"]})
+    return {"aggregate": agg, "tournaments": per}
+
+
+@router.get("/names/quarantine")
+def np_quarantine(current_user=Depends(require_auth)):
+    """Lista as entradas de quarentena de nomes PENDENTES (por torneio) para o painel."""
+    rows = query("""SELECT tournament_number, kind, conflict_key, candidates, hands, decision,
+                           chosen_name, chosen_hash, decided_by, decided_at
+                    FROM name_quarantine_review WHERE decision='pending'
+                    ORDER BY tournament_number, kind""")
+    return {"items": [dict(r) for r in rows], "count": len(rows)}
+
+
+class NpDecisionBody(BaseModel):
+    tournament_number: str
+    kind: str
+    conflict_key: str
+    chosen_name: Optional[str] = None
+    chosen_hash: Optional[str] = None
+
+
+def _np_decide(body, decision, who):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""UPDATE name_quarantine_review
+                SET decision=%s, chosen_name=%s, chosen_hash=%s, decided_by=%s,
+                    decided_at=(now() at time zone 'utc'), updated_at=(now() at time zone 'utc')
+                WHERE tournament_number=%s AND kind=%s AND conflict_key=%s""",
+                (decision, body.chosen_name, body.chosen_hash, who,
+                 body.tournament_number, body.kind, body.conflict_key))
+            if cur.rowcount == 0:
+                raise HTTPException(404, "entrada de quarentena nao encontrada")
+        conn.commit()
+    finally:
+        conn.close()
+    res = _np.refresh_name_propagation(body.tournament_number, auto_write=True)
+    return {"ok": True, "result": res}
+
+
+@router.post("/names/choose")
+def np_choose(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)):
+    """ESCOLHER o nome certo de um conflito -> entra no mapa e propaga. Para name_2_hash,
+    passar `chosen_hash` (qual dos lugares recebe o nome; o outro fica branco)."""
+    if not body.chosen_name:
+        raise HTTPException(400, "chosen_name obrigatorio")
+    if body.kind == "name_2_hash" and not body.chosen_hash:
+        raise HTTPException(400, "name_2_hash exige chosen_hash")
+    return _np_decide(body, "chosen", _ft_who(current_user))
+
+
+@router.post("/names/merge")
+def np_merge(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)):
+    """MERGE de variantes OCR (same_hash) -> escolhe o canonico e propaga."""
+    if body.kind != "same_hash" or not body.chosen_name:
+        raise HTTPException(400, "merge so em same_hash + chosen_name")
+    return _np_decide(body, "merged", _ft_who(current_user))
+
+
+@router.post("/names/dismiss")
+def np_dismiss(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)):
+    """DISPENSAR -> o(s) hash(es) ficam BRANCOS (honesto). Escreve so na review."""
+    return _np_decide(body, "dismissed", _ft_who(current_user))
+
+
+class NpApplyBody(BaseModel):
+    tournament_number: Optional[str] = None
+    dry_run: bool = False
+
+
+@router.post("/names/apply")
+def np_apply(body: NpApplyBody, current_user=Depends(require_auth_or_api_key)):
+    """Aplica a propagacao LIMPA (auto-write dos casos sem ambiguidade). Um `tn` ou
+    todos os GG tagados. dry_run=true -> so o plano agregado, nao escreve."""
+    tns = [body.tournament_number] if body.tournament_number else _np_tagged_gg_tns()
+    total = {"tournaments": 0, "hands_written": 0, "fills": 0, "quarantine_pending": 0}
+    for t in tns:
+        res = _np.refresh_name_propagation(t, auto_write=not body.dry_run)
+        total["tournaments"] += 1
+        total["hands_written"] += res.get("hands_written", 0)
+        total["fills"] += res.get("fills_total", 0)
+        total["quarantine_pending"] += res.get("quarantine_pending", 0)
+    return {"dry_run": body.dry_run, **total}

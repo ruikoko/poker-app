@@ -589,5 +589,15 @@ def reconcile_tournament_deanon(tournament_number: str, *, conn=None) -> dict:
         tournament_number, len(rows), changed, stats["unanimous"],
         stats["majority"], stats["tie"], stats["singleton"], agree_rate,
     )
+    # APA §B.6 Fase 3: mudou a desanon deste torneio → re-espalha os nomes por hash
+    # nas tagadas (F&F, idempotente, respeita a quarentena). Nunca parte o reconcile.
+    if changed:
+        try:
+            from app.services.name_propagation import trigger_name_propagation
+            trigger_name_propagation(tournament_number)
+        except Exception:
+            logger.exception("[table_ss_reconcile] trigger name_propagation falhou tn=%s",
+                             tournament_number)
+
     return {"tournament": tournament_number, "hands": len(rows), "changed": changed,
             "stats": stats, "agree_rate": round(agree_rate, 3)}

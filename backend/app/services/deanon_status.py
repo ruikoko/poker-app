@@ -19,7 +19,10 @@ def deanon_status(site, match_method, verified_by_user=False):
     - 'verified'   : GG desanonimizada por posição (`position_v3`) OU confirmada
                      à mão pelo Rui (`verified_by_user`, Fase 1-E do editor Saúde GG).
     - 'unverified' : GG desanonimizada por stack/feltro (`table_ss`,
-                     `anchors_stack_elimination*`, `mtt_*`) → aviso ⚠.
+                     `anchors_stack_elimination*`, `mtt_*`) OU por PROPAGAÇÃO de nome
+                     por hash (`hash_propagation_v1`, APA §B.6 Fase 3 — "por verificar")
+                     → aviso ⚠. Nota: 'unverified' faz com que os nomes propagados NÃO
+                     re-semeiem o mapa (`name_propagation._is_strong`) — sem cascata.
     - None         : não-GG (nomes reais da HH) ou GG sem match real
                      (null / `discord_placeholder_*` / desconhecido) → sem aviso.
 
@@ -39,7 +42,8 @@ def deanon_status(site, match_method, verified_by_user=False):
         return "verified"
     if (mm == "table_ss"
             or mm.startswith("anchors_stack_elimination")
-            or mm.startswith("mtt_")):
+            or mm.startswith("mtt_")
+            or mm.startswith("hash_propagation")):
         return "unverified"
     return None  # placeholders / desconhecido → sem aviso
 

@@ -1225,6 +1225,14 @@ async def import_hm3(
 
     asyncio.create_task(_ft_refresh_async())
 
+    # ── Trigger propagação de nomes por hash (APA §B.6 Fase 3), F&F idempotente.
+    from app.services.name_propagation import trigger_name_propagation
+
+    async def _name_prop_async():
+        await asyncio.to_thread(trigger_name_propagation)
+
+    asyncio.create_task(_name_prop_async())
+
     return {
         "status": "ok",
         "total_rows": len(hands_map),
