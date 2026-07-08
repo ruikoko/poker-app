@@ -26,6 +26,11 @@ não por pessoa): `DESANON_ANATOMIA §3.3`, `REGRAS_NEGOCIO §24`, `REGISTO_CONC
   + re-entradas resolvidas à primeira).
 - **Deferido:** upgrade automático fraco→`position_v3` (só decisão manual verificada corrige hoje); misread
   "Diego Emperador" no hash `93d63976` (outro nome-real-lugar-errado, fora do cartão OHmyBUDDHA).
+- **★ D (8 Jul) — `#IRE-SK` (Super KO) — AGUARDA validação empírica do Rui:** o IRE do Super KO
+  fica **escondido** (deny-list `SUPER_KO_NEEDLE`, `ire.py:507`) porque a **fração instantânea** do
+  bounty ao eliminar no Super KO GG **não está confirmada** — mostrar daria um IRE potencialmente
+  errado. Destranca-se quando o Rui confirmar a fração (então deriva-se a constante como no PKO e
+  mostra-se). Descido do pré-wipe (casa limpa) para D por falta de dado, decisão do Rui 8 Jul.
 - **★ D (decisão de arquitetura, 8 Jul) — `#STACK-ELIMINATION-ABANDON`:** abandonar de vez a
   **stack-elimination** como método de desanon do table-SS (usada nas 185 capturas antigas + painel
   SB/BB ~10/19 mal-lidos, `#STACK-LEGACY-TABLE-SS-AND-PANEL`). Substituir pela **âncora Hero+botão**
@@ -126,6 +131,20 @@ deploys por OpenAPI/liveness → railway CLI dispensado do fluxo. Detalhe da cau
 
 - **7 Jul 2026 — `#RAILWAY-TOKEN-SHORT-LIVED` (investigado, causa provável com evidência).** O `railway` CLI obriga a `railway login` **de ~1 em ~1 h** (4× num dia). **FACTOS medidos:** (a) `user.tokenExpiresAt` no `config.json` = **exatamente 1 h após o login** → o *access token* tem TTL de **1 hora**; (b) CLI **4.40.0**, pacote npm **datado 21 Abr, INALTERADO** → **não foi upgrade do CLI**; (c) **UM só** `config.json` (`C:\Users\User\.railway\config.json`), partilhado pelo shell do Code e pelo login do Rui (mtime segue os logins) → **NÃO** é o problema dos "dois ficheiros de sessão"; (d) o *refresh* falha com `invalid_grant` quando o access token expira. **CAUSA PROVÁVEL:** o access token dura 1 h e o **refresh automático está partido** — como o CLI não mudou, a mudança é do lado do **servidor Railway** (política de refresh/rotação de refresh-tokens mais estrita, recente — bate com "começou há poucos dias"), possivelmente **agravada pelas chamadas frequentes/concorrentes** do Code (pollers de deploy a cada 15 s + queries em paralelo) que correm o rotativo do refresh-token. **FIX DEFINITIVO:** (1) **DB reads** — guardar o **URL público do Postgres** (`ballast.proxy.rlwy.net:37559`) num ficheiro **gitignored** que o shell lê → psycopg2 direto, **sem railway, sem expiração** (âmbito = leitura a 1 BD); (2) **deploy status** — `RAILWAY_TOKEN` (project token, env `production`) cobre `railway status`/redeploy (o docs diz que é deploy-scoped; **não** cobre `railway variables`), OU dispensa-se (push→auto-deploy confirma-se por `/openapi.json` + liveness). Mitigação imediata do Code: **deixar de correr pollers `railway status` de 15 s** (usar OpenAPI/liveness). Ver memória `reference_railway_cli_auth`.
   - **SETUP escolhido (7 Jul, via 1):** as DB reads passam por um ficheiro **fora do repo, gitignored, só-leitura** — `~/.pokerapp_db_ro.env` (mode 600) com o URL público do Postgres. O shell lê `DBURL=$(cat ~/.pokerapp_db_ro.env)`; **nunca** se imprime o URL/creds em outputs nem entra em commits. Deploys: só OpenAPI/liveness (railway CLI dispensado do fluxo normal). **⚠️ ROTAÇÃO OBRIGATÓRIA:** se estas credenciais **alguma vez aparecerem num output/commit/log**, **rodar já** a password do Postgres no Railway (dashboard → serviço Postgres → variáveis) e regenerar o ficheiro. O ficheiro guarda a password viva do `DATABASE_URL` do `poker-app` (host público `ballast.proxy.rlwy.net`).
+
+## ★ Infra/git — `origin/watcher-gate` diverge de `main` (pt87–95 do watcher nunca fundidas) — arrumar pós-wipe
+
+**Registado 8 Jul.** O branch **`watcher-gate`** tem **14 commits** do robot/watcher (pt87–95) que
+**nunca foram fundidos em `main`** (medido: `main...origin/watcher-gate` = 135 à frente / **14 atrás**;
+HEAD do branch = `049cd4b` "pt95 — robustez de foco `#HRC-FOCUS-ROBUSTNESS` [SEM build ainda]"). Enquanto
+os dois branches divergirem, o histórico do watcher vive **fora do `main`** e o próximo build do `.exe`
+arrisca sair de uma base incompleta.
+
+- **Acção (pós-wipe):** reconciliar `watcher-gate` → `main` (merge ou rebase), resolver conflitos do
+  source do watcher (`tools/watcher_src/`), e **só depois** rebuildar o `.exe` (junto com o `#HRC-FOCUS-ROBUSTNESS`
+  e a guarda de tempo/janela, ambos já pendentes de build). Confirmar que nenhum fix pt87–95 se perde.
+- **Porquê pós-wipe:** o foco actual é a **casa limpa + wipe+reimport** (backend/dados); mexer no branch do
+  watcher agora abre uma frente paralela sem necessidade. Fica arrumado quando o robot voltar a ser tocado.
 
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 

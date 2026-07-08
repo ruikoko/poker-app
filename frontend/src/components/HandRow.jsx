@@ -93,6 +93,20 @@ function ResultBadge({ result }) {
 
 // IRE v2 — badge do villain principal (regra D). hand.ire.main_villain.
 function IreBadge({ ire }) {
+  // #IRE-VB: torneio COM bounty mas a Vision não leu → estado 'bounty ilegível' (âmbar),
+  // distinto de "sem bounty" (nada). Clicável p/ a mão (a linha inteira navega).
+  if (ire?.status === 'bounty_unread') {
+    return (
+      <span title="A Vision não leu o bounty desta mão (PKO) — abre a mão para rever/corrigir"
+        style={{
+          display: 'inline-block', padding: '2px 7px', borderRadius: 4,
+          fontSize: 10, fontWeight: 700, letterSpacing: 0.3, cursor: 'pointer',
+          color: '#fbbf24', background: 'rgba(245,158,11,0.12)',
+          border: '1px solid rgba(245,158,11,0.32)',
+          fontFamily: 'monospace', whiteSpace: 'nowrap',
+        }}>IRE — bounty ilegível</span>
+    )
+  }
   const mv = ire?.main_villain
   if (!mv || mv.ire_pct == null) return null
   const tip = `Main villain: ${mv.nick} (${mv.position || '?'}) · ` +

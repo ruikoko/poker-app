@@ -32,6 +32,60 @@ def test_lookup_offtable_high_clamps_then_falls_back_to_formula():
     assert ire.lookup_ire_pct(20.0, 10.0) == pytest.approx(2.941176, abs=1e-4)
 
 
+def test_lookup_offtable_high_uses_formula_not_edge_cell():
+    # #IRE-CL: stack_si=8 > 7 (fora da tabela), ko=1. ANTES encostava à célula [7.0][1]=0.2
+    # (subestima); AGORA usa a fórmula (válida fora da gama).
+    assert ire.lookup_ire_pct(8.0, 1.0) == pytest.approx(ire._formula_fallback(8.0, 1.0), abs=1e-6)
+    assert ire.lookup_ire_pct(8.0, 1.0) != pytest.approx(0.2)   # já não é a célula da borda
+
+
+def test_lookup_offtable_low_ko_uses_formula_not_edge_cell():
+    # #IRE-CL: ko_units=0.5 < 1 (abaixo da tabela). ANTES encostava à célula ko=1 (=5.1,
+    # sobrestima); AGORA usa a fórmula.
+    assert ire.lookup_ire_pct(1.0, 0.5) == pytest.approx(ire._formula_fallback(1.0, 0.5), abs=1e-6)
+    assert ire.lookup_ire_pct(1.0, 0.5) != pytest.approx(5.1)
+
+
+def test_lookup_table_boundaries_still_use_table():
+    # os limites EXACTOS (7.0, 0.25, 1, 5) continuam DENTRO → tabela (não regride)
+    assert ire.lookup_ire_pct(7.0, 1) == 0.2
+    assert ire.lookup_ire_pct(0.25, 1) == 13.0
+
+
+# ── #IRE-VB — distinguir "sem bounty" de "Vision falhou a ler" ────────────────
+
+def test_ire_vb_bounty_unread_when_vision_read_no_bounty():
+    # torneio COM bounty (bib>0) mas bounty_by_nick VAZIO (Vision falhou) → sinal, não None
+    apa = {"_meta": {"bb": 100},
+           "Villain1": {"position": "CO", "stack": 10000},
+           "Villain2": {"position": "BTN", "stack": 12000},
+           "Hero": {"is_hero": True, "position": "BB", "stack": 15000}}
+    r = ire._assemble_ire(apa, si=8000, bib=25.0, constant=0.25,
+                          ko_units_instant=0.5, bounty_by_nick={}, signal_unread=True)
+    assert r == {"status": "bounty_unread", "main_villain": None, "per_opponent": []}
+
+
+def test_ire_vb_wn_no_bounty_stays_hidden():
+    # WN (bounty vem do literal da HH, não da Vision) → sem sinal, escondido (None)
+    apa = {"_meta": {"bb": 100},
+           "Villain1": {"position": "CO", "stack": 10000},
+           "Hero": {"is_hero": True, "position": "BB", "stack": 15000}}
+    r = ire._assemble_ire(apa, si=8000, bib=25.0, constant=0.25,
+                          ko_units_instant=1.0, bounty_by_nick={})  # signal_unread default False
+    assert r is None
+
+
+def test_ire_vb_normal_when_bounty_read():
+    # com bounty lido → IRE normal (sem status), main_villain preenchido
+    apa = {"_meta": {"bb": 100},
+           "Villain1": {"position": "CO", "stack": 10000},
+           "Hero": {"is_hero": True, "position": "BB", "stack": 15000}}
+    r = ire._assemble_ire(apa, si=8000, bib=25.0, constant=0.25,
+                          ko_units_instant=0.5, bounty_by_nick={"Villain1": 12.5})
+    assert r is not None and r.get("status") != "bounty_unread"
+    assert r["main_villain"] is not None
+
+
 # ── _formula_fallback — constante 0,25 hardcoded (ALVO do T1) ────────────────
 
 def test_formula_fallback_known_points():
@@ -180,8 +234,10 @@ def test_gate_no_starting_stack_hidden():
 
 
 def test_gate_no_opponent_bounty_hidden():
-    # Sem coroa ($0) em nenhum vilão -> ko_units=0 -> escondido.
-    assert ire.compute_ire(_hand_5050(bounty_usd=0), _meta()) is None
+    # #IRE-VB: GG PKO com coroa $0 em TODOS os vilões = a Vision FALHOU a ler (não é ausência
+    # de bounty) -> sinal 'bounty_unread' (UI mostra "não calculado — bounty ilegível"), não None mudo.
+    r = ire.compute_ire(_hand_5050(bounty_usd=0), _meta())
+    assert r == {"status": "bounty_unread", "main_villain": None, "per_opponent": []}
 
 
 def test_gate_no_buy_in_bounty_hidden():

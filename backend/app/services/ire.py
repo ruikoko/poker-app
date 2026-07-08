@@ -219,6 +219,11 @@ def lookup_ire_pct(stack_si: float, ko_units: float,
         return _formula_fallback(stack_si, ko_units, constant)
     rows = W3CRAY_TABLE_25PCT["rows_si"]
     cols = W3CRAY_TABLE_25PCT["cols_ko"]
+    # #IRE-CL: FORA da tabela calibrada (stack ou ko além dos limites — stack_si>7 / ko>5,
+    # ou abaixo do mínimo) → FÓRMULA pura. `_nearest_idx` encostava à célula da BORDA, o
+    # que enviesa os extremos. A tabela W3cray só é válida DENTRO da sua gama.
+    if not (rows[0] <= stack_si <= rows[-1] and cols[0] <= ko_units <= cols[-1]):
+        return _formula_fallback(stack_si, ko_units, constant)
     y_idx = _nearest_idx(stack_si, rows)
     x_idx = _nearest_idx(ko_units, cols)
     cell = W3CRAY_TABLE_25PCT["values_pct"][rows[y_idx]][x_idx]
@@ -334,7 +339,8 @@ def _pick_main_villain(per_opponent: list, hero_stack_chips: float) -> Optional[
 # ── Núcleo partilhado GG/WN ──────────────────────────────────────────────────
 
 def _assemble_ire(apa: dict, *, si: float, bib: float, constant: float,
-                  ko_units_instant: float, bounty_by_nick: dict) -> Optional[dict]:
+                  ko_units_instant: float, bounty_by_nick: dict,
+                  signal_unread: bool = False) -> Optional[dict]:
     """Núcleo partilhado GG/WN. Constrói per_opponent (ko_units, stack_si,
     ire_pct), aplica as guardas (>=1 oponente com bounty; hero válido) e escolhe
     o vilão principal (regra D). Site-agnóstico: recebe já o bounty por nick
@@ -382,8 +388,19 @@ def _assemble_ire(apa: dict, *, si: float, bib: float, constant: float,
     if not per_opponent:
         return None
 
-    # nenhum oponente com bounty real > 0 => escondido
+    # #IRE-VB: distinguir "SEM bounty" de "Vision FALHOU a ler". Só a GG lê o bounty pela
+    # Vision (a coroa) → só aí "nenhum vilão com bounty num torneio PKO" é FALHA de leitura
+    # (signal_unread=True). Na WN o bounty vem do literal da HH — ausência = HH sem token,
+    # não falha de Vision → mantém-se escondido (None). Sinaliza (estado 'bounty_unread',
+    # que a UI mostra como "não calculado — bounty ilegível", clicável) em vez de None mudo.
     if not any(op["ko_units"] > 0 for op in per_opponent):
+        # Só é FALHA de leitura se NENHUMA coroa foi lida de todo. Se há coroas lidas
+        # (bounty_by_nick com valor > 0) mas nenhuma casou com os oponentes do apa, é
+        # um estado de mapeamento/anón (apa ainda por hash, nomes por propagar) — não é
+        # falha de Vision → escondido (None), não sinal. Ver test_apa_key_migration.
+        crowns_read = any((_coerce_float(v) or 0) > 0 for v in bounty_by_nick.values())
+        if signal_unread and bib > 0 and per_opponent and not crowns_read:
+            return {"status": "bounty_unread", "main_villain": None, "per_opponent": []}
         return None
 
     if hero_stack is None or hero_stack <= 0:
@@ -551,7 +568,8 @@ def compute_ire(hand: dict, tournament_meta: Optional[dict]) -> Optional[dict]:
                 if v:
                     bounty_by_nick.setdefault(v, _coerce_float(p.get("bounty_value_usd")))
     return _assemble_ire(apa, si=si, bib=bib, constant=constant,
-                         ko_units_instant=ko_units_instant, bounty_by_nick=bounty_by_nick)
+                         ko_units_instant=ko_units_instant, bounty_by_nick=bounty_by_nick,
+                         signal_unread=True)  # #IRE-VB: GG lê bounty pela Vision → sinaliza falha
 
 
 def max_opponent_ire_pct(ire_result: Optional[dict]) -> Optional[float]:
