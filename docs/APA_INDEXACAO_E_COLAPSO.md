@@ -1,10 +1,11 @@
 # APA — indexação por nome e colapso de lugares (investigação + ideia em discussão)
 
-> **Estado (3 Jul 2026):** documento de **registo de investigação**. O **diagnóstico** (§A) está
-> FECHADO. A **ideia de mudança do core** (§B) está **NÃO APROVADA** — há uma desconfiança do Rui
-> por resolver (ver §B.4). **Nenhum código do core foi escrito.** O mapa de acoplamento completo
-> (§C) é o PASSO 1 produzido nesta sessão. Cross-ref: `DESANON_ANATOMIA.md`, `MAPA_ACOPLAMENTO.md`
-> (§2.1 match_method), `#DESANON-SITTING-OUT-NPLUS1-NO-UNIVERSAL-GUARD`, `#DESANON-GOLD-SCRAMBLE`.
+> **Estado (8 Jul 2026):** documento de **registo de investigação + desenho aprovado**. O
+> **diagnóstico** (§A) está FECHADO. A **mudança do core** (§B) está **✅ APROVADA COM DESENHO DO
+> RUI** (8 Jul, com a evidência do invariante — §B header e **§B.6 = desenho canónico**). Falta
+> **implementar** (dry-run → fases 1→3). O mapa de acoplamento (§C) é a base do faseamento.
+> Cross-ref: `DESANON_ANATOMIA.md`, `MAPA_ACOPLAMENTO.md` (§2.1 match_method),
+> `REGISTO_CONCEITO 2026-07-08`, `#DESANON-SITTING-OUT-NPLUS1-NO-UNIVERSAL-GUARD`, `#DESANON-GOLD-SCRAMBLE`.
 
 ## Contexto que motivou tudo
 
@@ -66,10 +67,13 @@ chega ao anon_map, e depois cai na re-indexação. (Frente futura: prompt da Vis
 
 ---
 
-## §B. Ideia em discussão — **NÃO APROVADA**
+## §B. Mudança do core — **✅ APROVADA COM DESENHO DO RUI (8 Jul 2026)**
 
-> **Estado: proposta. O Rui NÃO aprovou.** Há uma desconfiança por resolver (§B.4). Não escrever
-> código do core até isso ficar resolvido e o desenho aprovado.
+> **Estado: APROVADA.** O Rui aprovou em **8 Jul 2026**, com a evidência do invariante posicional
+> (25 torneios / 38 488 aparições de hash / **0 violações** — `REGISTO_CONCEITO 2026-07-08`,
+> `JOURNAL_2026-07-08.md`). A desconfiança de §B.4 (dois níveis de identidade) ficou resolvida pelo
+> **sistema misto só-tagadas** de §B.6. O §B.1–§B.5 abaixo (proposta original) fica como registo; o
+> **desenho canónico aprovado é §B.6**. Faseamento leitores→writer + dry-run ANTES da fase 1.
 
 ### B.1 A mudança
 Mudar a **chave** do apa de `real_name` para a **identidade da HH**:
@@ -92,7 +96,12 @@ Nome de exibição = **`real_name || chave`**. Funciona com o formato **antigo**
 - **Propagação automática por torneio:** a chave-hash é a âncora estável (hash fixo por jogador) →
   a propagação escreve só o atributo, sem tocar na estrutura. (Com a guarda de A.5.)
 
-### B.4 ⚠️ A dúvida do Rui a resolver ANTES de qualquer decisão
+### B.4 ✅ A dúvida do Rui — RESOLVIDA (8 Jul 2026, ver §B.6)
+> **RESOLVIDA.** O sistema misto de §B.6 arruma os dois níveis: o **hash é veículo INTERNO ao
+> torneio** (nunca sai; nível-mão), e os **Vilões continuam a consumir os NOMES** das mãos tagadas,
+> exatamente como hoje (nível-jogador). O hash não substitui o nome no nível-jogador — só ancora a
+> propagação **dentro** do torneio. Texto original abaixo (a dúvida, para registo):
+
 A relação entre **dois níveis de identidade** ainda não ficou convincente:
 - **Nível-MÃO / torneio:** o **hash** é a identidade (fixo por jogador **dentro** do torneio; segue
   o jogador entre mesas — `DESANON_ANATOMIA §3.3`).
@@ -106,6 +115,63 @@ ponto a fechar antes de decidir.
 ### B.5 Decisão de contexto
 Os dados vão ser **apagados e reimportados** → **sem migração**; a regra `real_name||chave` torna a
 mudança de leitores segura mesmo antes do writer.
+
+---
+
+## §B.6 ★ DESENHO CANÓNICO APROVADO (8 Jul 2026) — sistema misto, só-tagadas
+
+> **Aprovado pelo Rui em 8 Jul com a evidência do invariante.** Este é o desenho a implementar
+> (§B.1–§B.5 = proposta original, contexto). Critério de sucesso: **o reimport produzir as mãos
+> tagadas GG já desanonimizadas à primeira** (isto é cura do CORE, não cura de dados).
+
+### B.6.1 Âmbito
+O objectivo é desanonimizar **APENAS as mãos tagadas GG** (<20% do total). As **não-tagadas NÃO
+recebem escrita** de propagação. O **mapa de nomes do torneio LÊ de todas as mãos com desanon**
+(conhecimento é conhecimento), mas **ESCREVE só nas tagadas**.
+
+### B.6.2 O mecanismo (incremental, por torneio)
+Quando uma mão é desanonimizada por **via FORTE** (match HH+Gold → `position_v3`, ou confirmação
+manual `verified_by_user`), os nomes estabelecidos **espalham-se pelos MESMOS hashes** nas outras
+mãos **TAGADAS** do torneio. Cada Gold nova **re-espalha** (enriquece o mapa). Base de segurança:
+o **invariante comprovado** (hash fixo por jogador no torneio inteiro, segue entre mesas —
+`REGISTO_CONCEITO 2026-07-08`).
+
+### B.6.3 Guardas (obrigatórias — vêm dos casos reais)
+- **(a) Só fonte FORTE semeia.** Só `deanon_status == 'verified'` (= `position_v3` OU
+  `verified_by_user`) semeia a propagação. Nomes de **via FRACA** (`table_ss`/stack-elimination)
+  **NÃO se propagam** — no máximo preenchem branco como "por verificar" na **própria** mão. *(Caso
+  `90abe28`/"V Bartko": a fraca errou 7× consistente; propagar confirmaria o erro — §A.5.)*
+- **(b) Guarda do nome-já-usado.** Antes de atribuir/espalhar um nome a um hash, verificar que esse
+  nome **não pertence já a OUTRO hash** no torneio. Conflito → **branco + quarentena**. *(Caso
+  `TaWebon` em 2 hashes.)*
+- **(c) Conflito de nomes no MESMO hash.** *(Caso `de6cc7ae` Daniel Filipe/Mikhail Petrov.)* Fonte
+  **forte vence fraca**; **forte vs forte** ou **fraca vs fraca** → **branco + quarentena**.
+- **(d) Em branco é honesto; nome errado é veneno** — mantém-se lei (§A.5, §A.6).
+
+### B.6.4 Alicerce técnico
+O apa passa a **indexado pela identidade da HH** (hash na GG; nick real nas outras salas),
+`real_name` como **atributo que pode estar vazio**; leitura retro-compatível **`real_name || chave`**
+(§B.2); **`_enrich_all_players_actions` deixa de re-indexar por nome** (§A.4). Faseamento
+**leitores → writer** (§B.2), usando o mapa de acoplamento §C: os readers que usam a chave como
+identidade (`villain_rules`, `ire`, …) **migram primeiro**.
+
+### B.6.5 Níveis
+O **hash NUNCA sai do torneio** (veículo interno). Os **Vilões continuam a consumir os NOMES** das
+mãos tagadas, como hoje — **nada muda no nível-jogador** (resolve §B.4).
+
+### B.6.6 Faseamento + quarentena de nomes
+Ordem **leitores → writer** (janela sem partir, garantida por `real_name || chave`):
+1. **Fase 0 — dry-run** (read-only, ANTES de tudo): números por torneio tagado (mãos que ganham
+   desanon por propagação, hashes em branco honesto, hashes em quarentena com casos). *O Rui vê os
+   números antes da fase 1.*
+2. **Fase 1 — leitores** migram para `real_name || chave` (frontend `handParser`; backend
+   `villain_rules._build_candidates`, `ire._assemble_ire`, `_resolve_hashes_in_raw`, `mtt`,
+   `hands` filtro, `table_ss` reparações). Sem mudar o writer → comportamento idêntico.
+3. **Fase 2 — writer**: `_enrich_all_players_actions` deixa de re-indexar (chave = hash/nick,
+   `real_name` = atributo).
+4. **Fase 3 — propagação por torneio** (só tagadas, guardas a–d) + **quarentena de nomes** numa
+   **secção nova na Saúde GG ao estilo da FT** (conflitos b/c → decisão do Rui: escolher o nome
+   certo por hash / manter branco). Escrita SÓ por aprovação; branco é o desfecho seguro.
 
 ---
 

@@ -107,11 +107,35 @@ A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_C
   ele, o reimport de HH **parte a desanon das mãos com captura já casada** (repõe o apa cru +
   esvazia o `anon_map` sem re-disparar a desanon das SS **casadas**, só das órfãs). Passa de
   "melhoria futura, NÃO agora" (pt93) a **pré-requisito do wipe**. Ver secção própria abaixo.
-- **(c) A decisão do CORE (apa indexado por HASH em vez de nome) está NÃO APROVADA.** É
-  decisão do **Rui**, não backlog do Code — há uma desconfiança dele por resolver (`APA §B.4`:
-  como convivem o nível-mão [hash] e o nível-jogador [nome dos Vilões]). **Não escrever código
-  do core** até o Rui aprovar o desenho. O §C do doc (mapa de acoplamento do apa, ~15-18
-  sítios) é o Passo 1 já feito.
+- **(c) ✅ A decisão do CORE está APROVADA (8 Jul 2026).** O Rui aprovou o **apa indexado por
+  HASH + propagação por torneio (sistema misto, só-tagadas)**, com a evidência do invariante
+  (0 violações em 38 488 aparições). Desenho canónico em **`APA_INDEXACAO_E_COLAPSO §B.6`** +
+  `REGISTO_CONCEITO 2026-07-08`. Ver secção própria abaixo (**★★ CORE — apa por hash APROVADO**).
+
+## ★★ CORE — apa por hash + propagação por torneio APROVADO (8 Jul 2026) — plano faseado + dry-run
+
+Desenho: `APA_INDEXACAO_E_COLAPSO §B.6`. **Só-tagadas** (escreve só nas mãos tagadas; lê de todas
+as com desanon). **Só fonte FORTE semeia** (`position_v3` OU `verified_by_user`); fraca não propaga.
+Guardas: (b) nome-já-noutro-hash → branco+quarentena; (c) conflito no mesmo hash forte-vs-forte →
+branco+quarentena; (d) branco honesto > nome errado.
+
+**FASES (leitores → writer; ordem obrigatória):**
+- **Fase 0 — dry-run** ✅ (8 Jul, read-only, números abaixo). O Rui vê antes da fase 1.
+- **Fase 1 — leitores** → `real_name || chave` (frontend `handParser`; backend `villain_rules._build_candidates`,
+  `ire._assemble_ire`, `_resolve_hashes_in_raw`, `mtt`, `hands` filtro, `table_ss` reparações). Comportamento idêntico.
+- **Fase 2 — writer**: `_enrich_all_players_actions` deixa de re-indexar por nome (chave = hash/nick; `real_name`=atributo).
+- **Fase 3 — propagação** (só tagadas, guardas b/c) + **quarentena de nomes na Saúde GG ao estilo da FT**. Escrita só por aprovação.
+
+**DRY-RUN (laboratório atual, sistema misto):**
+- **98 torneios GG tagados / 738 mãos tagadas.** 80 têm ≥1 semente FORTE; 18 sem semente (propagação dá 0 → branco honesto).
+- **437 mãos tagadas ficam 100% desanon-forte após propagação**; **ganho de +44 mãos NOVAS** (não estavam completas antes).
+- **Só 24 hashes em branco honesto** e **25 em quarentena** — de 738 mãos. Conflitos genuínos (após colapsar truncação/OCR): **17**.
+- **DOIS tipos de conflito:** (i) **9 "mesmo-hash→nomes-dif"** = variantes OCR do MESMO nome (`wvvMasteRwvw`/`wvwMasteRwvw`,
+  `Footloose`/`Footlose`) → **não são conflito real**; expõem necessidade de **dedup fuzzy dos reads da Vision** (auto-merge
+  ou 1-clique). (ii) **8 "nome→2-hashes"** = mesmo nome em 2 hashes diferentes (`Juan Marquez`, `Otto274`) = **veneno genuíno**
+  (pelo invariante, 2 hashes = 2 pessoas → 1 está errado) → guarda (b) a fazer bem o trabalho, quarentena correcta.
+- Concentração: quase tudo em 2 torneios grandes (`292758023` 62 tagadas/34 fortes; `292179612`). O critério de sucesso
+  real é o **reimport** produzir as tagadas desanon à primeira, não os números do laboratório (que vai ser apagado).
 
 ## ★ pt97 (1 Jul 2026, Web) — pós crachá/guardião/tags/saúde GG
 
