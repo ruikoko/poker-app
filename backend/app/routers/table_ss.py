@@ -1755,9 +1755,9 @@ def set_anon_map_override(payload: dict = Body(...),
     hand_db_id = hrows[0]["id"]
     if not _reparse_apa_hash_keyed(hand_db_id):
         raise HTTPException(422, "re-parse do raw falhou (sem HH?)")
-    rows = query("SELECT all_players_actions apa, player_names pn FROM hands WHERE id = %s",
+    rows = query("SELECT all_players_actions apa, player_names pn, raw FROM hands WHERE id = %s",
                  (hand_db_id,))
-    apa = rows[0]["apa"]; pn = rows[0]["pn"]
+    apa = rows[0]["apa"]; pn = rows[0]["pn"]; _raw = rows[0].get("raw")
     if isinstance(apa, str):
         apa = _json.loads(apa)
     if isinstance(pn, str):
@@ -1777,6 +1777,14 @@ def set_anon_map_override(payload: dict = Body(...),
     missing = [h for h in hashes if h not in anon_map]
     vision_data = {"players_list": (pn or {}).get("players_list") or []}
     enriched = _enrich_all_players_actions(apa, anon_map, vision_data)
+    # Guarda universal (#DESANON-SITTING-OUT-NPLUS1) — aqui em modo WARN (override MANUAL:
+    # o mapa do Rui manda; se ficar inconsistente com o raw, é sinal de que o mapa dado
+    # está torto). O C2 (nome duplicado) já foi barrado à entrada por _assert_no_duplicate.
+    from app.services.table_ss_deanon import assert_deanon_consistency
+    _cl, _cv = assert_deanon_consistency(_raw, enriched, anon_map)
+    if _cl == "block":
+        logger.warning("table-ss set-anon-map: hand %s inconsistente=%s (override MANUAL — grava na mesma)",
+                       hand_id, _cv)
     # APA §B (Fase 2): a fusão de seats já não pode acontecer (o enrich mantém a
     # chave-hash); o duplicado de nome é barrado À ENTRADA por
     # _assert_no_duplicate_real_names (guarda viva que substitui a antiga pós-enrich).

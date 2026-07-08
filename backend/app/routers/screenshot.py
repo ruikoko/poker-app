@@ -1765,6 +1765,20 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
         _used_position_v3 = False
     enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json)
 
+    # Guarda UNIVERSAL de consistência (#DESANON-SITTING-OUT-NPLUS1): position_v3 (por rótulo)
+    # isento do C3; o fallback stack (por ordem) está sujeito. block → mantém a mão ANÓNIMA
+    # (não escreve nomes deslizados/injetados — branco > errado).
+    from app.services.table_ss_deanon import assert_deanon_consistency
+    _cl, _cv = assert_deanon_consistency(
+        matched_hand.get("raw"), enriched_actions, anon_map,
+        vision_seat_count=len(raw_json.get("players_list") or []),
+        by_order=not _used_position_v3)
+    if _cl == "block":
+        logger.warning("[pos-v3] hand %s CONSISTÊNCIA=%s → fica ANÓNIMA (não escreve nomes)",
+                       hand_db_id, _cv)
+        anon_map = {}
+        enriched_actions = _enrich_all_players_actions(all_players_raw, {}, raw_json)
+
     # match_method só sobe a 'anchors_stack_elimination_v2' quando há HH real
     # (raw populado). Sem HH, a hand continua a ser placeholder mesmo após
     # 2ª entry Discord cruzar nicks via Vision — anteriormente este path

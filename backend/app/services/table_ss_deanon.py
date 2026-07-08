@@ -249,6 +249,80 @@ def _existing_match_method(player_names: Any) -> Optional[str]:
     return pn.get("match_method") if isinstance(pn, dict) else None
 
 
+# ── Guarda UNIVERSAL de consistência de desanon (#DESANON-SITTING-OUT-NPLUS1) ──
+
+_SEAT_HASH_RE = re.compile(r'^Seat \d+: ([0-9a-f]{4,8}) \(', re.M)   # hashes anón
+_SEAT_ANY_RE = re.compile(r'^Seat \d+: ', re.M)                      # todos os seats
+_HASHLIKE_RE = re.compile(r'^[0-9a-f]{4,8}$')
+
+
+def assert_deanon_consistency(raw, apa, anon_map, *, vision_seat_count=None,
+                              by_order=False) -> tuple:
+    """Invariante UNIVERSAL de desanon — pura, partilhada por todos os caminhos de escrita.
+    Compara o apa (real_name || chave) com os Seats do RAW + o `anon_map`. Devolve
+    `(level, viols)` com `level ∈ {'ok','alarm','block'}`:
+      - **block** → NÃO persistir (mão para revisão): nome REAL repetido na mão (C2, veneno —
+        nicks GG únicos por conta), nome injetado/seat perdido (C1, o apa desliza vs anon_map),
+        contagem apa≠HH (colapso/injeção), OU img≠HH num caminho por ORDEM/STACK (C3).
+      - **alarm** → persistir com `deanon_partial` (seat por mapear = branco honesto).
+      - **ok**.
+    `position_v3` (por RÓTULO) passa `by_order=False` → isento do C3 (larga o extra sem rótulo,
+    corretamente). Ver `DESANON_ANATOMIA §3.2.4` (caso `GG-6083771298`, Afonso Neto N+1)."""
+    raw = raw or ""
+    apa = apa if isinstance(apa, dict) else {}
+    anon = anon_map or {}
+    raw_hashes = set(_SEAT_HASH_RE.findall(raw))
+    seat_count = len(_SEAT_ANY_RE.findall(raw))
+    # Sem HH parseável (placeholder / raw vazio) OU sem hashes anón (não-GG, nicks reais) →
+    # a guarda não tem contra o quê validar → ABSTÉM-SE (não bloqueia).
+    if seat_count == 0 or not raw_hashes:
+        return "ok", []
+    players = [(k, v) for k, v in apa.items() if k != "_meta" and isinstance(v, dict)]
+
+    def _disp(k, v):
+        return (v.get("real_name") or k or "")
+
+    def _is_hash(n):
+        return bool(_HASHLIKE_RE.match(n or ""))
+
+    hero = next((_disp(k, v) for k, v in players if v.get("is_hero")), None)
+    named = [_disp(k, v) for k, v in players]
+    real = [n for n in named if n and not _is_hash(n)]   # nomes reais no apa (não hash/branco)
+    viols, level = [], "ok"
+
+    # C2 — nome real repetido DENTRO da mão → veneno estrutural (sempre bloqueia)
+    dups = sorted({n for n, c in Counter(real).items() if c > 1})
+    if dups:
+        viols.append("dup_name:" + ",".join(dups)); level = "block"
+
+    # C0 — contagem: o apa tem de ter tantos jogadores como Seats na HH (injeção/colapso)
+    if seat_count and len(players) != seat_count:
+        viols.append("count:apa%d_ne_hh%d" % (len(players), seat_count)); level = "block"
+
+    # C1 — cobertura: os nomes REAIS do apa == os que a HH+anon_map dizem (Hero incluído).
+    hh_names = {anon[h] for h in raw_hashes if h in anon and (anon[h] or "").strip()}
+    if hero:
+        hh_names.add(hero)
+    apa_real = set(real)
+    injected = apa_real - hh_names        # nome no apa que não pertence à mão (ex. Afonso Neto)
+    lost = hh_names - apa_real            # nome que a HH tem mas o apa perdeu (ex. SB colapsado)
+    if injected:
+        viols.append("name_injected:" + ",".join(sorted(injected))); level = "block"
+    if lost:
+        viols.append("seat_lost:" + ",".join(sorted(lost))); level = "block"
+
+    # seat por mapear (hash no raw sem nome) → alarme HONESTO (branco > errado), não bloqueia
+    unmapped = [h for h in raw_hashes if not (anon.get(h) or "").strip()]
+    if unmapped and level == "ok":
+        level = "alarm"; viols.append("unmapped:%d" % len(unmapped))
+
+    # C3 — img≠HH só nos caminhos por ORDEM/STACK (position_v3 por rótulo é isento)
+    if by_order and vision_seat_count is not None and vision_seat_count != seat_count:
+        viols.append("img%d_ne_hh%d" % (vision_seat_count, seat_count)); level = "block"
+
+    return level, viols
+
+
 def deanonymize_hand_from_table_ss(
     hand_db_id: int, seats: list[dict], hero_nick: Optional[str]
 ) -> dict:
@@ -336,6 +410,19 @@ def deanonymize_hand_from_table_ss(
 
     vision_data = _seats_to_vision_data(seats, hero_nick)
     enriched_apa = _enrich_all_players_actions(apa_raw, anon_map, vision_data)
+
+    # Guarda UNIVERSAL de consistência (#DESANON-SITTING-OUT-NPLUS1): assere o apa enriquecido
+    # vs raw+anon_map. by_order = fallback stack (sem is_button) → sujeito ao C3 img≠HH; a
+    # âncora já tem o seu count-abort. block → NÃO escreve (mão para revisão).
+    _by_order = not any(s.get("is_button") for s in (seats or []))
+    _lvl, _viols = assert_deanon_consistency(
+        h.get("raw"), enriched_apa, anon_map,
+        vision_seat_count=len(seats or []), by_order=_by_order)
+    if _lvl == "block":
+        logger.warning("[table_ss_deanon] hand %s CONSISTÊNCIA=%s → revisão (não escreve)",
+                       hand_db_id, _viols)
+        return {"status": "review_alarm", "hand_db_id": hand_db_id,
+                "alarm": "consistency:" + ";".join(_viols)}
 
     # Afinação Web: flag honesta quando NEM todos os hashes foram mapeados
     # (bancos ambíguos removidos, ou stacks que não chegaram a todos). Hashes

@@ -7,10 +7,11 @@ voluntário preflop. Cobre os 4 ramos da regra do Rui:
   - walk (Hero nunca decide) → None
   - limp de não-blind antes do Hero → None (Passo 2)
 
-Geometria 6-max com button=Seat 4 (label order [MP,HJ,CO,BTN,SB,BB] em ordem
-preflop a partir do Seat 1): seat1=MP seat2=HJ seat3=CO seat4=BTN seat5=SB
-seat6=BB. As asserts de posição usam `_resolve_position_for_nick` (não
-hardcode) para ficarem robustas a mudanças de convenção.
+Geometria 6-max com button=Seat 4 (label order [UTG,HJ,CO,BTN,SB,BB] em ordem
+preflop a partir do Seat 1): seat1=UTG seat2=HJ seat3=CO seat4=BTN seat5=SB
+seat6=BB. (idx0 do 6-max = UTG desde pt92, #POSITION-LABELS-PYTHON-JS-DRIFT —
+alinha com o que o HRC/script lê; era "MP".) As asserts de posição usam
+`_resolve_position_for_nick` (não hardcode) para ficarem robustas à convenção.
 """
 from app.services.queue_export import (
     derive_noraise_anchor,
@@ -95,10 +96,10 @@ def test_sb_complete_hero_bb_anchors_sb():
 
 
 def test_nonblind_limp_before_hero_returns_none():
-    """Limp de NÃO-blind (MP) antes do Hero → Passo 2 (nó não modelado) → None."""
+    """Limp de NÃO-blind (UTG) antes do Hero → Passo 2 (nó não modelado) → None."""
     hh = _hh(_SEATS_HERO_BTN, "P1: calls 700", "P2: folds", "P3: folds",
              "Hero: folds", "P5: folds")
-    assert _resolve_position_for_nick(hh, "P1") == "MP"
+    assert _resolve_position_for_nick(hh, "P1") == "UTG"   # idx0 6-max = UTG (pt92)
     assert derive_noraise_anchor(hh, 350, 700) is None
 
 
