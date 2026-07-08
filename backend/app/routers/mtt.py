@@ -635,12 +635,13 @@ def _create_villains_for_hand(conn, hh_hand: dict, screenshot_data: dict, *, mtt
     apa_for_mapping = hh_hand.get("all_players_actions", {})
     seat_to_name = {}
     if isinstance(apa_for_mapping, dict):
-        for _name, _pdata in apa_for_mapping.items():
-            if _name == "_meta" or not isinstance(_pdata, dict):
+        for _key, _pdata in apa_for_mapping.items():
+            if _key == "_meta" or not isinstance(_pdata, dict):
                 continue
             _seat = _pdata.get("seat")
             if _seat is not None:
-                seat_to_name[int(_seat)] = _name
+                # APA §B.2 (Fase 1): nome = real_name || chave (byte-idêntico hoje).
+                seat_to_name[int(_seat)] = _pdata.get("real_name") or _key
     if not seat_to_name:
         seat_to_name = _build_seat_to_name_map(hh_hand, screenshot_data)
     vision_by_name = {}

@@ -106,7 +106,9 @@ export function parseHH(raw, apa) {
 
   const players = Object.entries(apa || {})
     .filter(([k]) => k !== '_meta')
-    .map(([name, info]) => ({ name, ...info }))
+    // APA §B.2 (Fase 1): nome de exibição = real_name || chave. Hoje chave==real_name
+    // (desanon) ou real_name vazio (anón/nick nativo) → idêntico; pronto p/ Fase 2 (chave=hash).
+    .map(([key, info]) => ({ ...info, name: (info.real_name || key) }))
     .sort((a, b) => {
       const ai = SEAT_ORDER.indexOf(a.position) === -1 ? 99 : SEAT_ORDER.indexOf(a.position)
       const bi = SEAT_ORDER.indexOf(b.position) === -1 ? 99 : SEAT_ORDER.indexOf(b.position)

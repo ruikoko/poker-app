@@ -1779,8 +1779,10 @@ def set_bounties_override(payload: dict = Body(...),
     if isinstance(apa, str):
         apa = _json.loads(apa)
     pl = pn.get("players_list") or []
-    # apa indexado por real_name (a chave do dict) — mapa nick→entrada p/ patch coerente.
-    apa_by_name = {k: v for k, v in apa.items() if k != "_meta" and isinstance(v, dict)}
+    # APA §B.2 (Fase 1): mapa nome→entrada por real_name || chave (byte-idêntico hoje;
+    # em Fase 2 a chave do apa é o hash e o patch continua a bater pelo nome real).
+    apa_by_name = {(v.get("real_name") or k): v
+                   for k, v in apa.items() if k != "_meta" and isinstance(v, dict)}
     updated, confirmed, unconfirmed, plan = [], [], [], []
     touched = set(bounties) | set(confirm) | set(unconfirm)
     for e in pl:

@@ -176,11 +176,15 @@ def _build_candidates(hand: dict) -> list[dict]:
     )
 
     candidates: list[dict] = []
-    for name, pdata in apa.items():
-        if name == "_meta" or not isinstance(pdata, dict):
+    for key, pdata in apa.items():
+        if key == "_meta" or not isinstance(pdata, dict):
             continue
         if pdata.get("is_hero"):
             continue
+        # APA §B.2 (Fase 1): identidade = real_name || chave. Nos dados actuais
+        # chave==real_name (desanon) ou real_name vazio (anón/nick nativo) →
+        # byte-idêntico; pronto p/ a chave passar a hash em Fase 2.
+        name = pdata.get("real_name") or key
         if not name or name in ("Hero", "Unknown"):
             continue
         if name.lower() in HERO_NAMES:

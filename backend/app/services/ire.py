@@ -348,12 +348,15 @@ def _assemble_ire(apa: dict, *, si: float, bib: float, constant: float,
         return None
     hero_stack = None
     per_opponent: list[dict] = []
-    for nick, info in apa.items():
-        if nick == "_meta" or not isinstance(info, dict):
+    for key, info in apa.items():
+        if key == "_meta" or not isinstance(info, dict):
             continue
         if info.get("is_hero"):
             hero_stack = info.get("stack")
             continue
+        # APA §B.2 (Fase 1): nick = real_name || chave (byte-idêntico hoje; em Fase 2
+        # a chave é o hash e o bounty/nick vêm do real_name).
+        nick = info.get("real_name") or key
         try:
             stack_chips = float(info.get("stack") or 0)
         except (TypeError, ValueError):

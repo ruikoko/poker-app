@@ -142,12 +142,14 @@ def _resolve_hashes_in_raw(raw: str | None, apa: dict | None) -> str | None:
 
     # 1) Construir name_map cruzando "Seat N: <hash>" com apa[name].seat
     seat_to_real = {}
-    for name, info in apa.items():
-        if name == "_meta" or not isinstance(info, dict):
+    for key, info in apa.items():
+        if key == "_meta" or not isinstance(info, dict):
             continue
         seat = info.get("seat")
         if isinstance(seat, int):
-            seat_to_real[seat] = name
+            # APA §B.2 (Fase 1): nome real = real_name || chave (byte-idêntico hoje;
+            # em Fase 2 a chave é o hash e o nome vem de real_name).
+            seat_to_real[seat] = info.get("real_name") or key
 
     name_map: dict[str, str] = {}
     for m in _SEAT_RE.finditer(raw):

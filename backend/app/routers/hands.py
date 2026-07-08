@@ -634,7 +634,15 @@ def _build_conditions(
         params.append(source)
 
     if villain:
-        conditions.append("h.all_players_actions ? %s")
+        # APA §B.2 (Fase 1): casa a chave OU o real_name do valor. Nos dados actuais
+        # chave==real_name → o EXISTS não acrescenta linhas (byte-idêntico); em Fase 2
+        # a chave é hash e o filtro por nome real passa a bater pelo real_name do valor.
+        conditions.append(
+            "(h.all_players_actions ? %s OR EXISTS ("
+            "SELECT 1 FROM jsonb_each(h.all_players_actions) _p "
+            "WHERE _p.value->>'real_name' = %s))"
+        )
+        params.append(villain)
         params.append(villain)
 
     if has_showdown is True:
