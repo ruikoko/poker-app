@@ -164,11 +164,14 @@ Ordem **leitores → writer** (janela sem partir, garantida por `real_name || ch
 1. **Fase 0 — dry-run** (read-only, ANTES de tudo): números por torneio tagado (mãos que ganham
    desanon por propagação, hashes em branco honesto, hashes em quarentena com casos). *O Rui vê os
    números antes da fase 1.*
-2. **Fase 1 — leitores** migram para `real_name || chave` (frontend `handParser`; backend
-   `villain_rules._build_candidates`, `ire._assemble_ire`, `_resolve_hashes_in_raw`, `mtt`,
-   `hands` filtro, `table_ss` reparações). Sem mudar o writer → comportamento idêntico.
-3. **Fase 2 — writer**: `_enrich_all_players_actions` deixa de re-indexar (chave = hash/nick,
-   `real_name` = atributo).
+2. **Fase 1 — leitores ✅ FEITA e LIVE (`d9c504f`)** — `real_name || chave` (frontend `handParser`;
+   backend `villain_rules._build_candidates`, `ire._assemble_ire`, `_resolve_hashes_in_raw`, `mtt`,
+   `hands` filtro, `table_ss` reparações). Sem mudar o writer → comportamento byte-idêntico.
+3. **Fase 2 — writer ✅ FEITA e LIVE (`dc20ad1`)** — `_enrich_all_players_actions` deixa de re-indexar
+   (chave = hash/nick/"Hero", `real_name` = atributo `anon_map.get(chave) or ""`). Fecha a fusão de
+   seats (MaLong07/4321) e a queda de lugares sem nome, por desenho. `_rekey_apa_to_hashes` fica no-op
+   (mantido p/ mãos antigas). Guarda (b) mínima no `/set-anon-map` (`_assert_no_duplicate_real_names`:
+   mesmo nome em 2+ chaves → 409). Mãos antigas NÃO migram. Campo `played` reservado (§B.3).
 4. **Fase 3 — propagação por torneio** (só tagadas, guardas a–d) + **quarentena de nomes** numa
    **secção nova na Saúde GG ao estilo da FT** (conflitos b/c → decisão do Rui: escolher o nome
    certo por hash / manter branco). Escrita SÓ por aprovação; branco é o desfecho seguro.

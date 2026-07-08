@@ -128,8 +128,11 @@ branco+quarentena; (d) branco honesto > nome errado.
   `seat_to_name`, `hands` filtro `villain`, `table_ss.set_bounties`, frontend `handParser`). Byte-idêntico:
   premissa `real_name==chave` provada em toda a BD (68 664 entradas, 0 divergem); +6 testes antigo==novo; suite
   1306 passed (6 falhas pré-existentes: 5 Postgres-local + `#NORAISE-ANCHOR`).
-- **Fase 2 — writer** (PENDENTE, só com OK do Rui): `_enrich_all_players_actions` deixa de re-indexar por nome
-  (chave = hash/nick; `real_name`=atributo).
+- **Fase 2 — writer ✅ FEITA e LIVE (`dc20ad1`, 8 Jul):** `_enrich_all_players_actions` deixa de re-indexar
+  por nome (chave = hash/nick/"Hero"; `real_name`=atributo). Fecha a fusão de seats (MaLong07/4321) e a queda
+  de lugares por desenho; cobre os 2 sites do `mtt.py`; `_rekey_apa_to_hashes` no-op. **Guarda (b) mínima**
+  no `/set-anon-map` (`_assert_no_duplicate_real_names` → 409 no nome-já-usado). Mãos antigas NÃO migram.
+  +8 testes; suite alvo verde.
 - **Fase 3 — propagação** (PENDENTE): só tagadas, guardas b/c + **quarentena de nomes na Saúde GG ao estilo da
   FT**. Inclui o **OCR-merge dos 9 conflitos "mesmo-hash"** (matching tolerante, família `#GOLD-CROWN-CARRY-NAME-TRUNCATION`;
   auto-merge se inequívoco, 1-clique senão) e os 8 "nome→2-hashes" em quarentena pura. Escrita só por aprovação.
