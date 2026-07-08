@@ -994,10 +994,23 @@ def _build_anon_to_real_map_by_position(hand_row: dict, vision_data: dict) -> di
 
 def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: dict) -> dict:
     """
-    Substitui chaves anónimas pelos nomes reais em all_players_actions
-    e adiciona bounty_pct e country de cada jogador.
+    APA §B (Fase 2, core aprovado 8 Jul): enriquece `all_players_actions` **SEM
+    re-indexar por nome**. A CHAVE da HH mantém-se (hash GG / nick real não-GG /
+    "Hero"); o nome real passa a **atributo** `real_name = anon_map.get(chave) or ""`
+    (`""` = por mapear, honesto — o lugar **FICA na mesa**). Copia
+    bounty_pct/bounty_value_usd/country da Vision. Preserva '_meta' e TODOS os
+    campos do jogador (cards/actions/seat/stack/...) via `dict(info)`.
 
-    Preserva a chave '_meta' intacta (bb/sb/ante/level/num_players).
+    Antes (pré-Fase 2) fazia `enriched[real_name]` → dois hashes com o MESMO nome
+    FUNDIAM num só lugar (bug MaLong07) e hashes sem nome CAÍAM (sitting-out
+    desaparecido). Agora a chave é a identidade da HH → sem fusão, sem queda.
+    Leitores lêem `real_name || chave` (Fase 1). Ver `APA_INDEXACAO_E_COLAPSO §B`,
+    `DESANON_ANATOMIA §3.4`.
+
+    Nota: o `_rekey_apa_to_hashes` (table_ss_deanon) passa a NO-OP em mãos de
+    formato novo (já hash-keyed) — mantido só p/ mãos antigas name-keyed (pré-wipe).
+    Mãos ANTIGAS não se migram: um re-enrich sobre elas mantém a chave-nome
+    (real_name fica "", mas o leitor mostra a chave) — sem corrupção.
     """
     enriched = {}
 
@@ -1013,9 +1026,10 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
     for player_key, info in all_players.items():
         if player_key == "_meta":
             continue  # já preservado acima
-        real_name = anon_map.get(player_key, player_key)
+        # NÃO re-indexar: a chave da HH é a identidade. real_name = atributo.
+        real_name = anon_map.get(player_key) or ""
 
-        vision_info = vision_by_name.get(real_name.lower(), {})
+        vision_info = vision_by_name.get(real_name.lower(), {}) if real_name else {}
         if not vision_info:
             pos = info.get("position", "")
             vision_info = vision_by_pos.get(pos, {})
@@ -1029,8 +1043,9 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
         # guarda half-base vive no consumo (queue_export) e no backfill.
         new_info["bounty_value_usd"] = vision_info.get("bounty_value_usd", 0)
         new_info["country"] = vision_info.get("country")
+        # Campo `played` RESERVADO p/ sitting-outs futuros (§B.3) — não populado aqui.
 
-        enriched[real_name] = new_info
+        enriched[player_key] = new_info
 
     return enriched
 

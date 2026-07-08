@@ -217,10 +217,11 @@ def test_existing_match_method_variants():
 
 # ── pt95 (#REDEANON-NOT-IDEMPOTENT) — round-trip do re-key ────────────────────
 def test_rekey_apa_round_trip_restaura_hashes():
-    """O fix de idempotência: o `_enrich_all_players_actions` renomeia o apa
-    hash→name; `_rekey_apa_to_hashes` (via o anon_map) tem de RESTAURAR as chaves
-    hash. Sem isto, re-correr a desanon usaria os NOMES como chave → mapa
-    name→name (o que partiu a GG-6113994321). Testa a invariante do fix."""
+    """APA §B (Fase 2): o `_enrich_all_players_actions` já NÃO renomeia hash→name —
+    mantém a chave-hash e põe o nome em `real_name`. Logo `_rekey_apa_to_hashes`
+    passa a NO-OP em formato novo (chaves já são hashes). Isto FECHA por desenho a
+    corrupção de idempotência (GG-6113994321): re-correr a desanon nunca usa nomes
+    como chave, porque a chave nunca deixou de ser o hash."""
     from app.routers.screenshot import _enrich_all_players_actions
     apa_hash = {
         "_meta": {"bb": 100, "sb": 50},
@@ -230,11 +231,13 @@ def test_rekey_apa_round_trip_restaura_hashes():
     anon_map = {"5e26839e": "Karluz", "b6b2d9ab": "Galego"}
     vision = {"players_list": [{"name": "Karluz", "bounty_pct": 5},
                                {"name": "Galego", "bounty_pct": 3}]}
-    # 1) enrich renomeia hash→name (a causa da corrupção)
-    name_apa = _enrich_all_players_actions(apa_hash, anon_map, vision)
-    assert set(k for k in name_apa if k != "_meta") == {"Karluz", "Galego"}
-    # 2) o re-key restaura as chaves hash (o fix de idempotência)
-    back = _rekey_apa_to_hashes(name_apa, anon_map)
+    # 1) enrich MANTÉM as chaves-hash; o nome vai para real_name (não re-indexa)
+    enriched = _enrich_all_players_actions(apa_hash, anon_map, vision)
+    assert set(k for k in enriched if k != "_meta") == {"5e26839e", "b6b2d9ab"}
+    assert enriched["5e26839e"]["real_name"] == "Karluz"
+    assert enriched["b6b2d9ab"]["real_name"] == "Galego"
+    # 2) o re-key é NO-OP (já hash-keyed) — idempotência estrutural
+    back = _rekey_apa_to_hashes(enriched, anon_map)
     assert set(k for k in back if k != "_meta") == {"5e26839e", "b6b2d9ab"}
     # 3) _meta preservado + os dados por banco mantêm-se
     assert back["_meta"] == {"bb": 100, "sb": 50}
@@ -243,10 +246,11 @@ def test_rekey_apa_round_trip_restaura_hashes():
 
 # ── pt95 — override por blinds: garantia anti-fusão de seats ──────────────────
 def test_enrich_mapa_distinto_nao_funde_seats():
-    """O override por blinds (set-anon-map) tem de NÃO colapsar seats: um anon_map
-    com nicks DISTINTOS enriquece sem fundir (3 hashes → 3 nomes distintos). Um mapa
-    com nick repetido (o bug da 4321: vilão = nome do Hero) FUNDE 2 seats em 1 — é
-    isso que o endpoint recusa (dedup + contagem pós-enrich)."""
+    """APA §B (Fase 2): a fusão de seats (bug 4321: vilão = nome do Hero) fica
+    ESTRUTURALMENTE impossível — o enrich mantém a chave-hash, nunca re-indexa por
+    nome. Mapa com nicks distintos OU com nick repetido → o MESMO nº de seats
+    (nenhum cai); o nome repetido fica em `real_name` nos 2 hashes (veneno a apanhar
+    na quarentena de nomes da Fase 3, mas o LUGAR não desaparece)."""
     from app.routers.screenshot import _enrich_all_players_actions
     apa = {"_meta": {"bb": 4000},
            "Hero": {"position": "MP"}, "5e26839e": {"position": "UTG"},
@@ -254,10 +258,14 @@ def test_enrich_mapa_distinto_nao_funde_seats():
     vision = {"players_list": []}
     good = {"Hero": "Lauro Dermio", "5e26839e": "Karluz", "d6e6f5c9": "iLuckYou3000"}
     e = _enrich_all_players_actions(apa, good, vision)
-    assert sorted(k for k in e if k != "_meta") == ["Karluz", "Lauro Dermio", "iLuckYou3000"]
+    assert sorted(k for k in e if k != "_meta") == ["5e26839e", "Hero", "d6e6f5c9"]
+    assert e["5e26839e"]["real_name"] == "Karluz"
+    # nick repetido: SEM colapso (o seat NÃO cai — o coração da mudança anti-4321)
     bad = {"Hero": "Lauro Dermio", "5e26839e": "Lauro Dermio", "d6e6f5c9": "iLuckYou3000"}
     eb = _enrich_all_players_actions(apa, bad, vision)
-    assert len([k for k in eb if k != "_meta"]) == 2  # colapsou → o endpoint barra isto
+    assert len([k for k in eb if k != "_meta"]) == 3
+    assert eb["Hero"]["real_name"] == "Lauro Dermio"
+    assert eb["5e26839e"]["real_name"] == "Lauro Dermio"  # veneno, mas 2 seats distintos
 
 
 # ── pt96 (#DESANON-HERO-BUTTON-ANCHOR) — âncora Hero+botão + propagação circular ──

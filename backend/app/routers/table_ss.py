@@ -1672,6 +1672,27 @@ def force_redeanon_table_ss(payload: dict = Body(...),
     return {"redeanon": done, "skipped": skipped}
 
 
+def _assert_no_duplicate_real_names(anon_map: dict) -> None:
+    """Guarda (b) mínima (APA §B.6.3) no ponto de escrita MANUAL do anon_map: o
+    MESMO real_name atribuído a 2+ chaves é veneno — pelo invariante do hash (2
+    hashes = 2 pessoas), um dos nomes está errado. Rejeita ANTES de gravar. É o
+    único sítio onde um humano pode introduzir o duplicado; a quarentena completa
+    (nome-já-usado por torneio) é a Fase 3. Valores vazios ("" = por mapear) ignoram-se.
+    Substitui a antiga guarda pós-enrich (`len(enriched)!=len(hashes)`), que dava
+    dead-code na Fase 2 (a chave-hash já nunca funde)."""
+    seen: dict = {}
+    for key, name in (anon_map or {}).items():
+        if not name:
+            continue
+        if name in seen:
+            raise HTTPException(
+                409,
+                f"nome '{name}' atribuído a 2 lugares ({seen[name]} e {key}) — "
+                f"um deles está errado. Não gravado.",
+            )
+        seen[name] = key
+
+
 @router.post("/set-anon-map")
 def set_anon_map_override(payload: dict = Body(...),
                           current_user=Depends(require_auth_or_api_key)):
@@ -1689,8 +1710,7 @@ def set_anon_map_override(payload: dict = Body(...),
     if not hand_id or not isinstance(anon_map, dict) or not anon_map:
         raise HTTPException(400, "hand_id + anon_map (dict não-vazio) obrigatórios")
     vals = list(anon_map.values())
-    if len(set(vals)) != len(vals):
-        raise HTTPException(400, "anon_map com nicks DUPLICADOS — seats colados, recusado")
+    _assert_no_duplicate_real_names(anon_map)   # guarda (b) mínima (APA §B.6.3)
     hrows = query("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
     if not hrows:
         raise HTTPException(404, "mão não encontrada")
@@ -1719,11 +1739,9 @@ def set_anon_map_override(payload: dict = Body(...),
     missing = [h for h in hashes if h not in anon_map]
     vision_data = {"players_list": (pn or {}).get("players_list") or []}
     enriched = _enrich_all_players_actions(apa, anon_map, vision_data)
-    # anti-fusão pós-enrich: nº de jogadores tem de manter-se (nicks distintos → 0 colapso)
-    enriched_players = [k for k in enriched if k != "_meta"]
-    if len(enriched_players) != len(hashes):
-        raise HTTPException(500, "fusão de seats pós-enrich (%d→%d) — abortado"
-                            % (len(hashes), len(enriched_players)))
+    # APA §B (Fase 2): a fusão de seats já não pode acontecer (o enrich mantém a
+    # chave-hash); o duplicado de nome é barrado À ENTRADA por
+    # _assert_no_duplicate_real_names (guarda viva que substitui a antiga pós-enrich).
     new_pn = {**(pn or {}), "anon_map": anon_map, "match_method": "table_ss",
               "source": "manual_blinds_override", "deanon_partial": bool(missing)}
     conn = get_conn()

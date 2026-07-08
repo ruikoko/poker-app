@@ -839,9 +839,11 @@ def _promote_to_study(conn, mtt_hand_id: int, hh_hand: dict, screenshot_data: di
         name = info.get("name", "")
         pos = info.get("position", "?")
         stack_bb = round(info.get("stack", 0) / bb_size, 1) if bb_size > 0 else 0
-        real_name = seat_to_name.get(seat_num, name)
+        # APA §B (Fase 2): chave = identidade da HH (name = hash GG / nick real /
+        # "Hero"); real_name é ATRIBUTO (nome do screenshot, ou "" por mapear).
+        real_name = seat_to_name.get(seat_num) or ""
 
-        all_players[real_name] = {
+        all_players[name] = {
             "seat": seat_num,
             "position": pos,
             "stack_bb": stack_bb,
@@ -1010,9 +1012,10 @@ async def import_mtt(
                     pos = info.get("position", "?")
                     stack = info.get("stack", 0)
                     stack_bb = round(stack / bb_size, 1) if bb_size > 0 else 0
-                    real_name = seat_to_name.get(seat_num, name) if has_screenshot else name
+                    # APA §B (Fase 2): chave = identidade da HH (name); real_name = atributo.
+                    real_name = (seat_to_name.get(seat_num) or "") if has_screenshot else ""
 
-                    all_players[real_name] = {
+                    all_players[name] = {
                         "seat": seat_num,
                         "position": pos,
                         "stack": stack,

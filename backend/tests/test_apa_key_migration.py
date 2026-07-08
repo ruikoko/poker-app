@@ -126,3 +126,103 @@ def test_resolve_raw_new_anon_leaves_hashes():
     out = _resolve_hashes_in_raw(_RAW, _apa_new_anon())
     assert "3b4cd0c7: raises 2000" in out
     assert "89ef4cba: folds" in out
+
+
+# ═══ Fase 2 — writer: _enrich_all_players_actions NÃO re-indexa por nome ═══════
+# A chave da HH mantém-se (hash/nick/"Hero"); real_name = atributo. Ver APA §B.
+
+from app.routers.screenshot import _enrich_all_players_actions
+
+
+def _hash_apa():
+    return {
+        "_meta": {"bb": 1000},
+        "Hero":     {"is_hero": True, "seat": 1, "position": "BTN", "stack": 30000},
+        "3b4cd0c7": {"is_hero": False, "seat": 2, "position": "CO", "stack": 20000, "cards": ["Ah", "Kd"]},
+        "89ef4cba": {"is_hero": False, "seat": 3, "position": "SB", "stack": 40000},
+    }
+
+
+def test_enrich_new_gg_hand_keys_are_hashes_realname_empty():
+    # mão GG nova, sem desanon → chaves = hashes; real_name vazio
+    out = _enrich_all_players_actions(_hash_apa(), {}, {})
+    assert set(out) == {"_meta", "Hero", "3b4cd0c7", "89ef4cba"}
+    assert out["3b4cd0c7"]["real_name"] == ""
+    assert out["89ef4cba"]["real_name"] == ""
+
+
+def test_enrich_gold_desanon_fills_realname_keeps_key():
+    # desanon por Gold → real_name preenche SEM mudar a chave
+    out = _enrich_all_players_actions(_hash_apa(), {"3b4cd0c7": "Alice", "89ef4cba": "Bob"}, {})
+    assert "3b4cd0c7" in out and "Alice" not in out
+    assert out["3b4cd0c7"]["real_name"] == "Alice"
+    assert out["89ef4cba"]["real_name"] == "Bob"
+
+
+def test_enrich_two_players_same_name_two_entries():
+    # anti-MaLong07: dois jogadores com o MESMO nome → 2 entradas distintas (sem fusão)
+    out = _enrich_all_players_actions(_hash_apa(), {"3b4cd0c7": "MaLong07", "89ef4cba": "MaLong07"}, {})
+    assert len([k for k in out if k != "_meta"]) == 3
+    assert out["3b4cd0c7"]["real_name"] == "MaLong07"
+    assert out["89ef4cba"]["real_name"] == "MaLong07"
+
+
+def test_enrich_unmapped_seat_stays_on_table():
+    # anti-sitting-out: lugar sem nome FICA na mesa, real_name branco honesto
+    out = _enrich_all_players_actions(_hash_apa(), {"3b4cd0c7": "Alice"}, {})
+    assert "89ef4cba" in out
+    assert out["89ef4cba"]["real_name"] == ""
+    assert len([k for k in out if k != "_meta"]) == 3
+
+
+def test_enrich_meta_and_player_fields_preserved():
+    out = _enrich_all_players_actions(_hash_apa(), {"3b4cd0c7": "Alice"}, {})
+    assert out["_meta"] == {"bb": 1000}
+    assert out["3b4cd0c7"]["cards"] == ["Ah", "Kd"]
+    assert out["3b4cd0c7"]["seat"] == 2 and out["3b4cd0c7"]["position"] == "CO"
+
+
+def _has_showdown(apa):
+    # espelho exacto de hand_service._insert_hand L339-343 (lê pdata.cards, não a chave)
+    return any(isinstance(v, dict) and not v.get("is_hero") and v.get("cards")
+               for k, v in apa.items() if k != "_meta")
+
+
+def test_showdown_detection_key_agnostic():
+    new = _enrich_all_players_actions(_hash_apa(), {"3b4cd0c7": "Alice", "89ef4cba": "Bob"}, {})
+    old = {"_meta": {"bb": 1000},
+           "Hero": {"is_hero": True, "seat": 1},
+           "Alice": {"is_hero": False, "seat": 2, "cards": ["Ah", "Kd"], "real_name": "Alice"},
+           "Bob": {"is_hero": False, "seat": 3, "real_name": "Bob"}}
+    assert _has_showdown(new) is True
+    assert _has_showdown(new) == _has_showdown(old)
+
+
+def test_enrich_old_name_keyed_hand_not_corrupted():
+    # ponto 3: reparação sobre mão ANTIGA (chaves=nomes) → mantém formato antigo,
+    # sem perda de dados; o leitor mostra a chave (real_name || chave).
+    old_apa = {"_meta": {"bb": 1000},
+               "Hero": {"is_hero": True, "seat": 1, "real_name": "Hero"},
+               "Alice": {"is_hero": False, "seat": 2, "real_name": "Alice", "cards": ["Ah"]}}
+    out = _enrich_all_players_actions(old_apa, {"3b4cd0c7": "Zed"}, {})
+    assert "Alice" in out
+    assert out["Alice"]["cards"] == ["Ah"]
+    assert (out["Alice"]["real_name"] or "Alice") == "Alice"
+
+
+# ═══ Fase 2 — guarda (b) mínima no /set-anon-map (nome-já-usado) ═══════════════
+# Único ponto onde um humano introduz o duplicado antes da Fase 3 (quarentena).
+
+def test_set_anon_map_rejects_duplicate_real_name():
+    import pytest
+    from fastapi import HTTPException
+    from app.routers.table_ss import _assert_no_duplicate_real_names
+    # nicks distintos → não levanta
+    _assert_no_duplicate_real_names({"Hero": "Lauro", "h1": "Karluz", "h2": "iLuckYou"})
+    # valores vazios ("" = por mapear) ignorados
+    _assert_no_duplicate_real_names({"h1": "", "h2": ""})
+    # MESMO nome em 2 chaves → rejeita com erro claro (409, nomeia o duplicado)
+    with pytest.raises(HTTPException) as ei:
+        _assert_no_duplicate_real_names({"Hero": "Lauro Dermio", "h1": "Lauro Dermio"})
+    assert ei.value.status_code == 409
+    assert "Lauro Dermio" in ei.value.detail
