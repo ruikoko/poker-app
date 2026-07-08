@@ -143,4 +143,43 @@ existe lá).
   regra de não-colisão; fica para o Code do PC integrar.)*
 - **Opcional (agora moot):** o exe antigo `8390D405…` foi substituído; mapear a sua
   Release deixou de ser necessário.
-- Commit+push do journal para `watcher-front` (a aguardar OK do Rui sobre o timing).
+- Commit+push do journal para `watcher-front` — ✅ FEITO (`066b48b`, push OK).
+
+---
+
+## Fecho de sessão — 2026-07-08 (frente watcher PAUSA por decisão do Rui)
+
+**Feito e LIVE:** `#WATCHER-LOG-FILE-REGRESSION-PT90` resolvido; exe novo buildado
+do tip do `watcher-gate` (`049cd4b` pt95) + fix do log, instalado (1 só exe),
+SHA `4417698D…FEA31`. Journal committado+pushed (`066b48b` em `origin/watcher-front`).
+
+**⚠️ ESTADO CRÍTICO do exe instalado:** por ter sido buildado do tip do
+`watcher-gate`, o exe novo inclui **pela 1ª vez buildado** o pt94 (guarda 15 GB)
+e o pt95 (`#HRC-FOCUS-ROBUSTNESS`, antes "NÃO buildado") — **por validar
+end-to-end**. Comportamento mudou para além do log.
+
+**REGRA até nova ordem:** **NADA de batch real com o exe novo** enquanto o smoke
+end-to-end (#1) não passar.
+
+**Fila para a próxima sessão (decidida pelo Rui):**
+1. **PRÓXIMO PASSO — smoke end-to-end do exe novo** (`#HRC-TREE-GIGANTE` end-to-end,
+   valida também pt94/pt95): (a) mão normal corre+exporta; (b) árvore gigante
+   forçada → `.failed`; (c) OCR forçado a falhar → corre (fail-open). **COM o Rui
+   presente, salas FECHADAS, anunciado antes.** É o gate que liberta o batch real.
+2. `#SECOND-RUN-NOOP-SILENT-DONE` (2ª run degrada para no-op sem sinalizar) — pode
+   ser **preparado em código na faixa** (`tools/watcher_src/`) quando a frente
+   reabrir; não precisa do HRC até ao smoke.
+3. `#HRC-2ND-RUN-CI-TIME-DISCREPANCY` — **agendado como decisão de produto do Rui**.
+4. `#WATCHER-OCR-NOT-READ-ON-TREE-ZERO-BRANCH` (LOW) — telemetria; a reboque de outro build.
+
+**Lições (4) e pendências-para-o-PC** registadas acima (replicar 1-liner do
+`wrapper.py` no `_local_only` do PC; reconciliar `watcher-gate`↔`main`; backup
+pt87 MANTIDO). Não editei `PENDENTES.md`/`LICOES.md`/`REGISTO_CONCEITO.md`
+(fora da faixa / regra de não-colisão) — ficam para o Code do PC integrar a
+partir deste journal. Sem alterações de conceito nesta sessão.
+
+**Ambiente deixado pronto (Beelink):** clone `C:\Users\riand\poker-app` em
+`watcher-front`; Python 3.12.10 + PyInstaller 6.21.0 + deps de runtime
+(pyautogui/pygetwindow/pyperclip/pillow/winsdk) no `py -3.12`; material de build
+em `_local_only/watcher_decompile/` com `.spec`/`swap_and_smoke.py` já portáveis.
+Reabrir a frente = buildar+smokar aqui sem setup adicional.
