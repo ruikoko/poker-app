@@ -188,6 +188,27 @@ Racer** — e as **218 mãos Speed Racer EXISTEM na BD** (HH importada). Logo n�
 joga Speed Racer todos os dias). **Atacar quando o guião de hoje fechar, ANTES de arrancar a Etapa 2.**
 Refs: `routers/table_ss.py:_resolve_match`/`_find_candidate_hands`; formato do nome Speed Racer.
 
+## 🔴 `#CROWN-VISIBLE-READ-ZERO` — Vision lê $0 em coroas VISÍVEIS (3º bloco pré-Etapa-2, 8 Jul)
+
+**Investigação visual das 8 "Mãos suspeitas" (inspecção imagem-a-imagem).** Todas $0 (coroas por ler,
+não valores trocados — o padrão chama-vs-coroa NÃO voltou). Classificação: **7 espécie 1** (coroa
+CLARAMENTE VISÍVEL na imagem, gravada $0 = falha de leitura da Vision) + **1 espécie 2** (`6140169166`,
+sem captura de mesa; fonte = **Gold** `position_v3`, coroa $0 por ler na Gold) + **0 espécie 3** (casamento
+errado — o varrimento do reimport deu **0 casamentos cruzados** `capture_tn != hand_tn`; o `6139761400`,
+suspeito de imagem alheia, é **casamento CORRETO**: captura `tn=295228486` = tn da mão, Big Game $215 PKO,
+8 nicks da imagem batem com a HH). **Espécie 3 NÃO existe** — contexto não envenenado.
+- **Padrão da espécie 1:** o lugar lido $0 tem o **AVATAR obscurecido** (cartas viradas vermelhas / texto
+  "All-In" / cartas do Hero por cima), MAS o **banner dourado da coroa (por cima) está legível**. Apanha
+  **Hero E vilões** (4× Lauro Dermio + PhilVsSandwich $375, RaresSD $13.12, Golden Goose $125, Cornel $20,
+  Diagonale/SagradaFamilia/TripleL). A Vision devolve $0 quando o avatar está tapado, apesar da coroa à vista.
+- **Âmbito/IRE:** **25/166 mãos GG PKO desanon (15%)** têm ≥1 coroa $0; **18 ocorrências Hero-$0 + 100
+  vilão-$0** → IRE coxo em ~15% (o painel "suspeitas"=8 SUBCONTA: só apanha mãos com TS + $0 < base÷2). No
+  reimport completo multiplica por dezenas.
+- **Fixes propostos:** (1) **leitura** — afinar o prompt da Vision (a coroa dourada é ACIMA do avatar; ler
+  SEMPRE, mesmo com cartas/all-in a tapar o avatar) + **re-ler as imagens afetadas** (as compressas servem —
+  as coroas estão legíveis nas guardadas); (2) **filtro** — separar `coroa por ler ($0)` de `valor impossível
+  (>0 e <base÷2)`, estados/alarmes distintos (o alarme vermelho é só para o 2º). Espécie 3 sem fix (não existe).
+
 ## 🔴 `#ICM-FT-TAG-NOT-LANDING` — a tag `icm-ft` do IT não aterra (investigação pré-Etapa-2, 8 Jul)
 
 **Descoberto no reimport (Cano 7, A4).** 3 mãos de FT da FT VALIDADA `295219051` (Daily Hyper $60,
