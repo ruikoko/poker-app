@@ -2236,7 +2236,11 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
             img = base64.b64decode(b)
         except Exception:
             continue
-        text = await asyncio.to_thread(_extract_hand_data_from_image_claude, img, "image/png")
+        # As imagens GUARDADAS são JPEG comprimido (1280/JPEG85) — declarar
+        # o mime real; a Anthropic rejeita 400 se media_type≠magic (#CROWN-VISIBLE-READ-ZERO).
+        from app.services.image_utils import detect_image_mime
+        mime = detect_image_mime(img)
+        text = await asyncio.to_thread(_extract_hand_data_from_image_claude, img, mime)
         if not text:
             vision_failed += 1
             report.append({"hand_id": r["hand_id"], "result": "vision_failed"})
