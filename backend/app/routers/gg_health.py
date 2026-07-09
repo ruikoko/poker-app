@@ -26,7 +26,9 @@ from app.services.ft_boundary import (
     candidate_tns, via_b_diagnostics, review_status,
 )
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
-from app.services.eliminated_bounty import busted_real_names, BOUNTY_REVIEW_KEY
+from app.services.eliminated_bounty import (
+    busted_real_names, BOUNTY_REVIEW_KEY, BOUNTY_SOURCE_KEY, SOURCE_GREEN_KO,
+)
 
 router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
 
@@ -964,14 +966,18 @@ def np_apply(body: NpApplyBody, current_user=Depends(require_auth_or_api_key)):
 # ── CURA verde-KO — scan read-only de CONTAMINAÇÃO (rede de verificação) ──────
 @router.get("/eliminated-crown-scan")
 def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
-    """READ-ONLY. Lista seats ELIMINADOS (sinal HH: all-in e perdeu) que têm coroa
-    NÃO-NULA gravada — o veneno da armadilha verde-KO (coroa do vizinho colada no
-    eliminado). Sinaliza os FORTES: coroa igual à de OUTRO seat vivo E > base÷2
-    (acumulada, não a inicial partilhada por frescos). Serve para verificar o
-    reimporte (alvo pós-cura: 0 fortes) e o estado atual. NADA escreve.
+    """READ-ONLY. Verifica a cura verde-KO: seats ELIMINADOS (sinal HH: all-in e perdeu).
 
-    `strong` = quase-certo veneno; `review` = eliminado já marcado 'por rever'
-    (guarda ativa — bom); `soft` = coroa única/≤base÷2 (pode ser o real pré-bust)."""
+    ★ CRIVO VERDADEIRO (`vision_origin_contamination`): bustado com coroa >0 cuja
+    proveniência NÃO é 'green_ko' (derivada do verde pelo chokepoint) = coroa de
+    origem-Vision = contaminação. **Alvo pós-cura+reimporte: 0.** Apanha TODOS os
+    casos, incluindo os de valor ÚNICO que a heurística 'forte' não vê. É a garantia
+    estrutural da cura (todo bustado passa pelo chokepoint → verde-derivado OU NULL).
+
+    Proxies visíveis (subconjunto do crivo): `strong` = coroa >base÷2 igual à de outro
+    seat vivo (quase-certo veneno); `soft` = restante coroa origem-Vision (única/≤base÷2).
+    `review` = já marcado 'por rever' (guarda ativa — OK); `green_ko` = derivado do verde
+    (curado — OK, NÃO conta no crivo). NADA escreve."""
     base = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL")}
@@ -982,7 +988,7 @@ def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
         " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
         "   AND player_names->>'match_method' IS NOT NULL "
         "   AND player_names->'players_list' IS NOT NULL")
-    strong, review, soft = [], [], []
+    vision_origin, strong, soft, review, green_ko = [], [], [], [], []
     for r in rows:
         apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
@@ -1008,15 +1014,19 @@ def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
                 bv = float(p.get("bounty_value_usd") or 0)
             except (TypeError, ValueError):
                 bv = 0.0
-            has_review = bool(p.get(BOUNTY_REVIEW_KEY))
+            source = p.get(BOUNTY_SOURCE_KEY)
             item = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
                     "name": nm, "crown": bv, "floor": floor,
-                    "review": p.get(BOUNTY_REVIEW_KEY)}
-            if has_review and bv <= 0:
-                review.append(item)          # guarda ativa a funcionar
-                continue
+                    "review": p.get(BOUNTY_REVIEW_KEY), "source": source}
             if bv <= 0:
-                continue                     # eliminado sem coroa (limpo)
+                if p.get(BOUNTY_REVIEW_KEY):
+                    review.append(item)      # NULL + 'por rever' (guarda ativa — OK)
+                continue                     # senão: eliminado sem coroa (limpo)
+            if source == SOURCE_GREEN_KO:
+                green_ko.append(item)        # verde-derivado (curado) — NÃO conta no crivo
+                continue
+            # coroa >0 num bustado SEM 'green_ko' = origem-Vision = CONTAMINAÇÃO (crivo).
+            vision_origin.append(item)
             others = [n for n in crowns.get(round(bv, 2), []) if n != nm]
             if others and floor is not None and bv > floor + 0.001:
                 item["equal_to"] = others
@@ -1024,5 +1034,9 @@ def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
             else:
                 soft.append(item)
     return {"scanned_hands": len(rows),
-            "counts": {"strong": len(strong), "review": len(review), "soft": len(soft)},
-            "strong": strong, "review": review, "soft": soft}
+            # ★ crivo verdadeiro da cura: tem de ser 0 pós-cura+reimporte.
+            "vision_origin_contamination": len(vision_origin),
+            "counts": {"strong": len(strong), "soft": len(soft),
+                       "review": len(review), "green_ko": len(green_ko)},
+            "vision_origin": vision_origin,
+            "strong": strong, "soft": soft, "review": review, "green_ko": green_ko}

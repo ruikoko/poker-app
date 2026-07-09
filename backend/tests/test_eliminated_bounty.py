@@ -1,7 +1,7 @@
 """Cura verde-KO — deteção de eliminado (HH) + chokepoint do bounty por-seat."""
 from app.services.eliminated_bounty import (
     busted_keys_from_hh, busted_real_names, parse_green_kos, resolve_seat_bounty,
-    REVIEW_NO_GREEN, REVIEW_AMBIGUOUS,
+    REVIEW_NO_GREEN, REVIEW_AMBIGUOUS, SOURCE_GREEN_KO,
 )
 
 # HH real (GG-6140169166): Hero all-in no river e perde; ccc84511 coleta.
@@ -34,30 +34,30 @@ def test_busted_real_names_maps_via_apa():
 
 
 def test_resolve_non_eliminated_passthrough():
-    # Seat normal → coroa da Vision INALTERADA (convenção normal preservada).
-    val, rev = resolve_seat_bounty("YanayB", 253.75, busted_names={"Lauro Dermio"})
-    assert val == 253.75 and rev is None
+    # Seat normal → coroa da Vision INALTERADA (convenção normal preservada), sem source.
+    val, rev, src = resolve_seat_bounty("YanayB", 253.75, busted_names={"Lauro Dermio"})
+    assert val == 253.75 and rev is None and src is None
 
 
 def test_resolve_eliminated_one_green_derives_instant():
-    # 1 eliminado + 1 verde → grava o verde (instantâneo); o código faz ×2 → total.
+    # 1 eliminado + 1 verde → grava o verde (instantâneo, source green_ko); ×2 → total.
     greens = [{"winner": "YanayB", "value": 102.27}]
-    val, rev = resolve_seat_bounty("Lauro Dermio", 170.63,
-                                   busted_names={"Lauro Dermio"}, green_kos=greens)
-    assert val == 102.27 and rev is None       # NUNCA 170.63 (coroa do vizinho)
+    val, rev, src = resolve_seat_bounty("Lauro Dermio", 170.63,
+                                        busted_names={"Lauro Dermio"}, green_kos=greens)
+    assert val == 102.27 and rev is None and src == SOURCE_GREEN_KO   # NUNCA 170.63
 
 
 def test_resolve_eliminated_no_green_is_review():
-    val, rev = resolve_seat_bounty("Lauro Dermio", 170.63,
-                                   busted_names={"Lauro Dermio"}, green_kos=[])
-    assert val is None and rev == REVIEW_NO_GREEN
+    val, rev, src = resolve_seat_bounty("Lauro Dermio", 170.63,
+                                        busted_names={"Lauro Dermio"}, green_kos=[])
+    assert val is None and rev == REVIEW_NO_GREEN and src is None
 
 
 def test_resolve_eliminated_multiway_ambiguous():
     greens = [{"winner": "A", "value": 50.0}, {"winner": "B", "value": 60.0}]
-    val, rev = resolve_seat_bounty("X", 99.0,
-                                   busted_names={"X", "Y"}, green_kos=greens)
-    assert val is None and rev == REVIEW_AMBIGUOUS
+    val, rev, src = resolve_seat_bounty("X", 99.0,
+                                        busted_names={"X", "Y"}, green_kos=greens)
+    assert val is None and rev == REVIEW_AMBIGUOUS and src is None
 
 
 def test_parse_green_kos():
