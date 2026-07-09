@@ -19,8 +19,11 @@ FALLBACK — multiway (vários eliminados ou vários verdes, sem ligar 1:1) → 
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
+
+logger = logging.getLogger("eliminated_bounty")
 
 # Marca de review no seat (apa/pn) quando o bounty do eliminado fica por preencher.
 BOUNTY_REVIEW_KEY = "bounty_review"
@@ -107,3 +110,62 @@ def resolve_seat_bounty(
     if not greens:
         return None, REVIEW_NO_GREEN, None
     return None, REVIEW_AMBIGUOUS, None
+
+
+def _apply_seat_bounty(seat: dict, val, review, source) -> None:
+    """CIRÚRGICO — só toca os 3 campos do bounty; nome/stack/posição/cartas intactos."""
+    seat["bounty_value_usd"] = val                 # None (NULL) ou o verde (instantâneo)
+    if review:
+        seat[BOUNTY_REVIEW_KEY] = review
+    else:
+        seat.pop(BOUNTY_REVIEW_KEY, None)
+    if source:
+        seat[BOUNTY_SOURCE_KEY] = source
+    else:
+        seat.pop(BOUNTY_SOURCE_KEY, None)
+
+
+def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
+                             raw: Optional[str], vision_data: Optional[dict] = None) -> int:
+    """FUNIL ÚNICO da cura verde-KO. Chamado 1× em cada caminho AUTOMÁTICO que escreve
+    bounty por-seat (enrich gold/position_v3, orphan-enrich, table-ss, backfills gold-carry
+    e capture, reread). Aplica a guarda aos seats HH-bustados em AMBOS apa e pn.players_list.
+    Devolve nº de seats-nome tocados (audit). Muta apa/pn in-place.
+
+    4 garantias:
+    (1) MUST independente do verde: sem `vision_data`/verde (backfills só-apa) → o bustado
+        fica NULL + 'por rever' (a anulação vem SÓ do raw/HH).
+    (2) raw obrigatório: sem `raw` NÃO se pode computar bust em segurança → NÃO scruba e
+        LOGA warning (nunca deixa passar cru em silêncio; o call-site tem de garantir raw).
+    (3) CIRÚRGICO: só bounty_value_usd/bounty_review/bounty_source.
+    (4) apa↔pn consistente: busted/greens computados UMA vez, aplicados igual aos dois.
+    """
+    if not isinstance(apa, dict):
+        return 0
+    if not raw:
+        # Guarantee 2: um call-site sem raw é um buraco — sinaliza, não scruba às cegas.
+        logger.warning("scrub_eliminated_bounties: raw ausente — bust não computável; "
+                       "call-site tem de fornecer o raw (HH). Skip seguro (sem scrub).")
+        return 0
+    busted = busted_real_names(raw, apa)            # HH-autoritativo; {} se não há bust
+    if not busted:
+        return 0
+    greens = parse_green_kos(vision_data)           # best-effort; [] se ausente/sem prompt
+    touched = 0
+    for key, entry in apa.items():                  # 1) apa (chave=hash/nick/Hero)
+        if key == "_meta" or not isinstance(entry, dict):
+            continue
+        name = entry.get("real_name") or key
+        if name not in busted:
+            continue
+        val, review, source = resolve_seat_bounty(
+            name, entry.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
+        _apply_seat_bounty(entry, val, review, source)
+        touched += 1
+    for p in (pn or {}).get("players_list") or []:  # 2) pn.players_list (nome='name')
+        if not isinstance(p, dict) or p.get("name") not in busted:
+            continue
+        val, review, source = resolve_seat_bounty(
+            p.get("name"), p.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
+        _apply_seat_bounty(p, val, review, source)  # mesmo resultado → apa↔pn coerentes
+    return touched
