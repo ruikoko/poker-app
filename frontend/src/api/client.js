@@ -70,6 +70,7 @@ export const hands = {
   update: (id, body)    => req('PATCH',  `/hands/${id}`, body),
   delete: (id)          => req('DELETE', `/hands/${id}`),
   screenshot: (id)      => req('GET',    `/hands/${id}/screenshot`),
+  images:     (id)      => req('GET',    `/hands/${id}/images`),
   stats:  ()            => req('GET',    '/hands/stats'),
   ssMatchPending: ()    => req('GET',    '/hands/ss-match-pending'),
   ssWithoutMatch: ()    => req('GET',    '/hands/ss-without-match'),

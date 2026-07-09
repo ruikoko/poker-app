@@ -7,6 +7,7 @@ import HandRow from '../components/HandRow'
 import { HrcSelectionProvider, HrcActionBar, GroupSelectAll, useHrcSelection } from '../components/HrcSelection'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import AttachedImagesSection from '../components/AttachedImagesSection'
+import HandImagesSection from '../components/HandImagesSection'
 import TournamentHeader, { SiteWatermark } from '../components/TournamentHeader'
 import { isoDateLisbon, dateTimeLisbon } from '../utils/datetime'
 
@@ -650,6 +651,9 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
 
         {/* Imagens anexadas (Tech Debt #B9 — galeria manual, ajuste UX pt7) */}
         <AttachedImagesSection hand={handForAttachments} onChange={refreshAttachments} dense />
+
+        {/* Imagens da mão (só GG) — Gold, SS do IT, Lobby (regra 9 Jul) */}
+        <HandImagesSection hand={hand} />
 
         {/* Source info */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>

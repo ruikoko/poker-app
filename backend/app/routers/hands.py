@@ -1574,6 +1574,50 @@ def get_hand_screenshot(hand_pk: int, current_user=Depends(require_auth)):
     }
 
 
+@router.get("/{hand_pk}/images")
+def get_hand_images(hand_pk: int, current_user=Depends(require_auth)):
+    """Todas as imagens ligadas a ESTA mão, agrupadas por tipo, p/ o painel do detalhe
+    (regra 9 Jul: qualquer mão GG com imagem anexada mostra-a — uma secção por tipo).
+    - gold:     imagem da entry da mão (Gold/replayer download; entry_type
+                'screenshot'/'replayer_link' com img_b64) → /api/screenshots/image/<id>.
+    - table_ss: captura de mesa do IT ligada (context_table_ss_id) OU casada a esta mão
+                (matched_hand_id) → /api/table-ss/image/<id>.
+    - lobby:    leitura(s) do lobby do torneio — a IMAGEM do lobby NÃO é guardada
+                (lobby_processing_log só tem a leitura+hora). Só metadados.
+    Read-only; devolve apenas o que existe. Espelha _ft_images (gg_health) por-mão."""
+    rows = query(
+        "SELECT id, hand_id, site, tournament_number, entry_id, context_table_ss_id "
+        "FROM hands WHERE id = %s", (hand_pk,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="Mão não encontrada")
+    h = dict(rows[0])
+    gold = query(
+        "SELECT id, entry_type FROM entries "
+        " WHERE id = %s AND (raw_json->>'img_b64') IS NOT NULL "
+        "   AND entry_type IN ('screenshot','replayer_link')", (h["entry_id"],))
+    gold_out = [{"entry_id": r["id"], "kind": r["entry_type"],
+                 "image_url": f"/api/screenshots/image/{r['id']}"} for r in gold]
+    tss = query(
+        "SELECT DISTINCT l.id AS ss_id, l.captured_at, l.players_left "
+        "  FROM table_ss_processing_log l "
+        " WHERE l.img_b64 IS NOT NULL AND (l.id = %s OR l.matched_hand_id = %s) "
+        " ORDER BY l.captured_at", (h["context_table_ss_id"], h["hand_id"]))
+    tss_out = [{"ss_id": r["ss_id"], "image_url": f"/api/table-ss/image/{r['ss_id']}",
+                "captured_at": r["captured_at"].isoformat() if r["captured_at"] else None,
+                "players_left": r["players_left"]} for r in tss]
+    lobby_out = []
+    if h["tournament_number"]:
+        lob = query(
+            "SELECT posted_at, players_left, vision_json FROM lobby_processing_log "
+            " WHERE tournament_number = %s ORDER BY posted_at", (h["tournament_number"],))
+        lobby_out = [{"posted_at": r["posted_at"].isoformat() if r["posted_at"] else None,
+                      "players_left": r["players_left"],
+                      "open_tab": (r["vision_json"] or {}).get("open_tab"),
+                      "final_table_size": (r["vision_json"] or {}).get("final_table_size"),
+                      "note": "imagem não guardada"} for r in lob]
+    return {"gold": gold_out, "table_ss": tss_out, "lobby": lobby_out}
+
+
 # ── Admin endpoints ───────────────────────────────────────────────────────────
 
 @router.post("/admin/canonicalize-tags")
