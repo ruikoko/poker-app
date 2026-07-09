@@ -2216,7 +2216,14 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
         "  FROM hands h JOIN entries e ON e.id = h.entry_id "
         " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
         "   AND h.player_names->>'match_method' = 'position_v3' "
-        "   AND e.raw_json->>'img_b64' IS NOT NULL " + where,
+        "   AND e.raw_json->>'img_b64' IS NOT NULL "
+        # #CROWN-VISIBLE-READ-ZERO: SÓ torneios COM bounty. Uma coroa $0 num
+        # torneio vanilla é INEXISTENTE (não há bounty), não 'por ler' — alinha
+        # com o gate da secção Mãos suspeitas (suspicious._bounty_below_half_hands).
+        "   AND EXISTS (SELECT 1 FROM tournament_summaries ts "
+        "                WHERE ts.site='GGPoker' "
+        "                  AND ts.tournament_number = h.tournament_number "
+        "                  AND ts.buy_in_bounty > 0) " + where,
         params,
     )
 
@@ -2257,18 +2264,22 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
         apa, pn = r["apa"], r["pn"]
         changed = False
         recov = 0
+        recov_detail = []  # #CROWN-VISIBLE-READ-ZERO: auditoria — o que a Vision leu.
         if isinstance(apa, dict):
             for key, pdata in apa.items():
                 if key == "_meta" or not isinstance(pdata, dict):
                     continue
                 if (pdata.get("bounty_value_usd") or 0) > 0:
                     continue
-                cr = _crown_from_fresh(pdata.get("real_name") or key, fresh)
+                nm = pdata.get("real_name") or key
+                cr = _crown_from_fresh(nm, fresh)
                 if cr is None or (floor is not None and cr < floor):
                     continue
                 pdata["bounty_value_usd"] = cr
                 changed = True
                 recov += 1
+                recov_detail.append({"name": nm, "from": 0.0, "to": cr,
+                                     "floor": floor, "base": base})
         if isinstance(pn, dict):
             for p in (pn.get("players_list") or []):
                 if not isinstance(p, dict) or (p.get("bounty_value_usd") or 0) > 0:
@@ -2278,7 +2289,8 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
                     continue
                 p["bounty_value_usd"] = cr
                 changed = True
-        report.append({"hand_id": r["hand_id"], "recovered": recov})
+        report.append({"hand_id": r["hand_id"], "recovered": recov,
+                       "crowns": recov_detail})
         if changed:
             hands_updated += 1
             crowns_recovered += recov

@@ -6,7 +6,10 @@ from app.routers import screenshot
 
 def _run(base, hands, vision_players):
     def q(sql, params=None):
-        return base if "tournament_summaries" in sql else hands
+        # A query principal seleciona FROM hands; a base-lookup é só das TS.
+        # (Discriminar por "FROM hands" — a principal já contém "tournament_summaries"
+        #  no gate EXISTS #CROWN-VISIBLE-READ-ZERO.)
+        return hands if "FROM hands" in sql else base
     with patch.object(screenshot, "query", side_effect=q), \
          patch.object(screenshot, "get_conn"), \
          patch.object(screenshot, "_extract_hand_data_from_image_claude", return_value="txt"), \
@@ -25,6 +28,10 @@ def test_reread_recovers_zero_crown_valid():
     assert res["targets"] == 1 and res["crowns_recovered"] == 1
     assert hands[0]["apa"]["hashA"]["bounty_value_usd"] == 13.12
     assert hands[0]["pn"]["players_list"][0]["bounty_value_usd"] == 13.12
+    # #CROWN-VISIBLE-READ-ZERO: o relatório expõe o valor lido (auditoria pré-escrita).
+    crowns = res["report"][0]["crowns"]
+    assert crowns == [{"name": "RaresSD", "from": 0.0, "to": 13.12,
+                       "floor": 7.5, "base": 15.0}]
 
 
 def test_reread_rejects_below_half():
