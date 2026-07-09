@@ -177,6 +177,17 @@ coroas. Não é furo que gerou as 107 (é defesa-em-profundidade). Hoje a protec
 **gate do HRC** (`queue_export.py:1694`); o enrich **live** (`screenshot.py:1044`) grava o `bounty_value_usd`
 da Vision **cru**. **Quadro A vs B apresentado ao Rui** — aguarda decisão (não implementar até decidir).
 
+## 🔴 `#TABLE-SS-SPEEDRACER-NO-MATCH` — investigação OBRIGATÓRIA antes da Etapa 2 (8 Jul)
+
+**Descoberto no reimport (Cano 3, Etapa 1).** As **19 capturas GG `no_match_to_hand` são TODAS Speed
+Racer** — e as **218 mãos Speed Racer EXISTEM na BD** (HH importada). Logo não é "HH em falta": é um
+**gap de match por NOME** específico do Speed Racer. Suspeitos: o nome traz `[10 BB]` e buy-ins atípicos
+(`$21.60`, `$32`, `$108`, `Speed Racer Bounty Europe`) que partem a tokenização/janela do
+`_resolve_match`/`_find_candidate_hands` (as capturas Speed Racer estão no formato IT antigo → `tn=None`
+→ caem no match por tempo+nome). **Na Etapa 1 = 19 mãos; no REIMPORT COMPLETO afeta CENTENAS** (o Rui
+joga Speed Racer todos os dias). **Atacar quando o guião de hoje fechar, ANTES de arrancar a Etapa 2.**
+Refs: `routers/table_ss.py:_resolve_match`/`_find_candidate_hands`; formato do nome Speed Racer.
+
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 
 A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_COLAPSO.md`):
