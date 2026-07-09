@@ -122,3 +122,16 @@ def test_scrub_skips_untagged():
     apa, pn = _apa_pn()
     n = scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, tagged=False)
     assert n == 0 and apa["Hero"]["bounty_value_usd"] == 170.63
+
+
+def test_scrub_preserves_existing_green_ko_without_fresh_green():
+    # Idempotência: um seat já curado (green_ko) NÃO é desfeito por um scrub MUST-only.
+    apa = {"_meta": {}, "Hero": {"real_name": "Lauro Dermio", "bounty_value_usd": 102.27,
+                                 BOUNTY_SOURCE_KEY: SOURCE_GREEN_KO}}
+    pn = {"players_list": [{"name": "Lauro Dermio", "bounty_value_usd": 102.27,
+                            BOUNTY_SOURCE_KEY: SOURCE_GREEN_KO}]}
+    n = scrub_eliminated_bounties(apa, pn, _HH, vision_data=None)   # sem verde fresco
+    assert n == 0                                                   # nada tocado
+    assert apa["Hero"]["bounty_value_usd"] == 102.27               # green_ko PRESERVADO
+    assert apa["Hero"][BOUNTY_SOURCE_KEY] == SOURCE_GREEN_KO
+    assert pn["players_list"][0]["bounty_value_usd"] == 102.27

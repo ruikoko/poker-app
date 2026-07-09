@@ -173,6 +173,8 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
             continue
         val, review, source = resolve_seat_bounty(
             name, entry.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
+        if _preserves_green_ko(entry, source):
+            continue                                # idempotência: não desfaz um green_ko curado
         _apply_seat_bounty(entry, val, review, source)
         touched += 1
     for p in (pn or {}).get("players_list") or []:  # 2) pn.players_list (nome='name')
@@ -180,8 +182,18 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
             continue
         val, review, source = resolve_seat_bounty(
             p.get("name"), p.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
+        if _preserves_green_ko(p, source):
+            continue
         _apply_seat_bounty(p, val, review, source)  # mesmo resultado → apa↔pn coerentes
     return touched
+
+
+def _preserves_green_ko(seat: dict, new_source) -> bool:
+    """Idempotência: um seat JÁ curado por verde (`bounty_source='green_ko'`) NÃO é
+    desfeito por um scrub SEM verde fresco (que daria NULL). Só um NOVO green_ko o
+    sobrescreve. Sem isto, um apply MUST-only clobberava a cura do reread/ingest."""
+    return (seat.get(BOUNTY_SOURCE_KEY) == SOURCE_GREEN_KO
+            and new_source != SOURCE_GREEN_KO)
 
 
 def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
