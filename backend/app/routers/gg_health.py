@@ -274,7 +274,8 @@ def ft_raw_material(current_user=Depends(require_auth_or_api_key)):
     )
     lobby = {r["tn"]: r["min_pl"] for r in query(
         "SELECT tournament_number AS tn, MIN(players_left) AS min_pl "
-        "  FROM lobby_processing_log WHERE tournament_number IS NOT NULL "
+        "  FROM lobby_processing_log "
+        " WHERE tournament_number IS NOT NULL AND site = 'GGPoker' "  # GG-scoped (o resto do circuito FT já o é)
         " GROUP BY tournament_number"
     )}
     latest = {r["tn"]: r["raw"] for r in query(
