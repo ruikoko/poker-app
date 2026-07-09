@@ -75,3 +75,19 @@ def test_resolve_done_it_builds_path_when_configured(monkeypatch):
     monkeypatch.setattr(ai, "load_config", lambda: None)
     monkeypatch.setattr(ai, "PARENT_DIR", r"C:\Batmen")
     assert t.resolve_done_it() == os.path.join(r"C:\Batmen", "done", ai.IT_SUB)
+
+
+def test_reconcile_db_categorizes_missing():
+    from tidy_done_it import reconcile_db
+    db = ["a.png", "b.png", "c.png", "d.png"]
+    root = ["a.png"]                                    # só a.png na raiz do done
+    sub_index = {"b.png": r"ICM PKO\b.png"}             # b.png já numa subpasta
+    em_sub, ausentes = reconcile_db(db, root, sub_index)
+    assert em_sub == [("b.png", r"ICM PKO\b.png")]      # em subpasta
+    assert ausentes == ["c.png", "d.png"]               # nem raiz nem subpasta
+
+
+def test_canonical_pos_nko_is_live_folder_npko():
+    import app_import as ai
+    assert ai.CANONICAL_FOLDER_FOR_TAG["pos-nko"] == "NPKO Pos"      # pasta VIVA do disco
+    assert ai._folder_tag_for("NPKO Pos") == "pos-nko"              # round-trip real

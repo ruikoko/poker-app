@@ -541,7 +541,8 @@ CANONICAL_FOLDER_FOR_TAG = {
     "icm":            "ICM",
     "icm-pko":        "ICM PKO",
     "pos-pko":        "PKO Pos",
-    "pos-nko":        "NKO Pos",
+    "pos-nko":        "NPKO Pos",   # nome da pasta VIVA no disco do Rui (não "NKO Pos" — o
+                                    # move ia criar pasta diferente da viva; ambos round-trip)
     "icm-pko-ft":     "ICM PKO FT",
     "pos-pko-ft":     "PKO Pos FT",
     "icm-ft":         "ICM FT",

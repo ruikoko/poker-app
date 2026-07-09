@@ -33,6 +33,18 @@ def resolve_done_it():
     return os.path.join(ai.PARENT_DIR, "done", ai.IT_SUB)
 
 
+def reconcile_db(db_names, root_names, sub_index):
+    """PURO. Capturas COM tag na BD que NÃO estão na raiz do done\\it, com a razão
+    (responde 'BD=N vs plano=M → quais os que faltam'):
+    - `em_subpasta` [(nome, subpath)] — já noutra subpasta do done\\it;
+    - `ausentes` [nome] — nem na raiz nem em subpasta (não está no done\\it).
+    `sub_index` = {basename: subpath} dos ficheiros já em subpastas do done\\it."""
+    missing = sorted(set(db_names) - set(root_names))
+    em_subpasta = [(n, sub_index[n]) for n in missing if n in sub_index]
+    ausentes = [n for n in missing if n not in sub_index]
+    return em_subpasta, ausentes
+
+
 def plan_moves(files, name2tag):
     """PURO. Dado os ficheiros na RAIZ de done\\it e o mapa nome→tag da BD, devolve
     (plan, no_ev): plan = [(fname, tag, subpasta)] a realojar; no_ev = [fname] sem
@@ -78,6 +90,21 @@ def main(argv=None):
     print(f"  realojar: {len(plan)}   ·   ficam na raiz (sem tag na BD): {len(no_ev)}")
     for tag, n in by_tag.most_common():
         print(f"   {n:4}  → done\\it\\{ai.CANONICAL_FOLDER_FOR_TAG[tag]}\\   (tag {tag})")
+
+    # Reconciliação BD (com tag) vs raiz do done — explica o "BD=N vs plano=M".
+    sub_index = {}
+    for dp, _dn, fn in os.walk(done_it):
+        if os.path.abspath(dp) == os.path.abspath(done_it):
+            continue                                  # a raiz já está em `files`
+        for f in fn:
+            sub_index.setdefault(f, os.path.relpath(os.path.join(dp, f), done_it))
+    em_subpasta, ausentes = reconcile_db(name2tag.keys(), files, sub_index)
+    print(f"\nBD com tag mas NÃO na raiz do done\\it: {len(em_subpasta) + len(ausentes)}"
+          f"  (já em subpasta: {len(em_subpasta)} · ausentes do done\\it: {len(ausentes)})")
+    for n, sub in em_subpasta:
+        print(f"   [já em {sub}]  {n}")
+    for n in ausentes:
+        print(f"   [ausente do done\\it]  {n}")
 
     if not args.apply:
         print("\n--- plano completo (dry-run) ---")
