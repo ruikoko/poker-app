@@ -182,3 +182,44 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
             p.get("name"), p.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
         _apply_seat_bounty(p, val, review, source)  # mesmo resultado → apa↔pn coerentes
     return touched
+
+
+def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
+                      incoming_folder_tag=None) -> int:
+    """Wrapper DB-aware do funil, chamado nos PONTOS DE FINALIZAÇÃO (pós-persist de cada
+    caminho automático). Lê apa/pn/raw/tags FRESCOS da mão, aplica o scrub (só-tagadas) e
+    reescreve SE mudou. Idempotente → a ordem A/B não importa; correr 2× = mesmo resultado.
+
+    - `tagged = is_tagged(mão) OU incoming_folder_tag` → cobre o 'tagada-depois' (a captura
+      que traz a folder-tag torna a mão tagada NESTE momento → o scrub corre já).
+    - `vision_data` (com green_kos) só é passado onde há Vision FRESCA (reread, enrich gold)
+      → green-fill; senão MUST-only (bustado → NULL + 'por rever').
+    - FAIL-SAFE do raw (garantia 2): sem raw NÃO scruba e NÃO escreve — nunca grava uma
+      coroa que não consegue verificar (o scrub já devolve 0; aqui não há UPDATE).
+    """
+    import json as _json
+    from app.db import query, get_conn
+    rows = query("SELECT id, raw, all_players_actions AS apa, player_names AS pn, "
+                 "hm3_tags, discord_tags FROM hands WHERE id = %s", (hand_db_id,))
+    if not rows:
+        return 0
+    r = rows[0]
+    tagged = is_tagged(r) or bool(incoming_folder_tag)
+    if not tagged:
+        return 0                                   # SÓ-TAGADAS: skip total (não escreve)
+    if not r.get("raw"):
+        return 0                                   # fail-safe: sem raw não se verifica bust
+    apa = r["apa"] if isinstance(r["apa"], dict) else _json.loads(r["apa"] or "{}")
+    pn = r["pn"] if isinstance(r["pn"], dict) else _json.loads(r["pn"] or "{}")
+    n = scrub_eliminated_bounties(apa, pn, r["raw"], vision_data, tagged=True)
+    if n:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE hands SET all_players_actions = %s, player_names = %s "
+                            "WHERE id = %s",
+                            (_json.dumps(apa), _json.dumps(pn), hand_db_id))
+            conn.commit()
+        finally:
+            conn.close()
+    return n

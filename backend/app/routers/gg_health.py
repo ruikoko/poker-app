@@ -1040,6 +1040,9 @@ def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
     return {"scanned_hands": len(rows),
             # ★ crivo verdadeiro da cura: tem de ser 0 pós-cura+reimporte.
             "vision_origin_contamination": len(vision_origin),
+            # GATE DURO (decisão Web 9 Jul): >0 após reimporte OU após qualquer ingest GG
+            # = PARAR + investigar + corrigir. NUNCA "dado por curado" com o scan >0.
+            "gate": "hard: vision_origin_contamination>0 => PARAR+investigar (nunca curado)",
             "counts": {"strong": len(strong), "soft": len(soft),
                        "review": len(review), "green_ko": len(green_ko)},
             "vision_origin": vision_origin,

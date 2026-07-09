@@ -990,6 +990,20 @@ def _apply_folder_tag_to_hand(
 
     `conn` dado (reconcile) → escreve na transacção do caller (não faz commit);
     None → conn própria + commit."""
+    # ★ Cura verde-KO (família A) — ANTES do early-return, para que uma mão JÁ-tagada
+    # re-desanonimizada por captura SEM folder-tag (web-first) também seja scrubada. O
+    # `incoming_folder_tag=base_tag` força tagged na captura que traz a tag ('tagada-depois');
+    # sem base_tag, o wrapper usa is_tagged(mão). table-SS = captura cedo → sem verde →
+    # MUST-only. O GUARD não pode ser saltado por early-return. Corre após o `_deanon_after_match`.
+    if matched_hand_db_id:
+        try:
+            from app.services.eliminated_bounty import scrub_and_persist
+            scrub_and_persist(matched_hand_db_id, vision_data=vision_json,
+                              incoming_folder_tag=base_tag)
+        except Exception as e:  # pragma: no cover - defensivo
+            logger.error("[crown-cure] ⚠️ GUARD FALHOU (table-ss) hand %s — coroa de bustado "
+                         "pode SOBREVIVER (o crivo eliminated-crown-scan apanha): %s",
+                         matched_hand_db_id, e)
     if not matched_hand_db_id or not base_tag:
         return
     # Fonte única — canonicaliza o folder_tag que chega do IT (o appimport pode
@@ -2319,6 +2333,16 @@ def backfill_crowns_from_capture(dry_run: bool = True) -> dict:
                     conn.commit()
                 finally:
                     conn.close()
+        if not dry_run:
+            # Cura verde-KO (família B): a coroa vinda da captura pode cair num seat HH-
+            # bustado → o funil anula-a (captura = sem verde → MUST-only). Só-tagadas.
+            try:
+                from app.services.eliminated_bounty import scrub_and_persist
+                scrub_and_persist(r["id"])
+            except Exception as e:  # pragma: no cover - defensivo
+                logger.error("[crown-cure] ⚠️ GUARD FALHOU (capture-backfill) hand %s — coroa "
+                             "de bustado pode SOBREVIVER (o crivo apanha): %s",
+                             r.get("hand_id", r["id"]), e)
     return {"hands_scanned": len(rows), "hands_filled": hands_filled,
             "crowns_filled": crowns_filled, "rejected_below_half": rejected_below_half,
             "hands_without_ts_base": no_base}

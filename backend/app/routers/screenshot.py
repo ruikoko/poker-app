@@ -2199,6 +2199,15 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
                     conn.commit()
                 finally:
                     conn.close()
+        if not dry_run:
+            # Cura verde-KO (família B): a gold-carry pode carregar a coroa do vizinho para
+            # um seat HH-bustado → o funil anula-a (sem verde aqui → MUST-only). Só-tagadas.
+            try:
+                from app.services.eliminated_bounty import scrub_and_persist
+                scrub_and_persist(r["id"])
+            except Exception as e:  # pragma: no cover - defensivo
+                logger.error("[crown-cure] ⚠️ GUARD FALHOU (gold-carry) hand %s — coroa de bustado pode "
+                             "SOBREVIVER (o crivo apanha): %s", r["hand_id"], e)
     return {"hands_scanned": len(rows), "hands_filled": hands_filled,
             "players_filled": players_filled,
             "players_via_truncation": players_via_trunc,
@@ -2331,6 +2340,17 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
                     conn.commit()
                 finally:
                     conn.close()
+        if not dry_run:
+            # ★ Cura verde-KO (família B): garante que nenhum seat HH-bustado fica com uma
+            # coroa de origem-Vision (incl. as que o reread ACABOU de preencher) — verde-
+            # derivado (vd tem green_kos) ou NULL+'por rever'. Só-tagadas (o wrapper valida).
+            # Fecha o caminho que produziu o $170.63.
+            try:
+                from app.services.eliminated_bounty import scrub_and_persist
+                scrub_and_persist(r["id"], vision_data=vd)
+            except Exception as e:  # pragma: no cover - defensivo
+                logger.error("[crown-cure] ⚠️ GUARD FALHOU (reread) hand %s — coroa de bustado pode "
+                             "SOBREVIVER (o crivo apanha): %s", r["hand_id"], e)
     return {"targets": len(targets), "hands_updated": hands_updated,
             "crowns_recovered": crowns_recovered, "vision_failed": vision_failed,
             "report": report}
@@ -2657,6 +2677,14 @@ def reenrich_scrambled_gold(dry_run: bool = False) -> dict:
                 conn.commit()
             finally:
                 conn.close()
+            # Cura verde-KO (família A): re-enrich do gold baralhado → o funil garante que
+            # um seat HH-bustado não fica com coroa de origem-Vision. Só-tagadas.
+            try:
+                from app.services.eliminated_bounty import scrub_and_persist
+                scrub_and_persist(r["id"])
+            except Exception as e:  # pragma: no cover - defensivo
+                logger.error("[crown-cure] ⚠️ GUARD FALHOU (reenrich) hand %s — coroa de bustado pode "
+                             "SOBREVIVER (o crivo apanha): %s", r["hand_id"], e)
 
     return {
         "hands_scanned": total,
