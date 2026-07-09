@@ -42,6 +42,14 @@ ser $100 — ele tinha 2 KOs → instantâneo $100).
   confirma a própria coroa como qualquer vilão (capacidade permanente).
 - **ACEITAÇÃO = REIMPORTE:** GG-6132925926 nasce com o Hero NULL+"por rever", nunca $0 gravado.
 
+## 📋 `docs/MAPA_AUDITORIA_VISUAL.md` — instrumento de validação visual pós-wipe (10 Jul)
+
+Mapa por secção do sidebar (o QUE É / o QUE VÊS / número esperado datado / AÇÕES / SINAIS DE
+ALARME / relação com o reimporte) + **roteiro de auditoria** no topo. Construído do frontend real
++ números reais de prod. **É também o guião de aceitação do wipe:** percorrer o roteiro e confirmar
+que tudo nasce são — com destaque nos **3 gates das coroas a 0** e **nenhuma GG anónima no Estudo**.
+Números datados de **10 Jul 2026** (pós-wipe/meio-de-reimporte); actualizar após cada grande import.
+
 ## ✅ Guarda VANILLA (coroa espúria em torneio SEM bounty) — LIVE (9 Jul)
 
 **`#SPURIOUS-CROWN-NON-KO` — APROVADO pelo Rui + implementado.** Facet INVERSA (GG-6138905902 Daily
