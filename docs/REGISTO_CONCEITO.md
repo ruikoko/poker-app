@@ -188,3 +188,19 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
   - **Execução (C):** (1) backfill table-SS→mão onde Gold=$0 e a captura tem coroa ≥ base÷2; (2) prompt do Gold
     afinado (coroa = banner ACIMA do avatar, ler sempre mesmo com avatar tapado) + re-leitura das Gold-only; (3)
     filtro separa `coroa-por-ler ($0)` (âmbar) de `valor-impossível (>0 e <base÷2)` (vermelho).
+
+## 2026-07-09 — REGRA verde-KO CONFIRMADA (valor exato) + CURA por guarda HH-determinística
+
+- 2026-07-09 — **REGRA CONFIRMADA (à vírgula) + CURA (curar o core, não os dados): bounty de jogador
+  ELIMINADO num KO.** A coroa **própria** do eliminado **DESAPARECE**; **metade** do bounty aparece a
+  **VERDE** na coroa de **quem o elimina** → **bounty do eliminado = verde ÷ fração instantânea** (×2 no
+  PKO 50/50). Confirmado à vírgula na **GG-6140169166** (verde **$102.27** → **$204.53**).
+  - **Defeito anterior:** a leitura atribuía ao eliminado a coroa do seat **VIZINHO** (veneno) — na
+    GG-6140169166 o Hero levou **$170.63 = coroa do KamikazzE97**, não a dele.
+  - **CURA:** guarda no **ingest** com sinal de eliminado vindo da **HH** (autoritativo — all-in e perdeu,
+    stack final 0) — **NUNCA depende da Vision**. Eliminado → **nunca** a coroa da Vision → **verde-derivado**
+    se houver 1-verde-limpo, senão **NULL + "por rever"**. Multiway / verde ilegível → **"por rever"** (manual,
+    raro, aceite pelo Rui). Vale **Hero e vilões, GG only**. **Chokepoint único:** `services/eliminated_bounty.py`.
+  - **Porquê é robusta:** a garantia vive na **HH determinística**, não no prompt frágil (o verde é bónus,
+    não o gate do invariante). Cross-ref `REGRAS_NEGOCIO` (verde-KO), `DESANON_ANATOMIA`,
+    `#CROWN-VISIBLE-READ-ZERO`, `JOURNAL 2026-07-09`.

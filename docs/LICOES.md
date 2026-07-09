@@ -65,3 +65,15 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
 - 2026-07-02 — **Problema:** `GG-6083771298` mostrava um jogador errado (`Afonso Neto`) numa cadeira e nomes deslizados — um jogador **sentou-se mas não jogou a mão** (sem cartas) → a Vision da Gold leu **N+1 nomes** (6) vs **N cadeiras** da HH (5). → **Solução:** correcção manual via `/set-anon-map` (5 seats por posição, ground-truth do Rui, `Afonso Neto` fora) + coroas do Rio UTG→BB. **Diagnóstico-chave:** o `anon_map` estava **CERTO** (o `position_v3` por rótulo descartou bem o sem-cartas); só o `all_players_actions` estava **stale/corrompido**, escrito por um caminho de ORDEM que deslizou e colapsou um seat (5→4). Ler o apa E o anon_map (`/deanon-debug` vs `/hand-seats`) destapou a inconsistência que uma única vista esconderia.
 - 2026-07-02 — **LIÇÃO (guarda não-universal):** a salvaguarda "img≠HH → alarme" **só existe no método ÂNCORA do table-SS** (pt96); o `position_v3` e o caminho order/stack **não têm** guarda N+1. Um badge `deanon_status=verified` deriva do `match_method`, **não** da consistência real do apa → uma mão pode estar "verificada" com o apa silenciosamente errado. **Ao tocar em desanon/enrich: tratar img≠HH como sinal duro em TODOS os caminhos e assertar apa↔anon_map (seats == hashes da HH).** Registado `#DESANON-SITTING-OUT-NPLUS1-NO-UNIVERSAL-GUARD`; caso em `DESANON_ANATOMIA §3.2.4`.
 - 2026-07-02 — **LIÇÃO (o fix automático deixou um resíduo honesto):** esta mão era a **"1 diverge"** que o `reenrich-scrambled-gold` (#DESANON-GOLD-SCRAMBLE) **recusou escrever** — o gate de fichas FINAIS divergiu (stacks Gold em unidade inconsistente / momento fim-vs-início). O gate conservador **acertou em não escrever às cegas**; o desbloqueio é o **override manual confirmado pelo Rui** (`/set-anon-map`, sem o gate). Um skip de gate não é "esquecido" — é dívida à espera de confirmação humana.
+
+## 2026-07-09 — re-leitura de coroa agarrou a do vizinho num jogador ELIMINADO (verde-KO)
+
+- 2026-07-09 — **Problema:** a re-leitura de coroas agarrava a coroa do seat **VIZINHO** e colava-a num
+  jogador **ELIMINADO** (sem coroa própria) → bounty errado gravado **em silêncio** (GG-6140169166: o Hero
+  levou o **$170.63** do KamikazzE97). Um "arranjo completo" anterior ficou só **DOCUMENTADO** (armadilha
+  verde-KO no CLAUDE.md, caso arieloo/mirroring GG-6114944767 pt95), **nunca construído+verificado** →
+  **recorreu semanas depois**. → **Solução:** mudar o **método** — a garantia de não-contaminação vive numa
+  guarda **DETERMINÍSTICA pela HH** (nunca na Vision), num **chokepoint único** (`services/eliminated_bounty.py`);
+  "completo" passa a exigir **teste de aceitação com mãos reais nomeadas + validação DEPLOYADA (§10)**, não
+  "em buffer". O bónus (ler o verde) é secundário; as raras entram **à mão**. → êxito a confirmar no
+  **reimporte** (eliminados-contaminados ~0).
