@@ -204,3 +204,14 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
   - **Porquê é robusta:** a garantia vive na **HH determinística**, não no prompt frágil (o verde é bónus,
     não o gate do invariante). Cross-ref `REGRAS_NEGOCIO` (verde-KO), `DESANON_ANATOMIA`,
     `#CROWN-VISIBLE-READ-ZERO`, `JOURNAL 2026-07-09`.
+
+## 2026-07-09 (fecho) — CURA verde-KO dos eliminados LIVE e PROVADA em prod
+
+- 2026-07-09 — **FECHO da frente.** A cura da armadilha verde-KO (eliminado leva a coroa do
+  vizinho) está **LIVE e PROVADA em produção**: guarda **HH-determinística** nas mãos **tagadas**,
+  funil único `services/eliminated_bounty.py` ligado a 5 sítios (2 famílias, cobertura transitiva
+  por `_apply_folder_tag_to_hand`), só-tagadas, idempotente (preserva `green_ko`), fail-safe raw,
+  log-alto, **gate duro** no scan. **Contaminação das tagadas 29→0** (`vision_origin_contamination`,
+  `13c6177`); mão-troféu GG-6140169166 = $204.54 (verde $102.27 ×2), GG-6139653123 = $20; nunca
+  $170.63. **Aceitação FINAL = reimporte** (tagadas nascem verde-derivadas ou "por rever"). →
+  `JOURNAL_2026-07-09.md`.

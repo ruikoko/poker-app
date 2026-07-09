@@ -77,3 +77,17 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   "completo" passa a exigir **teste de aceitação com mãos reais nomeadas + validação DEPLOYADA (§10)**, não
   "em buffer". O bónus (ler o verde) é secundário; as raras entram **à mão**. → êxito a confirmar no
   **reimporte** (eliminados-contaminados ~0).
+
+## 2026-07-09 — cura verde-KO: lista provada + mãos reais + gate duro no ar (não "em buffer")
+
+- 2026-07-09 — **Problema:** a re-leitura de coroas colava a coroa do seat **VIZINHO** num
+  jogador **ELIMINADO** → bounty errado gravado **em silêncio** (GG-6140169166: Hero levou
+  $170.63 do KamikazzE97). Um "arranjo completo" anterior ficou só **DOCUMENTADO** (armadilha
+  verde-KO no CLAUDE.md) e **recorreu semanas depois**. → **Solução:** método com (a) lista de
+  escritores **PROVADA-completa** — a varredura apanhou o **`reread_gold_crowns`**, o próprio
+  culpado, que os 4 sítios nomeados deixavam de fora; (b) **teste em mãos reais nomeadas**
+  (GG-6140169166/GG-6139653123); (c) **gate duro (contagem=0) DEPLOYADO**
+  (`vision_origin_contamination`). → **ÊXITO:** contaminação das tagadas **29→0** em prod;
+  a mão-troféu lê **$204.54**, nunca $170.63. **LIÇÃO:** "completo" só conta com **lista provada
+  + prova em mãos reais + gate duro no ar** — não "em buffer" nem "documentado". (Reforça a lição
+  de 2026-07-09 anterior — o arranjo só-documentado que recorreu.)

@@ -1,5 +1,40 @@
 # Pendentes — backlog vivo
 
+## ✅ Cura verde-KO das coroas de ELIMINADOS — LIVE + PROVADA em prod (9 Jul)
+
+**Frente FECHADA (LIVE, `main`→`26db552`; ligação `13c6177`).** Anatomia: `JOURNAL_2026-07-09.md`,
+`REGISTO_CONCEITO 2026-07-09`. Defeito: um jogador eliminado num KO deixa de ter coroa própria e a
+leitura colava-lhe a coroa do seat **vizinho** (GG-6140169166: Hero levou $170.63 do KamikazzE97).
+Cura: guarda **HH-determinística** (all-in e perdeu) num **funil único** `services/eliminated_bounty.py`
+(`scrub_eliminated_bounties`/`scrub_and_persist`), **só-tagadas** (APA §B.6), ligada a 5 sítios (2
+famílias, cobertura transitiva por `_apply_folder_tag_to_hand`), idempotente (preserva `green_ko`),
+fail-safe raw, log-alto. Eliminado → **verde-derivado** (`green_ko`, o instantâneo; ×2 = total,
+`#KO-CROWN-INSTANT-FIX`) OU **NULL+"por rever"**, NUNCA a coroa do vizinho.
+
+- **PROVADO nos dados atuais:** crivo (`GET /api/gg-health/eliminated-crown-scan`, só-tagadas)
+  `vision_origin_contamination` **29 → 0** (gate DURO: >0 = PARAR+investigar). Mão-troféu
+  GG-6140169166 = **$204.54** (verde $102.27 ×2), GG-6139653123 = $20; nunca $170.63.
+- **ACEITAÇÃO REAL = REIMPORTE:** as tagadas nascem verde-derivadas (ingest com Vision fresca) ou
+  "por rever", nunca a coroa do vizinho. Os 36+2 seats de agora são demonstração (o reimporte apaga).
+- **GATE DURO permanente:** após o reimporte E após qualquer ingest GG, correr o scan; `>0` =
+  PARAR + investigar + corrigir, nunca "dado por curado".
+- **Deferido (nice-to-have):** onde o scrub sabe os bustados mas a escrita falha, tentar o NULL
+  fail-safe desses seats (hoje: log-alto + o crivo apanha).
+
+## ABERTO — próxima sessão (bloco das coroas + os 2 diagnosticados)
+
+- **`#CROWN-VISIBLE-READ-ZERO` facet "coroa VISÍVEL lida como $0"** (avatar tapado por cartas/
+  All-In) — **CONFIRMAR o estado** antes de fechar o bloco das coroas por INTEIRO. É **distinto**
+  da cura verde-KO (esta = coroa AUSENTE do eliminado; aquela = coroa PRESENTE mas lida $0). O gate
+  TS + prompt afinado + reread já foram; falta reconfirmar quantas ficam por ler e decidir o fecho.
+- **`#TABLE-SS-SPEEDRACER-NO-MATCH`** — diagnosticado: **HH em falta** (19 capturas de 15/16/18 Jun;
+  a BD só tem GG de 30 Jun-2 Jul). O matcher FUNCIONA (12 Speed Racer casaram nos dias com HH).
+  **NÃO afrouxar o match** (a mão de mesmo nome mais próxima está a 12-17 dias → match errado).
+  Resolve-se ao importar os dias em falta (o `relink_orphan_table_ss` re-liga). Ver `JOURNAL_2026-07-09`.
+- **`#ICM-FT-TAG-NOT-LANDING`** — a tag `icm-ft` da pasta `ICM FT` do IT não aterra (`table_ss` com
+  0 rows `folder_tag='icm-ft'`); precisa do LOG do appimport (retorno dos POST). Atacar com o Speed Racer.
+
+
 ## ✅ Sistema de nomes (quarentena Fase 3 + RE-ENTRADA + detetor de evidência dura) — LIVE (8 Jul)
 
 **LIVE (`main`→`5774bc2`).** Painel de conflitos de nomes na Saúde GG (grupo `name_quarantine`): mostra os
