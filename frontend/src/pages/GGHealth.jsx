@@ -687,6 +687,7 @@ export default function GGHealth() {
   const [page, setPage] = useState(1)
   const [zoom, setZoom] = useState(null)
   const [selected, setSelected] = useState(new Set())   // Ação 1: hand_ids marcados
+  const [selectedTags, setSelectedTags] = useState(new Set())  // Ação 1: tags em toggle (multi)
   const [msg, setMsg] = useState(null)
   const [swapResolve, setSwapResolve] = useState(null)  // Fase 1-A: im em resolução
   // Pesquisa GLOBAL por nº de mão (só frontend: usa group=all, filtra localmente).
@@ -734,7 +735,8 @@ export default function GGHealth() {
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
   }, [group, page])
 
-  const open = (k) => { setGroup(k); setPage(1); setSelected(new Set()); setMsg(null) }
+  const open = (k) => { setGroup(k); setPage(1); setSelected(new Set()); setSelectedTags(new Set()); setMsg(null) }
+  const toggleTag = (t) => setSelectedTags(s => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n })
   const reload = () => {
     loadSummary()
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
@@ -743,19 +745,22 @@ export default function GGHealth() {
     const n = new Set(s); n.has(hid) ? n.delete(hid) : n.add(hid); return n
   })
 
-  // Ação 1 — tagar as mãos selecionadas.
-  const applyTag = async (tag) => {
+  // Ação 1 — aplicar TODAS as tags ligadas (toggle) às mãos selecionadas, de uma vez.
+  // ACRESCENTA (nunca substitui). confirm=true força apesar do conflito de formato.
+  const applyTags = async () => {
     const ids = [...selected]
+    const tags = [...selectedTags]
     if (!ids.length) { setMsg('Seleciona pelo menos uma mão.'); return }
+    if (!tags.length) { setMsg('Liga pelo menos uma tag.'); return }
     try {
-      let res = await ggHealth.tag(ids, tag, false)
+      let res = await ggHealth.tag(ids, tags, false)
       if (res.needs_confirm) {
-        const w = (res.warnings || []).map(x => `${x.hand_id} (${x.tournament_format})`).join(', ')
-        if (!window.confirm(`A tag "${tag}" contradiz o formato do torneio em: ${w}.\nAplicar mesmo assim?`)) return
-        res = await ggHealth.tag(ids, tag, true)
+        const w = (res.warnings || []).map(x => `${x.hand_id}:${x.tag} (${x.tournament_format})`).join(', ')
+        if (!window.confirm(`Tag(s) que contradizem o formato do torneio em: ${w}.\nAplicar mesmo assim?`)) return
+        res = await ggHealth.tag(ids, tags, true)
       }
-      setMsg(`${res.applied} mão(s) tagada(s) com "${tag}".`)
-      setSelected(new Set())
+      setMsg(`${res.applied} etiqueta(s) aplicada(s) em ${res.hands ?? '?'} mão(s): ${tags.join(', ')}.`)
+      setSelected(new Set()); setSelectedTags(new Set())
       reload()
     } catch (e) { setMsg('Erro: ' + e.message) }
   }
@@ -833,13 +838,25 @@ export default function GGHealth() {
           {group === 'gold_no_tag' && (
             <div style={{ ...card, padding: '10px 12px', marginBottom: 10 }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-                Selecionadas: <b>{selected.size}</b> — carrega numa tag para aplicar a todas:
+                <b>{selected.size}</b> mão(s) · <b>{selectedTags.size}</b> tag(s) — liga as tags (podes ligar várias, ex. <b>icm</b> + <b>nota</b>) e carrega em <b>Aplicar</b>. ACRESCENTA, nunca substitui.
               </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {CANONICAL_TAGS.map(t => (
-                  <button key={t} style={{ ...btn, opacity: selected.size ? 1 : 0.4 }}
-                    disabled={!selected.size} onClick={() => applyTag(t)}>{t}</button>
-                ))}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                {CANONICAL_TAGS.map(t => {
+                  const on = selectedTags.has(t)
+                  return (
+                    <button key={t} onClick={() => toggleTag(t)}
+                      style={{ ...btn, background: on ? '#2563eb' : undefined, color: on ? '#fff' : undefined,
+                               borderColor: on ? '#2563eb' : undefined, fontWeight: on ? 700 : 400 }}>
+                      {on ? '✓ ' : ''}{t}
+                    </button>
+                  )
+                })}
+                <button style={{ ...btn, marginLeft: 8, background: (selected.size && selectedTags.size) ? '#16a34a' : undefined,
+                                 color: (selected.size && selectedTags.size) ? '#fff' : undefined, fontWeight: 700,
+                                 opacity: (selected.size && selectedTags.size) ? 1 : 0.4 }}
+                  disabled={!selected.size || !selectedTags.size} onClick={applyTags}>
+                  Aplicar{selectedTags.size ? ` ${selectedTags.size} tag(s)` : ''}
+                </button>
               </div>
             </div>
           )}

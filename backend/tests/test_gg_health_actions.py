@@ -38,12 +38,38 @@ def test_tag_applies_new_tag():
          patch.object(gg_health, "get_conn", return_value=MagicMock()), \
          patch("app.services.villain_rules.apply_villain_rules"):
         res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"})
-    assert res["applied"] == 1 and res["tag"] == "icm-pko"
+    assert res["applied"] == 1 and res["tags"] == ["icm-pko"]
 
 
 def test_tag_invalid_rejected():
     with pytest.raises(HTTPException):
         gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "xpto-nonsense"})
+
+
+def test_tag_multi_appends_all_selected():
+    # `tags` (lista): aplica AS DUAS de uma vez, ACRESCENTANDO à existente (não substitui).
+    captured = {}
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.execute.side_effect = lambda sql, params: captured.setdefault("tags", params[0])
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["nota"], "tournament_format": "PKO"}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn", return_value=conn), \
+         patch("app.services.villain_rules.apply_villain_rules"):
+        res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tags": ["icm", "pos-pko"], "confirm": True})
+    assert res["applied"] == 2 and res["hands"] == 1 and res["tags"] == ["icm", "pos-pko"]
+    assert captured["tags"] == ["nota", "icm", "pos-pko"]        # ACRESCENTOU, 'nota' sobreviveu
+
+
+def test_tag_multi_idempotent_skips_existing():
+    # uma das duas já lá está → só acrescenta a que falta.
+    conn = MagicMock()
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["icm"], "tournament_format": "PKO"}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn", return_value=conn), \
+         patch("app.services.villain_rules.apply_villain_rules"):
+        res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tags": ["icm", "nota"], "confirm": True})
+    assert res["applied"] == 1 and res["hands"] == 1               # só 'nota' era nova
 
 
 # ── Ação 2 — link manual (Gold manda vive dentro do _deanon_after_match) ─────

@@ -348,17 +348,29 @@ def tag_buttons(current_user=Depends(require_auth)):
 @router.post("/tag")
 def gg_health_tag(payload: dict = Body(...),
                   current_user=Depends(require_auth_or_api_key)):
-    """Ação 1 — taga N mãos com UMA tag canónica (multi-select). Normaliza na
-    escrita, `union distinct` em discord_tags, dispara apply_villain_rules. Se a
-    tag contradizer o formato do torneio → devolve `needs_confirm` + warnings (não
-    grava sem confirm). Idempotente (mão que já tem a tag → no-op)."""
+    """Ação 1 — taga N mãos com UMA ou VÁRIAS tags canónicas de uma vez (`tags`:
+    lista; `tag`: string única, back-compat). ACRESCENTA (union distinct em
+    discord_tags — NUNCA substitui), normaliza na escrita, dispara
+    apply_villain_rules. Se alguma tag contradizer o formato do torneio → devolve
+    `needs_confirm` + warnings (não grava sem confirm). Idempotente (tag que a mão já
+    tem → no-op)."""
     hand_ids = payload.get("hand_ids") or []
+    # `tags` (lista) tem prioridade; senão `tag` (string única, back-compat).
+    raw_tags = payload.get("tags")
+    if not (isinstance(raw_tags, list) and raw_tags):
+        raw_tags = [payload.get("tag")]
     # only_known=True: aceita SÓ tags reconhecidas (canónicas); string arbitrária
     # → None → 400 (o endpoint não deixa criar tags fora do vocabulário).
-    canon = canonicalize_tag(payload.get("tag"), only_known=True)
+    canons = []
+    for t in raw_tags:
+        ct = canonicalize_tag(t, only_known=True)
+        if not ct:
+            raise HTTPException(400, f"tag inválida: {t!r} (usar as tags canónicas)")
+        if ct not in canons:
+            canons.append(ct)                  # dedup preservando ordem
     confirm = bool(payload.get("confirm"))
-    if not canon:
-        raise HTTPException(400, "tag inválida (usar as tags canónicas)")
+    if not canons:
+        raise HTTPException(400, "tag(s) obrigatória(s) (usar as tags canónicas)")
     if not isinstance(hand_ids, list) or not hand_ids:
         raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
     if len(hand_ids) > 500:
@@ -367,20 +379,22 @@ def gg_health_tag(payload: dict = Body(...),
                  "FROM hands WHERE hand_id = ANY(%s)", (hand_ids,))
     warnings = []
     for r in rows:
-        c = _tag_format_conflict(canon, r["tournament_format"])
-        if c:
-            warnings.append({"hand_id": r["hand_id"], "conflict": c,
-                             "tournament_format": r["tournament_format"]})
+        for ct in canons:
+            c = _tag_format_conflict(ct, r["tournament_format"])
+            if c:
+                warnings.append({"hand_id": r["hand_id"], "conflict": c, "tag": ct,
+                                 "tournament_format": r["tournament_format"]})
     if warnings and not confirm:
-        return {"applied": 0, "needs_confirm": True, "warnings": warnings, "tag": canon}
-    applied = 0
+        return {"applied": 0, "needs_confirm": True, "warnings": warnings, "tags": canons}
+    applied = hands_touched = 0
     conn = get_conn()
     try:
         for r in rows:
             existing = {canonicalize_tag(t) for t in (r["discord_tags"] or [])}
-            if canon in existing:
-                continue                       # idempotente: já tem a tag
-            new_tags = list(r["discord_tags"] or []) + [canon]
+            to_add = [ct for ct in canons if ct not in existing]  # ACRESCENTA só o que falta
+            if not to_add:
+                continue                       # idempotente: já tem todas
+            new_tags = list(r["discord_tags"] or []) + to_add
             with conn.cursor() as cur:
                 cur.execute("UPDATE hands SET discord_tags=%s WHERE id=%s",
                             (new_tags, r["id"]))
@@ -390,10 +404,12 @@ def gg_health_tag(payload: dict = Body(...),
                 apply_villain_rules(r["id"])
             except Exception:
                 pass
-            applied += 1
+            applied += len(to_add)
+            hands_touched += 1
     finally:
         conn.close()
-    return {"applied": applied, "tag": canon, "warnings": warnings, "needs_confirm": False}
+    return {"applied": applied, "hands": hands_touched, "tags": canons,
+            "warnings": warnings, "needs_confirm": False}
 
 
 # ── F3: preview + revisão/quarentena + promoção da fronteira FT ──────────────

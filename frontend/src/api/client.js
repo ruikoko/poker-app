@@ -356,9 +356,13 @@ export const suspicious = {
 export const ggHealth = {
   summary: () => req('GET', '/gg-health/summary'),
   list: (group, page = 1, pageSize) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}${pageSize ? `&page_size=${pageSize}` : ''}`),
-  // Ação 1 — taga N mãos com UMA tag (multi-select). confirm=true força apesar do
-  // aviso de conflito de formato.
-  tag: (handIds, tag, confirm = false) => req('POST', '/gg-health/tag', { hand_ids: handIds, tag, confirm }),
+  // Ação 1 — taga N mãos com UMA tag (string) ou VÁRIAS (array) de uma vez. ACRESCENTA.
+  // confirm=true força apesar do aviso de conflito de formato.
+  tag: (handIds, tagOrTags, confirm = false) => req('POST', '/gg-health/tag', {
+    hand_ids: handIds,
+    ...(Array.isArray(tagOrTags) ? { tags: tagOrTags } : { tag: tagOrTags }),
+    confirm,
+  }),
   // F4 — ensaio/quarentena da fronteira FT.
   ftPreview: (tn) => req('GET', `/gg-health/ft/preview${tn ? `?tn=${encodeURIComponent(tn)}` : ''}`),
   ftConfirm: (tn) => req('POST', '/gg-health/ft/confirm', { tournament_number: tn }),
