@@ -173,3 +173,18 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
   - **A (escolhida):** prompt = defesa sistémica; o valor lido grava-se cru associado ao jogador e a mão fica **assinalada em "Mãos suspeitas"** (visível > silêncio); o **portão do HRC** continua a proteger o consumidor crítico (nunca resolve com bounty < metade). Custo zero; revisão manual ocasional de um punhado de bordos de eliminação.
   - **B (rejeitada):** guarda universal `crown>=base/2` também no live path. Torna o valor errado impossível de gravar, MAS o bordo de eliminação (coroa própria legitimamente ausente) seria **rejeitado em silêncio** → lugar a $0 sem aviso, a não ser que se construísse um painel "coroas por ler". Trocar visibilidade por silêncio.
   - **Consequência:** a secção "Mãos suspeitas" é a **rede** (por desenho, não bug); o critério de aceitação do reimport mantém-se **~0** (só bordos legítimos). Universalizar a guarda no live path fica como melhoria opcional futura **apenas se** vier acompanhada de superfície para os rejeitados. `screenshot.py:1044` (live, cru) · `screenshot.py:2144/2395` + `queue_export.py:1694` (guardas). Ver `FLUXO §12`, `PENDENTES` (secção Mãos suspeitas).
+
+## 2026-07-09 — REGRA de hierarquia das COROAS: Gold manda, mas $0 do Gold cai para a table-SS
+
+- 2026-07-09 — **Decisão do Rui (Opção C do `#CROWN-VISIBLE-READ-ZERO`).** Regra canónica da fonte-de-verdade
+  das coroas ($ bounty) em mãos GG desanonimizadas por **Gold** (`position_v3`): **o Gold manda nas coroas —
+  MAS `$0`/ausente do Gold NÃO é uma leitura**; cai para a **table-SS casada** quando esta tem valor **válido
+  (≥ base÷2)**. **Nunca inverter uma leitura VÁLIDA do Gold.** Gap-fill, não inversão.
+  - **Porquê:** investigação visual das 8 "Mãos suspeitas" (imagem-a-imagem) provou que as coroas $0 vinham da
+    **Vision do Gold** (que falha a ler a coroa quando o avatar está tapado por cartas viradas/All-In/cartas do
+    Hero), enquanto a **table-SS casada leu a mesma coroa CORRETAMENTE** ($375, $312.5, $105…). O valor certo já
+    estava na BD. Âmbito: 25 mãos GG PKO / 118 ocorrências $0; ~6-9 recuperáveis de imediato pela table-SS, o
+    resto (Gold-only) por re-leitura do Gold com prompt afinado. Ver `#CROWN-VISIBLE-READ-ZERO` (`PENDENTES`).
+  - **Execução (C):** (1) backfill table-SS→mão onde Gold=$0 e a captura tem coroa ≥ base÷2; (2) prompt do Gold
+    afinado (coroa = banner ACIMA do avatar, ler sempre mesmo com avatar tapado) + re-leitura das Gold-only; (3)
+    filtro separa `coroa-por-ler ($0)` (âmbar) de `valor-impossível (>0 e <base÷2)` (vermelho).
