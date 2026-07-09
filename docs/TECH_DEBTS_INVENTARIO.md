@@ -2500,3 +2500,21 @@ persistida vs re-criar) movido inline para a entry de #11 no backlog
   (usa hashes, não tempo) nem o pipeline HRC (TM number). Só relevante se um match
   temporal vier a depender de precisão sub-minuto. → `JOURNAL pt71 §C`.
 
+## 9 Jul 2026 — decisões do bloco das coroas
+
+- 🟢 **`#BOUNTY-SIGNAL-CROWN-FALLBACK-CIRCULAR` (TEÓRICO/latente — NÃO MEXER, decisão Rui 9 Jul)** —
+  `_has_real_bounty_signal` (`mtt.py:773`) prefere o TS mas, **sem TS**, infere `has_player_bounty`
+  das COROAS (`any bounty_value_usd>0`) → uma coroa inventada classificaria o torneio como KO
+  (circularidade leitura→formato). **Decisão do Rui:** manter como está — o cenário que o arma (GG
+  sem TS à hora da classificação) **não existe no fluxo real** (os TS da GG entram sempre primeiro,
+  ritual do Rui). Fallback = caminho morto. **Reabrir só se o ritual mudar.** Não é acção.
+- 🟡 **`#TS-LATE-NO-FORMAT-RECALC` (MED, achado 9 Jul — pergunta do Rui)** — o import de TS
+  (`tournament_summaries.py:500 import_tournament_summaries`) dispara `reconcile_lobby_logs` +
+  `trigger_ft_refresh`, mas **NÃO recalcula `tournament_format` das mãos já importadas**. O formato
+  da mão vem do NOME no import da HH (`gg_hands.py:369 detect_tournament_format(name)`, sem consultar
+  o TS) e **fica agarrado**. Consumidores do formato-da-mão: IRE (`ire.py:455/495/545`), HRC
+  (`hrc_queue.py`, `queue_export.py:1232/1681`), fator instantâneo da coroa (`queue_export.py:851`).
+  **Custo real:** para GG o nome carrega o formato (fiável) → baixo; só nomes ambíguos ficariam mal
+  classificados sem o TS os corrigir. **Esforço:** trigger f&f no TS import (à la `refresh_ft_boundaries`)
+  que re-corre a classificação com sinal do TS e faz UPDATE onde difere. **Não implementar sem OK.**
+

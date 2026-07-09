@@ -20,6 +20,10 @@ VIVO-$0  — jogador VIVO (HH) em torneio KO (base do TS > 0) com coroa lida $0 
            silencioso → NULL + 'live_crown_read_zero'. NÃO se deriva da base (o vivo pode ter KOs
            acumulados → a base subvaloriza; ex. GG-6132925926 Hero 2 KOs = coroa $100 ≠ base÷2 $50).
            Só dispara com base conhecida (GG + TS); sem base = passthrough. Valor em falta é honesto.
+VANILLA  — jogador VIVO num torneio SEM bounty (GG + TS presente + buy_in_bounty nulo/0) → não há
+           coroa possível no ecrã → coroa FORÇADA a NULL (#SPURIOUS-CROWN-NON-KO; ex. GG-6138905902
+           Daily Hyper $60: $50/$20 inventados pela Vision do table-SS). Raiz: `_seats_to_vision_data`
+           copia `bounty_usd` da Vision sem gate; o funil anula na origem.
 """
 from __future__ import annotations
 
@@ -94,17 +98,21 @@ def resolve_seat_bounty(
     busted_names: set,
     green_kos: Optional[list] = None,
     bounty_base=None,
+    has_ts_no_bounty: bool = False,
 ) -> tuple:
     """CHOKEPOINT do bounty por-seat. Devolve (value, review_reason, source).
 
     - Seat NÃO eliminado (VIVO):
+        · GUARDA VANILLA (decisão Rui, #SPURIOUS-CROWN-NON-KO): torneio com TS a dizer SEM
+          bounty (`has_ts_no_bounty`) → um vivo NÃO pode ter coroa (não há bounty no ecrã)
+          → (None, None, None). Mata coroas espúrias/$0 inventadas pela Vision em vanilla.
         · GUARDA VIVO-$0 (decisão Rui): torneio KO (base TS `bounty_base` > 0) + coroa
           lida $0/ausente → NUNCA gravar o $0 silencioso → (None, REVIEW_LIVE_ZERO, None).
           NÃO se deriva da base (o vivo pode ter KOs acumulados → a base subvaloriza;
           ex. GG-6132925926: Hero com 2 KOs = coroa $100, "fresco=base=$50" gravaria errado).
           Valor em falta é honesto; valor inventado é veneno.
-        · Sem base (não-KO / sem TS) OU coroa >0 → coroa da Vision tal-e-qual
-          (value, None, None); caminho normal INALTERADO (#KO-CROWN-INSTANT-FIX: instantâneo).
+        · Sem base e sem TS (formato desconhecido) OU coroa >0 num KO → coroa da Vision
+          tal-e-qual (value, None, None); caminho normal INALTERADO (#KO-CROWN-INSTANT-FIX).
     - Seat ELIMINADO (HH) → NUNCA a coroa por-seat da Vision. Se houver exatamente 1
       eliminado E 1 verde → (verde, None, 'green_ko') [proveniência marcada = crivo].
       Senão (0 verdes, >1 verde, >1 eliminado) → (None, review, None).
@@ -114,9 +122,12 @@ def resolve_seat_bounty(
     é contaminação de origem-Vision (crivo verdadeiro = 0 pós-cura).
     """
     if name not in busted_names:
+        # GUARDA VANILLA — TS presente E sem bounty → não há coroa possível → força NULL
+        # (mata coroas espúrias/$0 que a Vision inventa num torneio sem bounty).
+        if has_ts_no_bounty:
+            return None, None, None
         # GUARDA VIVO-$0 — só dispara quando SABEMOS que é KO (base do TS > 0). Sem base
-        # (não-KO / sem TS) = passthrough (a coroa espúria em não-KO é facet separada,
-        # ainda não ligada — ver PENDENTES #SPURIOUS-CROWN-NON-KO).
+        # E sem TS (formato desconhecido) = passthrough (não se decide às cegas).
         if bounty_base and float(bounty_base) > 0:
             try:
                 c = float(vision_crown) if vision_crown is not None else 0.0
@@ -157,13 +168,16 @@ def is_tagged(hand: Optional[dict]) -> bool:
 
 def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
                              raw: Optional[str], vision_data: Optional[dict] = None,
-                             *, tagged: bool = True, bounty_base=None) -> int:
+                             *, tagged: bool = True, bounty_base=None,
+                             has_ts_no_bounty: bool = False) -> int:
     """FUNIL ÚNICO da cura verde-KO. Chamado 1× em cada caminho AUTOMÁTICO que escreve
     bounty por-seat (enrich gold/position_v3, orphan-enrich, table-ss, backfills gold-carry
-    e capture, reread). Aplica a guarda aos seats HH-bustados (verde-KO) E — quando
-    `bounty_base` (buy_in_bounty do TS) > 0, i.e. torneio KO — aos seats VIVOS com coroa
-    $0 (guarda vivo-$0 → NULL + REVIEW_LIVE_ZERO), em AMBOS apa e pn.players_list.
-    Devolve nº de seats-nome tocados (audit). Muta apa/pn in-place.
+    e capture, reread). Aplica a guarda aos seats HH-bustados (verde-KO) E aos seats VIVOS:
+    - `bounty_base` (buy_in_bounty do TS) > 0 = torneio KO → vivo com coroa $0 → guarda
+      vivo-$0 (NULL + REVIEW_LIVE_ZERO);
+    - `has_ts_no_bounty` (TS presente e sem bounty = vanilla) → vivo NÃO pode ter coroa →
+      força NULL (guarda vanilla, #SPURIOUS-CROWN-NON-KO).
+    Em AMBOS apa e pn.players_list. Devolve nº de seats-nome tocados (audit). Muta in-place.
 
     5 garantias:
     (0) SÓ-TAGADAS: `tagged=False` → NÃO scruba (return 0). O scope do core (APA §B.6) fica
@@ -185,27 +199,40 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
                        "call-site tem de fornecer o raw (HH). Skip seguro (sem scrub).")
         return 0
     busted = busted_real_names(raw, apa)            # HH-autoritativo; {} se não há bust
-    live_guard = bool(bounty_base and float(bounty_base) > 0)  # KO conhecido → guarda vivo-$0
+    # guarda dos VIVOS activa quando KO conhecido (base>0) OU vanilla conhecido (TS sem bounty)
+    live_guard = bool((bounty_base and float(bounty_base) > 0) or has_ts_no_bounty)
     if not busted and not live_guard:
         return 0
     greens = parse_green_kos(vision_data)           # best-effort; [] se ausente/sem prompt
     touched = 0
+
+    def _handle(seat, name, is_busted):
+        """Aplica o chokepoint a um seat (apa ou pn). Devolve 1 se tocou, 0 senão."""
+        val, review, source = resolve_seat_bounty(
+            name, seat.get("bounty_value_usd"), busted_names=busted,
+            green_kos=greens, bounty_base=bounty_base, has_ts_no_bounty=has_ts_no_bounty)
+        if not is_busted:
+            # idempotência: só toca se muda algo (passthrough KO-com-coroa e vanilla-já-limpo
+            # não fazem churn; vanilla-com-coroa e vivo-$0 mudam → aplicam).
+            cur = (seat.get("bounty_value_usd"), seat.get(BOUNTY_REVIEW_KEY),
+                   seat.get(BOUNTY_SOURCE_KEY))
+            if (val, review, source) == cur:
+                return 0
+            _apply_seat_bounty(seat, val, review, source)
+            return 1
+        if _preserves_green_ko(seat, source):
+            return 0                                # idempotência: não desfaz um green_ko curado
+        _apply_seat_bounty(seat, val, review, source)
+        return 1
+
     for key, entry in apa.items():                  # 1) apa (chave=hash/nick/Hero)
         if key == "_meta" or not isinstance(entry, dict):
             continue
         name = entry.get("real_name") or key
         is_busted = name in busted
         if not is_busted and not live_guard:
-            continue                                # vivo e não-KO → nada a fazer
-        val, review, source = resolve_seat_bounty(
-            name, entry.get("bounty_value_usd"), busted_names=busted,
-            green_kos=greens, bounty_base=bounty_base)
-        if not is_busted and review is None:
-            continue                                # vivo com coroa válida (>0) → passthrough, sem churn
-        if _preserves_green_ko(entry, source):
-            continue                                # idempotência: não desfaz um green_ko curado
-        _apply_seat_bounty(entry, val, review, source)
-        touched += 1
+            continue                                # vivo e formato desconhecido → nada a fazer
+        touched += _handle(entry, name, is_busted)
     for p in (pn or {}).get("players_list") or []:  # 2) pn.players_list (nome='name')
         if not isinstance(p, dict):
             continue
@@ -213,14 +240,7 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
         is_busted = nm in busted
         if not is_busted and not live_guard:
             continue
-        val, review, source = resolve_seat_bounty(
-            nm, p.get("bounty_value_usd"), busted_names=busted,
-            green_kos=greens, bounty_base=bounty_base)
-        if not is_busted and review is None:
-            continue
-        if _preserves_green_ko(p, source):
-            continue
-        _apply_seat_bounty(p, val, review, source)  # mesmo resultado → apa↔pn coerentes
+        _handle(p, nm, is_busted)                   # mesmo resultado → apa↔pn coerentes
     return touched
 
 
@@ -250,7 +270,9 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
     # buy_in_bounty do TS (GG) → torneio KO? (guarda vivo-$0). LEFT JOIN: None se não há TS
     # ou não-GG → guarda vivo-$0 NÃO dispara (passthrough), como manda a decisão.
     rows = query("SELECT h.id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
-                 "       h.hm3_tags, h.discord_tags, ts.buy_in_bounty AS bounty_base "
+                 "       h.hm3_tags, h.discord_tags, h.site, "
+                 "       ts.buy_in_bounty AS bounty_base, "
+                 "       (ts.tournament_number IS NOT NULL) AS has_ts "
                  "  FROM hands h "
                  "  LEFT JOIN tournament_summaries ts "
                  "    ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
@@ -265,8 +287,12 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
         return 0                                   # fail-safe: sem raw não se verifica bust
     apa = r["apa"] if isinstance(r["apa"], dict) else _json.loads(r["apa"] or "{}")
     pn = r["pn"] if isinstance(r["pn"], dict) else _json.loads(r["pn"] or "{}")
+    base = r.get("bounty_base")
+    # vanilla = GG + TS presente + sem bounty → guarda vanilla (coroa forçada a NULL).
+    has_ts_no_bounty = (r.get("site") == "GGPoker" and bool(r.get("has_ts"))
+                        and not (base and float(base) > 0))
     n = scrub_eliminated_bounties(apa, pn, r["raw"], vision_data, tagged=True,
-                                  bounty_base=r.get("bounty_base"))
+                                  bounty_base=base, has_ts_no_bounty=has_ts_no_bounty)
     if n:
         conn = get_conn()
         try:

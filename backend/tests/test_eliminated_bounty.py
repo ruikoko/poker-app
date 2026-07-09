@@ -4,7 +4,7 @@ from app.services.eliminated_bounty import (
     scrub_eliminated_bounties,
     REVIEW_NO_GREEN, REVIEW_AMBIGUOUS, REVIEW_LIVE_ZERO, SOURCE_GREEN_KO,
     BOUNTY_REVIEW_KEY, BOUNTY_SOURCE_KEY,
-)
+)  # REVIEW_LIVE_ZERO = guarda vivo-$0; guarda vanilla usa NULL sem review.
 
 # HH real (GG-6140169166): Hero all-in no river e perde; ccc84511 coleta.
 _HH = """Poker Hand #TM6140169166: Tournament #295203310, Bounty Hunters Special $150
@@ -194,6 +194,39 @@ def test_scrub_live_positive_untouched_in_ko():
     scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, bounty_base=70)
     assert apa["ccc84511"]["bounty_value_usd"] == 253.75
     assert BOUNTY_REVIEW_KEY not in apa["ccc84511"]
+
+
+# ── Guarda VANILLA (torneio SEM bounty → coroa forçada a NULL) — #SPURIOUS-CROWN-NON-KO ──
+def test_resolve_vanilla_forces_null_positive_crown():
+    # GG-6138905902 (Daily Hyper $60): coroa $50 inventada num vanilla → NULL (sem review).
+    val, rev, src = resolve_seat_bounty("Ale Mantovani", 50.0, busted_names=set(),
+                                        has_ts_no_bounty=True)
+    assert val is None and rev is None and src is None
+
+
+def test_resolve_vanilla_forces_null_zero_crown():
+    val, rev, src = resolve_seat_bounty("X", 0, busted_names=set(), has_ts_no_bounty=True)
+    assert val is None and rev is None and src is None
+
+
+def test_scrub_vanilla_nulls_live_crowns():
+    # vanilla: os vivos com coroa (espúria) → NULL; o bustado → NULL (via verde-KO).
+    apa, pn = _apa_pn()   # YanayB (vivo) 253.75, Hero (bustado) 170.63
+    n = scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, has_ts_no_bounty=True)
+    assert n >= 1
+    assert apa["ccc84511"]["bounty_value_usd"] is None       # vivo vanilla → forçado NULL
+    assert BOUNTY_REVIEW_KEY not in apa["ccc84511"]          # NÃO é 'por rever' (é definitivo)
+    assert pn["players_list"][1]["bounty_value_usd"] is None
+    assert apa["Hero"]["bounty_value_usd"] is None           # bustado → NULL
+
+
+def test_scrub_vanilla_idempotent_on_live():
+    apa, pn = _apa_pn()
+    scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, has_ts_no_bounty=True)
+    before = dict(apa["ccc84511"])
+    scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, has_ts_no_bounty=True)
+    assert apa["ccc84511"] == before                          # vivo vanilla já limpo → sem churn
+    assert apa["ccc84511"]["bounty_value_usd"] is None
 
 
 def test_scrub_preserves_existing_green_ko_without_fresh_green():

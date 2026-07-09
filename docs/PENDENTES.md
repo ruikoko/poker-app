@@ -42,13 +42,36 @@ ser $100 — ele tinha 2 KOs → instantâneo $100).
   confirma a própria coroa como qualquer vilão (capacidade permanente).
 - **ACEITAÇÃO = REIMPORTE:** GG-6132925926 nasce com o Hero NULL+"por rever", nunca $0 gravado.
 
+## ✅ Guarda VANILLA (coroa espúria em torneio SEM bounty) — LIVE (9 Jul)
+
+**`#SPURIOUS-CROWN-NON-KO` — APROVADO pelo Rui + implementado.** Facet INVERSA (GG-6138905902 Daily
+Hyper $60: Ale Mantovani $50 + Heiaheisen $20 **inventados** pela Vision num vanilla).
+- **RAIZ (diagnóstico na fonte):** `table_ss_deanon._seats_to_vision_data:76-78` copia `bounty_usd`
+  da Vision do table-SS para `bounty_value_usd` de **cada** seat **sem gate** de "o torneio tem
+  bounty?". O prompt do table-SS (`table_ss_vision.py`) é cuidadoso (`null` se não houver coroa),
+  mas a Vision **alucinou** $50/$20 num vanilla e o writer copiou-os. O **formato NÃO é circular**
+  aqui: o TS diz `format='None'` (vanilla) e a HH (`gg_hands.py:369`) classifica por NOME → vanilla.
+- **Guarda (core, mesmo funil):** torneio **GG + TS presente + buy_in_bounty nulo/0** (`has_ts_no_bounty`)
+  → um vivo NÃO pode ter coroa → **coroa FORÇADA a NULL** em `resolve_seat_bounty`/`scrub_*`/
+  `scrub_and_persist`. Sem TS = passthrough (não se decide às cegas). Prova read-only na mão real:
+  6/6 coroas → NULL.
+- **Gate DURO:** `GET /api/gg-health/spurious-crown-non-ko-scan` → `spurious_crown_contamination` = 0
+  pós-reimporte / pós-ingest GG.
+
 ## ABERTO — próxima sessão
 
-- **`#SPURIOUS-CROWN-NON-KO` — coroa espúria em torneio SEM bounty** (facet INVERSA, descoberta 9
-  Jul via GG-6138905902 Daily Hyper $60: Ale Mantovani $50 + Heiaheisen $20 **inventados** num
-  torneio sem bounty). Fix determinístico **proposto, NÃO aprovado**: no funil, torneio com TS a
-  dizer `buy_in_bounty` nulo/0 → coroas forçadas a NULL na origem (à la vivo-$0). Scan read-only já
-  corrido (1 mão em prod; só cobre torneios com TS presente). **Decidir A/B com o Rui antes de ligar.**
+- **`#BOUNTY-SIGNAL-CROWN-FALLBACK-CIRCULAR` (TEÓRICO/latente — decisão Rui 9 Jul: NÃO MEXER)** —
+  `_has_real_bounty_signal` (`mtt.py:773`) alimenta `detect_tournament_format(has_player_bounty=…)`:
+  prefere o TS, mas sem TS cai nas COROAS → coroa inventada classificaria KO (leitura→formato). O
+  cenário que o arma (GG sem TS à hora da classificação) **NÃO existe no fluxo real** (os TS da GG
+  entram sempre primeiro — ritual do Rui). **Mantém-se como está** (fallback = caminho morto).
+  Reabrir só se o ritual mudar. Não é acção.
+- **`#TS-LATE-NO-FORMAT-RECALC` (achado 9 Jul)** — o import de TS (`tournament_summaries.py:500`)
+  dispara reconcile de lobbys + `trigger_ft_refresh`, mas **NÃO recalcula `tournament_format` das
+  mãos já importadas**. O formato da mão vem do NOME no import da HH (`gg_hands.py:369`) e fica
+  agarrado. Para GG o nome carrega o formato (fiável) → baixo custo; só nomes ambíguos ficariam
+  errados (afecta IRE/HRC/fator-coroa) sem o TS os corrigir. Esforço p/ recalc: trigger f&f no TS
+  import (à la `refresh_ft_boundaries`). **Não implementar sem OK do Rui.**
 - **`#TABLE-SS-SPEEDRACER-NO-MATCH`** — diagnosticado: **HH em falta** (19 capturas de 15/16/18 Jun;
   a BD só tem GG de 30 Jun-2 Jul). O matcher FUNCIONA (12 Speed Racer casaram nos dias com HH).
   **NÃO afrouxar o match** (a mão de mesmo nome mais próxima está a 12-17 dias → match errado).

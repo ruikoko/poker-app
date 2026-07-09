@@ -1072,7 +1072,7 @@ def eliminated_scrub_apply(
     params = (ids,) if ids else tuple()
     rows = query(
         "SELECT h.id, h.hand_id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
-        "       ts.buy_in_bounty AS bounty_base "
+        "       ts.buy_in_bounty AS bounty_base, (ts.tournament_number IS NOT NULL) AS has_ts "
         "  FROM hands h "
         "  LEFT JOIN tournament_summaries ts "
         "    ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
@@ -1087,13 +1087,14 @@ def eliminated_scrub_apply(
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
         busted = busted_real_names(r["raw"], apa)
         base = r.get("bounty_base")
-        live_guard = bool(base and float(base) > 0)          # KO conhecido → guarda vivo-$0
-        if not busted and not live_guard:
+        is_ko = bool(base and float(base) > 0)
+        has_ts_no_bounty = bool(r.get("has_ts")) and not is_ko      # vanilla (TS sem bounty)
+        if not busted and not is_ko and not has_ts_no_bounty:
             continue
-        # snapshot — comparado ao resultado do scrub numa CÓPIA (verde-KO + guarda vivo-$0).
+        # snapshot — CÓPIA scrubada (verde-KO + guarda vivo-$0 + guarda vanilla).
         apa_c, pn_c = _copy.deepcopy(apa), _copy.deepcopy(pn)
         n = scrub_eliminated_bounties(apa_c, pn_c, r["raw"], None, tagged=True,
-                                      bounty_base=base)        # MUST-only + vivo-$0
+                                      bounty_base=base, has_ts_no_bounty=has_ts_no_bounty)
         if not n:
             continue
         seats = []
@@ -1102,11 +1103,13 @@ def eliminated_scrub_apply(
                 continue
             nm = v.get("real_name") or k
             old = v.get("bounty_value_usd")
-            new = apa_c.get(k, {}).get("bounty_value_usd")
+            vc = apa_c.get(k, {})
+            new = vc.get("bounty_value_usd")
             if old != new:
-                seats.append({"name": nm, "from": old, "to": new,
-                              "kind": "eliminated" if nm in busted else "live_zero",
-                              "review": apa_c.get(k, {}).get(BOUNTY_REVIEW_KEY)})
+                rev = vc.get(BOUNTY_REVIEW_KEY)
+                kind = ("eliminated" if nm in busted
+                        else "live_zero" if rev else "vanilla_null")
+                seats.append({"name": nm, "from": old, "to": new, "kind": kind, "review": rev})
         if not seats:
             continue
         changed_hands += 1
@@ -1173,3 +1176,45 @@ def live_crown_zero_scan(current_user=Depends(require_auth_or_api_key)):
             "gate": "hard: silent_zero_contamination>0 => PARAR+investigar (nunca curado)",
             "counts": {"silent": len(silent), "review": len(review)},
             "silent_zero": silent, "review": review}
+
+
+# ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────
+@router.get("/spurious-crown-non-ko-scan")
+def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):
+    """GATE da guarda vanilla (só-tagadas, GG). Reporta mãos de torneios com TS a dizer SEM
+    bounty (buy_in_bounty nulo/0) mas com ≥1 lugar com coroa >0 — coroa INVENTADA pela Vision
+    num vanilla (raiz: `table_ss_deanon._seats_to_vision_data` copia `bounty_usd` sem gate; o
+    funil anula). GATE DURO: >0 pós-reimporte OU pós-ingest GG = PARAR + investigar. NADA escreve."""
+    vanilla_tns = {r["tournament_number"] for r in query(
+        "SELECT tournament_number FROM tournament_summaries "
+        "WHERE site='GGPoker' AND (buy_in_bounty IS NULL OR buy_in_bounty = 0)")}
+    rows = query(
+        "SELECT hand_id, tournament_number, tournament_name, player_names AS pn "
+        "  FROM hands "
+        " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
+        "   AND player_names->>'match_method' IS NOT NULL "
+        "   AND player_names->'players_list' IS NOT NULL "
+        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 "
+        "        OR COALESCE(array_length(discord_tags,1),0)>0)")
+    hits, scanned = [], 0
+    for r in rows:
+        if r["tournament_number"] not in vanilla_tns:
+            continue                    # não-vanilla ou sem TS → fora do âmbito da guarda
+        scanned += 1
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        seats = []
+        for p in pn.get("players_list") or []:
+            try:
+                bv = float(p.get("bounty_value_usd") or 0)
+            except (TypeError, ValueError):
+                bv = 0.0
+            if bv > 0:
+                seats.append({"name": p.get("name"), "crown": bv})
+        if seats:
+            hits.append({"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+                         "seats": seats})
+    return {"scanned_vanilla_tagged_hands": scanned,
+            # ★ crivo da guarda vanilla: tem de ser 0 pós-reimporte.
+            "spurious_crown_contamination": len(hits),
+            "gate": "hard: spurious_crown_contamination>0 => PARAR+investigar (nunca curado)",
+            "hits": hits}
