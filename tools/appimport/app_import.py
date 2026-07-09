@@ -561,6 +561,15 @@ def _done_subdir(done_root, sublbl):
     return os.path.join(done_root, sublbl) if sublbl else done_root
 
 
+def _it_subfolder_matches(entry, subfilter):
+    """A subpasta `entry` corresponde ao filtro `--only it/<subfilter>`? Case-insensitive
+    exacto OU mesma tag (tolera 'Speed Racer' vs 'SpeedRacer', 'NKO Pos' vs 'NPKO Pos')."""
+    if entry.strip().lower() == subfilter.strip().lower():
+        return True
+    t = _folder_tag_for(entry)
+    return t is not None and t == _folder_tag_for(subfilter)
+
+
 # ── Pasta `it` — classificada por NOME (MESA | LOBBY | SKIP) + tag da subpasta ──
 
 def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_lobby):
@@ -634,7 +643,7 @@ def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_
                 shutil.move(path, _dest_no_clobber(lobby_done, fname))
 
 
-def process_it_mixed(session, live, window=None):
+def process_it_mixed(session, live, window=None, subfilter=None):
     """Pasta do Intuitive Tables (mesa + lobby), classificada por NOME e roteada
     para o endpoint certo. MESA → table-ss (move → done/it); LOBBY → lobbys (move
     → done/lobby, retry transitório fica); SKIP → fica no sítio (formato não-IT).
@@ -654,19 +663,30 @@ def process_it_mixed(session, live, window=None):
          "fora": 0, "untagged_folder": 0}
 
     # 1) raiz de it\ — sem tag (back-compat: ficheiros largados directamente).
-    _process_it_dir(session, live, src_root, None, window, c, done_table, done_lobby)
+    #    Com --only it/<subpasta>, salta-se a raiz (só interessa a subpasta pedida).
+    if subfilter:
+        print(f"── {IT_SUB} (--only it/{subfilter}): SALTO a raiz de it\\ e as outras subpastas")
+    else:
+        _process_it_dir(session, live, src_root, None, window, c, done_table, done_lobby)
 
     # 2) subpastas de it\ — a subpasta É a tag (pasta-como-tag).
+    matched = 0
     for entry in sorted(os.listdir(src_root)):
         sub = os.path.join(src_root, entry)
         if not os.path.isdir(sub):
             continue
+        if subfilter and not _it_subfolder_matches(entry, subfilter):
+            continue                                  # --only it/<x>: salta as outras
+        matched += 1
         tag = _folder_tag_for(entry)
         if tag is None:
             c["untagged_folder"] += 1
             print(f"── {IT_SUB}/{entry}  ⚠ subpasta fora da tabela de tradução "
                   f"(IT_FOLDER_TAGS) → processada SEM tag")
         _process_it_dir(session, live, sub, tag, window, c, done_table, done_lobby)
+    if subfilter and matched == 0:
+        print(f"── {IT_SUB}/{subfilter}: ⚠ nenhuma subpasta com esse nome em it\\ "
+              f"(nada a fazer). Confirma o nome exacto da pasta.")
     return c
 
 
@@ -853,15 +873,28 @@ def parse_args(argv=None):
                    help="ENVIA a sério (e move). Sem esta flag = dry-run (só plano).")
     p.add_argument("--lobby-dir", dest="lobby_dir", action="store_true",
                    help="Lê também a LOBBY_DIR externa (2ª via manual; off por defeito).")
-    p.add_argument("--only", dest="only", default=None,
-                   choices=["gg_hh", "gg_ts", "manual", "it", "gold", "lobby"],
-                   help="Corre SÓ este canal (cano-a-cano). Sem esta flag = todos.")
+    p.add_argument("--only", dest="only", default=None, metavar="CANAL[/SUBPASTA]",
+                   help="Corre SÓ este canal (gg_hh|gg_ts|manual|it|gold|lobby). Sem esta "
+                        "flag = todos. Filtro por subpasta do it: --only \"it/SpeedRacer\" "
+                        "(nomes com espaço entre aspas).")
     p.add_argument("--desde", dest="desde", default=None, metavar="YYYY-MM-DD",
                    help="Janela das IMAGENS (it/manual/lobby): dia-de-jogo inicial. "
                         "Sobrepõe IMPORT_DESDE da config. HH/TS entram SEMPRE por inteiro.")
     p.add_argument("--ate", dest="ate", default=None, metavar="YYYY-MM-DD",
                    help="Janela das IMAGENS: dia-de-jogo final inclusive. Sobrepõe IMPORT_ATE.")
     return p.parse_args(argv)
+
+
+_ONLY_CHANNELS = {"gg_hh", "gg_ts", "manual", "it", "gold", "lobby"}
+
+
+def _parse_only(val):
+    """`--only` → (canal, subpasta). 'it/SpeedRacer' ou 'it\\SpeedRacer' →
+    ('it','SpeedRacer'); 'it' → ('it',''); None → (None,'')."""
+    if not val:
+        return None, ""
+    ch, _, sub = val.replace("\\", "/").partition("/")
+    return ch.strip(), sub.strip()
 
 
 def main(argv=None, overrides=None):
@@ -915,10 +948,20 @@ def main(argv=None, overrides=None):
 
     # --only: corre SÓ um canal (cano-a-cano). Canais saltados devolvem vazios
     # (mesma forma) para o RESUMO não quebrar.
+    only_ch, only_sub = _parse_only(args.only)
+    if only_ch is not None and only_ch not in _ONLY_CHANNELS:
+        print(f"ERRO: canal --only inválido: {only_ch!r}. Usa um de {sorted(_ONLY_CHANNELS)} "
+              f"(ou 'it/<subpasta>').")
+        sys.exit(2)
+    if only_sub and only_ch != "it":
+        print("ERRO: filtro por subpasta só é suportado no canal 'it' (--only \"it/<subpasta>\").")
+        sys.exit(2)
+
     def _run(ch):
-        return args.only is None or args.only == ch
+        return only_ch is None or only_ch == ch
     if args.only:
-        print(f"\n[--only {args.only}] a correr SÓ este canal; os outros são saltados.")
+        extra = f" · subpasta '{only_sub}'" if only_sub else ""
+        print(f"\n[--only {args.only}] SÓ o canal '{only_ch}'{extra}; o resto é saltado.")
     _EMPTY_IT = {"mesa": 0, "lobby": 0, "nonlobby": 0, "skip": 0, "retry": 0,
                  "fail": 0, "fora": 0, "untagged_folder": 0}
 
@@ -930,7 +973,8 @@ def main(argv=None, overrides=None):
         else:
             totals[sub] = (0, 0, 0, 0)
 
-    it_counts = process_it_mixed(session, live, window=img_window) if _run("it") else dict(_EMPTY_IT)
+    it_counts = process_it_mixed(session, live, window=img_window,
+                                 subfilter=(only_sub or None)) if _run("it") else dict(_EMPTY_IT)
     lobby_sub_res = process_lobby_subdir(session, live, window=img_window) if _run("lobby") else (0, 0, 0, 0)
     gold_res = process_gold_dir(session, live, window=img_window) if _run("gold") else None
     lobby_res = process_lobby_dir(session, live, window=img_window) if (args.lobby_dir and _run("lobby")) else None

@@ -51,5 +51,16 @@ def test_no_only_runs_all(monkeypatch):
 
 
 def test_only_rejects_unknown_channel(monkeypatch):
+    # validação passou do argparse (choices) para o main() (aceita 'it/<subpasta>')
     with pytest.raises(SystemExit):
-        A.parse_args(["--only", "banana"])
+        _run(monkeypatch, ["--only", "banana"])
+
+
+def test_only_it_subfolder_runs_only_it(monkeypatch):
+    chans = _run(monkeypatch, ["--only", "it/SpeedRacer"])
+    assert chans == ["it"]              # só o it; a subpasta é filtrada dentro do process_it_mixed
+
+
+def test_subfolder_only_allowed_on_it(monkeypatch):
+    with pytest.raises(SystemExit):    # subpasta num canal != it é erro claro
+        _run(monkeypatch, ["--only", "manual/x"])

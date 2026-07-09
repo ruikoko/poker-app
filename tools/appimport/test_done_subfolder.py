@@ -91,3 +91,22 @@ def test_canonical_pos_nko_is_live_folder_npko():
     import app_import as ai
     assert ai.CANONICAL_FOLDER_FOR_TAG["pos-nko"] == "NPKO Pos"      # pasta VIVA do disco
     assert ai._folder_tag_for("NPKO Pos") == "pos-nko"              # round-trip real
+
+
+# ── --only it/<subpasta> (filtro por subpasta) ───────────────────────────────
+def test_parse_only_channel_and_subfolder():
+    from app_import import _parse_only
+    assert _parse_only("it/SpeedRacer") == ("it", "SpeedRacer")
+    assert _parse_only("it\ICM PKO") == ("it", "ICM PKO")   # backslash tolerado
+    assert _parse_only("it") == ("it", "")
+    assert _parse_only(None) == (None, "")
+
+
+def test_it_subfolder_matches_exact_and_by_tag():
+    from app_import import _it_subfolder_matches
+    assert _it_subfolder_matches("SpeedRacer", "SpeedRacer")     # exacto
+    assert _it_subfolder_matches("SpeedRacer", "speedracer")     # case-insensitive
+    assert _it_subfolder_matches("SpeedRacer", "Speed Racer")    # mesma tag (espaço)
+    assert _it_subfolder_matches("NPKO Pos", "NKO Pos")          # mesma tag pos-nko
+    assert not _it_subfolder_matches("ICM PKO", "SpeedRacer")    # tags diferentes
+    assert not _it_subfolder_matches("Random", "SpeedRacer")     # sem tag + nomes != 
