@@ -197,8 +197,15 @@ sem tag", o gémeo). **Fundir as duas na Saúde GG como secções próprias** (s
 entradas `/marcadas-por-captura` e `/suspeitas`). A **"Marcadas por captura" precisa de:** (a) as **11
 tags canónicas** (hoje só mostra 4) + (b) **multi-tags em toggle + 1 Aplicar** (o mecanismo que o
 "Gold sem tag" acabou de ganhar em `abfef49` — a barra de toggles é PARTILHÁVEL). É **UX** (não toca
-arquitetura de dados: o endpoint `/gg-health/tag` já acrescenta/canónico/multi) → **desenho apresentado**,
-segue após OK do Rui. **Bónus:** dá ao Rui a via para etiquetar à mão as 3 SR abaixo (se o fix não as apanhar).
+arquitetura de dados: o endpoint `/gg-health/tag` já acrescenta/canónico/multi). **✅ DESENHO APROVADO
+pelo Rui (8 Jul).** Executar **quando os 3 blocos pré-Etapa-2 fecharem** (ou antes se der jeito no meio —
+o Code gere a ordem). Detalhe do desenho aprovado: `/gg-health` casa única; `/marcadas-por-captura` e
+`/suspeitas` redirecionam p/ `/gg-health`; barra de toggles (11 tags, ACRESCENTA, multi) vira componente
+partilhado por Gold-sem-tag + Marcadas-por-captura.
+
+**📌 INSTRUÇÃO das 3 SR marcadas-por-captura (`6138218252`/`6138218069`/`6137938737`):** o Rui etiqueta-as
+à mão com **`speed-racer`** SÓ **DEPOIS** de a arrumação dar a barra completa (11 tags) a essa secção —
+hoje a secção nem tem a tag `speed-racer`. **Até lá ficam quietas** (não tocar; não confiar no fix SR).
 
 **⚠️ As 3 Speed Racer em "Marcadas por captura" (`6138218252`/`6138218069`/`6137938737`) NÃO são o gap
 no_match** — CASARAM (`result=success`, `mm=table_ss`), desanon OK, mas `tags=[]` porque a captura que
