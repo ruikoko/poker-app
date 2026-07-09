@@ -125,14 +125,25 @@ def _apply_seat_bounty(seat: dict, val, review, source) -> None:
         seat.pop(BOUNTY_SOURCE_KEY, None)
 
 
+def is_tagged(hand: Optional[dict]) -> bool:
+    """SÓ-TAGADAS (APA §B.6): mão de estudo = hm3_tags OU discord_tags não-vazias.
+    Espelho de name_propagation._is_tagged (fonte única do conceito)."""
+    if not hand:
+        return False
+    return bool(hand.get("hm3_tags")) or bool(hand.get("discord_tags"))
+
+
 def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
-                             raw: Optional[str], vision_data: Optional[dict] = None) -> int:
+                             raw: Optional[str], vision_data: Optional[dict] = None,
+                             *, tagged: bool = True) -> int:
     """FUNIL ÚNICO da cura verde-KO. Chamado 1× em cada caminho AUTOMÁTICO que escreve
     bounty por-seat (enrich gold/position_v3, orphan-enrich, table-ss, backfills gold-carry
     e capture, reread). Aplica a guarda aos seats HH-bustados em AMBOS apa e pn.players_list.
     Devolve nº de seats-nome tocados (audit). Muta apa/pn in-place.
 
-    4 garantias:
+    5 garantias:
+    (0) SÓ-TAGADAS: `tagged=False` → NÃO scruba (return 0). O scope do core (APA §B.6) fica
+        BAKED-IN no funil; o call-site passa `tagged=is_tagged(hand)`.
     (1) MUST independente do verde: sem `vision_data`/verde (backfills só-apa) → o bustado
         fica NULL + 'por rever' (a anulação vem SÓ do raw/HH).
     (2) raw obrigatório: sem `raw` NÃO se pode computar bust em segurança → NÃO scruba e
@@ -140,6 +151,8 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
     (3) CIRÚRGICO: só bounty_value_usd/bounty_review/bounty_source.
     (4) apa↔pn consistente: busted/greens computados UMA vez, aplicados igual aos dois.
     """
+    if not tagged:
+        return 0
     if not isinstance(apa, dict):
         return 0
     if not raw:

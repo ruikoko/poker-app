@@ -115,3 +115,10 @@ def test_scrub_without_raw_is_safe_noop():
     apa, pn = _apa_pn()
     n = scrub_eliminated_bounties(apa, pn, raw=None)               # Guarantee 2
     assert n == 0 and apa["Hero"]["bounty_value_usd"] == 170.63    # não scruba às cegas
+
+
+def test_scrub_skips_untagged():
+    # SÓ-TAGADAS (garantia 0): mão não-marcada → funil não toca nada.
+    apa, pn = _apa_pn()
+    n = scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, tagged=False)
+    assert n == 0 and apa["Hero"]["bounty_value_usd"] == 170.63

@@ -987,7 +987,11 @@ def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
         "  FROM hands "
         " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
         "   AND player_names->>'match_method' IS NOT NULL "
-        "   AND player_names->'players_list' IS NOT NULL")
+        "   AND player_names->'players_list' IS NOT NULL "
+        # SÓ-TAGADAS (mãos que o Rui marcou in-game p/ rever): o crivo, como a cura,
+        # só vale nas tagadas (APA §B.6). Não-tagadas serão apagadas no reimporte.
+        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 "
+        "        OR COALESCE(array_length(discord_tags,1),0)>0)")
     vision_origin, strong, soft, review, green_ko = [], [], [], [], []
     for r in rows:
         apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
