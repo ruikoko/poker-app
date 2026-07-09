@@ -188,6 +188,20 @@ Racer** — e as **218 mãos Speed Racer EXISTEM na BD** (HH importada). Logo n�
 joga Speed Racer todos os dias). **Atacar quando o guião de hoje fechar, ANTES de arrancar a Etapa 2.**
 Refs: `routers/table_ss.py:_resolve_match`/`_find_candidate_hands`; formato do nome Speed Racer.
 
+## 🔴 `#ICM-FT-TAG-NOT-LANDING` — a tag `icm-ft` do IT não aterra (investigação pré-Etapa-2, 8 Jul)
+
+**Descoberto no reimport (Cano 7, A4).** 3 mãos de FT da FT VALIDADA `295219051` (Daily Hyper $60,
+`6139251935/69/175`) ficaram **sem a tag `icm-ft`** apesar de terem captura casada. **`table_ss` tem
+0 rows com `folder_tag='icm-ft'` em toda a BD** — a pasta `ICM FT` do appimport **nunca produziu uma
+row tagada**, embora o dry-run mostre `folder_tag=icm-ft` e o backend `canonicalize_tag('icm-ft')='icm-ft'`
+(válido). Um **re-run `--only it` da pasta ICM FT** (mesa=4, falhas=0) **NÃO criou/tocou nenhuma row**
+(última atividade `table_ss` 00:05 UTC, o re-run ~01:40 não aterrou) → os 4 POST à `/table-ss/upload` ou
+não chegaram ou devolveram algo contado como sucesso sem gravar. **Precisa do LOG do appimport** (retorno
+dos 4 POST) — não se diagnostica pela BD. Distinto do Speed Racer (aqui o match existe) e do web-first
+(as 3 vieram por web sem tag e o appimport não as re-tagou). **Nota:** `icm-pko-ft` (9) e `pos-pko-ft` (2)
+aterraram bem → é específico do fluxo `ICM FT`→`icm-ft`. **Impacto:** só a métrica A4 (`-ft` subcontado);
+a FT em si está bem promovida. Atacar com o Speed Racer, ANTES da Etapa 2.
+
 ## ★★ MUDANÇA DE ESTRATÉGIA (3 Jul 2026) — LER ANTES DE TOCAR NO BACKLOG DE DADOS GG
 
 A sessão de **3 Jul** virou a estratégia (registada em `docs/APA_INDEXACAO_E_COLAPSO.md`):
