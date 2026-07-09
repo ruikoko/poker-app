@@ -255,7 +255,9 @@ def _build_gg_vision_prompt() -> str:
         "BB: <BB player name from LEFT PANEL>\n"
         "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country> | <position>\n"
         "PLAYER: <name> | <stack> | <vpip_pct> | <bounty_value_usd> | <country> | <position>\n"
-        "... (one PLAYER line per player, including Hero, SB, and BB)\n\n"
+        "... (one PLAYER line per player, including Hero, SB, and BB)\n"
+        "GREEN_KO: <winner_name> | <green_value>\n"
+        "... (one GREEN_KO line per GREEN KO-transfer value you see; none → omit)\n\n"
         "RULES:\n"
         "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
         "- If a player's stack shows 0, write 0\n"
@@ -274,6 +276,17 @@ def _build_gg_vision_prompt() -> str:
         "- DO NOT confuse VPIP (a small plain integer in a circle, e.g. '34', NO '$') with\n"
         "  Bounty (a dollar amount in the TOP banner, e.g. '$268.18'). They are DIFFERENT\n"
         "  badges in DIFFERENT positions. See #FIELD-BOUNTY-PCT-MISNAMED.\n"
+        "- ★ ELIMINATED seat (0 chips / cracked-broken cards over the avatar / a player who\n"
+        "  just busted this hand): an eliminated player has NO OWN crown — their bounty\n"
+        "  banner is GONE. Do NOT copy a NEIGHBOUR's crown onto them. For that seat write\n"
+        "  bounty_value_usd = 0 (their real bounty is read from the GREEN value below, not\n"
+        "  from any golden banner near their seat).\n"
+        "- ★ GREEN_KO: when a player ELIMINATES someone, HALF of the eliminated player's\n"
+        "  bounty appears as a GREEN dollar value ON/NEXT TO the eliminator's golden crown\n"
+        "  (e.g. a crown showing '$253.75 +$102.27' — the '+$102.27' in GREEN is the KO\n"
+        "  transfer). For EACH green value you see, emit one GREEN_KO line: the winner's\n"
+        "  name and the green number (no '$', no '+'). If there are no green values, emit\n"
+        "  no GREEN_KO line. This is DIFFERENT from the golden (own-bounty) banner.\n"
         "- Country is the 2-letter code from the flag, or NONE\n"
         "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
         "- Include ALL players visible at the table, even if eliminated\n"
@@ -357,6 +370,7 @@ def _parse_vision_response(text: str) -> dict:
         "vision_level": None,
         "players_by_position": {},
         "players_list": [],
+        "green_kos": [],   # verde-KO: {winner, value} (cura verde-KO)
     }
     if not text:
         return result
@@ -364,6 +378,20 @@ def _parse_vision_response(text: str) -> dict:
     for line in text.splitlines():
         line = line.strip()
         if not line:
+            continue
+
+        if line.startswith("GREEN_KO:"):
+            body = line[len("GREEN_KO:"):].strip()
+            parts = [p.strip() for p in body.split("|")]
+            if len(parts) >= 2:
+                m = re.search(r"[\d]+(?:[.,]\d+)?", parts[1])
+                if m:
+                    try:
+                        val = float(m.group(0).replace(",", ""))
+                    except ValueError:
+                        val = 0.0
+                    if parts[0] and val > 0:
+                        result["green_kos"].append({"winner": parts[0], "value": val})
             continue
 
         if line.startswith("TM:"):
@@ -2320,6 +2348,83 @@ async def trigger_reread_gold_crowns(
     coroa $0 (até `limit`). Re-Vision do GOLD com o prompt afinado."""
     ids = [h.strip() for h in hand_ids.split(",") if h.strip()] if hand_ids else None
     return await reread_gold_crowns(hand_ids=ids, dry_run=not confirm, limit=limit)
+
+
+@router.post("/green-ko-dryrun")
+async def green_ko_dryrun(
+    hand_ids: Optional[str] = Query(None),
+    limit: int = Query(60, ge=1, le=120),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """READ-ONLY (guarantee #2 da cura verde-KO). Para as mãos GG desanon com BUST (HH),
+    corre a Vision (prompt novo) na imagem de ESTADO FINAL (Gold) e mede o bónus do verde
+    SEM escrever. Separa por tipo de imagem:
+      - `gold`: o verde ESTÁ na imagem → reporta verde-lido + bounty derivado ('green_ko')
+                ou 'por rever' (verde ilegível).
+      - `table_ss_only`/`none`: captura cedo, o verde (no fim) NÃO está → 'por rever' é o
+                resultado ESPERADO e correto (não corre Vision — não há onde ler o verde).
+    O pass/fail DURO é o crivo=0 (eliminated-crown-scan); isto é só a MEDIDA do bónus."""
+    import asyncio
+    import copy as _copy
+    from app.services.eliminated_bounty import (
+        busted_real_names, resolve_seat_bounty, parse_green_kos,
+        BOUNTY_REVIEW_KEY, BOUNTY_SOURCE_KEY, SOURCE_GREEN_KO,
+    )
+    ids = [h.strip() for h in hand_ids.split(",") if h.strip()] if hand_ids else None
+    where = "AND h.hand_id = ANY(%s)" if ids else ""
+    params = (ids,) if ids else tuple()
+    rows = query(
+        "SELECT h.id, h.hand_id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
+        "       e.raw_json->>'img_b64' AS gold_img, "
+        "       (h.context_table_ss_id IS NOT NULL) AS has_tss "
+        "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND h.player_names->>'match_method' IS NOT NULL " + where,
+        params,
+    )
+    gold_read = gold_review = tss_only_expected = 0
+    report = []
+    for r in rows:
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        busted = busted_real_names(r["raw"], apa)
+        if not busted:
+            continue
+        if not r["gold_img"]:
+            # sem Gold → o verde não está guardado → 'por rever' esperado (não é falha).
+            tss_only_expected += 1
+            report.append({"hand_id": r["hand_id"],
+                           "image": "table_ss_only" if r["has_tss"] else "none",
+                           "busted": sorted(busted), "expected": "por rever"})
+            continue
+        b = r["gold_img"]
+        if "," in b[:40]:
+            b = b.split(",", 1)[1]
+        try:
+            img = base64.b64decode(b)
+        except Exception:
+            continue
+        from app.services.image_utils import detect_image_mime
+        text = await asyncio.to_thread(
+            _extract_hand_data_from_image_claude, img, detect_image_mime(img))
+        greens = parse_green_kos(_parse_vision_response(text)) if text else []
+        seats = []
+        for name in sorted(busted):
+            val, review, source = resolve_seat_bounty(
+                name, None, busted_names=busted, green_kos=greens)
+            if source == SOURCE_GREEN_KO:
+                gold_read += 1
+            else:
+                gold_review += 1
+            seats.append({"name": name, "bounty": val,
+                          "source": source, "review": review})
+        report.append({"hand_id": r["hand_id"], "image": "gold",
+                       "greens_read": greens, "seats": seats})
+    return {
+        "busted_hands": len(report),
+        "gold": {"seats_derived_green": gold_read, "seats_por_rever": gold_review},
+        "table_ss_only_hands": tss_only_expected,
+        "report": report,
+    }
 
 
 # ── Re-enrich do baralhamento Gold (#DESANON-GOLD-SCRAMBLE) ──────────────────
