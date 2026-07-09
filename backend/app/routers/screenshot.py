@@ -26,7 +26,8 @@ import io
 from datetime import datetime
 from difflib import SequenceMatcher
 from itertools import permutations
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response
+from typing import Optional
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response, Query
 from PIL import Image
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
@@ -263,6 +264,13 @@ def _build_gg_vision_prompt() -> str:
         "  avatar (e.g. '268.18' for $268.18, '57.03' for $57.03). NEVER include '$' or\n"
         "  commas. In this bounty tournament it is almost never 0 — look carefully at the\n"
         "  top plate of EVERY avatar before writing 0.\n"
+        "  ★ CRITICAL (#CROWN-VISIBLE-READ-ZERO): the golden dollar banner is ABOVE the\n"
+        "  avatar and is a SEPARATE element. READ IT EVEN WHEN the seat/avatar below is\n"
+        "  COVERED — by face-down (red) cards, a red 'All-In' seal, a 'WIN' seal, or (for\n"
+        "  the Hero) the Hero's own large hole cards. A covered avatar does NOT mean 0\n"
+        "  bounty: the golden banner is still drawn above it. In a PKO the crown is at\n"
+        "  least about HALF the bounty buy-in (e.g. $50+), NEVER a tiny value. Write 0\n"
+        "  ONLY if there is genuinely NO golden banner above that seat.\n"
         "- DO NOT confuse VPIP (a small plain integer in a circle, e.g. '34', NO '$') with\n"
         "  Bounty (a dollar amount in the TOP banner, e.g. '$268.18'). They are DIFFERENT\n"
         "  badges in DIFFERENT positions. See #FIELD-BOUNTY-PCT-MISNAMED.\n"
@@ -2178,6 +2186,124 @@ def trigger_backfill_gold_bounties(dry_run: bool = False,
     """#GOLD-BOUNTY-CARRY — preenche as coroas das mãos Gold (position_v3) a partir
     do entry da Gold, com guarda half-base. `dry_run=true` → não escreve. Sem Vision."""
     return backfill_gold_bounties(dry_run=dry_run)
+
+
+# ── #CROWN-VISIBLE-READ-ZERO (Opção C, parte 2) — re-leitura das coroas do GOLD ──
+def _crown_from_fresh(name, fresh):
+    n = (name or "").lower().strip().rstrip(".")
+    if n in fresh:
+        return fresh[n]
+    cand = {v for k, v in fresh.items() if _same_player(n, k)}   # truncagem
+    return cand.pop() if len(cand) == 1 else None
+
+
+async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 30) -> dict:
+    """Re-lê as coroas nas mãos GG desanon por GOLD (`position_v3`) que ficaram com $0,
+    re-correndo a Vision do GOLD sobre a imagem GUARDADA do entry (prompt afinado: ler a
+    coroa mesmo com o avatar tapado). Atualiza SÓ coroas $0 onde a nova leitura é VÁLIDA
+    (>0 e ≥ base÷2). NÃO toca nomes (regra: Gold manda, $0 não é leitura). Escreve apa +
+    player_names. Vision OFF-THREAD. `hand_ids` limita ao teste (2-3); senão todas as $0."""
+    import asyncio
+    from psycopg2.extras import Json
+    base_by_tn = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL")}
+    where = "AND h.hand_id = ANY(%s)" if hand_ids else ""
+    params = (hand_ids,) if hand_ids else tuple()
+    rows = query(
+        "SELECT h.id, h.hand_id, h.tournament_number, h.all_players_actions AS apa, "
+        "       h.player_names AS pn, e.raw_json->>'img_b64' AS img "
+        "  FROM hands h JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND h.player_names->>'match_method' = 'position_v3' "
+        "   AND e.raw_json->>'img_b64' IS NOT NULL " + where,
+        params,
+    )
+
+    def _has_zero(pn):
+        return isinstance(pn, dict) and any(
+            (p.get("bounty_value_usd") or 0) <= 0
+            for p in (pn.get("players_list") or []) if isinstance(p, dict))
+
+    targets = [r for r in rows if _has_zero(r["pn"])][:limit]
+    hands_updated = crowns_recovered = vision_failed = 0
+    report = []
+    for r in targets:
+        b = r["img"] or ""
+        if "," in b[:40]:
+            b = b.split(",", 1)[1]
+        try:
+            img = base64.b64decode(b)
+        except Exception:
+            continue
+        text = await asyncio.to_thread(_extract_hand_data_from_image_claude, img, "image/png")
+        if not text:
+            vision_failed += 1
+            report.append({"hand_id": r["hand_id"], "result": "vision_failed"})
+            continue
+        vd = _parse_vision_response(text)
+        fresh = {}
+        for p in (vd.get("players_list") or []):
+            nm = (p.get("name") or "").lower().strip()
+            bv = p.get("bounty_value_usd")
+            if nm and bv and float(bv) > 0:
+                fresh[nm] = float(bv)
+        base = base_by_tn.get(r["tournament_number"])
+        floor = base / 2 if base else None
+        apa, pn = r["apa"], r["pn"]
+        changed = False
+        recov = 0
+        if isinstance(apa, dict):
+            for key, pdata in apa.items():
+                if key == "_meta" or not isinstance(pdata, dict):
+                    continue
+                if (pdata.get("bounty_value_usd") or 0) > 0:
+                    continue
+                cr = _crown_from_fresh(pdata.get("real_name") or key, fresh)
+                if cr is None or (floor is not None and cr < floor):
+                    continue
+                pdata["bounty_value_usd"] = cr
+                changed = True
+                recov += 1
+        if isinstance(pn, dict):
+            for p in (pn.get("players_list") or []):
+                if not isinstance(p, dict) or (p.get("bounty_value_usd") or 0) > 0:
+                    continue
+                cr = _crown_from_fresh(p.get("name"), fresh)
+                if cr is None or (floor is not None and cr < floor):
+                    continue
+                p["bounty_value_usd"] = cr
+                changed = True
+        report.append({"hand_id": r["hand_id"], "recovered": recov})
+        if changed:
+            hands_updated += 1
+            crowns_recovered += recov
+            if not dry_run:
+                conn = get_conn()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE hands SET all_players_actions=%s, player_names=%s WHERE id=%s",
+                                    (Json(apa), Json(pn), r["id"]))
+                    conn.commit()
+                finally:
+                    conn.close()
+    return {"targets": len(targets), "hands_updated": hands_updated,
+            "crowns_recovered": crowns_recovered, "vision_failed": vision_failed,
+            "report": report}
+
+
+@router.post("/reread-gold-crowns")
+async def trigger_reread_gold_crowns(
+    confirm: bool = Query(False),
+    hand_ids: Optional[str] = Query(None),
+    limit: int = Query(30, ge=1, le=100),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """#CROWN-VISIBLE-READ-ZERO parte 2. `?confirm=false` (default) = ENSAIO (não escreve).
+    `hand_ids=GG-a,GG-b` limita ao teste (2-3 mãos). Sem `hand_ids` = todas as Gold com
+    coroa $0 (até `limit`). Re-Vision do GOLD com o prompt afinado."""
+    ids = [h.strip() for h in hand_ids.split(",") if h.strip()] if hand_ids else None
+    return await reread_gold_crowns(hand_ids=ids, dry_run=not confirm, limit=limit)
 
 
 # ── Re-enrich do baralhamento Gold (#DESANON-GOLD-SCRAMBLE) ──────────────────

@@ -52,9 +52,14 @@ def _bounty_below_half_hands() -> list[dict]:
     for r in rows:
         below = detect_bounty_below_half(r["pn"], r["base"])
         if below:
+            # #CROWN-VISIBLE-READ-ZERO (fix do filtro): distinguir estados/alarmes.
+            #  - 'unread'    → TODAS as coroas em falta são $0 (por LER): âmbar, revisão.
+            #  - 'impossible'→ há coroa >0 e <base÷2 (valor IMPOSSÍVEL gravado): vermelho.
+            kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
             out.append({
                 "id": r["id"], "hand_id": r["hand_id"],
                 "tournament_name": r["tournament_name"], "played_at": r["played_at"],
+                "kind": kind,
                 "detail": {
                     "floor": below[0]["floor"],
                     "seats": [{"name": b["name"], "value": b["value"],
@@ -104,23 +109,41 @@ def list_suspicious(current_user=Depends(require_auth)):
     """READ-ONLY. Fila viva das mãos GG 2026 apanhadas pelos 2 venenos puros,
     agrupadas por motivo, com detalhe por mão."""
     g1, g2 = _build_groups()
+    # #CROWN-VISIBLE-READ-ZERO — dois estados distintos, alarmes distintos.
+    unread = [h for h in g1 if h.get("kind") == "unread"]
+    impossible = [h for h in g1 if h.get("kind") == "impossible"]
     return {
         "counts": {
-            "bounty_below_half": len(g1),
+            "coroa_por_ler": len(unread),
+            "valor_impossivel": len(impossible),
+            "bounty_below_half": len(g1),           # back-compat (soma dos dois)
             "hero_name_on_villain": len(g2),
             "total": len(g1) + len(g2),
         },
         "groups": [
             {
-                "key": "bounty_below_half",
-                "label": "Bounty abaixo de metade",
+                "key": "valor_impossivel",
+                "label": "Valor de coroa impossível",
+                "severity": "red",
                 "description": (
-                    "A coroa ($ bounty) gravada é menor que metade do bounty base "
-                    "do torneio. A coroa é o KO instantâneo = metade → nunca < base÷2; "
-                    "provável leitura da chama (VPIP %) em vez da coroa ($)."
+                    "Coroa ($ bounty) gravada com valor >0 mas MENOR que metade do "
+                    "bounty base — impossível (a coroa é o KO instantâneo = metade). "
+                    "Provável leitura da chama (VPIP %) em vez da coroa ($)."
                 ),
-                "count": len(g1),
-                "hands": g1,
+                "count": len(impossible),
+                "hands": impossible,
+            },
+            {
+                "key": "coroa_por_ler",
+                "label": "Coroa por ler ($0)",
+                "severity": "amber",
+                "description": (
+                    "Coroa gravada a $0 — não é valor errado, é coroa POR LER (a Vision "
+                    "não a apanhou, tipicamente com o avatar tapado). Merece revisão/re-leitura, "
+                    "não alarme vermelho."
+                ),
+                "count": len(unread),
+                "hands": unread,
             },
             {
                 "key": "hero_name_on_villain",

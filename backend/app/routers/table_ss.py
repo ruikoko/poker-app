@@ -2236,6 +2236,104 @@ async def reprocess_failed(
     return {"tally": tally, "remaining": remaining, "report": report}
 
 
+# ── #CROWN-VISIBLE-READ-ZERO (Opção C, parte 1) — backfill da coroa table-SS→mão ──
+def _norm_nick(s) -> str:
+    return (s or "").lower().strip().rstrip(".")
+
+
+def backfill_crowns_from_capture(dry_run: bool = True) -> dict:
+    """Quando o GOLD desanon deu `$0`/ausente numa coroa mas a **table-SS CASADA** leu
+    um valor VÁLIDO (≥ base÷2), preenche a coroa a partir da table-SS. 0 Vision (dados
+    já na BD). Regra (REGISTO_CONCEITO 9 Jul, Opção C do Rui): o Gold manda, mas `$0` do
+    Gold NÃO é leitura → cai para a table-SS; NUNCA inverte uma leitura VÁLIDA do Gold.
+    Escreve em `all_players_actions` (display da mesa) E `player_names.players_list`
+    (IRE + Mãos suspeitas). Só GG `position_v3` com `context_table_ss_id`."""
+    from psycopg2.extras import Json
+    from app.routers.screenshot import _same_player
+    base_by_tn = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL")}
+    rows = query("""SELECT h.id, h.hand_id, h.tournament_number,
+                           h.all_players_actions AS apa, h.player_names AS pn,
+                           t.vision_json AS tvj
+                      FROM hands h JOIN table_ss_processing_log t ON t.id = h.context_table_ss_id
+                     WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
+                       AND h.player_names->>'match_method' = 'position_v3'
+                       AND t.vision_json IS NOT NULL""")
+    hands_filled = crowns_filled = rejected_below_half = no_base = 0
+    for r in rows:
+        apa, pn, tvj = r["apa"], r["pn"], r["tvj"]
+        if not isinstance(apa, dict) or not isinstance(pn, dict) or not isinstance(tvj, dict):
+            continue
+        # coroas VÁLIDAS (>0) da table-SS por nick
+        tss = {}
+        for s in (tvj.get("seats") or []):
+            nk, bv = _norm_nick(s.get("nick")), s.get("bounty_usd")
+            if nk and bv and float(bv) > 0:
+                tss[nk] = float(bv)
+        if not tss:
+            continue
+        base = base_by_tn.get(r["tournament_number"])
+        if base is None:
+            no_base += 1
+            continue                       # sem base não há guarda ≥base/2 → não mexe
+        floor = base / 2
+
+        def _tss_crown(name):
+            n = _norm_nick(name)
+            if n in tss:
+                return tss[n]
+            cand = {v for k, v in tss.items() if _same_player(n, k)}   # truncagem
+            return cand.pop() if len(cand) == 1 else None
+
+        changed = False
+        for key, pdata in apa.items():                 # 1) apa (mesa)
+            if key == "_meta" or not isinstance(pdata, dict):
+                continue
+            if (pdata.get("bounty_value_usd") or 0) > 0:
+                continue                               # Gold leu válido → NÃO inverter
+            crown = _tss_crown(pdata.get("real_name") or key)
+            if crown is None:
+                continue
+            if crown < floor:
+                rejected_below_half += 1
+                continue
+            pdata["bounty_value_usd"] = crown
+            crowns_filled += 1
+            changed = True
+        for p in (pn.get("players_list") or []):       # 2) player_names (IRE/suspeitas)
+            if not isinstance(p, dict) or (p.get("bounty_value_usd") or 0) > 0:
+                continue
+            crown = _tss_crown(p.get("name"))
+            if crown is not None and crown >= floor:
+                p["bounty_value_usd"] = crown
+                changed = True
+        if changed:
+            hands_filled += 1
+            if not dry_run:
+                conn = get_conn()
+                try:
+                    with conn.cursor() as cur2:
+                        cur2.execute("UPDATE hands SET all_players_actions=%s, player_names=%s WHERE id=%s",
+                                     (Json(apa), Json(pn), r["id"]))
+                    conn.commit()
+                finally:
+                    conn.close()
+    return {"hands_scanned": len(rows), "hands_filled": hands_filled,
+            "crowns_filled": crowns_filled, "rejected_below_half": rejected_below_half,
+            "hands_without_ts_base": no_base}
+
+
+@router.post("/backfill-crowns-from-capture")
+def backfill_crowns_from_capture_endpoint(
+    confirm: bool = Query(False),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """#CROWN-VISIBLE-READ-ZERO parte 1. `?confirm=false` (default) = ENSAIO (plano, não
+    escreve). `?confirm=true` = escreve. Ver a regra em `_backfill_crowns_from_capture`."""
+    return backfill_crowns_from_capture(dry_run=not confirm)
+
+
 @router.get("/recent")
 def list_recent_table_ss(
     limit: int = Query(50, ge=1, le=200),
