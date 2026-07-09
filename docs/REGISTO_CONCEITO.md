@@ -215,3 +215,26 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
   `13c6177`); mão-troféu GG-6140169166 = $204.54 (verde $102.27 ×2), GG-6139653123 = $20; nunca
   $170.63. **Aceitação FINAL = reimporte** (tagadas nascem verde-derivadas ou "por rever"). →
   `JOURNAL_2026-07-09.md`.
+
+## 2026-07-09 (fecho, noite) — chokepoint de bounty no ingest: 3 guardas + gatilho TS-late
+
+- 2026-07-09 — **Conceito do ingest de coroas consolidado.** O bounty por-seat passa por UM
+  chokepoint (`services/eliminated_bounty.py:resolve_seat_bounty`, via `scrub_and_persist`,
+  só-tagadas, GG), com **3 guardas** determinísticas guiadas pela HH e pelo TS:
+  1. **Eliminado (verde-KO)** — seat all-in-e-perdeu nunca leva a coroa da Vision; verde-derivado
+     (`green_ko`, instantâneo) ou NULL+"por rever".
+  2. **Vivo-$0 (KO)** — torneio com `buy_in_bounty>0` no TS + vivo + coroa lida $0 → NULL +
+     `live_crown_read_zero`. **NUNCA deriva da base** (o vivo pode ter KOs acumulados → subvaloriza;
+     GG-6132925926: Hero 2 KOs = coroa $100 ≠ base÷2 $50).
+  3. **Vanilla** — torneio com TS presente e SEM bounty → um vivo não pode ter coroa → NULL forçado
+     (mata as inventadas; GG-6138905902 Daily Hyper $60: $50/$20 alucinados pela Vision do table-SS;
+     raiz = `table_ss_deanon._seats_to_vision_data` copiava `bounty_usd` sem gate).
+  - **Convenção reafirmada (caso real):** a coroa de um VIVO = **INSTANTÂNEO** (metade do total, PKO
+    50/50); Hero com KOs acumulados tem coroa **> base÷2** — LEGÍTIMO. *Branco honesto > valor inventado.*
+  - **Gates duros:** `live-crown-zero-scan` (`silent_zero_contamination`) + `spurious-crown-non-ko-scan`
+    (`spurious_crown_contamination`) — ambos =0 pós-reimporte.
+  - **Editar a coroa do Hero:** `{!isHero}` levantado no `CrownCell` (capacidade permanente).
+- 2026-07-09 — **Gatilho TS-late (`#TS-LATE-NO-FORMAT-RECALC`, GG-only).** Ao importar um TS GG,
+  reclassifica o formato (rede de segurança) e **re-corre o funil de coroas** das mãos desse torneio
+  → as guardas vivo-$0/vanilla disparam mesmo quando o TS chega DEPOIS da HH. `services/ts_reclassify.py`;
+  TS-primeiro = no-op (byte-idêntico). Jusante: solves HRC stale listados, não re-solvidos. → `JOURNAL_2026-07-09.md`.

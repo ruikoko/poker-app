@@ -84,12 +84,32 @@ para os `tn` GG upsertados:
 **Impacto medido (read-only, 2622 mãos GG 2026 com TS): 0 formatos mudariam** (o nome GG já
 classifica bem) → a reclassificação é rede de segurança; o valor real é o re-scrub. Teste puro:
 `test_ts_reclassify.py`. Verificação ao vivo pós-deploy: largar um TS e ver o log `[ts_import] reclassify`.
-- **`#TABLE-SS-SPEEDRACER-NO-MATCH`** — diagnosticado: **HH em falta** (19 capturas de 15/16/18 Jun;
-  a BD só tem GG de 30 Jun-2 Jul). O matcher FUNCIONA (12 Speed Racer casaram nos dias com HH).
-  **NÃO afrouxar o match** (a mão de mesmo nome mais próxima está a 12-17 dias → match errado).
-  Resolve-se ao importar os dias em falta (o `relink_orphan_table_ss` re-liga). Ver `JOURNAL_2026-07-09`.
-- **`#ICM-FT-TAG-NOT-LANDING`** — a tag `icm-ft` da pasta `ICM FT` do IT não aterra (`table_ss` com
-  0 rows `folder_tag='icm-ft'`); precisa do LOG do appimport (retorno dos POST). Atacar com o Speed Racer.
+- **`#TABLE-SS-SPEEDRACER-NO-MATCH` — diagnóstico ATUALIZADO 9 Jul (a versão "HH em falta" era só
+  METADE).** Sintoma que destapou o resto: **0 mãos Speed Racer na secção HRC**. Investigação
+  read-only em prod (como se chegou cá: contar mãos → contar capturas por source/folder_tag → ler o
+  gate do HRC):
+  - **218 mãos Speed Racer GG 2026** — 206 anónimas · 8 por Gold (`position_v3`) · 4 por print IT
+    (`table_ss`); **217/218 SEM etiqueta nenhuma**.
+  - **31 prints de mesa (IT)** do Speed Racer, TODOS `source='manual_upload'` (soltos, sem pasta) →
+    **0 com `folder_tag='speed-racer'`**. Destes: **19 `no_match_to_hand`** (faltam as HH de
+    15/16/18 Jun; a BD só tem 30 Jun–2 Jul) + **12 `success`** (casaram) — mas **nenhum aplicou
+    etiqueta** (não a traziam).
+  - **0 capturas Gold** na tabela de capturas; a Gold deu nome a 8 mãos mas **a Gold NUNCA etiqueta**
+    (só põe nomes reais).
+  - **São DOIS bloqueios, não um:** (a) 19 capturas não casam (HH em falta) — **NÃO afrouxar o match**
+    (mão de nome igual mais próxima a 12-17 dias = match errado); (b) **a etiqueta `speed-racer` não
+    existe em NENHUM print** → nenhuma mão fica etiquetada → o gate do HRC, que **exige** etiqueta do
+    basket (`hrc_queue.py:158-163`, e bem — só mãos de estudo entram), exclui-as **todas**.
+  - **NÃO é bug do HRC nem do matcher.** Resolve quando os **prints da pasta "SpeedRacer"** (que
+    trazem `folder_tag='speed-racer'`) entrarem E casarem → a etiqueta aterra → HRC. Depende do
+    `#ICM-FT-TAG-NOT-LANDING` (a etiqueta aterrar mesmo em linhas casadas). **Tudo fecha no
+    wipe+reimporte** (HH todas + prints com pasta). Bloco antigo (8 Jul) mais abaixo = superseded.
+- **`#ICM-FT-TAG-NOT-LANDING` — investigação OBRIGATÓRIA pré-Etapa-2 (PRÓXIMA SESSÃO).** A etiqueta
+  da pasta do IT (`icm-ft`, `speed-racer`, …) **não aterra** em linhas casadas por upload web
+  (`table_ss` com 0 rows `folder_tag`). É o **mesmo mecanismo** que deixa o Speed Racer sem etiqueta
+  (acima) → é a raiz partilhada. **Plano:** correr o appimport com o **LOG dos POST** (retorno de
+  cada `_apply_folder_tag_to_hand`) para ver ONDE a folder-tag se perde. **Diagnóstico primeiro, em
+  linguagem simples ao Rui, ANTES de qualquer fix.**
 
 
 ## ✅ Sistema de nomes (quarentena Fase 3 + RE-ENTRADA + detetor de evidência dura) — LIVE (8 Jul)
@@ -293,6 +313,10 @@ coroas. Não é furo que gerou as 107 (é defesa-em-profundidade). Hoje a protec
 da Vision **cru**. **Quadro A vs B apresentado ao Rui** — aguarda decisão (não implementar até decidir).
 
 ## 🔴 `#TABLE-SS-SPEEDRACER-NO-MATCH` — investigação OBRIGATÓRIA antes da Etapa 2 (8 Jul)
+
+> ⚠️ **SUPERSEDED pelo diagnóstico ATUALIZADO 9 Jul no topo (secção ABERTO).** O no-match (HH em
+> falta) é só METADE; o bloqueio que mantém o Speed Racer FORA do HRC é a **etiqueta que nunca
+> existiu** (0 prints com `folder_tag='speed-racer'`; todos soltos por web). Ler o topo primeiro.
 
 **Descoberto no reimport (Cano 3, Etapa 1).** As **19 capturas GG `no_match_to_hand` são TODAS Speed
 Racer** — e as **218 mãos Speed Racer EXISTEM na BD** (HH importada). Logo não é "HH em falta": é um

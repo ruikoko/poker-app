@@ -91,3 +91,19 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   a mão-troféu lê **$204.54**, nunca $170.63. **LIÇÃO:** "completo" só conta com **lista provada
   + prova em mãos reais + gate duro no ar** — não "em buffer" nem "documentado". (Reforça a lição
   de 2026-07-09 anterior — o arranjo só-documentado que recorreu.)
+
+- 2026-07-09 (noite) — **Ausência num painel a jusante ≠ bug do painel.** O Rui notou "0 mãos
+  Speed Racer no HRC". O gate do HRC estava **certo** (só aceita mãos com etiqueta de estudo); a
+  causa real era **a montante** — a etiqueta `speed-racer` **nunca aterrou** (0 prints com pasta;
+  todos soltos por web). **LIÇÃO:** quando algo falta num painel, seguir o **pipeline da condição**
+  (aqui: a etiqueta), não só o filtro do painel. Confirmar na fonte + com dados reais (contámos as
+  218 mãos, os 31 prints por source, os 0 folder_tag) antes de concluir.
+- 2026-07-09 (noite) — **Coroa gravada sem perguntar "este torneio tem bounty?".** A raiz das coroas
+  espúrias num vanilla foi um **writer sem gate** (`_seats_to_vision_data` copiava o `bounty_usd` da
+  Vision para cada seat). **LIÇÃO:** o valor da Vision é palpite; a guarda vive no **funil único**
+  (com o sinal autoritativo do TS), não espalhada por cada escritor — foi assim que a vivo-$0 e a
+  vanilla entraram no mesmo chokepoint da verde-KO, e não em N sítios.
+- 2026-07-09 (noite) — **Diagnóstico só-na-conversa mente ao próximo Claude.** O
+  `#TABLE-SS-SPEEDRACER-NO-MATCH` estava registado como "HH em falta" (metade); a versão completa
+  (dois bloqueios: no-match + etiqueta inexistente) vivia só no chat. **LIÇÃO:** ao evoluir um
+  diagnóstico, reescrever a versão final nos **docs vivos** (PENDENTES) na mesma sessão.
