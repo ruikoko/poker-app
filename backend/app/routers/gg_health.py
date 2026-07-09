@@ -26,6 +26,7 @@ from app.services.ft_boundary import (
     candidate_tns, via_b_diagnostics, review_status,
 )
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
+from app.services.eliminated_bounty import busted_real_names, BOUNTY_REVIEW_KEY
 
 router = APIRouter(prefix="/api/gg-health", tags=["gg-health"])
 
@@ -958,3 +959,70 @@ def np_apply(body: NpApplyBody, current_user=Depends(require_auth_or_api_key)):
         total["fills"] += res.get("fills_total", 0)
         total["quarantine_pending"] += res.get("quarantine_pending", 0)
     return {"dry_run": body.dry_run, **total}
+
+
+# ── CURA verde-KO — scan read-only de CONTAMINAÇÃO (rede de verificação) ──────
+@router.get("/eliminated-crown-scan")
+def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
+    """READ-ONLY. Lista seats ELIMINADOS (sinal HH: all-in e perdeu) que têm coroa
+    NÃO-NULA gravada — o veneno da armadilha verde-KO (coroa do vizinho colada no
+    eliminado). Sinaliza os FORTES: coroa igual à de OUTRO seat vivo E > base÷2
+    (acumulada, não a inicial partilhada por frescos). Serve para verificar o
+    reimporte (alvo pós-cura: 0 fortes) e o estado atual. NADA escreve.
+
+    `strong` = quase-certo veneno; `review` = eliminado já marcado 'por rever'
+    (guarda ativa — bom); `soft` = coroa única/≤base÷2 (pode ser o real pré-bust)."""
+    base = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL")}
+    rows = query(
+        "SELECT hand_id, tournament_number, tournament_name, raw, "
+        "       all_players_actions AS apa, player_names AS pn "
+        "  FROM hands "
+        " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
+        "   AND player_names->>'match_method' IS NOT NULL "
+        "   AND player_names->'players_list' IS NOT NULL")
+    strong, review, soft = [], [], []
+    for r in rows:
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        busted = busted_real_names(r["raw"], apa)
+        if not busted:
+            continue
+        pl = pn.get("players_list") or []
+        crowns = {}
+        for p in pl:
+            try:
+                bv = float(p.get("bounty_value_usd") or 0)
+            except (TypeError, ValueError):
+                bv = 0.0
+            if bv > 0:
+                crowns.setdefault(round(bv, 2), []).append(p.get("name"))
+        b = base.get(r["tournament_number"])
+        floor = b / 2 if b else None
+        for p in pl:
+            nm = p.get("name")
+            if nm not in busted:
+                continue
+            try:
+                bv = float(p.get("bounty_value_usd") or 0)
+            except (TypeError, ValueError):
+                bv = 0.0
+            has_review = bool(p.get(BOUNTY_REVIEW_KEY))
+            item = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+                    "name": nm, "crown": bv, "floor": floor,
+                    "review": p.get(BOUNTY_REVIEW_KEY)}
+            if has_review and bv <= 0:
+                review.append(item)          # guarda ativa a funcionar
+                continue
+            if bv <= 0:
+                continue                     # eliminado sem coroa (limpo)
+            others = [n for n in crowns.get(round(bv, 2), []) if n != nm]
+            if others and floor is not None and bv > floor + 0.001:
+                item["equal_to"] = others
+                strong.append(item)
+            else:
+                soft.append(item)
+    return {"scanned_hands": len(rows),
+            "counts": {"strong": len(strong), "review": len(review), "soft": len(soft)},
+            "strong": strong, "review": review, "soft": soft}
