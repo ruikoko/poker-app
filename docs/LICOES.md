@@ -107,3 +107,12 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   `#TABLE-SS-SPEEDRACER-NO-MATCH` estava registado como "HH em falta" (metade); a versão completa
   (dois bloqueios: no-match + etiqueta inexistente) vivia só no chat. **LIÇÃO:** ao evoluir um
   diagnóstico, reescrever a versão final nos **docs vivos** (PENDENTES) na mesma sessão.
+
+- 2026-07-09 (noite) — **O nosso próprio processo fabricava a doença.** O move do appimport
+  **achatava** o `done\it` (`it\<SUB>\x → done\it\x`), destruindo a subpasta — e a subpasta É a
+  etiqueta. Um reimporte a partir do `done` nasceria TODO sem etiqueta (a mesma doença que
+  investigávamos no Speed Racer). **Descoberto pelo Rui**, não pela suite. **LIÇÃO:** o `done`/arquivo
+  não é lixo — é **matéria-prima do reimporte**; qualquer passo que MOVA dados tem de preservar o que
+  os classifica (aqui, a subpasta). Ao curar, garantir o **round-trip** (guardar → reler dá o mesmo)
+  com teste nos dois sentidos, e **não adivinhar** o que já se perdeu (prints sem tag na BD ficam na
+  raiz — branco honesto).

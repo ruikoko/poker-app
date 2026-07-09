@@ -1862,6 +1862,21 @@ def set_anon_map_override(payload: dict = Body(...),
             "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing)}
 
 
+@router.get("/folder-tags")
+def folder_tags_by_filename(current_user=Depends(require_auth)):
+    """#ICM-FT-TAG-NOT-LANDING — mapa `original_filename → folder_tag` das capturas que
+    trazem tag (folder_tag não-nulo). Read-only. Serve a arrumação do `done\\it` achatado
+    (script local `tidy_done_it.py`): a BD é a fonte de verdade de que pasta cada print veio.
+    Nomes de ficheiro repetidos ficam com a última tag vista (raro; a mesma captura reprocessada)."""
+    rows = query(
+        "SELECT original_filename, folder_tag FROM table_ss_processing_log "
+        " WHERE folder_tag IS NOT NULL AND original_filename IS NOT NULL")
+    m = {}
+    for r in rows:
+        m[r["original_filename"]] = r["folder_tag"]
+    return {"count": len(m), "map": m}
+
+
 @router.post("/set-bounties")
 def set_bounties_override(payload: dict = Body(...),
                           current_user=Depends(require_auth_or_api_key)):

@@ -534,6 +534,32 @@ def _folder_tag_for(subdir_name):
     return IT_FOLDER_TAGS.get(key)
 
 
+# Reverso: tag → NOME de subpasta canónico (para reconstruir o done achatado,
+# #ICM-FT-TAG-NOT-LANDING). Cada nome tem de voltar a bater no `_folder_tag_for`
+# (senão o reimporte lê a subpasta e não reconhece a tag) — garantido por teste.
+CANONICAL_FOLDER_FOR_TAG = {
+    "icm":            "ICM",
+    "icm-pko":        "ICM PKO",
+    "pos-pko":        "PKO Pos",
+    "pos-nko":        "NKO Pos",
+    "icm-pko-ft":     "ICM PKO FT",
+    "pos-pko-ft":     "PKO Pos FT",
+    "icm-ft":         "ICM FT",
+    "pos-nko-ft":     "NKO Pos FT",
+    "speed-racer":    "SpeedRacer",
+    "speed-racer-ft": "Speed Racer FT",
+    "nota":           "Nota",
+}
+
+
+def _done_subdir(done_root, sublbl):
+    """Destino no done PRESERVANDO a subpasta de origem. A subpasta É a etiqueta
+    (pt72) → achatar o done destruía a informação NO DISCO e um reimporte a partir
+    do done nascia SEM tag (#ICM-FT-TAG-NOT-LANDING, descoberto pelo Rui). Raiz
+    (sublbl vazio) → done_root; subpasta → done_root\\<sublbl>."""
+    return os.path.join(done_root, sublbl) if sublbl else done_root
+
+
 # ── Pasta `it` — classificada por NOME (MESA | LOBBY | SKIP) + tag da subpasta ──
 
 def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_lobby):
@@ -544,6 +570,9 @@ def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_
     files = _imgs_in(src)
     label = os.path.basename(src.rstrip("\\/")) or IT_SUB
     sublbl = "" if label == IT_SUB else label
+    # PRESERVAR a subpasta no done (a subpasta É a tag — #ICM-FT-TAG-NOT-LANDING).
+    mesa_done = _done_subdir(done_table, sublbl)
+    lobby_done = _done_subdir(done_lobby, sublbl)
     tag_lbl = f"  tag={folder_tag}" if folder_tag else ""
     print(f"── {IT_SUB}/{sublbl}  (Intuitive Tables — routing por nome{tag_lbl})  "
           f"— {len(files)} ficheiro(s)")
@@ -581,7 +610,8 @@ def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_
             elif status == "table":
                 c["mesa"] += 1
                 print(f"   ✓ MESA   {fname}: {msg}")
-                shutil.move(path, _dest_no_clobber(done_table, fname))
+                os.makedirs(mesa_done, exist_ok=True)
+                shutil.move(path, _dest_no_clobber(mesa_done, fname))
             else:  # fail (exceção / HTTP não-2xx) — comportamento de sempre
                 c["fail"] += 1
                 print(f"   ✗ MESA   {fname}: {msg} → retry depois")
@@ -594,11 +624,13 @@ def _process_it_dir(session, live, src, folder_tag, window, c, done_table, done_
             elif status == "lobby":
                 c["lobby"] += 1
                 print(f"   ✓ LOBBY  {fname}: {msg}")
-                shutil.move(path, _dest_no_clobber(done_lobby, fname))
+                os.makedirs(lobby_done, exist_ok=True)
+                shutil.move(path, _dest_no_clobber(lobby_done, fname))
             else:  # nonlobby
                 c["nonlobby"] += 1
                 print(f"   · LOBBY  {fname}: {msg} — processado")
-                shutil.move(path, _dest_no_clobber(done_lobby, fname))
+                os.makedirs(lobby_done, exist_ok=True)
+                shutil.move(path, _dest_no_clobber(lobby_done, fname))
 
 
 def process_it_mixed(session, live, window=None):

@@ -104,12 +104,25 @@ classifica bem) → a reclassificação é rede de segurança; o valor real é o
     trazem `folder_tag='speed-racer'`) entrarem E casarem → a etiqueta aterra → HRC. Depende do
     `#ICM-FT-TAG-NOT-LANDING` (a etiqueta aterrar mesmo em linhas casadas). **Tudo fecha no
     wipe+reimporte** (HH todas + prints com pasta). Bloco antigo (8 Jul) mais abaixo = superseded.
-- **`#ICM-FT-TAG-NOT-LANDING` — investigação OBRIGATÓRIA pré-Etapa-2 (PRÓXIMA SESSÃO).** A etiqueta
-  da pasta do IT (`icm-ft`, `speed-racer`, …) **não aterra** em linhas casadas por upload web
-  (`table_ss` com 0 rows `folder_tag`). É o **mesmo mecanismo** que deixa o Speed Racer sem etiqueta
-  (acima) → é a raiz partilhada. **Plano:** correr o appimport com o **LOG dos POST** (retorno de
-  cada `_apply_folder_tag_to_hand`) para ver ONDE a folder-tag se perde. **Diagnóstico primeiro, em
-  linguagem simples ao Rui, ANTES de qualquer fix.**
+- **`#ICM-FT-TAG-NOT-LANDING` — RAIZ ENCONTRADA + fix do core LIVE (9 Jul).** Diagnóstico (código+BD):
+  a máquina de etiquetar **funciona** (286 capturas com `folder_tag`: icm-pko 103, pos-pko 85, nota 66,
+  icm 19, icm-pko-ft 9, pos-pko-ft 2, pos-nko 2). O `icm-ft`/`speed-racer` = 0 porque os prints **não
+  vieram na subpasta** (Speed Racer: 30/31 soltos na raiz `it\`, 1 na pasta errada). **★ Bug do core
+  achado pelo Rui:** o move pós-2xx **achatava** `it\<SUB>\x → done\it\x` → a subpasta (=a tag)
+  **morria no disco** → um reimporte a partir do `done` nascia SEM tag (a doença fabricada por nós).
+  - **FIX (Task 1, LIVE):** `_process_it_dir` preserva a subpasta (`_done_subdir` → `done\it\<SUB>\`;
+    raiz→raiz); `CANONICAL_FOLDER_FOR_TAG` (reverso tag→pasta) round-trip garantido por teste
+    (`test_done_subfolder.py`). Reimporte lê a subpasta → mesma tag. **55 testes appimport verdes.**
+  - **Arrumar o `done` já achatado (Task 2, entregue — à espera do dry-run do Rui):** endpoint
+    `GET /api/table-ss/folder-tags` (nome→tag, BD = fonte de verdade) + `tidy_done_it.py` +
+    `TidyDoneIT.bat`/`TidyDoneIT_Aplicar.bat`: realoja cada print na subpasta da sua tag; **sem tag na
+    BD → fica na raiz (não adivinhar)**; dry-run primeiro, `--apply` move. Só dentro de `Batmen\`.
+  - **ICM FT sem evidência (decisão Rui):** se entraram soltos, ficam na raiz do done (não adivinhar);
+    a máquina FT (`ft_boundary`) repõe os `-ft` das tags base no reimporte — a perda é do sinal manual.
+  - **`it\Lobbys` — DECIDIDO (Rui 9 Jul): deixar como está, NÃO mapear, NÃO investigar.** Os lobbys
+    entram pelo routing por NOME (raiz ou subpasta, indiferente); a pasta é arrumação pessoal do Rui.
+    O aviso "subpasta fora da tabela (IT_FOLDER_TAGS)" para `Lobbys` é **ruído esperado** — ignorar.
+  - **Etapa 2 desbloqueada** deste lado (o done deixa de destruir a tag).
 
 
 ## ✅ Sistema de nomes (quarentena Fase 3 + RE-ENTRADA + detetor de evidência dura) — LIVE (8 Jul)
