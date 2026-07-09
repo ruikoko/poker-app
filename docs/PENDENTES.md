@@ -124,6 +124,29 @@ fallback (players_left da fronteira = N); D3 `folder_ft_source='auto'`; D4 mante
 - **`#FT-N-FROM-NONGG-LOBBY` — N direto do lobby nas salas não-GG.** Os lobbys de **PS/Winamax/WPN** mostram o **tamanho da mesa final DIRETAMENTE** no lobby (ao contrário da GG, onde o N só aparece na aba **Info** — daí o gate `open_tab='Info'`). **Quando/se** o motor FT se estender **além da GG** (ou o snap quiser refinar tags manuais não-GG), o **N** dessas salas extrai-se de **qualquer print de lobby**, **sem** convenção de aba. Facilitador futuro. **Âmbito ATUAL do motor: só-GG** (a cobertura TOTAL de mãos é pré-condição da propagação e do cross-check; as não-GG têm nicks reais e tagam por HM3/pasta, sem o mecanismo de desanon que motiva a FT-propagation na GG).
 - ~~**`#FT-ENSAIO-VIA-F3-ENDPOINT` — mover os ensaios para a F3.**~~ ✅ **FEITO (F3, 8 Jul):** os ensaios correm por `GET /api/gg-health/ft/preview` (mesmo caminho da app, sem script local nem proxy).
 
+## ★ `#LOBBY-IMAGE-NOT-STORED` — guardar a IMAGEM do lobby no pipeline (futuro, 9 Jul)
+
+**Registado a pedido do Rui (9 Jul).** Hoje o pipeline de lobbys **NÃO guarda a imagem** — o
+`lobby_processing_log` só tem a **leitura** da Vision (`vision_json`, `players_left`, `open_tab`,
+`final_table_size`) + `posted_at`, **não os bytes** (ao contrário do table-SS, que guarda
+`img_b64`, e das entries Gold/replayer). Por isso a secção **🏦 Lobby** do painel da mão
+(`HandImagesSection`, `GET /api/hands/<id>/images`, regra 9 Jul) e o ensaio da FT (`_ft_images`)
+mostram só a leitura + hora com a nota **"imagem não guardada"** — não há foto para mostrar nem
+para re-Visionar o histórico.
+
+- **O que falta:** persistir a imagem do lobby (à imagem do `table_ss_processing_log.img_b64`:
+  comprimir 1280/JPEG85 e guardar) nas DUAS vias de entrada — Discord `#lobbys`
+  (`services/lobby_sync.py` / `discord_bot`) e upload por pasta (`POST /api/lobbys/upload`,
+  `services/lobby_vision.py`) — + servir por endpoint (`/api/lobbys/image/<id>`) e ligar na secção
+  Lobby do `HandImagesSection` (hoje já reserva o sítio; passa a mostrar a foto quando existir).
+- **Porquê guardar:** (a) mostrar a foto do lobby na mão/FT; (b) **re-Vision** do histórico
+  (players_left/open_tab/final_table_size) quando o prompt melhorar, sem re-pedir o ficheiro ao Rui
+  (o mesmo motivo que levou o table-SS a guardar a imagem). Só a Vision lê a **original**; a cópia
+  comprimida é para guardar.
+- **Âmbito/decisão:** produto — **quando o Rui mandar**. Retroativo impossível (as imagens
+  antigas foram descartadas; só as novas ficam guardadas a partir da mudança). Cross-ref
+  `HandImagesSection`, `_ft_images` (`gg_health.py`), `#LOBBY-INFO-NO-PAYOUT`.
+
 ## ✅ Infra — token Railway de vida curta (MITIGADO via ficheiro local, 8 Jul)
 
 **Resolvido na prática:** DB reads por `~/.pokerapp_db_ro.env` (fora do repo, só-leitura) +
