@@ -1047,3 +1047,68 @@ def eliminated_crown_scan(current_user=Depends(require_auth_or_api_key)):
                        "review": len(review), "green_ko": len(green_ko)},
             "vision_origin": vision_origin,
             "strong": strong, "soft": soft, "review": review, "green_ko": green_ko}
+
+
+# ── CURA verde-KO — apply controlado do funil às TAGADAS (demonstração do crivo→0) ──
+@router.post("/eliminated-scrub-apply")
+def eliminated_scrub_apply(
+    confirm: bool = Query(False),
+    hand_ids: Optional[str] = Query(None),
+    limit: int = Query(300, ge=1, le=1000),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """Aplica o funil verde-KO (`scrub_and_persist`) às mãos GG TAGADAS com seat HH-bustado.
+    `confirm=false` (default) = ENSAIO: mostra o que mudaria (por mão: seat + coroa-atual →
+    NULL/'por rever'), NÃO escreve. `confirm=true` = escreve, MUST-only (sem verde — o verde
+    vive no ingest com Vision fresca; aqui é demonstração do crivo→0 na BD atual, que o
+    reimporte apaga). Só-tagadas (o wrapper valida). Idempotente. `hand_ids` limita ao teste."""
+    import copy as _copy
+    from app.services.eliminated_bounty import (
+        busted_real_names, scrub_eliminated_bounties, scrub_and_persist, BOUNTY_REVIEW_KEY,
+    )
+    ids = [h.strip() for h in hand_ids.split(",") if h.strip()] if hand_ids else None
+    where = "AND hand_id = ANY(%s)" if ids else ""
+    params = (ids,) if ids else tuple()
+    rows = query(
+        "SELECT id, hand_id, raw, all_players_actions AS apa, player_names AS pn "
+        "  FROM hands "
+        " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
+        "   AND player_names->>'match_method' IS NOT NULL "
+        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 "
+        "        OR COALESCE(array_length(discord_tags,1),0)>0) " + where, params)
+    changed_hands = changed_seats = written = 0
+    plan = []
+    for r in rows[:limit]:
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        busted = busted_real_names(r["raw"], apa)
+        if not busted:
+            continue
+        # snapshot dos bustados com coroa (o que muda) — comparado ao resultado do scrub numa CÓPIA.
+        apa_c, pn_c = _copy.deepcopy(apa), _copy.deepcopy(pn)
+        n = scrub_eliminated_bounties(apa_c, pn_c, r["raw"], None, tagged=True)  # MUST-only
+        if not n:
+            continue
+        seats = []
+        for k, v in apa.items():
+            if k == "_meta" or not isinstance(v, dict):
+                continue
+            nm = v.get("real_name") or k
+            if nm not in busted:
+                continue
+            old = v.get("bounty_value_usd")
+            new = apa_c.get(k, {}).get("bounty_value_usd")
+            if old != new:
+                seats.append({"name": nm, "from": old, "to": new,
+                              "review": apa_c.get(k, {}).get(BOUNTY_REVIEW_KEY)})
+        if not seats:
+            continue
+        changed_hands += 1
+        changed_seats += len(seats)
+        if len(plan) < 60:
+            plan.append({"hand_id": r["hand_id"], "seats": seats})
+        if confirm:
+            written += scrub_and_persist(r["id"])   # escreve (MUST-only)
+    return {"dry_run": not confirm, "tagged_scanned": min(len(rows), limit),
+            "changed_hands": changed_hands, "changed_seats": changed_seats,
+            "seats_written": written if confirm else 0, "plan": plan}
