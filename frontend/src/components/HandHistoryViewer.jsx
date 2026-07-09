@@ -166,7 +166,7 @@ function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
             border: '1px solid rgba(252,211,77,0.30)', whiteSpace: 'nowrap',
           }} title="coroa (sem IRE aceso)">{crownStr}</span>)}
       {ire && tap && crownStr && <span style={{ fontSize: 11, color: '#fcd34d', fontFamily: 'monospace' }}>{crownStr}</span>}
-      {!isHero && handId && (
+      {handId && (
         <button onClick={() => setEditing(e => !e)} title="editar/confirmar coroa" style={{
           background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 12, padding: 0,
         }}>✎</button>
