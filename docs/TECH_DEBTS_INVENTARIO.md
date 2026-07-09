@@ -2502,19 +2502,29 @@ persistida vs re-criar) movido inline para a entry de #11 no backlog
 
 ## 9 Jul 2026 — decisões do bloco das coroas
 
+- ⚪ **`#WN-FORMAT-NAME-GRID` — NÃO CONSTRUIR (decisão Rui 9 Jul, FECHADO).** Pergunta: existe/está
+  ligada uma grelha curada nome→formato para a Winamax? **Estado real verificado:** NÃO. A
+  classificação WN vem de `detect_tournament_format` (`utils/tournament_format.py:81`), chamada em
+  `routers/hm3.py:378` (parser de HH não-GG, via `routers/import_.py:_parse_hh_file:115`): **nome-keyword**
+  (`_classify_by_name`) OU, sem keyword, o **sinal estrutural** `_WN_BOUNTY_RE` (o `X€ bounty)` na linha
+  Seat) → PKO. O `services/winamax_ire_tournaments.py` é um mapa por **PREÇO** só para o IRE (não é
+  grelha de formato). O `parsers/winamax.py TYPE_MAP` serve o parser de **summary/P&L**, não a HH.
+  **Evidência:** 166/166 mãos WN 2026 bem classificadas, incl. nomes mudos (GRAVITY, HIGHROLLER → PKO
+  pelo € bounty estrutural). **Decisão:** aceitar como correcto, não construir grelha. Não reabrir.
+
 - 🟢 **`#BOUNTY-SIGNAL-CROWN-FALLBACK-CIRCULAR` (TEÓRICO/latente — NÃO MEXER, decisão Rui 9 Jul)** —
   `_has_real_bounty_signal` (`mtt.py:773`) prefere o TS mas, **sem TS**, infere `has_player_bounty`
   das COROAS (`any bounty_value_usd>0`) → uma coroa inventada classificaria o torneio como KO
   (circularidade leitura→formato). **Decisão do Rui:** manter como está — o cenário que o arma (GG
   sem TS à hora da classificação) **não existe no fluxo real** (os TS da GG entram sempre primeiro,
   ritual do Rui). Fallback = caminho morto. **Reabrir só se o ritual mudar.** Não é acção.
-- 🟡 **`#TS-LATE-NO-FORMAT-RECALC` (MED, achado 9 Jul — pergunta do Rui)** — o import de TS
-  (`tournament_summaries.py:500 import_tournament_summaries`) dispara `reconcile_lobby_logs` +
-  `trigger_ft_refresh`, mas **NÃO recalcula `tournament_format` das mãos já importadas**. O formato
-  da mão vem do NOME no import da HH (`gg_hands.py:369 detect_tournament_format(name)`, sem consultar
-  o TS) e **fica agarrado**. Consumidores do formato-da-mão: IRE (`ire.py:455/495/545`), HRC
-  (`hrc_queue.py`, `queue_export.py:1232/1681`), fator instantâneo da coroa (`queue_export.py:851`).
-  **Custo real:** para GG o nome carrega o formato (fiável) → baixo; só nomes ambíguos ficariam mal
-  classificados sem o TS os corrigir. **Esforço:** trigger f&f no TS import (à la `refresh_ft_boundaries`)
-  que re-corre a classificação com sinal do TS e faz UPDATE onde difere. **Não implementar sem OK.**
+- ✅ **`#TS-LATE-NO-FORMAT-RECALC` (FECHADO/LIVE 9 Jul — aprovado pelo Rui)** — o import de TS
+  (`tournament_summaries.py:500` + ramo TS de `import_.py:623`) passa a disparar (f&f, GG-only)
+  `ts_reclassify.reclassify_and_rescrub_for_tns` dos `tn` GG upsertados: (1) reclassifica o formato
+  das mãos GG do tn com o sinal do TS (`_reclassified_format`; nome ganha; não rebaixa Mystery/Super
+  KO→PKO), (2) re-scrub das coroas (`scrub_and_persist`, só-tagadas) → as guardas vanilla/vivo-$0
+  disparam quando o TS chega DEPOIS da HH (fecha a fresta), (3) lista no log os solves HRC stale (não
+  re-solve). TS-primeiro = no-op (byte-idêntico). **Impacto medido read-only:** 2622 mãos GG 2026 com
+  TS → **0 reclassificações** (o nome GG já classifica bem) → a reclassificação é rede de segurança; o
+  valor real é o re-scrub. Teste: `test_ts_reclassify.py`. Consumidores do formato: IRE, HRC, fator-coroa.
 

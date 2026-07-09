@@ -621,6 +621,23 @@ async def import_file(
             _extract_txt_files,
         )
         ts_stats = persist_tournament_summaries(_extract_txt_files(content, filename))
+        # #TS-LATE-NO-FORMAT-RECALC (GG-only) — mesmo gatilho da rota dedicada: reclassifica
+        # formato + re-scrub coroas das mãos GG dos tns importados. Fire-and-forget; idempotente.
+        if detected_site == "ggpoker":
+            import asyncio
+            from app.services.ts_reclassify import reclassify_and_rescrub_for_tns
+
+            async def _ts_reclassify_import():
+                try:
+                    res = await asyncio.to_thread(
+                        reclassify_and_rescrub_for_tns, ts_stats.get("gg_tournament_numbers"))
+                    if res["hrc_stale"]:
+                        logger.warning("[import ts] HRC solves STALE por reclassificação: %s",
+                                       res["hrc_stale"])
+                except Exception as exc:
+                    logger.error(f"[import ts] reclassify falhou: {exc}")
+
+            asyncio.create_task(_ts_reclassify_import())
 
     ts_total = (ts_stats["inserted"] + ts_stats["updated"]) if ts_stats else 0
     return {

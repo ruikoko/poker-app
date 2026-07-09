@@ -66,12 +66,24 @@ Hyper $60: Ale Mantovani $50 + Heiaheisen $20 **inventados** pela Vision num van
   cenário que o arma (GG sem TS à hora da classificação) **NÃO existe no fluxo real** (os TS da GG
   entram sempre primeiro — ritual do Rui). **Mantém-se como está** (fallback = caminho morto).
   Reabrir só se o ritual mudar. Não é acção.
-- **`#TS-LATE-NO-FORMAT-RECALC` (achado 9 Jul)** — o import de TS (`tournament_summaries.py:500`)
-  dispara reconcile de lobbys + `trigger_ft_refresh`, mas **NÃO recalcula `tournament_format` das
-  mãos já importadas**. O formato da mão vem do NOME no import da HH (`gg_hands.py:369`) e fica
-  agarrado. Para GG o nome carrega o formato (fiável) → baixo custo; só nomes ambíguos ficariam
-  errados (afecta IRE/HRC/fator-coroa) sem o TS os corrigir. Esforço p/ recalc: trigger f&f no TS
-  import (à la `refresh_ft_boundaries`). **Não implementar sem OK do Rui.**
+### ✅ `#TS-LATE-NO-FORMAT-RECALC` — gatilho no import do TS GG — LIVE (9 Jul)
+
+**APROVADO + implementado (GG-only).** O import de TS (`tournament_summaries.py:500` + o ramo TS
+do `import_.py:623`) dispara agora, fire-and-forget, `ts_reclassify.reclassify_and_rescrub_for_tns`
+para os `tn` GG upsertados:
+1. **Reclassifica** o formato das mãos GG do tn com o sinal do TS (`_reclassified_format` puro:
+   `detect_tournament_format(..., has_player_bounty=buy_in_bounty>0)`; nome ganha; não rebaixa
+   Mystery/Super KO → PKO). Corrige a classificação name-only da HH.
+2. **Re-scrub das coroas** (`scrub_and_persist`, só-tagadas, DB-aware, idempotente) → as guardas
+   vanilla/vivo-$0 disparam quando o TS chega DEPOIS da HH (o scrub lê o TS live → idêntico a
+   TS-primeiro). Fecha a fresta por inteiro.
+3. **Jusante:** solves HRC afectados por mudança de formato são **listados no log** (`hrc_stale`),
+   NÃO re-solvidos (espírito da F6 dormente).
+
+**TS-primeiro (ritual normal) byte-idêntico:** quando o TS entra sem mãos ainda desse tn → no-op.
+**Impacto medido (read-only, 2622 mãos GG 2026 com TS): 0 formatos mudariam** (o nome GG já
+classifica bem) → a reclassificação é rede de segurança; o valor real é o re-scrub. Teste puro:
+`test_ts_reclassify.py`. Verificação ao vivo pós-deploy: largar um TS e ver o log `[ts_import] reclassify`.
 - **`#TABLE-SS-SPEEDRACER-NO-MATCH`** — diagnosticado: **HH em falta** (19 capturas de 15/16/18 Jun;
   a BD só tem GG de 30 Jun-2 Jul). O matcher FUNCIONA (12 Speed Racer casaram nos dias com HH).
   **NÃO afrouxar o match** (a mão de mesmo nome mais próxima está a 12-17 dias → match errado).

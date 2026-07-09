@@ -548,6 +548,27 @@ async def import_tournament_summaries(
         await asyncio.to_thread(trigger_ft_refresh)
 
     asyncio.create_task(_ft_refresh_async())
+
+    # ── #TS-LATE-NO-FORMAT-RECALC (GG-only) — reclassifica formato + re-scrub coroas
+    # das mãos GG dos tns recém-importados (fecha o cenário HH-primeiro→TS-depois).
+    # Fire-and-forget; idempotente; no-op se o TS entrou antes das mãos (ritual normal).
+    from app.services.ts_reclassify import reclassify_and_rescrub_for_tns
+
+    async def _ts_reclassify_async():
+        try:
+            res = await asyncio.to_thread(
+                reclassify_and_rescrub_for_tns, result.get("gg_tournament_numbers"))
+            logger.info(
+                "[ts_import] reclassify: tns=%d reclassified=%d rescrubbed=%d hrc_stale=%d",
+                res["tns"], res["reclassified"], res["rescrubbed"], len(res["hrc_stale"]),
+            )
+            if res["hrc_stale"]:
+                logger.warning("[ts_import] HRC solves STALE por reclassificação (não re-solvidos): %s",
+                               res["hrc_stale"])
+        except Exception as exc:
+            logger.error(f"[ts_import] reclassify falhou: {exc}")
+
+    asyncio.create_task(_ts_reclassify_async())
     return result
 
 
@@ -580,6 +601,8 @@ def persist_tournament_summaries(files: list[tuple[str, bytes]]) -> dict:
         "updated": 0,
         "skipped_pre_2026": 0,
         "failed": [],
+        # tns GG upsertados nesta corrida → alvo do gatilho #TS-LATE-NO-FORMAT-RECALC.
+        "gg_tournament_numbers": [],
     }
 
     if not files:
@@ -627,6 +650,8 @@ def persist_tournament_summaries(files: list[tuple[str, bytes]]) -> dict:
                         stats["inserted"] += 1
                     else:
                         stats["updated"] += 1
+                    if parsed["site"] == "GGPoker":
+                        stats["gg_tournament_numbers"].append(parsed["tournament_number"])
                     cur.execute("RELEASE SAVEPOINT row_sp")
                 except Exception as e:
                     cur.execute("ROLLBACK TO SAVEPOINT row_sp")
