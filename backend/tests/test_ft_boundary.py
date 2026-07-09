@@ -121,6 +121,21 @@ def test_lobby_boundary_none_without_info_print():
         assert fb._lobby_ft_boundary("T1") == (None, None)
 
 
+# ── has_new_ft_signal: SÓ a tag manual -ft reactiva um dispensado (não o lobby) ──
+def test_has_new_ft_signal_manual_reactivates():
+    with patch.object(fb, "_manual_ft_boundary", return_value=T0):
+        assert fb.has_new_ft_signal("T1") is True
+
+
+def test_has_new_ft_signal_lobby_alone_does_not_reactivate():
+    # o print do Info (lobby) é o MESMO sinal que tornou o torneio candidato — não é
+    # 'novo' face a uma dispensa → NÃO reactiva (senão a dispensa nunca pegava; era o
+    # bug do cartão FT que voltava a pending a cada refresh).
+    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+         patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)):
+        assert fb.has_new_ft_signal("T1") is False
+
+
 # ── cross-check HH (Adição 1, D2) ─────────────────────────────────────────────
 def test_cross_check_match_mismatch_and_illegible():
     with patch.object(fb, "_first_hand_seats_after", return_value=7):

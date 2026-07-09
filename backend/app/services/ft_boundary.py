@@ -369,6 +369,7 @@ def _candidate_tns() -> list[str]:
     rows = query(
         """SELECT DISTINCT tournament_number AS tn FROM lobby_processing_log
             WHERE tournament_number IS NOT NULL
+              AND site = 'GGPoker'
               AND ((players_left IS NOT NULL AND players_left <= %s)
                    OR (vision_json->>'open_tab' = 'Info'
                        AND vision_json->>'final_table_size' ~ '^[0-9]+$'))
@@ -532,11 +533,12 @@ def _review_row(tn):
 
 
 def has_new_ft_signal(tn) -> bool:
-    """Sinal novo FORTE para reactivar um dispensado: tag manual -ft OU print do Info."""
-    if _manual_ft_boundary(tn) is not None:
-        return True
-    lb, _n = _lobby_ft_boundary(tn)
-    return lb is not None
+    """Sinal DELIBERADO novo que reactiva um dispensado: SÓ a tag manual `-ft` do Rui
+    (`folder_ft_source='manual'`). O sinal de **lobby** (aba Info) é o MESMO que tornou
+    o torneio candidato — não é 'novo' face a uma dispensa; se reactivasse por presença,
+    a dispensa NUNCA pegava (o cartão voltava a pending a cada refresh — bug apanhado no
+    reimport). Só o Rui a pôr a mão numa pasta `-ft` conta como sinal novo forte."""
+    return _manual_ft_boundary(tn) is not None
 
 
 def _upsert_review_snapshot(tn, d, status, decision):
