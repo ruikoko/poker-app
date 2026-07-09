@@ -2,7 +2,7 @@
 from app.services.eliminated_bounty import (
     busted_keys_from_hh, busted_real_names, parse_green_kos, resolve_seat_bounty,
     scrub_eliminated_bounties,
-    REVIEW_NO_GREEN, REVIEW_AMBIGUOUS, SOURCE_GREEN_KO,
+    REVIEW_NO_GREEN, REVIEW_AMBIGUOUS, REVIEW_LIVE_ZERO, SOURCE_GREEN_KO,
     BOUNTY_REVIEW_KEY, BOUNTY_SOURCE_KEY,
 )
 
@@ -122,6 +122,78 @@ def test_scrub_skips_untagged():
     apa, pn = _apa_pn()
     n = scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, tagged=False)
     assert n == 0 and apa["Hero"]["bounty_value_usd"] == 170.63
+
+
+# ── Guarda VIVO-$0 (torneio KO + vivo pela HH + coroa $0 → NULL + por rever) ──
+def test_resolve_live_zero_in_ko_is_review():
+    # KO (base>0) + vivo + coroa $0 → NULL + review; NUNCA deriva da base.
+    val, rev, src = resolve_seat_bounty("Fresh", 0, busted_names=set(), bounty_base=70)
+    assert val is None and rev == REVIEW_LIVE_ZERO and src is None
+
+
+def test_resolve_live_none_crown_in_ko_is_review():
+    val, rev, src = resolve_seat_bounty("Fresh", None, busted_names=set(), bounty_base=70)
+    assert val is None and rev == REVIEW_LIVE_ZERO and src is None
+
+
+def test_resolve_live_positive_crown_passthrough_in_ko():
+    val, rev, src = resolve_seat_bounty("Fresh", 35.0, busted_names=set(), bounty_base=70)
+    assert val == 35.0 and rev is None and src is None   # coroa >0 → INALTERADA
+
+
+def test_resolve_live_zero_without_base_passthrough():
+    # Sem base (não-KO / sem TS) → $0 passa tal-e-qual (guarda não dispara).
+    val, rev, src = resolve_seat_bounty("Fresh", 0, busted_names=set(), bounty_base=None)
+    assert val == 0 and rev is None and src is None
+    val0, _, _ = resolve_seat_bounty("Fresh", 0, busted_names=set(), bounty_base=0)
+    assert val0 == 0
+
+
+def _apa_pn_live_zero():
+    # YanayB VIVO com coroa $0; Hero BUSTADO (pela _HH) com coroa.
+    apa = {"_meta": {"bb": 5000},
+           "Hero": {"real_name": "Lauro Dermio", "bounty_value_usd": 170.63},
+           "ccc84511": {"real_name": "YanayB", "bounty_value_usd": 0}}
+    pn = {"players_list": [
+        {"name": "Lauro Dermio", "bounty_value_usd": 170.63},
+        {"name": "YanayB", "bounty_value_usd": 0}]}
+    return apa, pn
+
+
+def test_scrub_live_zero_nulls_and_reviews_when_ko():
+    apa, pn = _apa_pn_live_zero()
+    n = scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, bounty_base=70)
+    assert n >= 1
+    # YanayB (vivo, $0) → NULL + live_crown_read_zero, em apa E pn
+    assert apa["ccc84511"]["bounty_value_usd"] is None
+    assert apa["ccc84511"][BOUNTY_REVIEW_KEY] == REVIEW_LIVE_ZERO
+    assert pn["players_list"][1]["bounty_value_usd"] is None
+    assert pn["players_list"][1][BOUNTY_REVIEW_KEY] == REVIEW_LIVE_ZERO
+    # Hero (bustado, sem verde) → NULL + eliminated_no_green (verde-KO na mesma corrida)
+    assert apa["Hero"][BOUNTY_REVIEW_KEY] == REVIEW_NO_GREEN
+
+
+def test_scrub_live_zero_never_derives_base():
+    # A regra do Rui: NUNCA gravar a base (nem base÷2) — grava NULL honesto.
+    apa, pn = _apa_pn_live_zero()
+    scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, bounty_base=70)
+    assert apa["ccc84511"]["bounty_value_usd"] is None    # não é 70 nem 35
+
+
+def test_scrub_live_zero_untouched_without_base():
+    # Sem base (não-KO / sem TS) → guarda vivo-$0 NÃO dispara; YanayB fica $0.
+    apa, pn = _apa_pn_live_zero()
+    scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, bounty_base=None)
+    assert apa["ccc84511"]["bounty_value_usd"] == 0
+    assert BOUNTY_REVIEW_KEY not in apa["ccc84511"]
+
+
+def test_scrub_live_positive_untouched_in_ko():
+    # Vivo com coroa >0 em torneio KO → passthrough, sem churn nem review.
+    apa, pn = _apa_pn()   # YanayB coroa 253.75 (>0)
+    scrub_eliminated_bounties(apa, pn, _HH, vision_data=None, bounty_base=70)
+    assert apa["ccc84511"]["bounty_value_usd"] == 253.75
+    assert BOUNTY_REVIEW_KEY not in apa["ccc84511"]
 
 
 def test_scrub_preserves_existing_green_ko_without_fresh_green():

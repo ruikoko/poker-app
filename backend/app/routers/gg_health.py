@@ -1057,7 +1057,8 @@ def eliminated_scrub_apply(
     limit: int = Query(300, ge=1, le=1000),
     current_user=Depends(require_auth_or_api_key),
 ):
-    """Aplica o funil verde-KO (`scrub_and_persist`) às mãos GG TAGADAS com seat HH-bustado.
+    """Aplica o funil (`scrub_and_persist`) às mãos GG TAGADAS: verde-KO (seat HH-bustado) E
+    guarda vivo-$0 (KO + vivo + coroa $0 → NULL+'por rever'; `kind` distingue no plano).
     `confirm=false` (default) = ENSAIO: mostra o que mudaria (por mão: seat + coroa-atual →
     NULL/'por rever'), NÃO escreve. `confirm=true` = escreve, MUST-only (sem verde — o verde
     vive no ingest com Vision fresca; aqui é demonstração do crivo→0 na BD atual, que o
@@ -1067,26 +1068,32 @@ def eliminated_scrub_apply(
         busted_real_names, scrub_eliminated_bounties, scrub_and_persist, BOUNTY_REVIEW_KEY,
     )
     ids = [h.strip() for h in hand_ids.split(",") if h.strip()] if hand_ids else None
-    where = "AND hand_id = ANY(%s)" if ids else ""
+    where = "AND h.hand_id = ANY(%s)" if ids else ""
     params = (ids,) if ids else tuple()
     rows = query(
-        "SELECT id, hand_id, raw, all_players_actions AS apa, player_names AS pn "
-        "  FROM hands "
-        " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
-        "   AND player_names->>'match_method' IS NOT NULL "
-        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 "
-        "        OR COALESCE(array_length(discord_tags,1),0)>0) " + where, params)
+        "SELECT h.id, h.hand_id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
+        "       ts.buy_in_bounty AS bounty_base "
+        "  FROM hands h "
+        "  LEFT JOIN tournament_summaries ts "
+        "    ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND h.player_names->>'match_method' IS NOT NULL "
+        "   AND (COALESCE(array_length(h.hm3_tags,1),0)>0 "
+        "        OR COALESCE(array_length(h.discord_tags,1),0)>0) " + where, params)
     changed_hands = changed_seats = written = 0
     plan = []
     for r in rows[:limit]:
         apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
         busted = busted_real_names(r["raw"], apa)
-        if not busted:
+        base = r.get("bounty_base")
+        live_guard = bool(base and float(base) > 0)          # KO conhecido → guarda vivo-$0
+        if not busted and not live_guard:
             continue
-        # snapshot dos bustados com coroa (o que muda) — comparado ao resultado do scrub numa CÓPIA.
+        # snapshot — comparado ao resultado do scrub numa CÓPIA (verde-KO + guarda vivo-$0).
         apa_c, pn_c = _copy.deepcopy(apa), _copy.deepcopy(pn)
-        n = scrub_eliminated_bounties(apa_c, pn_c, r["raw"], None, tagged=True)  # MUST-only
+        n = scrub_eliminated_bounties(apa_c, pn_c, r["raw"], None, tagged=True,
+                                      bounty_base=base)        # MUST-only + vivo-$0
         if not n:
             continue
         seats = []
@@ -1094,12 +1101,11 @@ def eliminated_scrub_apply(
             if k == "_meta" or not isinstance(v, dict):
                 continue
             nm = v.get("real_name") or k
-            if nm not in busted:
-                continue
             old = v.get("bounty_value_usd")
             new = apa_c.get(k, {}).get("bounty_value_usd")
             if old != new:
                 seats.append({"name": nm, "from": old, "to": new,
+                              "kind": "eliminated" if nm in busted else "live_zero",
                               "review": apa_c.get(k, {}).get(BOUNTY_REVIEW_KEY)})
         if not seats:
             continue
@@ -1112,3 +1118,58 @@ def eliminated_scrub_apply(
     return {"dry_run": not confirm, "tagged_scanned": min(len(rows), limit),
             "changed_hands": changed_hands, "changed_seats": changed_seats,
             "seats_written": written if confirm else 0, "plan": plan}
+
+
+# ── GATE da guarda VIVO-$0 (irmão do eliminated-crown-scan) ───────────────────
+@router.get("/live-crown-zero-scan")
+def live_crown_zero_scan(current_user=Depends(require_auth_or_api_key)):
+    """GATE da guarda vivo-$0 (só-tagadas, GG KO). Reporta jogadores VIVOS (não bustados
+    pela HH) com coroa $0 em torneios KO (buy_in_bounty do TS > 0). Dois baldes:
+    - `silent_zero` = coroa $0/null SEM bounty_review → CONTAMINAÇÃO (grava $0 em silêncio).
+      GATE DURO: >0 após reimporte OU qualquer ingest GG = PARAR + investigar + corrigir.
+    - `review` = $0 com review='live_crown_read_zero' → honesto (guarda activa — OK).
+    Torneios não-KO ou sem TS ficam FORA (a guarda não se aplica). NADA escreve."""
+    base = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL AND buy_in_bounty > 0")}
+    rows = query(
+        "SELECT hand_id, tournament_number, tournament_name, raw, "
+        "       all_players_actions AS apa, player_names AS pn "
+        "  FROM hands "
+        " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
+        "   AND player_names->>'match_method' IS NOT NULL "
+        "   AND player_names->'players_list' IS NOT NULL "
+        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 "
+        "        OR COALESCE(array_length(discord_tags,1),0)>0)")
+    scanned = 0
+    silent, review = [], []
+    for r in rows:
+        b = base.get(r["tournament_number"])
+        if not b:                       # não-KO ou sem TS → guarda não se aplica
+            continue
+        scanned += 1
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        busted = busted_real_names(r["raw"], apa)
+        for p in pn.get("players_list") or []:
+            nm = p.get("name")
+            if not nm or nm in busted:
+                continue                # eliminado = verde-KO (outro crivo)
+            try:
+                bv = float(p.get("bounty_value_usd") or 0)
+            except (TypeError, ValueError):
+                bv = 0.0
+            if bv > 0:
+                continue
+            item = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+                    "name": nm, "review": p.get(BOUNTY_REVIEW_KEY)}
+            if p.get(BOUNTY_REVIEW_KEY):
+                review.append(item)     # honesto (guarda activa)
+            else:
+                silent.append(item)     # coroa $0 gravada em silêncio = contaminação
+    return {"scanned_ko_tagged_hands": scanned,
+            # ★ crivo da guarda vivo-$0: tem de ser 0 pós-reimporte.
+            "silent_zero_contamination": len(silent),
+            "gate": "hard: silent_zero_contamination>0 => PARAR+investigar (nunca curado)",
+            "counts": {"silent": len(silent), "review": len(review)},
+            "silent_zero": silent, "review": review}

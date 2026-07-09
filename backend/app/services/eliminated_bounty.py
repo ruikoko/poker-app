@@ -16,6 +16,10 @@ MUST     — eliminado sem verde derivável → bounty NULL + review='eliminated
 SHOULD   — 1 eliminado + 1 verde → bounty = verde (instantâneo; convenção #KO-CROWN-INSTANT-FIX,
            o resto do código faz ÷instant_fraction=×2 → total). Guarda o INSTANTÂNEO (o verde).
 FALLBACK — multiway (vários eliminados ou vários verdes, sem ligar 1:1) → NULL + 'eliminated_ambiguous'.
+VIVO-$0  — jogador VIVO (HH) em torneio KO (base do TS > 0) com coroa lida $0 → NUNCA gravar o $0
+           silencioso → NULL + 'live_crown_read_zero'. NÃO se deriva da base (o vivo pode ter KOs
+           acumulados → a base subvaloriza; ex. GG-6132925926 Hero 2 KOs = coroa $100 ≠ base÷2 $50).
+           Só dispara com base conhecida (GG + TS); sem base = passthrough. Valor em falta é honesto.
 """
 from __future__ import annotations
 
@@ -29,6 +33,7 @@ logger = logging.getLogger("eliminated_bounty")
 BOUNTY_REVIEW_KEY = "bounty_review"
 REVIEW_NO_GREEN = "eliminated_no_green"       # bustou, sem verde legível → por rever
 REVIEW_AMBIGUOUS = "eliminated_ambiguous"     # multiway → não se liga verde↔eliminado
+REVIEW_LIVE_ZERO = "live_crown_read_zero"     # KO (base TS>0) + VIVO (HH) + coroa lida $0 → por rever
 
 # Proveniência do bounty no seat (apa/pn). O CRIVO VERDADEIRO da cura: um seat
 # HH-bustado com coroa >0 SÓ é aceitável se a proveniência for 'green_ko' (derivado
@@ -88,11 +93,18 @@ def resolve_seat_bounty(
     *,
     busted_names: set,
     green_kos: Optional[list] = None,
+    bounty_base=None,
 ) -> tuple:
     """CHOKEPOINT do bounty por-seat. Devolve (value, review_reason, source).
 
-    - Seat NÃO eliminado → coroa da Vision tal-e-qual (value, None, None). O caminho
-      normal fica INALTERADO (convenção #KO-CROWN-INSTANT-FIX: value = instantâneo).
+    - Seat NÃO eliminado (VIVO):
+        · GUARDA VIVO-$0 (decisão Rui): torneio KO (base TS `bounty_base` > 0) + coroa
+          lida $0/ausente → NUNCA gravar o $0 silencioso → (None, REVIEW_LIVE_ZERO, None).
+          NÃO se deriva da base (o vivo pode ter KOs acumulados → a base subvaloriza;
+          ex. GG-6132925926: Hero com 2 KOs = coroa $100, "fresco=base=$50" gravaria errado).
+          Valor em falta é honesto; valor inventado é veneno.
+        · Sem base (não-KO / sem TS) OU coroa >0 → coroa da Vision tal-e-qual
+          (value, None, None); caminho normal INALTERADO (#KO-CROWN-INSTANT-FIX: instantâneo).
     - Seat ELIMINADO (HH) → NUNCA a coroa por-seat da Vision. Se houver exatamente 1
       eliminado E 1 verde → (verde, None, 'green_ko') [proveniência marcada = crivo].
       Senão (0 verdes, >1 verde, >1 eliminado) → (None, review, None).
@@ -102,6 +114,16 @@ def resolve_seat_bounty(
     é contaminação de origem-Vision (crivo verdadeiro = 0 pós-cura).
     """
     if name not in busted_names:
+        # GUARDA VIVO-$0 — só dispara quando SABEMOS que é KO (base do TS > 0). Sem base
+        # (não-KO / sem TS) = passthrough (a coroa espúria em não-KO é facet separada,
+        # ainda não ligada — ver PENDENTES #SPURIOUS-CROWN-NON-KO).
+        if bounty_base and float(bounty_base) > 0:
+            try:
+                c = float(vision_crown) if vision_crown is not None else 0.0
+            except (TypeError, ValueError):
+                c = 0.0
+            if c <= 0:
+                return None, REVIEW_LIVE_ZERO, None
         return vision_crown, None, None
     greens = green_kos or []
     # Caso limpo (SHOULD): 1 eliminado nesta mão + 1 verde → liga-se sem ambiguidade.
@@ -135,10 +157,12 @@ def is_tagged(hand: Optional[dict]) -> bool:
 
 def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
                              raw: Optional[str], vision_data: Optional[dict] = None,
-                             *, tagged: bool = True) -> int:
+                             *, tagged: bool = True, bounty_base=None) -> int:
     """FUNIL ÚNICO da cura verde-KO. Chamado 1× em cada caminho AUTOMÁTICO que escreve
     bounty por-seat (enrich gold/position_v3, orphan-enrich, table-ss, backfills gold-carry
-    e capture, reread). Aplica a guarda aos seats HH-bustados em AMBOS apa e pn.players_list.
+    e capture, reread). Aplica a guarda aos seats HH-bustados (verde-KO) E — quando
+    `bounty_base` (buy_in_bounty do TS) > 0, i.e. torneio KO — aos seats VIVOS com coroa
+    $0 (guarda vivo-$0 → NULL + REVIEW_LIVE_ZERO), em AMBOS apa e pn.players_list.
     Devolve nº de seats-nome tocados (audit). Muta apa/pn in-place.
 
     5 garantias:
@@ -161,7 +185,8 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
                        "call-site tem de fornecer o raw (HH). Skip seguro (sem scrub).")
         return 0
     busted = busted_real_names(raw, apa)            # HH-autoritativo; {} se não há bust
-    if not busted:
+    live_guard = bool(bounty_base and float(bounty_base) > 0)  # KO conhecido → guarda vivo-$0
+    if not busted and not live_guard:
         return 0
     greens = parse_green_kos(vision_data)           # best-effort; [] se ausente/sem prompt
     touched = 0
@@ -169,19 +194,30 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
         if key == "_meta" or not isinstance(entry, dict):
             continue
         name = entry.get("real_name") or key
-        if name not in busted:
-            continue
+        is_busted = name in busted
+        if not is_busted and not live_guard:
+            continue                                # vivo e não-KO → nada a fazer
         val, review, source = resolve_seat_bounty(
-            name, entry.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
+            name, entry.get("bounty_value_usd"), busted_names=busted,
+            green_kos=greens, bounty_base=bounty_base)
+        if not is_busted and review is None:
+            continue                                # vivo com coroa válida (>0) → passthrough, sem churn
         if _preserves_green_ko(entry, source):
             continue                                # idempotência: não desfaz um green_ko curado
         _apply_seat_bounty(entry, val, review, source)
         touched += 1
     for p in (pn or {}).get("players_list") or []:  # 2) pn.players_list (nome='name')
-        if not isinstance(p, dict) or p.get("name") not in busted:
+        if not isinstance(p, dict):
+            continue
+        nm = p.get("name")
+        is_busted = nm in busted
+        if not is_busted and not live_guard:
             continue
         val, review, source = resolve_seat_bounty(
-            p.get("name"), p.get("bounty_value_usd"), busted_names=busted, green_kos=greens)
+            nm, p.get("bounty_value_usd"), busted_names=busted,
+            green_kos=greens, bounty_base=bounty_base)
+        if not is_busted and review is None:
+            continue
         if _preserves_green_ko(p, source):
             continue
         _apply_seat_bounty(p, val, review, source)  # mesmo resultado → apa↔pn coerentes
@@ -211,8 +247,14 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
     """
     import json as _json
     from app.db import query, get_conn
-    rows = query("SELECT id, raw, all_players_actions AS apa, player_names AS pn, "
-                 "hm3_tags, discord_tags FROM hands WHERE id = %s", (hand_db_id,))
+    # buy_in_bounty do TS (GG) → torneio KO? (guarda vivo-$0). LEFT JOIN: None se não há TS
+    # ou não-GG → guarda vivo-$0 NÃO dispara (passthrough), como manda a decisão.
+    rows = query("SELECT h.id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
+                 "       h.hm3_tags, h.discord_tags, ts.buy_in_bounty AS bounty_base "
+                 "  FROM hands h "
+                 "  LEFT JOIN tournament_summaries ts "
+                 "    ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
+                 " WHERE h.id = %s", (hand_db_id,))
     if not rows:
         return 0
     r = rows[0]
@@ -223,7 +265,8 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
         return 0                                   # fail-safe: sem raw não se verifica bust
     apa = r["apa"] if isinstance(r["apa"], dict) else _json.loads(r["apa"] or "{}")
     pn = r["pn"] if isinstance(r["pn"], dict) else _json.loads(r["pn"] or "{}")
-    n = scrub_eliminated_bounties(apa, pn, r["raw"], vision_data, tagged=True)
+    n = scrub_eliminated_bounties(apa, pn, r["raw"], vision_data, tagged=True,
+                                  bounty_base=r.get("bounty_base"))
     if n:
         conn = get_conn()
         try:

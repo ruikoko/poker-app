@@ -21,12 +21,34 @@ fail-safe raw, log-alto. Eliminado → **verde-derivado** (`green_ko`, o instant
 - **Deferido (nice-to-have):** onde o scrub sabe os bustados mas a escrita falha, tentar o NULL
   fail-safe desses seats (hoje: log-alto + o crivo apanha).
 
-## ABERTO — próxima sessão (bloco das coroas + os 2 diagnosticados)
+## ✅ Guarda VIVO-$0 (coroa visível lida $0 num jogador VIVO) — LIVE (9 Jul)
 
-- **`#CROWN-VISIBLE-READ-ZERO` facet "coroa VISÍVEL lida como $0"** (avatar tapado por cartas/
-  All-In) — **CONFIRMAR o estado** antes de fechar o bloco das coroas por INTEIRO. É **distinto**
-  da cura verde-KO (esta = coroa AUSENTE do eliminado; aquela = coroa PRESENTE mas lida $0). O gate
-  TS + prompt afinado + reread já foram; falta reconfirmar quantas ficam por ler e decidir o fecho.
+**Decisão do Rui (verificada; GG-6132925926 = evidência + caso de aceitação, NÃO dado a
+consertar).** Reenquadra o antigo `#CROWN-VISIBLE-READ-ZERO`: **não é oclusão** (o Rui confirmou
+coroas bem visíveis) — é a Vision a falhar coroas à vista, raramente, no **VIVO** (o eliminado é a
+verde-KO). Resíduo pós-cura+prompt+reread minúsculo (1 mão real: Hero da GG-6132925926, $0 devia
+ser $100 — ele tinha 2 KOs → instantâneo $100).
+
+- **Convenção confirmada:** a coroa de um VIVO = **INSTANTÂNEO** (metade do total, PKO 50/50). Hero
+  com KOs acumulados tem coroa **> base÷2** — é LEGÍTIMO (o scan não aperta nesse sentido).
+- **Guarda (core, ingest):** KO (buy_in_bounty do TS > 0) + VIVO (pela HH) + coroa $0 → **NUNCA
+  gravar o $0** → NULL + `bounty_review='live_crown_read_zero'`. **NUNCA derivar da base** (o vivo
+  pode ter KOs → subvaloriza; inventar é veneno). Só-tagadas. No mesmo funil `eliminated_bounty.py`
+  (`resolve_seat_bounty`/`scrub_eliminated_bounties`/`scrub_and_persist` com `bounty_base` do TS) →
+  cobre os 5 escritores por transitividade.
+- **Gate DURO:** `GET /api/gg-health/live-crown-zero-scan` → `silent_zero_contamination` (coroa $0
+  sem review) tem de ser **0** pós-reimporte / pós-ingest GG.
+- **Lápis do Hero:** `{!isHero}` levantado no `CrownCell` (`HandHistoryViewer.jsx`) — o Hero edita/
+  confirma a própria coroa como qualquer vilão (capacidade permanente).
+- **ACEITAÇÃO = REIMPORTE:** GG-6132925926 nasce com o Hero NULL+"por rever", nunca $0 gravado.
+
+## ABERTO — próxima sessão
+
+- **`#SPURIOUS-CROWN-NON-KO` — coroa espúria em torneio SEM bounty** (facet INVERSA, descoberta 9
+  Jul via GG-6138905902 Daily Hyper $60: Ale Mantovani $50 + Heiaheisen $20 **inventados** num
+  torneio sem bounty). Fix determinístico **proposto, NÃO aprovado**: no funil, torneio com TS a
+  dizer `buy_in_bounty` nulo/0 → coroas forçadas a NULL na origem (à la vivo-$0). Scan read-only já
+  corrido (1 mão em prod; só cobre torneios com TS presente). **Decidir A/B com o Rui antes de ligar.**
 - **`#TABLE-SS-SPEEDRACER-NO-MATCH`** — diagnosticado: **HH em falta** (19 capturas de 15/16/18 Jun;
   a BD só tem GG de 30 Jun-2 Jul). O matcher FUNCIONA (12 Speed Racer casaram nos dias com HH).
   **NÃO afrouxar o match** (a mão de mesmo nome mais próxima está a 12-17 dias → match errado).
