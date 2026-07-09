@@ -54,3 +54,24 @@ def test_plan_moves_unknown_tag_not_in_canonical_stays_root():
     # tag existe na BD mas não tem pasta canónica (defensivo) → fica na raiz
     plan, no_ev = plan_moves(["x.png"], {"x.png": "tag-desconhecida"})
     assert plan == [] and no_ev == ["x.png"]
+
+
+# ── tidy: resolução da pasta-mãe (bug do 1º dry-run: PARENT_DIR=None → TypeError) ──
+import pytest
+
+
+def test_resolve_done_it_guards_missing_parent(monkeypatch):
+    import app_import as ai
+    import tidy_done_it as t
+    monkeypatch.setattr(ai, "load_config", lambda: None)   # não sobrepõe PARENT_DIR
+    monkeypatch.setattr(ai, "PARENT_DIR", None)            # simula config por preencher
+    with pytest.raises(SystemExit):                        # mensagem clara, NÃO TypeError
+        t.resolve_done_it()
+
+
+def test_resolve_done_it_builds_path_when_configured(monkeypatch):
+    import app_import as ai
+    import tidy_done_it as t
+    monkeypatch.setattr(ai, "load_config", lambda: None)
+    monkeypatch.setattr(ai, "PARENT_DIR", r"C:\Batmen")
+    assert t.resolve_done_it() == os.path.join(r"C:\Batmen", "done", ai.IT_SUB)

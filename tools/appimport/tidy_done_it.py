@@ -20,6 +20,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app_import as ai
 
 
+def resolve_done_it():
+    """Resolve `done\\it` pelo MESMO mecanismo dos outros bats: `ai.load_config()` lê o
+    `config_local.py` e preenche `PARENT_DIR` (o `import app_import` sozinho NÃO o faz — foi
+    o bug do 1º dry-run: PARENT_DIR=None → TypeError). Guarda de arranque: pasta-mãe/subpasta
+    vazias → mensagem PT clara + SystemExit, nunca traceback."""
+    ai.load_config()
+    if not ai.PARENT_DIR or not ai.IT_SUB:
+        print("ERRO: pasta-mãe não configurada — preenche PARENT_DIR em "
+              "tools/appimport/config_local.py (o mesmo que os outros imports usam).")
+        raise SystemExit(1)
+    return os.path.join(ai.PARENT_DIR, "done", ai.IT_SUB)
+
+
 def plan_moves(files, name2tag):
     """PURO. Dado os ficheiros na RAIZ de done\\it e o mapa nome→tag da BD, devolve
     (plan, no_ev): plan = [(fname, tag, subpasta)] a realojar; no_ev = [fname] sem
@@ -43,9 +56,10 @@ def main(argv=None):
     if ai.requests is None:
         print("ERRO: módulo 'requests' não instalado (pip install requests)."); sys.exit(1)
 
-    done_it = os.path.join(ai.PARENT_DIR, "done", ai.IT_SUB)
+    done_it = resolve_done_it()   # load_config + guarda (mesmo mecanismo dos outros bats)
+    print(f"Pasta-mãe: {ai.PARENT_DIR}")
     if not os.path.isdir(done_it):
-        print(f"done\\it não existe: {done_it} — nada a arrumar."); return
+        print(f"done\\it ainda não existe: {done_it} — nada a arrumar."); return
 
     session = ai.requests.Session()
     ai.login(session)
