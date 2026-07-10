@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { hands as handsApi, screenshots, ggHealth } from '../api/client'
 import TagEditor from '../components/TagEditor'
 import HandHistoryViewer from '../components/HandHistoryViewer'
+import HandTimeline from '../components/HandTimeline'
 import AttachedImagesSection from '../components/AttachedImagesSection'
 import HandImagesSection from '../components/HandImagesSection'
 import { dateTimeLisbon } from '../utils/datetime'
@@ -116,48 +117,19 @@ export default function HandDetailPage() {
       {/* ── OBRA 3: selo "nome em revisão" (conflito de nomes pendente) ── */}
       <ReviewSeal hand={hand} />
 
-      {/* ── INFO GRID — FIRST THING ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
-        {[
-          { l: 'SALA', v: hand.site },
-          { l: 'DATA', v: playedDate },
-          { l: 'RESULTADO', v: hand.result != null ? `${hand.result > 0 ? '+' : ''}${Number(hand.result).toFixed(1)} BB` : '—', c: resultColor, big: true },
-          { l: 'POSIÇÃO', v: null, badge: hand.position },
-          { l: 'TORNEIO', v: tourneyName },
-          { l: 'HAND ID', v: hand.hand_id },
-          { l: 'DB ID', v: `#${hand.id}` },
-          { l: 'BLINDS', v: blindsLabel || '—' },
-          { l: 'LEVEL', v: meta.level != null ? `Lv ${meta.level}` : '—' },
-          { l: 'JOGADORES', v: players.length },
-        ].map(({ l, v, c, badge, big }) => (
-          <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '12px 16px' }}>
-            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>{l}</div>
-            {badge ? <PosBadge pos={badge} /> : <div style={{ fontSize: big ? 18 : 15, color: c || '#f1f5f9', fontWeight: 700, wordBreak: 'break-all' }}>{v || '—'}</div>}
-          </div>
-        ))}
+      {/* ── meta recuada (o resto recua; a mão é protagonista — 3b) ── */}
+      <div style={{ fontSize: 12, color: '#5f6b82', marginBottom: 14, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span>{hand.site}</span><span>{playedDate}</span>
+        {tourneyName && <span>{tourneyName}</span>}
+        {blindsLabel && <span>Blinds {blindsLabel}{meta.level != null ? ` · Lv ${meta.level}` : ''}</span>}
+        <span style={{ color: '#4a5568' }}>{hand.hand_id} · #{hand.id}</span>
       </div>
 
-      {/* ── HERO CARDS + BOARD ── */}
-      <div style={{ background: '#0f1117', borderRadius: 8, padding: '16px 20px', marginBottom: 14, display: 'flex', gap: 40, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>HERO &middot; <PosBadge pos={hand.position} /></div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {hand.hero_cards?.length > 0 ? hand.hero_cards.map((c, i) => <RCard key={i} card={c} size="lg" />) : <span style={{ color: '#4b5563' }}>—</span>}
-          </div>
-        </div>
-        {hand.board?.length > 0 && (
-          <div>
-            <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>BOARD</div>
-            <div style={{ display: 'flex', gap: 5 }}>{hand.board.map((c, i) => <RCard key={i} card={c} size="lg" />)}</div>
-          </div>
-        )}
-      </div>
+      {/* ── A MÃO — vista Timeline (3b), reutiliza parser + edição (coroas/nomes) ── */}
+      <HandTimeline hand={hand} onEdited={refreshHand} />
 
-      {/* ── IMAGENS ANEXADAS (Tech Debt #B9 — galeria manual) ── */}
+      {/* ── IMAGENS ANEXADAS (Tech Debt #B9 — galeria manual, recuada) ── */}
       <AttachedImagesSection hand={hand} onChange={refreshHand} />
-
-      {/* ── MESA + ACÇÕES + SHOWDOWN (Tech Debt #8 — renderer canónico) ── */}
-      <HandHistoryViewer hand={hand} onEdited={refreshHand} />
 
       {/* ── IMAGENS DA MÃO (só GG) — regra 9 Jul: Gold, SS do IT (table-SS) e Lobby,
              uma secção por tipo. Winamax/PS/WPN: não aparece. */}

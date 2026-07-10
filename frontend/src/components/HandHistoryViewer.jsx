@@ -120,7 +120,7 @@ function IreOpBadge({ ire }) {
 // Fase 2 — coroa ($ bounty_value_usd) + editor. COM IRE: a coroa vai no hover/tap do
 // badge IRE (tooltip). SEM IRE (não acende): a coroa aparece no LUGAR do IRE. O ✎
 // abre o editor (valor + "aceitar <½-base") com pré-visualização dry-run.
-function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
+export function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState(crown != null ? String(crown) : '')
   const [accept, setAccept] = useState(false)
