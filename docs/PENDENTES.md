@@ -13,10 +13,13 @@
 - **A2/A3/A4 — não-bug** (desanon recusa nomes incertos; contas batem; regra C estrita). Sem acção.
 - **✅ C (IRE) — decidido, sem cura.** IRE = métrica de estudo KO; 'nota' fora por desenho
   (REGISTO_CONCEITO 10 Jul). Não reabrir.
+- **✅ B (core) — FECHADO (só documentação, 10 Jul).** Quadro de definições do verde/coroa escrito
+  (REGISTO_CONCEITO 10 Jul, âncora Deepstack Turbo $88 / bounty $40 / instant 0.5). Verificado
+  consumidor a consumidor (IRE ÷bib×0.5, queue_export/HRC ×2, scan/backfill vs base÷2, verde-KO,
+  hover) — **todos tratam a coroa como INSTANTÂNEO, nenhum como total → SEM fator-de-2 latente**.
+  Nota latente menor: `0.5` duplicado (`ire.py:77` + `queue_export.py:845`) — fonte única resolveria;
+  sem acção.
 - **FILA (por atacar, pela ordem):**
-  - **B (core):** quadro de definições do VERDE (coroa visível = cash de quem elimina; verde =
-    incremento à coroa do eliminador; no PKO 50/50 valem o mesmo). Verificar se algum consumidor
-    assume interpretação errada (fator 2 latente). Âncora: TS Deepstack Turbo $88.
   - **D:** zombie da Fronteira FT (Daily Hyper $60, tn 295258986) — dispensa reacorda (sinal anterior
     à dispensa? edição errada do daily?). Logs da dispensa ajudam.
   - **E:** falso positivo no scan "coroa impossível" — excecionar `bounty_source='green_ko'` (régua

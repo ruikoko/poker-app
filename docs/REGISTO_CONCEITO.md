@@ -254,3 +254,36 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
   (`bounty_value_usd`/ko_units), **nunca** a chama (`bounty_pct` = VPIP). Confirmado que NÃO morreu no
   fix de 1-Jul (taxa de acendimento pré 76% ≈ pós 80%). **Não reabrir** — pedir IRE em mãos só-'nota'
   seria mudar o gate por formato; decisão futura só se o Rui a levantar. → `JOURNAL_2026-07-10.md`.
+
+## 2026-07-10 (lote B) — QUADRO DE DEFINIÇÕES do verde/coroa (âncora $88) — TUDO COERENTE
+
+Frente B da auditoria. **Diagnóstico: coerente ponta-a-ponta, sem fator-de-2 latente → só documentação.**
+
+**Âncora:** Bounty Hunters Deepstack Turbo $88 (tn 295252423) — buy_in_total $88 = entry $40.96 +
+**bounty $40** + rake. PKO 50/50 → `_INSTANT_FRACTION = 0.5`.
+
+**Semântica (Rui):** a **coroa dourada visível** de um jogador VIVO = o **INSTANTÂNEO** = metade do
+bounty total = o **CASH que quem o eliminar recebe**. O **VERDE** na coroa do eliminador = o
+**INCREMENTO** à coroa dele. No **PKO 50/50 os dois valem o mesmo** (metade) — por isso as contas
+batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o verde).
+
+**Cadeia ecrã → guardado → derivado (exemplo: fresco num $40-bounty):**
+| Passo | O que é | Valor |
+|---|---|---|
+| coroa visível de um VIVO | instantâneo = metade = cash do eliminador | $20 |
+| `bounty_value_usd` (guardado) | a coroa visível = instantâneo | $20 |
+| IRE `ko_units` (`ire.py:371`) | coroa / (buy_in_bounty × 0.5) = 20/(40×0.5) | 1.0 (fresco = 1 unidade) |
+| queue_export/HRC (`_crown_to_total_factor` = 1/0.5 = 2) | total = coroa × 2 | $40 (total na cabeça) |
+| hover (`HandHistoryViewer`) | mostra a coroa $ + ko_units (NÃO duplica) | "$20 · KO 1.0" |
+| scan suspeitas / backfill / verde-KO | fresco = base÷2; < base÷2 = suspeita; verde = instantâneo | limite $20 |
+
+**Caso GG-6139653123 (Hero $30):** `bounty_value_usd=$30` (instantâneo acumulado: $20 fresco + $10 do
+1º KO) → IRE ko_units 30/20=1.5; HRC total $60. Coerente.
+
+**Consumidor a consumidor — verdict:** IRE (÷bib×0.5), queue_export/HRC (×2), scan suspeitas
+(vs base÷2), backfill_crowns (≥base÷2), verde-KO (guarda o instantâneo), hover (mostra cru + ko_units)
+— **TODOS tratam a coroa como INSTANTÂNEO**. **Nenhum a assume como total.** Sem fator-de-2 latente.
+
+**Nota latente (menor, sem acção):** o `0.5` está DUPLICADO — `ire.py:77` e `queue_export.py:845`
+(re-declarado de propósito). Ambos 0.5 hoje; se um mudar sem o outro → divergência (à la
+`#POSITION-LABELS-PYTHON-JS-DRIFT`). Fonte única resolveria; regista-se, não é acção.
