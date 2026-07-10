@@ -87,9 +87,9 @@ export default function HandTimeline({ hand, onEdited }) {
         background: p.isHero ? 'rgba(34,211,238,.09)' : '#0e131d',
         border: `1px solid ${p.isHero ? '#17414a' : '#232c3d'}` }}>
         <Pos pos={p.position} />
-        <span style={{ fontWeight: 700, fontSize: 13.5, color: p.isHero ? '#67e8f9' : '#e8eef7',
+        <span style={{ fontWeight: 500, fontSize: 14, letterSpacing: '.3px', color: p.isHero ? '#67e8f9' : '#e8eef7',
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
-          {p.name}{p.isHero && <span style={{ fontSize: 9, fontWeight: 800, color: '#22d3ee', marginLeft: 5 }}>HERO</span>}
+          {p.name}{p.isHero && <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.5px', color: '#22d3ee', marginLeft: 5 }}>HERO</span>}
         </span>
         <span style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12.5, color: '#fbbf24', fontWeight: 700, whiteSpace: 'nowrap' }}>
           {N(p.startStack)}<span style={{ display: 'block', color: '#7d8aa3', fontSize: 11 }}>{formatBB(p.startStack / bb)}</span>
@@ -112,7 +112,7 @@ export default function HandTimeline({ hand, onEdited }) {
         boxShadow: allIn ? 'inset 3px 0 0 #fb7185' : 'none' }}>
         <Pos pos={pl?.position} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: st.isHero ? '#67e8f9' : '#e8eef7', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.actor}</div>
+          <div style={{ fontWeight: 500, fontSize: 14.5, letterSpacing: '.3px', color: st.isHero ? '#67e8f9' : '#e8eef7', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.actor}</div>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: a.c, marginTop: 1 }}>{label}</div>
         </div>
         <div style={{ textAlign: 'right', fontSize: 12, whiteSpace: 'nowrap',
@@ -143,7 +143,7 @@ export default function HandTimeline({ hand, onEdited }) {
         border: '1px solid #17414a', borderRadius: 16, padding: '14px 18px', marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 10, letterSpacing: 2, color: '#22d3ee', textTransform: 'uppercase' }}>Hero {hero && <>· {hero.position}</>}</div>
-          <div style={{ fontSize: 17, fontWeight: 800, margin: '2px 0 8px' }}>{hero?.name || hand.player_names?.hero || 'Hero'}</div>
+          <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '.3px', margin: '2px 0 8px' }}>{hero?.name || hand.player_names?.hero || 'Hero'}</div>
           <div style={{ display: 'flex', gap: 6 }}>{(hand.hero_cards || []).length ? hand.hero_cards.map((c, i) => <HandCard key={i} card={c} size="lg" variant={variant} />) : <span style={{ color: '#5f6b82' }}>—</span>}</div>
         </div>
         {hand.board?.length > 0 && (
@@ -209,7 +209,7 @@ export default function HandTimeline({ hand, onEdited }) {
               <div key={i} style={{ background: '#121722', border: '1px solid #232c3d', borderRadius: 12, padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Pos pos={p.position} />
                 <div style={{ display: 'flex', gap: 4 }}>{(p.cards || []).map((c, j) => card(c, 'sm'))}</div>
-                <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{p.name}</span>
+                <span style={{ fontWeight: 500, fontSize: 13.5, letterSpacing: '.3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{p.name}</span>
                 {w > 0 && <span style={{ color: '#4ade80', fontSize: 12, fontWeight: 700 }}>+{N(w)}</span>}
               </div>
             )
