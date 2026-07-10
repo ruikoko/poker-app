@@ -280,6 +280,26 @@ function VerifyDetail({ res, handDbId }) {
   )
 }
 
+// Winamax: Hand ID longo (WN-<mesa>-<n>-<seq>) → "WN-" + última sequência numérica.
+// Só apresentação; o ID completo vai no title (hover) e nas operações usa-se h.hand_id.
+function shortHandId(hid) {
+  if (!hid || !String(hid).startsWith('WN-')) return hid
+  const parts = String(hid).split('-')
+  return 'WN-' + parts[parts.length - 1]
+}
+
+// Cabeçalho de secção expansível: título + números (children) + seta; clica p/ abrir.
+function SecHead({ title, open, onToggle, children }) {
+  return (
+    <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      cursor: 'pointer', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+      background: 'var(--bg)', marginBottom: 10, userSelect: 'none' }}>
+      <span style={{ fontSize: 15, fontWeight: 800 }}>{open ? '▾' : '▸'} {title}</span>
+      <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }} onClick={e => e.stopPropagation()}>{children}</span>
+    </div>
+  )
+}
+
 export default function HRCQueuePage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -315,6 +335,11 @@ export default function HRCQueuePage() {
   const [showReprocess, setShowReprocess] = useState(false) // pt92 — separador re-processar
   const [sendBusy, setSendBusy] = useState(false)
   const [sendResult, setSendResult] = useState(null)       // {released, skipped, ...} | {error}
+  // 3 secções expansíveis (colapsadas por defeito): elegíveis / enviadas-vivas / resolvidas
+  const [openElig, setOpenElig] = useState(false)
+  const [openLive, setOpenLive] = useState(false)
+  const [openSolved, setOpenSolved] = useState(false)
+  const [solvedSite, setSolvedSite] = useState('')         // filtro Site da secção HRC Solved
 
   // pt92 — limpar/pausar a fila: des-liberta tudo. O adapter para de puxar até
   // nova seleção manual ('Enviar ao HRC'). Não há mais "Disparar tudo".
@@ -645,16 +670,15 @@ export default function HRCQueuePage() {
 
       {data && !error && (
         <>
-          {/* Summary */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-            <span style={{ fontSize: 15, fontWeight: 700 }}>{data.count} mãos elegíveis</span>
-            <span style={{ color: 'var(--border)' }}>|</span>
+          {/* Secção 1 — MÃOS ELEGÍVEIS: cabeçalho c/ números; barra de filtros sempre
+              visível; a LISTA só aparece ao expandir. */}
+          <SecHead title={`MÃOS ELEGÍVEIS (${data.count})`} open={openElig} onToggle={() => setOpenElig(o => !o)}>
             <Chip color={SRC_COLOR.real}>real {scen.real || 0}</Chip>
             <Chip color={SRC_COLOR.fallback_root}>fallback_root {scen.fallback_root || 0}</Chip>
             <Chip color={SRC_COLOR.fallback_unusable_position}>fallback_unusable {scen.fallback_unusable_position || 0}</Chip>
             <span style={{ color: 'var(--border)' }}>|</span>
             {Object.entries(fmtCounts).map(([k, v]) => <Chip key={k}>{k} {v}</Chip>)}
-          </div>
+          </SecHead>
 
           {/* Filtros client-side — 8 filtros combináveis (AND); "sem dado" aparece por defeito */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, fontSize: 12, color: 'var(--muted)',
@@ -794,8 +818,8 @@ export default function HRCQueuePage() {
             </div>
           )}
 
-          {/* Tabela */}
-          {visible.length === 0 ? (
+          {/* Tabela — lista SÓ ao expandir a secção */}
+          {openElig && (visible.length === 0 ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
               {showSelected ? '0 mãos marcadas.' : (hands.length === 0 ? '0 mãos elegíveis agora.' : 'Nenhuma mão corresponde aos filtros.')}
             </div>
@@ -826,7 +850,7 @@ export default function HRCQueuePage() {
                       <td style={{ padding: '7px 10px' }}>
                         <input type="checkbox" checked={selected.has(h.hand_id)} onChange={() => toggleSel(h.hand_id)} />
                       </td>
-                      <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{h.hand_id}</td>
+                      <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }} title={h.hand_id}>{shortHandId(h.hand_id)}</td>
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtTs(h.played_at)}</td>
                       <td style={{ padding: '7px 10px' }}>{h.site}</td>
                       <td style={{ padding: '7px 10px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -863,20 +887,21 @@ export default function HRCQueuePage() {
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', position: 'sticky', right: 0, background: 'var(--bg)', zIndex: 1, borderLeft: '1px solid var(--border)' }}>
                         {(() => {
                           const isRev = curState(h) === 'resolved'
-                          const c = isRev ? '#22c55e' : '#3b82f6'
                           const busy = stBusy[h.id] === 'busy'
                           return (
                             <button
                               onClick={() => toggleState(h)}
                               disabled={busy}
-                              title={isRev ? 'Marcar como Nova' : 'Marcar como Revista'}
+                              title={isRev ? 'Marcar como Nova (volta a HRC)' : 'Marcar como Revista'}
                               style={{
-                                fontSize: 11, fontWeight: 600, cursor: busy ? 'wait' : 'pointer',
-                                color: c, background: `${c}1f`, border: `1px solid ${c}55`,
+                                fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer',
+                                ...(isRev
+                                  ? { color: '#22c55e', background: '#22c55e1f', border: '1px solid #22c55e55' }
+                                  : { color: '#000', background: '#eab308', border: '1px solid #eab308' }),
                                 borderRadius: 4, padding: '2px 7px', marginRight: 8,
                                 opacity: busy ? 0.5 : 1,
                               }}
-                            >{busy ? '…' : (isRev ? 'Revista' : 'Nova')}</button>
+                            >{busy ? '…' : (isRev ? 'Revista' : 'HRC')}</button>
                           )
                         })()}
                         {h.has_payout && (
@@ -906,68 +931,42 @@ export default function HRCQueuePage() {
                 </tbody>
               </table>
             </div>
-          )}
+          ))}
         </>
       )}
 
-      {/* pt83 — Enviadas: mãos libertadas + estado (resolvida / por resolver / cancelada) */}
-      {sent && (
-        <div style={{ marginTop: 30 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>Enviadas ao HRC</h2>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span>{sent.total} no total</span>
-            <span style={{ color: 'var(--border)' }}>|</span>
-            <Chip color="#22c55e">resolvida {sent.sent.filter(s => curSentState(s) === 'resolvida').length}</Chip>
-            <Chip color="#eab308">por resolver {sent.sent.filter(s => curSentState(s) === 'por_resolver').length}</Chip>
-            <Chip color="#ef4444">cancelada {sent.sent.filter(s => curSentState(s) === 'cancelada').length}</Chip>
-            <span style={{ color: 'var(--border)' }}>|</span>
-            {/* pt92 — verify em lote sob-demanda (fora da abertura: pesado) */}
-            {verify && verify.total > 0 ? (
-              <>
-                <span style={{ fontSize: 11 }}>verificação HH↔HRC:</span>
-                <Chip color="#22c55e">✓ {verify.summary.ok || 0}</Chip>
-                <Chip color="#eab308">⚠ {verify.summary.warn || 0}</Chip>
-                <Chip color="#ef4444">✗ {verify.summary.fail || 0}</Chip>
-                <button onClick={loadVerify} disabled={verifyBusy}
-                  style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: verifyBusy ? 'wait' : 'pointer' }}>
-                  {verifyBusy ? 'a verificar…' : '↻'}
-                </button>
-              </>
-            ) : (
-              <button onClick={loadVerify} disabled={verifyBusy}
-                style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 6, background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: verifyBusy ? 'wait' : 'pointer' }}>
-                {verifyBusy ? 'a verificar…' : 'Verificar resolvidas'}
-              </button>
-            )}
-          </div>
-          {sent.sent.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-              Nenhuma mão enviada ainda.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
-                    {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'concluída', 'estado', 'acções'].map(h => (
-                      <th key={h} style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sent.sent.map(s => {
-                    const st = curSentState(s)
-                    const meta = SENT_STATE[st] || { c: '#94a3b8', label: st }
-                    const vEntry = verify?.byId?.[s.hand_id]   // só as resolvidas têm result_zip
-                    const isOpen = vOpen === s.hand_id
-                    return (
+      {/* ── Secções 2 e 3 — Enviadas (vivas) e HRC Solved (resolvidas) ── */}
+      {sent && (() => {
+        const live = sent.sent.filter(s => curSentState(s) !== 'resolvida')      // por resolver + canceladas
+        const solvedAll = sent.sent.filter(s => curSentState(s) === 'resolvida')  // resolvidas (tree recebida)
+        const solved = solvedAll.filter(s => !solvedSite || s.site === solvedSite)
+        const solvedSites = [...new Set(solvedAll.map(s => s.site))].sort()
+        const nLive = live.filter(s => curSentState(s) === 'por_resolver').length
+        const nCanc = live.filter(s => curSentState(s) === 'cancelada').length
+        const SentTable = ({ rows }) => (
+          <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--muted)', background: 'var(--bg)' }}>
+                  {['hand_id', 'played_at (UTC)', 'site', 'torneio', 'concluída', 'estado', 'acções'].map(h => (
+                    <th key={h} style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(s => {
+                  const st = curSentState(s)
+                  const meta = SENT_STATE[st] || { c: '#94a3b8', label: st }
+                  const vEntry = verify?.byId?.[s.hand_id]   // só as resolvidas têm result_zip
+                  const isOpen = vOpen === s.hand_id
+                  return (
                     <Fragment key={s.hand_id}>
                       <tr style={{ borderBottom: isOpen ? 'none' : '1px solid rgba(255,255,255,0.04)' }}>
                         <td style={{ padding: '7px 10px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                             <VerifyBadge verdict={vEntry?.verdict} open={isOpen}
                               onClick={() => toggleVerify(s.hand_id)} />
-                            {s.hand_id}
+                            <span title={s.hand_id}>{shortHandId(s.hand_id)}</span>
                           </span>
                         </td>
                         <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtTs(s.played_at)}</td>
@@ -1010,20 +1009,66 @@ export default function HRCQueuePage() {
                       </tr>
                       {isOpen && (
                         <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td colSpan={6} style={{ padding: 0 }}>
+                          <td colSpan={7} style={{ padding: 0 }}>
                             <VerifyDetail res={vDetail[s.hand_id]} handDbId={s.id} />
                           </td>
                         </tr>
                       )}
                     </Fragment>
-                    )
-                  })}
-                </tbody>
-              </table>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )   // fim de SentTable
+        return (
+          <>
+            {/* Secção 2 — ENVIADAS AO HRC: fila VIVA (por resolver + canceladas). Ao
+                ficar RESOLVIDA, a mão sai daqui e passa para a secção HRC Solved. */}
+            <div style={{ marginTop: 26 }}>
+              <SecHead title={`ENVIADAS AO HRC (${live.length})`} open={openLive} onToggle={() => setOpenLive(o => !o)}>
+                <Chip color="#eab308">por resolver {nLive}</Chip>
+                <Chip color="#ef4444">cancelada {nCanc}</Chip>
+                <span style={{ color: 'var(--border)' }}>|</span>
+                <button onClick={loadVerify} disabled={verifyBusy}
+                  style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 6, background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: verifyBusy ? 'wait' : 'pointer' }}>
+                  {verifyBusy ? 'a verificar…' : 'Verificar resolvidas'}
+                </button>
+              </SecHead>
+              {openLive && (live.length === 0
+                ? <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Nada por resolver ou cancelado.</div>
+                : <SentTable rows={live} />)}
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Secção 3 — HRC SOLVED: mãos resolvidas (tree recebida). Estrutura da secção 1
+                (cabeçalho c/ números + filtro; lista ao expandir). Filtro Site — os campos
+                ricos (pos/formato/etc.) precisam de vir do backend /hrc/sent p/ o filtro completo. */}
+            <div style={{ marginTop: 22 }}>
+              <SecHead title={`HRC SOLVED (${solvedAll.length})`} open={openSolved} onToggle={() => setOpenSolved(o => !o)}>
+                <label style={{ ...SEL_LABEL, cursor: 'pointer' }} onClick={e => e.stopPropagation()}>Site:
+                  <select value={solvedSite} onChange={e => setSolvedSite(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    {solvedSites.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                <span style={{ opacity: 0.7, fontWeight: 600 }}>{solved.length} de {solvedAll.length}</span>
+                {verify && verify.total > 0 && (
+                  <>
+                    <span style={{ color: 'var(--border)' }}>|</span>
+                    <span style={{ fontSize: 11 }}>verif.:</span>
+                    <Chip color="#22c55e">✓ {verify.summary.ok || 0}</Chip>
+                    <Chip color="#eab308">⚠ {verify.summary.warn || 0}</Chip>
+                    <Chip color="#ef4444">✗ {verify.summary.fail || 0}</Chip>
+                  </>
+                )}
+              </SecHead>
+              {openSolved && (solved.length === 0
+                ? <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Nenhuma mão resolvida{solvedSite ? ' neste site' : ' ainda'}.</div>
+                : <SentTable rows={solved} />)}
+            </div>
+          </>
+        )
+      })()}
     </div>
   )
 }
