@@ -15,15 +15,37 @@ roteiro do MAPA_AUDITORIA_VISUAL**.
 
 ## 🎯 ÂMBITO (decisão do Rui, 10 Jul) — SEM wipe, JUNHO → hoje
 
-- **Continua-se POR CIMA do estado atual** (não há wipe). O **gatilho TS-tardio** cobre a ordem
-  (TS pode chegar depois das HH; o reconcile resolve). Backup restore-verificado feito como novo
-  ponto de partida (`_local_only/backup_etapa2_20260710/`, 24 884 mãos).
+- **Continua-se POR CIMA do estado atual** (não há wipe). O **gatilho TS-tardio** cobre a ordem.
+  Backup restore-verificado feito (`_local_only/backup_etapa2_20260710/`, 24 884 mãos) = ponto de partida.
 - **Âmbito = Junho → hoje.** **Jan–Maio NÃO se importa** — fica na cópia `Poker\GG\…\2026-0[1-5]\`
-  como arquivo, **fora do plano**. (Se um dia se quiser, importa-se da cópia; não é para agora.)
-- **Buracos que NÃO se tapam da cópia (confirmado por conteúdo, 10 Jul):** os dias sem mãos de
-  Jun/Jul **não estão na cópia nem na BD** — `06-07/10/17/19/20/27/28/29` e `07-03→07-08`. Ou são
-  **dias sem jogo**, ou a HH **só existe no backoffice**. A cópia cobre em Jul só `07-01/02/09`.
-  → o que faltar mesmo (se jogaste) vai-se buscar ao **backoffice**, não à cópia.
+  como arquivo, fora do plano.
+- **✅ HH + TS de GG (Junho→hoje) = COMPLETO na BD.** Os dias sem mãos
+  (`06-07/10/17/19/20/27/28/29` e `07-03→07-08`) são **FOLGAS — o Rui NÃO jogou GG** (confirmado
+  10 Jul). Não são buracos: **nada a ir buscar ao backoffice.** A parte de mãos está fechada.
+
+## ✅ Etapa 2 REDUZIDA (o que falta — decisão do Rui, 10 Jul)
+
+Fechado o HH+TS, a Etapa 2 são só **3 passos**:
+
+1. **Imagens (Gold + IT) — desanonimizar.** Importar as capturas que dão nomes reais às mãos GG:
+   as **Gold** (replayer, lane `GOLD_DIR`→`/api/screenshots`) e as **IT** (table-SS + lobby, pasta
+   `it\` do appimport). Hoje há **16 mãos GG tagadas anónimas** à espera + a maioria de Junho sem
+   print IT (só 06-15/16/18/30 têm). Cada captura é **hash-dedup ANTES do Vision** → reenviar é
+   barato (0 IA em duplicados). O reconcile religa órfãs e propaga nomes.
+2. **Resolver o `294738291` no painel** (Saúde GG → "Edições de lobby (Raiz 2)"). O crivo
+   `lobby-edition-scan` acusa **1 contaminação**: o payout do 294738291 foi escrito por um lobby da
+   edição irmã **294711510** (`entrants` 287/305 > campo 219, escritor `3a90095a` `result=success`).
+   ⚠️ **CONFIRMADO (10 Jul): o painel de quarentena está a 0 e NÃO expõe o 294738291** — o lobby
+   contaminante está `success` (colado pela lógica antiga), não em `edition_quarantine`. Logo, tal
+   como está, **não é resolúvel pelo painel**. Precisa de **um retoque pequeno**: o painel/endpoint
+   passar a trazer as **contaminações do `lobby-edition-scan`** à decisão (repor payout na edição
+   certa / mandar o intruso para 294711510). Sem esse retoque, o gate 4 fica em 1 (inócuo — não foi
+   consumido por solve). *Decisão de produto: fazer o retoque ou aceitar o 1 como conhecido.*
+3. **Auditoria final — roteiro do `MAPA_AUDITORIA_VISUAL`** (§4 abaixo): 4 gates + deanon.alert +
+   percorrer as 16 paragens. Estado a 10 Jul: gates 1/2/3 = **0**, gate 4 = **1** (o 294738291 do
+   passo 2), deanon.alert = **False**. Fecha quando o passo 2 puser o gate 4 a **0**.
+
+## ⚠️ Antes de tudo — o que NÃO vai à app + tamanhos
 
 ## ⚠️ Antes de tudo — o que NÃO vai à app + tamanhos
 
