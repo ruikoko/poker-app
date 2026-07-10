@@ -30,6 +30,7 @@ from app.services.hrc_queue import (
     lookup_payouts,
     lookup_bounties,
     lookup_icm_chips,
+    enrich_hands_for_display,
     DEFAULT_TAGS,
     DEFAULT_STUDY_STATES,
     ALLOWED_SITES,
@@ -299,6 +300,7 @@ def queue_sent(current_user=Depends(require_auth_or_api_key)):
     (released sem job). `released_at` p/ a pista 'enviada há Xh'. Read-only."""
     rows = query(
         "SELECT h.id, h.hand_id, h.site, h.tournament_name, h.hero_cards, h.played_at, "
+        "       h.tournament_number, h.tournament_format, h.position, h.raw, "
         "       r.released_at, r.batch_id, r.requeue_epoch, "
         "       j.status AS job_status, j.error, j.result_zip_size, j.completed_at "
         "FROM hrc_queue_release r "
@@ -306,10 +308,14 @@ def queue_sent(current_user=Depends(require_auth_or_api_key)):
         "LEFT JOIN hrc_jobs j ON j.hand_db_id = r.hand_db_id "
         "ORDER BY r.released_at DESC"
     )
+    rows = [dict(r) for r in rows]
+    # Enriquecimento com os campos ricos (iguais à secção Elegíveis) para a barra
+    # de filtros da secção 'HRC Solved'. Defensivo — nunca esconde uma mão enviada.
+    rich_by_id = enrich_hands_for_display(rows)
     out = []
-    for r in rows:
-        d = dict(r)
+    for d in rows:
         d["state"] = _derive_sent_state(d.get("job_status"))
+        rich = rich_by_id.get(d.get("id"), {})
         out.append({
             "id": d.get("id"), "hand_id": d["hand_id"], "site": d["site"],
             "tournament_name": d.get("tournament_name"),
@@ -321,6 +327,15 @@ def queue_sent(current_user=Depends(require_auth_or_api_key)):
             "error": d.get("error") if d["state"] == "cancelada" else None,
             "result_zip_size": d.get("result_zip_size") if d["state"] == "resolvida" else None,
             "completed_at": d.get("completed_at"),
+            # Campos ricos p/ os filtros da secção HRC Solved (None = "sem dado").
+            "tournament_format": rich.get("tournament_format"),
+            "position_hero": rich.get("position_hero"),
+            "first_vpip_position": rich.get("first_vpip_position"),
+            "stack_hero_bb": rich.get("stack_hero_bb"),
+            "total_players": rich.get("total_players"),
+            "tournament_speed": rich.get("tournament_speed"),
+            "players_left": rich.get("players_left"),
+            "players_left_source": rich.get("players_left_source"),
         })
     return {"sent": out, "total": len(out)}
 

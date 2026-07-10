@@ -35,13 +35,16 @@ def test_derive_sent_state():
 # ── GET /hrc/sent ──
 @patch("app.routers.queue.query")
 def test_sent_lists_three_states(mq):
+    # Contrato do row de /hrc/sent (pós-enriquecimento): inclui id + colunas ricas
+    # (tournament_number/raw ausentes → enriquecimento fica offline, campos ricos None).
     base = dict(site="GGPoker", tournament_name="Daily", hero_cards=["Ah", "Ks"],
                 played_at=datetime(2026, 6, 16, 17, 10), released_at=datetime(2026, 6, 18, 9, 0),
-                batch_id="b1", requeue_epoch=0, completed_at=None)
+                batch_id="b1", requeue_epoch=0, completed_at=None,
+                tournament_format=None, position=None)
     mq.return_value = [
-        {**base, "hand_id": "GG-1", "job_status": "done", "error": None, "result_zip_size": 123},
-        {**base, "hand_id": "GG-2", "job_status": "failed", "error": "setup failed", "result_zip_size": None},
-        {**base, "hand_id": "GG-3", "job_status": None, "error": None, "result_zip_size": None},
+        {**base, "id": 1, "hand_id": "GG-1", "job_status": "done", "error": None, "result_zip_size": 123},
+        {**base, "id": 2, "hand_id": "GG-2", "job_status": "failed", "error": "setup failed", "result_zip_size": None},
+        {**base, "id": 3, "hand_id": "GG-3", "job_status": None, "error": None, "result_zip_size": None},
     ]
     r = _client().get("/api/queue/hrc/sent")
     assert r.status_code == 200
@@ -55,6 +58,10 @@ def test_sent_lists_three_states(mq):
     assert by["GG-1"]["error"] is None
     assert by["GG-3"]["result_zip_size"] is None
     assert by["GG-2"]["result_zip_size"] is None
+    # campos ricos presentes no contrato (None quando sem dado)
+    for k in ("position_hero", "first_vpip_position", "tournament_format",
+              "tournament_speed", "total_players", "players_left", "stack_hero_bb"):
+        assert k in by["GG-1"]
 
 
 # ── POST /hrc/requeue ──

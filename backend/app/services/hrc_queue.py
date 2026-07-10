@@ -634,3 +634,52 @@ def eligible_hands(
         "format_counts": fmt,
         "hands": hands,
     }
+
+
+def enrich_hands_for_display(rows: list[dict]) -> dict:
+    """Enriquece mãos ARBITRÁRIAS (já enviadas/resolvidas) com os MESMOS campos
+    ricos de `eligible_hands` (position_hero, first_vpip_position, stack_hero_bb,
+    tournament_format, total_players, tournament_speed, players_left) para a barra
+    de filtros da secção 'HRC Solved'.
+
+    Difere de `eligible_hands`: NÃO aplica gates (estas mãos já foram enviadas —
+    algumas já são `hrc_jobs.done`, logo excluídas do `select_andar1_rows`). É
+    puramente aditivo e DEFENSIVO: uma mão que não parseia mantém-se na lista com
+    os campos ricos a `None` (nunca se esconde uma mão já enviada). Read-only.
+
+    `rows` devem trazer: id, site, tournament_number, tournament_format, position,
+    raw. Devolve `{id: {campos ricos}}` (mapa por hand-db-id).
+    """
+    ts_meta = lookup_ts_meta(rows)
+    players_left_map = lookup_players_left(rows)
+    out: dict[int, dict] = {}
+    for h in rows:
+        rich = {
+            "tournament_format": h.get("tournament_format"),
+            "position_hero": h.get("position"),
+            "first_vpip_position": None,
+            "stack_hero_bb": None,
+            "total_players": None,
+            "tournament_speed": None,
+            "players_left": None,
+            "players_left_source": None,
+        }
+        try:
+            meta = ts_meta.get((h.get("site"), h.get("tournament_number"))) or {}
+            rich["total_players"] = meta.get("total_players")
+            rich["tournament_speed"] = meta.get("tournament_speed")
+            pl_val, pl_src = players_left_map.get(h.get("id"), (None, None))
+            rich["players_left"] = pl_val
+            rich["players_left_source"] = pl_src
+            hh = convert_gg_hh_to_pokerstars_compatible(h)
+            if hh:
+                seats_list = derive_seats_in_preflop_order(hh)
+                blinds = _extract_blinds_from_header(hh)
+                bb = blinds[1] if blinds else None
+                rich["first_vpip_position"] = derive_first_vpip_position(hh, seats_list)
+                rich["stack_hero_bb"] = _hero_stack_bb(hh, bb)
+        except Exception:
+            logger.exception("enrich_hands_for_display: mão %s falhou (mantida c/ Nones)",
+                             h.get("hand_id"))
+        out[h["id"]] = rich
+    return out

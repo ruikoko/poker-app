@@ -339,7 +339,16 @@ export default function HRCQueuePage() {
   const [openElig, setOpenElig] = useState(false)
   const [openLive, setOpenLive] = useState(false)
   const [openSolved, setOpenSolved] = useState(false)
-  const [solvedSite, setSolvedSite] = useState('')         // filtro Site da secção HRC Solved
+  // Filtros da secção HRC Solved — espelham os da secção Elegíveis (sem SpeedRacer:
+  // /hrc/sent não traz tags). Prefixo s* para não colidir com os da secção 1.
+  const [sSite, setSSite] = useState('')
+  const [sHeroPos, setSHeroPos] = useState('')
+  const [sVpip, setSVpip] = useState('')
+  const [sFormat, setSFormat] = useState('')
+  const [sTotal, setSTotal] = useState('')
+  const [sLeft, setSLeft] = useState('')
+  const [sField, setSField] = useState('')
+  const [sSpeed, setSSpeed] = useState('')
 
   // pt92 — limpar/pausar a fila: des-liberta tudo. O adapter para de puxar até
   // nova seleção manual ('Enviar ao HRC'). Não há mais "Disparar tudo".
@@ -939,8 +948,25 @@ export default function HRCQueuePage() {
       {sent && (() => {
         const live = sent.sent.filter(s => curSentState(s) !== 'resolvida')      // por resolver + canceladas
         const solvedAll = sent.sent.filter(s => curSentState(s) === 'resolvida')  // resolvidas (tree recebida)
-        const solved = solvedAll.filter(s => !solvedSite || s.site === solvedSite)
+        // Filtro completo da secção HRC Solved (mesmos buckets da secção 1).
+        const solved = solvedAll.filter(s =>
+          (!sSite || s.site === sSite) &&
+          (!sHeroPos || (sHeroPos === 'sd' ? !s.position_hero : normPos(s.position_hero) === sHeroPos)) &&
+          (!sVpip || (sVpip === 'sd' ? !s.first_vpip_position : normPos(s.first_vpip_position) === sVpip)) &&
+          (!sFormat || fmtBucket(s.tournament_format) === sFormat) &&
+          (!sTotal || totalBucket(s.total_players) === sTotal) &&
+          (!sLeft || leftBucket(s.players_left) === sLeft) &&
+          (!sField || fieldBucket(s) === sField) &&
+          (!sSpeed || speedBucket(s.tournament_speed) === sSpeed)
+        )
         const solvedSites = [...new Set(solvedAll.map(s => s.site))].sort()
+        const solvedHeroPos = [...new Set(solvedAll.map(s => normPos(s.position_hero)).filter(Boolean))].sort()
+        const solvedVpip = [...new Set(solvedAll.map(s => normPos(s.first_vpip_position)).filter(Boolean))].sort()
+        const sActive = [sSite, sHeroPos, sVpip, sFormat, sTotal, sLeft, sField, sSpeed].filter(Boolean).length
+        const clearSolvedFilters = () => {
+          setSSite(''); setSHeroPos(''); setSVpip(''); setSFormat('')
+          setSTotal(''); setSLeft(''); setSField(''); setSSpeed('')
+        }
         const nLive = live.filter(s => curSentState(s) === 'por_resolver').length
         const nCanc = live.filter(s => curSentState(s) === 'cancelada').length
         const SentTable = ({ rows }) => (
@@ -1040,17 +1066,10 @@ export default function HRCQueuePage() {
                 : <SentTable rows={live} />)}
             </div>
 
-            {/* Secção 3 — HRC SOLVED: mãos resolvidas (tree recebida). Estrutura da secção 1
-                (cabeçalho c/ números + filtro; lista ao expandir). Filtro Site — os campos
-                ricos (pos/formato/etc.) precisam de vir do backend /hrc/sent p/ o filtro completo. */}
+            {/* Secção 3 — HRC SOLVED: mãos resolvidas (tree recebida). Estrutura da secção 1:
+                cabeçalho c/ números + barra de filtros COMPLETA (sempre visível); lista ao expandir. */}
             <div style={{ marginTop: 22 }}>
               <SecHead title={`HRC SOLVED (${solvedAll.length})`} open={openSolved} onToggle={() => setOpenSolved(o => !o)}>
-                <label style={{ ...SEL_LABEL, cursor: 'pointer' }} onClick={e => e.stopPropagation()}>Site:
-                  <select value={solvedSite} onChange={e => setSolvedSite(e.target.value)} style={SEL_STYLE}>
-                    <option value="">Todos</option>
-                    {solvedSites.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </label>
                 <span style={{ opacity: 0.7, fontWeight: 600 }}>{solved.length} de {solvedAll.length}</span>
                 {verify && verify.total > 0 && (
                   <>
@@ -1062,8 +1081,88 @@ export default function HRCQueuePage() {
                   </>
                 )}
               </SecHead>
+
+              {/* Barra de filtros — igual à secção Elegíveis (sem SpeedRacer: /hrc/sent não traz tags) */}
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, fontSize: 12, color: 'var(--muted)',
+                padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                <label style={SEL_LABEL}>Site:
+                  <select value={sSite} onChange={e => setSSite(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    {solvedSites.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>Hero pos:
+                  <select value={sHeroPos} onChange={e => setSHeroPos(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todas</option>
+                    <option value="sd">— sem dado —</option>
+                    {solvedHeroPos.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>1º VPIP:
+                  <select value={sVpip} onChange={e => setSVpip(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todas</option>
+                    <option value="sd">— sem dado —</option>
+                    {solvedVpip.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>Formato:
+                  <select value={sFormat} onChange={e => setSFormat(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    <option value="pko">PKO/KO</option>
+                    <option value="vanilla">Vanilla</option>
+                    <option value="sd">— sem dado —</option>
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>Speed:
+                  <select value={sSpeed} onChange={e => setSSpeed(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    <option value="hyper">Hyper</option>
+                    <option value="turbo">Turbo</option>
+                    <option value="normal">Normal</option>
+                    <option value="sd">— sem dado —</option>
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>Total jog.:
+                  <select value={sTotal} onChange={e => setSTotal(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    <option value="<100">&lt;100</option>
+                    <option value="100-500">100–500</option>
+                    <option value="500-1000">500–1000</option>
+                    <option value="1000+">1000+</option>
+                    <option value="sd">— sem dado —</option>
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>Restantes:
+                  <select value={sLeft} onChange={e => setSLeft(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    <option value="1-50">1–50</option>
+                    <option value="51-200">51–200</option>
+                    <option value="201-1000">201–1000</option>
+                    <option value="1000+">1000+</option>
+                    <option value="sd">— sem dado —</option>
+                  </select>
+                </label>
+                <label style={SEL_LABEL}>% field:
+                  <select value={sField} onChange={e => setSField(e.target.value)} style={SEL_STYLE}>
+                    <option value="">Todos</option>
+                    <option value="<=10">≤10%</option>
+                    <option value="10-25">10–25%</option>
+                    <option value="25-50">25–50%</option>
+                    <option value=">50">&gt;50%</option>
+                    <option value="sd">— sem dado —</option>
+                  </select>
+                </label>
+                {sActive > 0 && (
+                  <button onClick={clearSolvedFilters} style={{ ...SEL_STYLE, cursor: 'pointer', color: 'var(--accent)', fontWeight: 600 }}>
+                    limpar filtros ({sActive})
+                  </button>
+                )}
+              </div>
+
               {openSolved && (solved.length === 0
-                ? <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Nenhuma mão resolvida{solvedSite ? ' neste site' : ' ainda'}.</div>
+                ? <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+                    {solvedAll.length === 0 ? 'Nenhuma mão resolvida ainda.' : 'Nenhuma mão resolvida corresponde aos filtros.'}
+                  </div>
                 : <SentTable rows={solved} />)}
             </div>
           </>
