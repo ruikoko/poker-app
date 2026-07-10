@@ -55,10 +55,16 @@
   botão novo); não verificável → ⚠ honesto. Recusada a Opção A (watcher grava no manifest) por
   exigir rebuild+reinstalação no Beelink (regra "1 exe", frágil). Não cruza de graça com D/G-K.
 - **🚨 REGRA DE LARGADA:** **lote GRANDE do robot SÓ com o CRIVO da Raiz 2 no ar** (senão payouts na
-  edição errada envenenam o ICM em silêncio). ✅ **Crivo no ar (11 Jul)** — mas hoje reporta **1
-  contaminação (tn 294738291)** → o gate FALHA. Antes de largar um lote grande: resolver/apagar essa
-  contaminação (o reimporte apaga-a) e confirmar o crivo a **0**. O lote da noite (10 Jul) NÃO a
-  consumiu (não tocou 294738291) → limpo à mesma.
+  edição errada envenenam o ICM em silêncio). ✅ **Crivo no ar (11 Jul)** — reporta **1 contaminação
+  (tn 294738291)** → o gate FALHA.
+  - **DECISÃO do Rui (11 Jul):** a contaminação do **294738291** (BH Deepstack $88, payout da edição
+    irmã 294711510) **NÃO se resolve à mão — morre no reimporte da Etapa 2.** Consequência **aceite**:
+    o gate `lobby-edition-scan` fica a **1** e o robot fica **travado para lotes GRANDES até à Etapa 2**;
+    **mãos avulsas podem correr**. O lote da noite (10 Jul) NÃO a consumiu (não tocou 294738291) → limpo.
+  - **GUIÃO DE ACEITAÇÃO da Etapa 2 (acrescentar):** os **4 gates a 0 pós-reimporte** — os **3 das
+    coroas** (eliminated-crown-scan `vision_origin_contamination`; guarda vivo-$0; guarda vanilla) **+
+    o das edições** (`lobby-edition-scan` `edition_contamination`). E o **294738291 nascer colado à
+    edição CERTA** é o **caso de aceitação do resolver novo** (a Raiz 2 a funcionar de raiz no reimporte).
 - **Pendentes do Rui:** 2 lobbys de 2 Jul por capturar (Deepstack Turbo $88, Hyper Special $108) p/
   desbloquear 4 mãos tagadas no HRC; 3 coroas do lápis (#24, speed-racer "IRE bounty ilegível").
 - **Vigiar:** cancelada **GG-6138896036** re-enfileirada (2ª vida) — confirmar no próximo run do robot.
