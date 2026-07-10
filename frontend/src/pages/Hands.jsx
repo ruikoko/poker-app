@@ -6,6 +6,7 @@ import TagEditor from '../components/TagEditor'
 import HandRow from '../components/HandRow'
 import { HrcSelectionProvider, HrcActionBar, GroupSelectAll, useHrcSelection } from '../components/HrcSelection'
 import HandHistoryViewer from '../components/HandHistoryViewer'
+import HandTimeline from '../components/HandTimeline'
 import AttachedImagesSection from '../components/AttachedImagesSection'
 import HandImagesSection from '../components/HandImagesSection'
 import TournamentHeader, { SiteWatermark } from '../components/TournamentHeader'
@@ -496,7 +497,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
     }} onClick={onClose}>
       <div
         style={{
-          width: '92%', maxWidth: 800, maxHeight: '90vh', overflow: 'auto',
+          width: '94%', maxWidth: 900, maxHeight: '90vh', overflow: 'auto',
           background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 12,
           padding: 28,
         }}
@@ -549,56 +550,11 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           >Detalhe</a>
         </div>
 
-        {/* Info grid — FIRST */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 20px',
-          marginBottom: 16, fontSize: 13,
-        }}>
-          {[
-            { l: 'Sala', v: hand.site },
-            { l: 'Data', v: hand.played_at ? isoDateLisbon(hand.played_at) : null },
-            { l: 'Resultado', v: <ResultBadge result={hand.result} /> },
-            { l: 'Posição', v: <PosBadge pos={hand.position} /> },
-            { l: 'Torneio', v: hand.stakes },
-            { l: 'Hand ID', v: hand.hand_id ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{hand.hand_id.slice(-12)}</span> : null },
-          ].map(({ l, v }) => (
-            <div key={l} style={{ background: '#0f1117', borderRadius: 6, padding: '8px 12px' }}>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.4, marginBottom: 3, textTransform: 'uppercase' }}>{l}</div>
-              <div>{v || <span style={{ color: '#4b5563' }}>&mdash;</span>}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Cartas + Board */}
-        <div style={{
-          background: '#0f1117', borderRadius: 10, padding: '16px 20px',
-          marginBottom: 20, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap',
-        }}>
-          <div>
-            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
-              Hero &middot; <PosBadge pos={hand.position} />
-            </div>
-            <div style={{ display: 'flex', gap: 5 }}>
-              {hand.hero_cards?.length > 0
-                ? hand.hero_cards.map((c, i) => <PokerCard key={i} card={c} size="lg" />)
-                : <span style={{ color: '#4b5563', fontSize: 13 }}>Cartas não visíveis</span>
-              }
-            </div>
-          </div>
-          {hand.board?.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Board</div>
-              <div style={{ display: 'flex', gap: 5 }}>
-                {hand.board.slice(0, 5).map((c, i) => <PokerCard key={i} card={c} size="lg" />)}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Acções — prioridade: HH parseada (raw) > all_players_actions > fallback notas */}
-        {/* Tech Debt #8: HandHistoryViewer canónico (substitui ParsedHandHistory + parseRawHH local). */}
+        {/* A MÃO — vista Timeline (3b), igual à página de detalhe. O header em cima
+            já traz sala/data/nível/resultado; a Timeline traz posições/stacks/cartas/
+            ações/coroas/showdown, por isso o info-grid e as cartas soltas saem. */}
         {hand.raw
-          ? <HandHistoryViewer hand={hand} />
+          ? <HandTimeline hand={hand} onEdited={onUpdate} />
           : hand.all_players_actions
             ? <AllPlayersActions actions={hand.all_players_actions} />
             : <HeroActionsFromNotes notes={hand.notes} />
@@ -635,19 +591,7 @@ function HandDetailModal({ hand, onClose, onUpdate }) {
           </div>
         )}
 
-        {/* Replayer */}
-        {hand.raw && hand.all_players_actions && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-              <a href={`/replayer/${hand.id}`} target="_blank" rel="noopener noreferrer" style={{
-                fontSize: 11, fontWeight: 600, color: '#818cf8', textDecoration: 'none',
-                padding: '4px 12px', borderRadius: 5, background: 'rgba(99,102,241,0.1)',
-                border: '1px solid rgba(99,102,241,0.25)', display: 'inline-flex', alignItems: 'center', gap: 4,
-              }}>&#9654; Fullscreen</a>
-            </div>
-            <Replayer hand={hand} />
-          </>
-        )}
+        {/* Replayer NÃO embutido (decisão do Rui) — o botão ▶ Replayer no topo leva lá. */}
 
         {/* Imagens anexadas (Tech Debt #B9 — galeria manual, ajuste UX pt7) */}
         <AttachedImagesSection hand={handForAttachments} onChange={refreshAttachments} dense />
