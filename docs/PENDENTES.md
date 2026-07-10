@@ -19,9 +19,16 @@
   hover) — **todos tratam a coroa como INSTANTÂNEO, nenhum como total → SEM fator-de-2 latente**.
   Nota latente menor: `0.5` duplicado (`ire.py:77` + `queue_export.py:845`) — fonte única resolveria;
   sem acção.
-- **FILA (por atacar, pela ordem):**
-  - **D:** zombie da Fronteira FT (Daily Hyper $60, tn 295258986) — dispensa reacorda (sinal anterior
-    à dispensa? edição errada do daily?). Logs da dispensa ajudam.
+- **✅ D — Raiz 1 CURADA (LIVE).** Zombie FT: o painel reacordava a dispensa com o print Info
+  PRÉ-EXISTENTE. Regra ÚNICA `has_new_ft_signal(tn, decided_at)` (refresh + painel): só reacorda com
+  sinal POSTERIOR à dispensa (Info `posted_at>decided_at`) ou tag -ft manual. +5 testes.
+- **🔴 D — Raiz 2 DESENHADA (quadro pronto, NÃO construída — precisa OK).** Resolver de lobbys não
+  distingue edições do mesmo nome/dia pela hora. Desenho (standard Rui): portão buy-in · janela com
+  prova (`start_time` do TS + janela de mãos) · cross-check de conteúdo · quarentena · crivo
+  permanente. Simulação retroativa: 114 lobbys → 81 certos · 2 corrigidos (zombie→295219051) · 2
+  quarentena · 29 sem janela-de-mãos (via `start_time`) · 0 regressões. 3 mal-colados
+  (295258986/297027787/297032961), 0 solves contaminados → **morrem no reimporte** (via recomendada).
+- **FILA (por atacar, pela ordem):** Raiz 2 (com OK) → **E** → **F** → **G-K** → cosmética → `#HRC-ANCHOR-IN-SENT`.
   - **E:** falso positivo no scan "coroa impossível" — excecionar `bounty_source='green_ko'` (régua
     ≥base÷2 é para VIVOS). Barato.
   - **F (verificação):** âmbito do bust no reentry_hint varre as SEATED todas (não só tagadas)?
@@ -37,6 +44,15 @@
   método pt92, + `target_node_offset`). Comparar → ✓/⚠ no passo "Verificar resolvidas" (badge, sem
   botão novo); não verificável → ⚠ honesto. Recusada a Opção A (watcher grava no manifest) por
   exigir rebuild+reinstalação no Beelink (regra "1 exe", frágil). Não cruza de graça com D/G-K.
+- **🚨 REGRA DE LARGADA:** **lote GRANDE do robot SÓ com o CRIVO da Raiz 2 no ar** (senão payouts na
+  edição errada envenenam o ICM em silêncio). Até lá, o robot corre só o que já está verificado.
+- **Pendentes do Rui:** 2 lobbys de 2 Jul por capturar (Deepstack Turbo $88, Hyper Special $108) p/
+  desbloquear 4 mãos tagadas no HRC; 3 coroas do lápis (#24, speed-racer "IRE bounty ilegível").
+- **Vigiar:** cancelada **GG-6138896036** re-enfileirada (2ª vida) — confirmar no próximo run do robot.
+- **✅ 1ª prova real TS-depois-das-mãos (10 Jul):** os 3 TS atrasados de 9 Jul ENTRARAM (295428546/
+  295428550/297033978, todos PKO) → reconcile religou os 22 lobbys de dia 9 (payout de 295428550
+  escrito via `reconcile_lobby_vision`); reclassificação de formato = no-op (nomes já PKO). Gatilho
+  TS-tardio validado em produção.
 - **Registar (sem acção):** quarentena de nomes a ZERO (FabiSt7 re-entrada); Daily Hyper $80
   dispensado; espécime #23 WN-4832780523824742404-104 (fallback_root, guardar p/ os fallbacks);
   **#24 (informativo):** 3 das 9 speed-racer mostram "IRE — bounty ilegível" (coroas por rever,

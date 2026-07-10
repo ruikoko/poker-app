@@ -528,17 +528,27 @@ def review_status(engine_status, cross_check) -> str:
 
 
 def _review_row(tn):
-    rows = query("SELECT decision FROM ft_boundary_review WHERE tournament_number=%s", (tn,))
+    rows = query("SELECT decision, decided_at FROM ft_boundary_review WHERE tournament_number=%s",
+                 (tn,))
     return rows[0] if rows else None
 
 
-def has_new_ft_signal(tn) -> bool:
-    """Sinal DELIBERADO novo que reactiva um dispensado: SÓ a tag manual `-ft` do Rui
-    (`folder_ft_source='manual'`). O sinal de **lobby** (aba Info) é o MESMO que tornou
-    o torneio candidato — não é 'novo' face a uma dispensa; se reactivasse por presença,
-    a dispensa NUNCA pegava (o cartão voltava a pending a cada refresh — bug apanhado no
-    reimport). Só o Rui a pôr a mão numa pasta `-ft` conta como sinal novo forte."""
-    return _manual_ft_boundary(tn) is not None
+def has_new_ft_signal(tn, decided_at=None) -> bool:
+    """REGRA ÚNICA (Rui 10 Jul, #FT-ZOMBIE-DISMISS-REACTIVATION): um dispensado só reacorda com
+    sinal **POSTERIOR à dispensa**. Usada IGUAL pelo refresh (background) e pelo painel
+    (`_ft_dismiss_reactivated`) — antes divergiam (refresh só -ft; painel -ft OU Info
+    pré-existente → o zombie: o cartão voltava a "needs" a cada abertura).
+    - tag manual `-ft` (`folder_ft_source='manual'`) = override DELIBERADO do Rui (confirma a
+      FT à mão; contradiz e trumps a dispensa) → reacorda.
+    - print Info do lobby → só reacorda se `posted_at > decided_at` (um Info genuinamente NOVO,
+      não o pré-existente que motivou a dispensa).
+    Sem `decided_at` → conservador (só o -ft manual reacorda)."""
+    if _manual_ft_boundary(tn) is not None:
+        return True
+    if decided_at is None:
+        return False
+    lb, _n = _lobby_ft_boundary(tn)
+    return lb is not None and lb > decided_at
 
 
 def _upsert_review_snapshot(tn, d, status, decision):
@@ -584,10 +594,10 @@ def refresh_ft_boundaries(tournament_number: Optional[str] = None) -> dict:
         d = compute_ft_boundary(tn)
         status = review_status(d.get("status"), d.get("cross_check"))
         if dec == "dismissed":
-            if has_new_ft_signal(tn):
+            if has_new_ft_signal(tn, row.get("decided_at") if row else None):
                 _upsert_review_snapshot(tn, d, status, decision="pending")
                 reactivated += 1
-            continue                                  # sem sinal novo → fica dispensado
+            continue                                  # sem sinal POSTERIOR → fica dispensado
         _upsert_review_snapshot(tn, d, status, decision="pending")
         refreshed += 1
     return {"refreshed": refreshed, "reactivated": reactivated}

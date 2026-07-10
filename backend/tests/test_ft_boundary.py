@@ -427,7 +427,7 @@ def test_refresh_respects_decisions_and_reactivates():
     with patch.object(fb, "_candidate_tns", return_value=list(reviews)), \
          patch.object(fb, "_review_row", side_effect=lambda tn: reviews[tn]), \
          patch.object(fb, "compute_ft_boundary", return_value=_REFRESH_D), \
-         patch.object(fb, "has_new_ft_signal", side_effect=lambda tn: tn == "dis2"), \
+         patch.object(fb, "has_new_ft_signal", side_effect=lambda tn, decided_at=None: tn == "dis2"), \
          patch.object(fb, "_upsert_review_snapshot",
                       side_effect=lambda tn, d, s, decision: upserts.append((tn, decision))):
         res = fb.refresh_ft_boundaries()

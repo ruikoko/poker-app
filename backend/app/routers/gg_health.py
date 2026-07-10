@@ -615,20 +615,22 @@ def _ft_candidate_list() -> list:
         "MIN(played_at)::date AS day, COUNT(*) AS n_hands "
         "FROM hands WHERE site='GGPoker' AND tournament_number = ANY(%s) "
         "GROUP BY tournament_number", (tns,))}
-    dec = {r["tournament_number"]: r["decision"] for r in query(
-        "SELECT tournament_number, decision FROM ft_boundary_review "
+    dec = {r["tournament_number"]: r for r in query(
+        "SELECT tournament_number, decision, decided_at FROM ft_boundary_review "
         "WHERE tournament_number = ANY(%s)", (tns,))}
     out = []
     for tn in tns:
         d = compute_ft_boundary(tn)
         cc = d.get("cross_check") or {}
         status = _ft_map_status(d.get("status"), cc)
-        decision = dec.get(tn, "pending")
-        # REVERSIBILIDADE do Dispensar: um torneio 'dismissed' volta a pending se entrar
-        # sinal novo FORTE (tag manual -ft OU print do Info) — não persiste no GET (só
-        # reflecte); o Rui volta a decidir. Nota "sinal novo pós-dispensa".
+        drow = dec.get(tn)
+        decision = drow["decision"] if drow else "pending"
+        # REVERSIBILIDADE do Dispensar: um 'dismissed' só volta a pending com sinal POSTERIOR
+        # à dispensa (regra única `has_new_ft_signal`) — o Info PRÉ-EXISTENTE já não reacorda
+        # (era o zombie). Não persiste no GET (só reflecte); o Rui volta a decidir.
         reactivated = False
-        if decision == "dismissed" and _ft_dismiss_reactivated(tn):
+        if decision == "dismissed" and _ft_dismiss_reactivated(
+                tn, drow.get("decided_at") if drow else None):
             decision, reactivated = "pending", True
         boundary = d.get("boundary")
         if decision == "dismissed":
@@ -656,14 +658,13 @@ def _ft_candidate_list() -> list:
     return out
 
 
-def _ft_dismiss_reactivated(tn) -> bool:
-    """Um torneio dispensado ganhou sinal novo FORTE desde a dispensa? (tag manual -ft
-    OU print do Info). Só se chama para os 'dismissed' (poucos)."""
-    from app.services.ft_boundary import _manual_ft_boundary, _lobby_ft_boundary
-    if _manual_ft_boundary(tn) is not None:
-        return True
-    lb, _n = _lobby_ft_boundary(tn)
-    return lb is not None
+def _ft_dismiss_reactivated(tn, decided_at=None) -> bool:
+    """Um torneio dispensado ganhou sinal POSTERIOR à dispensa? Regra ÚNICA partilhada com o
+    refresh (`has_new_ft_signal`): tag manual -ft (override) OU print Info com `posted_at >
+    decided_at`. O Info PRÉ-EXISTENTE já NÃO reacorda (#FT-ZOMBIE-DISMISS-REACTIVATION, Rui
+    10 Jul). Só se chama para os 'dismissed'."""
+    from app.services.ft_boundary import has_new_ft_signal
+    return has_new_ft_signal(tn, decided_at)
 
 
 class FtTnBody(BaseModel):

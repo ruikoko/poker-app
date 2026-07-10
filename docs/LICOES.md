@@ -127,3 +127,17 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   (ko_units), não a chama; a mão "sem IRE" estava só tagada 'nota' (fora do âmbito KO). **LIÇÃO:**
   medir (taxa pré/pós) + correr a função real sobre a mão concreta ANTES de aceitar a causa — a
   premissa plausível estava errada.
+
+- 2026-07-10 (fecho do lote da auditoria) — quatro lições:
+  - **(a) Um "duplicado" não é um no-op.** O dedup do table-SS saía cedo e engolia a `folder_tag` do
+    reenvio → mãos sem etiqueta em silêncio. O que o reenvio traz de NOVO (a tag) tem de ser
+    reconciliado, não deitado fora — sobretudo antes de um reimporte que gera duplicados em massa.
+  - **(b) Um sinal que motivou uma decisão não a pode reacordar.** O print Info pré-existente
+    reacordava a dispensa FT a cada refresh (zombie). Só sinal POSTERIOR à decisão conta.
+  - **(c) Resolver por nome+dia sem HORA é palpite quando há edições múltiplas.** Os Daily têm 2+
+    edições/dia (mesmo nome, `start_time` diferente). A janela REAL com prova (`start_time` do TS +
+    janela de mãos) é o método; "hora mais próxima" seria adivinhar. Em falta → quarentena (honesto);
+    colar às cegas → veneno (payout na edição errada).
+  - **(d) Smoke com contagem COMPLETA de proveniência > amostragem.** Verificar os 5/5 solves +
+    varrer TODOS os lobbys (114) + confirmar 0 solves nas edições mal-coladas dá certeza; olhar
+    a 1-2 mãos não.

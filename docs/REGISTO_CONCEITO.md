@@ -287,3 +287,15 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
 **Nota latente (menor, sem acção):** o `0.5` está DUPLICADO — `ire.py:77` e `queue_export.py:845`
 (re-declarado de propósito). Ambos 0.5 hoje; se um mudar sem o outro → divergência (à la
 `#POSITION-LABELS-PYTHON-JS-DRIFT`). Fonte única resolveria; regista-se, não é acção.
+
+## 2026-07-10 (fecho) — reactivação de dispensas FT + certificação pt95
+
+- 2026-07-10 — **Regra da reactivação de uma dispensa FT (`#FT-ZOMBIE-DISMISS-REACTIVATION`):** um
+  cartão dispensado só reacorda com sinal **POSTERIOR à dispensa** — regra ÚNICA partilhada pelo
+  refresh (background) e pelo painel (`has_new_ft_signal(tn, decided_at)`; antes divergiam → zombie).
+  Sinais: **tag -ft manual** (override deliberado do Rui, trumps a dispensa) OU **print Info do lobby
+  com `posted_at > decided_at`** (Info genuinamente novo). O Info **pré-existente** (o que motivou a
+  dispensa) NUNCA a reacorda. Princípio: *o sinal que motivou uma decisão não pode desfazê-la.*
+- 2026-07-10 — **Certificação smoke pt95:** 5/5 solves do robot verificados (estrutura + âncora +
+  proveniência de payout limpa); exe certificado; gate #1 fechado. `hrc_jobs`=6 (5 done); 0 solves
+  nas edições mal-coladas (nenhum payout errado consumido). → `JOURNAL_2026-07-10.md`.

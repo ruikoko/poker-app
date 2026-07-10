@@ -186,7 +186,7 @@ def _list_with(decision, reactivated):
     def _q(sql, params=None):
         if "MAX(tournament_name)" in sql:
             return [{"tn": "T1", "name": "X", "day": None, "n_hands": 5}]
-        if "decision FROM ft_boundary_review" in sql:
+        if "FROM ft_boundary_review" in sql:
             return [{"tournament_number": "T1", "decision": decision}]
         return []
     with patch.object(ggh, "candidate_tns", return_value=["T1"]), \
@@ -216,7 +216,7 @@ def test_candidate_list_classifies_sections():
     def _q(sql, params=None):
         if "MAX(tournament_name)" in sql:
             return [{"tn": t, "name": "X", "day": None, "n_hands": 10} for t in ("m", "n", "p")]
-        if "decision FROM ft_boundary_review" in sql:
+        if "FROM ft_boundary_review" in sql:
             return [{"tournament_number": "p", "decision": "promoted"}]
         return []
     with patch.object(ggh, "candidate_tns", return_value=["m", "n", "p"]), \
