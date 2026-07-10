@@ -13,6 +13,24 @@ roteiro do MAPA_AUDITORIA_VISUAL**.
 
 ---
 
+## ⚠️ Antes de tudo — o que NÃO vai à app + tamanhos
+
+- **Só GG HH/TS.** Não subir ao `/api/import`: **bundles HRC** (`hrc_GG-*.zip`,
+  `GG-*.zip`, `queue_*.zip` — trazem `meta.json`/`payouts.json`/`script.js` ao lado de um
+  `hh.txt`) nem **packs PS/WN** (`Poker_Hands_PS_*`, etc.). A pasta `Poker\GG\HH|TS\2026-MM\`
+  já foi **limpa** destes intrusos (11 Jul) — importar a partir dela é seguro.
+  - *Como se coaram no arquivo:* os bundles HRC têm um `hh.txt` GG lá dentro → passaram por HH;
+    os packs PS/WN têm `tournament_number` → passaram pelo filtro. Regra: **GG = `GGPoker` no
+    conteúdo**, não "tem torneio".
+- **Tamanho.** Não há limite explícito no código; o bloqueio é do **proxy (Railway)/uvicorn**
+  no upload manual de ficheiros grandes. Os zips **GG são pequenos (≤ ~17 MB)** → sem problema.
+  **Usa o `appimport`** (pasta → um toque; posta **ficheiro-a-ficheiro**) em vez de arrastar
+  zips grandes na UI: mata o bloqueio por tamanho de raiz. Se algum ficheiro GG for
+  invulgarmente grande (>~50 MB), importa-o pela pasta/appimport (per-file) — **nunca**
+  extrair para o partir.
+- **NÃO subir ad-hoc fora de ordem** (lição desta sessão): um upload manual precipitado meteu
+  ~9,9k mãos de meio-Junho **fora de ordem e incompleto** por cima do baseline. Segue as fases.
+
 ## 0. Pré-voo (antes de importar nada)
 
 - [ ] **Salas de poker fechadas** (regra de ouro do CLAUDE.md) — nada de HM3/HUD/salas abertas.
