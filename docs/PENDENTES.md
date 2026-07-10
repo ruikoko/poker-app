@@ -4,10 +4,12 @@
 
 **A e C fechados** (diagnóstico + A1 fix + C decidido). Restantes na fila pela ordem do lote.
 
-- **✅ A1 (`#DEDUP-DROPS-FOLDER-TAG`) — LIVE.** Dedup do table-SS deitava fora a folder_tag de um
-  re-envio. Cura `_reapply_folder_tag_on_dedup` (Opção A). **Aceitação pendente:** o Rui re-corre o
-  import de `done\it\SpeedRacer\` → as 3 mãos (GG-6138218252/6138218069/6137938737) nascem etiquetadas
-  pela porta normal (confirmar `discord_tags=['speed-racer']` depois).
+- **✅ A1 (`#DEDUP-DROPS-FOLDER-TAG`) — LIVE + ACEITE (10 Jul).** Dedup do table-SS deitava fora a
+  folder_tag de um re-envio. Cura `_reapply_folder_tag_on_dedup` (Opção A). **Aceite:** o Rui
+  re-correu o import de `it\SpeedRacer\` (`ImportaSpeedRacerAoVivo.bat`) → as 3 mãos
+  (GG-6138218252/6138218069/6137938737) ficaram `discord_tags=['speed-racer']` (mm=table_ss) + a row
+  da captura com `folder_tag=speed-racer`; grupo speed-racer no Estudo **6→9** (torneio 295211698,
+  02/07). Confirmado read-only na BD. Fechado.
 - **A2/A3/A4 — não-bug** (desanon recusa nomes incertos; contas batem; regra C estrita). Sem acção.
 - **✅ C (IRE) — decidido, sem cura.** IRE = métrica de estudo KO; 'nota' fora por desenho
   (REGISTO_CONCEITO 10 Jul). Não reabrir.
@@ -25,7 +27,9 @@
   - **Cosmética:** fusão das tags na triagem; "IMAGENS ANEXADAS(0) vs DA MÃO(6)"; echos da
     TidyDoneIT_Aplicar.bat (já limpos 10 Jul); grafias antigas nos filtros GTO.
 - **Registar (sem acção):** quarentena de nomes a ZERO (FabiSt7 re-entrada); Daily Hyper $80
-  dispensado; espécime #23 WN-4832780523824742404-104 (fallback_root, guardar p/ os fallbacks).
+  dispensado; espécime #23 WN-4832780523824742404-104 (fallback_root, guardar p/ os fallbacks);
+  **#24 (informativo):** 3 das 9 speed-racer mostram "IRE — bounty ilegível" (coroas por rever,
+  honestas) — comportamento correcto; o Rui preenche pelo lápis quando quiser. Sem código.
 
 
 ## ✅ Cura verde-KO das coroas de ELIMINADOS — LIVE + PROVADA em prod (9 Jul)
