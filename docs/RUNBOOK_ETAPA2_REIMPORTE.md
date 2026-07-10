@@ -13,6 +13,18 @@ roteiro do MAPA_AUDITORIA_VISUAL**.
 
 ---
 
+## 🎯 ÂMBITO (decisão do Rui, 10 Jul) — SEM wipe, JUNHO → hoje
+
+- **Continua-se POR CIMA do estado atual** (não há wipe). O **gatilho TS-tardio** cobre a ordem
+  (TS pode chegar depois das HH; o reconcile resolve). Backup restore-verificado feito como novo
+  ponto de partida (`_local_only/backup_etapa2_20260710/`, 24 884 mãos).
+- **Âmbito = Junho → hoje.** **Jan–Maio NÃO se importa** — fica na cópia `Poker\GG\…\2026-0[1-5]\`
+  como arquivo, **fora do plano**. (Se um dia se quiser, importa-se da cópia; não é para agora.)
+- **Buracos que NÃO se tapam da cópia (confirmado por conteúdo, 10 Jul):** os dias sem mãos de
+  Jun/Jul **não estão na cópia nem na BD** — `06-07/10/17/19/20/27/28/29` e `07-03→07-08`. Ou são
+  **dias sem jogo**, ou a HH **só existe no backoffice**. A cópia cobre em Jul só `07-01/02/09`.
+  → o que faltar mesmo (se jogaste) vai-se buscar ao **backoffice**, não à cópia.
+
 ## ⚠️ Antes de tudo — o que NÃO vai à app + tamanhos
 
 - **Só GG HH/TS.** Não subir ao `/api/import`: **bundles HRC** (`hrc_GG-*.zip`,
