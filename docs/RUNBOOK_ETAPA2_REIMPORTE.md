@@ -40,7 +40,14 @@ roteiro do MAPA_AUDITORIA_VISUAL**.
   - `GET /api/queue/hrc/gate` → confirmar fechada.
   - **NÃO** clicar "Enviar ao HRC" no painel `/hrc`; **NÃO** correr o adaptador no Beelink.
   - Os imports e o reconcile **não** disparam o robot sozinhos (fila 100% manual, pt68/pt92).
-- [ ] **Backup da BD** feito e restore-verificado (o padrão dos wipes anteriores).
+- [ ] **PASSO 0 — Backup + WIPE (operacional, do Rui; o Code só tem leitura de prod):**
+  1. **Backup** da BD **restore-verificado** ANTES de tudo (padrão pt47/pt68).
+  2. **WIPE**: `TRUNCATE … RESTART IDENTITY CASCADE` das tabelas de dados,
+     **preservando `users`, `stat_ideals`, `monthly_stats`** (como nos wipes anteriores).
+  3. Confirmar **tabelas de dados a 0** antes de importar (hands/tournament_summaries/
+     tournament_payouts/lobby_processing_log/hrc_jobs = 0).
+  > O reimporte só arranca **depois** deste Passo 0 confirmado. O Code não executa o wipe
+  > (só tem `~/.pokerapp_db_ro.env`, leitura); dá suporte a cada fase a seguir.
 - [ ] **Baseline dos 4 gates** (correr agora, ANTES; anotar os números — hoje o das edições
       dá **1**, tn 294738291; ver §4). Serve para comparar no fim.
 
