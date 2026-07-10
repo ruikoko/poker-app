@@ -22,13 +22,23 @@
 - **✅ D — Raiz 1 CURADA (LIVE).** Zombie FT: o painel reacordava a dispensa com o print Info
   PRÉ-EXISTENTE. Regra ÚNICA `has_new_ft_signal(tn, decided_at)` (refresh + painel): só reacorda com
   sinal POSTERIOR à dispensa (Info `posted_at>decided_at`) ou tag -ft manual. +5 testes.
-- **🔴 D — Raiz 2 DESENHADA (quadro pronto, NÃO construída — precisa OK).** Resolver de lobbys não
-  distingue edições do mesmo nome/dia pela hora. Desenho (standard Rui): portão buy-in · janela com
-  prova (`start_time` do TS + janela de mãos) · cross-check de conteúdo · quarentena · crivo
-  permanente. Simulação retroativa: 114 lobbys → 81 certos · 2 corrigidos (zombie→295219051) · 2
-  quarentena · 29 sem janela-de-mãos (via `start_time`) · 0 regressões. 3 mal-colados
-  (295258986/297027787/297032961), 0 solves contaminados → **morrem no reimporte** (via recomendada).
-- **FILA (por atacar, pela ordem):** Raiz 2 (com OK) → **E** → **F** → **G-K** → cosmética → `#HRC-ANCHOR-IN-SENT`.
+- **✅ D — Raiz 2 CONSTRUÍDA + LIVE (11 Jul, opção A + ressalva do Rui).** Resolver de lobbys deixa
+  de escolher a edição "mais próxima às cegas". Provas DURAS (`tournament_resolver._disambiguate_editions`,
+  GG-only, só lobby prestart): **H1** nome-exacto (mata "…Europe…") · **H2** impossibilidade
+  (`entrants` do print > campo final da edição → exclui; UNIDIRECIONAL — `entrants` < campo é NORMAL,
+  nunca prova) · **H3** não-arrancada-com-eliminações (`players_left < entrants` numa edição que ainda
+  não começou → exclui) · **H4** janela de mãos (`[1ª mão−45min, última mão+120min]`, âncora
+  **UTC→Lisboa**). 2+ sobrevivem sem containment estrito → **quarentena** (`result='edition_quarantine'`,
+  não cola). **Crivo** `GET /api/gg-health/lobby-edition-scan` (irmão do eliminated-crown-scan, gate
+  duro) + **painel de quarentena** `LobbyEditionPanel` (Saúde GG) + decisão manual
+  `POST /lobby-edition-resolve`. **Simulação com código real:** 85 GG → 78 certos · 5 corrigidos
+  (2 zombie→295219051 + 3 BH$88 provados por `entrants`) · 2 quarentena; 29 WN intactos (fora de
+  âmbito — decisão Rui); **0 regressões**. **Crivo hoje = 1 CONTAMINAÇÃO real:** tn **294738291**
+  (BH Deepstack $88) tem payout escrito por lobby da edição **294711510** (`entrants` 287/305 > campo
+  219) — **NÃO consumido por nenhum solve do lote** (o BH do lote era o $32 294698433) → morre no
+  reimporte. Os **3 mal-colados** (297032961/297027787/295258986) = payout LIMPO (escritores re-resolvem
+  a si próprios); **id=19 (297032961) = LIMPO** (payout de 315da0e6, entrants 347 coerente).
+- **FILA (por atacar, pela ordem):** ~~Raiz 2~~ (✅ 11 Jul) → **E** → **F** → **G-K** → cosmética → `#HRC-ANCHOR-IN-SENT`.
   - **E:** falso positivo no scan "coroa impossível" — excecionar `bounty_source='green_ko'` (régua
     ≥base÷2 é para VIVOS). Barato.
   - **F (verificação):** âmbito do bust no reentry_hint varre as SEATED todas (não só tagadas)?
@@ -45,7 +55,10 @@
   botão novo); não verificável → ⚠ honesto. Recusada a Opção A (watcher grava no manifest) por
   exigir rebuild+reinstalação no Beelink (regra "1 exe", frágil). Não cruza de graça com D/G-K.
 - **🚨 REGRA DE LARGADA:** **lote GRANDE do robot SÓ com o CRIVO da Raiz 2 no ar** (senão payouts na
-  edição errada envenenam o ICM em silêncio). Até lá, o robot corre só o que já está verificado.
+  edição errada envenenam o ICM em silêncio). ✅ **Crivo no ar (11 Jul)** — mas hoje reporta **1
+  contaminação (tn 294738291)** → o gate FALHA. Antes de largar um lote grande: resolver/apagar essa
+  contaminação (o reimporte apaga-a) e confirmar o crivo a **0**. O lote da noite (10 Jul) NÃO a
+  consumiu (não tocou 294738291) → limpo à mesma.
 - **Pendentes do Rui:** 2 lobbys de 2 Jul por capturar (Deepstack Turbo $88, Hyper Special $108) p/
   desbloquear 4 mãos tagadas no HRC; 3 coroas do lápis (#24, speed-racer "IRE bounty ilegível").
 - **Vigiar:** cancelada **GG-6138896036** re-enfileirada (2ª vida) — confirmar no próximo run do robot.

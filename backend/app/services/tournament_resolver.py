@@ -60,6 +60,34 @@ _GG_PRESTART_FWD_HOURS = 6
 # empírico pt41), e ±2h era marginal.
 _RAMO1_FWD_HOURS = 4
 
+# ── RAIZ 2 (11 Jul) — desambiguação de EDIÇÕES do mesmo torneio no mesmo dia ───
+# GG corre o mesmo torneio 2×/dia (ex.: Daily Hyper $60 às 17:45 E 20:45). O
+# TIER 0 escolhia a edição "mais próxima" às cegas (LIMIT 1) → cola o lobby na
+# edição errada → payout errado no ICM. A Raiz 2 exige PROVA para colar; sem
+# prova que separe as edições → QUARENTENA (não cola). Ver docs Raiz 2.
+#
+# GG-ONLY: a Winamax identifica o torneio sem ambiguidade na própria HH e não
+# repete edições no mesmo dia (decisão do Rui, 11 Jul) → fora do âmbito.
+#
+# PROVAS DURAS (podem decidir uma cola), por ordem:
+#   H1  nome EXACTO ("Speed Racer $108" ≠ "Speed Racer Europe $108").
+#   H2  impossibilidade: entrants do print > campo FINAL da edição (+tol OCR) →
+#       impossível (mais inscritos do que o total final) → exclui. UNIDIRECIONAL:
+#       entrants < campo final é NORMAL (print antes de fechar inscrições) e
+#       NUNCA é prova (ressalva do Rui).
+#   H3  não-arrancada-com-eliminações: a edição ainda não tinha começado à hora
+#       do print (anchor < start) MAS o print mostra eliminações (players_left <
+#       entrants) → impossível (um torneio por arrancar não tem gente eliminada).
+#   H4  janela de mãos: anchor tem de cair em [1ª mão − REG_BACK, última mão +
+#       POST_SLACK] (mãos reais do Hero nessa edição; start do TS se não houver).
+# Se as provas duras deixarem 2+ e só o "entrants mais próximo do campo" as
+# separasse → QUARENTENA (o desempate por proximidade de entrants NÃO cola só
+# por si — ressalva do Rui).
+_EDITION_REG_BACK_MIN = 45      # print pré-arranque observado até −26min → 45 folga
+_EDITION_POST_SLACK_MIN = 120   # o Rui vê o lobby muito depois de bustar (obs. >60min)
+_EDITION_NO_HANDS_DUR_MIN = 360  # sem mãos do Hero: assume duração generosa p/ a janela
+_EDITION_ENTRANTS_TOL = 0.05    # folga de OCR na régua da impossibilidade (H2)
+
 
 def _currency_for_site(site: Optional[str]) -> Optional[str]:
     """Moeda canónica por sala (para o filtro buy_in_currency do TIER 0)."""
@@ -186,6 +214,95 @@ def _parse_iso_naive(start_time_iso: Optional[str]) -> Optional[datetime]:
     return st.replace(tzinfo=None)
 
 
+def _edition_hand_window(site: str, tn: str):
+    """(1ª mão, última mão) do Hero nessa edição (Lisboa naive), ou (None, None).
+    É a "janela de mãos do torneio" da prova H4 — só temos as mãos do Hero, mas
+    marcam quando ele esteve NAQUELA edição."""
+    rows = query(
+        "SELECT MIN(played_at) AS mn, MAX(played_at) AS mx FROM hands "
+        "WHERE site = %s AND tournament_number = %s",
+        (site, tn),
+    )
+    if not rows:
+        return None, None
+    return rows[0].get("mn"), rows[0].get("mx")
+
+
+def _disambiguate_editions(site, candidates, anchor_lisbon, entrants,
+                           players_left, lobby_name=None):
+    """RAIZ 2 — escolhe a edição certa por PROVA DURA, ou devolve None (quarentena).
+
+    candidates: list de dicts com tournament_number, tournament_name, start_time,
+      total_players (start_time em Lisboa naive, como o TS).
+    anchor_lisbon: hora do print em Lisboa naive (posted_at convertido UTC→Lisboa).
+    entrants / players_left: do vision_json do lobby (int|None).
+    lobby_name: nome lido pela Vision (para a prova H1 nome-exacto).
+
+    Devolve (tournament_number, decision, survivors). tournament_number None =
+    quarentena. `decision` é uma etiqueta curta p/ auditoria/painel.
+    """
+    if anchor_lisbon is not None and getattr(anchor_lisbon, "tzinfo", None) is not None:
+        anchor_lisbon = anchor_lisbon.replace(tzinfo=None)
+
+    ent = entrants if isinstance(entrants, (int, float)) and entrants > 0 else None
+    pl = players_left if isinstance(players_left, (int, float)) and players_left > 0 else None
+    # eliminações provadas no print → só possível numa edição JÁ arrancada (H3).
+    has_eliminations = bool(ent and pl and pl < ent)
+
+    # H1 — nome EXACTO. Se algum candidato casa exactamente o nome (cleaned,
+    # lowercase) do lobby, restringe a esses (mata "…Europe…" que o match por
+    # tokens deixa entrar como superset).
+    ln = (clean_tournament_name(lobby_name) or "").strip().lower()
+    exact = [c for c in candidates
+             if ln and (clean_tournament_name(c.get("tournament_name")) or "").strip().lower() == ln]
+    pool = exact if exact else list(candidates)
+
+    survivors = []
+    for c in pool:
+        tn = c["tournament_number"]
+        start = c.get("start_time")
+        total = c.get("total_players")
+        # H2 — impossibilidade (unidirecional): entrants > campo final → exclui.
+        if ent is not None and total and ent > total * (1 + _EDITION_ENTRANTS_TOL):
+            continue
+        # H3 — não-arrancada mas com eliminações → impossível.
+        if start is not None and anchor_lisbon is not None and anchor_lisbon < start \
+           and has_eliminations:
+            continue
+        # H4 — janela de mãos.
+        fh, lh = _edition_hand_window(site, tn)
+        base_lo = fh if fh is not None else start
+        base_hi = lh if lh is not None else (
+            (start + timedelta(minutes=_EDITION_NO_HANDS_DUR_MIN)) if start else None)
+        if base_lo is None or base_hi is None or anchor_lisbon is None:
+            # sem sinal temporal utilizável — não exclui nem prova; deixa passar
+            # p/ os outros crivos decidirem (raro em GG, que tem start do TS).
+            survivors.append({**c, "_fh": fh, "_lh": lh})
+            continue
+        lo = base_lo - timedelta(minutes=_EDITION_REG_BACK_MIN)
+        hi = base_hi + timedelta(minutes=_EDITION_POST_SLACK_MIN)
+        if lo <= anchor_lisbon <= hi:
+            survivors.append({**c, "_fh": fh, "_lh": lh})
+
+    if len(survivors) == 1:
+        return survivors[0]["tournament_number"], "hard_unique", survivors
+    if not survivors:
+        return None, "no_edition_consistent", survivors
+
+    # 2+ sobrevivem às provas duras de exclusão. Última prova DURA: containment
+    # estrito na janela de mãos (o Hero estava DEMONSTRAVELMENTE a jogar essa
+    # edição à hora do print). Se exactamente 1 → cola; senão → quarentena
+    # (só o desempate por proximidade de entrants sobraria, e esse NÃO cola).
+    contained = [
+        c for c in survivors
+        if c.get("_fh") is not None and c.get("_lh") is not None
+        and c["_fh"] <= anchor_lisbon <= c["_lh"]
+    ]
+    if len(contained) == 1:
+        return contained[0]["tournament_number"], "hand_window_contained", survivors
+    return None, "ambiguous_editions", survivors
+
+
 def _decide_window(
     start_time_iso: Optional[str],
     posted_at_hint: Optional[datetime],
@@ -234,7 +351,7 @@ def _decide_window(
 def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
                      prize_pool=None, total_players=None,
                      anchor=None, window_hours=_TIER0_WINDOW_HOURS,
-                     anchor_mode="during_play"):
+                     anchor_mode="during_play", return_all=False):
     """TIER 0 — tournament_summaries (autoritativo).
 
     pt39 (#RESOLVER-TIER0-STRICT-EQUALITY): TIER 0 suporta DOIS conjuntos de
@@ -265,8 +382,12 @@ def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
             back_h, fwd_h = _PRESTART_BACK_HOURS, _PRESTART_FWD_HOURS
         else:
             back_h, fwd_h = window_hours, 0
+        # return_all (RAIZ 2): devolve TODAS as edições da janela (não LIMIT 1
+        # "closest às cegas") para o resolver as desambiguar por prova. total_players
+        # vai no SELECT p/ a régua da impossibilidade (H2).
+        limit_sql = "" if return_all else "LIMIT 1"
         return query(
-            """SELECT tournament_number, tournament_name, start_time
+            """SELECT tournament_number, tournament_name, start_time, total_players
                  FROM tournament_summaries
                 WHERE site = %s
                   AND tournament_name ILIKE ALL (%s::text[])
@@ -277,7 +398,7 @@ def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
                   AND start_time >= %s - make_interval(hours => %s)
                   AND start_time <= %s + make_interval(hours => %s)
                 ORDER BY abs(EXTRACT(EPOCH FROM (start_time - %s))) ASC
-                LIMIT 1""",
+                """ + limit_sql,
             (site, patterns, buy_in, buy_in, buy_in_currency, buy_in_currency,
              prize_pool, prize_pool, total_players, total_players,
              anchor, back_h, anchor, fwd_h, anchor),
@@ -373,6 +494,10 @@ def resolve_tournament_number(
     total_players: Optional[int] = None,
     anchor_mode: str = "during_play",
     return_tier: bool = False,
+    disambiguate_editions: bool = False,
+    disambig_anchor_lisbon: Optional[datetime] = None,
+    disambig_entrants: Optional[int] = None,
+    disambig_players_left: Optional[int] = None,
 ):
     """Cascata em 3 tiers: tournament_summaries -> tournaments_meta -> hands.
 
@@ -424,10 +549,15 @@ def resolve_tournament_number(
     ts_currency = (
         (buy_in_currency or _currency_for_site(site)) if buy_in is not None else None
     )
+    # RAIZ 2 (11 Jul) — só GG, só quando o caller pede (lobby prestart). Traz
+    # TODAS as edições da janela (não LIMIT 1 às cegas) para desambiguar por prova.
+    disambig_on = (
+        disambiguate_editions and site == "GGPoker" and anchor is not None
+    )
     candidates_summaries = [dict(r) for r in _query_summaries(
         site, patterns, buy_in=buy_in, buy_in_currency=ts_currency,
         prize_pool=prize_pool, total_players=total_players, anchor=anchor,
-        anchor_mode=anchor_mode,
+        anchor_mode=anchor_mode, return_all=disambig_on,
     )]
     if candidates_summaries:
         if len(candidates_summaries) == 1:
@@ -436,6 +566,25 @@ def resolve_tournament_number(
                 f"[tournament_resolver] OK tier=summaries tn={tn} site={site}"
             )
             return _ret(tn, [], "summaries")
+        if disambig_on:
+            # 2+ edições do mesmo torneio/dia: exige PROVA DURA para colar; sem
+            # prova que as separe → quarentena (tier='edition_quarantine').
+            chosen, decision, _surv = _disambiguate_editions(
+                site, candidates_summaries, disambig_anchor_lisbon,
+                disambig_entrants, disambig_players_left,
+                lobby_name=tournament_name,
+            )
+            if chosen is not None:
+                logger.info(
+                    f"[tournament_resolver] OK tier=summaries_disambiguated "
+                    f"tn={chosen} decision={decision} site={site}"
+                )
+                return _ret(chosen, [], "summaries")
+            logger.info(
+                f"[tournament_resolver] EDITION_QUARANTINE decision={decision} "
+                f"n={len(candidates_summaries)} site={site}"
+            )
+            return _ret(None, candidates_summaries, "edition_quarantine")
         logger.info(
             f"[tournament_resolver] AMBIG tier=summaries "
             f"n={len(candidates_summaries)} site={site}"

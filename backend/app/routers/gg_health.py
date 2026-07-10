@@ -1219,3 +1219,215 @@ def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):
             "spurious_crown_contamination": len(hits),
             "gate": "hard: spurious_crown_contamination>0 => PARAR+investigar (nunca curado)",
             "hits": hits}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAIZ 2 (11 Jul) — resolver de EDIÇÕES: crivo + quarentena + decisão manual.
+# GG-only (a Winamax identifica o torneio na própria HH; sem edições repetidas
+# no mesmo dia — decisão do Rui). NADA no funil das coroas nem no watcher.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_LOBBY_SOURCE_PREFIXES = (
+    "discord_lobby_vision:", "reconcile_lobby_vision:", "file_lobby_vision:",
+)
+
+
+def _reresolve_lobby_row(row: dict):
+    """Re-corre o resolver (com desambiguação de edições) sobre uma row de
+    lobby_processing_log usando o vision_json guardado. Devolve ((tn, cands,
+    tier), vj). Read-only."""
+    from app.services import tournament_resolver as TR
+    from app.utils.timezones import utc_to_lisbon_naive
+    vj = row.get("vision_json") or {}
+    if isinstance(vj, str):
+        vj = json.loads(vj or "{}")
+    site = row.get("site") or vj.get("site")
+    name = row.get("tournament_name") or vj.get("tournament_name")
+    posted = row.get("posted_at")
+    pl_raw = vj.get("players_left")
+    pl = int(pl_raw) if isinstance(pl_raw, int) and pl_raw > 0 else None
+    res = TR.resolve_tournament_number(
+        site, name, vj.get("start_time_iso"),
+        posted_at_hint=posted, buy_in=vj.get("buy_in"),
+        anchor_mode="prestart", return_tier=True,
+        disambiguate_editions=True,
+        disambig_anchor_lisbon=(utc_to_lisbon_naive(posted) if posted else None),
+        disambig_entrants=vj.get("entrants"), disambig_players_left=pl,
+    )
+    return res, vj
+
+
+@router.get("/lobby-edition-scan")
+def lobby_edition_scan(current_user=Depends(require_auth_or_api_key)):
+    """CRIVO READ-ONLY da Raiz 2 (irmao do eliminated-crown-scan).
+
+    Varre cada tournament_payouts GG ESCRITO por um lobby e re-corre o resolver
+    (com prova de edicao) sobre o lobby QUE O ESCREVEU. Se esse lobby, com a prova
+    de hoje, casa noutra edicao (ou fica ambiguo), o payout consumido pelo ICM
+    pode ser da edicao errada = CONTAMINACAO.
+
+    - contamination: o escritor casa agora numa edicao DIFERENTE do tn do payout
+      (veneno duro — o ICM usou premios de outra edicao). GATE: >0 => PARAR.
+    - suspect: o escritor ficou em quarentena (2+ edicoes, sem prova) — rever no
+      painel. NAO conta no gate duro (o payout pode estar certo; falta prova).
+    NADA escreve."""
+    rows = query(
+        "SELECT tp.tournament_number AS payout_tn, tp.source, "
+        "       l.discord_message_id, l.site, l.tournament_name, l.posted_at, "
+        "       l.players_left, l.vision_json "
+        "  FROM tournament_payouts tp "
+        "  LEFT JOIN lobby_processing_log l "
+        "    ON l.discord_message_id = split_part(tp.source, ':', 2) "
+        " WHERE tp.site = 'GGPoker'"
+    )
+    clean, contamination, suspect, no_writer = [], [], [], []
+    for r in rows:
+        src = r.get("source") or ""
+        if not any(src.startswith(p) for p in _LOBBY_SOURCE_PREFIXES):
+            continue  # manual/backoffice: nao e do resolver de lobbys
+        if not r.get("discord_message_id"):
+            no_writer.append({"payout_tn": r["payout_tn"], "source": src})
+            continue
+        (new_tn, _cands, tier), _vj = _reresolve_lobby_row(r)
+        item = {"payout_tn": r["payout_tn"], "writer_msg": r["discord_message_id"][:12],
+                "tournament_name": r.get("tournament_name"), "new_tn": new_tn, "tier": tier}
+        if tier == "edition_quarantine" or new_tn is None:
+            item["editions"] = [c.get("tournament_number") for c in _cands]
+            suspect.append(item)
+        elif str(new_tn) != str(r["payout_tn"]):
+            contamination.append(item)
+        else:
+            clean.append(item)
+    return {
+        "scanned_lobby_payouts": len(clean) + len(contamination) + len(suspect),
+        "edition_contamination": len(contamination),
+        "gate": "hard: edition_contamination>0 => PARAR+investigar (payout de edicao errada no ICM)",
+        "counts": {"clean": len(clean), "suspect": len(suspect),
+                   "no_writer_row": len(no_writer)},
+        "contamination": contamination, "suspect": suspect, "no_writer": no_writer,
+    }
+
+
+def _edition_evidence(site, candidates, anchor_lisbon):
+    """Para o painel: por edicao candidata, start, janela de maos, total, e se o
+    anchor cai na janela — a prova que o Rui ve para decidir."""
+    from app.services import tournament_resolver as TR
+    out = []
+    for c in candidates:
+        tn = c.get("tournament_number")
+        fh, lh = TR._edition_hand_window(site, tn)
+        started = (anchor_lisbon is not None and c.get("start_time") is not None
+                   and anchor_lisbon >= c["start_time"])
+        out.append({
+            "tournament_number": tn,
+            "tournament_name": c.get("tournament_name"),
+            "start_time": c["start_time"].isoformat() if c.get("start_time") else None,
+            "total_players": c.get("total_players"),
+            "first_hand": fh.isoformat() if fh else None,
+            "last_hand": lh.isoformat() if lh else None,
+            "started_at_capture": started,
+        })
+    return out
+
+
+@router.get("/lobby-edition-quarantine")
+def lobby_edition_quarantine(current_user=Depends(require_auth_or_api_key)):
+    """READ-ONLY. Lobbys GG em quarentena de edicao (2+ edicoes plausiveis sem
+    prova dura). Para cada um, recalcula os candidatos + evidencia (start, janela
+    de maos, entrants, anchor) para o Rui decidir no painel."""
+    from app.utils.timezones import utc_to_lisbon_naive
+    rows = query(
+        "SELECT discord_message_id, site, tournament_name, posted_at, "
+        "       players_left, vision_json "
+        "  FROM lobby_processing_log "
+        " WHERE result = 'edition_quarantine' AND vision_json IS NOT NULL "
+        " ORDER BY posted_at DESC"
+    )
+    items = []
+    for r in rows:
+        (tn, cands, tier), vj = _reresolve_lobby_row(r)
+        if tier != "edition_quarantine":
+            items.append({
+                "message_id": r["discord_message_id"], "now_resolvable_tn": tn,
+                "tournament_name": r.get("tournament_name"),
+                "note": "reconcile vai resolver", "candidates": [],
+            })
+            continue
+        posted = r.get("posted_at")
+        anchor_l = utc_to_lisbon_naive(posted) if posted else None
+        items.append({
+            "message_id": r["discord_message_id"],
+            "tournament_name": r.get("tournament_name"),
+            "posted_at": posted.isoformat() if posted else None,
+            "anchor_lisbon": anchor_l.isoformat() if anchor_l else None,
+            "entrants": vj.get("entrants"), "players_left": r.get("players_left"),
+            "candidates": _edition_evidence(r.get("site") or vj.get("site"), cands, anchor_l),
+        })
+    return {"quarantined": len(rows), "items": items}
+
+
+class _EditionResolveBody(BaseModel):
+    message_id: str
+    chosen_tn: str
+    dry_run: bool = True
+
+
+@router.post("/lobby-edition-resolve")
+def lobby_edition_resolve(body: _EditionResolveBody = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """Decisao MANUAL do Rui: cola um lobby em quarentena a edicao que ele escolhe.
+    Escreve o payout (source manual_edition: — precedencia D11, nao e esmagado por
+    lobbys futuros) e marca o log success. dry_run=true (default) so mostra.
+
+    Respeita D11 (nao sobrescreve manual:/backoffice_vision: ja presente) e a
+    guarda de coerencia de payout. So GG."""
+    from app.services import lobby_vision, payouts_service
+    from app.services.payout_coherence import check_vj_payout_coherent
+    from app.services.lobby_sync import _upsert_lobby_log, _is_info_tab
+    rows = query(
+        "SELECT discord_message_id, site, tournament_name, posted_at, players_left, "
+        "       vision_json, result FROM lobby_processing_log "
+        " WHERE discord_message_id = %s", (body.message_id,))
+    if not rows:
+        raise HTTPException(404, "lobby message nao encontrada")
+    r = rows[0]
+    vj = r.get("vision_json") or {}
+    if isinstance(vj, str):
+        vj = json.loads(vj or "{}")
+    site = r.get("site") or vj.get("site")
+    if site != "GGPoker":
+        raise HTTPException(422, "Raiz 2 e GG-only")
+    tn = body.chosen_tn.strip()
+    ts = query("SELECT tournament_number, tournament_name FROM tournament_summaries "
+               "WHERE site='GGPoker' AND tournament_number=%s", (tn,))
+    if not ts:
+        raise HTTPException(422, f"tn {tn} nao existe em tournament_summaries")
+    if _is_info_tab(vj):
+        raise HTTPException(422, "print da aba Info nao escreve payout (so marca FT)")
+    existing = query("SELECT source FROM tournament_payouts WHERE site='GGPoker' "
+                     "AND tournament_number=%s", (tn,))
+    cur_src = (existing[0].get("source") or "") if existing else ""
+    if cur_src.startswith("manual:") or cur_src.startswith("backoffice_vision:"):
+        raise HTTPException(409, f"payout de {tn} tem fonte de maior precedencia: {cur_src}")
+    ok_coh, coh_reason = check_vj_payout_coherent(site, tn, vj)
+    if not ok_coh:
+        raise HTTPException(422, f"payout incoerente: {coh_reason}")
+    plan = {"message_id": body.message_id, "chosen_tn": tn,
+            "chosen_name": ts[0].get("tournament_name"),
+            "prev_source": cur_src or None, "dry_run": body.dry_run}
+    if body.dry_run:
+        plan["would"] = "escrever payout (source manual_edition:) + log success"
+        return plan
+    blob = lobby_vision.build_hrc_payouts_blob(vj)
+    up = payouts_service.upsert_payout(site="GGPoker", tournament_number=tn,
+                                       payouts_json=blob,
+                                       source=f"manual_edition:{body.message_id}")
+    _upsert_lobby_log(
+        message_id=body.message_id, channel_id=None, result="success",
+        reason_detail=f"manual_edition_resolve -> {tn}",
+        site="GGPoker", tournament_name=r.get("tournament_name"),
+        tournament_number=tn, vision_json=vj, posted_at=r.get("posted_at"),
+        players_left=r.get("players_left"))
+    plan["payout_action"] = (up or {}).get("action")
+    plan["written"] = True
+    return plan

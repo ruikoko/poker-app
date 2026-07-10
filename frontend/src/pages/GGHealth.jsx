@@ -13,6 +13,7 @@ const NEEDS = [
   { key: 'tag_conflicts', label: 'Conflito de tags', color: '#ef4444' },
   { key: 'ft_quarantine', label: 'Fronteira FT (rever)', color: '#f59e0b' },
   { key: 'name_quarantine', label: 'Nomes em conflito', color: '#a78bfa' },
+  { key: 'lobby_edition', label: 'Edições de lobby (Raiz 2)', color: '#38bdf8' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
@@ -677,6 +678,100 @@ function NamePropagationPanel() {
   )
 }
 
+// RAIZ 2 (11 Jul) — resolver de EDIÇÕES GG: crivo (payout de edição errada) +
+// quarentena (2+ edições sem prova) com decisão manual do Rui.
+function LobbyEditionPanel() {
+  const [scan, setScan] = useState(null)
+  const [quar, setQuar] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const load = () => {
+    ggHealth.lobbyEditionScan().then(setScan).catch(e => setMsg('Erro crivo: ' + e.message))
+    ggHealth.lobbyEditionQuarantine().then(r => setQuar(r.items || [])).catch(e => setMsg('Erro quarentena: ' + e.message))
+  }
+  useEffect(() => { load() }, [])
+
+  const resolve = async (mid, tn, name) => {
+    if (!window.confirm(`Colar este lobby à edição ${tn} (${name})?\nEscreve o payout (manual_edition) e marca success.`)) return
+    setBusy(true); setMsg(null)
+    try {
+      const r = await ggHealth.lobbyEditionResolve(mid, tn, false)
+      setMsg(`✓ Colado a ${tn} — payout ${r.payout_action || 'escrito'}.`); load()
+    } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
+  }
+
+  const contam = scan?.edition_contamination ?? null
+  return (
+    <div>
+      {/* CRIVO — gate de contaminação de payout */}
+      <div style={{ ...card, padding: 12, marginBottom: 12,
+        borderLeft: `3px solid ${contam === 0 ? '#22c55e' : contam > 0 ? '#ef4444' : '#30363d'}` }}>
+        <div style={{ fontSize: 13, marginBottom: 8 }}>
+          <b>Crivo de edições</b> — varre cada payout GG escrito por um lobby e re-corre a prova
+          de edição sobre o lobby que o escreveu. Contaminação = o ICM usou prémios da edição errada.
+        </div>
+        {!scan ? <div style={{ color: 'var(--muted)' }}>A correr crivo…</div> : (
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13, alignItems: 'center' }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color: contam > 0 ? '#ef4444' : '#22c55e' }}>
+              {contam > 0 ? `⚠ ${contam}` : '✓ 0'}
+            </span>
+            <span style={{ color: contam > 0 ? '#fca5a5' : '#22c55e' }}>
+              {contam > 0 ? 'PARAR — payout de edição errada no ICM' : 'sem contaminação de payout'}
+            </span>
+            <span style={{ color: 'var(--muted)' }}>varridos {scan.scanned_lobby_payouts} · limpos {scan.counts?.clean} · suspeitos {scan.counts?.suspect}</span>
+          </div>
+        )}
+        {scan?.contamination?.length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 12, fontFamily: mono }}>
+            {scan.contamination.map((c, i) => (
+              <div key={i} style={{ color: '#fca5a5' }}>
+                payout {c.payout_tn} ({c.tournament_name}) → o escritor é da edição {c.new_tn}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13,
+        color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd' }}>{msg}</div>}
+      {/* QUARENTENA — decisão manual */}
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+        Lobbys sem prova dura para separar 2+ edições do mesmo torneio/dia — o pipeline NÃO cola
+        (branco é honesto). Decide a edição pela evidência:
+      </div>
+      {!quar ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> :
+        quar.length === 0 ? <div style={{ ...card, padding: 16, color: '#22c55e' }}>✓ Sem lobbys em quarentena de edição.</div> : (
+          quar.map((it, i) => (
+            <div key={i} style={{ ...card, padding: 12, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, marginBottom: 6 }}>
+                <b>{it.tournament_name}</b>
+                {it.now_resolvable_tn && <span style={{ color: '#22c55e', marginLeft: 8 }}>→ já resolúvel ({it.now_resolvable_tn}); o reconcile vai colá-la.</span>}
+                <span style={{ color: 'var(--muted)', marginLeft: 8, fontFamily: mono, fontSize: 11 }}>
+                  print {it.anchor_lisbon?.slice(11, 16)} · entrants {it.entrants ?? '—'} · left {it.players_left ?? '—'}
+                </span>
+              </div>
+              {(it.candidates || []).map((c, j) => (
+                <div key={j} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12,
+                  fontFamily: mono, padding: '4px 0', borderTop: j ? '1px solid #21262d' : 'none' }}>
+                  <span style={{ minWidth: 90 }}>{c.tournament_number}</span>
+                  <span style={{ color: 'var(--muted)' }}>
+                    start {c.start_time?.slice(11, 16)} · campo {c.total_players ?? '—'}
+                    · mãos {c.first_hand?.slice(11, 16) || '—'}–{c.last_hand?.slice(11, 16) || '—'}
+                    · {c.started_at_capture ? 'a decorrer' : 'por arrancar'}
+                  </span>
+                  <button disabled={busy} style={{ ...btn, marginLeft: 'auto' }}
+                    onClick={() => resolve(it.message_id, c.tournament_number, it.tournament_name)}>
+                    Colar aqui
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+    </div>
+  )
+}
+
 export default function GGHealth() {
   const [sum, setSum] = useState(null)
   const [err, setErr] = useState(null)
@@ -730,7 +825,7 @@ export default function GGHealth() {
   const loadSummary = () => ggHealth.summary().then(setSum).catch(e => setErr(e.message))
   useEffect(() => { loadSummary() }, [])
   useEffect(() => {
-    if (!group || group === 'ft_quarantine' || group === 'name_quarantine') { setList(null); return }
+    if (!group || group === 'ft_quarantine' || group === 'name_quarantine' || group === 'lobby_edition') { setList(null); return }
     setList(null)
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
   }, [group, page])
@@ -833,7 +928,8 @@ export default function GGHealth() {
           </div>
 
           {group === 'ft_quarantine' ? <FtQuarantinePanel /> :
-           group === 'name_quarantine' ? <NamePropagationPanel /> : (<>
+           group === 'name_quarantine' ? <NamePropagationPanel /> :
+           group === 'lobby_edition' ? <LobbyEditionPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (
             <div style={{ ...card, padding: '10px 12px', marginBottom: 10 }}>

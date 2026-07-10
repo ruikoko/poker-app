@@ -141,3 +141,24 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   - **(d) Smoke com contagem COMPLETA de proveniência > amostragem.** Verificar os 5/5 solves +
     varrer TODOS os lobbys (114) + confirmar 0 solves nas edições mal-coladas dá certeza; olhar
     a 1-2 mãos não.
+
+## 2026-07-11 — Raiz 2 (resolver de edições)
+
+- **Prova > palpite, e o sinal certo estava no vision_json o tempo todo (`entrants`).** A
+  desambiguação de edições parecia precisar de heurísticas de tempo frágeis; o disambiguador limpo
+  era o `entrants` (total de inscritos) que TODOS os 85 lobbys GG já traziam: `entrants > campo final
+  da edição` é **impossível** (H2) e apanhou 3 contaminações reais (BH$88) que o modelo temporal
+  deixava colar. Antes de inventar heurísticas, ver que campos os dados já têm.
+- **A régua da impossibilidade é UNIDIRECIONAL.** `entrants > campo` prova (exclui); `entrants <
+  campo` NÃO prova nada (print antes de fechar inscrições). Um desempate "entrants mais próximo do
+  campo" não pode colar sozinho → quarentena. (Ressalva do Rui, incorporada.)
+- **Fuso é uma armadilha silenciosa.** O `posted_at` do lobby está em **UTC**; `start_time`/
+  `played_at` estão em **Lisboa naive**. O resolver antigo tolerava o −1h porque as janelas eram de
+  12h; uma prova apertada (±45–120min) obriga a converter a âncora UTC→Lisboa. Janela larga esconde
+  bugs de fuso.
+- **Divergência da prévia ≠ erro — reportar, não ajustar em silêncio.** O modelo forte deu 5
+  corrigidos vs 2 da prévia; os +3 eram provados (entrants). Reportar a divergence com a prova e
+  pedir a decisão (o Rui escolheu o modelo forte) > forçar os números da prévia.
+- **O crivo prova-se a apanhar um real logo à 1ª.** `lobby-edition-scan` acusou 1 contaminação
+  verdadeira (294738291) na 1ª corrida — o gate duro funciona; um crivo que nunca acusa nada não
+  está a ser testado.

@@ -23,6 +23,7 @@ from app.db import get_conn, query
 from app.ingest_filters import is_pre_2026
 from app.services import lobby_vision, tournament_resolver, payouts_service
 from app.services.payout_coherence import check_vj_payout_coherent
+from app.utils.timezones import utc_to_lisbon_naive
 
 logger = logging.getLogger("lobby_sync")
 
@@ -33,6 +34,11 @@ _VALID_RESULTS = frozenset({
     "success", "vision_failed", "json_invalid", "site_undetected",
     "tm_not_found", "tm_ambiguous", "no_attachments", "pre_2026_skip",
     "upsert_error", "payout_incoherent",
+    # RAIZ 2 (11 Jul) — 2+ edições GG do mesmo torneio/dia sem prova que as
+    # separe: NÃO cola (colar às cegas = payout errado no ICM). Fica em
+    # quarentena p/ o Rui decidir no painel da Saúde GG. Auto-resolve no reconcile
+    # se chegarem mãos/TS que passem a dar prova.
+    "edition_quarantine",
 })
 
 
@@ -434,6 +440,12 @@ async def process_lobby_message(
             buy_in=vj.get("buy_in"),
             anchor_mode="prestart",  # pt41 Track A — lobby SS é pré-start
             return_tier=True,
+            # RAIZ 2 — desambiguação de edições GG do mesmo torneio/dia. Âncora
+            # em Lisboa naive (posted_at vem em UTC; o resto é Lisboa naive).
+            disambiguate_editions=True,
+            disambig_anchor_lisbon=utc_to_lisbon_naive(posted_at),
+            disambig_entrants=vj.get("entrants"),
+            disambig_players_left=players_left,
         )
     base["resolver_tier"] = resolver_tier
 
@@ -454,9 +466,15 @@ async def process_lobby_message(
                 base["site"] = site
 
     if tn is None:
-        result = "tm_ambiguous" if candidates else "tm_not_found"
-        reason = (f"n_candidates={len(candidates)}"
-                  if candidates else f"start={vj.get('start_time_iso')!r}")
+        if resolver_tier == "edition_quarantine":
+            # RAIZ 2 — 2+ edições GG plausíveis sem prova dura → NÃO cola.
+            result = "edition_quarantine"
+            reason = ("editions="
+                      + ",".join(str(c.get("tournament_number")) for c in candidates))
+        else:
+            result = "tm_ambiguous" if candidates else "tm_not_found"
+            reason = (f"n_candidates={len(candidates)}"
+                      if candidates else f"start={vj.get('start_time_iso')!r}")
         _upsert_lobby_log(
             message_id=message_id, channel_id=channel_id,
             result=result, reason_detail=reason,
@@ -828,7 +846,10 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
         "SELECT discord_message_id, site, tournament_name, posted_at, "
         "       vision_json, result "
         "FROM lobby_processing_log "
-        "WHERE result IN ('tm_not_found', 'tm_ambiguous') "
+        # RAIZ 2 — 'edition_quarantine' entra no retry: se chegarem mãos/TS que
+        # passem a dar prova dura, auto-resolve; senão fica em quarentena (o
+        # Rui decide no painel). Idempotente.
+        "WHERE result IN ('tm_not_found', 'tm_ambiguous', 'edition_quarantine') "
         "  AND vision_json IS NOT NULL"
     )
     if message_ids is not None:
@@ -854,6 +875,12 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
             site, name, vj.get("start_time_iso"),
             posted_at_hint=anchor, buy_in=vj.get("buy_in"),
             anchor_mode="prestart", return_tier=True,
+            # RAIZ 2 — mesma desambiguação de edições do live path.
+            disambiguate_editions=True,
+            disambig_anchor_lisbon=(utc_to_lisbon_naive(posted_at)
+                                    if posted_at is not None else None),
+            disambig_entrants=vj.get("entrants"),
+            disambig_players_left=_coerce_players_left(vj),
         )
 
         item = {
@@ -881,7 +908,21 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
 
         if tn is None:
             still += 1
-            item["action"] = "still_ambiguous" if candidates else "still_unresolved"
+            if tier == "edition_quarantine":
+                item["action"] = "edition_quarantine"
+                item["editions"] = [c.get("tournament_number") for c in candidates]
+                if not dry_run:
+                    _upsert_lobby_log(
+                        message_id=r["discord_message_id"], channel_id=None,
+                        result="edition_quarantine",
+                        reason_detail="reconcile: editions="
+                        + ",".join(str(c.get("tournament_number")) for c in candidates),
+                        site=site, tournament_name=name,
+                        vision_json=vj, posted_at=posted_at,
+                        players_left=_coerce_players_left(vj),
+                    )
+            else:
+                item["action"] = "still_ambiguous" if candidates else "still_unresolved"
             items.append(item)
             continue
 

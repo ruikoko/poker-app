@@ -299,3 +299,32 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
 - 2026-07-10 — **Certificação smoke pt95:** 5/5 solves do robot verificados (estrutura + âncora +
   proveniência de payout limpa); exe certificado; gate #1 fechado. `hrc_jobs`=6 (5 done); 0 solves
   nas edições mal-coladas (nenhum payout errado consumido). → `JOURNAL_2026-07-10.md`.
+
+## 2026-07-11 — RAIZ 2: resolver de EDIÇÕES do mesmo torneio GG (construído + LIVE)
+
+- 2026-07-11 — **O resolver de lobbys deixa de "escolher a edição mais próxima às cegas".** Conceito
+  novo: **prova de edição**. A GG corre o mesmo torneio 2×/dia (ex.: Daily Hyper $60 às 17:45 E às
+  20:45); o TIER 0 do `tournament_resolver` escolhia a `start_time` mais próxima com `LIMIT 1` →
+  colava o lobby na edição errada → payout errado no ICM. Agora, quando há 2+ edições (mesmo
+  nome+buy-in+dia), exige **PROVA DURA** para colar; sem prova que as separe → **quarentena** (não
+  cola). Provas (`_disambiguate_editions`, GG-only, só lobby prestart): **H1** nome-exacto ("Speed
+  Racer $108" ≠ "Speed Racer Europe $108"); **H2** impossibilidade (`entrants` do print > campo final
+  da edição → exclui — UNIDIRECIONAL: `entrants` < campo é NORMAL, print antes de fechar inscrições,
+  **nunca prova** — ressalva do Rui); **H3** não-arrancada-com-eliminações (`players_left < entrants`
+  numa edição por arrancar → impossível → exclui); **H4** janela de mãos do Hero `[1ª−45min,
+  última+120min]`. **Âncora convertida UTC→Lisboa** (o `posted_at` é UTC; o resto é Lisboa naive — a
+  peça que faltava). Novo estado `result='edition_quarantine'` (auto-resolve no reconcile se chegarem
+  mãos/TS que passem a dar prova; senão o Rui decide no painel). Motivo: *colar às cegas = veneno
+  (payout na edição errada); branco/quarentena = honesto.* → `services/tournament_resolver.py`,
+  `services/lobby_sync.py`, `JOURNAL_2026-07-11.md`.
+- 2026-07-11 — **CRIVO de edições = GG-only; Winamax fora POR NATUREZA (decisão do Rui).** Na Winamax
+  o torneio vem identificado sem ambiguidade na própria HH e **não há edições repetidas do mesmo
+  torneio no mesmo dia** → o problema das edições é padrão **GG**. O âmbito da Raiz 2 (resolver +
+  quarentena + crivo) é **GG-only**; os 29 lobbys WN da simulação ficam intactos. → `JOURNAL_2026-07-11.md`.
+- 2026-07-11 — **Crivo permanente `GET /api/gg-health/lobby-edition-scan`** (irmão do
+  `eliminated-crown-scan`): varre cada payout GG escrito por um lobby e re-corre a prova de edição
+  sobre o lobby-escritor; se ele casa hoje noutra edição = **contaminação** (o ICM usou prémios da
+  edição errada). **Gate DURO: contaminação > 0 → PARAR.** É este crivo que destranca a **regra de
+  largada** (lote grande do robot). 1ª corrida real (11 Jul): **1 contaminação — tn 294738291**
+  (payout de um lobby que é da edição 294711510; `entrants` 287/305 > campo 219), não consumida por
+  nenhum solve do lote → morre no reimporte. → `routers/gg_health.py`, `JOURNAL_2026-07-11.md`.

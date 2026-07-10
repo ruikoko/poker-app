@@ -383,6 +383,12 @@ export const ggHealth = {
   namesReentry: (b) => req('POST', '/gg-health/names/reentry', b),
   namesHandStatus: (handId) => req('GET', `/gg-health/names/hand-status?hand_id=${encodeURIComponent(handId)}`),
   namesApply: (tn = null, dryRun = false) => req('POST', '/gg-health/names/apply', { tournament_number: tn, dry_run: dryRun }),
+  // RAIZ 2 (11 Jul) — resolver de edições GG: crivo + quarentena + decisão.
+  lobbyEditionScan: () => req('GET', '/gg-health/lobby-edition-scan'),
+  lobbyEditionQuarantine: () => req('GET', '/gg-health/lobby-edition-quarantine'),
+  lobbyEditionResolve: (messageId, chosenTn, dryRun = true) => req('POST', '/gg-health/lobby-edition-resolve', {
+    message_id: messageId, chosen_tn: chosenTn, dry_run: dryRun,
+  }),
 }
 
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
