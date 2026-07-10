@@ -29,6 +29,14 @@
     238 vs 230; J HRC 187 vs 172; K SS Mesa "tent."=3 sempre.
   - **Cosmética:** fusão das tags na triagem; "IMAGENS ANEXADAS(0) vs DA MÃO(6)"; echos da
     TidyDoneIT_Aplicar.bat (já limpos 10 Jul); grafias antigas nos filtros GTO.
+- **`#HRC-ANCHOR-IN-SENT` (UX, queued DEPOIS de B-K — via já decidida).** Expor no painel
+  "Enviadas ao HRC" a POSIÇÃO onde a 2ª run ancorou (Selected Subtree) + auto-validação. **Via
+  (Opção B, backend, NÃO tocar watcher):** é o **C6 do `hrc_verify`** (já previsto no comentário
+  do módulo: "target_node_offset vs spot do Hero — v2"). Esperada = `first_vpip_position` (já
+  existe, LEI B); real = derivada do `result_zip` (reconstruir a Strategy Table via `parse_hrc_zip`,
+  método pt92, + `target_node_offset`). Comparar → ✓/⚠ no passo "Verificar resolvidas" (badge, sem
+  botão novo); não verificável → ⚠ honesto. Recusada a Opção A (watcher grava no manifest) por
+  exigir rebuild+reinstalação no Beelink (regra "1 exe", frágil). Não cruza de graça com D/G-K.
 - **Registar (sem acção):** quarentena de nomes a ZERO (FabiSt7 re-entrada); Daily Hyper $80
   dispensado; espécime #23 WN-4832780523824742404-104 (fallback_root, guardar p/ os fallbacks);
   **#24 (informativo):** 3 das 9 speed-racer mostram "IRE — bounty ilegível" (coroas por rever,
