@@ -116,3 +116,14 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   os classifica (aqui, a subpasta). Ao curar, garantir o **round-trip** (guardar → reler dá o mesmo)
   com teste nos dois sentidos, e **não adivinhar** o que já se perdeu (prints sem tag na BD ficam na
   raiz — branco honesto).
+
+- 2026-07-10 — **Dedup que descarta metadados = perda silenciosa.** O atalho de dedup do table-SS
+  (mesmo file_hash → sai cedo) deitava fora a `folder_tag` de um re-envio → mãos ficavam sem etiqueta
+  em silêncio (as 3 Speed Racer). **LIÇÃO:** um caminho de "já processado" tem de reconciliar os
+  metadados NOVOS que o pedido traz (aqui a tag), não só devolver o antigo — sobretudo antes de um
+  reimporte que gera duplicados em massa.
+- 2026-07-10 — **Diagnóstico refuta hipótese: seguir o gate real, não o nome do campo.** A hipótese
+  "IRE morto porque exige `bounty_pct` (que deixou de gravar)" caiu ao ler o gate: o IRE usa a COROA
+  (ko_units), não a chama; a mão "sem IRE" estava só tagada 'nota' (fora do âmbito KO). **LIÇÃO:**
+  medir (taxa pré/pós) + correr a função real sobre a mão concreta ANTES de aceitar a causa — a
+  premissa plausível estava errada.

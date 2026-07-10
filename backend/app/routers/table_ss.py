@@ -1043,6 +1043,36 @@ def _apply_folder_tag_to_hand(
             conn.close()
 
 
+def _reapply_folder_tag_on_dedup(matched_hand_id, folder_tag, vision_json, file_hash) -> None:
+    """#DEDUP-DROPS-FOLDER-TAG (lote auditoria A1, Opção A). Um duplicado (mesmo
+    file_hash de uma captura já bem-sucedida) reenviado COM `folder_tag` deitava a
+    etiqueta fora (a via de dedup saía cedo). Aqui aplica-se a tag à mão JÁ casada
+    e grava-se na row do log. Não re-corre Vision nem desanon. Idempotente:
+    `_apply_folder_tag_to_hand` faz union distinct, logo uma tag já presente sai
+    intacta; sem `folder_tag`/sem mão casada → no-op. Defensivo (nunca rebenta o upload)."""
+    if not folder_tag or not matched_hand_id:
+        return
+    try:
+        rows = query("SELECT id FROM hands WHERE hand_id = %s", (matched_hand_id,))
+        if rows:
+            _apply_folder_tag_to_hand(rows[0]["id"], folder_tag, vision_json)
+        # A row do log passa a refletir a pasta (só preenche se estava vazia — Opção A:
+        # não sobrescreve uma folder_tag diferente já lá).
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE table_ss_processing_log SET folder_tag = %s "
+                    "WHERE file_hash = %s AND folder_tag IS NULL",
+                    (folder_tag, file_hash))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error("[table_ss dedup] reaplicar folder_tag falhou (hand %s): %s",
+                     matched_hand_id, e)
+
+
 def _finalize(
     out: dict, *, source: str, original_filename: Optional[str],
     file_size: int, captured_at: Optional[datetime],
@@ -1095,6 +1125,13 @@ async def _process_table_ss(
     )
     if existing and existing[0].get("result") == "success":
         e = dict(existing[0])
+        # #DEDUP-DROPS-FOLDER-TAG (lote auditoria A1): um duplicado reenviado COM
+        # folder_tag (ex.: print antes solto, agora na pasta SpeedRacer\) NÃO pode
+        # deitar a etiqueta fora — aplica-a à mão JÁ casada antes de sair. Idempotente
+        # (union distinct); sem re-correr Vision nem desanon. Opção A (Rui, 10 Jul).
+        if folder_tag and e.get("matched_hand_id"):
+            _reapply_folder_tag_on_dedup(
+                e["matched_hand_id"], folder_tag, e.get("vision_json"), file_hash)
         out.update({
             "result": "success", "dedup": True,
             "site": e.get("site"), "tournament_name": e.get("tournament_name"),

@@ -118,3 +118,43 @@ def test_ft_source_none_when_base_and_not_final_table():
 def test_ft_source_none_when_no_base():
     assert _folder_tag_ft_source(None, {"seats": _seats(6), "players_left": 6}) is None
     assert _folder_tag_ft_source("", {"seats": _seats(6), "players_left": 6}) is None
+
+
+# ── A1 (#DEDUP-DROPS-FOLDER-TAG) — a via de dedup reaplica a folder_tag ────────
+import app.routers.table_ss as T
+
+
+class _FakeCur:
+    def __init__(self): self.executed = []
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def execute(self, q, p=None): self.executed.append((q, p))
+
+
+class _FakeConn:
+    def __init__(self): self.cur = _FakeCur(); self.committed = False
+    def cursor(self): return self.cur
+    def commit(self): self.committed = True
+    def close(self): pass
+
+
+def test_dedup_reapplies_folder_tag_to_matched_hand(monkeypatch):
+    calls = []
+    monkeypatch.setattr(T, "query", lambda q, p=None: [{"id": 42}])
+    monkeypatch.setattr(T, "_apply_folder_tag_to_hand", lambda *a, **k: calls.append(a))
+    fc = _FakeConn()
+    monkeypatch.setattr(T, "get_conn", lambda: fc)
+    T._reapply_folder_tag_on_dedup("GG-6138218252", "speed-racer", {"seats": []}, "hash123")
+    assert calls and calls[0][0] == 42 and calls[0][1] == "speed-racer"   # aplicou à mão casada
+    assert fc.committed                                                   # gravou na row
+    assert any("UPDATE table_ss_processing_log" in q for q, _ in fc.cur.executed)
+
+
+def test_dedup_noop_without_folder_tag_or_match(monkeypatch):
+    calls = []
+    monkeypatch.setattr(T, "_apply_folder_tag_to_hand", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(T, "query",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não devia consultar")))
+    T._reapply_folder_tag_on_dedup("GG-x", None, {}, "h")          # sem folder_tag → no-op
+    T._reapply_folder_tag_on_dedup(None, "speed-racer", {}, "h")   # sem mão casada → no-op
+    assert calls == []

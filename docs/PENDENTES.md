@@ -1,5 +1,33 @@
 # Pendentes — backlog vivo
 
+## 🔎 Lote da auditoria visual (10 Jul) — 23 achados, por prioridade
+
+**A e C fechados** (diagnóstico + A1 fix + C decidido). Restantes na fila pela ordem do lote.
+
+- **✅ A1 (`#DEDUP-DROPS-FOLDER-TAG`) — LIVE.** Dedup do table-SS deitava fora a folder_tag de um
+  re-envio. Cura `_reapply_folder_tag_on_dedup` (Opção A). **Aceitação pendente:** o Rui re-corre o
+  import de `done\it\SpeedRacer\` → as 3 mãos (GG-6138218252/6138218069/6137938737) nascem etiquetadas
+  pela porta normal (confirmar `discord_tags=['speed-racer']` depois).
+- **A2/A3/A4 — não-bug** (desanon recusa nomes incertos; contas batem; regra C estrita). Sem acção.
+- **✅ C (IRE) — decidido, sem cura.** IRE = métrica de estudo KO; 'nota' fora por desenho
+  (REGISTO_CONCEITO 10 Jul). Não reabrir.
+- **FILA (por atacar, pela ordem):**
+  - **B (core):** quadro de definições do VERDE (coroa visível = cash de quem elimina; verde =
+    incremento à coroa do eliminador; no PKO 50/50 valem o mesmo). Verificar se algum consumidor
+    assume interpretação errada (fator 2 latente). Âncora: TS Deepstack Turbo $88.
+  - **D:** zombie da Fronteira FT (Daily Hyper $60, tn 295258986) — dispensa reacorda (sinal anterior
+    à dispensa? edição errada do daily?). Logs da dispensa ajudam.
+  - **E:** falso positivo no scan "coroa impossível" — excecionar `bounty_source='green_ko'` (régua
+    ≥base÷2 é para VIVOS). Barato.
+  - **F (verificação):** âmbito do bust no reentry_hint varre as SEATED todas (não só tagadas)?
+  - **G-K:** vistas (rótulos/contas): G Dashboard "SS TOTAL"=127; H HM3 (janela/tag); I Torneios
+    238 vs 230; J HRC 187 vs 172; K SS Mesa "tent."=3 sempre.
+  - **Cosmética:** fusão das tags na triagem; "IMAGENS ANEXADAS(0) vs DA MÃO(6)"; echos da
+    TidyDoneIT_Aplicar.bat (já limpos 10 Jul); grafias antigas nos filtros GTO.
+- **Registar (sem acção):** quarentena de nomes a ZERO (FabiSt7 re-entrada); Daily Hyper $80
+  dispensado; espécime #23 WN-4832780523824742404-104 (fallback_root, guardar p/ os fallbacks).
+
+
 ## ✅ Cura verde-KO das coroas de ELIMINADOS — LIVE + PROVADA em prod (9 Jul)
 
 **Frente FECHADA (LIVE, `main`→`26db552`; ligação `13c6177`).** Anatomia: `JOURNAL_2026-07-09.md`,

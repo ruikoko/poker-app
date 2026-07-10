@@ -238,3 +238,19 @@ Formato: `- AAAA-MM-DD — <resumo numa linha>. **Porquê:** <motivo>. → <refe
   reclassifica o formato (rede de segurança) e **re-corre o funil de coroas** das mãos desse torneio
   → as guardas vivo-$0/vanilla disparam mesmo quando o TS chega DEPOIS da HH. `services/ts_reclassify.py`;
   TS-primeiro = no-op (byte-idêntico). Jusante: solves HRC stale listados, não re-solvidos. → `JOURNAL_2026-07-09.md`.
+
+## 2026-07-10 — lote auditoria: fluxo captura-casa (A) + IRE = métrica KO (C)
+
+- 2026-07-10 — **Fluxo captura-casa-mão (mapa).** Captura NOVA → match → `_finalize`: grava log
+  (folder_tag) → desanon (só escreve nomes se a âncora confirmar; senão branco honesto) → tag
+  (`_apply_folder_tag_to_hand`, sempre). Captura DUPLICADA (mesmo file_hash já-success) → **atalho**
+  (`table_ss.py`) sai cedo, nada corre. **A1 (`#DEDUP-DROPS-FOLDER-TAG`):** o atalho deitava fora a
+  folder_tag de um re-envio → cura `_reapply_folder_tag_on_dedup` (Opção A): aplica a tag à mão casada
+  + grava na row, sem re-correr IA/desanon; idempotente. Tag GG só entra pela pasta do IT → esta é a
+  porta. **14 tagadas-anónimas = desanon recusou nomes incertos (salvaguarda, não bug).**
+- 2026-07-10 — **IRE é métrica de ESTUDO KO — decisão do Rui: fica como está.** O gate `ire.py`
+  (`_has_ko_tag`) só acende com tag de estudo KO (pko/icm-pko/pos-pko/pos-nko/speed-racer); **'nota'
+  NÃO conta** ('nota' = ficha de vilão, vai para Vilões, não é spot de estudo KO). O IRE usa a COROA
+  (`bounty_value_usd`/ko_units), **nunca** a chama (`bounty_pct` = VPIP). Confirmado que NÃO morreu no
+  fix de 1-Jul (taxa de acendimento pré 76% ≈ pós 80%). **Não reabrir** — pedir IRE em mãos só-'nota'
+  seria mudar o gate por formato; decisão futura só se o Rui a levantar. → `JOURNAL_2026-07-10.md`.
