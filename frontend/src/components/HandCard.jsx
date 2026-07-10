@@ -59,15 +59,17 @@ export default function HandCard({ card, size = 'md', variant = 'hm3', faceDown 
       </span>
     )
   }
-  // hm3
+  // hm3 — SÓ o rank (sem naipe), cor = naipe (4 cores). Tipo de letra com serifas
+  // (traços nas pernas do K / ponta do J), menos arredondado que o sans.
   const c = HM3[su] || HM3.s
+  const two = rank.length > 1               // "10" — encolhe + aperta
+  const rankFs = Math.round(s.pip * (two ? 0.7 : 0.92))
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: s.w, height: s.h, borderRadius: s.r, background: c.bg, border: `1px solid ${c.bd}`,
       boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.03), 0 2px 6px rgba(0,0,0,.4)',
-      fontFamily: 'ui-sans-serif,system-ui,sans-serif', lineHeight: 1, userSelect: 'none' }}>
-      <span style={{ fontSize: s.rank, fontWeight: 800, color: c.fg }}>{rank}</span>
-      <span style={{ fontSize: s.suit, color: c.fg, marginTop: 1 }}>{sym}</span>
+      fontFamily: '"Times New Roman", Georgia, "Liberation Serif", serif', lineHeight: 1, userSelect: 'none' }}>
+      <span style={{ fontSize: rankFs, fontWeight: 400, color: c.fg, letterSpacing: two ? '-0.06em' : 0 }}>{rank}</span>
     </span>
   )
 }
