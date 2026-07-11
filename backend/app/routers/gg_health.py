@@ -1301,6 +1301,191 @@ def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):
             "hits": hits}
 
 
+def _crowns_from_witness(img_b64, gold: bool) -> dict:
+    """name(lower) → coroa lida, via Vision (prompt NOVO) sobre UMA testemunha
+    (gold=entry replayer / table-SS). {} em falha."""
+    if not img_b64:
+        return {}
+    import base64
+    from app.services.image_utils import detect_image_mime
+    try:
+        img = base64.b64decode(img_b64)
+    except Exception:
+        return {}
+    mime = detect_image_mime(img) or "image/png"
+    out = {}
+    if gold:
+        from app.routers.screenshot import (
+            _extract_hand_data_from_image_claude, _parse_vision_response)
+        raw = _extract_hand_data_from_image_claude(img, mime)
+        data = _parse_vision_response(raw) if raw else {}
+        for s in data.get("players_list", []):
+            if s.get("name"):
+                out[str(s["name"]).strip().lower()] = s.get("bounty_value_usd")
+    else:
+        from app.services.table_ss_vision import (
+            extract_table_ss_json, parse_and_validate_table_ss_json)
+        raw = extract_table_ss_json(img, mime)
+        data = parse_and_validate_table_ss_json(raw) if raw else None
+        for s in (data or {}).get("seats", []):
+            if s.get("nick"):
+                out[str(s["nick"]).strip().lower()] = s.get("bounty_usd")
+    return out
+
+
+def _hand_witnesses(entry_id, ctx) -> tuple:
+    """(gold_map, ss_map) — coroas das 2 testemunhas da MESMA mão via Vision novo."""
+    gold_map, ss_map = {}, {}
+    if ctx:
+        c = query("SELECT img_b64 FROM table_ss_processing_log WHERE id=%s", (ctx,))
+        if c and c[0]["img_b64"]:
+            ss_map = _crowns_from_witness(c[0]["img_b64"], gold=False)
+    if entry_id:
+        c = query("SELECT raw_json->>'img_b64' b FROM entries WHERE id=%s", (entry_id,))
+        if c and c[0]["b"]:
+            gold_map = _crowns_from_witness(c[0]["b"], gold=True)
+    return gold_map, ss_map
+
+
+def _to_float(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@router.post("/crowns/high-reread-confirm")
+def crowns_high_reread_confirm(payload: dict = Body(...),
+                               current_user=Depends(require_auth_or_api_key)):
+    """Grupo 'Valor alto' — re-lê cada mão (coroa > 3×base não confirmada) e
+    AUTO-CARIMBA (`bounty_confirmed`) os seats cuja re-leitura BATE o valor gravado
+    (tolerância de cêntimos: max($1, 0.5%)). Consistência entre leituras independentes
+    = prova (lição 11 Jul). Divergentes ficam no grupo, devolvidos com os 2 valores
+    lado a lado. body: {"hand_ids":[...], "dry_run":bool}. NÃO altera valores — só o
+    flag; divergentes ficam intactos p/ o olho do Rui."""
+    from app.services.queue_export import detect_bounty_above_3x
+    hand_ids = payload.get("hand_ids") or []
+    dry_run = bool(payload.get("dry_run", False))
+    results = []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT h.id, h.entry_id, h.context_table_ss_id ctx, h.player_names pn, "
+            "  ts.buy_in_bounty base "
+            "FROM hands h LEFT JOIN tournament_summaries ts "
+            "  ON ts.site='GGPoker' AND ts.tournament_number=h.tournament_number "
+            "WHERE h.hand_id=%s", (hid,))
+        if not rows:
+            results.append({"hand_id": hid, "error": "not found"}); continue
+        r = rows[0]
+        pn = r["pn"]
+        if isinstance(pn, str): pn = json.loads(pn or "{}")
+        highs = detect_bounty_above_3x(pn, r["base"])
+        if not highs:
+            results.append({"hand_id": hid, "skip": "sem coroa alta por confirmar"}); continue
+        high_names = {h["name"] for h in highs}
+        # 1 testemunha basta (a que gravou o valor); preferir table-SS, senão gold
+        gold_map, ss_map = _hand_witnesses(r["entry_id"], r["ctx"])
+        vmap = ss_map or gold_map
+        if not vmap:
+            results.append({"hand_id": hid, "error": "Vision sem leitura"}); continue
+        pl = pn.get("players_list") or []
+        confirmed, diverge = [], []
+        for e in pl:
+            if e.get("name") not in high_names:
+                continue
+            stored = _to_float(e.get("bounty_value_usd"))
+            reread = _to_float(vmap.get(str(e.get("name") or "").strip().lower()))
+            tol = max(1.0, (stored or 0) * 0.005)
+            if reread is not None and stored is not None and abs(stored - reread) <= tol:
+                if not dry_run:
+                    e["bounty_confirmed"] = True
+                confirmed.append({"name": e.get("name"), "value": stored})
+            else:
+                diverge.append({"name": e.get("name"), "stored": stored, "reread": reread})
+        if confirmed and not dry_run:
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET player_names=%s WHERE id=%s",
+                                (json.dumps(pn), r["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+        results.append({"hand_id": hid, "auto_confirmed": confirmed, "diverge": diverge})
+    return {"results": results, "dry_run": dry_run}
+
+
+@router.post("/crowns/fallback-fill")
+def crowns_fallback_fill(payload: dict = Body(...),
+                         current_user=Depends(require_auth_or_api_key)):
+    """Fallback SS por seat (desenho do Rui): para seats com coroa NULL/$0, procura o
+    valor NOUTRA testemunha da MESMA mão (Gold + table-SS). **Gold preferida**; se NULL
+    na Gold usa a table-SS; grava `bounty_source` por seat. Guarda base÷2 aplica-se.
+    'por rever' (`crown_review='no_witness_has_plate'`) só quando NENHUMA testemunha tem
+    a placa. NÃO toca seats que já têm coroa >0. body: {"hand_ids":[...], "dry_run":bool}."""
+    hand_ids = payload.get("hand_ids") or []
+    dry_run = bool(payload.get("dry_run", False))
+    results = []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT h.id, h.tournament_number tn, h.entry_id, h.context_table_ss_id ctx, "
+            "  h.player_names pn, h.all_players_actions apa "
+            "FROM hands h WHERE h.hand_id=%s", (hid,))
+        if not rows:
+            results.append({"hand_id": hid, "error": "not found"}); continue
+        r = rows[0]
+        pn = r["pn"]; apa = r["apa"]
+        if isinstance(pn, str): pn = json.loads(pn or "{}")
+        if isinstance(apa, str): apa = json.loads(apa or "{}")
+        gold_map, ss_map = _hand_witnesses(r["entry_id"], r["ctx"])
+        pl = pn.get("players_list") or []
+        filled, still = [], []
+        final_by_name = {}
+        for e in pl:
+            nm = str(e.get("name") or "").strip().lower()
+            cur = _to_float(e.get("bounty_value_usd"))
+            if cur is not None and cur > 0:
+                final_by_name[nm] = cur
+                continue                                   # já tem coroa — não tocar
+            g = _to_float(gold_map.get(nm)); s = _to_float(ss_map.get(nm))
+            chosen, src = (None, None)
+            if g is not None and g > 0: chosen, src = g, "gold"
+            elif s is not None and s > 0: chosen, src = s, "table_ss"
+            if chosen is not None:
+                if not dry_run:
+                    e["bounty_value_usd"] = chosen
+                    e["bounty_source"] = src
+                    e.pop("crown_review", None)
+                final_by_name[nm] = chosen
+                filled.append({"name": e.get("name"), "value": chosen, "source": src})
+            else:
+                if not dry_run:
+                    e["crown_review"] = "no_witness_has_plate"
+                still.append({"name": e.get("name")})
+        guard = _guard_suspect_crowns(pl, r["tn"])          # base÷2 nos preenchidos
+        for e in pl:                                        # refrescar após guarda
+            final_by_name[str(e.get("name") or "").strip().lower()] = _to_float(e.get("bounty_value_usd"))
+        if isinstance(apa, dict):                           # espelhar no apa
+            for k, v in apa.items():
+                if k == "_meta" or not isinstance(v, dict): continue
+                rn = str(v.get("real_name") or "").strip().lower()
+                if rn in final_by_name:
+                    v["bounty_value_usd"] = final_by_name[rn]
+        if not dry_run and (filled or guard.get("below_half")):
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET player_names=%s, all_players_actions=%s WHERE id=%s",
+                                (json.dumps(pn), json.dumps(apa), r["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+        results.append({"hand_id": hid, "filled": filled, "still_review": still,
+                        "guard": guard,
+                        "witnesses": {"gold": bool(gold_map), "table_ss": bool(ss_map)}})
+    return {"results": results, "dry_run": dry_run}
+
+
 @router.post("/crowns/test-reread")
 def crowns_test_reread(payload: dict = Body(...),
                        current_user=Depends(require_auth_or_api_key)):
