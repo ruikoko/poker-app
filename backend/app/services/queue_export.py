@@ -106,6 +106,40 @@ def detect_bounty_below_half(player_names, starting_bounty):
     return below
 
 
+# Coroa > 3×base = ALTA — em PKO progressivo é possível (acumulação de KOs em
+# fase funda) mas invulgar; entra no grupo "Valor alto — confirmar" do painel
+# Coroas até o Rui carimbar. É CONFIRMAÇÃO, não suspeita (verificação 11 Jul:
+# 7/7 eram reais). Sem `bounty_confirmed` → NÃO vai a export (a coroa alta não
+# solve com prémios possivelmente errados; carimbo do Rui destranca).
+_HIGH_CROWN_FACTOR = 3.0
+
+
+def detect_bounty_above_3x(player_names, starting_bounty):
+    """Simétrico de `detect_bounty_below_half`: lugares cuja coroa
+    (`bounty_value_usd`) é > 3×base (base = `tournament_summaries.buy_in_bounty`).
+    Fonte única reusada pela guarda de `build_queue_zip`, pelo painel Coroas
+    (grupo "Valor alto — confirmar") e pelo gate. Seats `bounty_confirmed=true`
+    (carimbo manual do Rui) são EXCEÇÃO → saltam (não entram em `above`).
+    Pura (sem BD). Devolve lista de `{name, value, ceil}` (vazia = ok)."""
+    if not starting_bounty:
+        return []
+    pn = player_names
+    if isinstance(pn, str):
+        try:
+            pn = json.loads(pn)
+        except (ValueError, TypeError):
+            pn = {}
+    ceil = float(starting_bounty) * _HIGH_CROWN_FACTOR
+    above = []
+    for e in ((pn or {}).get("players_list") or []):
+        if e.get("bounty_confirmed"):        # carimbado pelo Rui → exceção
+            continue
+        v = e.get("bounty_value_usd")
+        if v is not None and float(v) > ceil:
+            above.append({"name": e.get("name"), "value": float(v), "ceil": ceil})
+    return above
+
+
 # Captura `LevelN(SB/BB(ante))` com numeros podendo ter virgulas de milhar.
 # Ex: `Level17(2,500/5,000(600))` -> grupos: 17, 2,500, 5,000, 600.
 _LEVEL_RE = re.compile(
@@ -1705,6 +1739,15 @@ def build_queue_zip(
                                     "reason": "bounty_below_half_base",
                                     "detail": {"floor": _below[0]["floor"],
                                                "below": [b["name"] for b in _below][:8]}})
+                    continue
+                # Simétrico: coroa > 3×base sem carimbo do Rui → grupo "Valor alto —
+                # confirmar" do painel; não solve com coroa alta por confirmar.
+                _above = detect_bounty_above_3x(h.get("player_names"), starting_bounty)
+                if _above:
+                    skipped.append({"hand_id": hand_id,
+                                    "reason": "bounty_above_3x_unconfirmed",
+                                    "detail": {"ceil": _above[0]["ceil"],
+                                               "above": [a["name"] for a in _above][:8]}})
                     continue
 
             hh_text = convert_gg_hh_to_pokerstars_compatible(h, bounty_ctx=bctx)

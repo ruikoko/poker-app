@@ -236,7 +236,8 @@ def crowns_to_verify(current_user=Depends(require_auth)):
     lista com IMAGEM + seats afetados para o Rui confirmar à vista (`tableSs.setBounties`
     com `confirm[]`) ou corrigir o valor. Fonte única `detect_bounty_below_half` (a
     mesma da guarda `bounty_below_half_base` do export)."""
-    from app.services.queue_export import TS_GATED_FORMATS, detect_bounty_below_half
+    from app.services.queue_export import (
+        TS_GATED_FORMATS, detect_bounty_below_half, detect_bounty_above_3x)
     rows = query(
         """SELECT h.id, h.hand_id, h.tournament_name, h.played_at::text AS played_at,
                   h.player_names AS pn, h.context_table_ss_id AS ss_id,
@@ -251,14 +252,15 @@ def crowns_to_verify(current_user=Depends(require_auth)):
             ORDER BY h.played_at DESC""",
         (list(TS_GATED_FORMATS),),
     )
-    impossible, unread = [], []
+    impossible, unread, high_confirm = [], [], []
     by_source = {"table_ss": 0, "gold": 0, "other": 0}
     for r in rows:
         below = detect_bounty_below_half(r["pn"], r["base"])
-        if not below:
+        above = detect_bounty_above_3x(r["pn"], r["base"])
+        if not below and not above:
             continue
-        kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
-        # ── ORIGEM do valor suspeito: compara-o com a coroa da captura table-SS
+        flagged = below or above            # p/ deteção de origem (uma mão tem 1 dos 2)
+        # ── ORIGEM do valor: compara-o com a coroa da captura table-SS
         #    (bate → escreveu-o o table-SS); senão veio do Gold/carry/reread. ──
         ss_vals = {}
         if r["ss_id"]:
@@ -270,7 +272,7 @@ def crowns_to_verify(current_user=Depends(require_auth)):
                 ss_vals = {s.get("nick"): s.get("bounty_usd") for s in (vj.get("seats") or [])}
         match_ss = any(b["name"] in ss_vals and ss_vals[b["name"]] is not None
                        and abs(float(ss_vals[b["name"]]) - float(b["value"] or 0)) < 0.5
-                       for b in below)
+                       for b in flagged)
         gold = query("SELECT e.id FROM entries e JOIN hands h ON h.entry_id=e.id "
                      "WHERE h.id=%s AND e.entry_type='screenshot' "
                      "AND (e.raw_json->>'img_b64') IS NOT NULL LIMIT 1", (r["id"],))
@@ -281,22 +283,29 @@ def crowns_to_verify(current_user=Depends(require_auth)):
             source, src_img = "gold", f"/api/screenshots/image/{gold_id}"
         else:
             source, src_img = "other", (f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None)
-        by_source[source] += 1
-        item = {
+        base_item = {
             "id": r["id"], "hand_id": r["hand_id"],
             "tournament_name": r["tournament_name"], "played_at": r["played_at"],
-            "kind": kind, "floor": below[0]["floor"],
             "match_method": r["mm"],
             "crown_source": source,           # table_ss | gold | other(carry/reread)
             "has_both": bool(r["ss_id"]) and bool(gold_id),
-            "image_url": src_img,             # a imagem da FONTE do valor suspeito
-            "image_is_source": True,          # (mostramos a fonte, não outra captura)
-            "seats": [{"name": b["name"], "value": b["value"]} for b in below],
+            "image_url": src_img,             # a imagem da FONTE do valor
+            "image_is_source": True,
         }
-        (impossible if kind == "impossible" else unread).append(item)
+        if below:
+            by_source[source] += 1
+            kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
+            (impossible if kind == "impossible" else unread).append({
+                **base_item, "kind": kind, "floor": below[0]["floor"],
+                "seats": [{"name": b["name"], "value": b["value"]} for b in below]})
+        if above:
+            high_confirm.append({
+                **base_item, "kind": "high", "ceil": above[0]["ceil"],
+                "seats": [{"name": a["name"], "value": a["value"]} for a in above]})
     return {"count": len(impossible) + len(unread),
+            "high_count": len(high_confirm),
             "by_source": by_source,
-            "impossible": impossible, "unread": unread}
+            "impossible": impossible, "unread": unread, "high_confirm": high_confirm}
 
 
 @router.get("/list")

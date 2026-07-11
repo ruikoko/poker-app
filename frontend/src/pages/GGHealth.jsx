@@ -846,7 +846,7 @@ function CrownHand({ h, onDone }) {
             return <span title={`imagem mostrada = a fonte do valor · match_method ${h.match_method || '?'}`}
               style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 5, color: spec.c, border: `1px solid ${spec.c}55`, background: `${spec.c}18` }}>{spec.t}{h.has_both ? ' (SS+Gold)' : ''}</span>
           })()}
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.tournament_name} · {(h.played_at || '').slice(0, 16)} · piso ${h.floor}</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.tournament_name} · {(h.played_at || '').slice(0, 16)} · {h.kind === 'high' ? `teto $${h.ceil}` : `piso $${h.floor}`}</span>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
           <tbody>
@@ -941,6 +941,8 @@ function CoroasPanel() {
         desc="Coroa >0 mas < base÷2 — a Vision leu a chama (VPIP %) em vez da coroa ($)." />
       <Section title="Coroa por ler ($0)" color="#eab308" hands={data.unread}
         desc="Coroa a $0 — não foi lida (avatar tapado). Rever/re-ler, não é valor errado." />
+      <Section title="Valor alto — confirmar" color="#38bdf8" hands={data.high_confirm || []}
+        desc="Coroa > 3×base — em PKO fundo é POSSÍVEL (acumulação de KOs). Isto é CONFIRMAÇÃO, não suspeita: na verificação de 11 Jul 7/7 eram reais. Sem carimbo (✓) NÃO vai a export; confirma à vista para libertar." />
     </div>
   )
 }
