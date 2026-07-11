@@ -27,7 +27,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from itertools import permutations
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response, Query
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Response, Query, Body
 from PIL import Image
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
@@ -2791,6 +2791,56 @@ async def vision_backfill(
         "total_pending": total_pending,
         "message": f"{len(entry_ids)} screenshots a processar em background.",
     }
+
+
+@router.post("/gold-vision-run")
+async def gold_vision_run(payload: dict = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """Recuperação/teste — re-corre a Vision do GOLD (NOMES) sobre a imagem GUARDADA de
+    mãos GG cuja gold nunca foi processada (`vision_done=false` + `img_b64` presente).
+    Estas caíram no vão: o worker normal só apanha `img_b64 IS NULL` (o import trouxe a
+    imagem) e o `revision-replayers` só apanha `replayer_link` do Discord. Corre
+    `_run_vision_for_entry(force=True)` → extrai `players_list` + de-anon (position_v3).
+    SÍNCRONO, cap **10** por chamada (anti-massivo: lotes grandes = ordem do Rui). Body:
+    {hand_ids:[...]}. Devolve por mão: nomes extraídos + mm/hero resultante."""
+    hand_ids = payload.get("hand_ids") or []
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    if len(hand_ids) > 10:
+        raise HTTPException(400, "máx 10 por chamada (lotes grandes = ordem do Rui)")
+    out = []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT e.id AS eid, e.raw_json AS rj, h.id AS hdbid "
+            "  FROM entries e JOIN hands h ON h.entry_id = e.id "
+            " WHERE h.hand_id = %s AND e.entry_type = 'screenshot' "
+            "   AND (e.raw_json->>'img_b64') IS NOT NULL", (hid,))
+        if not rows:
+            out.append({"hand_id": hid, "status": "sem gold com img_b64"})
+            continue
+        e = rows[0]
+        raw = e["rj"] or {}
+        b = raw.get("img_b64", "") or ""
+        if "," in b[:40]:
+            b = b.split(",", 1)[1]
+        try:
+            content = base64.b64decode(b)
+        except Exception:
+            out.append({"hand_id": hid, "status": "img_b64 inválida"})
+            continue
+        await _run_vision_for_entry(
+            e["eid"], content, raw.get("mime_type", "image/png"),
+            raw.get("tm"), raw.get("file_meta", {}), raw.get("img_b64", ""), force=True)
+        er = query("SELECT COALESCE(jsonb_array_length(raw_json->'players_list'),0) AS n, "
+                   "raw_json->'players_list' AS pl, raw_json->>'vision_done' AS vd "
+                   "FROM entries WHERE id = %s", (e["eid"],))[0]
+        hr = query("SELECT player_names->>'match_method' AS mm, "
+                   "player_names->>'hero' AS hero FROM hands WHERE id = %s", (e["hdbid"],))[0]
+        names = [p.get("name") for p in (er["pl"] or [])
+                 if isinstance(p, dict) and p.get("name")]
+        out.append({"hand_id": hid, "vision_done": er["vd"], "n_names": er["n"],
+                    "names": names, "mm": hr["mm"], "hero": hr["hero"]})
+    return {"results": out}
 
 
 @router.get("/vision/status")
