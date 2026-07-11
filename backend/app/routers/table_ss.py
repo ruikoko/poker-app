@@ -1931,6 +1931,10 @@ def set_anon_map_override(payload: dict = Body(...),
     # _assert_no_duplicate_real_names (guarda viva que substitui a antiga pós-enrich).
     new_pn = {**(pn or {}), "anon_map": anon_map, "match_method": "table_ss",
               "source": "manual_blinds_override", "deanon_partial": bool(missing)}
+    # O Hero do anon_map é autoritário — repõe também o campo pn.hero (a desanon
+    # errada podia tê-lo deixado com o nick de um vilão; ex. swap R Sanchez↔Lauro).
+    if anon_map.get("Hero"):
+        new_pn["hero"] = anon_map["Hero"]
     conn = get_conn()
     try:
         with conn.cursor() as cur:

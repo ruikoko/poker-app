@@ -314,9 +314,9 @@ def test_hero_button_headsup():
     """Heads-up (2-max, SB=botão): sem BTN label -> salta checagem do botão, 2 seats ok."""
     from app.services.table_ss_deanon import build_anon_map_by_hero_button
     hh_pos = {"Hero":"BB","h1":"SB"}
-    img = [_seat("HeroNick", hero=True), _seat("Villain", btn=True)]
+    img = [_seat("Lauro Dermio", hero=True), _seat("Villain", btn=True)]
     m, alarm = build_anon_map_by_hero_button(img, hh_pos, 2)
-    assert alarm is None and m == {"Hero":"HeroNick","h1":"Villain"}
+    assert alarm is None and m == {"Hero":"Lauro Dermio","h1":"Villain"}
 
 
 def test_direcao_por_stacks_sem_botao():
@@ -326,11 +326,11 @@ def test_direcao_por_stacks_sem_botao():
     hh_pos = {"h1":"SB","h2":"BB","Hero":"UTG","h3":"MP","h4":"CO","h5":"BTN"}  # 6-max
     hh_st = {"h1":10.0,"h2":20.0,"Hero":30.0,"h3":40.0,"h4":50.0,"h5":60.0}
     # wheel=[Hero,h3,h4,h5,h1,h2] stacks [30,40,50,60,10,20]
-    img = [{"nick":"A","is_hero":True,"stack_bb":30},{"nick":"B","stack_bb":40},
+    img = [{"nick":"Lauro Dermio","is_hero":True,"stack_bb":30},{"nick":"B","stack_bb":40},
            {"nick":"C","stack_bb":50},{"nick":"D","stack_bb":60},
            {"nick":"E","stack_bb":10},{"nick":"F","stack_bb":20}]
     m,a = build_anon_map_by_hero_button(img, hh_pos, 6, hh_st)
-    assert a is None and m == {"Hero":"A","h3":"B","h4":"C","h5":"D","h1":"E","h2":"F"}
+    assert a is None and m == {"Hero":"Lauro Dermio","h3":"B","h4":"C","h5":"D","h1":"E","h2":"F"}
     img_rev = [img[0]] + img[1:][::-1]                 # Vision leu ao contrário
     m2,a2 = build_anon_map_by_hero_button(img_rev, hh_pos, 6, hh_st)
     assert a2 is None and m2 == m                      # stacks revertem -> mesmo mapa
@@ -342,7 +342,7 @@ def test_botao_stacks_discordam_alarme():
     hh_st = {"h1":10.0,"h2":20.0,"Hero":30.0,"h4":40.0,"h5":50.0}
     # wheel=[Hero,h4,h5,h1,h2] stacks [30,40,50,10,20]; btn(h5) idx 2
     # stacks -> fwd; botão colocado no idx 3 -> rev  => discordam
-    img = [{"nick":"A","is_hero":True,"stack_bb":30},{"nick":"B","stack_bb":40},
+    img = [{"nick":"Lauro Dermio","is_hero":True,"stack_bb":30},{"nick":"B","stack_bb":40},
            {"nick":"C","stack_bb":50},{"nick":"D","stack_bb":10,"is_button":True},
            {"nick":"E","stack_bb":20}]
     m,a = build_anon_map_by_hero_button(img, hh_pos, 5, hh_st)
@@ -388,3 +388,35 @@ def test_guard_suspect_crowns_no_base_noop(monkeypatch):
     out = _guard_suspect_crowns(pl, "T1")
     assert out == {"below_half": 0}
     assert pl[0]["bounty_value_usd"] == 27
+
+
+# ── #DESANON-HERO-ANCHOR-VALIDATION: is_hero da Vision tem de ser o Rui ───────
+def test_vision_hero_nick_is_rui_tolerant():
+    from app.services.table_ss_deanon import _vision_hero_nick_is_rui
+    assert _vision_hero_nick_is_rui("Lauro Dermio")
+    assert _vision_hero_nick_is_rui("Lauro Der..")      # truncado pela Vision
+    assert _vision_hero_nick_is_rui("koumpounophobia")
+    assert not _vision_hero_nick_is_rui("R Sanchez")    # vilão (o bug 2223abd8)
+    assert not _vision_hero_nick_is_rui("buildthepot")  # vilão (a 7ª)
+    assert not _vision_hero_nick_is_rui("")
+    assert not _vision_hero_nick_is_rui("R S")           # prefixo curto não casa
+
+
+def test_anchor_alarms_when_hero_not_rui():
+    """Vision marcou 'R Sanchez' como is_hero (baixo-centro) → alarme, não ancora
+    (senão Hero↔vilão trocam nomes)."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"Hero": "BTN", "h2": "SB", "h3": "BB"}     # 3-handed
+    img = [{"nick": "R Sanchez", "is_hero": True}, {"nick": "vilao1"}, {"nick": "vilao2"}]
+    m, a = build_anon_map_by_hero_button(img, hh_pos, 3, {"Hero": 30.0, "h2": 20.0, "h3": 10.0})
+    assert m == {} and a and a.startswith("hero_not_rui_account")
+
+
+def test_anchor_ok_when_hero_is_rui_truncated():
+    """is_hero = 'Lauro Der..' (truncado) → passa a guarda (não alarma)."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"Hero": "BTN", "h2": "SB", "h3": "BB"}
+    img = [{"nick": "Lauro Der..", "is_hero": True, "is_button": True},
+           {"nick": "villA"}, {"nick": "villB"}]
+    m, a = build_anon_map_by_hero_button(img, hh_pos, 3, {"Hero": 30.0, "h2": 20.0, "h3": 10.0})
+    assert a != "hero_not_rui_account" and (a is None or not str(a).startswith("hero_not_rui"))

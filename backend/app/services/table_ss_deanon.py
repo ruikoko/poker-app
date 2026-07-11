@@ -176,6 +176,27 @@ def _num_stack(x):
         return None
 
 
+def _vision_hero_nick_is_rui(nick) -> bool:
+    """#DESANON-HERO-ANCHOR-VALIDATION (11 Jul) — o seat `is_hero` da Vision (baixo-centro)
+    É SEMPRE o Rui nas SUAS capturas → tem de bater com uma conta HERO_NICKS (GG). Se não
+    bate, a Vision leu mal o Hero (marcou um vilão em baixo-centro) → NÃO ancorar (senão o
+    Hero recebe o nick do vilão e um vilão recebe o nome do Hero — o swap 2223abd8↔Hero).
+    Comparação **tolerante a truncação**: a Vision corta nicks com `..`; aceita prefixo em
+    qualquer sentido (ex.: 'Lauro Der..' casa 'Lauro Dermio'). Mínimo 3 chars p/ o prefixo
+    não casar por acaso ('R S' não é 'lauro dermio')."""
+    from app.hero_names import HERO_NICKS_BY_SITE
+    heroes = [h.lower() for h in HERO_NICKS_BY_SITE.get("GGPoker", [])]
+    n = (nick or "").strip().lower().rstrip(".").strip()
+    if not n:
+        return False
+    for h in heroes:
+        if h == n:
+            return True
+        if len(n) >= 3 and (h.startswith(n) or n.startswith(h)):
+            return True
+    return False
+
+
 def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: int,
                                   hh_stacks: dict = None):
     """pt96 (#DESANON-HERO-BUTTON-ANCHOR): desanon do table-SS por ÂNCORA Hero+botão +
@@ -216,6 +237,12 @@ def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: 
     heroes = [i for i, s in enumerate(image_seats) if s.get("is_hero")]
     if len(heroes) != 1:
         return {}, "image_hero_count_%d" % len(heroes)
+    # GUARDA do ponto de âncora: o is_hero da Vision TEM de ser uma conta do Rui. Se a
+    # Vision marcou um vilão em baixo-centro (ex. 'R Sanchez'/'buildthepot'), ancorar aqui
+    # envenena — o Hero fica com o nick do vilão e o vilão com o nome do Hero. Alarme →
+    # mão para revisão, não escreve. (Âncoras validam-se contra verdade conhecida.)
+    if not _vision_hero_nick_is_rui(image_seats[heroes[0]].get("nick")):
+        return {}, "hero_not_rui_account:%s" % ((image_seats[heroes[0]].get("nick") or "")[:24])
     img = image_seats[heroes[0]:] + image_seats[:heroes[0]]
 
     # DIRECÇÃO da roda (1 de 2). O Hero está FIXO (índice 0); falta só escolher horário
