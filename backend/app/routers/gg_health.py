@@ -1305,6 +1305,7 @@ def crowns_test_reread(payload: dict = Body(...),
     from app.routers.screenshot import (
         _extract_hand_data_from_image_claude, _parse_vision_response)
     from app.services.table_ss_deanon import _guard_suspect_crowns
+    from app.services.image_utils import detect_image_mime
     hand_ids = payload.get("hand_ids") or []
     out = []
     for hid in hand_ids:
@@ -1334,15 +1335,16 @@ def crowns_test_reread(payload: dict = Body(...),
             img_bytes = base64.b64decode(img_b64)
         except Exception as e:
             out.append({"hand_id": hid, "error": f"decode: {e}"}); continue
-        seats = []
+        mime = detect_image_mime(img_bytes) or "image/png"
+        seats = []; err_out = {}; raw = None
         if src == "table_ss":
-            raw = extract_table_ss_json(img_bytes, "image/png")
+            raw = extract_table_ss_json(img_bytes, mime, err_out=err_out)
             data = parse_and_validate_table_ss_json(raw) if raw else None
             for s in (data or {}).get("seats", []):
                 seats.append({"name": s.get("nick"), "bounty": s.get("bounty_usd"), "vpip": None})
         else:
-            text = _extract_hand_data_from_image_claude(img_bytes, "image/png")
-            data = _parse_vision_response(text) if text else {}
+            raw = _extract_hand_data_from_image_claude(img_bytes, mime)
+            data = _parse_vision_response(raw) if raw else {}
             for s in data.get("players_list", []):
                 seats.append({"name": s.get("name"), "bounty": s.get("bounty_value_usd"),
                               "vpip": s.get("bounty_pct")})
@@ -1355,6 +1357,8 @@ def crowns_test_reread(payload: dict = Body(...),
             x["after_guard"] = gp.get("bounty_value_usd", x["bounty"])
             x["crown_review"] = gp.get("crown_review")
         out.append({"hand_id": hid, "mm": r["mm"], "src": src, "base": base,
+                    "mime": mime, "raw_len": len(raw or ""),
+                    "vision_error": err_out.get("error"),
                     "n_seats": len(seats), "seats": seats, "guard": guard})
     return {"results": out}
 
