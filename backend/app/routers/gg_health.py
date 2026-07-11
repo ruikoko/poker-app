@@ -1423,6 +1423,7 @@ def crowns_fallback_fill(payload: dict = Body(...),
     na Gold usa a table-SS; grava `bounty_source` por seat. Guarda base÷2 aplica-se.
     'por rever' (`crown_review='no_witness_has_plate'`) só quando NENHUMA testemunha tem
     a placa. NÃO toca seats que já têm coroa >0. body: {"hand_ids":[...], "dry_run":bool}."""
+    from app.services.table_ss_deanon import _guard_suspect_crowns
     hand_ids = payload.get("hand_ids") or []
     dry_run = bool(payload.get("dry_run", False))
     results = []

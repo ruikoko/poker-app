@@ -361,6 +361,10 @@ export const ggHealth = {
   crowns: () => req('GET', '/gg-health/crowns'),
   // Re-leitura das coroas com o prompt NOVO (placa de $) — corrige e escreve (guarda base÷2).
   crownsReread: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/reread', { hand_ids: handIds, dry_run: dryRun }),
+  // Grupo "Valor alto": re-lê e AUTO-CARIMBA os seats cuja re-leitura bate o valor gravado.
+  crownsHighConfirm: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/high-reread-confirm', { hand_ids: handIds, dry_run: dryRun }),
+  // Fallback SS por seat: preenche coroas NULL/$0 pela outra testemunha (Gold/table-SS) da mesma mão.
+  crownsFallbackFill: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/fallback-fill', { hand_ids: handIds, dry_run: dryRun }),
   // Ação 1 — taga N mãos com UMA tag (string) ou VÁRIAS (array) de uma vez. ACRESCENTA.
   // confirm=true força apesar do aviso de conflito de formato.
   tag: (handIds, tagOrTags, confirm = false) => req('POST', '/gg-health/tag', {
