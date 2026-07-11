@@ -1363,6 +1363,103 @@ def crowns_test_reread(payload: dict = Body(...),
     return {"results": out}
 
 
+@router.post("/crowns/reread")
+def crowns_reread(payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Botão de RE-LEITURA do painel Coroas (11 Jul) — re-lê a Vision com o prompt
+    NOVO (placa de $) sobre a imagem guardada de cada mão suspeita e ESCREVE as
+    coroas corrigidas em player_names + all_players_actions. Guarda base÷2 aplicada
+    (coroa <½ → NULL + 'por rever'). body: {"hand_ids": [...], "dry_run": bool}.
+    Só toca bounty_value_usd + crown_review dos seats que a Vision voltou a ler —
+    NÃO mexe nomes, posições, match_method nem anon_map. Seats bounty_confirmed
+    (exceção manual) ficam intactos (a guarda salta-os)."""
+    import base64
+    from app.services.table_ss_vision import (
+        extract_table_ss_json, parse_and_validate_table_ss_json)
+    from app.routers.screenshot import (
+        _extract_hand_data_from_image_claude, _parse_vision_response)
+    from app.services.table_ss_deanon import _guard_suspect_crowns
+    from app.services.image_utils import detect_image_mime
+    hand_ids = payload.get("hand_ids") or []
+    dry_run = bool(payload.get("dry_run", False))
+    results = []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT h.id, h.hand_id, h.tournament_number tn, h.entry_id, "
+            "  h.context_table_ss_id ctx, h.player_names pn, h.all_players_actions apa "
+            "FROM hands h WHERE h.hand_id=%s", (hid,))
+        if not rows:
+            results.append({"hand_id": hid, "error": "not found"}); continue
+        r = rows[0]
+        pn = r["pn"]
+        if isinstance(pn, str): pn = json.loads(pn or "{}")
+        apa = r["apa"]
+        if isinstance(apa, str): apa = json.loads(apa or "{}")
+        img_b64 = None; src = None
+        if r["ctx"]:
+            ir = query("SELECT img_b64 FROM table_ss_processing_log WHERE id=%s", (r["ctx"],))
+            img_b64 = ir[0]["img_b64"] if ir and ir[0]["img_b64"] else None; src = "table_ss"
+        if not img_b64 and r["entry_id"]:
+            ir = query("SELECT raw_json->>'img_b64' b FROM entries WHERE id=%s", (r["entry_id"],))
+            img_b64 = ir[0]["b"] if ir and ir[0]["b"] else None; src = "gold"
+        if not img_b64:
+            results.append({"hand_id": hid, "error": "sem imagem guardada"}); continue
+        try:
+            img_bytes = base64.b64decode(img_b64)
+        except Exception as e:
+            results.append({"hand_id": hid, "error": f"decode: {e}"}); continue
+        mime = detect_image_mime(img_bytes) or "image/png"
+        vmap = {}; verr = {}
+        if src == "table_ss":
+            raw = extract_table_ss_json(img_bytes, mime, err_out=verr)
+            data = parse_and_validate_table_ss_json(raw) if raw else None
+            for s in (data or {}).get("seats", []):
+                if s.get("nick"): vmap[str(s["nick"]).strip().lower()] = s.get("bounty_usd")
+        else:
+            raw = _extract_hand_data_from_image_claude(img_bytes, mime)
+            data = _parse_vision_response(raw) if raw else {}
+            for s in data.get("players_list", []):
+                if s.get("name"): vmap[str(s["name"]).strip().lower()] = s.get("bounty_value_usd")
+        if not vmap:
+            results.append({"hand_id": hid, "error": "Vision sem seats",
+                            "vision_error": verr.get("error")}); continue
+        pl = pn.get("players_list") or []
+        orig = {str(p.get("name") or "").strip().lower(): p.get("bounty_value_usd") for p in pl}
+        for p in pl:                                   # aplicar a leitura nova
+            nm = str(p.get("name") or "").strip().lower()
+            if nm and nm in vmap:
+                p["bounty_value_usd"] = vmap[nm]
+        guard = _guard_suspect_crowns(pl, r["tn"])      # base÷2 → NULL + por rever
+        changes = []
+        final_by_name = {}
+        for p in pl:
+            nm = str(p.get("name") or "").strip().lower()
+            fv = p.get("bounty_value_usd")
+            final_by_name[nm] = fv
+            if nm in vmap and (orig.get(nm) or None) != (fv or None):
+                changes.append({"name": p.get("name"), "old": orig.get(nm), "new": fv})
+        if isinstance(apa, dict):                       # espelhar no apa (por real_name)
+            for k, v in apa.items():
+                if k == "_meta" or not isinstance(v, dict): continue
+                rn = str(v.get("real_name") or "").strip().lower()
+                if rn and rn in final_by_name:
+                    v["bounty_value_usd"] = final_by_name[rn]
+        if not dry_run and (changes or guard.get("below_half")):
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE hands SET player_names=%s, all_players_actions=%s WHERE id=%s",
+                        (json.dumps(pn), json.dumps(apa), r["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+        results.append({"hand_id": hid, "src": src, "dry_run": dry_run,
+                        "guard": guard, "n_changes": len(changes), "changes": changes,
+                        "vision_error": verr.get("error")})
+    return {"results": results, "dry_run": dry_run}
+
+
 @router.get("/flame-as-crown-scan")
 def flame_as_crown_scan(current_user=Depends(require_auth_or_api_key)):
     """4º GATE das coroas (11 Jul) — chama-lida-como-coroa. Reusa a fonte única

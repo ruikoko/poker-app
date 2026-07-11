@@ -821,6 +821,15 @@ function CrownHand({ h, onDone }) {
       setMsg('Coroa(s) corrigida(s).'); onDone && onDone()
     } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
   }
+  const reread = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await ggHealth.crownsReread([h.hand_id])
+      const res = (r.results || [])[0] || {}
+      if (res.error) { setMsg('Vision: ' + res.error) }
+      else { setMsg(`Re-lido (${res.n_changes || 0} alteração(ões)).`); onDone && onDone() }
+    } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
+  }
   return (
     <div style={{ ...card, padding: 12, marginBottom: 10, display: 'flex', gap: 12 }}>
       {h.image_url
@@ -855,6 +864,7 @@ function CrownHand({ h, onDone }) {
           </tbody>
         </table>
         <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button style={{ ...btn, borderColor: '#818cf8', color: '#818cf8' }} disabled={busy} onClick={reread}>↻ Re-ler (prompt novo)</button>
           <button style={{ ...btn, borderColor: '#22c55e', color: '#22c55e' }} disabled={busy} onClick={confirmReal}>✓ Coroa real (confirmar)</button>
           <button style={{ ...btn, borderColor: '#eab308', color: '#eab308' }} disabled={busy} onClick={saveCorrections}>Corrigir valor(es)</button>
           {msg && <span style={{ fontSize: 12, color: msg.startsWith('Erro') ? '#ef4444' : '#22c55e' }}>{msg}</span>}
@@ -867,8 +877,26 @@ function CrownHand({ h, onDone }) {
 function CoroasPanel() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
+  const [bulk, setBulk] = useState(null)   // {done,total,changed} durante o disparo
   const load = () => ggHealth.crowns().then(setData).catch(e => setErr(e.message))
   useEffect(() => { load() }, [])
+  const rereadAll = async () => {
+    const ids = [...(data.impossible || []), ...(data.unread || [])].map(h => h.hand_id)
+    if (!ids.length) return
+    if (!window.confirm(`Re-ler ${ids.length} mão(s) com o prompt novo e escrever as coroas corrigidas?`)) return
+    setBulk({ done: 0, total: ids.length, changed: 0 })
+    let changed = 0
+    for (let i = 0; i < ids.length; i += 5) {          // lotes de 5
+      const batch = ids.slice(i, i + 5)
+      try {
+        const r = await ggHealth.crownsReread(batch)
+        changed += (r.results || []).reduce((a, x) => a + (x.n_changes || 0), 0)
+      } catch { /* continua o lote seguinte */ }
+      setBulk({ done: Math.min(i + 5, ids.length), total: ids.length, changed })
+    }
+    setBulk(b => ({ ...b, finished: true }))
+    load()
+  }
   if (err) return <div style={{ ...card, padding: 16, color: '#ef4444' }}>Erro: {err}</div>
   if (!data) return <div style={{ color: 'var(--muted)' }}>A carregar…</div>
   const Section = ({ title, color, hands, desc }) => (
@@ -883,7 +911,22 @@ function CoroasPanel() {
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-        Coroa = KO instantâneo = <b>metade</b> do bounty → nunca &lt; base÷2. Confirma à vista (real → salta a guarda) ou corrige.
+        Coroa = KO instantâneo = <b>metade</b> do bounty → nunca &lt; base÷2. Confirma à vista (real → salta a guarda), corrige, ou <b>re-lê com o prompt novo</b> (placa de $).
+      </div>
+      <div style={{ ...card, padding: '8px 12px', margin: '6px 0', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button style={{ ...btn, borderColor: '#818cf8', color: '#818cf8', fontWeight: 700 }}
+          disabled={!!bulk && !bulk.finished} onClick={rereadAll}>
+          ↻ Re-ler todas as {data.count} (prompt novo)
+        </button>
+        {bulk && (
+          <span style={{ fontSize: 12, color: bulk.finished ? '#22c55e' : 'var(--muted)' }}>
+            {bulk.finished ? `Concluído: ${bulk.done}/${bulk.total} re-lidas · ${bulk.changed} coroa(s) alterada(s).`
+              : `A re-ler ${bulk.done}/${bulk.total}… (${bulk.changed} alteradas)`}
+          </span>
+        )}
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          Corre a Vision com o prompt corrigido sobre a imagem guardada e escreve as coroas certas (guarda base÷2).
+        </span>
       </div>
       {data.by_source && (
         <div style={{ ...card, padding: '8px 12px', margin: '6px 0 4px', fontSize: 12, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>

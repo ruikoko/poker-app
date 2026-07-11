@@ -359,6 +359,8 @@ export const ggHealth = {
   list: (group, page = 1, pageSize) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}${pageSize ? `&page_size=${pageSize}` : ''}`),
   // Painel Coroas (consolidação 11 Jul) — mãos com coroa < base÷2 p/ verificar à vista.
   crowns: () => req('GET', '/gg-health/crowns'),
+  // Re-leitura das coroas com o prompt NOVO (placa de $) — corrige e escreve (guarda base÷2).
+  crownsReread: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/reread', { hand_ids: handIds, dry_run: dryRun }),
   // Ação 1 — taga N mãos com UMA tag (string) ou VÁRIAS (array) de uma vez. ACRESCENTA.
   // confirm=true força apesar do aviso de conflito de formato.
   tag: (handIds, tagOrTags, confirm = false) => req('POST', '/gg-health/tag', {

@@ -86,30 +86,20 @@ def _seats_to_vision_data(seats: list[dict], hero_nick: Optional[str]) -> dict:
     }
 
 
-def _crown_on_grid(crown: float, base: float) -> bool:
-    """Grelha aritmética: uma coroa real = base × (k/2ⁿ) com k/2ⁿ ≥ ½ (fresca base÷2
-    + acumulações de metades). Tolerância max(0.5, base×1%) p/ cêntimos/rake. Fora
-    da grelha → suspeita (valor que não é combinação de metades da base)."""
-    tol = max(0.5, base * 0.01)
-    for n in range(0, 5):
-        for k in range(1, 2 ** n * 6 + 1):
-            v = base * k / (2 ** n)
-            if v >= base / 2 - tol and abs(crown - v) < tol:
-                return True
-    return False
-
-
 def _guard_suspect_crowns(players_list, tn) -> dict:
-    """#FLAME-AS-CROWN-GUARD (11 Jul, decisão do Rui) — guarda no FUNIL da escrita
-    de coroas (table-SS E position_v3/Gold). Rejeita uma coroa ($ bounty) e grava
-    **NULL + 'por rever'** (`crown_review`), nunca descarte silencioso — visível no
-    painel Coroas. Dois critérios:
-      - `below_half`: coroa < base÷2 (impossível — a coroa é o KO instantâneo = ½;
-        a Vision leu a chama VPIP %).
-      - `off_grid`: coroa ≥ base÷2 mas FORA da grelha aritmética (não é base×k/2ⁿ).
-    Base = `tournament_summaries.buy_in_bounty`. Seats `bounty_confirmed` (exceção
-    manual do Rui) e $0 (omissão) ficam intactos. Devolve {below_half, off_grid}."""
-    out = {"below_half": 0, "off_grid": 0}
+    """#FLAME-AS-CROWN-GUARD (11 Jul, decisão A do Rui) — guarda **base÷2** no FUNIL
+    da escrita de coroas (table-SS E position_v3/Gold). Uma coroa ($ bounty) < base÷2
+    é IMPOSSÍVEL (a coroa é o KO instantâneo = metade) → a Vision leu a chama
+    (VPIP %). NÃO grava o valor errado: **NULL + 'por rever'** (`crown_review` =
+    'flame_below_half'), nunca descarte silencioso — visível no painel Coroas. Base =
+    `tournament_summaries.buy_in_bounty`. Seats `bounty_confirmed` (exceção manual do
+    Rui) e $0 (omissão) ficam intactos. Devolve {below_half}.
+
+    A GRELHA aritmética (dyadic base×k/2ⁿ) foi TESTADA no real e REMOVIDA: as coroas
+    progressivas/rake NÃO são dyadic (ex.: Lucas 259.37 = placa real, a grelha
+    NULLava-a). O detetor ==chama fica como SINAL no painel Coroas (não guarda —
+    coroa==VPIP pode ser coincidência legítima)."""
+    out = {"below_half": 0}
     if not tn or not players_list:
         return out
     from app.db import query
@@ -118,8 +108,7 @@ def _guard_suspect_crowns(players_list, tn) -> dict:
     base = rows[0]["buy_in_bounty"] if rows else None
     if not base:
         return out
-    base = float(base)
-    floor = base / 2.0
+    floor = float(base) / 2.0
     for p in players_list:
         if p.get("bounty_confirmed"):
             continue
@@ -131,13 +120,9 @@ def _guard_suspect_crowns(players_list, tn) -> dict:
         if bv is None or bv <= 0:
             continue                                   # $0/omissão fica (por ler)
         if bv < floor - 0.5:
-            p["bounty_value_usd"] = None
-            p["crown_review"] = "flame_below_half"
+            p["bounty_value_usd"] = None               # não gravar o valor errado
+            p["crown_review"] = "flame_below_half"     # 'por rever' (painel Coroas)
             out["below_half"] += 1
-        elif not _crown_on_grid(bv, base):
-            p["bounty_value_usd"] = None
-            p["crown_review"] = "off_grid"
-            out["off_grid"] += 1
     return out
 
 
