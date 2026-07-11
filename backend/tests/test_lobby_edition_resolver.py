@@ -137,6 +137,44 @@ def test_genuinely_ambiguous_two_started_no_containment_quarantines():
     assert tn is None
 
 
+# ── H5 (nova, 11 Jul): igualdade dura entrants == campo EXACTO de 1 edição ─────
+def test_h5_entrants_equality_glues_when_corroborated():
+    # 2 sobrevivem H1-H4 (sem containment); entrants=108 == total EXACTO de A,
+    # ≠ de B; corroborado por ≥2 prints → cola A.
+    A = _cand("AAA", "E $50", datetime(2026, 7, 1, 20, 0), 108)
+    B = _cand("BBB", "E $50", datetime(2026, 7, 1, 20, 5), 150)
+    with patch.object(TR, "_edition_hand_window", side_effect=_windows({})), \
+         patch.object(TR, "_entrants_corroborated", return_value=True):
+        tn, decision, _ = _disambiguate_editions(
+            "GGPoker", [A, B], datetime(2026, 7, 1, 20, 40),
+            entrants=108, players_left=90, lobby_name="E $50")
+    assert tn == "AAA" and decision == "entrants_equality"
+
+
+def test_h5_equality_without_corroboration_quarantines():
+    A = _cand("AAA", "E $50", datetime(2026, 7, 1, 20, 0), 108)
+    B = _cand("BBB", "E $50", datetime(2026, 7, 1, 20, 5), 150)
+    with patch.object(TR, "_edition_hand_window", side_effect=_windows({})), \
+         patch.object(TR, "_entrants_corroborated", return_value=False):
+        tn, decision, _ = _disambiguate_editions(
+            "GGPoker", [A, B], datetime(2026, 7, 1, 20, 40),
+            entrants=108, players_left=90, lobby_name="E $50")
+    assert tn is None and decision == "ambiguous_editions"
+
+
+# ── H6 (nova, 11 Jul): impossibilidade temporal (eliminados p/ tempo desde start)
+def test_h6_temporal_impossibility_excludes_barely_started_edition():
+    # Ambas total 200 (H5 não separa). B arranca 5 min antes do anchor; o print
+    # mostra 90 eliminados (45%) → impossível em 5 min → exclui B. Sobra A.
+    A = _cand("AAA", "E", datetime(2026, 7, 1, 20, 0), 200)
+    B = _cand("BBB", "E", datetime(2026, 7, 1, 20, 35), 200)
+    with patch.object(TR, "_edition_hand_window", side_effect=_windows({})):
+        tn, decision, _ = _disambiguate_editions(
+            "GGPoker", [A, B], datetime(2026, 7, 1, 20, 40),
+            entrants=200, players_left=110, lobby_name="E")
+    assert tn == "AAA" and decision == "temporal_impossibility"
+
+
 # ── Integração: tier='edition_quarantine' via resolve_tournament_number ────────
 def test_resolve_returns_edition_quarantine_tier():
     editions = [

@@ -228,6 +228,52 @@ def _edition_hand_window(site: str, tn: str):
     return rows[0].get("mn"), rows[0].get("mx")
 
 
+# Provas novas (11 Jul 2026) — só actuam no ramo AMBÍGUO (2+ sobreviventes),
+# depois de H1-H4 + hand_window_contained: convertem quarentena→cola, nunca
+# mudam uma cola existente (regressão-zero por construção).
+_EDITION_FULL_BUST_MIN = 18.0   # tempo (min) p/ rebentar TODO o campo num hyper
+                                # (calibração PERMISSIVA — a mais rápida; segura
+                                # contra falsas exclusões em torneios lentos).
+_EDITION_ELIM_GRACE_FRAC = 0.05  # folga de OCR na fração de eliminados
+
+
+def _elim_impossible(cand, ent, pl, anchor_lisbon, site):
+    """H6 — impossibilidade temporal. Os eliminados implicados (ent−pl) são
+    fisicamente impossíveis para o tempo decorrido desde o start DESTA edição?
+    Conservador: max_frac(min) = min(1, minutos/_EDITION_FULL_BUST_MIN). Só
+    exclui quando a fração de eliminados excede o teto por larga margem."""
+    start = cand.get("start_time")
+    if start is None or anchor_lisbon is None or not ent or pl is None:
+        return False
+    elapsed_min = (anchor_lisbon - start).total_seconds() / 60.0
+    if elapsed_min <= 0:
+        return (ent - pl) > 0   # não-arrancada com eliminados (reforça H3)
+    elim_frac = (ent - pl) / float(ent)
+    max_frac = min(1.0, elapsed_min / _EDITION_FULL_BUST_MIN) + _EDITION_ELIM_GRACE_FRAC
+    return elim_frac > max_frac
+
+
+def _entrants_corroborated(site, cand, ent):
+    """H5 requisito ≥2 prints: quantos prints do MESMO torneio (site + nome do
+    candidato) mostram entrants == o campo final desta edição. ≥2 → corroborado
+    (guarda contra misread único / contagem parcial de late-reg a colar por
+    acaso). Nome exacto do candidato → conservador (falso-negativo = fica em
+    quarentena, seguro; evita falso-positivo de torneios homónimos-de-número)."""
+    name = cand.get("tournament_name")
+    if not name:
+        return False
+    try:
+        rows = query(
+            "SELECT COUNT(*) AS n FROM lobby_processing_log "
+            " WHERE site = %s AND tournament_name = %s "
+            "   AND (vision_json->>'entrants')::int = %s",
+            (site, name, int(ent)),
+        )
+    except Exception:
+        return False
+    return bool(rows) and (rows[0].get("n") or 0) >= 2
+
+
 def _disambiguate_editions(site, candidates, anchor_lisbon, entrants,
                            players_left, lobby_name=None):
     """RAIZ 2 — escolhe a edição certa por PROVA DURA, ou devolve None (quarentena).
@@ -300,6 +346,20 @@ def _disambiguate_editions(site, candidates, anchor_lisbon, entrants,
     ]
     if len(contained) == 1:
         return contained[0]["tournament_number"], "hand_window_contained", survivors
+
+    # ── Provas novas (só narrowing do ramo ambíguo; regressão-zero) ──
+    # H6 — impossibilidade temporal: exclui survivors onde os eliminados
+    # implicados (ent−pl) são impossíveis p/ o tempo desde o start dessa edição.
+    possible = [c for c in survivors if not _elim_impossible(c, ent, pl, anchor_lisbon, site)]
+    if len(possible) == 1:
+        return possible[0]["tournament_number"], "temporal_impossibility", survivors
+    pool_eq = possible if possible else survivors
+    # H5 — igualdade dura: entrants == campo final EXACTO de UM survivor e ≠ dos
+    # outros, corroborada por ≥2 prints (assinatura, não proximidade).
+    if ent is not None:
+        eq = [c for c in pool_eq if c.get("total_players") == ent]
+        if len(eq) == 1 and _entrants_corroborated(site, eq[0], int(ent)):
+            return eq[0]["tournament_number"], "entrants_equality", survivors
     return None, "ambiguous_editions", survivors
 
 

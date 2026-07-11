@@ -70,6 +70,7 @@ _LOBBY_PROMPT = (
     '  "starting_stack": <int chips> | null,\n'
     '  "entrants": <int total registered> | null,\n'
     '  "players_left": <int players still alive mid-tournament> | null,\n'
+    '  "reg_open": <true if Late Registration still open, else false> | null,\n'
     '  "average_stack": <int average chip stack mid-tournament> | null,\n'
     '  "places_paid": <int total positions that get paid> | null,\n'
     '  "prize_pool": <float USD/EUR total prize pool> | null,\n'
@@ -99,13 +100,29 @@ _LOBBY_PROMPT = (
     "  places paid', 'Places Paid: X', or visible as the cap of the prize\n"
     "  table (highest rank with a payout).\n"
     "- prize_pool: 'Total Prize Pool' from the lobby header (plain number).\n"
-    "- entrants: TOTAL registered players (static after registration closes,\n"
-    "  e.g. 500). Often labelled 'Entries', 'Players Entered', 'Total Entries'.\n"
-    "- players_left: players STILL ALIVE in the event RIGHT NOW (decreases as\n"
-    "  busts happen). Common formats in lobby header: 'Players Left: X',\n"
-    "  'Remaining: X', 'X/Y' (where X is left, Y is entrants), or a 'Players'\n"
-    "  count distinct from 'Entries'. If only one number is shown and it's\n"
-    "  ambiguous, prefer null to guessing.\n"
+    "- entrants: TOTAL registered players (grows during late registration, then\n"
+    "  static once registration closes). VERIFIED real labels (read from these,\n"
+    "  in this order of trust):\n"
+    "    * GG lobby header: 'Players Left: <LEFT> / <ENTRANTS>' — the SECOND\n"
+    "      number is entrants. Corroborated by 'Unique | Re-entry: A | B' where\n"
+    "      entrants = A + B. Prefer A+B when both are shown.\n"
+    "    * Winamax lobby header: 'Players <LEFT> / <ENTRANTS>' — the SECOND\n"
+    "      number is entrants (Re-Entries shown separately).\n"
+    "    * A field labelled 'Entries'/'Total Entries'.\n"
+    "  If registration is still OPEN ('Late Reg'/'Late Registration' shown),\n"
+    "  entrants is a PARTIAL count — still report it, but set reg_open=true.\n"
+    "- players_left: players STILL ALIVE RIGHT NOW (decreases as busts happen).\n"
+    "  It is the FIRST number in 'Players Left: <LEFT> / <entrants>' (GG) or\n"
+    "  'Players <LEFT> / <entrants>' (WN), or a 'Players Left: X' / 'Remaining: X'.\n"
+    "- reg_open: true if the lobby shows 'Late Reg'/'Late Registration' (entrants\n"
+    "  not yet final); false if registration is closed; null if you cannot tell.\n"
+    "!! CRITICAL — do NOT confuse with the HERO's RANK/POSITION. GG shows the\n"
+    "   hero's seat highlighted in the Players list with a 'Rank' number, and WN\n"
+    "   shows 'RANK: Nth' in the left panel. That RANK is the hero's standing —\n"
+    "   it is NEITHER entrants NOR players_left. NEVER read the hero rank into\n"
+    "   entrants or players_left. If the only 'X/Y' you see is the hero's\n"
+    "   rank/left widget (not a 'Players Left'/'Players' labelled header), prefer\n"
+    "   null for entrants over guessing.\n"
     "- open_tab: which TAB is currently OPEN/selected in this lobby view. GG\n"
     "  tournament lobbies have tabs including 'Info' (tournament details) and\n"
     "  'Prize Pool' (the payout table). Report 'Info' if the info/details panel is\n"

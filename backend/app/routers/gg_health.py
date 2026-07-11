@@ -1431,3 +1431,83 @@ def lobby_edition_resolve(body: _EditionResolveBody = Body(...),
     plan["payout_action"] = (up or {}).get("action")
     plan["written"] = True
     return plan
+
+
+class _EditionRepointBody(BaseModel):
+    payout_tn: str
+    correct_tn: str
+    dry_run: bool = True
+
+
+@router.post("/lobby-edition-repoint")
+def lobby_edition_repoint(body: _EditionRepointBody = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """Fecha uma contaminacao de edicao JA ESCRITA (o que a quarentena NAO trata,
+    pois so age em prints novos). O payout de `payout_tn` foi escrito por um lobby
+    que, com a prova de hoje, pertence a `correct_tn`. APAGA o payout de payout_tn
+    + reaponta o log do escritor para correct_tn; se correct_tn nao tiver payout,
+    escreve-o do vj do escritor (D11 + coerencia). dry_run=true (default) so mostra.
+
+    GUARDA DURA: o crivo TEM de confirmar que o escritor resolve para correct_tn
+    (senao 422) — nunca apaga por palpite. So GG. Gate: correr /lobby-edition-scan
+    a seguir; deve ficar sem esta contaminacao."""
+    from app.services import lobby_vision, payouts_service
+    from app.services.payout_coherence import check_vj_payout_coherent
+    rows = query(
+        "SELECT tp.tournament_number AS payout_tn, tp.source, "
+        "       l.discord_message_id, l.site, l.tournament_name, l.posted_at, "
+        "       l.players_left, l.vision_json "
+        "  FROM tournament_payouts tp "
+        "  LEFT JOIN lobby_processing_log l "
+        "    ON l.discord_message_id = split_part(tp.source, ':', 2) "
+        " WHERE tp.site='GGPoker' AND tp.tournament_number=%s", (body.payout_tn,))
+    if not rows:
+        raise HTTPException(404, f"payout GG {body.payout_tn} nao encontrado")
+    r = rows[0]
+    src = r.get("source") or ""
+    if not any(src.startswith(p) for p in _LOBBY_SOURCE_PREFIXES):
+        raise HTTPException(422, f"payout {body.payout_tn} nao e de lobby (source={src})")
+    if not r.get("discord_message_id"):
+        raise HTTPException(422, "escritor do payout nao encontrado no log")
+    # GUARDA — o crivo confirma que o escritor pertence a correct_tn?
+    (new_tn, _cands, tier), vj = _reresolve_lobby_row(r)
+    if str(new_tn) != str(body.correct_tn):
+        raise HTTPException(422, f"crivo NAO confirma: escritor resolve para {new_tn} "
+                                 f"(tier={tier}), nao {body.correct_tn}")
+    exist_correct = query("SELECT source FROM tournament_payouts WHERE site='GGPoker' "
+                          "AND tournament_number=%s", (body.correct_tn,))
+    correct_has = bool(exist_correct)
+    plan = {
+        "payout_tn": body.payout_tn, "correct_tn": body.correct_tn,
+        "writer_msg": r["discord_message_id"][:12], "crivo_tier": tier,
+        "would_delete_payout_of": body.payout_tn,
+        "correct_tn_already_has_payout": correct_has,
+        "would_write_correct_from_writer": (not correct_has),
+        "dry_run": body.dry_run,
+    }
+    if body.dry_run:
+        return plan
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tournament_payouts WHERE site='GGPoker' "
+                        "AND tournament_number=%s", (body.payout_tn,))
+            plan["deleted_payout_rows"] = cur.rowcount
+            cur.execute("UPDATE lobby_processing_log SET tournament_number=%s "
+                        "WHERE discord_message_id=%s",
+                        (body.correct_tn, r["discord_message_id"]))
+            plan["repointed_writer_log"] = cur.rowcount
+            conn.commit()
+    if not correct_has:
+        ok_coh, coh = check_vj_payout_coherent(r.get("site") or "GGPoker",
+                                               body.correct_tn, vj)
+        if ok_coh:
+            blob = lobby_vision.build_hrc_payouts_blob(vj)
+            payouts_service.upsert_payout(
+                site="GGPoker", tournament_number=body.correct_tn,
+                payouts_json=blob, source=f"manual_edition:{r['discord_message_id']}")
+            plan["wrote_correct"] = True
+        else:
+            plan["wrote_correct"] = False
+            plan["coherence_skip"] = coh
+    plan["written"] = True
+    return plan

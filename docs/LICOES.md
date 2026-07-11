@@ -162,3 +162,29 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
 - **O crivo prova-se a apanhar um real logo à 1ª.** `lobby-edition-scan` acusou 1 contaminação
   verdadeira (294738291) na 1ª corrida — o gate duro funciona; um crivo que nunca acusa nada não
   está a ser testado.
+
+## 11 Jul 2026 — Vision, fuso e o olho de jogador (Raiz 2 + prompt + provas)
+
+- 2026-07-11 — **Problema:** suspeita de que a Vision lia a POSIÇÃO do Hero como `entrants` nos
+  lobbys → provas de edição (H2/igualdade) assentes em areia. **Solução:** carimbo VISUAL — as
+  imagens não estão na BD, mas vivem em `Batmen\done\lobby`; casei-as por `sha256` (=
+  `discord_message_id`) e **abri-as eu próprio** (Read renderiza imagem). 3 GG + 1 WN: o rótulo é
+  **`Players Left: <left> / <entrants>`** (GG, corroborado por `Unique+Re-entry`) / `Players
+  <left>/<entrants>` (WN); a posição/RANK do Hero é um campo SEPARADO que a Vision não lê. Suspeita
+  **desmentida**; entrants está certo; a correção do 294738291 (305>219) aguenta.
+  **→ Lição (a): um campo de IA sem semântica verificada contra o ecrã é uma bomba latente** —
+  fechar o loop abrindo a imagem real, não só olhando o número gravado.
+- 2026-07-11 — **Problema:** painel de edições com −1h (print SR$32 Level 1 às 20:10 mas edição
+  candidata dizia start 19:10). **Solução:** `start_time` do TS em UTC vs tempos de print em Lisboa,
+  comparados/exibidos sem normalizar (o fantasma GG conhecido). Normalizar tudo a Lisboa na
+  exibição E nas comparações. **→ Lição (b): motor certo + montra torta = desconfiança evitável —
+  a exibição converte SEMPRE fusos e declara-os.**
+- 2026-07-11 — **Êxito:** o **olho de jogador do Rui** ("um hyper 10BB não está no Level 1 uma hora
+  após o start") apanhou o bug de fuso que nenhuma suite tinha. **→ Lição (c): a intuição de
+  domínio do Rui vale por uma suite — quando ele diz "isto é fisicamente impossível", é um teste.**
+- 2026-07-11 — **Solução (provas novas, regressão-zero por construção):** H5 (igualdade dura:
+  entrants == campo EXACTO de 1 edição, ≠ das outras, corroborado por ≥2 prints) + H6
+  (impossibilidade temporal: eliminados implicados vs tempo desde o start) só actuam no ramo
+  AMBÍGUO, DEPOIS do `hand_window_contained` — convertem quarentena→cola, nunca mudam uma cola
+  existente. Prompt endurecido pelos rótulos reais + `reg_open` (a igualdade só é fiável com reg
+  fechada; os 6 da quarentena eram capturas de late-reg com contagem parcial, não misreads).
