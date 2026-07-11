@@ -2777,51 +2777,66 @@ def test_build_sizings_overrides_HU_no_caso_B():
 # ── pt91 (Regra 2 do Rui) — sizing de 3bet por efetivo (mirror do JS) ──────
 
 def test_threebet_multiplier_ip_bands():
-    """IP: <20 → 2.3 fixo; 20..50 interp 2.3→3.0; >50 → 3.0."""
-    assert threebet_multiplier(10.0, True) == 2.3
-    assert threebet_multiplier(19.99, True) == 2.3
-    assert threebet_multiplier(20.0, True) == 2.3          # início da interp
-    assert round(threebet_multiplier(35.0, True), 4) == 2.65   # 2.3+(15/30)*0.7
-    assert threebet_multiplier(50.0, True) == 3.0
-    assert threebet_multiplier(60.0, True) == 3.0
+    """LEI §18 — IP por escalão fixo: 17-20→2.0, 21-25→2.2, 26-35→2.5,
+    36-70→3.0, 71+→3.5 (sem interpolação)."""
+    assert threebet_multiplier(20.0, True) == 2.0
+    assert threebet_multiplier(21.0, True) == 2.2
+    assert threebet_multiplier(25.0, True) == 2.2
+    assert threebet_multiplier(26.0, True) == 2.5
+    assert threebet_multiplier(35.0, True) == 2.5
+    assert threebet_multiplier(36.0, True) == 3.0
+    assert threebet_multiplier(70.0, True) == 3.0
+    assert threebet_multiplier(71.0, True) == 3.5
 
 
 def test_threebet_multiplier_op_bands():
-    """OP: <20 → 2.5 fixo; 20..50 interp 2.5→4.0; >50 → 4.0."""
-    assert threebet_multiplier(10.0, False) == 2.5
+    """LEI §18 — OP por escalão fixo: 17-20→2.5, 21-25→3.0, 26-35→3.5,
+    36-70→4.0, 71+→4.5 (sem interpolação)."""
     assert threebet_multiplier(20.0, False) == 2.5
-    assert round(threebet_multiplier(35.0, False), 4) == 3.25  # 2.5+(15/30)*1.5
-    assert threebet_multiplier(50.0, False) == 4.0
+    assert threebet_multiplier(21.0, False) == 3.0
+    assert threebet_multiplier(25.0, False) == 3.0
+    assert threebet_multiplier(26.0, False) == 3.5
+    assert threebet_multiplier(35.0, False) == 3.5
+    assert threebet_multiplier(36.0, False) == 4.0
     assert threebet_multiplier(70.0, False) == 4.0
+    assert threebet_multiplier(71.0, False) == 4.5
 
 
 def test_threebet_sizings_bb_ip_gate():
-    """IP: <18 → [ALLIN]; 18..40 → [size, ALLIN]; >=40 → [size]. open=2bb."""
+    """LEI §18 — IP: <17 → [ALLIN]; >=17 → SEMPRE [size, ALLIN]. open=2bb."""
     assert threebet_sizings_bb(10.0, True, 2.0) == ["ALLIN"]
-    assert threebet_sizings_bb(17.99, True, 2.0) == ["ALLIN"]
-    # eff=18 (>=18, <40) → [size, ALLIN]; eff<20 → x=2.3 → 4.6
-    assert threebet_sizings_bb(18.0, True, 2.0) == [4.6, "ALLIN"]
-    # eff=40 (>=40) → só size; x=interp(40)=2.7667 → 5.53
-    assert threebet_sizings_bb(40.0, True, 2.0) == [5.53]
-    # deep → x=3.0 → 6.0, sem ALLIN
-    assert threebet_sizings_bb(60.0, True, 2.0) == [6.0]
+    assert threebet_sizings_bb(16.99, True, 2.0) == ["ALLIN"]
+    # eff=17 → escalão 17-20 → x=2.0 → 4.0 + jam
+    assert threebet_sizings_bb(17.0, True, 2.0) == [4.0, "ALLIN"]
+    # eff=40 → escalão 36-70 → x=3.0 → 6.0 + JAM (o teto 40 morreu)
+    assert threebet_sizings_bb(40.0, True, 2.0) == [6.0, "ALLIN"]
+    # deep 80 → x=3.5 → 7.0 + JAM (jam nunca sai do nó)
+    assert threebet_sizings_bb(80.0, True, 2.0) == [7.0, "ALLIN"]
 
 
 def test_threebet_sizings_bb_op_gate():
-    """OP: <20 → [ALLIN]; 20..45 → [size, ALLIN]; >=45 → [size]. open=2bb."""
+    """LEI §18 — OP: <17 → [ALLIN]; >=17 → SEMPRE [size, ALLIN]. open=2bb."""
     assert threebet_sizings_bb(15.0, False, 2.0) == ["ALLIN"]
-    assert threebet_sizings_bb(19.99, False, 2.0) == ["ALLIN"]
-    # eff=20 (>=20, <45) → [size, ALLIN]; x=2.5 → 5.0
+    assert threebet_sizings_bb(16.99, False, 2.0) == ["ALLIN"]
+    # eff=20 → escalão 17-20 → x=2.5 → 5.0 + jam
     assert threebet_sizings_bb(20.0, False, 2.0) == [5.0, "ALLIN"]
-    # eff=45 (>=45) → só size; x=interp(45)=3.75 → 7.5
-    assert threebet_sizings_bb(45.0, False, 2.0) == [7.5]
-    # deep → x=4.0 → 8.0, sem ALLIN
-    assert threebet_sizings_bb(50.0, False, 2.0) == [8.0]
+    # eff=45 → escalão 36-70 → x=4.0 → 8.0 + JAM (o teto 45 morreu)
+    assert threebet_sizings_bb(45.0, False, 2.0) == [8.0, "ALLIN"]
+    # deep 71 → x=4.5 → 9.0 + JAM
+    assert threebet_sizings_bb(71.0, False, 2.0) == [9.0, "ALLIN"]
 
 
 def test_threebet_sizings_bb_size_scales_with_open():
-    """`x` multiplica o raise inicial (open). open=3bb, IP eff=60 → 3.0×3=9.0."""
-    assert threebet_sizings_bb(60.0, True, 3.0) == [9.0]
+    """`x` multiplica o open. open=3bb, IP eff=60 (36-70→3.0) → 3.0×3=9.0 + jam."""
+    assert threebet_sizings_bb(60.0, True, 3.0) == [9.0, "ALLIN"]
+
+
+def test_threebet_sizings_bb_ko_bonus():
+    """LEI §18 — bónus KO (+0.5) quando aplicável. IP eff=40 (x=3.0)+0.5=3.5,
+    open=2bb → 7.0 + jam. <17 continua só-jam mesmo com bónus."""
+    assert threebet_sizings_bb(40.0, True, 2.0, 0.5) == [7.0, "ALLIN"]
+    assert threebet_sizings_bb(30.0, False, 2.0, 0.5) == [8.0, "ALLIN"]  # OP 26-35 x=3.5+0.5=4.0
+    assert threebet_sizings_bb(10.0, True, 2.0, 0.5) == ["ALLIN"]        # jam-only ignora bónus
 
 
 # ── pt91 (Regra 3 do Rui) — flag IS_PKO no template ────────────────────────

@@ -39,10 +39,10 @@ let SIZES_OPEN_SB = [3.5];
 let SIZES_OPEN_BB = [4];
 
 // general 3-bet sizing in big blinds
-// ⚠️ pt91 (Regra 2 do Rui): os arrays de 3-bet CLÁSSICO abaixo (IP/UTG1..BU e
-// SB_VS_*/BB_VS_*) deixaram de ser LIDOS — getSizings3Bets passou a calcular o
-// 3bet dinamicamente por efetivo min(3bettor,opener) + IP/OP. Mantidos só como
-// referência histórica / defaults inertes. O gerador Python já NÃO os
+// ⚠️ pt91 + LEI §18 (11 Jul 2026): os arrays de 3-bet CLÁSSICO abaixo (IP/UTG1..BU
+// e SB_VS_*/BB_VS_*) deixaram de ser LIDOS — getSizings3Bets calcula o 3bet por
+// ESCALÃO fixo de efetiva min(3bettor,opener) + IP/OP (+ bónus KO). Mantidos só
+// como referência histórica / defaults inertes. O gerador Python já NÃO os
 // sobrescreve. Os SIZES_3BET_SQUEEZE_* CONTINUAM activos (squeeze inalterado).
 let SIZES_3BET_IP = [6, ALLIN];
 let SIZES_3BET_UTG1 = [6];
@@ -403,7 +403,11 @@ function getSizings3Bets(ctx) {
 	let effBB = effectiveStackBBVsRaiser(ctx, player, raiser);
 	let openToBB = totalChipsThisStreet(ctx, raiser) / ctx.getSizeBigBlind();
 
-	let sizings = threeBetSizings(effBB, isIP, openToBB)
+	// LEI nova (§18, 11 Jul 2026) — BÓNUS KO: torneio KO + opener COBRE o
+	// 3-bettor (opener tem >= fichas totais) → +0.5 ao multiplicador.
+	let koBonus = (IS_PKO && totalStackChips(ctx, raiser) >= totalStackChips(ctx, player)) ? 0.5 : 0;
+
+	let sizings = threeBetSizings(effBB, isIP, openToBB, koBonus)
 		.map(s => sizingBBorAllIn(ctx, s));
 
 	// pt91 (Regra 3) — PKO + adversário vivo <= PKO_SHORTIE_BB → +all-in (ISO).
@@ -413,33 +417,38 @@ function getSizings3Bets(ctx) {
 	return sizings;
 }
 
-// pt91 (Regra 2) — array de 3bet em BB (com sentinela ALLIN) por efetivo+IP/OP.
-//   IP: <18 -> [ALLIN]; 18..40 -> [size, ALLIN]; >=40 -> [size]
-//   OP: <20 -> [ALLIN]; 20..45 -> [size, ALLIN]; >=45 -> [size]
-//   size = multiplicador(eff) * openToBB. Mirror EXACTO de
-//   hrc_script_gen.threebet_sizings_bb (manter em sync — drift cross-language).
-function threeBetSizings(effBB, isIP, openToBB) {
-	let lo = isIP ? 18 : 20;          // abaixo -> só all-in
-	let hi = isIP ? 40 : 45;          // >= -> só size (sem all-in)
-	let size = round2(threeBetMultiplier(effBB, isIP) * openToBB);
-	if (effBB < lo)
+// LEI nova (§18, 11 Jul 2026) — array de 3bet em BB (sentinela ALLIN).
+//   effBB < 17  -> [ALLIN]           (nó SÓ-jam, sem size)
+//   effBB >= 17 -> [size, ALLIN]     (SEMPRE size + jam; morreram os tetos 40/45)
+//   size = (multiplicador(escalão) + koBonus) * openToBB.
+//   koBonus (0 ou 0.5) vem do caller (getSizings3Bets), só em KO + opener cobre.
+//   Mirror EXACTO de hrc_script_gen.threebet_sizings_bb (sync cross-language).
+function threeBetSizings(effBB, isIP, openToBB, koBonus) {
+	if (effBB < 17)
 		return [ALLIN];
-	if (effBB < hi)
-		return [size, ALLIN];
-	return [size];
+	let mult = threeBetMultiplier(effBB, isIP) + (koBonus || 0);
+	let size = round2(mult * openToBB);
+	return [size, ALLIN];
 }
 
-// pt91 (Regra 2) — multiplicador "x" sobre o raise inicial (open).
-//   IP: <20 -> 2.3 fixo; 20..50 interp linear 2.3->3.0; >50 -> 3.0
-//   OP: <20 -> 2.5 fixo; 20..50 interp linear 2.5->4.0; >50 -> 4.0
+// LEI nova (§18, 11 Jul 2026) — multiplicador "x" sobre o open, por ESCALÃO fixo
+// de efetiva (sem interpolação). Só chamado com effBB >= 17 (o <17 é jam acima).
+//   escalão      IP    OP
+//   17..20      2.0   2.5
+//   21..25      2.2   3.0
+//   26..35      2.5   3.5
+//   36..70      3.0   4.0
+//   71+         3.5   4.5
 function threeBetMultiplier(effBB, isIP) {
-	let loX = isIP ? 2.3 : 2.5;
-	let hiX = isIP ? 3.0 : 4.0;
-	if (effBB < 20)
-		return loX;
-	if (effBB > 50)
-		return hiX;
-	return loX + (effBB - 20) / (50 - 20) * (hiX - loX);
+	if (effBB < 21)
+		return isIP ? 2.0 : 2.5;
+	if (effBB < 26)
+		return isIP ? 2.2 : 3.0;
+	if (effBB < 36)
+		return isIP ? 2.5 : 3.5;
+	if (effBB < 71)
+		return isIP ? 3.0 : 4.0;
+	return isIP ? 3.5 : 4.5;
 }
 
 function round2(v) {

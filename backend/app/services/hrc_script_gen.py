@@ -949,35 +949,45 @@ def _apply_caso_a_3bet_ip(
 
 
 def threebet_multiplier(eff_bb: float, is_ip: bool) -> float:
-    """Multiplicador "x" do 3bet sobre o raise inicial (open), por efetivo + IP/OP.
+    """Multiplicador "x" do 3bet sobre o open, por ESCALÃO fixo de efetiva
+    (LEI §18, 11 Jul 2026 — sem interpolação). Só válido para eff >= 17 (o
+    <17 é jam, tratado em `threebet_sizings_bb`). Mirror EXACTO do template
+    `threeBetMultiplier` (manter em sync — drift cross-language).
 
-    IP: <20 → 2.3 fixo; 20..50 interp linear 2.3→3.0; >50 → 3.0
-    OP: <20 → 2.5 fixo; 20..50 interp linear 2.5→4.0; >50 → 4.0
+        escalão     IP    OP
+        17..20     2.0   2.5
+        21..25     2.2   3.0
+        26..35     2.5   3.5
+        36..70     3.0   4.0
+        71+        3.5   4.5
     """
-    lo_x = 2.3 if is_ip else 2.5
-    hi_x = 3.0 if is_ip else 4.0
-    if eff_bb < 20:
-        return lo_x
-    if eff_bb > 50:
-        return hi_x
-    return lo_x + (eff_bb - 20.0) / (50.0 - 20.0) * (hi_x - lo_x)
+    if eff_bb < 21:
+        return 2.0 if is_ip else 2.5
+    if eff_bb < 26:
+        return 2.2 if is_ip else 3.0
+    if eff_bb < 36:
+        return 2.5 if is_ip else 3.5
+    if eff_bb < 71:
+        return 3.0 if is_ip else 4.0
+    return 3.5 if is_ip else 4.5
 
 
-def threebet_sizings_bb(eff_bb: float, is_ip: bool, open_to_bb: float) -> list:
-    """Array de 3bet em BB ("ALLIN" como sentinela) por efetivo + IP/OP.
+def threebet_sizings_bb(
+    eff_bb: float, is_ip: bool, open_to_bb: float, ko_bonus: float = 0.0,
+) -> list:
+    """Array de 3bet em BB ("ALLIN" como sentinela) — LEI §18 (11 Jul 2026).
 
-    IP: <18 → ["ALLIN"]; 18..40 → [size, "ALLIN"]; >=40 → [size]
-    OP: <20 → ["ALLIN"]; 20..45 → [size, "ALLIN"]; >=45 → [size]
-    size = round(multiplicador(eff) × open_to_bb, 2).
+    eff < 17  → ["ALLIN"]        (nó SÓ-jam, sem size)
+    eff >= 17 → [size, "ALLIN"]  (SEMPRE size + jam; morreram os tetos 40/45)
+    size = round((multiplicador(escalão) + ko_bonus) × open_to_bb, 2).
+    `ko_bonus` (0.0 ou 0.5) — só em KO + opener cobre o 3-bettor; o caller
+    runtime (`getSizings3Bets`) decide. Mirror EXACTO de `threeBetSizings`.
     """
-    lo = 18.0 if is_ip else 20.0
-    hi = 40.0 if is_ip else 45.0
-    size = round(threebet_multiplier(eff_bb, is_ip) * open_to_bb, 2)
-    if eff_bb < lo:
+    if eff_bb < 17.0:
         return ["ALLIN"]
-    if eff_bb < hi:
-        return [size, "ALLIN"]
-    return [size]
+    mult = threebet_multiplier(eff_bb, is_ip) + (ko_bonus or 0.0)
+    size = round(mult * open_to_bb, 2)
+    return [size, "ALLIN"]
 
 
 # ── Helpers de array (compositores) ─────────────────────────────────────

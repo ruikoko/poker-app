@@ -687,6 +687,12 @@ export default function HRCQueuePage() {
             <Chip color={SRC_COLOR.fallback_unusable_position}>fallback_unusable {scen.fallback_unusable_position || 0}</Chip>
             <span style={{ color: 'var(--border)' }}>|</span>
             {Object.entries(fmtCounts).map(([k, v]) => <Chip key={k}>{k} {v}</Chip>)}
+            {data.sizing_rules && (
+              <>
+                <span style={{ color: 'var(--border)' }}>|</span>
+                <Chip color="#a855f7" title="Lei de sizing que estas mãos vão usar ao enviar">lei {data.sizing_rules}</Chip>
+              </>
+            )}
           </SecHead>
 
           {/* Filtros client-side — 8 filtros combináveis (AND); "sem dado" aparece por defeito */}
@@ -1004,6 +1010,10 @@ export default function HRCQueuePage() {
                         </td>
                         <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
                           <Chip color={meta.c}>{meta.label}</Chip>
+                          <Chip color={s.sizing_rules_version ? '#a855f7' : '#6b7280'}
+                                title="Lei de sizing com que a mão foi (re)libertada/resolvida">
+                            {s.sizing_rules_version || 'pré-v2'}
+                          </Chip>
                           {st === 'por_resolver' && fmtAge(s.released_at) && (
                             <span style={{ color: 'var(--muted)', marginLeft: 6 }}>enviada {fmtAge(s.released_at)}</span>
                           )}

@@ -58,6 +58,11 @@ def _is_ft_tag(tag) -> bool:
 #   BOUNTY_FORMATS   — qualquer evento com bounty (decide se há token no HH).
 #   MYSTERY_FORMATS  — HRC não modela Mystery KO → excluídos do /hrc (gate).
 #   TS_GATED_FORMATS — exigem `tournament_summaries.buy_in_bounty` (GG only).
+# Versão das regras de sizing (LEI §18). Bump a cada mudança de regra → cada
+# pack (manifest + meta.json) e cada release regista-a → painel distingue trees
+# da lei velha vs nova. "3bet-v2" = escalões fixos + jam sempre + bónus KO.
+SIZING_RULES_VERSION = "2026-07-11-3bet-v2"
+
 BOUNTY_FORMATS = ("pko", "super ko", "ko", "mystery ko", "mystery")
 MYSTERY_FORMATS = ("mystery ko", "mystery")
 TS_GATED_FORMATS = ("pko", "super ko", "ko")
@@ -1459,6 +1464,9 @@ def _build_hand_meta(
         "aggressor_real_action": aggressor_real_action,
         # pt82 — nome legível p/ o adapter guardar o tree de output em C:\hrc\trees\.
         "tree_filename": compute_tree_filename(hand),
+        # LEI §18 (11 Jul 2026) — versão das regras de sizing que geraram este
+        # script.js (auditoria; o pack auto-documenta a lei que o produziu).
+        "sizing_rules": SIZING_RULES_VERSION,
     }
 
 
@@ -2031,6 +2039,7 @@ def build_queue_zip(
 
         manifest = {
             "exported_at": datetime.now(timezone.utc).isoformat(),
+            "sizing_rules": SIZING_RULES_VERSION,   # LEI §18 — lei de sizing deste lote
             "filters": filters_meta or {},
             "total_hands_queried": len(hands),
             "total_in_zip": len(hands_included),

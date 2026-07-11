@@ -717,6 +717,50 @@ ex. `SIZES_3BET_*=[16.05, ALLIN]` sobre um shove de 6.98 BB. **O defeito não er
 dos arrays — era a fórmula do size.** Aplica-se a CASO B (candidatos IP) e CASO A (3-bettor
 real). Cross-ref `§17`, `HRC_ANATOMIA §3.4`, `REGISTO_CONCEITO.md`.
 
+> ⚠️ **Estado (11 Jul 2026):** o **B1 está DORMENTE** — `_apply_caso_a/b_3bet` (que o
+> implementam) **não têm call-site** em `build_sizings_overrides` (verificado: só o `def`).
+> O 3-bet sobre open-all-in é hoje resolvido pelo **template runtime** (`getSizings3Bets`,
+> §18.4), que capa a `eff` por `min(3bettor, opener-all-in)` → jam curto dá `[ALLIN]`. A
+> **regra nova sobre open-all-in está em desenho com o Rui** — fora do âmbito da lei §18.4.
+
+### 18.4 3-bet clássico DINÂMICO por escalão de efetiva — LEI do Rui (11 Jul 2026)
+
+**Ditada pelo Rui em 11 Jul 2026. Fonte de verdade. SUBSTITUI a regra pt91** (multiplicadores
+**interpolados** + tetos de allin 40 IP / 45 OP). Vive no **template runtime** (`getSizings3Bets`
+→ `threeBetSizings`/`threeBetMultiplier` em `mtt_advanced_canonical_2026.js`; mirror
+`threebet_sizings_bb`/`threebet_multiplier` no gerador, só para testes). O 3-bet **clássico**
+(IP/OP, incl. SB/BB; **exclui squeeze**) é calculado nó-a-nó por **efetiva = min(stack total do
+3-bettor, stack total do opener)** em BB, **IP/OP vs o opener**.
+
+**Multiplicador × o open, por ESCALÃO fixo (sem interpolação):**
+
+| eff (BB) | IP | OP |
+|---|---|---|
+| `< 17` | nó **só-JAM** (`[ALLIN]`, sem size) | idem |
+| `17–20` | 2.0 | 2.5 |
+| `21–25` | 2.2 | 3.0 |
+| `26–35` | 2.5 | 3.5 |
+| `36–70` | 3.0 | 4.0 |
+| `71+` | 3.5 | 4.5 |
+
+`size = round((mult + bónus_KO) × opener_to_bb, 2)`.
+
+**Opções no nó:** a partir de **17 BB** efetivos → **SEMPRE `[size, ALLIN]`** (o jam nunca sai
+do nó, mesmo fundo). **Morreram os tetos 40 IP / 45 OP** da pt91.
+
+**Bónus KO:** torneio KO (`IS_PKO`) **E** o opener **cobre** o 3-bettor (opener tem ≥ fichas
+totais) → **+0.5** ao multiplicador.
+
+**Fora do âmbito (inalterados):** squeeze (`SIZES_3BET_SQUEEZE_*`, arrays fixos), **Regra 3 PKO**
+(all-in ISO aditivo se adversário vivo ≤ `PKO_SHORTIE_BB`), e o **sobre open-all-in** (§18.3/B1,
+em desenho).
+
+**Versão de sizing:** `SIZING_RULES_VERSION = "2026-07-11-3bet-v2"` (`queue_export.py`) — registada
+no `manifest.json` + `meta.json` de cada pack e carimbada em `hrc_queue_release.sizing_rules_version`
+no release; o painel HRC distingue trees da lei velha (NULL) vs nova. Re-solve = `POST /hrc/reset-done`
+(mão-a-mão, à ordem do Rui) → mão volta a elegível → re-enviada usa o template fresco → o novo
+resultado **substitui** a tree antiga (UPSERT por `hand_db_id`).
+
 ## §19. ALLIN implícito nos opens — 25 BB geral / 30 BB blind-vs-blind — LEI do Rui (pt86, 23 Jun 2026)
 
 **Ditada pelo Rui em pt86. Fonte de verdade.** Regra **distinta** do §17/§18 (que são o

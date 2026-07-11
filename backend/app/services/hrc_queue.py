@@ -35,6 +35,7 @@ from app.services.queue_export import (
     BOUNTY_FORMATS,
     MYSTERY_FORMATS,
     TS_GATED_FORMATS,
+    SIZING_RULES_VERSION,
 )
 from app.services.hrc_node_offset import strategy_table_positions
 from app.services.hrc_script_gen import _parse_seat_stacks
@@ -633,6 +634,9 @@ def eligible_hands(
         "scenario_counts": scen,
         "format_counts": fmt,
         "hands": hands,
+        # LEI §18 — lei de sizing corrente (a que estas elegíveis vão usar quando
+        # forem enviadas; o pack lê o template fresco no build).
+        "sizing_rules": SIZING_RULES_VERSION,
     }
 
 

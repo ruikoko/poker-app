@@ -23,7 +23,7 @@ from app.services.hrc_jobs import (
     extract_meta_from_result_zip,
     upsert_hrc_job_result,
 )
-from app.services.queue_export import build_queue_zip
+from app.services.queue_export import build_queue_zip, SIZING_RULES_VERSION
 from app.services.hrc_queue import (
     resolve_filters,
     select_andar1_rows,
@@ -89,6 +89,15 @@ def ensure_hrc_queue_release_schema():
     execute(
         "ALTER TABLE hrc_queue_release "
         "ADD COLUMN IF NOT EXISTS requeue_epoch INT NOT NULL DEFAULT 0"
+    )
+    # LEI §18 (11 Jul 2026) — versão das regras de sizing com que a mão foi
+    # libertada (= a lei com que será/foi resolvida; o pack lê o template fresco
+    # no build). NULL = libertada antes deste carimbo (lei velha, as 32 iniciais).
+    # Serve o painel a distinguir trees da lei velha vs nova. Re-release (re-solve
+    # via reset-done) actualiza para a lei corrente.
+    execute(
+        "ALTER TABLE hrc_queue_release "
+        "ADD COLUMN IF NOT EXISTS sizing_rules_version TEXT"
     )
     # pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES) — marcador de re-processamento: mãos
     # já `done` cujo resultado ficou MAU (offset na posição errada) e foram
@@ -234,11 +243,14 @@ def queue_release(payload: dict = Body(...),
         # adapter salta a mão em silêncio (dedup hrc_adapter.py:262). Release
         # fresco → INSERT epoch=0 (adapter puxa na mesma, não está em state);
         # re-envio (já libertada) → +1 → adapter re-puxa sozinho e loga re-queue.
-        execute("INSERT INTO hrc_queue_release (hand_db_id, batch_id) VALUES (%s,%s) "
+        execute("INSERT INTO hrc_queue_release "
+                "  (hand_db_id, batch_id, sizing_rules_version) VALUES (%s,%s,%s) "
                 "ON CONFLICT (hand_db_id) DO UPDATE SET "
                 "  requeue_epoch = hrc_queue_release.requeue_epoch + 1, "
                 "  released_at = NOW(), "
-                "  batch_id = EXCLUDED.batch_id", (h["id"], batch_id))
+                "  batch_id = EXCLUDED.batch_id, "
+                "  sizing_rules_version = EXCLUDED.sizing_rules_version",
+                (h["id"], batch_id, SIZING_RULES_VERSION))
         released.append(hid)
     logger.info("queue/hrc release forçado: released=%d skipped=%d batch=%s",
                 len(released), len(skipped), batch_id)
@@ -301,7 +313,7 @@ def queue_sent(current_user=Depends(require_auth_or_api_key)):
     rows = query(
         "SELECT h.id, h.hand_id, h.site, h.tournament_name, h.hero_cards, h.played_at, "
         "       h.tournament_number, h.tournament_format, h.position, h.raw, "
-        "       r.released_at, r.batch_id, r.requeue_epoch, "
+        "       r.released_at, r.batch_id, r.requeue_epoch, r.sizing_rules_version, "
         "       j.status AS job_status, j.error, j.result_zip_size, j.completed_at "
         "FROM hrc_queue_release r "
         "JOIN hands h ON h.id = r.hand_db_id "
@@ -327,6 +339,9 @@ def queue_sent(current_user=Depends(require_auth_or_api_key)):
             "error": d.get("error") if d["state"] == "cancelada" else None,
             "result_zip_size": d.get("result_zip_size") if d["state"] == "resolvida" else None,
             "completed_at": d.get("completed_at"),
+            # LEI §18 — lei de sizing com que a mão foi (re)libertada/resolvida.
+            # NULL = lei velha (libertada antes do carimbo). O painel distingue.
+            "sizing_rules_version": d.get("sizing_rules_version"),
             # Campos ricos p/ os filtros da secção HRC Solved (None = "sem dado").
             "tournament_format": rich.get("tournament_format"),
             "position_hero": rich.get("position_hero"),
