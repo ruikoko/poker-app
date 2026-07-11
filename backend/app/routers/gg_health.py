@@ -299,9 +299,15 @@ def crowns_to_verify(current_user=Depends(require_auth)):
                 **base_item, "kind": kind, "floor": below[0]["floor"],
                 "seats": [{"name": b["name"], "value": b["value"]} for b in below]})
         if above:
+            _pn = r["pn"]
+            if isinstance(_pn, str):
+                _pn = json.loads(_pn or "{}")
+            _reread = {e.get("name"): e.get("crown_reread")
+                       for e in ((_pn or {}).get("players_list") or [])}
             high_confirm.append({
                 **base_item, "kind": "high", "ceil": above[0]["ceil"],
-                "seats": [{"name": a["name"], "value": a["value"]} for a in above]})
+                "seats": [{"name": a["name"], "value": a["value"],
+                           "reread": _reread.get(a["name"])} for a in above]})
     return {"count": len(impossible) + len(unread),
             "high_count": len(high_confirm),
             "by_source": by_source,
@@ -1399,10 +1405,13 @@ def crowns_high_reread_confirm(payload: dict = Body(...),
             if reread is not None and stored is not None and abs(stored - reread) <= tol:
                 if not dry_run:
                     e["bounty_confirmed"] = True
+                    e.pop("crown_reread", None)          # limpa divergência antiga
                 confirmed.append({"name": e.get("name"), "value": stored})
             else:
+                if not dry_run:
+                    e["crown_reread"] = reread            # persiste p/ o painel (lado a lado)
                 diverge.append({"name": e.get("name"), "stored": stored, "reread": reread})
-        if confirmed and not dry_run:
+        if (confirmed or diverge) and not dry_run:
             conn = get_conn()
             try:
                 with conn.cursor() as cur:

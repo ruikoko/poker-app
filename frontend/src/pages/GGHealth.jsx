@@ -853,7 +853,12 @@ function CrownHand({ h, onDone }) {
             {h.seats.map((s, i) => (
               <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,.05)' }}>
                 <td style={{ padding: '3px 6px' }}>{s.name}</td>
-                <td style={{ padding: '3px 6px', color: '#ef4444', fontFamily: mono }}>${s.value ?? 0}</td>
+                <td style={{ padding: '3px 6px', color: h.kind === 'high' ? '#38bdf8' : '#ef4444', fontFamily: mono }}>
+                  ${s.value ?? 0}
+                  {h.kind === 'high' && s.reread !== undefined && (
+                    <span style={{ color: 'var(--muted)', fontSize: 11 }}> vs re-leitura {s.reread == null ? 'NULL' : `$${s.reread}`}</span>
+                  )}
+                </td>
                 <td style={{ padding: '3px 6px' }}>
                   <input type="number" step="1" placeholder="coroa real $" value={edit[s.name] ?? ''}
                     onChange={e => setEdit(x => ({ ...x, [s.name]: e.target.value }))}
