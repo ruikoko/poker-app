@@ -388,3 +388,21 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   qualidade aberta (coroas, desanon, âncora) contamina o volume se disparada antes de estar curada —
   o wipe/reimport é o teste de aceitação, não um passo a apressar. → `PENDENTES.md`, memória
   `feedback_no_mass_processing_until_100`.
+- 2026-07-12 — **A âncora exige o Rui VISÍVEL na imagem** (`#DESANON-ANCHOR-REQUIRES-HERO-IN-IMAGE`,
+  extensão da validação-contra-verdade-conhecida acima). A guarda `_vision_hero_nick_is_rui` valida o
+  *ponto* de âncora (o `is_hero` tem de ser o Rui), mas **assume que o Rui está à mesa**. Num print
+  **PÓS-BUST** (o Rui já bustou / multi-tabling noutra mesa) **NENHUM seat é o Rui** → a Vision marca
+  um vilão como `is_hero` e a âncora dá-lhe o nome do Hero. Guarda 4 nova (mais forte): a de-anon do
+  table-SS exige **>=1 seat = conta do Rui** entre os seats da Vision; senão `deanon_skipped_no_hero_in_image`
+  — **casa a imagem (contexto), NÃO escreve nomes** (a mão fica anónima até um print COM o Rui
+  re-desanonimizar). Princípio: *uma imagem só serve de âncora de NOMES se contém a verdade conhecida
+  (o Rui); sem ele visível, casa-se o contexto mas não se nomeia ninguém.*
+  → `services/table_ss_deanon.py` (Guarda 4), `routers/table_ss.py:revert-to-anon`, `JOURNAL_2026-07-12.md`.
+- 2026-07-12 — **Cosmético (rótulo) ≠ veneno (dados): distinguir `pn.hero` de `apa['Hero']`.** O campo-resumo
+  `pn.hero` pode dessincronizar da nomeação AUTORITÁRIA por lugar (`apa['Hero'].real_name`): a propagação
+  por hash (8 Jul) cura o `apa`/`anon_map` mas **não toca** o `pn.hero`. Logo uma mão pode ter `pn.hero`=nick
+  de vilão **com o apa já certo** (Lauro) = **cosmético** (basta re-aplicar o mapa existente via
+  `/set-anon-map`, que repõe `pn.hero`); ou o `apa['Hero']` **também** errado = **veneno real** (nomes de um
+  print sem o Rui → `/revert-to-anon`). O detetor tem de ler os DOIS e classificar; corrigir só o rótulo em
+  cima de dados envenenados esconderia o problema. Exemplo: das 3 hero-alheio, 2 eram cosméticas (212/734) e
+  1 veneno (515). → `routers/suspicious.py:_hero_alheio_hands` (veneno 3), `JOURNAL_2026-07-12.md`.

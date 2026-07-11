@@ -14,9 +14,20 @@ Afinação primeiro; volume (reimport, robot em lotes) só com **ordem explícit
   **aguardam um print futuro** com a placa visível. Ficam fora do export (base÷2 trava-as).
 
 **Verificação visual Saúde Import (painel a painel) — em curso:**
-- ✓ Edições · ✓ Coroas · ✓ Suspeitas (7→0).
-- **Marcadas (432)** — responder ao Rui a **origem das tags** (de onde vieram as marcações).
-- **Conflitos 1 + 11 + 3** — por ver.
+- ✓ Edições · ✓ Coroas · ✓ Suspeitas (7→0) · ✓ **Hero-alheio (3→0)** · ✓ **Marcadas (432)**.
+- **✓ Marcadas (432) — RESPONDIDO (12 Jul):** todas `folder_tag=NULL` (nenhuma de subpasta
+  etiquetada) → **0 falhas de propagação**; vieram da RAIZ do `it\` (não ordenadas). Cruzado
+  em 3 ângulos (BD + via import + disco: 427/432 na raiz do `done\it`, 0 em subpasta). 302/432
+  em 15 torneios que já têm tags tuas (referência p/ arrumar). CSVs em `_local_only\`
+  (`marcadas_432_por_torneio.csv` + `_detalhe.csv`). Triagem manual fica contigo (a 1 clique).
+- **✓ Hero-alheio (3→0, 12 Jul):** ângulo cego do veneno "nome num vilão" (o teu nome ESTÁ
+  AUSENTE, não num vilão). Scan novo `pn.hero ∉ HERO_NAMES_ALL` → exatamente 3 em toda a BD,
+  todas **pré-guarda** (11 Jul 17:31; veneno antigo, guarda sem furo). 212/734 = cosméticas
+  (apa já tinha Lauro; só o rótulo dessincronizou → set-anon-map); 515 = veneno real (print
+  pós-bust sem o Rui → revert-to-anon). LIVE `f8ce806`: Guarda 4 da âncora
+  (#DESANON-ANCHOR-REQUIRES-HERO-IN-IMAGE) + veneno 3 no painel Mãos suspeitas + endpoint
+  `revert-to-anon`.
+- **Conflitos 1 + 11 + 3** — por ver (**próximo**).
 - **Timeline** por validar + **estética das cartas** por afinar.
 - **Amostragem final** do conjunto.
 
