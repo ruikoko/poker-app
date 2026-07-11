@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ggHealth, tableSs, API_ROOT } from '../api/client'
+import { ggHealth, tableSs, captureTriage, suspicious, importHealth, API_ROOT } from '../api/client'
+import ImportHealthPage from './ImportHealth'
+import CaptureTriagePage from './CaptureTriage'
+import SuspiciousHandsPage from './SuspiciousHands'
 
-// "Saúde das mãos GG" — Fase 1 (mostrar) + Fase 2 (AÇÕES). Vista por IMAGEM.
-// Só GG. Ação 1: tagar (multi-select). Ação 2: ligar órfã à mão. Ação 3:
-// aceitar/rejeitar/rever suspeita. Confirmação nas Ações 2/3 (mexem em ligações).
+// "Saúde Import" (casa única consolidada 11 Jul — desenho da antiga Saúde GG).
+// Vista por IMAGEM + painéis migrados (Saúde Import, Marcadas/captura, Mãos
+// suspeitas) + painel novo Coroas. Só GG. Ações: tagar, ligar órfã, resolver
+// suspeitas, verificar coroas à vista.
 
 const NEEDS = [
   { key: 'gold_no_tag', label: 'Gold sem tag', color: '#eab308' },
@@ -14,15 +18,35 @@ const NEEDS = [
   { key: 'ft_quarantine', label: 'Fronteira FT (rever)', color: '#f59e0b' },
   { key: 'name_quarantine', label: 'Nomes em conflito', color: '#a78bfa' },
   { key: 'lobby_edition', label: 'Edições de lobby (Raiz 2)', color: '#38bdf8' },
+  // Migrados/novo (consolidação 11 Jul):
+  { key: 'marcadas', label: 'Marcadas/captura', color: '#f59e0b' },
+  { key: 'suspeitas', label: 'Mãos suspeitas', color: '#ef4444' },
+  { key: 'coroas', label: 'Coroas (verificar)', color: '#eab308' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
   { key: 'it_matched', label: 'IT desanon', color: '#22c55e' },
 ]
-const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY].map(g => [g.key, g.label]))
+// Secção nova "Import & processamento" (← antiga página Saúde Import).
+const IMPORTP = [
+  { key: 'import', label: 'Saúde do Import', color: '#38bdf8' },
+]
+// Grupos migrados que renderizam uma página inteira (não a lista de imagens).
+const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas'])
+const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY, ...IMPORTP].map(g => [g.key, g.label]))
 // As 11 tags canónicas (Ação 1) — espelho de _TAG_BUTTONS no backend.
 const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
   'icm-ft', 'icm-pko-ft', 'pos-pko-ft', 'pos-nko-ft', 'speed-racer-ft', 'nota']
+
+// Soma defensiva das falhas/sem-match dos pipelines p/ o número do painel Import.
+function sumImportIssues(r) {
+  if (!r) return null
+  const ps = Array.isArray(r.pipelines) ? r.pipelines
+    : (r.pipelines && typeof r.pipelines === 'object') ? Object.values(r.pipelines) : []
+  let t = 0
+  for (const p of ps) t += (p?.fail || 0) + (p?.gg_sem_match || 0) + (p?.errors || 0)
+  return t
+}
 
 const card = { background: 'var(--card,#161b22)', border: '1px solid var(--border,#30363d)', borderRadius: 8 }
 const btn = { background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 5, cursor: 'pointer', fontSize: 12, padding: '3px 8px' }
@@ -772,8 +796,98 @@ function LobbyEditionPanel() {
   )
 }
 
+// Painel COROAS (consolidação 11 Jul) — mãos GG PKO com coroa < base÷2, com a
+// IMAGEM ao lado, para o Rui CONFIRMAR à vista (coroa real → salta a guarda) ou
+// CORRIGIR o valor. `impossible` (valor >0 e <½ = chama-lida-como-coroa, vermelho)
+// e `unread` (coroa a $0 = por ler, âmbar). Escreve via tableSs.setBounties.
+function CrownHand({ h, onDone }) {
+  const [edit, setEdit] = useState({})   // seatName -> novo valor
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const confirmReal = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      await tableSs.setBounties(h.hand_id, { confirm: h.seats.map(s => s.name) })
+      setMsg('Coroa(s) confirmada(s) como reais.'); onDone && onDone()
+    } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
+  }
+  const saveCorrections = async () => {
+    const bounties = Object.fromEntries(Object.entries(edit)
+      .filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, Number(v)]))
+    if (!Object.keys(bounties).length) { setMsg('Escreve pelo menos um valor.'); return }
+    setBusy(true); setMsg(null)
+    try {
+      await tableSs.setBounties(h.hand_id, { bounties })
+      setMsg('Coroa(s) corrigida(s).'); onDone && onDone()
+    } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ ...card, padding: 12, marginBottom: 10, display: 'flex', gap: 12 }}>
+      {h.image_url
+        ? <img src={API_ROOT + h.image_url} alt="" loading="lazy" style={{ width: 260, maxWidth: '38%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
+        : <div style={{ width: 260, maxWidth: '38%', color: 'var(--muted)', fontSize: 12, padding: 8 }}>(sem imagem guardada)</div>}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <Link to={`/hand/${h.id}`} style={{ fontFamily: mono, color: '#818cf8', fontSize: 13, fontWeight: 700 }}>{h.hand_id}</Link>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.tournament_name} · {(h.played_at || '').slice(0, 16)} · piso ${h.floor}</span>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
+          <tbody>
+            {h.seats.map((s, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,.05)' }}>
+                <td style={{ padding: '3px 6px' }}>{s.name}</td>
+                <td style={{ padding: '3px 6px', color: '#ef4444', fontFamily: mono }}>${s.value ?? 0}</td>
+                <td style={{ padding: '3px 6px' }}>
+                  <input type="number" step="1" placeholder="coroa real $" value={edit[s.name] ?? ''}
+                    onChange={e => setEdit(x => ({ ...x, [s.name]: e.target.value }))}
+                    style={{ ...inp, width: 90 }} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button style={{ ...btn, borderColor: '#22c55e', color: '#22c55e' }} disabled={busy} onClick={confirmReal}>✓ Coroa real (confirmar)</button>
+          <button style={{ ...btn, borderColor: '#eab308', color: '#eab308' }} disabled={busy} onClick={saveCorrections}>Corrigir valor(es)</button>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('Erro') ? '#ef4444' : '#22c55e' }}>{msg}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CoroasPanel() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  const load = () => ggHealth.crowns().then(setData).catch(e => setErr(e.message))
+  useEffect(() => { load() }, [])
+  if (err) return <div style={{ ...card, padding: 16, color: '#ef4444' }}>Erro: {err}</div>
+  if (!data) return <div style={{ color: 'var(--muted)' }}>A carregar…</div>
+  const Section = ({ title, color, hands, desc }) => (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color }}>{title} ({hands.length})</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 8px' }}>{desc}</div>
+      {hands.length === 0
+        ? <div style={{ color: 'var(--muted)', fontSize: 12 }}>Nada aqui.</div>
+        : hands.map(h => <CrownHand key={h.id} h={h} onDone={load} />)}
+    </div>
+  )
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
+        Coroa = KO instantâneo = <b>metade</b> do bounty → nunca &lt; base÷2. Confirma à vista (real → salta a guarda) ou corrige.
+      </div>
+      <Section title="Valor impossível (provável chama)" color="#ef4444" hands={data.impossible}
+        desc="Coroa >0 mas < base÷2 — a Vision leu a chama (VPIP %) em vez da coroa ($)." />
+      <Section title="Coroa por ler ($0)" color="#eab308" hands={data.unread}
+        desc="Coroa a $0 — não foi lida (avatar tapado). Rever/re-ler, não é valor errado." />
+    </div>
+  )
+}
+
 export default function GGHealth() {
   const [sum, setSum] = useState(null)
+  const [extra, setExtra] = useState({})   // contagens dos painéis migrados/novo
   const [err, setErr] = useState(null)
   const [searchParams] = useSearchParams()
   // Deep-link do selo "nome em revisão" (OBRA 3): ?panel=name_quarantine abre o painel.
@@ -823,14 +937,24 @@ export default function GGHealth() {
     : null
 
   const loadSummary = () => ggHealth.summary().then(setSum).catch(e => setErr(e.message))
-  useEffect(() => { loadSummary() }, [])
+  // Contagens dos painéis migrados/novo (fetch à parte p/ o dashboard abrir rápido).
+  const loadExtra = () => Promise.all([
+    ggHealth.crowns().then(r => r.count).catch(() => null),
+    captureTriage.count().then(r => (r.count ?? r.total ?? null)).catch(() => null),
+    suspicious.count().then(r => r.total).catch(() => null),
+    importHealth.get().then(sumImportIssues).catch(() => null),
+  ]).then(([coroas, marcadas, suspeitas, imp]) =>
+    setExtra({ coroas, marcadas, suspeitas, import: imp }))
+  useEffect(() => { loadSummary(); loadExtra() }, [])
   useEffect(() => {
-    if (!group || group === 'ft_quarantine' || group === 'name_quarantine' || group === 'lobby_edition') { setList(null); return }
+    if (!group || group === 'ft_quarantine' || group === 'name_quarantine' || group === 'lobby_edition' || MIGRATED.has(group)) { setList(null); return }
     setList(null)
     ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
   }, [group, page])
 
   const open = (k) => { setGroup(k); setPage(1); setSelected(new Set()); setSelectedTags(new Set()); setMsg(null) }
+  // Número do painel: summary (needs/healthy) → senão as contagens extra (migrados/coroas).
+  const countOf = (k) => (sum?.needs_you?.[k] ?? sum?.healthy?.[k] ?? extra[k])
   const toggleTag = (t) => setSelectedTags(s => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n })
   const reload = () => {
     loadSummary()
@@ -873,7 +997,7 @@ export default function GGHealth() {
   return (
     <div style={{ padding: 24, maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>Saúde das mãos GG</h1>
+        <h1 style={{ fontSize: 20, margin: 0 }}>Saúde Import</h1>
         {sum && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{sum.total_images} imagens · {sum.total_hands_with_image} mãos com imagem</span>}
       </div>
       {err && <div style={{ ...card, padding: 16, color: '#ef4444', marginTop: 12 }}>Erro: {err}</div>}
@@ -910,11 +1034,15 @@ export default function GGHealth() {
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '20px 0 8px' }}>Precisa de ti</div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {NEEDS.map(g => <Panel key={g.key} g={g} value={sum.needs_you[g.key]} onClick={() => open(g.key)} />)}
+            {NEEDS.map(g => <Panel key={g.key} g={g} value={countOf(g.key)} onClick={() => open(g.key)} />)}
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '24px 0 8px' }}>Saudável</div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {HEALTHY.map(g => <Panel key={g.key} g={g} value={sum.healthy[g.key]} onClick={() => open(g.key)} />)}
+            {HEALTHY.map(g => <Panel key={g.key} g={g} value={countOf(g.key)} onClick={() => open(g.key)} />)}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '24px 0 8px' }}>Import &amp; processamento</div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {IMPORTP.map(g => <Panel key={g.key} g={g} value={countOf(g.key)} onClick={() => open(g.key)} />)}
           </div>
         </>
       )}
@@ -922,14 +1050,20 @@ export default function GGHealth() {
       {!qt && group && (
         <div style={{ marginTop: 16 }}>
           <button onClick={() => setGroup(null)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>&larr; Dashboard</button>
+          {/* Grupos migrados (import/marcadas/suspeitas) trazem o próprio título → sem h2 duplicado. */}
+          {!MIGRATED.has(group) || group === 'coroas' ? (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '6px 0 12px' }}>
             <h2 style={{ fontSize: 16, margin: 0 }}>{LABELS[group]}</h2>
             {list && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{list.total} imagens</span>}
-          </div>
+          </div>) : <div style={{ marginBottom: 6 }} />}
 
           {group === 'ft_quarantine' ? <FtQuarantinePanel /> :
            group === 'name_quarantine' ? <NamePropagationPanel /> :
-           group === 'lobby_edition' ? <LobbyEditionPanel /> : (<>
+           group === 'lobby_edition' ? <LobbyEditionPanel /> :
+           group === 'import' ? <ImportHealthPage /> :
+           group === 'marcadas' ? <CaptureTriagePage /> :
+           group === 'suspeitas' ? <SuspiciousHandsPage /> :
+           group === 'coroas' ? <CoroasPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (
             <div style={{ ...card, padding: '10px 12px', marginBottom: 10 }}>

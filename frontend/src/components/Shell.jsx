@@ -5,18 +5,19 @@ import ImportModal from './ImportModal'
 import { useStudyTimer } from '../contexts/StudyTimerContext'
 import { suspicious } from '../api/client'
 
+// Consolidação 11 Jul: "Saúde Import" (rota /gg-health) é a casa única de saúde.
+// Absorveu as antigas entradas "Saúde Import" (/import-health), "Marcadas/captura"
+// e "Mãos suspeitas" — todas viram painéis lá dentro; as rotas mantêm-se em App.jsx
+// (acessíveis por link interno), só saem do sidebar. O badge migra para cá.
 const NAV = [
   { to: '/',            label: 'Dashboard' },
-  { to: '/import-health', label: 'Saúde Import' },
   { to: '/hands',       label: 'Estudo' },
   { to: '/discord',     label: 'Discord' },
   { to: '/tournaments', label: 'Torneios' },
   { to: '/lobbys',      label: 'Lobbys' },
   { to: '/hm3',         label: 'HM3' },
   { to: '/table-ss',    label: 'SS Mesa' },
-  { to: '/gg-health',   label: 'Saúde GG' },
-  { to: '/marcadas-por-captura', label: 'Marcadas/captura' },
-  { to: '/suspeitas',   label: 'Mãos suspeitas', badge: 'suspicious' },
+  { to: '/gg-health',   label: 'Saúde Import', badge: 'suspicious' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
   { to: '/hrc',         label: 'HRC' },

@@ -228,6 +228,46 @@ def summary(current_user=Depends(require_auth)):
     }
 
 
+@router.get("/crowns")
+def crowns_to_verify(current_user=Depends(require_auth)):
+    """Painel COROAS da Saúde Import (consolidação 11 Jul) — mãos GG PKO/KO cuja
+    coroa ($ bounty) gravada é < base÷2. `impossible` = valor >0 mas <½ (a Vision
+    leu a chama VPIP em vez da coroa $); `unread` = coroa a $0 (por ler). Read-only:
+    lista com IMAGEM + seats afetados para o Rui confirmar à vista (`tableSs.setBounties`
+    com `confirm[]`) ou corrigir o valor. Fonte única `detect_bounty_below_half` (a
+    mesma da guarda `bounty_below_half_base` do export)."""
+    from app.services.queue_export import TS_GATED_FORMATS, detect_bounty_below_half
+    rows = query(
+        """SELECT h.id, h.hand_id, h.tournament_name, h.played_at::text AS played_at,
+                  h.player_names AS pn, h.context_table_ss_id AS ss_id,
+                  ts.buy_in_bounty AS base
+             FROM hands h
+             JOIN tournament_summaries ts
+               ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number
+            WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
+              AND ts.buy_in_bounty IS NOT NULL
+              AND lower(COALESCE(h.tournament_format,'')) = ANY(%s)
+            ORDER BY h.played_at DESC""",
+        (list(TS_GATED_FORMATS),),
+    )
+    impossible, unread = [], []
+    for r in rows:
+        below = detect_bounty_below_half(r["pn"], r["base"])
+        if not below:
+            continue
+        kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
+        item = {
+            "id": r["id"], "hand_id": r["hand_id"],
+            "tournament_name": r["tournament_name"], "played_at": r["played_at"],
+            "kind": kind, "floor": below[0]["floor"],
+            "image_url": (f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None),
+            "seats": [{"name": b["name"], "value": b["value"]} for b in below],
+        }
+        (impossible if kind == "impossible" else unread).append(item)
+    return {"count": len(impossible) + len(unread),
+            "impossible": impossible, "unread": unread}
+
+
 @router.get("/list")
 def list_images(
     group: str = Query("all"),
