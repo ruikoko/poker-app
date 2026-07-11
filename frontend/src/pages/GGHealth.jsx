@@ -829,6 +829,14 @@ function CrownHand({ h, onDone }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <Link to={`/hand/${h.id}`} style={{ fontFamily: mono, color: '#818cf8', fontSize: 13, fontWeight: 700 }}>{h.hand_id}</Link>
+          {(() => {
+            const src = h.crown_source
+            const spec = src === 'table_ss' ? { t: 'origem: table-SS', c: '#38bdf8' }
+              : src === 'gold' ? { t: 'origem: Gold', c: '#eab308' }
+              : { t: 'origem: carry/reread', c: '#94a3b8' }
+            return <span title={`imagem mostrada = a fonte do valor · match_method ${h.match_method || '?'}`}
+              style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 5, color: spec.c, border: `1px solid ${spec.c}55`, background: `${spec.c}18` }}>{spec.t}{h.has_both ? ' (SS+Gold)' : ''}</span>
+          })()}
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.tournament_name} · {(h.played_at || '').slice(0, 16)} · piso ${h.floor}</span>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
@@ -877,6 +885,15 @@ function CoroasPanel() {
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
         Coroa = KO instantâneo = <b>metade</b> do bounty → nunca &lt; base÷2. Confirma à vista (real → salta a guarda) ou corrige.
       </div>
+      {data.by_source && (
+        <div style={{ ...card, padding: '8px 12px', margin: '6px 0 4px', fontSize: 12, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <b>Origem das {data.count}:</b>
+          <span style={{ color: '#38bdf8' }}>table-SS <b>{data.by_source.table_ss}</b></span>
+          <span style={{ color: '#eab308' }}>Gold <b>{data.by_source.gold}</b></span>
+          <span style={{ color: '#94a3b8' }}>carry/reread <b>{data.by_source.other}</b></span>
+          <span style={{ color: 'var(--muted)' }}>— a fresta está sobretudo no <b>Gold</b>; o prompt corrigido (pt95) só fecha o table-SS.</span>
+        </div>
+      )}
       <Section title="Valor impossível (provável chama)" color="#ef4444" hands={data.impossible}
         desc="Coroa >0 mas < base÷2 — a Vision leu a chama (VPIP %) em vez da coroa ($)." />
       <Section title="Coroa por ler ($0)" color="#eab308" hands={data.unread}

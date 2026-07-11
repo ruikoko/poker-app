@@ -240,6 +240,7 @@ def crowns_to_verify(current_user=Depends(require_auth)):
     rows = query(
         """SELECT h.id, h.hand_id, h.tournament_name, h.played_at::text AS played_at,
                   h.player_names AS pn, h.context_table_ss_id AS ss_id,
+                  (h.player_names->>'match_method') AS mm,
                   ts.buy_in_bounty AS base
              FROM hands h
              JOIN tournament_summaries ts
@@ -251,20 +252,50 @@ def crowns_to_verify(current_user=Depends(require_auth)):
         (list(TS_GATED_FORMATS),),
     )
     impossible, unread = [], []
+    by_source = {"table_ss": 0, "gold": 0, "other": 0}
     for r in rows:
         below = detect_bounty_below_half(r["pn"], r["base"])
         if not below:
             continue
         kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
+        # ── ORIGEM do valor suspeito: compara-o com a coroa da captura table-SS
+        #    (bate → escreveu-o o table-SS); senão veio do Gold/carry/reread. ──
+        ss_vals = {}
+        if r["ss_id"]:
+            c = query("SELECT vision_json vj FROM table_ss_processing_log WHERE id=%s", (r["ss_id"],))
+            if c:
+                vj = c[0]["vj"]
+                if isinstance(vj, str):
+                    vj = json.loads(vj or "{}")
+                ss_vals = {s.get("nick"): s.get("bounty_usd") for s in (vj.get("seats") or [])}
+        match_ss = any(b["name"] in ss_vals and ss_vals[b["name"]] is not None
+                       and abs(float(ss_vals[b["name"]]) - float(b["value"] or 0)) < 0.5
+                       for b in below)
+        gold = query("SELECT e.id FROM entries e JOIN hands h ON h.entry_id=e.id "
+                     "WHERE h.id=%s AND e.entry_type='screenshot' "
+                     "AND (e.raw_json->>'img_b64') IS NOT NULL LIMIT 1", (r["id"],))
+        gold_id = gold[0]["id"] if gold else None
+        if match_ss:
+            source, src_img = "table_ss", (f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None)
+        elif gold_id:
+            source, src_img = "gold", f"/api/screenshots/image/{gold_id}"
+        else:
+            source, src_img = "other", (f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None)
+        by_source[source] += 1
         item = {
             "id": r["id"], "hand_id": r["hand_id"],
             "tournament_name": r["tournament_name"], "played_at": r["played_at"],
             "kind": kind, "floor": below[0]["floor"],
-            "image_url": (f"/api/table-ss/image/{r['ss_id']}" if r["ss_id"] else None),
+            "match_method": r["mm"],
+            "crown_source": source,           # table_ss | gold | other(carry/reread)
+            "has_both": bool(r["ss_id"]) and bool(gold_id),
+            "image_url": src_img,             # a imagem da FONTE do valor suspeito
+            "image_is_source": True,          # (mostramos a fonte, não outra captura)
             "seats": [{"name": b["name"], "value": b["value"]} for b in below],
         }
         (impossible if kind == "impossible" else unread).append(item)
     return {"count": len(impossible) + len(unread),
+            "by_source": by_source,
             "impossible": impossible, "unread": unread}
 
 
