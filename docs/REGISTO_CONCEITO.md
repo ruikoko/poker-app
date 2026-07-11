@@ -360,3 +360,14 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   carimbar. **É CONFIRMAÇÃO, não suspeita** — o texto do painel di-lo (7/7 reais). O carimbo é o mesmo
   `bounty_confirmed` que já isenta as `<½` aceites à vista. → `services/queue_export.py`,
   `routers/gg_health.py:/crowns`, `frontend/.../GGHealth.jsx`, `JOURNAL_2026-07-11.md`.
+- 2026-07-11 — **Auto-carimbo por consistência + fallback SS por testemunha (fecho do bloco coroas).**
+  (1) **Grupo "Valor alto"** (74 mãos > 3×base): re-lidas com o prompt novo; **re-leitura == valor
+  gravado (tol. de cêntimos) → `bounty_confirmed` automático** (consistência entre leituras
+  independentes = prova). **206 seats auto-carimbados; 9 mãos sobram** (divergência guardada em
+  `crown_reread`, mostrada lado a lado no painel p/ o olho do Rui — sobretudo O Sander $819≈$813, wobble
+  de OCR fora dos cêntimos). (2) **Fallback SS por seat** (`crowns/fallback-fill`): coroa NULL/$0 vai
+  buscar à **outra testemunha** (Gold preferida, senão table-SS) da MESMA mão; `bounty_source` por
+  seat; base÷2 aplica-se; `crown_review='no_witness_has_plate'` só quando NENHUMA testemunha tem a
+  placa. Sobre o gate (14) + Hero $0: **3 fechadas** (placa lida na Gold), **11 ficam por rever**
+  (placa tapada em TODAS as capturas). **Números finais: flame-as-crown-scan 14→11; grupo Valor alto
+  74→9; 11 seats por rever (nenhuma testemunha).** → `routers/gg_health.py`, `JOURNAL_2026-07-11.md`.
