@@ -501,6 +501,61 @@ def gg_health_tag(payload: dict = Body(...),
             "warnings": warnings, "needs_confirm": False}
 
 
+@router.post("/untag")
+def gg_health_untag(payload: dict = Body(...),
+                    current_user=Depends(require_auth_or_api_key)):
+    """Ferramenta de edição — REMOVE UMA ou VÁRIAS tags canónicas de N mãos (o oposto
+    de `/tag`). Usa-se para limpar tags espúrias (ex.: um SS mal casado deixou `pos-pko`
+    numa mão vizinha; ao recasar, a tag fica na errada). Só toca `discord_tags` (as tags
+    de estudo vivem lá — ver banner do CLAUDE.md); NÃO toca `hm3_tags`. Normaliza para
+    comparar (remove a forma canónica mesmo que a gravada seja uma variante). Dispara
+    `apply_villain_rules` (remover `nota` pode desfazer um villain). Idempotente: tag que
+    a mão não tem → no-op. Body: {hand_ids:[...], tags:[...] | tag:'...'}."""
+    hand_ids = payload.get("hand_ids") or []
+    raw_tags = payload.get("tags")
+    if not (isinstance(raw_tags, list) and raw_tags):
+        raw_tags = [payload.get("tag")]
+    canons = []
+    for t in raw_tags:
+        ct = canonicalize_tag(t, only_known=True)
+        if not ct:
+            raise HTTPException(400, f"tag inválida: {t!r} (usar as tags canónicas)")
+        if ct not in canons:
+            canons.append(ct)
+    if not canons:
+        raise HTTPException(400, "tag(s) obrigatória(s) (usar as tags canónicas)")
+    if not isinstance(hand_ids, list) or not hand_ids:
+        raise HTTPException(400, "hand_ids (lista não-vazia) obrigatório")
+    if len(hand_ids) > 500:
+        raise HTTPException(400, "máx 500 mãos por chamada")
+    rows = query("SELECT id, hand_id, discord_tags FROM hands WHERE hand_id = ANY(%s)",
+                 (hand_ids,))
+    remove_set = set(canons)
+    removed = hands_touched = 0
+    conn = get_conn()
+    try:
+        for r in rows:
+            cur_tags = list(r["discord_tags"] or [])
+            # mantém a etiqueta se a sua forma canónica NÃO está no conjunto a remover.
+            keep = [t for t in cur_tags if canonicalize_tag(t) not in remove_set]
+            if len(keep) == len(cur_tags):
+                continue                       # nada a remover nesta mão
+            with conn.cursor() as cur:
+                cur.execute("UPDATE hands SET discord_tags=%s WHERE id=%s",
+                            (keep, r["id"]))
+            conn.commit()
+            try:
+                from app.services.villain_rules import apply_villain_rules
+                apply_villain_rules(r["id"])
+            except Exception:
+                pass
+            removed += len(cur_tags) - len(keep)
+            hands_touched += 1
+    finally:
+        conn.close()
+    return {"removed": removed, "hands": hands_touched, "tags": canons}
+
+
 # ── F3: preview + revisão/quarentena + promoção da fronteira FT ──────────────
 _ft_map_status = review_status   # fonte única em services/ft_boundary (F5)
 

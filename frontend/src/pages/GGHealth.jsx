@@ -1051,6 +1051,22 @@ export default function GGHealth() {
     } catch (e) { setMsg('Erro: ' + e.message) }
   }
 
+  // Ferramenta de edição — REMOVE as tags ligadas das mãos selecionadas (limpa
+  // espúrias, ex. um SS mal casado deixou pos-pko numa vizinha). Oposto de Aplicar.
+  const removeTags = async () => {
+    const ids = [...selected]
+    const tags = [...selectedTags]
+    if (!ids.length) { setMsg('Seleciona pelo menos uma mão.'); return }
+    if (!tags.length) { setMsg('Liga pelo menos uma tag para remover.'); return }
+    if (!window.confirm(`Remover ${tags.join(', ')} de ${ids.length} mão(s)?`)) return
+    try {
+      const res = await ggHealth.untag(ids, tags)
+      setMsg(`${res.removed} etiqueta(s) removida(s) de ${res.hands ?? '?'} mão(s): ${tags.join(', ')}.`)
+      setSelected(new Set()); setSelectedTags(new Set())
+      reload()
+    } catch (e) { setMsg('Erro: ' + e.message) }
+  }
+
   // Ação 2 — ligar órfã à mão (com confirmação).
   const linkOrphan = async (ssId, handId) => {
     if (!handId) return
@@ -1153,6 +1169,13 @@ export default function GGHealth() {
                                  opacity: (selected.size && selectedTags.size) ? 1 : 0.4 }}
                   disabled={!selected.size || !selectedTags.size} onClick={applyTags}>
                   Aplicar{selectedTags.size ? ` ${selectedTags.size} tag(s)` : ''}
+                </button>
+                <button style={{ ...btn, background: (selected.size && selectedTags.size) ? '#b91c1c' : undefined,
+                                 color: (selected.size && selectedTags.size) ? '#fff' : undefined, fontWeight: 700,
+                                 opacity: (selected.size && selectedTags.size) ? 1 : 0.4 }}
+                  disabled={!selected.size || !selectedTags.size} onClick={removeTags}
+                  title="Remove as tags ligadas das mãos selecionadas (limpa espúrias)">
+                  Remover{selectedTags.size ? ` ${selectedTags.size} tag(s)` : ''}
                 </button>
               </div>
             </div>

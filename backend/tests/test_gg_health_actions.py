@@ -72,6 +72,36 @@ def test_tag_multi_idempotent_skips_existing():
     assert res["applied"] == 1 and res["hands"] == 1               # só 'nota' era nova
 
 
+# ── untag — remover tag espúria (oposto de tagar) ────────────────────────────
+def test_untag_removes_selected_tag():
+    captured = {}
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.execute.side_effect = lambda sql, params: captured.setdefault("tags", params[0])
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["nota", "pos-pko"]}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn", return_value=conn), \
+         patch("app.services.villain_rules.apply_villain_rules"):
+        res = gg_health.gg_health_untag({"hand_ids": ["GG-1"], "tag": "pos-pko"})
+    assert res["removed"] == 1 and res["hands"] == 1
+    assert captured["tags"] == ["nota"]                 # só 'pos-pko' saiu, 'nota' fica
+
+
+def test_untag_idempotent_when_absent():
+    conn = MagicMock()
+    rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["nota"]}]
+    with patch.object(gg_health, "query", return_value=rows), \
+         patch.object(gg_health, "get_conn", return_value=conn):
+        res = gg_health.gg_health_untag({"hand_ids": ["GG-1"], "tag": "pos-pko"})
+    assert res["removed"] == 0 and res["hands"] == 0    # não tinha → no-op
+    conn.cursor.assert_not_called()
+
+
+def test_untag_invalid_rejected():
+    with pytest.raises(HTTPException):
+        gg_health.gg_health_untag({"hand_ids": ["GG-1"], "tag": "xpto-nonsense"})
+
+
 # ── Ação 2 — link manual (Gold manda vive dentro do _deanon_after_match) ─────
 def test_manual_link_success_deanons_and_tags():
     log = [{"id": 5, "site": "GGPoker", "vision_json": {"seats": [{"nick": "a"}]},
