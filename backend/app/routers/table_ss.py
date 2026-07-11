@@ -547,6 +547,40 @@ def _find_closest_hand_by_tn(
     return dict(rows[0]) if rows else None
 
 
+# #IT-MATCHER-HERO-LAST-HAND (regra do Rui, 11 Jul 2026) — janela do bust: o
+# print é capturado segundos após a mão final (o Rui foto-a no momento do bust).
+# played_at = início da mão; a captura vem depois (bust + demora a fotografar),
+# com folga p/ a duração da própria mão.
+_BUST_WINDOW_BEFORE_MIN = -5.0
+_BUST_WINDOW_AFTER_MIN = 45.0
+
+
+def _hero_last_hand_bust_candidate(site, tournament_name, captured_at):
+    """Candidata do BUST: a mão do Hero do MESMO NOME (QUALQUER edição) cujo
+    played_at cai na janela do bust — a mais recente antes/à-hora do print. TODAS
+    as mãos em `hands` são do Hero (a app só guarda as dele) → basta o nome + a
+    janela. ATRAVESSA edições de propósito: resolver 1 tn apontava a edição errada
+    (vazia) quando o nome tem várias edições. Só sites de nome fiável (GG/WN); PS/
+    WPN (nome NULL/genérico) → None (nada a validar por nome). None se nenhuma."""
+    if not tournament_name or site not in _NAME_RELIABLE_SITES:
+        return None
+    lo = captured_at - timedelta(minutes=abs(_BUST_WINDOW_AFTER_MIN))
+    hi = captured_at + timedelta(minutes=abs(_BUST_WINDOW_BEFORE_MIN))
+    rows = query(
+        "SELECT id, hand_id, tournament_number, tournament_name, site, played_at "
+        "  FROM hands "
+        " WHERE played_at >= '2026-01-01' AND site = %s "
+        "   AND played_at BETWEEN %s AND %s "
+        "   AND tournament_number IS NOT NULL AND study_state != 'mtt_archive' "
+        " ORDER BY played_at DESC",
+        (site, lo, hi),
+    )
+    for r in rows:                       # DESC → a 1ª que casa o nome = a do bust
+        if name_tokens_subset(tournament_name, r.get("tournament_name") or ""):
+            return dict(r)
+    return None
+
+
 # #FIX-B2 (pt50): salas cuja HH traz o NOME REAL do torneio (validável por nome
 # token-a-token). GG e Winamax gravam o nome real; a Winamax pode trazer o nº de
 # mesa #NNN (aparado por clean_tournament_name). WPN grava string de garantia
@@ -727,6 +761,25 @@ def compute_table_ss_match(
             "matched_hand_id": m["matched"]["hand_id"],
             "matched_hand_db_id": m["matched"]["id"],
         }
+
+    # #IT-MATCHER-HERO-LAST-HAND (regra do Rui, 11 Jul; gate corrigido pela
+    # evidência) — RESCUE do BUST: o hand-id do nome falhou (não há filename_tn
+    # aqui — esse ramo retornou acima) E a via temporal NÃO casou. O print de bust
+    # é capturado segundos após a mão FINAL do Hero → a última mão do torneio é a
+    # candidata. Gate REAL do bust = captured_at na janela [−5, +45] min DEPOIS da
+    # última mão (a guarda `_hero_last_hand_for_tn`), não a "visibilidade" do Hero:
+    # 51/54 órfãs MOSTRAM o Hero (bottom-center) e são todas `no_hands_in_window`.
+    # Casa pela mão do Hero (mesmo nome, qualquer edição) na janela do bust; toma
+    # precedência sobre o ambíguo/no-hands (via temporal fraca no momento do bust).
+    last = _hero_last_hand_bust_candidate(site, vj.get("tournament_name"), captured_at)
+    if last:
+        return {
+            "result": "success", "reason_detail": "hero_last_hand_bust",
+            "site": site, "tournament_number": last["tournament_number"],
+            "matched_hand_id": last["hand_id"],
+            "matched_hand_db_id": last["id"],
+        }
+
     if m["ambiguous"]:
         base["result"] = "tm_ambiguous"
         base["reason_detail"] = m["reason"]

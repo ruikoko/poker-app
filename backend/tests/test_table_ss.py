@@ -666,14 +666,33 @@ def test_compute_match_single_tn_success():
 
 
 def test_compute_match_no_hands_resolves_tn_for_limbo():
+    # #IT-MATCHER-HERO-LAST-HAND: o caminho no-hands agora sonda a última mão do
+    # Hero (rescue do bust) antes do limbo — sem mão nessa janela → cai no limbo.
     with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
          patch("app.routers.table_ss._find_candidate_hands", return_value=[]), \
+         patch("app.routers.table_ss._hero_last_hand_bust_candidate", return_value=None), \
          patch("app.routers.table_ss.resolve_tournament_number", return_value=("T9", [])):
         d = table_ss.compute_table_ss_match(
             CAP, "Winamax", {"tournament_name": "ODYSSEY #013"})
     assert d["result"] == "no_match_to_hand"
     assert d["matched_hand_db_id"] is None
     assert d["tournament_number"] == "T9"
+
+
+def test_compute_match_hero_last_hand_bust_rescues_orphan():
+    """#IT-MATCHER-HERO-LAST-HAND: sem match temporal, mas captured_at cai na
+    janela do bust após a última mão do Hero → cola a essa mão (reason próprio)."""
+    last = {"id": 77, "hand_id": "GG-999", "tournament_number": "T9",
+            "tournament_name": "ODYSSEY", "site": "GGPoker"}
+    with patch("app.routers.table_ss.tv._correct_site", side_effect=lambda n, s: s), \
+         patch("app.routers.table_ss._find_candidate_hands", return_value=[]), \
+         patch("app.routers.table_ss._hero_last_hand_bust_candidate", return_value=last), \
+         patch("app.routers.table_ss.resolve_tournament_number", return_value=("T9", [])):
+        d = table_ss.compute_table_ss_match(
+            CAP, "GGPoker", {"tournament_name": "ODYSSEY"})
+    assert d["result"] == "success"
+    assert d["reason_detail"] == "hero_last_hand_bust"
+    assert d["tournament_number"] == "T9" and d["matched_hand_db_id"] == 77
 
 
 def test_compute_match_trusts_passed_site():
