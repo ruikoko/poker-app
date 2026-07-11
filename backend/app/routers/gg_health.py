@@ -1386,11 +1386,15 @@ def crowns_reread(payload: dict = Body(...),
     for hid in hand_ids:
         rows = query(
             "SELECT h.id, h.hand_id, h.tournament_number tn, h.entry_id, "
-            "  h.context_table_ss_id ctx, h.player_names pn, h.all_players_actions apa "
-            "FROM hands h WHERE h.hand_id=%s", (hid,))
+            "  h.context_table_ss_id ctx, h.player_names pn, h.all_players_actions apa, "
+            "  ts.buy_in_bounty base "
+            "FROM hands h LEFT JOIN tournament_summaries ts "
+            "  ON ts.site='GGPoker' AND ts.tournament_number=h.tournament_number "
+            "WHERE h.hand_id=%s", (hid,))
         if not rows:
             results.append({"hand_id": hid, "error": "not found"}); continue
         r = rows[0]
+        floor = (float(r["base"]) / 2.0) if r["base"] is not None else None
         pn = r["pn"]
         if isinstance(pn, str): pn = json.loads(pn or "{}")
         apa = r["apa"]
@@ -1432,11 +1436,29 @@ def crowns_reread(payload: dict = Body(...),
         guard = _guard_suspect_crowns(pl, r["tn"])      # base÷2 → NULL + por rever
         changes = []
         final_by_name = {}
+        seat_detail = []
         for p in pl:
             nm = str(p.get("name") or "").strip().lower()
             fv = p.get("bounty_value_usd")
             final_by_name[nm] = fv
-            if nm in vmap and (orig.get(nm) or None) != (fv or None):
+            before = orig.get(nm)
+            vhit = nm in vmap
+            if before is None and not vhit:
+                continue                                # seat vazio / sem coroa — ignorar
+            if fv is not None:
+                status = "corrected" if (before or None) != (fv or None) else "unchanged"
+                reason = None
+            else:
+                status = "por_rever"
+                if not vhit:
+                    reason = "nome não casou (truncado/renomeado) → guarda NULL"
+                elif vmap.get(nm) is None:
+                    reason = "NULL da Vision (placa ilegível)"
+                else:
+                    reason = "Vision <½ base (guarda)"
+            seat_detail.append({"name": p.get("name"), "before": before, "after": fv,
+                                "status": status, "reason": reason})
+            if vhit and (orig.get(nm) or None) != (fv or None):
                 changes.append({"name": p.get("name"), "old": orig.get(nm), "new": fv})
         if isinstance(apa, dict):                       # espelhar no apa (por real_name)
             for k, v in apa.items():
@@ -1454,9 +1476,9 @@ def crowns_reread(payload: dict = Body(...),
                 conn.commit()
             finally:
                 conn.close()
-        results.append({"hand_id": hid, "src": src, "dry_run": dry_run,
+        results.append({"hand_id": hid, "src": src, "dry_run": dry_run, "base": r["base"],
                         "guard": guard, "n_changes": len(changes), "changes": changes,
-                        "vision_error": verr.get("error")})
+                        "seat_detail": seat_detail, "vision_error": verr.get("error")})
     return {"results": results, "dry_run": dry_run}
 
 
