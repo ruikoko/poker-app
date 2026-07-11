@@ -219,6 +219,19 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   só se aprova contra dados reais; o teste com a Vision real sobre a imagem real matou a grelha antes
   de ela corromper produção. Testar ao mais alto nível (Vision real, imagem real) > raciocinar sobre
   a forma dos valores.**
+- 2026-07-11 — **Problema (âncora sem validação do ponto de partida):** 7 mãos com o nome do Rui
+  ("Lauro Dermio") num hash-vilão. Raiz: a Vision do table-SS marcou um VILÃO como `is_hero`
+  (baixo-centro) — 'R Sanchez' em 6 mãos (HR $525), 'buildthepot' na 7ª (Daily $88). A âncora
+  (`build_anon_map_by_hero_button`) confia cegamente no `is_hero` e fixa `anon_map["Hero"]` a esse
+  nick → **swap de 2 vias**: o Hero (Lauro) fica com o nome do vilão e o vilão com o nome do Hero.
+  Pior: nas 6, **1 leitura má (a que trocou) venceu 5 boas** — a propagação de nomes por hash
+  espalhou `2223abd8 = Lauro` do único capture mal lido para os outros 5 que tinham lido o Hero
+  CERTO. **→ Lição: uma leitura má vence N boas se a âncora não valida o PONTO DE PARTIDA. Uma
+  âncora só é âncora se se validar contra verdade CONHECIDA — aqui, o `is_hero` das capturas do Rui
+  É SEMPRE uma conta HERO_NICKS; se não é, é misread, alarme, não escreve.** Guarda posta (tolerante
+  a truncação da Vision). As outras salvaguardas (contagem, direção por botão/stacks, nicks
+  distintos) passaram todas porque a ROTAÇÃO estava certa — só o ponto de âncora estava errado; nenhuma
+  olhava para a verdade conhecida "o baixo-centro é o Rui".
 - 2026-07-11 — **Êxito (consistência = prova):** a re-leitura devolveu 7 coroas "implausíveis"
   (10–21×base). Antes de alarmar, reparei que vinham em **pares idênticos** (mãos consecutivas do
   mesmo torneio: Puntti $5324 nas DUAS mãos do HR Main Event) — sinal de **leitura consistente, não
