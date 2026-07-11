@@ -240,3 +240,16 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   humano em vez de reverter — e estava certo. "Implausível pelo tamanho" ≠ "errado"; separar sempre
   o invulgar do inválido.** Corolário: a coroa alta não tem guarda automática (a base÷2 só apara
   baixos); fica **grupo de confirmação** (não suspeita) com carimbo manual antes do export.
+- 2026-07-12 — **Retração própria: "recuperável" só se declara depois de VALIDAR A ÂNCORA, não só a
+  presença de nomes.** Ao ver as 13 golds sem-nomes de 26/06, classifiquei 9 como "recuperáveis" só
+  porque tinham uma table-SS ligada com nicks + o Rui presente. **Estava errado.** Ao correr o
+  `/redeanon` de facto: **0/9 nomearam** — TODAS deram `review_alarm` (6 por `seat_count_mismatch`
+  SS>HH, 3 por `button_stack_direction_disagree` com contagens iguais, 1 por `hero_not_rui_account`).
+  Ter nomes + Rui é NECESSÁRIO mas não SUFICIENTE: a âncora ainda pode falhar por contagem, direção
+  ou hero mal lido. **→ Lição: nunca prometer "recuperável" a partir de um pré-requisito parcial;
+  ou corro a âncora e reporto o resultado real (nomeou vs alarme), ou digo "candidato a testar",
+  nunca "recuperável".** É a mesma família da lição da âncora (11 Jul): uma condição só vale depois
+  de validada contra a verdade, não por presença de sinais soltos. Corolário que salvou o caso: a
+  raiz real não era a table-SS (que não alinha) mas a **Gold nunca lida** (`vision_done=false`) — a
+  1ª leitura do gold no formato atual de-anonimiza pela via premium (`position_v3`), validado ao vivo
+  na GG-6117480341 (5 nomes, Hero=Lauro).
