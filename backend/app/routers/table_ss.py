@@ -1956,6 +1956,27 @@ def set_anon_map_override(payload: dict = Body(...),
             "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing)}
 
 
+@router.post("/revert-to-anon")
+def revert_to_anon(payload: dict = Body(...),
+                   current_user=Depends(require_auth_or_api_key)):
+    """Reverte UMA mão GG à ANÓNIMA (primitiva `_revert_hand_to_anonymous`, exposta pt97+).
+    Uso: prints PÓS-BUST / sem o Rui visível que a desanon antiga (pré-guarda 11 Jul)
+    ancorou num vilão → o Hero ficou com o nick do vilão (#DESANON-ANCHOR-REQUIRES-HERO-IN-IMAGE).
+    Repõe o apa HASH-keyed do raw, limpa `player_names` ({}), apaga `hand_villains` e
+    desliga `context_table_ss_id`. GUARDA: só toca se `match_method=='table_ss'` (Gold/
+    Discord/anónima → devolve reverted=False). Reversível: um print COM o Rui re-desanon.
+    Body: {hand_id}."""
+    hand_id = (payload or {}).get("hand_id")
+    if not hand_id:
+        raise HTTPException(400, "hand_id obrigatório")
+    rows = query("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
+    if not rows:
+        raise HTTPException(404, "mão não encontrada")
+    res = _revert_hand_to_anonymous(rows[0]["id"])
+    logger.info("table-ss revert-to-anon: %s -> %s", hand_id, res)
+    return {"hand_id": hand_id, **res}
+
+
 @router.get("/folder-tags")
 def folder_tags_by_filename(current_user=Depends(require_auth)):
     """#ICM-FT-TAG-NOT-LANDING — mapa `original_filename → folder_tag` das capturas que

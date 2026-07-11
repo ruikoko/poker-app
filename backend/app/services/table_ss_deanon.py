@@ -432,6 +432,22 @@ def deanonymize_hand_from_table_ss(
         return {"status": "skip_real_match", "hand_db_id": hand_db_id,
                 "match_method": existing_mm}
 
+    # Guarda 4 (#DESANON-ANCHOR-REQUIRES-HERO-IN-IMAGE, 12 Jul) — a desanon do table-SS
+    # ancora nos NOMES lidos da imagem; se o Rui NÃO está entre os seats da Vision (print
+    # PÓS-BUST, ou de outra mesa em multi-tabling), a imagem não pode nomear ninguém com
+    # fiabilidade: a Vision marca um vilão como is_hero e a âncora dá o nome do vilão ao
+    # HERO da mão (e nomes trocados aos vilões). Regra dura: exige >=1 seat = conta do Rui
+    # (GG). Senão CASA a imagem (o match/context_table_ss_id é setado a montante), mas NÃO
+    # escreve nomes — a mão fica anónima até um print COM o Rui a re-desanonimizar. É mais
+    # forte que a guarda do PONTO de âncora (`_vision_hero_nick_is_rui` sobre o is_hero):
+    # esta cobre o pós-bust, onde NENHUM seat é o Rui. Âncoras validam-se contra verdade
+    # conhecida (o Rui tem de estar visível para a imagem servir de âncora).
+    if not any(_vision_hero_nick_is_rui((s or {}).get("nick")) for s in (seats or [])):
+        logger.info(
+            "[table_ss_deanon] hand %s sem conta do Rui nos seats da Vision → casa imagem, "
+            "NÃO desanonimiza (deanon_skipped_no_hero_in_image)", hand_db_id)
+        return {"status": "deanon_skipped_no_hero_in_image", "hand_db_id": hand_db_id}
+
     apa_raw = h.get("all_players_actions") or {}
     if isinstance(apa_raw, str):
         try:

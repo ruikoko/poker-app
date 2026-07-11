@@ -58,8 +58,26 @@ function HeroVillainDetail({ detail }) {
   )
 }
 
+function HeroAlheioDetail({ detail }) {
+  const poison = detail.kind === 'poison'
+  return (
+    <div style={{ fontSize: 12 }}>
+      <span style={{ color: 'var(--muted)' }}>pn.hero: </span>
+      <b style={{ color: '#fca5a5' }}>{detail.hero || '—'}</b>
+      <span style={{ color: 'var(--muted)', marginLeft: 8 }}>apa: </span>
+      <b style={{ color: detail.apa_hero ? '#818cf8' : '#f59e0b' }}>{detail.apa_hero || '—'}</b>
+      <Chip color={poison ? '#ef4444' : '#eab308'}>{poison ? 'veneno — reverter' : 'cosmético — sincronizar'}</Chip>
+    </div>
+  )
+}
+
 function GroupCard({ group }) {
   const color = group.key === 'bounty_below_half' ? '#f59e0b' : '#ef4444'
+  const renderDetail = (h) => {
+    if (group.key === 'bounty_below_half') return <BountyDetail detail={h.detail} />
+    if (group.key === 'hero_alheio') return <HeroAlheioDetail detail={h.detail} />
+    return <HeroVillainDetail detail={h.detail} />
+  }
   return (
     <div style={card}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
@@ -93,9 +111,7 @@ function GroupCard({ group }) {
                 <td style={td}>{h.tournament_name || '—'}</td>
                 <td style={{ ...td, whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmt(h.played_at)}</td>
                 <td style={td}>
-                  {group.key === 'bounty_below_half'
-                    ? <BountyDetail detail={h.detail} />
-                    : <HeroVillainDetail detail={h.detail} />}
+                  {renderDetail(h)}
                 </td>
               </tr>
             ))}
