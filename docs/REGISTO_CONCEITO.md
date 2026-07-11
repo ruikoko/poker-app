@@ -328,3 +328,25 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   largada** (lote grande do robot). 1ª corrida real (11 Jul): **1 contaminação — tn 294738291**
   (payout de um lobby que é da edição 294711510; `entrants` 287/305 > campo 219), não consumida por
   nenhum solve do lote → morre no reimporte. → `routers/gg_health.py`, `JOURNAL_2026-07-11.md`.
+
+## 2026-07-11 (tarde) — COROAS: o bounty vive na PLACA de $, não existe ícone de coroa
+
+- 2026-07-11 — **O bounty na GG vive SEMPRE na placa retangular de $ POR CIMA do avatar; NÃO existe
+  ícone de coroa dourada colado ao avatar (em nenhuma variante).** A única badge no avatar é a
+  **chama laranja = VPIP (%)**. Descoberto pelo Rui na sessão visual (3 casos + conhecimento do ecrã).
+  Os prompts da Vision (Gold + table-SS) descreviam um "gold crown badge" **imaginário** → a Vision
+  obedecia e agarrava a chama (trocas), procurava a coroa e não achava (omissões), ou ignorava a
+  descrição e lia a placa (acertos por acaso). **Fix:** prompts reescritos sobre o ecrã REAL — bounty
+  = $ na placa acima do avatar; chama = SEMPRE VPIP, NUNCA bounty; sem placa legível → NULL. Teste de
+  aceitação ao vivo (Vision real, imagens reais): **GG-6113996183 8/8 EXATO** face às placas
+  (Lauro 50 · Lucas 259.37 · Short Bus 168.75 · TpApK1m 200 · 4_TheGlory 200 · Volodymyr 250 ·
+  Producer65 137.5 · Lionevil 168.75). → `routers/screenshot.py`, `services/table_ss_vision.py`,
+  `DESANON_ANATOMIA`, `JOURNAL_2026-07-11.md`.
+- 2026-07-11 — **A GRELHA aritmética morreu no teste real.** A guarda das coroas tinha um 2º critério
+  (a coroa real seria `base × k/2ⁿ`, "grelha de metades"); o teste de aceitação provou que **NULLava
+  coroas verdadeiras** — Lucas **259.37** é a placa real, mas não cai na grelha até 1/16. **Facto:** as
+  coroas **progressivas/rake NÃO são dyadic** (acumulam metades com arredondamento/rake → 1/32, 1/64
+  ou valores não-dyadic). **Decisão A do Rui:** a guarda fica **só base÷2** (coroa < base÷2 =
+  impossível = chama lida como coroa → NULL + "por rever"). O detetor **==chama** fica só como
+  **SINAL** no painel Coroas (coroa == VPIP pode ser coincidência legítima), **não** guarda. →
+  `services/table_ss_deanon.py:_guard_suspect_crowns`, `JOURNAL_2026-07-11.md`.

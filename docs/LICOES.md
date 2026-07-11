@@ -204,3 +204,18 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   mudou: as "46-60 suspeitas Gold" eram falsos positivos (coroa fresca base÷2 == VPIP) + omissão
   $0; o erro real é table-SS (55 seats, 15 mãos), Gold escreve 0 impossíveis. Olhar a imagem
   desfez uma conclusão errada tirada só dos números.
+- 2026-07-11 — **Problema (o de fundo):** o prompt da Vision descrevia um **"gold crown badge"**
+  colado ao avatar — elemento que **NÃO existe** na GG (o bounty vive na placa de $ acima do
+  avatar; a única badge é a chama = VPIP). Este prompt errado **sobreviveu a DUAS curas** anteriores
+  do flame-as-crown (pt95 + a guarda base÷2) porque cada cura mexeu na jusante (guardas, gates,
+  rellink) e **ninguém pôs a descrição ao lado de uma imagem real**. Foi o **Rui a olhar o ecrã**
+  que viu que a coroa descrita não existia. **→ Lição: um prompt de Vision é código que descreve um
+  ecrã — valida-se comparando a LETRA com uma IMAGEM real, não relendo o texto. Duas curas trataram
+  sintomas a jusante de um prompt que descrevia um elemento imaginário; a raiz só cai quando se
+  confronta a descrição com o pixel.**
+- 2026-07-11 — **Êxito:** a **grelha aritmética** (2º critério da guarda) parecia sólida no papel
+  (coroas = base×k/2ⁿ) mas o **teste de aceitação ao vivo** apanhou-a a NULLar o **259.37 real** do
+  Lucas — coroas progressivas/rake não são dyadic. **→ Lição: uma guarda "matematicamente elegante"
+  só se aprova contra dados reais; o teste com a Vision real sobre a imagem real matou a grelha antes
+  de ela corromper produção. Testar ao mais alto nível (Vision real, imagem real) > raciocinar sobre
+  a forma dos valores.**
