@@ -1,5 +1,16 @@
 # Pendentes — backlog vivo
 
+## 🟢 REGRA DE LARGADA DESTRANCADA — robot livre para lotes grandes (11 Jul 2026)
+
+**O último bloqueio à largada de lotes grandes ao robot HRC caiu.** A contaminação de edição
+`294738291` (payout de edição errada, escrito por um lobby que pertencia à `294711510` — prova dura
+`entrants 305 > campo 219 impossível`) foi **fechada por repoint**: `POST /api/gg-health/lobby-edition-repoint`
+(`payout_tn 294738291 → correct_tn 294711510`, dry-run→OK do Rui→escrita) apagou o payout envenenado
+(1 row) e reapontou o log do escritor; a `294711510` mantém o payout correto dela. **`lobby-edition-scan`
+= edition_contamination 0** (146 clean, 0 suspect). Sem payout de edição errada a alimentar o ICM →
+**o robot pode processar lotes grandes sem risco de premiar com prémios da edição errada.** (Repoint =
+mecanismo geral p/ contaminações JÁ escritas — a quarentena só trata prints novos.)
+
 ## 🔎 Lote da auditoria visual (10 Jul) — 23 achados, por prioridade
 
 **A e C fechados** (diagnóstico + A1 fix + C decidido). Restantes na fila pela ordem do lote.
