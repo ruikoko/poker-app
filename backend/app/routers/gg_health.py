@@ -1292,6 +1292,42 @@ def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):
             "hits": hits}
 
 
+@router.get("/flame-as-crown-scan")
+def flame_as_crown_scan(current_user=Depends(require_auth_or_api_key)):
+    """4º GATE das coroas (11 Jul) — chama-lida-como-coroa. Reusa a fonte única
+    `detect_bounty_below_half`: mãos GG PKO/KO cuja coroa gravada é < base÷2 (a
+    Vision leu a chama VPIP % em vez da coroa $). Bounty-quality passa a critério
+    de aceitação, ao lado dos 3 gates (vision_origin/silent_zero/spurious). GATE
+    DURO: `flame_as_crown_contamination` tem de ser 0 pós-reimporte/pós-cura.
+    Seats com `bounty_confirmed` (exceção manual do Rui) NÃO contam. NADA escreve."""
+    from app.services.queue_export import TS_GATED_FORMATS, detect_bounty_below_half
+    rows = query(
+        "SELECT h.hand_id, h.tournament_name, h.player_names AS pn, ts.buy_in_bounty AS base "
+        "  FROM hands h JOIN tournament_summaries ts "
+        "    ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND ts.buy_in_bounty IS NOT NULL "
+        "   AND lower(COALESCE(h.tournament_format,'')) = ANY(%s)",
+        (list(TS_GATED_FORMATS),),
+    )
+    hits, scanned = [], 0
+    for r in rows:
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        if not (pn.get("players_list")):
+            continue
+        scanned += 1
+        below = detect_bounty_below_half(pn, r["base"])
+        if below:
+            hits.append({"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
+                         "floor": below[0]["floor"],
+                         "seats": [{"name": b["name"], "value": b["value"]} for b in below]})
+    return {"scanned_gg_pko_hands": scanned,
+            # ★ 4º gate: tem de ser 0 pós-reimporte/pós-cura.
+            "flame_as_crown_contamination": len(hits),
+            "gate": "hard: flame_as_crown_contamination>0 => PARAR+investigar (chama lida como coroa)",
+            "hits": hits[:200]}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # RAIZ 2 (11 Jul) — resolver de EDIÇÕES: crivo + quarentena + decisão manual.
 # GG-only (a Winamax identifica o torneio na própria HH; sem edições repetidas
