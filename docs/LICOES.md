@@ -219,3 +219,11 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   só se aprova contra dados reais; o teste com a Vision real sobre a imagem real matou a grelha antes
   de ela corromper produção. Testar ao mais alto nível (Vision real, imagem real) > raciocinar sobre
   a forma dos valores.**
+- 2026-07-11 — **Êxito (consistência = prova):** a re-leitura devolveu 7 coroas "implausíveis"
+  (10–21×base). Antes de alarmar, reparei que vinham em **pares idênticos** (mãos consecutivas do
+  mesmo torneio: Puntti $5324 nas DUAS mãos do HR Main Event) — sinal de **leitura consistente, não
+  ruído**. O Rui confirmou à vista: **7/7 reais**. **→ Lição: valores repetidos entre capturas
+  independentes do mesmo estado são EVIDÊNCIA de leitura verdadeira, não de erro. Flaguei para o olho
+  humano em vez de reverter — e estava certo. "Implausível pelo tamanho" ≠ "errado"; separar sempre
+  o invulgar do inválido.** Corolário: a coroa alta não tem guarda automática (a base÷2 só apara
+  baixos); fica **grupo de confirmação** (não suspeita) com carimbo manual antes do export.

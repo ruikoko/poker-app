@@ -350,3 +350,13 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   impossível = chama lida como coroa → NULL + "por rever"). O detetor **==chama** fica só como
   **SINAL** no painel Coroas (coroa == VPIP pode ser coincidência legítima), **não** guarda. →
   `services/table_ss_deanon.py:_guard_suspect_crowns`, `JOURNAL_2026-07-11.md`.
+- 2026-07-11 — **Coroas ALTAS (> 3×base) são possíveis e reais** (PKO progressivo: acumulação de KOs
+  em fase funda). Verificação visual do Rui às 7 mais altas da re-leitura (até **21×base** —
+  Puntti $5324 num HR Main Event $525): **7/7 CONFIRMADAS reais**. Conceito: a guarda **base÷2** só
+  apara os valores **baixos** (chama); os **altos** não têm guarda automática (a grelha, que os
+  travaria, matava os 259.37 legítimos). Em vez de guarda → **grupo "Valor alto — confirmar"**
+  (`detect_bounty_above_3x`, simétrico do `detect_bounty_below_half`): coroa > 3×base sem
+  `bounty_confirmed` entra no painel e **NÃO vai a export** (`bounty_above_3x_unconfirmed`) até o Rui
+  carimbar. **É CONFIRMAÇÃO, não suspeita** — o texto do painel di-lo (7/7 reais). O carimbo é o mesmo
+  `bounty_confirmed` que já isenta as `<½` aceites à vista. → `services/queue_export.py`,
+  `routers/gg_health.py:/crowns`, `frontend/.../GGHealth.jsx`, `JOURNAL_2026-07-11.md`.
