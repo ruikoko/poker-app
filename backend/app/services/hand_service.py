@@ -301,6 +301,7 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                                 if anon_map:
                                     h["all_players_actions"] = _enrich_all_players_actions(
                                         apa_new, anon_map, vision_data,
+                                        tn=h.get("tournament_number"),
                                     )
                             except Exception:
                                 logger.exception(

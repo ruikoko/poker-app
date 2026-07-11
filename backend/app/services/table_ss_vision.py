@@ -63,7 +63,7 @@ _TABLE_PROMPT = (
     '  "hero_nick": "<hero screen name>" | null,\n'
     '  "seats": [ {"nick": "<exact screen name under the avatar>", '
     '"stack_bb": <float stack in BIG BLINDS> | "ALLIN" | null, '
-    '"bounty_usd": <float DOLLAR $ in the GOLD CROWN badge above the avatar> | null, '
+    '"bounty_usd": <float DOLLAR $ on the rectangular $ PLATE above the avatar> | null, '
     '"is_hero": <true for the bottom-center hero seat, else false>, '
     '"is_button": <true for the seat with the dealer BUTTON (D chip), else false>} ]\n'
     "}\n\n"
@@ -81,15 +81,15 @@ _TABLE_PROMPT = (
     "in BIG BLINDS (convert from chips by dividing by big_blind if shown in "
     "chips; use the literal 'ALLIN' string if the seat shows All-In; null if "
     "unreadable).\n"
-    "  * bounty_usd = the DOLLAR amount ($) in the GOLD/YELLOW CROWN badge above the "
-    "avatar (the KO/PKO bounty). A MONEY value: $50, $75, $215. In a PKO it is NEVER "
-    "tiny — at least about $50 (half the bounty buy-in), often much more. null if no "
-    "crown.\n"
-    "  * There is ALSO an ORANGE/RED FLAME badge near the avatar showing a PERCENT (%) "
-    "— the player's VPIP statistic (e.g. 16%, 27%, 43%). IGNORE the flame — it is NOT "
-    "the bounty. NEVER put the flame percent into bounty_usd. A small number like 16, "
-    "20, 27, 43 is the FLAME percent, NOT the crown bounty; only the gold crown DOLLAR "
-    "($) goes in bounty_usd.\n"
+    "  * bounty_usd = the DOLLAR amount ($) printed on the rectangular $ PLATE that "
+    "sits DIRECTLY ABOVE the avatar (the KO/PKO bounty). A MONEY value like $50, $75, "
+    "$215. This $ plate is a SEPARATE element above the seat and is the ONLY place the "
+    "bounty appears — there is NO crown, coin or badge icon on the avatar itself. Use "
+    "null if there is no readable $ plate above the seat.\n"
+    "  * The ORANGE FLAME badge ON the avatar is the player's VPIP statistic (e.g. 16%, "
+    "27%, 43%). IGNORE the flame — it is NEVER the bounty. NEVER put the flame percent "
+    "into bounty_usd. A small number like 16, 20, 27, 43 is the FLAME percent; only the "
+    "DOLLAR ($) on the plate ABOVE the avatar goes in bounty_usd.\n"
     "  is_hero = true only for the bottom-center "
     "hero seat. Do NOT include empty seats. Read each nick carefully — they feed "
     "an exact name match.\n"

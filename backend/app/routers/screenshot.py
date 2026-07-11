@@ -261,32 +261,33 @@ def _build_gg_vision_prompt() -> str:
         "RULES:\n"
         "- Stack must be the exact number shown below the name (e.g. 65021 or 102944)\n"
         "- If a player's stack shows 0, write 0\n"
-        "- vpip_pct is the integer in the ORANGE FLAME badge (e.g. '28' for 28%); use 0 if not visible\n"
-        "- bounty_value_usd is the DOLLAR amount in the golden/tan banner at the TOP of the\n"
-        "  avatar (e.g. '268.18' for $268.18, '57.03' for $57.03). NEVER include '$' or\n"
-        "  commas. In this bounty tournament it is almost never 0 — look carefully at the\n"
-        "  top plate of EVERY avatar before writing 0.\n"
-        "  ★ CRITICAL (#CROWN-VISIBLE-READ-ZERO): the golden dollar banner is ABOVE the\n"
-        "  avatar and is a SEPARATE element. READ IT EVEN WHEN the seat/avatar below is\n"
-        "  COVERED — by face-down (red) cards, a red 'All-In' seal, a 'WIN' seal, or (for\n"
-        "  the Hero) the Hero's own large hole cards. A covered avatar does NOT mean 0\n"
-        "  bounty: the golden banner is still drawn above it. In a PKO the crown is at\n"
-        "  least about HALF the bounty buy-in (e.g. $50+), NEVER a tiny value. Write 0\n"
-        "  ONLY if there is genuinely NO golden banner above that seat.\n"
-        "- DO NOT confuse VPIP (a small plain integer in a circle, e.g. '34', NO '$') with\n"
-        "  Bounty (a dollar amount in the TOP banner, e.g. '$268.18'). They are DIFFERENT\n"
-        "  badges in DIFFERENT positions. See #FIELD-BOUNTY-PCT-MISNAMED.\n"
-        "- ★ ELIMINATED seat (0 chips / cracked-broken cards over the avatar / a player who\n"
-        "  just busted this hand): an eliminated player has NO OWN crown — their bounty\n"
-        "  banner is GONE. Do NOT copy a NEIGHBOUR's crown onto them. For that seat write\n"
-        "  bounty_value_usd = 0 (their real bounty is read from the GREEN value below, not\n"
-        "  from any golden banner near their seat).\n"
+        "- vpip_pct is the integer in the ORANGE FLAME badge ON the avatar (e.g. '28'\n"
+        "  for 28%); use 0 if not visible. The orange flame is ALWAYS the VPIP\n"
+        "  statistic — it is NEVER the bounty. See #FIELD-BOUNTY-PCT-MISNAMED.\n"
+        "- bounty_value_usd is the DOLLAR amount printed on the rectangular $ PLATE that\n"
+        "  sits DIRECTLY ABOVE the avatar (e.g. '268.18' for $268.18, '57.03' for\n"
+        "  $57.03). This $ plate is a SEPARATE element above the seat and is the ONLY\n"
+        "  place the bounty is shown. There is NO crown, coin or badge icon on the\n"
+        "  avatar itself. NEVER include '$' or commas.\n"
+        "  ★ The $ plate is drawn above the avatar EVEN WHEN the avatar below is COVERED\n"
+        "    — by face-down (red) cards, a red 'All-In' seal, a 'WIN' seal, or (for the\n"
+        "    Hero) the Hero's own large hole cards. A covered avatar does NOT hide the\n"
+        "    plate above it.\n"
+        "  ★ Do NOT confuse the orange FLAME on the avatar (a small % like '28', no '$')\n"
+        "    with the bounty on the $ PLATE above it (a dollar amount like '268.18'). If\n"
+        "    the only bounty-looking thing near a seat is the orange flame %, that seat's\n"
+        "    bounty is NOT that number.\n"
+        "  ★ If there is NO readable $ plate above a seat, write NULL (not 0). Do NOT\n"
+        "    invent a value and do NOT copy a neighbour's plate.\n"
+        "- ★ ELIMINATED seat (0 chips / cracked-broken cards over the avatar / a player\n"
+        "  who just busted this hand): an eliminated player has NO OWN $ plate — it is\n"
+        "  GONE. Write bounty_value_usd = NULL for that seat (their real bounty is read\n"
+        "  from the GREEN value below, not from any plate near their seat).\n"
         "- ★ GREEN_KO: when a player ELIMINATES someone, HALF of the eliminated player's\n"
-        "  bounty appears as a GREEN dollar value ON/NEXT TO the eliminator's golden crown\n"
-        "  (e.g. a crown showing '$253.75 +$102.27' — the '+$102.27' in GREEN is the KO\n"
+        "  bounty appears as a GREEN dollar value ON/NEXT TO the eliminator's $ PLATE\n"
+        "  (e.g. a plate showing '$253.75 +$102.27' — the '+$102.27' in GREEN is the KO\n"
         "  transfer). For EACH green value you see, emit one GREEN_KO line: the winner's\n"
-        "  name and the green number (no '$', no '+'). If there are no green values, emit\n"
-        "  no GREEN_KO line. This is DIFFERENT from the golden (own-bounty) banner.\n"
+        "  name and the green number (no '$', no '+'). No green values → no GREEN_KO line.\n"
         "- Country is the 2-letter code from the flag, or NONE\n"
         "- Level must be a plain integer (strip 'Lv' or 'Level' prefix) or NONE if not visible\n"
         "- Include ALL players visible at the table, even if eliminated\n"
@@ -518,17 +519,16 @@ def _parse_vision_response(text: str) -> dict:
                 if vpip_m:
                     bounty_pct = int(vpip_m.group(1))
 
-                # pt24: bounty_value_usd — dollar amount inside the golden crown badge.
-                # Aceita floats (e.g. "112.50") e ints (e.g. "125"). Strip de "$" e ","
-                # defensivos caso Vision desobedeça à regra "no symbols".
-                bounty_value_usd = 0.0
-                bv = bounty_value_str.replace("$", "").replace(",", "").strip()
-                bv_m = re.search(r'[\d]+(?:\.[\d]+)?', bv)
-                if bv_m:
-                    try:
-                        bounty_value_usd = float(bv_m.group(0))
-                    except ValueError:
-                        bounty_value_usd = 0.0
+                # bounty_value_usd — dollar amount on the $ PLATE above the avatar
+                # (prompt novo 11 Jul). "NULL"/vazio (sem placa legível) → None =
+                # 'por rever', NUNCA 0 (num PKO não há bounty 0; a leitura falhou).
+                # Strip de "$"/"," defensivo. Ver #FLAME-AS-CROWN-GUARD.
+                bv = (bounty_value_str or "").replace("$", "").replace(",", "").strip()
+                if bv.upper() in ("", "NULL", "NONE", "-", "N/A"):
+                    bounty_value_usd = None
+                else:
+                    bv_m = re.search(r'[\d]+(?:\.[\d]+)?', bv)
+                    bounty_value_usd = float(bv_m.group(0)) if bv_m else None
 
                 player_info = {
                     "name": name,
@@ -1028,7 +1028,8 @@ def _build_anon_to_real_map_by_position(hand_row: dict, vision_data: dict) -> di
     }
 
 
-def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: dict) -> dict:
+def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: dict,
+                                tn: str | None = None) -> dict:
     """
     APA §B (Fase 2, core aprovado 8 Jul): enriquece `all_players_actions` **SEM
     re-indexar por nome**. A CHAVE da HH mantém-se (hash GG / nick real não-GG /
@@ -1049,6 +1050,18 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
     (real_name fica "", mas o leitor mostra a chave) — sem corrupção.
     """
     enriched = {}
+
+    # #FLAME-AS-CROWN-GUARD (position_v3/Gold) — base÷2 + grelha aritmética à ENTRADA
+    # da escrita de coroas. Rejeitado → NULL + 'por rever' (crown_review), nunca
+    # descarte silencioso. Mutação in-place: o caller usa o MESMO players_list para
+    # o `player_names`, logo cobre apa + player_names de uma vez. Só quando `tn`
+    # (torneio conhecido → base). Ver `table_ss_deanon._guard_suspect_crowns`.
+    if tn:
+        try:
+            from app.services.table_ss_deanon import _guard_suspect_crowns
+            _guard_suspect_crowns(vision_data.get("players_list", []), tn)
+        except Exception:
+            pass  # ficheiro delicado: a guarda nunca pode partir um import
 
     # Preservar metadata — não é um jogador
     if "_meta" in all_players:
@@ -1799,7 +1812,8 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     else:
         anon_map = _build_anon_to_real_map(matched_hand, raw_json)
         _used_position_v3 = False
-    enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json)
+    _tn_guard = matched_hand.get("tournament_number")
+    enriched_actions = _enrich_all_players_actions(all_players_raw, anon_map, raw_json, tn=_tn_guard)
 
     # Guarda UNIVERSAL de consistência (#DESANON-SITTING-OUT-NPLUS1): position_v3 (por rótulo)
     # isento do C3; o fallback stack (por ordem) está sujeito. block → mantém a mão ANÓNIMA
@@ -1813,7 +1827,7 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
         logger.warning("[pos-v3] hand %s CONSISTÊNCIA=%s → fica ANÓNIMA (não escreve nomes)",
                        hand_db_id, _cv)
         anon_map = {}
-        enriched_actions = _enrich_all_players_actions(all_players_raw, {}, raw_json)
+        enriched_actions = _enrich_all_players_actions(all_players_raw, {}, raw_json, tn=_tn_guard)
 
     # match_method só sobe a 'anchors_stack_elimination_v2' quando há HH real
     # (raw populado). Sem HH, a hand continua a ser placeholder mesmo após

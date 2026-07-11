@@ -347,3 +347,55 @@ def test_botao_stacks_discordam_alarme():
            {"nick":"E","stack_bb":20}]
     m,a = build_anon_map_by_hero_button(img, hh_pos, 5, hh_st)
     assert m == {} and a == "button_stack_direction_disagree"
+
+
+# ── #FLAME-AS-CROWN-GUARD (base÷2 + grelha aritmética) ───────────────────────
+def test_crown_on_grid_dyadic():
+    """Grelha: coroa real = base × k/2ⁿ (k/2ⁿ ≥ ½). Off-grid → suspeita."""
+    from app.services.table_ss_deanon import _crown_on_grid
+    # base 100: on-grid = 50,75,100,125,150,... (múltiplos de base/16 ≥ 50)
+    assert _crown_on_grid(50, 100)      # fresca base÷2
+    assert _crown_on_grid(75, 100)      # 1 KO acumulado
+    assert _crown_on_grid(100, 100)     # 2 KOs
+    assert _crown_on_grid(137.5, 100)   # base×11/8
+    assert not _crown_on_grid(80, 100)  # 0.8·base não é dyadic → off-grid
+    assert not _crown_on_grid(27, 100)  # < base÷2 (nem chega à grelha)
+
+
+def _patch_query(monkeypatch, base):
+    import app.db as dbmod
+    monkeypatch.setattr(dbmod, "query",
+                        lambda *a, **k: [{"buy_in_bounty": base}])
+
+
+def test_guard_suspect_crowns_below_half_and_grid(monkeypatch):
+    """base 100: $27<½→NULL(below_half); $80 off-grid→NULL(off_grid);
+    $50/$0/$75 intactos; bounty_confirmed intacto mesmo off-grid."""
+    from app.services.table_ss_deanon import _guard_suspect_crowns
+    _patch_query(monkeypatch, 100)
+    pl = [
+        {"name": "A", "bounty_value_usd": 27},                 # <½ → below_half
+        {"name": "B", "bounty_value_usd": 80},                 # off-grid
+        {"name": "C", "bounty_value_usd": 50},                 # ok (fresca)
+        {"name": "D", "bounty_value_usd": 75},                 # ok (1 KO)
+        {"name": "E", "bounty_value_usd": 0},                  # omissão → fica
+        {"name": "F", "bounty_value_usd": 80, "bounty_confirmed": True},  # exceção
+    ]
+    out = _guard_suspect_crowns(pl, "T1")
+    assert out == {"below_half": 1, "off_grid": 1}
+    assert pl[0]["bounty_value_usd"] is None and pl[0]["crown_review"] == "flame_below_half"
+    assert pl[1]["bounty_value_usd"] is None and pl[1]["crown_review"] == "off_grid"
+    assert pl[2]["bounty_value_usd"] == 50 and "crown_review" not in pl[2]
+    assert pl[3]["bounty_value_usd"] == 75
+    assert pl[4]["bounty_value_usd"] == 0
+    assert pl[5]["bounty_value_usd"] == 80          # confirmado fica
+
+
+def test_guard_suspect_crowns_no_base_noop(monkeypatch):
+    """Sem base (TS ausente) → NO-OP (não anula nada)."""
+    from app.services.table_ss_deanon import _guard_suspect_crowns
+    _patch_query(monkeypatch, None)
+    pl = [{"name": "A", "bounty_value_usd": 27}]
+    out = _guard_suspect_crowns(pl, "T1")
+    assert out == {"below_half": 0, "off_grid": 0}
+    assert pl[0]["bounty_value_usd"] == 27

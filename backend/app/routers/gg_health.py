@@ -1292,6 +1292,73 @@ def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):
             "hits": hits}
 
 
+@router.post("/crowns/test-reread")
+def crowns_test_reread(payload: dict = Body(...),
+                       current_user=Depends(require_auth_or_api_key)):
+    """ENSAIO read-only (#FLAME-AS-CROWN prompt novo 11 Jul) — teste de aceitação
+    do Rui. Re-lê a Vision com o prompt ATUAL (novo, placa de $) sobre a imagem
+    JÁ GUARDADA de cada mão e devolve os bounties por seat + o efeito da guarda
+    (base÷2 + grelha). **NÃO escreve NADA** na BD. body: {"hand_ids": [...]}."""
+    import base64
+    from app.services.table_ss_vision import (
+        extract_table_ss_json, parse_and_validate_table_ss_json)
+    from app.routers.screenshot import (
+        _extract_hand_data_from_image_claude, _parse_vision_response)
+    from app.services.table_ss_deanon import _guard_suspect_crowns
+    hand_ids = payload.get("hand_ids") or []
+    out = []
+    for hid in hand_ids:
+        rows = query(
+            "SELECT h.id, h.hand_id, h.tournament_number tn, h.entry_id, "
+            "  h.context_table_ss_id ctx, (h.player_names->>'match_method') mm, "
+            "  ts.buy_in_bounty base "
+            "FROM hands h LEFT JOIN tournament_summaries ts "
+            "  ON ts.site='GGPoker' AND ts.tournament_number=h.tournament_number "
+            "WHERE h.hand_id=%s", (hid,))
+        if not rows:
+            out.append({"hand_id": hid, "error": "not found"}); continue
+        r = rows[0]
+        base = float(r["base"]) if r["base"] is not None else None
+        img_b64 = None; src = None
+        if r["ctx"]:
+            ir = query("SELECT img_b64 FROM table_ss_processing_log WHERE id=%s", (r["ctx"],))
+            img_b64 = ir[0]["img_b64"] if ir and ir[0]["img_b64"] else None
+            src = "table_ss"
+        if not img_b64 and r["entry_id"]:
+            ir = query("SELECT raw_json->>'img_b64' b FROM entries WHERE id=%s", (r["entry_id"],))
+            img_b64 = ir[0]["b"] if ir and ir[0]["b"] else None
+            src = "gold"
+        if not img_b64:
+            out.append({"hand_id": hid, "error": "sem imagem guardada"}); continue
+        try:
+            img_bytes = base64.b64decode(img_b64)
+        except Exception as e:
+            out.append({"hand_id": hid, "error": f"decode: {e}"}); continue
+        seats = []
+        if src == "table_ss":
+            raw = extract_table_ss_json(img_bytes, "image/png")
+            data = parse_and_validate_table_ss_json(raw) if raw else None
+            for s in (data or {}).get("seats", []):
+                seats.append({"name": s.get("nick"), "bounty": s.get("bounty_usd"), "vpip": None})
+        else:
+            text = _extract_hand_data_from_image_claude(img_bytes, "image/png")
+            data = _parse_vision_response(text) if text else {}
+            for s in data.get("players_list", []):
+                seats.append({"name": s.get("name"), "bounty": s.get("bounty_value_usd"),
+                              "vpip": s.get("bounty_pct")})
+        # guarda em ENSAIO (cópia; não toca BD)
+        preview = [{"name": x["name"], "bounty_value_usd": x["bounty"]} for x in seats]
+        guard = _guard_suspect_crowns(preview, r["tn"]) if base else {"below_half": 0, "off_grid": 0}
+        gmap = {p["name"]: p for p in preview}
+        for x in seats:
+            gp = gmap.get(x["name"], {})
+            x["after_guard"] = gp.get("bounty_value_usd", x["bounty"])
+            x["crown_review"] = gp.get("crown_review")
+        out.append({"hand_id": hid, "mm": r["mm"], "src": src, "base": base,
+                    "n_seats": len(seats), "seats": seats, "guard": guard})
+    return {"results": out}
+
+
 @router.get("/flame-as-crown-scan")
 def flame_as_crown_scan(current_user=Depends(require_auth_or_api_key)):
     """4º GATE das coroas (11 Jul) — chama-lida-como-coroa. Reusa a fonte única
