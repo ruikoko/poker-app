@@ -1,5 +1,29 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 12 Jul 2026 — pendentes ativos
+
+**⛔ REGRA DO RUI (permanente):** SEM imports/processamentos massivos até a app estar 100%.
+Afinação primeiro; volume (reimport, robot em lotes) só com **ordem explícita**. O robot HRC fica
+**em espera por esta regra** (a largada técnica está destrancada, mas o gatilho é do Rui). Ver
+`REGISTO_CONCEITO 2026-07-12` + memória `feedback_no_mass_processing_until_100`.
+
+**Bloco COROAS — fechado; sobram só carimbos à vista (por desenho, decisão do Rui):**
+- **9 cliques "Valor alto"** — confirmar as 9 mãos > 3×base que divergiram no auto-carimbo (sobretudo
+  O Sander $819≈$813, wobble de OCR; lado a lado no painel). 1 clique cada.
+- **11 seats "por rever"** — placa tapada em TODAS as testemunhas (Hero com cartas/all-in por cima);
+  **aguardam um print futuro** com a placa visível. Ficam fora do export (base÷2 trava-as).
+
+**Verificação visual Saúde Import (painel a painel) — em curso:**
+- ✓ Edições · ✓ Coroas · ✓ Suspeitas (7→0).
+- **Marcadas (432)** — responder ao Rui a **origem das tags** (de onde vieram as marcações).
+- **Conflitos 1 + 11 + 3** — por ver.
+- **Timeline** por validar + **estética das cartas** por afinar.
+- **Amostragem final** do conjunto.
+
+**Sizing (em aberto):** **sobre-jam** por ditar (regra do Rui).
+
+---
+
 ## 🟢 REGRA DE LARGADA DESTRANCADA — robot livre para lotes grandes (11 Jul 2026)
 
 **O último bloqueio à largada de lotes grandes ao robot HRC caiu.** A contaminação de edição

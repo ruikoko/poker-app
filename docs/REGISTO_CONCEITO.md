@@ -371,3 +371,20 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   placa. Sobre o gate (14) + Hero $0: **3 fechadas** (placa lida na Gold), **11 ficam por rever**
   (placa tapada em TODAS as capturas). **Números finais: flame-as-crown-scan 14→11; grupo Valor alto
   74→9; 11 seats por rever (nenhuma testemunha).** → `routers/gg_health.py`, `JOURNAL_2026-07-11.md`.
+- 2026-07-12 — **Âncoras validam-se contra VERDADE CONHECIDA** (`#DESANON-HERO-ANCHOR-VALIDATION`).
+  O `is_hero` (baixo-centro) das capturas do Rui **É SEMPRE uma conta HERO_NICKS** (Lauro/koumpo…).
+  Se a Vision marca um vilão como `is_hero`, a âncora do table-SS trocava Hero↔vilão (swap de 2 vias:
+  o Hero fica com o nome do vilão e o vilão com o do Hero) — e, via propagação por hash, **1 leitura
+  má vencia N boas** no torneio (2223abd8→Lauro espalhou-se de 1 capture a 5). As outras salvaguardas
+  (contagem/direção/nicks-distintos) passam porque a **rotação** está certa; só o **ponto de âncora**
+  está errado. Guarda nova: `is_hero` ∉ HERO_NICKS → **alarme, não escreve** (comparação tolerante a
+  truncação da Vision — prefixo, min 3 chars). Princípio geral: *uma âncora só é âncora se se valida
+  contra verdade conhecida; sem isso, um único misread do ponto de partida envenena tudo a jusante.*
+  → `services/table_ss_deanon.py:_vision_hero_nick_is_rui`, `LICOES.md`, `JOURNAL_2026-07-12.md`.
+- 2026-07-12 — **REGRA DO RUI (permanente): SEM imports/processamentos massivos até a app estar 100%.**
+  Afinação da qualidade PRIMEIRO; volume (reimport total, robot HRC em lotes grandes, re-processar
+  massa) só com **ordem explícita** do Rui. A "regra de largada" técnica pode estar destrancada
+  (`edition_contamination=0`), mas o **gatilho é do Rui**, não do backlog. Motivo: cada frente de
+  qualidade aberta (coroas, desanon, âncora) contamina o volume se disparada antes de estar curada —
+  o wipe/reimport é o teste de aceitação, não um passo a apressar. → `PENDENTES.md`, memória
+  `feedback_no_mass_processing_until_100`.
