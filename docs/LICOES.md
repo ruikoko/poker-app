@@ -188,3 +188,19 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   AMBÍGUO, DEPOIS do `hand_window_contained` — convertem quarentena→cola, nunca mudam uma cola
   existente. Prompt endurecido pelos rótulos reais + `reg_open` (a igualdade só é fiável com reg
   fechada; os 6 da quarentena eram capturas de late-reg com contagem parcial, não misreads).
+
+## 11 Jul 2026 (tarde) — correlação ≠ causa (coroas)
+
+- 2026-07-11 — **Problema:** ao explicar o flame-as-crown, propus uma causa VISUAL ("chama e
+  coroa coladas em stacks curtos" / "chama saliente no avatar") a partir de uma correlação
+  (97% das suspeitas em stacks curtos) — **sem ter aberto uma única imagem**. O Rui corrigiu:
+  no layout GG os elementos da mesa **não** mudam de tamanho/posição com o stack; a explicação
+  era especulação. **→ Solução/Lição: correlação NÃO é causa. Uma explicação visual plausível
+  quase entrou nos docs (REGISTO_CONCEITO) sem ninguém ter olhado para um pixel.** Retirada dos
+  registos. Regra: só escrever causa depois de confirmar na imagem/dados; separar SEMPRE o facto
+  (correlação medida) da hipótese (porquê). A guarda protege independentemente da causa — a causa
+  fica para quem olha as imagens.
+- 2026-07-11 — **Êxito colateral:** ao ABRIR as imagens (da BD, não do disco OneDrive) o quadro
+  mudou: as "46-60 suspeitas Gold" eram falsos positivos (coroa fresca base÷2 == VPIP) + omissão
+  $0; o erro real é table-SS (55 seats, 15 mãos), Gold escreve 0 impossíveis. Olhar a imagem
+  desfez uma conclusão errada tirada só dos números.

@@ -86,6 +86,40 @@ def _seats_to_vision_data(seats: list[dict], hero_nick: Optional[str]) -> dict:
     }
 
 
+def _guard_below_half_crowns(players_list, tn) -> int:
+    """#FLAME-AS-CROWN-GUARD (11 Jul) — guarda base÷2 no FUNIL da desanon table-SS.
+    Uma coroa ($ bounty) < base÷2 é IMPOSSÍVEL (a coroa é o KO instantâneo = metade)
+    → a Vision leu a chama (VPIP %). NÃO grava o valor errado: **NULL + marca
+    'por rever'** (`crown_review`), nunca descarte silencioso — visível no painel
+    Coroas. Base = `tournament_summaries.buy_in_bounty` por torneio. Seats com
+    `bounty_confirmed` (exceção manual do Rui) ficam intactos. $0 (omissão) e coroas
+    ≥ base÷2 não são tocados. (A grelha aritmética FICA DE FORA da guarda: medição
+    11 Jul mostrou 6% de coroas reais off-grid por rake → alarmaria falsos.)
+    Devolve nº de coroas anuladas."""
+    if not tn or not players_list:
+        return 0
+    rows = query("SELECT buy_in_bounty FROM tournament_summaries "
+                 "WHERE site='GGPoker' AND tournament_number=%s", (tn,))
+    base = rows[0]["buy_in_bounty"] if rows else None
+    if not base:
+        return 0
+    floor = float(base) / 2.0
+    nulled = 0
+    for p in players_list:
+        if p.get("bounty_confirmed"):
+            continue
+        bv = p.get("bounty_value_usd")
+        try:
+            bv = float(bv) if bv is not None else None
+        except (TypeError, ValueError):
+            bv = None
+        if bv is not None and 0 < bv < floor:
+            p["bounty_value_usd"] = None            # não gravar o valor errado
+            p["crown_review"] = "flame_below_half"  # 'por rever' (painel Coroas)
+            nulled += 1
+    return nulled
+
+
 def _has_usable_stack(seat: dict) -> bool:
     """Banco tem stack numérico > 0 (não 'ALLIN', não None, não 0)."""
     s = seat.get("stack_bb")
@@ -413,6 +447,10 @@ def deanonymize_hand_from_table_ss(
         return {"status": "no_map", "hand_db_id": hand_db_id}
 
     vision_data = _seats_to_vision_data(seats, hero_nick)
+    # #FLAME-AS-CROWN-GUARD — coroa < base÷2 (chama lida como coroa) → NULL + por rever.
+    _guard_below_half_crowns(
+        vision_data["players_list"],
+        h.get("tournament_number") or _hand_tournament_number(hand_db_id))
     enriched_apa = _enrich_all_players_actions(apa_raw, anon_map, vision_data)
 
     # Guarda UNIVERSAL de consistência (#DESANON-SITTING-OUT-NPLUS1): assere o apa enriquecido
