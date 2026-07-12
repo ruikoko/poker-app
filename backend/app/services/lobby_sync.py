@@ -1014,3 +1014,31 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
         "skipped_precedence": skipped_prec, "incoherent": incoherent,
         "still_unresolved": still, "dry_run": dry_run, "items": items,
     }
+
+
+def trigger_import_reconciles(reason: str = "import") -> None:
+    """Cura no core (#HM3-IMPORT-NO-RECONCILE-REDISPATCH) — ao assentar mãos novas, re-corre
+    OS DOIS reconciles (table-SS relink + lobbys pendentes) num DAEMON THREAD robusto. O
+    padrão anterior (`asyncio.create_task` no import_hm3/import_) perdia-se em imports
+    sync-pesados / timeout do request (a leva WN de hoje ficou sem re-match/re-resolve até
+    correr à mão). O daemon thread sobrevive ao ciclo do request E não bloqueia o event
+    loop. Idempotente; defensivo (nunca lança — não parte o import que o dispara). Mesmo
+    padrão de `name_propagation.trigger_name_propagation`."""
+    import threading
+
+    def _run():
+        try:
+            from app.routers.table_ss import relink_orphan_table_ss
+            r = relink_orphan_table_ss()
+            logger.info("[reconciles/%s] table-SS relink: success=%s changed=%s orphan=%s (checked=%s)",
+                        reason, r.get("success"), r.get("changed"), r.get("orphan"), r.get("checked"))
+        except Exception:
+            logger.exception("[reconciles/%s] table-SS relink falhou", reason)
+        try:
+            r = reconcile_lobby_logs()
+            logger.info("[reconciles/%s] lobby reconcile: resolved=%s written=%s still=%s (scanned=%s)",
+                        reason, r.get("resolved"), r.get("written"), r.get("still_unresolved"), r.get("scanned"))
+        except Exception:
+            logger.exception("[reconciles/%s] lobby reconcile falhou", reason)
+
+    threading.Thread(target=_run, daemon=True).start()

@@ -498,40 +498,13 @@ async def import_file(
 
         asyncio.create_task(_attachments_async())
 
-        # ── Trigger re-link SS de mesa órfãs (peça em falta da Fase A) ──
-        # SSs em no_match_to_hand podem agora ligar às mãos HH recém-importadas.
-        from app.routers.table_ss import relink_orphan_table_ss
-
-        async def _table_ss_relink_async():
-            try:
-                res = relink_orphan_table_ss()
-                logger.info(
-                    f"[import_] table_ss relink: {res['linked']} linked, "
-                    f"{res['still_orphan']} still orphan ({res['checked']} checked)"
-                )
-            except Exception as exc:
-                logger.error(f"[import_] table_ss relink falhou: {exc}")
-
-        asyncio.create_task(_table_ss_relink_async())
-
-        # ── Trigger reconcile de lobbys pendentes (tm_not_found/tm_ambiguous) ──
-        # As mãos recém-importadas (TIER 2) podem tornar resolvível um lobby que
-        # ficou por resolver. Re-corre o resolver sobre o vision_json guardado e
-        # escreve o payout. Sem Vision; idempotente. Fire-and-forget.
-        from app.services.lobby_sync import reconcile_lobby_logs
-
-        async def _lobby_reconcile_async():
-            try:
-                res = await asyncio.to_thread(reconcile_lobby_logs)
-                logger.info(
-                    f"[import_] lobby reconcile: resolved={res['resolved']} "
-                    f"written={res['written']} skipped_prec={res['skipped_precedence']} "
-                    f"still={res['still_unresolved']} (scanned={res['scanned']})"
-                )
-            except Exception as exc:
-                logger.error(f"[import_] lobby reconcile falhou: {exc}")
-
-        asyncio.create_task(_lobby_reconcile_async())
+        # ── Cura no core (#HM3-IMPORT-NO-RECONCILE-REDISPATCH) — re-corre OS DOIS
+        # reconciles (table-SS relink + lobbys pendentes) num DAEMON THREAD robusto (o
+        # padrão anterior de `asyncio.create_task` separados perdia-se em imports
+        # sync-pesados/timeout). Sobrevive ao request, não bloqueia o event loop; mesmo
+        # helper do import_hm3. Idempotente + defensivo.
+        from app.services.lobby_sync import trigger_import_reconciles
+        trigger_import_reconciles(reason="import_gg_zip")
 
         # ── Trigger refresh das fronteiras FT (F5) — recomputa o estado por torneio e
         # sincroniza a review/painel. RESPEITA decisões (promoted/confirmed/corrected

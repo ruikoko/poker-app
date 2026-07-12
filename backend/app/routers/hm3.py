@@ -1179,42 +1179,15 @@ async def import_hm3(
 
     asyncio.create_task(_attachments_async())
 
-    # ── Trigger re-link SS de mesa órfãs (peça em falta da Fase A) ──
-    # SSs presas em no_match_to_hand podem agora ligar a mãos recém-importadas.
-    from app.routers.table_ss import relink_orphan_table_ss
-
-    async def _table_ss_relink_async():
-        try:
-            res = relink_orphan_table_ss()
-            logger.info(
-                f"[import_hm3] table_ss relink: {res['linked']} linked, "
-                f"{res['still_orphan']} still orphan ({res['checked']} checked)"
-            )
-        except Exception as exc:
-            logger.error(f"[import_hm3] table_ss relink falhou: {exc}")
-
-    asyncio.create_task(_table_ss_relink_async())
-
-    # ── Trigger reconcile de lobbys pendentes (tm_not_found/tm_ambiguous) ──
-    # #WN-LOBBY-NO-AUTO-RETRY: as mãos WN entram pelo .bat do HM3 (este
-    # caminho), que — ao contrário do import_.py — não re-corria o resolver
-    # sobre os lobbys pendentes. Resultado: lobbys ficavam tm_not_found mesmo
-    # depois de as mãos chegarem. Espelha import_.py: re-corre reconcile_lobby_logs
-    # (sem Vision; usa o vision_json guardado; idempotente). Fire-and-forget.
-    from app.services.lobby_sync import reconcile_lobby_logs
-
-    async def _lobby_reconcile_async():
-        try:
-            res = await asyncio.to_thread(reconcile_lobby_logs)
-            logger.info(
-                f"[import_hm3] lobby reconcile: resolved={res['resolved']} "
-                f"written={res['written']} skipped_prec={res['skipped_precedence']} "
-                f"still={res['still_unresolved']} (scanned={res['scanned']})"
-            )
-        except Exception as exc:
-            logger.error(f"[import_hm3] lobby reconcile falhou: {exc}")
-
-    asyncio.create_task(_lobby_reconcile_async())
+    # ── Cura no core (#HM3-IMPORT-NO-RECONCILE-REDISPATCH) — ao assentar mãos novas,
+    # re-corre OS DOIS reconciles (table-SS relink + lobbys pendentes) num DAEMON THREAD
+    # robusto. O padrão anterior (dois `asyncio.create_task` separados) perdia-se em imports
+    # sync-pesados / timeout do request: a leva WN de hoje (76 mãos HM3) deixou os prints de
+    # mesa em no_match e os lobbys em tm_not_found até se correr o reconcile À MÃO. O daemon
+    # thread sobrevive ao ciclo do request e não bloqueia o event loop. Mesmo padrão do
+    # TS-tardio / name_propagation. Idempotente + defensivo.
+    from app.services.lobby_sync import trigger_import_reconciles
+    trigger_import_reconciles(reason="import_hm3")
 
     # ── Trigger refresh das fronteiras FT (F5) — recomputa/sincroniza a review;
     # respeita decisões; NUNCA escreve tags. Fire-and-forget.
