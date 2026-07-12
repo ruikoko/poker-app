@@ -335,6 +335,34 @@ def test_direcao_por_stacks_sem_botao():
     m2,a2 = build_anon_map_by_hero_button(img_rev, hh_pos, 6, hh_st)
     assert a2 is None and m2 == m                      # stacks revertem -> mesmo mapa
 
+def test_stack_guard_apanha_rotacao():
+    """#DESANON-ROTATION-STACK-GUARD — a Vision leu os seats numa ordem RODADA (nick+stack
+    deslocados após o Hero); a direção fwd/rev não apanha uma rotação de 1 cadeira, o mapa
+    constrói-se, mas os STACKS desmentem-no (cada hash recebe o nick da cadeira ao lado) →
+    alarme, não escreve. É a família da captura 782 do tn 292179612."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"h1": "SB", "h2": "BB", "Hero": "UTG", "h3": "MP", "h4": "CO", "h5": "BTN"}  # 6-max
+    hh_st = {"h1": 10.0, "h2": 20.0, "Hero": 30.0, "h3": 40.0, "h4": 50.0, "h5": 60.0}
+    # wheel=[Hero,h3,h4,h5,h1,h2] stacks [30,40,50,60,10,20]; Vision leu C,D,E,F,B (rodado).
+    img = [{"nick": "Lauro Dermio", "is_hero": True, "stack_bb": 30}, {"nick": "C", "stack_bb": 50},
+           {"nick": "D", "stack_bb": 60}, {"nick": "E", "stack_bb": 10},
+           {"nick": "F", "stack_bb": 20}, {"nick": "B", "stack_bb": 40}]
+    m, a = build_anon_map_by_hero_button(img, hh_pos, 6, hh_st)
+    assert m == {} and a and a.startswith("stack_map_mismatch")
+
+
+def test_stack_guard_deixa_passar_mapa_certo():
+    """Mapa alinhado (stacks batem) → SEM alarme de stacks (não falsos-positivos)."""
+    from app.services.table_ss_deanon import build_anon_map_by_hero_button
+    hh_pos = {"h1": "SB", "h2": "BB", "Hero": "UTG", "h3": "MP", "h4": "CO", "h5": "BTN"}
+    hh_st = {"h1": 10.0, "h2": 20.0, "Hero": 30.0, "h3": 40.0, "h4": 50.0, "h5": 60.0}
+    img = [{"nick": "Lauro Dermio", "is_hero": True, "stack_bb": 30}, {"nick": "B", "stack_bb": 40},
+           {"nick": "C", "stack_bb": 50}, {"nick": "D", "stack_bb": 60},
+           {"nick": "E", "stack_bb": 10}, {"nick": "F", "stack_bb": 20}]
+    m, a = build_anon_map_by_hero_button(img, hh_pos, 6, hh_st)
+    assert a is None and m["Hero"] == "Lauro Dermio"
+
+
 def test_botao_stacks_discordam_alarme():
     """Botão diz uma direcção, stacks dizem outra → ALARME (não escreve)."""
     from app.services.table_ss_deanon import build_anon_map_by_hero_button

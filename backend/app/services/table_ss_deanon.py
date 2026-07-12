@@ -303,6 +303,26 @@ def build_anon_map_by_hero_button(image_seats: list, hh_pos: dict, num_players: 
     # sanidade: nicks distintos (2 seats com o mesmo nome = leitura má) → alarme.
     if len(set(anon_map.values())) != len(anon_map):
         return {}, "duplicate_nicks"
+    # GUARDA DE STACKS (#DESANON-ROTATION-STACK-GUARD, 12 Jul) — os STACKS são o árbitro
+    # objetivo. O mapa alinha nicks→hashes por POSIÇÃO/botão; se a âncora RODOU a roda
+    # (ponto de partida/direção errado), cada nick fica na cadeira ao lado e os stacks
+    # DESMENTEM-NO (o nick atribuído a um hash tem um stack ≠ do stack real desse hash na
+    # HH). Valida o mapa final contra os stacks da HH: se a MAIORIA não bate, é rotação →
+    # alarme, NÃO escreve. Caso real: captura 782 do tn 292179612 rodou 1 cadeira e passou
+    # todas as outras guardas (contagem/direção/nicks-distintos) — só os stacks a apanham.
+    if hh_stacks:
+        ok = tot = 0
+        for k in range(len(hh_wheel)):
+            hh_s = _num_stack(hh_stacks.get(hh_wheel[k]))
+            img_s = _num_stack(img[k].get("stack_bb"))
+            if hh_s is None or img_s is None or hh_s <= 0:
+                continue
+            tot += 1
+            if abs(hh_s - img_s) / hh_s <= 0.15:    # tol. 15% (drift de timing SS↔HH)
+                ok += 1
+        # ≥4 stacks comparáveis e a maioria a desmentir → rotação/mapa torto, não cega.
+        if tot >= 4 and ok / tot < 0.5:
+            return {}, "stack_map_mismatch_%d_of_%d" % (ok, tot)
     return anon_map, None
 
 

@@ -696,7 +696,11 @@ def _apply_decisions_to_map(clean: dict, quarantine: list, decisions: dict):
 
 
 def _upsert_quarantine(conn, tn: str, quarantine: list) -> None:
-    """Regista/atualiza as PENDENTES; NAO toca em linhas ja decididas."""
+    """Regista/atualiza as PENDENTES; NAO toca em linhas ja decididas. PODA as pending
+    STALE — as que ja nao conflituam nesta recomputacao (ex.: a captura podre que gerava
+    N conflitos foi revertida a anonima → os N conflitos caem sozinhos). So apaga
+    decision='pending' (decididas ficam como audit)."""
+    fresh = {(q["kind"], _quar_key(q)) for q in quarantine}
     with conn.cursor() as cur:
         for q in quarantine:
             cur.execute("""
@@ -709,6 +713,14 @@ def _upsert_quarantine(conn, tn: str, quarantine: list) -> None:
                     WHERE name_quarantine_review.decision='pending'
             """, (tn, q["kind"], _quar_key(q),
                   json.dumps(q["candidates"]), json.dumps(q.get("hands", []))))
+        # PODA: pending que já não estão no conjunto fresco (conflito dissolvido).
+        cur.execute("SELECT kind, conflict_key FROM name_quarantine_review "
+                    "WHERE tournament_number=%s AND decision='pending'", (tn,))
+        for r in cur.fetchall():
+            if (r["kind"], r["conflict_key"]) not in fresh:
+                cur.execute("DELETE FROM name_quarantine_review WHERE tournament_number=%s "
+                            "AND kind=%s AND conflict_key=%s AND decision='pending'",
+                            (tn, r["kind"], r["conflict_key"]))
     conn.commit()
 
 
