@@ -268,3 +268,22 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   (`build_anon_map_by_hero_button`, alarme `stack_map_mismatch`), prune de quarentena stale
   (a captura revertida faz cair os N conflitos), detetor de rotação no painel
   (`/names/rotation-scan` → "reverter captura podre"). Ver `REGISTO_CONCEITO 2026-07-12`.
+- 2026-07-13 — **Detetor novo SEM tolerância a truncação = falsos positivos em massa.** O
+  detetor de rotação contava nome TRUNCADO da Vision ('Tobias Schwecht'→'Tobias Schw..') como
+  troca de vizinho → **7 de 9 "capturas podres" eram truncação, não rotação** (7 capturas boas
+  quase revertidas). O **"devo confiar?" do Rui salvou-as** (parou antes de reverter). **→ Lição:
+  qualquer detetor que compare nomes tem de ser tolerante a truncação (prefixo, mín 4 chars —
+  como a guarda da âncora) ANTES de acusar; uma rotação exige nomes DIFERENTES entre si (a,b→b,a),
+  não encurtados.** Fix: `_same_name_trunc` no `/names/rotation-scan` (9→0). Ver `JOURNAL_2026-07-13`.
+- 2026-07-13 — **Nunca oferecer "confirmar" quando TODAS as variantes estão truncadas.** No caso
+  `Andre Figue..` as duas candidatas são cortes do mesmo nome; o "confirmar o forte" gravaria uma
+  grafia arbitrária. **→ Lição: quando o conflito é só truncação (sem nome-cheio para arbitrar), a
+  UI deve oferecer "nome manual / fundir variantes", não "confirmar".** Corolário do stack-árbitro:
+  o stack confirma o LUGAR (mesmo seat) mas não escolhe a GRAFIA — isso é olho humano ou nome manual.
+- 2026-07-13 — **`asyncio.create_task` em imports = padrão FRÁGIL; usar daemon thread.** Os
+  reconciles (table-SS/lobbys) disparados por `asyncio.create_task` no `import_hm3`/`import_`
+  **perdem-se** quando o import é síncrono-pesado ou o request expira — a leva WN de hoje ficou sem
+  re-match até correr à mão. **→ Lição: triggers fire-and-forget pós-import que TÊM de correr usam
+  DAEMON THREAD** (sobrevive ao ciclo do request, não bloqueia o event loop; padrão de
+  `trigger_name_propagation`), não tasks do event loop. Cura: `trigger_import_reconciles`
+  (`#HM3-IMPORT-NO-RECONCILE-REDISPATCH`). Ver `JOURNAL_2026-07-13`.

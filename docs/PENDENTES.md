@@ -1,5 +1,33 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 13 Jul 2026 — pendentes ativos
+
+**⛔ REGRA DO RUI (permanente):** SEM imports/processamentos massivos até a app estar 100%.
+Afinação primeiro; volume (reimport, robot em lotes) só com **ordem explícita**. Ver memória
+`feedback_no_mass_processing_until_100`.
+
+**🔴 POR EXPLICAR (resposta em dívida):**
+- **2 Golds + 1 TS enviados hoje sem assentar** — foram enviados mas não aterraram na BD (o
+  audit da leva viu golds 16/18 e TS 0/1). Investigar porquê (dedup? falha silenciosa? path).
+
+**Triagem/decisões do Rui (worklists e casos abertos):**
+- **Caso `Andre Figue..`** — nome truncado nas DUAS variantes → o stack confirma o lugar mas não
+  escolhe a grafia. **Melhoria de UI pedida:** opção "nome manual / fundir variantes truncadas"
+  no painel Nomes em conflito (o "confirmar o forte" não serve quando ambas estão cortadas).
+- **"Ler todas" das Golds por ler (137)** — clique do Rui (a via existe: painel "Golds por ler").
+- **Marcadas 431 + Gold sem tag ~315** — worklists de triagem manual (CSVs em `_local_only`).
+- **Nomes em conflito** — R Romanovsky ✓ · Gooddecision91 ✓ · SuchAGooodBoy [confirmar] carimbados.
+
+**Consolidado de produto (backlog de UX/limpeza):**
+- Apagar-imagem nas órfãs · rótulo "Remover da mão" · botão não-FT + as **2 mãos de 11/06
+  marcadas não-FT** · duplicados físicos · regra "endpoint nos relatórios" (operações de prod
+  via servidor). 
+
+**Fila HRC:** FECHADA (anti-massivo) com **3 elegíveis de hoje em espera** (GG-6170862643 PKO ·
+GG-6171629160 + GG-6171849992 Vanilla) — libertação manual do Rui (sizing `2026-07-11-3bet-v2`).
+
+---
+
 ## 📌 FECHO DO DIA 12 Jul 2026 — pendentes ativos
 
 **⛔ REGRA DO RUI (permanente):** SEM imports/processamentos massivos até a app estar 100%.
