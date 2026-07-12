@@ -18,6 +18,7 @@ const NEEDS = [
   { key: 'ft_quarantine', label: 'Fronteira FT (rever)', color: '#f59e0b' },
   { key: 'name_quarantine', label: 'Nomes em conflito', color: '#a78bfa' },
   { key: 'lobby_edition', label: 'Edições de lobby (Raiz 2)', color: '#38bdf8' },
+  { key: 'golds_unread', label: 'Golds por ler', color: '#f59e0b' },
   // Migrados/novo (consolidação 11 Jul):
   { key: 'marcadas', label: 'Marcadas/captura', color: '#f59e0b' },
   { key: 'suspeitas', label: 'Mãos suspeitas', color: '#ef4444' },
@@ -32,7 +33,7 @@ const IMPORTP = [
   { key: 'import', label: 'Saúde do Import', color: '#38bdf8' },
 ]
 // Grupos migrados que renderizam uma página inteira (não a lista de imagens).
-const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas'])
+const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread'])
 const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY, ...IMPORTP].map(g => [g.key, g.label]))
 // As 11 tags canónicas (Ação 1) — espelho de _TAG_BUTTONS no backend.
 const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
@@ -952,6 +953,96 @@ function CoroasPanel() {
   )
 }
 
+// Painel "Golds por ler" — mãos com Gold ligada mas vision_done=false (a leitura
+// nunca correu). Ler individual ("Ler agora") ou em lote ("Ler todas", com confirmação
+// — a regra anti-massivo: o botão é do Rui, nada corre sozinho).
+function GoldsUnreadPanel() {
+  const [data, setData] = useState(null)
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(null)   // hand_id em curso, ou '__all__'
+  const load = () => ggHealth.goldsUnread().then(setData).catch(e => setMsg('Erro: ' + e.message))
+  useEffect(() => { load() }, [])
+  const fmt = (iso) => iso ? String(iso).replace('T', ' ').slice(0, 16) : '—'
+
+  const readOne = async (hid) => {
+    setBusy(hid); setMsg('')
+    try {
+      const r = await ggHealth.goldVisionRun([hid])
+      const x = (r.results || [])[0] || {}
+      setMsg(x.mm === 'position_v3'
+        ? `${hid}: leu ${x.n_names} nome(s) → ${x.mm}, hero=${x.hero}.`
+        : `${hid}: sem nomes (${x.status || x.mm || 'alarme'}) — fica anónima.`)
+      load()
+    } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(null) }
+  }
+
+  const readAll = async () => {
+    const ids = (data?.hands || []).map(h => h.hand_id)
+    if (!ids.length) return
+    if (!window.confirm(`Ler TODAS as ${ids.length} Golds por ler? (${ids.length} chamadas Vision, uns minutos)`)) return
+    setBusy('__all__'); setMsg('A ler…')
+    let named = 0, done = 0
+    try {
+      for (let i = 0; i < ids.length; i += 10) {
+        const r = await ggHealth.goldVisionRun(ids.slice(i, i + 10))
+        for (const x of (r.results || [])) { done++; if (x.mm === 'position_v3') named++ }
+        setMsg(`Lidas ${done}/${ids.length} · nomearam ${named}…`)
+      }
+      setMsg(`Concluído: ${named}/${done} nomearam. As restantes ficam anónimas honestas.`)
+      load()
+    } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(null) }
+  }
+
+  if (!data) return <div style={{ color: 'var(--muted)' }}>A carregar…</div>
+  const hands = data.hands || []
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+        <b style={{ fontSize: 15 }}>Golds por ler</b>
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>{hands.length} mão(s) — a Gold existe mas a leitura nunca correu</span>
+        <button style={{ ...btn, background: hands.length ? '#16a34a' : undefined, color: hands.length ? '#fff' : undefined, fontWeight: 700, opacity: hands.length ? 1 : 0.4 }}
+          disabled={!hands.length || busy} onClick={readAll}>Ler todas ({hands.length})</button>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, maxWidth: 760 }}>
+        A Vision destas Golds nunca correu (falhou/nunca disparou no funil de ingest, sem recuperação).
+        Ler = extrai nomes + desanonimiza pela via premium (position_v3). As que não lerem ficam anónimas honestas.
+      </div>
+      {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13 }}>{msg}</div>}
+      <div style={{ ...card, overflow: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+          <thead><tr>
+            {['Mão', 'Data/hora', 'Torneio', 'SS?', 'Estado', ''].map(h =>
+              <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)', borderBottom: '1px solid #30363d', whiteSpace: 'nowrap' }}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {hands.map(h => (
+              <tr key={h.hand_id}>
+                <td style={{ padding: '5px 8px', fontFamily: mono }}>
+                  <Link to={`/hand/${h.id}`} style={{ color: '#60a5fa', textDecoration: 'none' }}>{h.hand_id}</Link>
+                </td>
+                <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmt(h.played_at)}</td>
+                <td style={{ padding: '5px 8px' }}>{h.tournament_name || '—'}</td>
+                <td style={{ padding: '5px 8px' }}>{h.has_ss ? '✓' : '—'}</td>
+                <td style={{ padding: '5px 8px' }}>
+                  {h.anon
+                    ? <span style={{ color: '#f59e0b', fontWeight: 600 }}>mão anónima</span>
+                    : <span style={{ color: '#22c55e' }}>já com nomes</span>}
+                </td>
+                <td style={{ padding: '5px 8px' }}>
+                  <button style={{ ...btn }} disabled={busy} onClick={() => readOne(h.hand_id)}>
+                    {busy === h.hand_id ? '…' : 'Ler agora'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {hands.length === 0 && <tr><td colSpan={6} style={{ padding: 16, color: '#22c55e' }}>✓ Nenhuma Gold por ler.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function GGHealth() {
   const [sum, setSum] = useState(null)
   const [extra, setExtra] = useState({})   // contagens dos painéis migrados/novo
@@ -1146,6 +1237,7 @@ export default function GGHealth() {
            group === 'import' ? <ImportHealthPage /> :
            group === 'marcadas' ? <CaptureTriagePage /> :
            group === 'suspeitas' ? <SuspiciousHandsPage /> :
+           group === 'golds_unread' ? <GoldsUnreadPanel /> :
            group === 'coroas' ? <CoroasPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (

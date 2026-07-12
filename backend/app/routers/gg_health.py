@@ -210,6 +210,13 @@ def summary(current_user=Depends(require_auth)):
     except Exception:
         name_quarantine = 0
 
+    # "Golds por ler": mãos GG com Gold ligada mas vision_done=false (a leitura nunca
+    # correu / falhou em background sem recuperação — a fresta do funil). Defensivo → 0.
+    try:
+        golds_unread = _golds_unread_count()
+    except Exception:
+        golds_unread = 0
+
     return {
         "total_images": len(imgs),
         "total_hands_with_image": len(hands_with_img),
@@ -220,12 +227,65 @@ def summary(current_user=Depends(require_auth)):
             "tag_conflicts": n("tag_conflicts"),
             "ft_quarantine": ft_quarantine,
             "name_quarantine": name_quarantine,
+            "golds_unread": golds_unread,
         },
         "healthy": {
             "gold_matched": n("gold_matched"),
             "it_matched": n("it_matched"),
         },
     }
+
+
+# ── "Golds por ler" — mãos com Gold ligada mas vision_done=false ──────────────
+_GOLDS_UNREAD_WHERE = (
+    "h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+    "AND e.entry_type='screenshot' AND (e.raw_json->>'img_b64') IS NOT NULL "
+    "AND (e.raw_json->>'vision_done')::boolean = false"
+)
+
+
+def _golds_unread_count() -> int:
+    r = query("SELECT COUNT(*) c FROM hands h JOIN entries e ON e.id = h.entry_id "
+              "WHERE " + _GOLDS_UNREAD_WHERE)
+    return int(r[0]["c"]) if r else 0
+
+
+def _golds_unread_list() -> list[dict]:
+    rows = query(
+        "SELECT h.id, h.hand_id, h.played_at, h.tournament_name, h.tournament_number, "
+        "       h.tournament_format, e.file_name, "
+        "       (h.context_table_ss_id IS NOT NULL) AS has_ss, "
+        "       (h.player_names->>'match_method') AS mm "
+        "  FROM hands h JOIN entries e ON e.id = h.entry_id "
+        " WHERE " + _GOLDS_UNREAD_WHERE +
+        " ORDER BY h.played_at DESC NULLS LAST")
+    out = []
+    for r in rows:
+        mm = r.get("mm")
+        out.append({
+            "id": r["id"],
+            "hand_id": r["hand_id"],
+            "played_at": r["played_at"].isoformat() if r.get("played_at") else None,
+            "tournament_name": r.get("tournament_name"),
+            "tournament_number": r.get("tournament_number"),
+            "tournament_format": r.get("tournament_format"),
+            "has_ss": bool(r.get("has_ss")),
+            # anónima = ainda sem nomes (placeholder/sem match real) — a leitura da Gold
+            # dá-lhe nomes; nas outras a Gold só melhora/confirma.
+            "anon": mm in (None, "", "discord_placeholder_no_hh"),
+            "file_name": r.get("file_name"),
+        })
+    return out
+
+
+@router.get("/golds-unread")
+def golds_unread(current_user=Depends(require_auth_or_api_key)):
+    """Painel "Golds por ler" — mãos GG com Gold ligada cuja Vision NUNCA correu
+    (`vision_done=false` + img presente). É a fresta do funil (a Vision de background
+    falhou/nunca disparou e nada as re-apanha). A UI lê cada uma (`gold-vision-run`).
+    Read-only aqui."""
+    lst = _golds_unread_list()
+    return {"count": len(lst), "hands": lst}
 
 
 @router.get("/crowns")

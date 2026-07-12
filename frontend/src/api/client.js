@@ -376,6 +376,8 @@ export const ggHealth = {
     hand_ids: handIds,
     ...(Array.isArray(tagOrTags) ? { tags: tagOrTags } : { tag: tagOrTags }),
   }),
+  goldsUnread: () => req('GET', '/gg-health/golds-unread'),
+  goldVisionRun: (handIds) => req('POST', '/screenshots/gold-vision-run', { hand_ids: handIds }),
   // F4 — ensaio/quarentena da fronteira FT.
   ftPreview: (tn) => req('GET', `/gg-health/ft/preview${tn ? `?tn=${encodeURIComponent(tn)}` : ''}`),
   ftConfirm: (tn) => req('POST', '/gg-health/ft/confirm', { tournament_number: tn }),
