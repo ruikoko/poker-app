@@ -65,6 +65,7 @@ def _gold_rows() -> list[dict]:
     rows = query(
         f"""SELECT e.id AS ss_id, e.file_name AS fname, h.id AS hand_db_id,
                    h.hand_id, h.discord_tags, h.hm3_tags,
+                   h.tournament_name, h.tournament_format, h.played_at,
                    (h.player_names->>'match_method') AS mm
               FROM entries e JOIN hands h ON h.entry_id = e.id
              WHERE e.entry_type = 'screenshot'
@@ -73,6 +74,7 @@ def _gold_rows() -> list[dict]:
     out = []
     for r in rows:
         m = _FNUM_GOLD.search(r.get("fname") or "")
+        mm = r.get("mm")
         out.append({
             "source": "gold",
             "image_url": f"/api/screenshots/image/{r['ss_id']}",
@@ -85,6 +87,12 @@ def _gold_rows() -> list[dict]:
             "tags": list(r.get("discord_tags") or []) + list(r.get("hm3_tags") or []),
             "conflicts": _tag_conflicts(r.get("discord_tags"), r.get("hm3_tags")),
             "has_tag": bool(r.get("discord_tags") or r.get("hm3_tags")),
+            # Metadados p/ triar em lote (nome/data/formato) sem depender só da imagem.
+            "tournament_name": r.get("tournament_name"),
+            "tournament_format": r.get("tournament_format"),
+            "played_at": r["played_at"].isoformat() if r.get("played_at") else None,
+            # anónima = ainda sem nomes (a tag entra na mesma; os nomes vêm depois).
+            "anon": mm in (None, "", "discord_placeholder_no_hh"),
             "state": "casou",
         })
     return out
@@ -378,10 +386,12 @@ def crowns_to_verify(current_user=Depends(require_auth)):
 def list_images(
     group: str = Query("all"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(60, ge=1, le=300),
+    page_size: int = Query(60, ge=1, le=3000),
     current_user=Depends(require_auth),
 ):
-    """Lista POR IMAGEM de um grupo/cenário (read-only, paginada)."""
+    """Lista POR IMAGEM de um grupo/cenário (read-only, paginada). O teto alto (3000)
+    serve o "Gold sem tag", que carrega TUDO para os filtros + seleção-em-lote operarem
+    sobre o grupo inteiro (a lista devolve URLs, não base64 — é leve)."""
     pred = _group_pred(group)
     if pred is None:
         return {"error": f"grupo inválido: {group!r}", "total": 0, "images": []}

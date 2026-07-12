@@ -53,6 +53,11 @@ const card = { background: 'var(--card,#161b22)', border: '1px solid var(--borde
 const btn = { background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 5, cursor: 'pointer', fontSize: 12, padding: '3px 8px' }
 const mono = "'Fira Code',monospace"
 const inp = { fontFamily: mono, fontSize: 12, background: '#0b0d13', color: '#c9d1d9', border: '1px solid #30363d', borderRadius: 5, padding: '3px 6px' }
+// data/hora (ISO Lisboa-naive) → "MM-DD HH:MM"; formato PKO vs Vanilla (tudo o que
+// não é Vanilla é bounty/PKO p/ o filtro binário).
+const fmtDT = (iso) => iso ? String(iso).replace('T', ' ').slice(5, 16) : '—'
+const isPKO = (fmt) => !!fmt && !/vanilla/i.test(fmt)
+const isSpeedRacer = (name) => !!name && /speed\s*racer/i.test(name)
 
 function Panel({ g, value, onClick }) {
   return (
@@ -101,6 +106,17 @@ function Row({ im, group, onZoom, selected, onToggleSel, onLink, onResolve = () 
       {im.hand_db_id
         ? <Link to={`/hand/${im.hand_db_id}`} style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#60a5fa', minWidth: 130, textDecoration: 'none' }}>{im.hand_id}</Link>
         : <span style={{ fontFamily: "'Fira Code',monospace", fontSize: 12, color: '#64748b', minWidth: 130 }}>sem mão</span>}
+      {/* Metadados de triagem (só golds enriquecidos): torneio · data/hora · formato · anónima. */}
+      {im.tournament_name != null && (
+        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 200, gap: 2 }}>
+          <span style={{ fontSize: 11, color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220 }}>{im.tournament_name || '—'}</span>
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 10, color: '#64748b' }}>{fmtDT(im.played_at)}</span>
+            {im.tournament_format && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3, color: isPKO(im.tournament_format) ? '#fca5a5' : '#93c5fd', background: isPKO(im.tournament_format) ? 'rgba(239,68,68,0.12)' : 'rgba(59,130,246,0.12)' }}>{isPKO(im.tournament_format) ? 'PKO' : 'Vanilla'}</span>}
+            {im.anon && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3, color: '#fbbf24', background: 'rgba(245,158,11,0.12)' }}>mão anónima</span>}
+          </span>
+        </span>
+      )}
       <NumBadge im={im} />
       <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
         {(im.tags || []).map((t, i) => <span key={i} style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.12)', padding: '1px 6px', borderRadius: 4 }}>{t}</span>)}
@@ -1055,6 +1071,7 @@ export default function GGHealth() {
   const [zoom, setZoom] = useState(null)
   const [selected, setSelected] = useState(new Set())   // Ação 1: hand_ids marcados
   const [selectedTags, setSelectedTags] = useState(new Set())  // Ação 1: tags em toggle (multi)
+  const [gFilter, setGFilter] = useState({ fmt: 'all', sr: 'all', trn: 'all', date: 'all' })  // filtros do "Gold sem tag"
   const [msg, setMsg] = useState(null)
   const [swapResolve, setSwapResolve] = useState(null)  // Fase 1-A: im em resolução
   // Pesquisa GLOBAL por nº de mão (só frontend: usa group=all, filtra localmente).
@@ -1107,16 +1124,18 @@ export default function GGHealth() {
   useEffect(() => {
     if (!group || group === 'ft_quarantine' || group === 'name_quarantine' || group === 'lobby_edition' || MIGRATED.has(group)) { setList(null); return }
     setList(null)
-    ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
+    // gold_no_tag: carrega TUDO (page_size grande) → filtros + "selecionar todos os
+    // filtrados" operam sobre o grupo inteiro, não só a página atual.
+    ggHealth.list(group, page, group === 'gold_no_tag' ? 2000 : undefined).then(setList).catch(e => setErr(e.message))
   }, [group, page])
 
-  const open = (k) => { setGroup(k); setPage(1); setSelected(new Set()); setSelectedTags(new Set()); setMsg(null) }
+  const open = (k) => { setGroup(k); setPage(1); setSelected(new Set()); setSelectedTags(new Set()); setGFilter({ fmt: 'all', sr: 'all', trn: 'all', date: 'all' }); setMsg(null) }
   // Número do painel: summary (needs/healthy) → senão as contagens extra (migrados/coroas).
   const countOf = (k) => (sum?.needs_you?.[k] ?? sum?.healthy?.[k] ?? extra[k])
   const toggleTag = (t) => setSelectedTags(s => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n })
   const reload = () => {
     loadSummary()
-    ggHealth.list(group, page).then(setList).catch(e => setErr(e.message))
+    ggHealth.list(group, page, group === 'gold_no_tag' ? 2000 : undefined).then(setList).catch(e => setErr(e.message))
   }
   const toggleSel = (hid) => setSelected(s => {
     const n = new Set(s); n.has(hid) ? n.delete(hid) : n.add(hid); return n
@@ -1167,6 +1186,23 @@ export default function GGHealth() {
   }
 
   // Fase 1-A — a suspeita resolve-se agora no SwapModal (escolher a dona certa).
+
+  // Filtros do "Gold sem tag" (combináveis) — operam sobre o grupo inteiro (carregado
+  // todo). As opções dos dropdowns saem das imagens presentes.
+  const _goldImgs = list?.images || []
+  const _matchG = (im) => {
+    if (gFilter.fmt === 'pko' && !isPKO(im.tournament_format)) return false
+    if (gFilter.fmt === 'vanilla' && isPKO(im.tournament_format)) return false
+    if (gFilter.sr === 'yes' && !isSpeedRacer(im.tournament_name)) return false
+    if (gFilter.sr === 'no' && isSpeedRacer(im.tournament_name)) return false
+    if (gFilter.trn !== 'all' && im.tournament_name !== gFilter.trn) return false
+    if (gFilter.date !== 'all' && (im.played_at || '').slice(0, 10) !== gFilter.date) return false
+    return true
+  }
+  const gFiltered = group === 'gold_no_tag' ? _goldImgs.filter(_matchG) : _goldImgs
+  const gTournaments = [...new Set(_goldImgs.map(im => im.tournament_name).filter(Boolean))].sort()
+  const gDates = [...new Set(_goldImgs.map(im => (im.played_at || '').slice(0, 10)).filter(Boolean))].sort().reverse()
+  const selectAllFiltered = () => setSelected(new Set(gFiltered.map(im => im.hand_id)))
 
   return (
     <div style={{ padding: 24, maxWidth: 1200 }}>
@@ -1272,6 +1308,30 @@ export default function GGHealth() {
               </div>
             </div>
           )}
+          {/* Filtros de triagem em lote (só "Gold sem tag") — combináveis, sobre o grupo todo. */}
+          {group === 'gold_no_tag' && list && (
+            <div style={{ ...card, padding: '8px 12px', marginBottom: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>Filtros:</span>
+              <select value={gFilter.fmt} onChange={e => setGFilter(f => ({ ...f, fmt: e.target.value }))} style={inp}>
+                <option value="all">Formato: todos</option><option value="pko">PKO</option><option value="vanilla">Vanilla</option>
+              </select>
+              <select value={gFilter.sr} onChange={e => setGFilter(f => ({ ...f, sr: e.target.value }))} style={inp}>
+                <option value="all">Speed Racer: todos</option><option value="yes">só Speed Racer</option><option value="no">sem Speed Racer</option>
+              </select>
+              <select value={gFilter.trn} onChange={e => setGFilter(f => ({ ...f, trn: e.target.value }))} style={{ ...inp, maxWidth: 260 }}>
+                <option value="all">Torneio: todos</option>
+                {gTournaments.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select value={gFilter.date} onChange={e => setGFilter(f => ({ ...f, date: e.target.value }))} style={inp}>
+                <option value="all">Data: todas</option>
+                {gDates.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <span style={{ fontSize: 11, color: '#93c5fd', fontWeight: 600 }}>{gFiltered.length} filtrada(s) · {selected.size} selec.</span>
+              <button style={{ ...btn, background: gFiltered.length ? '#2563eb' : undefined, color: gFiltered.length ? '#fff' : undefined }}
+                onClick={selectAllFiltered} disabled={!gFiltered.length}>Selecionar todos os filtrados</button>
+              {selected.size > 0 && <button style={btn} onClick={() => setSelected(new Set())}>Limpar seleção</button>}
+            </div>
+          )}
           {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13,
             color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd',
             borderColor: /erro/i.test(msg) ? '#ef4444' : 'var(--border,#30363d)' }}>{msg}</div>}
@@ -1279,12 +1339,12 @@ export default function GGHealth() {
           {!list ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
             <>
               <div style={{ ...card, overflow: 'hidden' }}>
-                {list.images.map((im, i) => (
-                  <Row key={i} im={im} group={group} onZoom={setZoom}
+                {(group === 'gold_no_tag' ? gFiltered : list.images).map((im, i) => (
+                  <Row key={im.hand_id || i} im={im} group={group} onZoom={setZoom}
                     selected={selected} onToggleSel={toggleSel}
                     onLink={linkOrphan} onResolve={setSwapResolve} />
                 ))}
-                {list.images.length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhuma imagem neste grupo.</div>}
+                {(group === 'gold_no_tag' ? gFiltered : list.images).length === 0 && <div style={{ padding: 16, color: '#22c55e' }}>✓ Nenhuma imagem neste grupo{group === 'gold_no_tag' ? ' (com estes filtros)' : ''}.</div>}
               </div>
               {list.total > list.page_size && (
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
