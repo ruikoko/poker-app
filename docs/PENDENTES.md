@@ -1,5 +1,35 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO INTERCALAR 14 Jul 2026 — Resultados HRC (em curso)
+
+**★ Implementação da secção "Resultados HRC" EM CURSO.** Caderno de encargos ditado pelo Rui
+(estilo GTO Wizard; paleta fold-azul/call-verde/raise-amarelo/**3bet-vermelho**/**allin-laranja**;
+página principal 3 cartões + painel colapsável **por instância de torneio**; página da mão com
+barra de posições clicável + stacks reais + **coroas $ por cima** (PKO), grelha 13×13, navegação
+da árvore, **abre neutra**, **EV perdido discreto em % de equity ICM** — não $; botão HRC amarelo
+nas listas). **Protótipo validado à primeira** (`_local_only/proto_hrc_resultados/`, dados reais,
+não commitado). Detalhe: `docs/JOURNAL_2026-07-14.md`. **Falta: implementar na app.**
+
+**Decisões de arquitetura já registadas:** árvore **servida por API** por-clique (zip ~32 MB/mão;
+`build_verify_tree` já lazy); "% left" do Cartão 1 = **slot** (ligar a `players_left`); EV = **%
+equity de torneio (ICM)**, comparável entre torneios (recomendado — confirmar).
+
+**🔴 Respostas em dívida:**
+- **(a) SB sem all-in / §19 BvB ≤30 — RESPONDIDA, falta DECISÃO do Rui.** §19 **está** no caminho
+  da SB (unificada, não é fresta); sem jam porque mede pela stack **INDIVIDUAL** (37.8bb>30), não
+  a efetiva (24bb). Decisão: **(A)** deixar como está · **(B)** em BvB (heads-up, sem risco pt29)
+  medir por efetiva `min(SB,BB)` — obriga template + `hrc_node_offset.count_lines_for_position` em
+  **lockstep** + smoke. Ver `JOURNAL_2026-07-14` + `REGRAS_NEGOCIO §19`.
+- **(b) saves `.hrcz` no Beelink (botão "Abrir no HRC")** — hoje **não existem** (só Complete
+  Export = dados, não reabrível). Opções (a) save nativo / (b) re-solve / **(c) testar se o HRC
+  importa o Complete Export** (recomendado, só o Rui testa).
+- **(c) 2 Golds + 1 TS de 13 Jul sem assentar** — herdado do fecho 13 Jul (abaixo); investigar
+  (dedup / falha silenciosa / path).
+
+**Worklists de triagem do Rui (continuam):** "Ler todas" das Golds por ler (**137**) · Marcadas
+(**431**) · Gold sem tag (**~315**) · caso **`Andre Figue..`** (nome truncado nas 2 variantes →
+melhoria de UI "nome manual / fundir variantes truncadas").
+
 ## 📌 FECHO DO DIA 13 Jul 2026 — pendentes ativos
 
 **⛔ REGRA DO RUI (permanente):** SEM imports/processamentos massivos até a app estar 100%.
