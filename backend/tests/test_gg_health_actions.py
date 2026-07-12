@@ -72,6 +72,23 @@ def test_tag_multi_idempotent_skips_existing():
     assert res["applied"] == 1 and res["hands"] == 1               # só 'nota' era nova
 
 
+# ── detetor de rotação: truncação ≠ troca ────────────────────────────────────
+def test_same_name_trunc_tolera_truncacao():
+    f = gg_health._same_name_trunc
+    # truncação da Vision = MESMO nome (não é troca de vizinho)
+    assert f("Tobias Schwecht", "Tobias Schw..") is True
+    assert f("Tobias Schw..", "Tobias Schwecht") is True
+    assert f("R Romanovsk", "R Romanovsky") is True
+    assert f("ciupy1234", "ciupy1234") is True
+    # nomes GENUINAMENTE diferentes = potencial troca
+    assert f("msxiter", "ciupy1234") is False
+    assert f("mufasa", "R Romanovsk") is False
+    assert f("166X", "Pedro Borges") is False
+    # prefixo curto (<4 chars) NÃO casa por acaso ('Ann' prefixo de 'Anna' mas len 3)
+    assert f("Ann", "Anna") is False
+    assert f(None, "x") is False and f("", "y") is False
+
+
 # ── untag — remover tag espúria (oposto de tagar) ────────────────────────────
 def test_untag_removes_selected_tag():
     captured = {}

@@ -1155,6 +1155,20 @@ def np_hand_status(hand_id: str = Query(...), current_user=Depends(require_auth)
     return {"in_conflict": bool(rows), "conflicts": [dict(r) for r in rows]}
 
 
+def _same_name_trunc(a, b) -> bool:
+    """Dois nomes são o MESMO tolerando a TRUNCAÇÃO da Vision ('Tobias Schw..' ==
+    'Tobias Schwecht'). Uma rotação exige nomes DIFERENTES entre si (a,b → b,a); um nome
+    encurtado de si próprio NÃO é troca de vizinho. Prefixo em qualquer sentido, mín 4
+    chars (evita casar por acaso). Mesmo espírito da guarda da âncora (_vision_hero_nick_is_rui)."""
+    x = (a or "").strip().lower().rstrip(".").strip()
+    y = (b or "").strip().lower().rstrip(".").strip()
+    if not x or not y:
+        return False
+    if x == y:
+        return True
+    return min(len(x), len(y)) >= 4 and (x.startswith(y) or y.startswith(x))
+
+
 @router.get("/names/rotation-scan")
 def names_rotation_scan(current_user=Depends(require_auth_or_api_key)):
     """Detetor de ROTAÇÃO (família da captura 782). N conflitos de nomes num torneio podem
@@ -1187,9 +1201,10 @@ def names_rotation_scan(current_user=Depends(require_auth_or_api_key)):
                 if k in ("_meta", "Hero") or not isinstance(v, dict):
                     continue
                 nm, st = v.get("real_name"), strong.get(k)
-                if nm and st and nm != st:
+                # tolerante a truncação: 'Tobias Schw..' == 'Tobias Schwecht' NÃO é troca.
+                if nm and st and not _same_name_trunc(nm, st):
                     confl.append({"hash": k, "read": nm, "strong": st})
-            if len(confl) >= 3:            # cadeia de rotação (≥3 hashes)
+            if len(confl) >= 3:            # cadeia de rotação (≥3 hashes DIFERENTES)
                 rotten.append({"tournament_number": tn, "hand_id": r["hand_id"],
                                "match_method": r["mm"], "n_conflicts": len(confl),
                                "conflicts": confl})
