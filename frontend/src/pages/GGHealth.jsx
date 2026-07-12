@@ -659,6 +659,7 @@ function NameConflictCard({ it, busy, onChoose, onMerge, onDismiss, onReentry, o
 function NamePropagationPanel() {
   const [agg, setAgg] = useState(null)
   const [quar, setQuar] = useState(null)
+  const [rotten, setRotten] = useState(null)   // capturas rotacionadas (≥3 conflitos)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [zoom, setZoom] = useState(null)
@@ -666,6 +667,7 @@ function NamePropagationPanel() {
   const load = () => {
     ggHealth.namesQuarantine().then(r => setQuar(r.items || [])).catch(e => setMsg('Erro: ' + e.message))
     ggHealth.namesApply(null, true).then(setAgg).catch(() => {})   // dry-run agregado leve
+    ggHealth.namesRotationScan().then(r => setRotten(r.rotten || [])).catch(() => {})
   }
   useEffect(() => { load() }, [])
 
@@ -682,6 +684,13 @@ function NamePropagationPanel() {
   const onDismiss = wrap(async (it) => { await ggHealth.namesDismiss({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key }); setMsg('Dispensado — fica branco.') })
   const onReentry = wrap(async (it) => { await ggHealth.namesReentry({ tournament_number: it.tournament_number, kind: it.kind, conflict_key: it.conflict_key, chosen_name: it.conflict_key }); setMsg('Re-entrada confirmada — o nome fica nos dois lugares.') })
   const onAttach = wrap(async (handId, file) => { const r = await tableSs.attachToHand(file, handId); setMsg(`Imagem anexada a ${handId} (${r.result || 'ok'}).`) })
+  // Rotação: 1 captura podre → 1 ação. Reverter à anónima + re-propagar (os N conflitos
+  // caem sozinhos, o forte re-preenche do mapa correto). NÃO confirmar por hash.
+  const onRevertRotten = wrap(async (hid) => {
+    await tableSs.revertToAnon(hid)
+    await ggHealth.namesApply()
+    setMsg(`Captura rotacionada ${hid} revertida à anónima — conflitos re-propagados do mapa forte.`)
+  })
 
   return (
     <div>
@@ -703,6 +712,31 @@ function NamePropagationPanel() {
       </div>
       {msg && <div style={{ ...card, padding: '8px 12px', marginBottom: 10, fontSize: 13,
         color: /erro/i.test(msg) ? '#fca5a5' : '#93c5fd' }}>{msg}</div>}
+      {/* Detetor de ROTAÇÃO — N conflitos = 1 captura podre. 1 ação (reverter), não N confirmações. */}
+      {rotten && rotten.length > 0 && (
+        <div style={{ ...card, padding: 12, marginBottom: 12, borderColor: '#b45309', background: 'rgba(180,83,9,0.08)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>
+            ⟳ Rotação suspeita — {rotten.length} captura(s) podre(s)
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, maxWidth: 720 }}>
+            Estes conflitos vêm de UMA captura cuja âncora <b>rodou a roda</b> (cada seat recebeu o nick do vizinho;
+            os stacks desmentem-na). NÃO confirmes por hash — <b>reverte a captura podre</b> e o forte re-preenche do mapa correto.
+          </div>
+          {rotten.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '6px 0', borderTop: i ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
+              <span style={{ fontFamily: mono, fontSize: 12, color: '#fca5a5', fontWeight: 700 }}>{r.hand_id}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>tn {r.tournament_number} · mm={r.match_method} · <b style={{ color: '#fca5a5' }}>{r.n_conflicts}</b> hashes trocados</span>
+              <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: mono }}>
+                {(r.conflicts || []).slice(0, 4).map(c => `${c.hash}: ${c.read}→${c.strong}`).join(' · ')}{r.conflicts.length > 4 ? ' …' : ''}
+              </span>
+              <button disabled={busy} style={{ ...btn, marginLeft: 'auto', background: '#b91c1c', color: '#fff', fontWeight: 700 }}
+                onClick={() => onRevertRotten(r.hand_id)} title="Reverte a captura à anónima + re-propaga do mapa forte">
+                Reverter captura podre
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {!quar ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> :
         quar.length === 0 ? <div style={{ ...card, padding: 16, color: '#22c55e' }}>✓ Sem nomes em conflito.</div> : (
           <>

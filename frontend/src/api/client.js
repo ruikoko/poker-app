@@ -378,6 +378,7 @@ export const ggHealth = {
   }),
   goldsUnread: () => req('GET', '/gg-health/golds-unread'),
   goldVisionRun: (handIds) => req('POST', '/screenshots/gold-vision-run', { hand_ids: handIds }),
+  namesRotationScan: () => req('GET', '/gg-health/names/rotation-scan'),
   // F4 — ensaio/quarentena da fronteira FT.
   ftPreview: (tn) => req('GET', `/gg-health/ft/preview${tn ? `?tn=${encodeURIComponent(tn)}` : ''}`),
   ftConfirm: (tn) => req('POST', '/gg-health/ft/confirm', { tournament_number: tn }),
@@ -507,6 +508,7 @@ export const tableSs = {
   },
   // Ação 2 — liga a captura à mão escolhida (handId=null → desliga). Gold manda.
   link: (ssId, handId) => req('POST', `/table-ss/${ssId}/link`, { hand_id: handId }),
+  revertToAnon: (handId) => req('POST', '/table-ss/revert-to-anon', { hand_id: handId }),
   // Ação 3 — decisão sobre suspeita de troca: 'accept' | 'reject' | 'review'.
   swapReview: (ssId, decision) => req('POST', `/table-ss/${ssId}/swap-review`, { decision }),
   // Fase 1-A — as 2 mãos candidatas (pré-visualização) + escolher a dona (com dry-run).

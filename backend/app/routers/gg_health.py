@@ -1155,6 +1155,47 @@ def np_hand_status(hand_id: str = Query(...), current_user=Depends(require_auth)
     return {"in_conflict": bool(rows), "conflicts": [dict(r) for r in rows]}
 
 
+@router.get("/names/rotation-scan")
+def names_rotation_scan(current_user=Depends(require_auth_or_api_key)):
+    """Detetor de ROTAÇÃO (família da captura 782). N conflitos de nomes num torneio podem
+    vir de UMA captura podre: a âncora rodou a roda → cada seat recebeu o nick do vizinho.
+    Para cada tn com conflitos pending, constrói o mapa FORTE (position_v3) e acha as mãos
+    cuja de-anon (não-position_v3) discorda do forte em ≥3 hashes = captura rotacionada. A
+    cura é UMA ação — reverter essa captura — não N × 'confirmar o forte'. Read-only."""
+    tns = [r["tournament_number"] for r in query(
+        "SELECT DISTINCT tournament_number FROM name_quarantine_review WHERE decision='pending'")]
+    rotten = []
+    for tn in tns:
+        strong = {}
+        for r in query(
+            "SELECT all_players_actions apa FROM hands WHERE tournament_number=%s "
+            "AND site='GGPoker' AND (player_names->>'match_method')='position_v3'", (tn,)):
+            apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+            for k, v in apa.items():
+                if k not in ("_meta", "Hero") and isinstance(v, dict) and v.get("real_name"):
+                    strong.setdefault(k, v["real_name"])
+        if not strong:
+            continue
+        for r in query(
+            "SELECT hand_id, (player_names->>'match_method') mm, all_players_actions apa "
+            "FROM hands WHERE tournament_number=%s AND site='GGPoker' "
+            "AND (player_names->>'match_method') IS NOT NULL "
+            "AND (player_names->>'match_method') <> 'position_v3'", (tn,)):
+            apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+            confl = []
+            for k, v in apa.items():
+                if k in ("_meta", "Hero") or not isinstance(v, dict):
+                    continue
+                nm, st = v.get("real_name"), strong.get(k)
+                if nm and st and nm != st:
+                    confl.append({"hash": k, "read": nm, "strong": st})
+            if len(confl) >= 3:            # cadeia de rotação (≥3 hashes)
+                rotten.append({"tournament_number": tn, "hand_id": r["hand_id"],
+                               "match_method": r["mm"], "n_conflicts": len(confl),
+                               "conflicts": confl})
+    return {"count": len(rotten), "rotten": rotten}
+
+
 class NpApplyBody(BaseModel):
     tournament_number: Optional[str] = None
     dry_run: bool = False

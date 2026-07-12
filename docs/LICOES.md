@@ -253,3 +253,18 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   raiz real não era a table-SS (que não alinha) mas a **Gold nunca lida** (`vision_done=false`) — a
   1ª leitura do gold no formato atual de-anonimiza pela via premium (`position_v3`), validado ao vivo
   na GG-6117480341 (5 nomes, Hero=Lauro).
+- 2026-07-12 — **N conflitos podem ser 1 captura podre — agrupa por FONTE; os STACKS são o
+  árbitro.** No tn 292179612, 6 dos 7 conflitos do painel "Nomes em conflito" vinham de UMA
+  captura table-SS (GG-6100838605, ctx=782) cuja âncora **rodou a roda** (ponto/direção off →
+  cada seat recebeu o nick do vizinho). A UI oferecia 6× "confirma o forte" — tedioso E
+  perigoso: se o forte fosse o rotacionado, confirmar gravava o erro. **A prova objetiva são
+  os STACKS:** os nomes+stacks da Vision estavam CERTOS; alinhados por stack davam 8/8 o mapa
+  forte — foi só o mapeamento nome→hash que rodou. **→ Lições:** (1) quando ≥3 conflitos de um
+  torneio partilham uma captura que discorda do mapa forte, é UMA captura podre, não N
+  desacordos — agrupar por fonte e oferecer 1 ação (reverter a captura), não N confirmações;
+  (2) os stacks são o árbitro objetivo — validar sempre o mapa nome→hash contra os stacks da
+  HH (uma rotação mostra todos os stacks trocados); (3) "forte" (position_v3) não é imune —
+  confirmar só depois do cross-check por stack. Curas: guarda de stacks no de-anon
+  (`build_anon_map_by_hero_button`, alarme `stack_map_mismatch`), prune de quarentena stale
+  (a captura revertida faz cair os N conflitos), detetor de rotação no painel
+  (`/names/rotation-scan` → "reverter captura podre"). Ver `REGISTO_CONCEITO 2026-07-12`.

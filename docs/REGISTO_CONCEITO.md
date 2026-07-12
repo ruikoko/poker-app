@@ -406,3 +406,17 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   print sem o Rui → `/revert-to-anon`). O detetor tem de ler os DOIS e classificar; corrigir só o rótulo em
   cima de dados envenenados esconderia o problema. Exemplo: das 3 hero-alheio, 2 eram cosméticas (212/734) e
   1 veneno (515). → `routers/suspicious.py:_hero_alheio_hands` (veneno 3), `JOURNAL_2026-07-12.md`.
+- 2026-07-12 — **Os STACKS são o árbitro objetivo da desanon; N conflitos = agrupar por FONTE**
+  (`#DESANON-ROTATION-STACK-GUARD`). A âncora do table-SS mapeia nomes→hashes por POSIÇÃO/botão,
+  IGNORANDO os stacks. Se roda a roda (ponto de partida/direção off), cada seat recebe o nick do
+  vizinho e o mapa fica rotacionado — passando contagem/direção/nicks-distintos. **Os stacks
+  desmentem-no sempre:** o nick atribuído a um hash tem um stack ≠ do stack real desse hash na HH.
+  Princípios: (1) validar o mapa nome→hash contra os stacks da HH — rotação = todos os stacks
+  trocados → alarme, não escreve (`build_anon_map_by_hero_button`, guarda `stack_map_mismatch`,
+  tol. 15%, ≥4 comparáveis, maioria a desmentir); (2) N conflitos de nomes num torneio que
+  partilham UMA captura discordante do mapa forte (≥3 hashes) = UMA captura podre → 1 ação
+  (reverter), não N × "confirmar o forte" (`/names/rotation-scan`); (3) a quarentena poda-se
+  sozinha quando a fonte podre é revertida (`_upsert_quarantine` apaga pending stale); (4) "forte"
+  (position_v3) não é imune — só confirmar após o cross-check por stack. Âncora do caso: captura
+  782 do tn 292179612 (rodou 1 cadeira; 6 conflitos → 1 revert; 8120b537=Pedro Borges). Ver
+  `LICOES 2026-07-12`.
