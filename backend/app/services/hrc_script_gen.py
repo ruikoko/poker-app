@@ -948,46 +948,152 @@ def _apply_caso_a_3bet_ip(
 # #POSITION-LABELS-PYTHON-JS-DRIFT).
 
 
-def threebet_multiplier(eff_bb: float, is_ip: bool) -> float:
-    """Multiplicador "x" do 3bet sobre o open, por ESCALÃO fixo de efetiva
-    (LEI §18, 11 Jul 2026 — sem interpolação). Só válido para eff >= 17 (o
-    <17 é jam, tratado em `threebet_sizings_bb`). Mirror EXACTO do template
-    `threeBetMultiplier` (manter em sync — drift cross-language).
+def threebet_multiplier(eff_bb: float, block: str):
+    """LEI v3 §B (15 Jul 2026) — multiplicador × OPEN por escalão fixo de efetiva,
+    por BLOCO (`IP` / `SB` / `BB` / `SBvsBB`). `None` = abaixo da banda (jam).
+    Mirror EXACTO do template `threeBetMultV3` (manter em sync — drift cross-lang).
 
-        escalão     IP    OP
-        17..20     2.0   2.5
-        21..25     2.2   3.0
-        26..35     2.5   3.5
-        36..70     3.0   4.0
-        71+        3.5   4.5
+        IP:     17-25→2.25 · 26-35→2.5 · 36-60→3 · 61-90→3.5 · 91+→4   (<17 jam)
+        SB:     18-25→3    · 26-30→3.5 · 31-80→4 · 81+→5               (<18 jam)
+        BB:     16-20→2.5  · 21-25→3   · 26-35→3.5 · 36-80→4 · 81+→5   (<16 jam)
+        SBvsBB: 16-25→2.2  · 26-35→2.5 · 36-100→3 · 101+→4             (<16 jam)
     """
-    if eff_bb < 21:
-        return 2.0 if is_ip else 2.5
-    if eff_bb < 26:
-        return 2.2 if is_ip else 3.0
-    if eff_bb < 36:
-        return 2.5 if is_ip else 3.5
-    if eff_bb < 71:
-        return 3.0 if is_ip else 4.0
-    return 3.5 if is_ip else 4.5
+    if block == "IP":
+        if eff_bb < 17:
+            return None
+        if eff_bb <= 25:
+            return 2.25
+        if eff_bb <= 35:
+            return 2.5
+        if eff_bb <= 60:
+            return 3.0
+        if eff_bb <= 90:
+            return 3.5
+        return 4.0
+    if block == "SB":
+        if eff_bb < 18:
+            return None
+        if eff_bb <= 25:
+            return 3.0
+        if eff_bb <= 30:
+            return 3.5
+        if eff_bb <= 80:
+            return 4.0
+        return 5.0
+    if block == "BB":
+        if eff_bb < 16:
+            return None
+        if eff_bb <= 20:
+            return 2.5
+        if eff_bb <= 25:
+            return 3.0
+        if eff_bb <= 35:
+            return 3.5
+        if eff_bb <= 80:
+            return 4.0
+        return 5.0
+    # SBvsBB
+    if eff_bb < 16:
+        return None
+    if eff_bb <= 25:
+        return 2.2
+    if eff_bb <= 35:
+        return 2.5
+    if eff_bb <= 100:
+        return 3.0
+    return 4.0
 
 
 def threebet_sizings_bb(
-    eff_bb: float, is_ip: bool, open_to_bb: float, ko_bonus: float = 0.0,
+    eff_bb: float, block: str, open_to_bb: float, ko_bonus: float = 0.0,
 ) -> list:
-    """Array de 3bet em BB ("ALLIN" como sentinela) — LEI §18 (11 Jul 2026).
-
-    eff < 17  → ["ALLIN"]        (nó SÓ-jam, sem size)
-    eff >= 17 → [size, "ALLIN"]  (SEMPRE size + jam; morreram os tetos 40/45)
-    size = round((multiplicador(escalão) + ko_bonus) × open_to_bb, 2).
-    `ko_bonus` (0.0 ou 0.5) — só em KO + opener cobre o 3-bettor; o caller
-    runtime (`getSizings3Bets`) decide. Mirror EXACTO de `threeBetSizings`.
+    """LEI v3 §B — array de 3bet em BB ("ALLIN" sentinela). Abaixo da banda →
+    ["ALLIN"]; senão [size, "ALLIN"] com size = round((mult + ko_bonus)×open, 2).
+    `ko_bonus` (0.0 / 0.5) só em KO + opener cobre. Mirror de `threeBetSizingsV3`.
     """
-    if eff_bb < 17.0:
+    mult = threebet_multiplier(eff_bb, block)
+    if mult is None:
         return ["ALLIN"]
-    mult = threebet_multiplier(eff_bb, is_ip) + (ko_bonus or 0.0)
-    size = round(mult * open_to_bb, 2)
+    size = round((mult + (ko_bonus or 0.0)) * open_to_bb, 2)
     return [size, "ALLIN"]
+
+
+def fourbet_multiplier(eff_bb: float, block: str):
+    """LEI v3 §C — multiplicador × 3-BET por escalão, por BLOCO. `None` = só allin.
+    Mirror EXACTO do template `fourBetMultV3`.
+
+        IP:     26-35→2 · 36-60→2.2 · 61-90→2.5 · 91+→2.7   (<26 só allin)
+        SB:     31-80→2.3 · 81+→2.5                         (<31 só allin)
+        BB:     26-35→2.3 · 36-80→2.5 · 81+→3               (<26 só allin)
+        SBvsBB: 36-100→2.2 · 101+→2.7                       (<36 só allin)
+    """
+    if block == "IP":
+        if eff_bb < 26:
+            return None
+        if eff_bb <= 35:
+            return 2.0
+        if eff_bb <= 60:
+            return 2.2
+        if eff_bb <= 90:
+            return 2.5
+        return 2.7
+    if block == "SB":
+        if eff_bb < 31:
+            return None
+        if eff_bb <= 80:
+            return 2.3
+        return 2.5
+    if block == "BB":
+        if eff_bb < 26:
+            return None
+        if eff_bb <= 35:
+            return 2.3
+        if eff_bb <= 80:
+            return 2.5
+        return 3.0
+    # SBvsBB
+    if eff_bb < 36:
+        return None
+    if eff_bb <= 100:
+        return 2.2
+    return 2.7
+
+
+def fourbet_sizings_bb(eff_bb: float, block: str, prev_3bet_to_bb: float) -> list:
+    """LEI v3 §C — array de 4bet em BB. Abaixo da banda → ["ALLIN"]; senão
+    [size, "ALLIN"] com size = round(mult × 3-bet, 2). Mirror de `fourBetSizingsV3`."""
+    mult = fourbet_multiplier(eff_bb, block)
+    if mult is None:
+        return ["ALLIN"]
+    return [round(mult * prev_3bet_to_bb, 2), "ALLIN"]
+
+
+def squeeze_multiplier(eff_bb: float, is_oop: bool):
+    """LEI v3 §E — multiplicador × OPEN do squeeze (IP / OOP). `None` = jam (<20).
+    Mirror EXACTO do template `squeezeMultV3`.
+
+        20-25→3/3.5 · 26-35→3.5/3.7 · 36-60→3.7/4 · 61-100→4/4.5 · 101+→4.5/5
+    """
+    if eff_bb < 20:
+        return None
+    if eff_bb <= 25:
+        return 3.5 if is_oop else 3.0
+    if eff_bb <= 35:
+        return 3.7 if is_oop else 3.5
+    if eff_bb <= 60:
+        return 4.0 if is_oop else 3.7
+    if eff_bb <= 100:
+        return 4.5 if is_oop else 4.0
+    return 5.0 if is_oop else 4.5
+
+
+def squeeze_sizings_bb(eff_bb: float, is_oop: bool, open_to_bb: float) -> list:
+    """LEI v3 §E — array de squeeze em BB. <20 → ["ALLIN"]; senão [size, "ALLIN"]
+    com size = round(mult × open, 2). Mirror de `getSizingsSqueeze`."""
+    mult = squeeze_multiplier(eff_bb, is_oop)
+    if mult is None:
+        return ["ALLIN"]
+    return [round(mult * open_to_bb, 2), "ALLIN"]
 
 
 # ── Helpers de array (compositores) ─────────────────────────────────────
@@ -1085,47 +1191,14 @@ def build_sizings_overrides(
     if not actions:
         return overrides
 
-    # pt91 (Regra 2 do Rui): o 3bet CLÁSSICO (IP/OP, incl. SB/BB) deixou de ser
-    # gerado em Python — passou a ser calculado pelo HRC nó-a-nó via JS
-    # (getSizings3Bets), por efetivo min(3bettor,opener). O bloco CASO A/B
-    # (pt42b) foi descontinuado. Só o SQUEEZE mantém override Python.
-    opener_action = next((a for a in actions if a["bet_count"] == 1), None)
-    opener_position = opener_action.get("position") if opener_action else None
-
-    for a in actions:
-        bc = a["bet_count"]
-
-        if bc == 1:
-            var = _bucket_open(a)
-            if var and var not in overrides:
-                default = _compute_default_for_open(a)
-                overrides[var] = _array_for_raise(a, default)
-            continue
-
-        if bc == 2:
-            # pt91 (Regra 2): só o SQUEEZE mantém override Python. O 3bet
-            # clássico (IP/OP/SB/BB) é calculado em runtime pelo template JS.
-            var = _bucket_3bet(a, opener_position)
-            if (var and var.startswith("SIZES_3BET_SQUEEZE_")
-                    and var not in overrides):
-                default = _compute_default_for_squeeze(a)
-                overrides[var] = _array_for_raise(a, default)
-            continue
-
-        if bc in (3, 4):
-            var = _bucket_4bet5bet(a, len(seats))
-            if var and var not in overrides:
-                if bc == 3:
-                    bb_default = _compute_default_for_4bet(a)
-                else:
-                    bb_default = _compute_default_for_5bet(a)
-                overrides[var] = _array_for_4bet5bet_in_pot_fraction(
-                    a, bb_default, level_bb,
-                )
-            continue
-
-        # bc >= 5: skip (template runtime shove-or-fold em getSizingsPreflop).
-
+    # LEI v3 (15 Jul 2026): TODAS as raises preflop (open / 3-bet / squeeze /
+    # 4-bet / 5-bet) são calculadas em RUNTIME pelo template JS por escalão de
+    # efetiva (régua única). O size REAL de cada raise viaja em REAL_PREFLOP_RAISES
+    # (build_real_raises_map) e é preservado no seu nó (preserveRealRaise). O
+    # gerador já NÃO emite overrides de sizing → `build_sizings_overrides` devolve
+    # sempre `{}`. Mantido (assinatura + parse) por retrocompat do pipeline e do
+    # manifest; os helpers de default (pt42/pt42b) ficam para limpeza na Fase 4.
+    _ = actions  # parse validado; sem overrides a emitir na v3
     return overrides
 
 

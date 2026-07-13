@@ -85,6 +85,9 @@ _OPEN_ALLIN_THRESHOLD_BVB_BB = 30.0
 # <= 4 BB acrescenta all-in. Manter em sync com o JS.
 _OPEN_ALLIN_ONLY_EFF_BB = 9.0
 _PKO_SHORTIE_BB = 4.0
+# LEI v3 §A — as blinds (SB na strategy table) fazem jam abaixo de 10 BB (<10);
+# as não-blind mantêm o colapso ≤9. Espelha BLIND_OPEN_JAM_BELOW_BB do template.
+_BLIND_OPEN_JAM_BELOW_BB = 10.0
 
 
 def _is_allin_token(s) -> bool:
@@ -131,80 +134,67 @@ def _bucket_open_for_position(position: str) -> str:
 
 
 def count_lines_for_position(
-    position: str, script_overrides: dict, stack_bb=None,
+    position: str, script_overrides: dict = None, stack_bb=None,
     *, effective_bb=None, is_pko: bool = False, own_total_bb=None,
     yet_to_act_short_or_allin: bool = False,
 ) -> int:
     """Nº de linhas que `position` ocupa na Strategy Table HRC (open node).
 
-    `stack_bb` = stack INDIVIDUAL da posição em BB (remaining no nó de open).
-      - `None` → **legacy** (pré-pt86): `len(array)` + Complete da SB. Fallback
-        defensivo quando a stack não está disponível; mantém os testes
-        estruturais. NÃO aplica o limiar (subconta/sobreconta como o bug).
-      - valor → **pt86**: espelha o template (`getSizingsPreflop`):
-        linhas = `sizings não-ALLIN abaixo da stack` + `1 ALLIN se [ALLIN
-        explícito no array OU stack ≤ limiar OU um size ≥ stack (colapso)]`
-        + `1 Complete se SB`. Limiar = 30 BB se SB (blind-vs-blind na tabela
-        de opens), senão 25 BB.
+    LEI v3 (15 Jul 2026) — os opens são **single-size** (a Regra de Ouro dá 1
+    size real; senão 1 size base: IP 2 BB / SB e BB por eff). A linha de all-in
+    é decidida por **EFETIVA** (§19 reformada — morre o "individual"). Logo o nº
+    de linhas por posição-open =
+        `1 (size base)` + `1 ALLIN se [eff ≤ limiar OU colapso ≤9 OU Regra 3]`
+        + `1 Complete se SB`.
+    Colapso `eff ≤ 9` → SÓ all-in (1 linha; + Complete se SB), exceto shortie
+    próprio PKO. Limiar de all-in = **30** se SB (blind-vs-blind na tabela de
+    opens), senão **25**.
 
-    SB tem sempre +1 linha de Complete (limp) — `canFlatCallPreflop` bets==1.
+    `effective_bb` = efetiva no nó de open desta posição (régua única, remaining;
+    `min(remaining da posição, maior remaining vivo atrás)`), calculada pelo
+    caller (`compute_target_node_offset`) a partir dos stacks REMAINING.
+      - `None` → **legacy/defensivo**: 1 linha base (+ Complete SB). Sem efetiva
+        não se pode decidir a linha de all-in → conta só a base (back-compat).
 
-    pt91 (Regras 1 e 3 do Rui) — kwargs novos (espelham `getSizingsOpening`):
-      - `effective_bb`: efetivo no nó (min do opener com o maior vivo). Se
-        <= 9 → SÓ all-in → 1 linha (+ Complete se SB), EXCETO quando em PKO o
-        próprio opener é o shortie (<= 4 BB), que mantém min+allin.
-      - `is_pko` + `own_total_bb` + `yet_to_act_short_or_allin`: Regra 3-em-open
-        — em PKO, força a linha de all-in (se ainda não contada) quando o
-        próprio opener é shortie OU há adversário por falar all-in / <= 4 BB.
-      Defaults (`effective_bb=None`, `is_pko=False`) → comportamento pré-pt91
-      inalterado (back-compat dos testes e do caminho legacy).
+    `is_pko` + `own_total_bb` + `yet_to_act_short_or_allin`: Regra 3-em-open — em
+    PKO, força a linha de all-in quando o próprio opener é shortie (<= 4 BB) OU há
+    adversário por falar all-in / <= 4 BB.
+
+    `script_overrides` e `stack_bb` ficam na assinatura por back-compat mas já
+    **não** decidem as linhas (opens single-size na v3).
     """
-    if not isinstance(script_overrides, dict):
-        script_overrides = {}
     pos = (position or "").upper()
-    bucket = _bucket_open_for_position(position)
-    arr = script_overrides.get(bucket)
-
-    # ── Legacy (sem stack): comportamento pré-pt86 intacto ──
-    if stack_bb is None:
-        count = (
-            len(arr) if isinstance(arr, list) and arr
-            else _TEMPLATE_DEFAULT_OPEN_COUNT
-        )
-        if pos == "SB":
-            count += _SB_COMPLETE_LINES
-        return count
-
-    # ── pt86: espelha o template, com a stack individual + limiar 25/30 ──
-    if not (isinstance(arr, list) and arr):
-        arr = _TEMPLATE_DEFAULT_OPEN_ARRAY.get(bucket, [2.0])
-    non_allin = [s for s in arr if not _is_allin_token(s)]
-    has_explicit_allin = any(_is_allin_token(s) for s in arr)
-    threshold = _OPEN_ALLIN_THRESHOLD_BVB_BB if pos == "SB" else _OPEN_ALLIN_THRESHOLD_BB
-
-    kept = [s for s in non_allin if float(s) < stack_bb]      # sizes abaixo da stack
-    collapsed = any(float(s) >= stack_bb for s in non_allin)  # size ≥ stack → vira ALLIN
-    add_allin = has_explicit_allin or collapsed or (stack_bb <= threshold)
-
-    # ── pt91 (Regra 1): efetivo <= 9 → SÓ all-in (1 linha), exceto shortie-own PKO ──
     shortie_own = (
         bool(is_pko) and own_total_bb is not None
         and float(own_total_bb) <= _PKO_SHORTIE_BB
     )
-    if (effective_bb is not None
-            and float(effective_bb) <= _OPEN_ALLIN_ONLY_EFF_BB
-            and not shortie_own):
+
+    # ── Sem efetiva (legacy/defensivo): 1 linha base (+ Complete SB) ──
+    if effective_bb is None:
         lines = 1
         if pos == "SB":
             lines += _SB_COMPLETE_LINES
         return max(1, lines)
 
-    # ── pt91 (Regra 3-em-open): PKO → força all-in se shortie próprio OU
-    #    adversário por falar all-in / <= 4 BB (aditivo; só se ainda não contado).
-    if is_pko and (shortie_own or yet_to_act_short_or_allin):
-        add_allin = True
+    eff = float(effective_bb)
+    threshold = _OPEN_ALLIN_THRESHOLD_BVB_BB if pos == "SB" else _OPEN_ALLIN_THRESHOLD_BB
 
-    lines = len(kept) + (1 if add_allin else 0)
+    # ── Colapso → SÓ all-in (1 linha), exceto shortie próprio PKO. A letra do
+    #    quadro: SB (blind) faz jam abaixo de 10 (<10); não-blind mantém ≤9. ──
+    collapse = (eff < _BLIND_OPEN_JAM_BELOW_BB) if pos == "SB" else (eff <= _OPEN_ALLIN_ONLY_EFF_BB)
+    if collapse and not shortie_own:
+        lines = 1
+        if pos == "SB":
+            lines += _SB_COMPLETE_LINES
+        return max(1, lines)
+
+    # ── Linha de all-in por EFETIVA (§19 v3) + Regra 3 (shortie PKO) ──
+    add_allin = (
+        eff <= threshold
+        or shortie_own
+        or (bool(is_pko) and yet_to_act_short_or_allin)
+    )
+    lines = 1 + (1 if add_allin else 0)
     if pos == "SB":
         lines += _SB_COMPLETE_LINES
     return max(1, lines)
@@ -270,29 +260,38 @@ def derive_position_total_stacks_bb(hh_text, level_bb, seats=None) -> dict:
 
 
 def _open_node_eff_and_shortie(
-    position: str, seats_at_table: int, position_total_bb: dict,
+    position: str, seats_at_table: int, position_remaining_bb: dict,
+    position_total_bb: dict = None,
 ):
-    """pt91 — para o nó de open de `position` (cenário fold-to-position):
+    """LEI v3 — para o nó de open de `position` (cenário fold-to-position):
     devolve `(effective_bb, own_total_bb, yet_to_act_short_or_allin)`.
 
     - opponents = posições que actuam DEPOIS na ordem de _POSITION_LABELS_BY_N
-      (incl. blinds; em fold-to-position todos os de trás estão vivos).
-    - effective = min(own_total, max(opp_total)); yet_short = algum opp <= 4 BB.
-    Qualquer falta de dados → `(None, own, False)` (Regra 1 inerte nessa posição).
+      (incl. blinds; em fold-to-position todos os de trás estão vivos e por falar).
+    - **effective = régua única = min(REMAINING da posição, MAIOR REMAINING vivo
+      atrás)** — espelha `effVsFieldBB` do template.
+    - Regra 3 (shortie) usa os stacks **TOTAIS**: `own_total` e `yet_short` =
+      algum opp com TOTAL <= 4 BB. `position_total_bb=None` → usa o remaining.
+    Falta de dados → `(None, own_total, False)` (linha de all-in inerte nessa
+    posição → count_lines cai na base).
     """
     labels = _POSITION_LABELS_BY_N.get(seats_at_table) or []
-    own = position_total_bb.get(position)
-    if not labels or position not in labels or own is None:
-        return None, own, False
+    if position_total_bb is None:
+        position_total_bb = position_remaining_bb
+    own_rem = position_remaining_bb.get(position)
+    own_tot = position_total_bb.get(position)
+    if not labels or position not in labels or own_rem is None:
+        return None, own_tot, False
     after = labels[labels.index(position) + 1:]
-    opp_totals = [
-        position_total_bb[p] for p in after if p in position_total_bb
+    opp_rem = [
+        position_remaining_bb[p] for p in after if p in position_remaining_bb
     ]
-    if not opp_totals:
-        return None, own, False
-    effective = min(own, max(opp_totals))
-    yet_short = any(t <= _PKO_SHORTIE_BB for t in opp_totals)
-    return round(effective, 2), own, yet_short
+    if not opp_rem:
+        return None, own_tot, False
+    effective = min(own_rem, max(opp_rem))
+    opp_tot = [position_total_bb[p] for p in after if p in position_total_bb]
+    yet_short = any(t <= _PKO_SHORTIE_BB for t in opp_tot)
+    return round(effective, 2), own_tot, yet_short
 
 
 def _is_all_in_effective(
@@ -467,39 +466,37 @@ def compute_target_node_offset(
         return None
 
     overrides = script_overrides or {}
-    # pt86: stack individual por posição (espelha o limiar 25/30 do template).
-    # `None` na posição → count_lines cai no legacy defensivo (sem regressão).
-    stacks = position_stacks_bb or {}
-    # pt91: stacks TOTAIS por posição p/ Regra 1 (efetivo) + Regra 3 (shortie).
-    # `None` → Regras 1/3 inertes (back-compat: caminho/test sem totais = pt86).
-    totals = position_total_bb or {}
+    # LEI v3: efetiva (régua única) por posição = min(remaining da posição, maior
+    # remaining vivo atrás). Usa os stacks REMAINING; fallback aos TOTAIS se só
+    # esses vierem; `None` em ambos → count_lines cai na base (1 linha).
+    remaining_map = position_stacks_bb or position_total_bb or {}
+    totals_map = position_total_bb or position_stacks_bb or {}
     raiser_idx = positions.index(position)
     offset = 0
     for p in positions[:raiser_idx]:
-        if totals:
+        if remaining_map:
             eff_p, own_p, yet_short_p = _open_node_eff_and_shortie(
-                p, seats_at_table, totals,
+                p, seats_at_table, remaining_map, totals_map,
             )
         else:
             eff_p, own_p, yet_short_p = None, None, False
         offset += count_lines_for_position(
-            p, overrides, stacks.get(p),
+            p, overrides, None,
             effective_bb=eff_p, is_pko=is_pko, own_total_bb=own_p,
             yet_to_act_short_or_allin=yet_short_p,
         )
     # within-bucket do raiser: pt92 (#HRC-NODE-OFFSET-IMPLICIT-LINES FIX) — o
     # nº REAL de linhas do bucket do PRÓPRIO abridor vem do `count_lines_for_position`
-    # (a MESMA lógica de colapso Regra 1/limiar das outras posições), para o jam
-    # apontar para a ÚLTIMA linha existente (e não para um índice fixo que
-    # pressupunha um nó small sempre presente → saltava de posição).
-    if totals:
+    # (a MESMA lógica de colapso/limiar das outras posições), para o jam apontar
+    # para a ÚLTIMA linha existente.
+    if remaining_map:
         eff_a, own_a, yet_a = _open_node_eff_and_shortie(
-            position, seats_at_table, totals,
+            position, seats_at_table, remaining_map, totals_map,
         )
     else:
         eff_a, own_a, yet_a = None, None, False
     abridor_rows = count_lines_for_position(
-        position, overrides, stacks.get(position),
+        position, overrides, None,
         effective_bb=eff_a, is_pko=is_pko, own_total_bb=own_a,
         yet_to_act_short_or_allin=yet_a,
     )

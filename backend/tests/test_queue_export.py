@@ -1347,6 +1347,10 @@ from app.services.hrc_script_gen import (
     build_real_raises_map,
     threebet_multiplier,
     threebet_sizings_bb,
+    fourbet_multiplier,
+    fourbet_sizings_bb,
+    squeeze_multiplier,
+    squeeze_sizings_bb,
 )
 from app.services.queue_export import derive_seats_in_preflop_order
 
@@ -1733,34 +1737,34 @@ def _read_template():
         return f.read()
 
 
-def test_apply_overrides_substitutes_SIZES_OPEN_OTHERS():
+# LEI v3: os arrays de sizing legacy (SIZES_OPEN_*, SIZES_3BET_*, SIZES_POT_4BET_*)
+# foram removidos do template (tudo runtime). `apply_sizings_overrides` fica como
+# mecanismo genérico (usado com overrides={} na v3); testado aqui contra a única
+# var de array que sobrevive, SIZES_POT_5BET_* (5-bet).
+
+def test_apply_overrides_substitutes_existing_var():
     tpl = _read_template()
-    out = apply_sizings_overrides(tpl, {"SIZES_OPEN_OTHERS": [2.5, "ALLIN"]})
-    assert "let SIZES_OPEN_OTHERS = [2.5, ALLIN];" in out
-    # Default original do template foi substituído
-    assert "let SIZES_OPEN_OTHERS = [2, ALLIN];" not in out
-    # 1 ocorrência apenas
-    assert out.count("let SIZES_OPEN_OTHERS") == 1
+    out = apply_sizings_overrides(tpl, {"SIZES_POT_5BET_IP": [0.6, "ALLIN"]})
+    assert "let SIZES_POT_5BET_IP = [0.6, ALLIN];" in out
+    assert "let SIZES_POT_5BET_IP = [0.4, ALLIN];" not in out
+    assert out.count("let SIZES_POT_5BET_IP") == 1
 
 
 def test_apply_overrides_leaves_untouched_vars_alone():
     tpl = _read_template()
-    out = apply_sizings_overrides(tpl, {"SIZES_OPEN_OTHERS": [2.5, "ALLIN"]})
-    # SIZES_OPEN_BU não foi tocado → fica no default do template.
-    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
-    assert "let SIZES_OPEN_BU = [2];" in out
+    out = apply_sizings_overrides(tpl, {"SIZES_POT_5BET_IP": [0.6, "ALLIN"]})
+    # SIZES_POT_5BET_OOP não foi tocado → fica no default do template.
+    assert "let SIZES_POT_5BET_OOP = [0.5, ALLIN];" in out
 
 
 def test_apply_overrides_handles_multiple():
     tpl = _read_template()
     out = apply_sizings_overrides(tpl, {
-        "SIZES_OPEN_OTHERS": [2.5, "ALLIN"],
-        "SIZES_3BET_BB_VS_OTHER": [9, "ALLIN"],
-        "SIZES_POT_4BET_OOP": [0.45, "ALLIN"],
+        "SIZES_POT_5BET_IP": [0.6, "ALLIN"],
+        "SIZES_POT_5BET_OOP": [0.45, "ALLIN"],
     })
-    assert "let SIZES_OPEN_OTHERS = [2.5, ALLIN];" in out
-    assert "let SIZES_3BET_BB_VS_OTHER = [9, ALLIN];" in out
-    assert "let SIZES_POT_4BET_OOP = [0.45, ALLIN];" in out
+    assert "let SIZES_POT_5BET_IP = [0.6, ALLIN];" in out
+    assert "let SIZES_POT_5BET_OOP = [0.45, ALLIN];" in out
 
 
 def test_apply_overrides_unknown_var_logs_and_skips():
@@ -1768,35 +1772,6 @@ def test_apply_overrides_unknown_var_logs_and_skips():
     # Var inexistente → log warning, output igual ao input
     out = apply_sizings_overrides(tpl, {"SIZES_NONEXISTENT": [1, "ALLIN"]})
     assert out == tpl
-
-
-def test_apply_overrides_substitutes_SIZES_3BET_HJ():
-    """pt42b — apply_sizings_overrides substitui SIZES_3BET_HJ no template."""
-    tpl = _read_template()
-    out = apply_sizings_overrides(tpl, {"SIZES_3BET_HJ": [5.4, "ALLIN"]})
-    assert "let SIZES_3BET_HJ = [5.4, ALLIN];" in out
-    # Default original do template foi substituído
-    assert "let SIZES_3BET_HJ = [6];" not in out
-    # 1 ocorrência apenas
-    assert out.count("let SIZES_3BET_HJ") == 1
-
-
-def test_apply_overrides_substitutes_multiple_3bet_positions():
-    """pt42b — apply_sizings_overrides substitui várias SIZES_3BET_<POS>
-    em conjunto, sem interferência entre si."""
-    tpl = _read_template()
-    out = apply_sizings_overrides(tpl, {
-        "SIZES_3BET_UTG1": [4.6, "ALLIN"],
-        "SIZES_3BET_MP": [4.6, "ALLIN"],
-        "SIZES_3BET_HJ": [5.4],
-        "SIZES_3BET_CO": [5.4],
-        "SIZES_3BET_BU": [6],
-    })
-    assert "let SIZES_3BET_UTG1 = [4.6, ALLIN];" in out
-    assert "let SIZES_3BET_MP = [4.6, ALLIN];" in out
-    assert "let SIZES_3BET_HJ = [5.4];" in out
-    assert "let SIZES_3BET_CO = [5.4];" in out
-    assert "let SIZES_3BET_BU = [6];" in out
 
 
 # ── pt42c #WN-BOUNTY-NULL-IN-HRC-PIPELINE — extracção bounty WN + patch ────
@@ -2092,9 +2067,9 @@ def test_build_sizings_overrides_GG_HJ_open_deep():
         _HH_GG_REAL, level_sb=150, level_bb=300, seats=seats,
         effective_stack_bb=eff,
     )
-    # pt89: open per-posição — o opener desta mão (5-handed) é rotulado CO.
-    assert "SIZES_OPEN_CO" in out
-    assert out["SIZES_OPEN_CO"] == [2.0]  # sem ALLIN — eff > 25
+    # LEI v3: os opens já NÃO são emitidos pelo gerador (single-size em runtime;
+    # o size real viaja em REAL_PREFLOP_RAISES). O opener desta mão é rotulado CO.
+    assert "SIZES_OPEN_CO" not in out
     # Nenhum 3-bet/4-bet na mão
     assert "SIZES_3BET_IP" not in out
     # pt91 (Regra 2): o 3bet clássico já NÃO é emitido pelo gerador (calculado
@@ -2117,7 +2092,9 @@ def test_build_sizings_overrides_PS_BU_jam_shallow():
         _HH_PS_REAL, level_sb=12500, level_bb=25000, seats=seats,
         effective_stack_bb=eff,
     )
-    assert out["SIZES_OPEN_BU"] == [2.0, "ALLIN"]  # pt70 ordem [size, ALLIN]
+    # LEI v3: opens em runtime (não overridden). O jam do BU chega em
+    # REAL_PREFLOP_RAISES + a linha de all-in é decidida por efetiva no template.
+    assert "SIZES_OPEN_BU" not in out
 
 
 def test_build_sizings_overrides_WN_squeeze_3bet():
@@ -2134,9 +2111,10 @@ def test_build_sizings_overrides_WN_squeeze_3bet():
         _HH_WN_REAL, level_sb=4000, level_bb=8000, seats=seats,
         effective_stack_bb=eff,
     )
-    assert out["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener HJ → SIZES_OPEN_HJ
-    assert out["SIZES_3BET_SQUEEZE_SB"] == [8.0]
-    # pt91 (Regra 2): 3bet clássico calculado no JS → não emitido aqui.
+    assert "SIZES_OPEN_HJ" not in out   # LEI v3: opens em runtime
+    # LEI v3 §E: o squeeze também é runtime (escalões IP/OOP no template) → sem override.
+    assert "SIZES_3BET_SQUEEZE_SB" not in out
+    # 3bet clássico calculado no JS → não emitido aqui.
     assert "SIZES_3BET_CO" not in out
     assert "SIZES_3BET_BU" not in out
 
@@ -2152,7 +2130,7 @@ def test_build_sizings_overrides_WPN_HJ_open_deep():
         _HH_WPN_REAL, level_sb=800, level_bb=1600, seats=seats,
         effective_stack_bb=eff,
     )
-    assert out["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener HJ → SIZES_OPEN_HJ
+    assert "SIZES_OPEN_HJ" not in out   # LEI v3: opens em runtime
     # pt91 (Regra 2): 3bet clássico calculado no JS → não emitido aqui.
     assert "SIZES_3BET_CO" not in out
     assert "SIZES_3BET_BU" not in out
@@ -2202,9 +2180,9 @@ def test_build_sizings_overrides_drops_ALLIN_when_eff_at_action_above_threshold(
         hh_at_threshold, level_sb=50, level_bb=100, seats=seats,
         effective_stack_bb=25.0,
     )
-    # eff_at_action = min(2500, max(2500-50, 2500-100, 2500, 2500)) = 2450 → 24.5 BB ≤ 25.
-    # pt89: opener C = idx0 em 5-handed = HJ (_POSITION_LABELS_BY_N[5][0]).
-    assert out_below["SIZES_OPEN_HJ"] == [2.0, "ALLIN"]
+    # LEI v3: opens não são emitidos pelo gerador (a linha de all-in por efetiva
+    # ≤25 é decidida em runtime no template + espelhada em count_lines).
+    assert "SIZES_OPEN_HJ" not in out_below
 
     hh_above_threshold = hh_at_threshold.replace("2500 in chips", "2600 in chips")
     seats = derive_seats_in_preflop_order(hh_above_threshold)
@@ -2212,8 +2190,7 @@ def test_build_sizings_overrides_drops_ALLIN_when_eff_at_action_above_threshold(
         hh_above_threshold, level_sb=50, level_bb=100, seats=seats,
         effective_stack_bb=26.0,
     )
-    # eff_at_action = min(2600, 2600-50=2550) = 2550 → 25.5 BB > 25.
-    assert out_above["SIZES_OPEN_HJ"] == [2.0]   # pt89: opener C = idx0 5-handed = HJ
+    assert "SIZES_OPEN_HJ" not in out_above   # LEI v3: opens em runtime
 
 
 def test_build_sizings_overrides_4bet_with_ratio():
@@ -2243,12 +2220,11 @@ def test_build_sizings_overrides_4bet_with_ratio():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=100.0)
-    # Open by SB → SIZES_OPEN_SB.
-    assert out["SIZES_OPEN_SB"] == [2.5]
-    # pt91 (Regra 2): 3bet clássico (BB vs SB) calculado no JS → não emitido.
+    # LEI v3: open, 3bet e 4bet são todos runtime (não overridden).
+    assert "SIZES_OPEN_SB" not in out
     assert "SIZES_3BET_BB_VS_SB" not in out
-    # 4-bet by SB (OOP vs BB). Pot fraction 0.43 (raise_inc 600 / pot_after_call 1400).
-    assert out["SIZES_POT_4BET_OOP"] == [0.43]
+    # LEI v3 §C: 4-bet = ×3-bet em BB, calculado em runtime → sem override.
+    assert "SIZES_POT_4BET_OOP" not in out
 
 
 # ── pt42 — regra universal de sizings ────────────────────────────────────
@@ -2365,7 +2341,9 @@ def test_sb_allin_open_in_band_gets_size_and_allin():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=13.73)
-    assert out["SIZES_OPEN_SB"] == [2.5, "ALLIN"]
+    # LEI v3: o size do open da SB (tabela SBvsBB por eff) + a linha de all-in são
+    # RUNTIME (template `sbOpenSizeByEff`); o gerador já não os emite.
+    assert "SIZES_OPEN_SB" not in out
 
 
 def test_default_for_classic_3bet_high_band_x3():
@@ -2470,8 +2448,8 @@ def test_open_allin_jam_with_eff_above_8_adds_2bb_default():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=15.0)
-    # C = idx0 em 5-handed = HJ (pt89: per-posição, _POSITION_LABELS_BY_N[5][0]).
-    assert out["SIZES_OPEN_HJ"] == [2.0, "ALLIN"]  # pt70 ordem [size, ALLIN]
+    # LEI v3: open (base 2bb + linha de all-in por efetiva) é runtime; não emitido.
+    assert "SIZES_OPEN_HJ" not in out
 
 
 def test_open_allin_jam_with_eff_below_8_no_default():
@@ -2483,7 +2461,8 @@ def test_open_allin_jam_with_eff_below_8_no_default():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=7.0)
-    assert out["SIZES_OPEN_HJ"] == ["ALLIN"]   # pt89: opener C = idx0 5-handed = HJ
+    # LEI v3: colapso ≤9 é runtime (template) — o open não é emitido pelo gerador.
+    assert "SIZES_OPEN_HJ" not in out
 
 
 def test_open_allin_jam_position_SB_uses_blind_table():
@@ -2497,7 +2476,8 @@ def test_open_allin_jam_position_SB_uses_blind_table():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=15.0)
-    assert out["SIZES_OPEN_SB"] == [2.5, "ALLIN"]
+    # LEI v3: a tabela SBvsBB por eff é runtime (`sbOpenSizeByEff`); não emitida.
+    assert "SIZES_OPEN_SB" not in out
 
 
 # Universal rule — end-to-end (3-bet clássico) ----------------------------
@@ -2517,8 +2497,8 @@ def test_squeeze_allin_uses_3x_opener():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=30.0)
-    # BU squeeze (callers_before=1 → SIZES_3BET_SQUEEZE_IP). Default = 7.5.
-    assert out["SIZES_3BET_SQUEEZE_IP"] == [7.5, "ALLIN"]  # pt70 ordem
+    # LEI v3 §E: squeeze é runtime (escalões IP/OOP × open no template) → sem override.
+    assert "SIZES_3BET_SQUEEZE_IP" not in out
 
 
 def test_squeeze_non_allin_uses_real_sizing():
@@ -2533,8 +2513,8 @@ def test_squeeze_non_allin_uses_real_sizing():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=100.0)
-    # BU squeeze to 10 BB. Sizing real 1ª opção; sem ALLIN 2ª (deep).
-    assert out["SIZES_3BET_SQUEEZE_IP"] == [10.0]
+    # LEI v3 §E: squeeze runtime → sem override (o size real vai em REAL_PREFLOP_RAISES).
+    assert "SIZES_3BET_SQUEEZE_IP" not in out
 
 
 # Universal rule — end-to-end (4-bet / 5-bet em pot fraction) -------------
@@ -2559,7 +2539,8 @@ def test_4bet_allin_writes_pot_fraction_of_2_3x_3bet():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=30.0)
-    assert out["SIZES_POT_4BET_OOP"] == [0.65, "ALLIN"]  # pt70 ordem
+    # LEI v3 §C: 4-bet = ×3-bet em BB, runtime → sem override.
+    assert "SIZES_POT_4BET_OOP" not in out
 
 
 def test_5bet_allin_writes_pot_fraction_of_2_2x_4bet():
@@ -2580,10 +2561,10 @@ def test_5bet_allin_writes_pot_fraction_of_2_2x_4bet():
     seats = derive_seats_in_preflop_order(hh)
     out = build_sizings_overrides(hh, level_sb=50, level_bb=100, seats=seats,
                                   effective_stack_bb=70.0)
-    # BB 5-bet ALLIN. IP/OOP: BB postflop rank=1, SB=0 → BB IP relativo a SB.
-    # pt70 ordem [size, ALLIN]: size (pot fraction) primeiro, ALLIN segundo.
-    assert isinstance(out["SIZES_POT_5BET_IP"][0], float)
-    assert out["SIZES_POT_5BET_IP"][1] == "ALLIN"
+    # LEI v3 §D: 5-bet mantém 0.4/0.5 pot no template (com all-in no array) → sem
+    # override do gerador; o size real vai em REAL_PREFLOP_RAISES.
+    assert "SIZES_POT_5BET_IP" not in out
+    assert "SIZES_POT_5BET_OOP" not in out
 
 
 # Efectiva dinâmica por raise ---------------------------------------------
@@ -2777,66 +2758,138 @@ def test_build_sizings_overrides_HU_no_caso_B():
 # ── pt91 (Regra 2 do Rui) — sizing de 3bet por efetivo (mirror do JS) ──────
 
 def test_threebet_multiplier_ip_bands():
-    """LEI §18 — IP por escalão fixo: 17-20→2.0, 21-25→2.2, 26-35→2.5,
-    36-70→3.0, 71+→3.5 (sem interpolação)."""
-    assert threebet_multiplier(20.0, True) == 2.0
-    assert threebet_multiplier(21.0, True) == 2.2
-    assert threebet_multiplier(25.0, True) == 2.2
-    assert threebet_multiplier(26.0, True) == 2.5
-    assert threebet_multiplier(35.0, True) == 2.5
-    assert threebet_multiplier(36.0, True) == 3.0
-    assert threebet_multiplier(70.0, True) == 3.0
-    assert threebet_multiplier(71.0, True) == 3.5
+    """LEI v3 §B — IP: 17-25→2.25, 26-35→2.5, 36-60→3, 61-90→3.5, 91+→4; <17 jam."""
+    assert threebet_multiplier(16.99, "IP") is None
+    assert threebet_multiplier(17.0, "IP") == 2.25
+    assert threebet_multiplier(25.0, "IP") == 2.25
+    assert threebet_multiplier(26.0, "IP") == 2.5
+    assert threebet_multiplier(35.0, "IP") == 2.5
+    assert threebet_multiplier(36.0, "IP") == 3.0
+    assert threebet_multiplier(60.0, "IP") == 3.0
+    assert threebet_multiplier(61.0, "IP") == 3.5
+    assert threebet_multiplier(90.0, "IP") == 3.5
+    assert threebet_multiplier(91.0, "IP") == 4.0
 
 
-def test_threebet_multiplier_op_bands():
-    """LEI §18 — OP por escalão fixo: 17-20→2.5, 21-25→3.0, 26-35→3.5,
-    36-70→4.0, 71+→4.5 (sem interpolação)."""
-    assert threebet_multiplier(20.0, False) == 2.5
-    assert threebet_multiplier(21.0, False) == 3.0
-    assert threebet_multiplier(25.0, False) == 3.0
-    assert threebet_multiplier(26.0, False) == 3.5
-    assert threebet_multiplier(35.0, False) == 3.5
-    assert threebet_multiplier(36.0, False) == 4.0
-    assert threebet_multiplier(70.0, False) == 4.0
-    assert threebet_multiplier(71.0, False) == 4.5
+def test_threebet_multiplier_sb_bands():
+    """LEI v3 §B — SB: 18-25→3, 26-30→3.5, 31-80→4, 81+→5; <18 jam."""
+    assert threebet_multiplier(17.99, "SB") is None
+    assert threebet_multiplier(18.0, "SB") == 3.0
+    assert threebet_multiplier(25.0, "SB") == 3.0
+    assert threebet_multiplier(26.0, "SB") == 3.5
+    assert threebet_multiplier(30.0, "SB") == 3.5
+    assert threebet_multiplier(31.0, "SB") == 4.0
+    assert threebet_multiplier(80.0, "SB") == 4.0
+    assert threebet_multiplier(81.0, "SB") == 5.0
 
 
-def test_threebet_sizings_bb_ip_gate():
-    """LEI §18 — IP: <17 → [ALLIN]; >=17 → SEMPRE [size, ALLIN]. open=2bb."""
-    assert threebet_sizings_bb(10.0, True, 2.0) == ["ALLIN"]
-    assert threebet_sizings_bb(16.99, True, 2.0) == ["ALLIN"]
-    # eff=17 → escalão 17-20 → x=2.0 → 4.0 + jam
-    assert threebet_sizings_bb(17.0, True, 2.0) == [4.0, "ALLIN"]
-    # eff=40 → escalão 36-70 → x=3.0 → 6.0 + JAM (o teto 40 morreu)
-    assert threebet_sizings_bb(40.0, True, 2.0) == [6.0, "ALLIN"]
-    # deep 80 → x=3.5 → 7.0 + JAM (jam nunca sai do nó)
-    assert threebet_sizings_bb(80.0, True, 2.0) == [7.0, "ALLIN"]
+def test_threebet_multiplier_bb_bands():
+    """LEI v3 §B — BB: 16-20→2.5, 21-25→3, 26-35→3.5, 36-80→4, 81+→5; <16 jam."""
+    assert threebet_multiplier(15.99, "BB") is None
+    assert threebet_multiplier(16.0, "BB") == 2.5
+    assert threebet_multiplier(20.0, "BB") == 2.5
+    assert threebet_multiplier(21.0, "BB") == 3.0
+    assert threebet_multiplier(25.0, "BB") == 3.0
+    assert threebet_multiplier(26.0, "BB") == 3.5
+    assert threebet_multiplier(35.0, "BB") == 3.5
+    assert threebet_multiplier(36.0, "BB") == 4.0
+    assert threebet_multiplier(80.0, "BB") == 4.0
+    assert threebet_multiplier(81.0, "BB") == 5.0
 
 
-def test_threebet_sizings_bb_op_gate():
-    """LEI §18 — OP: <17 → [ALLIN]; >=17 → SEMPRE [size, ALLIN]. open=2bb."""
-    assert threebet_sizings_bb(15.0, False, 2.0) == ["ALLIN"]
-    assert threebet_sizings_bb(16.99, False, 2.0) == ["ALLIN"]
-    # eff=20 → escalão 17-20 → x=2.5 → 5.0 + jam
-    assert threebet_sizings_bb(20.0, False, 2.0) == [5.0, "ALLIN"]
-    # eff=45 → escalão 36-70 → x=4.0 → 8.0 + JAM (o teto 45 morreu)
-    assert threebet_sizings_bb(45.0, False, 2.0) == [8.0, "ALLIN"]
-    # deep 71 → x=4.5 → 9.0 + JAM
-    assert threebet_sizings_bb(71.0, False, 2.0) == [9.0, "ALLIN"]
+def test_threebet_multiplier_sbvsbb_bands():
+    """LEI v3 §B — SBvsBB: 16-25→2.2, 26-35→2.5, 36-100→3, 101+→4; <16 jam."""
+    assert threebet_multiplier(15.99, "SBvsBB") is None
+    assert threebet_multiplier(16.0, "SBvsBB") == 2.2
+    assert threebet_multiplier(25.0, "SBvsBB") == 2.2
+    assert threebet_multiplier(26.0, "SBvsBB") == 2.5
+    assert threebet_multiplier(35.0, "SBvsBB") == 2.5
+    assert threebet_multiplier(36.0, "SBvsBB") == 3.0
+    assert threebet_multiplier(100.0, "SBvsBB") == 3.0
+    assert threebet_multiplier(101.0, "SBvsBB") == 4.0
+
+
+def test_threebet_sizings_bb_gate_and_size():
+    """LEI v3 §B — abaixo da banda → [ALLIN]; senão [size, ALLIN]. open=2bb."""
+    assert threebet_sizings_bb(10.0, "IP", 2.0) == ["ALLIN"]
+    assert threebet_sizings_bb(16.99, "IP", 2.0) == ["ALLIN"]
+    # IP eff=17 → 2.25 × 2 = 4.5 + jam
+    assert threebet_sizings_bb(17.0, "IP", 2.0) == [4.5, "ALLIN"]
+    # IP eff=40 → 3.0 × 2 = 6.0 + jam
+    assert threebet_sizings_bb(40.0, "IP", 2.0) == [6.0, "ALLIN"]
+    # SB eff=50 → 4.0 × 2 = 8.0 + jam
+    assert threebet_sizings_bb(50.0, "SB", 2.0) == [8.0, "ALLIN"]
+    # SBvsBB eff=20 → 2.2 × 2 = 4.4 + jam
+    assert threebet_sizings_bb(20.0, "SBvsBB", 2.0) == [4.4, "ALLIN"]
 
 
 def test_threebet_sizings_bb_size_scales_with_open():
-    """`x` multiplica o open. open=3bb, IP eff=60 (36-70→3.0) → 3.0×3=9.0 + jam."""
-    assert threebet_sizings_bb(60.0, True, 3.0) == [9.0, "ALLIN"]
+    """`x` multiplica o open. open=3bb, IP eff=50 (36-60→3.0) → 3.0×3=9.0 + jam."""
+    assert threebet_sizings_bb(50.0, "IP", 3.0) == [9.0, "ALLIN"]
 
 
 def test_threebet_sizings_bb_ko_bonus():
-    """LEI §18 — bónus KO (+0.5) quando aplicável. IP eff=40 (x=3.0)+0.5=3.5,
-    open=2bb → 7.0 + jam. <17 continua só-jam mesmo com bónus."""
-    assert threebet_sizings_bb(40.0, True, 2.0, 0.5) == [7.0, "ALLIN"]
-    assert threebet_sizings_bb(30.0, False, 2.0, 0.5) == [8.0, "ALLIN"]  # OP 26-35 x=3.5+0.5=4.0
-    assert threebet_sizings_bb(10.0, True, 2.0, 0.5) == ["ALLIN"]        # jam-only ignora bónus
+    """LEI v3 §G — bónus KO (+0.5) só no 3-bet. IP eff=40 (3.0)+0.5=3.5, open=2bb
+    → 7.0 + jam. Abaixo da banda continua só-jam mesmo com bónus."""
+    assert threebet_sizings_bb(40.0, "IP", 2.0, 0.5) == [7.0, "ALLIN"]
+    assert threebet_sizings_bb(30.0, "BB", 2.0, 0.5) == [8.0, "ALLIN"]  # BB 26-35 x=3.5+0.5=4.0
+    assert threebet_sizings_bb(10.0, "IP", 2.0, 0.5) == ["ALLIN"]        # jam-only ignora bónus
+
+
+# ── LEI v3 §C — 4-bet (× 3-bet) ──────────────────────────────────────────
+
+def test_fourbet_multiplier_bands():
+    assert fourbet_multiplier(25.99, "IP") is None
+    assert fourbet_multiplier(26.0, "IP") == 2.0
+    assert fourbet_multiplier(35.0, "IP") == 2.0
+    assert fourbet_multiplier(36.0, "IP") == 2.2
+    assert fourbet_multiplier(60.0, "IP") == 2.2
+    assert fourbet_multiplier(61.0, "IP") == 2.5
+    assert fourbet_multiplier(90.0, "IP") == 2.5
+    assert fourbet_multiplier(91.0, "IP") == 2.7
+    assert fourbet_multiplier(30.99, "SB") is None
+    assert fourbet_multiplier(31.0, "SB") == 2.3
+    assert fourbet_multiplier(80.0, "SB") == 2.3
+    assert fourbet_multiplier(81.0, "SB") == 2.5
+    assert fourbet_multiplier(25.99, "BB") is None
+    assert fourbet_multiplier(35.0, "BB") == 2.3
+    assert fourbet_multiplier(80.0, "BB") == 2.5
+    assert fourbet_multiplier(81.0, "BB") == 3.0
+    assert fourbet_multiplier(35.99, "SBvsBB") is None
+    assert fourbet_multiplier(100.0, "SBvsBB") == 2.2
+    assert fourbet_multiplier(101.0, "SBvsBB") == 2.7
+
+
+def test_fourbet_sizings_bb_gate_and_size():
+    """Abaixo da banda → só allin; senão [size, ALLIN]. 3-bet anterior = 8bb."""
+    assert fourbet_sizings_bb(20.0, "IP", 8.0) == ["ALLIN"]      # <26 IP
+    assert fourbet_sizings_bb(40.0, "IP", 8.0) == [17.6, "ALLIN"]  # 2.2×8
+    assert fourbet_sizings_bb(50.0, "SB", 8.0) == [18.4, "ALLIN"]  # 2.3×8
+    assert fourbet_sizings_bb(200.0, "SBvsBB", 8.0) == [21.6, "ALLIN"]  # 2.7×8
+
+
+# ── LEI v3 §E — squeeze (× open, IP/OOP) ─────────────────────────────────
+
+def test_squeeze_multiplier_bands():
+    assert squeeze_multiplier(19.99, False) is None
+    assert squeeze_multiplier(19.99, True) is None
+    assert squeeze_multiplier(25.0, False) == 3.0
+    assert squeeze_multiplier(25.0, True) == 3.5
+    assert squeeze_multiplier(35.0, False) == 3.5
+    assert squeeze_multiplier(35.0, True) == 3.7
+    assert squeeze_multiplier(60.0, False) == 3.7
+    assert squeeze_multiplier(60.0, True) == 4.0
+    assert squeeze_multiplier(100.0, False) == 4.0
+    assert squeeze_multiplier(100.0, True) == 4.5
+    assert squeeze_multiplier(101.0, False) == 4.5
+    assert squeeze_multiplier(101.0, True) == 5.0
+
+
+def test_squeeze_sizings_bb_gate_and_size():
+    """<20 → só allin; senão [size, ALLIN]. open = 2.5bb."""
+    assert squeeze_sizings_bb(15.0, False, 2.5) == ["ALLIN"]
+    assert squeeze_sizings_bb(30.0, False, 2.5) == [8.75, "ALLIN"]  # 3.5×2.5
+    assert squeeze_sizings_bb(30.0, True, 2.5) == [9.25, "ALLIN"]   # 3.7×2.5 (OOP)
 
 
 # ── pt91 (Regra 3 do Rui) — flag IS_PKO no template ────────────────────────
@@ -2938,12 +2991,15 @@ def test_generate_hrc_script_for_hand_GG_HJ_open():
     )
     assert err is None
     assert eff == 133.33
-    # pt89: opener desta mão (5-handed) é rotulado CO → SIZES_OPEN_CO.
-    assert overrides["SIZES_OPEN_CO"] == [2.0]
-    assert "let SIZES_OPEN_CO = [2];" in js
-    # Outras vars não tocadas → default do template.
-    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
-    assert "let SIZES_OPEN_BU = [2];" in js
+    # LEI v3: os opens já não são overridden pelo gerador (single-size runtime).
+    assert "SIZES_OPEN_CO" not in overrides
+    # O size REAL do open (CO, 5-handed) viaja em REAL_PREFLOP_RAISES (bets=2).
+    assert '"CO":{"2":2.0}' in js.replace(" ", "")
+    # O template traz as funções v3 dos opens (base 2bb / SB,BB por eff).
+    assert "function sbOpenSizeByEff" in js
+    assert "function effVsFieldBB" in js
+    # E já não traz a régua antiga de open (substituída pela régua única).
+    assert "function effectiveStackBBAtOpen" not in js
 
 
 def test_generate_hrc_script_for_hand_walk_to_BB_returns_template_intact():
@@ -2965,9 +3021,8 @@ def test_generate_hrc_script_for_hand_walk_to_BB_returns_template_intact():
     )
     assert err is None
     assert overrides == {}
-    # Template default em SIZES_OPEN_OTHERS.
-    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
-    assert "let SIZES_OPEN_OTHERS = [2];" in js
+    # LEI v3: walk-to-BB → template cru (sem overrides); REAL_PREFLOP_RAISES fica {}.
+    assert "let REAL_PREFLOP_RAISES = {};" in js
 
 
 def test_generate_hrc_script_for_hand_template_io_failure_returns_error():
@@ -3199,18 +3254,16 @@ def test_build_queue_zip_writes_script_js_for_hand_with_open():
     assert meta["script_path"] == "script.js"
 
     js = zf.read("GG-OPEN/script.js").decode("utf-8")
-    # UTGopener é UTG (idx 0 em 8-handed) → SIZES_OPEN_UTG substituído (pt89).
-    # Open size = 1200/400 = 3 BB. Eff stack = 10000/400 = 25 → override do
-    # gerador inclui ALLIN (eff ≤ 25). ALLIN aqui vem do override, não do default.
-    assert "let SIZES_OPEN_UTG = [3, ALLIN];" in js
-    # Outras vars intactas → default do template.
-    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
-    assert "let SIZES_OPEN_BU = [2];" in js
+    # LEI v3: UTG open (3 BB, idx0 em 8-handed) viaja em REAL_PREFLOP_RAISES
+    # (bets=2); a base/linha de all-in do open é runtime (não SIZES_OPEN override).
+    assert '"UTG":{"2":3.0}' in js.replace(" ", "")
+    assert "function sbOpenSizeByEff" in js
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]
     assert entry["has_script"] is True
-    assert entry["script_overrides"]["SIZES_OPEN_UTG"] == [3.0, "ALLIN"]
+    # LEI v3: opens já não geram override → dict de overrides sem SIZES_OPEN_UTG.
+    assert "SIZES_OPEN_UTG" not in entry["script_overrides"]
     assert entry["effective_stack_bb"] == 25.0
     assert entry["aggressor_position"] == 0  # UTG=0 em 8-handed (HRC docs conv)
     assert entry["aggressor_source"] == "real"  # pt36: open real → "real"
@@ -3243,9 +3296,8 @@ def test_build_queue_zip_writes_script_js_for_walk_to_BB():
     assert "GG-WALK/script.js" in names
 
     js = zf.read("GG-WALK/script.js").decode("utf-8")
-    # Template intacto — defaults canónicos.
-    # pt29 tree-size control: default dos arrays OPEN passou a [N] sem ALLIN.
-    assert "let SIZES_OPEN_OTHERS = [2];" in js
+    # LEI v3: template cru (walk-to-BB) → REAL_PREFLOP_RAISES fica {}.
+    assert "let REAL_PREFLOP_RAISES = {};" in js
 
     manifest = _json.loads(zf.read("manifest.json"))
     entry = manifest["hands_included"][0]

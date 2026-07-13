@@ -15,81 +15,22 @@ let ALLIN = 9999;
 // Start of Preflop configuration
 // =====================================================================
 
-// Preflop open sizing in big blinds.
-// pt29 tree-size control: ALLIN removido dos arrays OPEN — agora controlado
-// exclusivamente por shouldAddPreflopAllIn (filtro por stack BB individual
-// vs STACK_BB_FOR_OPEN_ALLIN_OPTION). Sem isto, ALLIN=9999 entrava sempre
-// via applyAllinThreshold e causava explosao da tree em mesas com mistura
-// de short + deep stacks (smoke pt29 GG-5944816316: 26.9 GB > limite 20.4
-// GB). 3-bet/4-bet/5-bet arrays mantem o ALLIN literal (lógica SPR-efectivo
-// continua valida em pots ja levantados).
-// pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION): opens per-posição (era o bucket
-// partilhado SIZES_OPEN_OTHERS). Cada posição não-blind/não-BU tem a sua var,
-// para o gerador overridar SÓ a do opener (size + ALLIN por stack individual)
-// sem vazar para as fundas. Default [2] em todas (= o antigo OTHERS).
-let SIZES_OPEN_UTG1 = [2];
-let SIZES_OPEN_UTG  = [2];
-let SIZES_OPEN_MP   = [2];
-let SIZES_OPEN_HJ   = [2];
-let SIZES_OPEN_CO   = [2];
-// SIZES_OPEN_OTHERS = fallback defensivo p/ labels inesperados (fora de UTG1/UTG/MP/HJ/CO).
-let SIZES_OPEN_OTHERS = [2];
-let SIZES_OPEN_BU = [2];
-let SIZES_OPEN_SB = [3.5];
-let SIZES_OPEN_BB = [4];
+// LEI v3 (15 Jul 2026): TODAS as raises preflop (open / 3-bet / squeeze / 4-bet)
+// são calculadas em RUNTIME por escalão de efetiva (régua única). Os arrays de
+// sizing legacy (SIZES_OPEN_*, SIZES_3BET_*/SQUEEZE_*, SIZES_POT_4BET_*) foram
+// removidos — já não eram lidos. O 5-bet mantém pot-fraction (abaixo).
 
-// general 3-bet sizing in big blinds
-// ⚠️ pt91 + LEI §18 (11 Jul 2026): os arrays de 3-bet CLÁSSICO abaixo (IP/UTG1..BU
-// e SB_VS_*/BB_VS_*) deixaram de ser LIDOS — getSizings3Bets calcula o 3bet por
-// ESCALÃO fixo de efetiva min(3bettor,opener) + IP/OP (+ bónus KO). Mantidos só
-// como referência histórica / defaults inertes. O gerador Python já NÃO os
-// sobrescreve. Os SIZES_3BET_SQUEEZE_* CONTINUAM activos (squeeze inalterado).
-let SIZES_3BET_IP = [6, ALLIN];
-let SIZES_3BET_UTG1 = [6];
-let SIZES_3BET_UTG = [6];
-let SIZES_3BET_MP = [6];
-let SIZES_3BET_HJ = [6];
-let SIZES_3BET_CO = [6];
-let SIZES_3BET_BU = [6];
-let SIZES_3BET_BB_VS_SB = [10, ALLIN];
-let SIZES_3BET_BB_VS_OTHER = [8, ALLIN];
-let SIZES_3BET_SB_VS_BB = [11, ALLIN];
-let SIZES_3BET_SB_VS_OTHER = [8, ALLIN];
-
-// special sizing for squeezes in big blinds
-let SIZES_3BET_SQUEEZE_IP = [8, ALLIN];
-let SIZES_3BET_SQUEEZE_SB = [11, ALLIN];
-let SIZES_3BET_SQUEEZE_BB = [11, ALLIN];
-let SQUEEZE_INCREASE_PER_CALL = 1.0;
-
-// general 4-bet rules, sized in relation to pot
-let SIZES_POT_4BET_IP = [0.5, ALLIN];
-let SIZES_POT_4BET_OOP = [0.4, ALLIN];
-
-// general 5-bet rules, sized in relation to pot
+// 5-bet rules, sized in relation to pot (LEI v3 §D — inalterado).
 let SIZES_POT_5BET_IP = [0.4, ALLIN];
 let SIZES_POT_5BET_OOP = [0.5, ALLIN];
 
-// All-In threshold, works like the UI version
+// All-In threshold, works like the UI version.
 let PREFLOP_ALLIN_THRESHOLD = 1;
 
-// Add all-in as an option if SPR is below this value (3-bet+ only post-pt29).
-let PREFLOP_ADD_ALLIN_SPR = 7;
-
-// pt29 tree-size control: threshold para ALLIN em opens (primeira raise
-// voluntaria preflop). SPR efectivo nao funciona para opens porque um short
-// na mesa puxa effective stacks para baixo e adiciona ALLIN como opcao a
-// TODOS os jogadores (incluindo deep stacks 100+BB). Filtro individual por
-// stack BB do jogador activo evita a explosao multiway. Threshold 30 BB
-// definido em despacho pt29 (Rui). Reduzir para 25 se 30 nao chegar.
-//
-// pt86 (despacho Rui): o limiar passa a 25 BB GERAL; 30 BB SO em blind-vs-blind
-// (SB-vs-BB / BB-vs-SB; na tabela de opens = a SB). SEGURO re: pt29 — o filtro
-// CONTINUA por stack INDIVIDUAL (nao efetiva), por isso os deep 100+BB
-// continuam excluidos (100 > 25); baixar 30->25 so REMOVE ALLINs (arvore igual
-// ou menor), nunca reintroduz a explosao multiway.
-const STACK_BB_FOR_OPEN_ALLIN_OPTION = 25;       // geral (era 30 pre-pt86)
-const STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB = 30;   // SO blind-vs-blind
+// LEI v3 §A — limiar da linha de all-in nos OPENS por EFETIVA (régua única):
+// 25 BB geral (IP e BB-vs-limp); 30 BB só a SB (blind-vs-blind).
+const STACK_BB_FOR_OPEN_ALLIN_OPTION = 25;       // IP / BB-vs-limp
+const STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB = 30;   // SB (blind-vs-blind)
 
 // pt91 (Regra 3 do Rui) — flag de formato bounty (PKO/KO/SuperKO/Mystery/...).
 // O gerador Python (hrc_script_gen.generate_hrc_script_for_hand) faz replace
@@ -105,6 +46,14 @@ let PKO_SHORTIE_BB = 4;
 // pt91 (Regra 1 do Rui) — open com efetivo <= este valor (capado pelo maior
 // adversário vivo, recalculado no nó) → SÓ all-in (remove o min-raise).
 let OPEN_ALLIN_ONLY_EFF_BB = 9;
+
+// LEI v3 (15 Jul 2026) — size base do open das posições não-blind (IP).
+// A Regra de Ouro sobrepõe-se: o open REAL da posição substitui esta base.
+let OPEN_BASE_IP_BB = 2;
+
+// LEI v3 §A — as BLINDS (SBvsBB / BB-vs-limp) fazem jam abaixo de 10 BB (a letra
+// do quadro: "<10 jam"); as não-blind (IP) mantêm o colapso ≤9.
+let BLIND_OPEN_JAM_BELOW_BB = 10;
 
 // pt91 (preservação da ação real) — mapa {posição: {bets: size}} das raises
 // REAIS preflop desta mão (bets = 1+betCount: open=2, 3bet=3, 4bet=4, 5bet=5;
@@ -189,8 +138,9 @@ function getSizingsPreflop(ctx) {
 			return ctx.sizingAllIn();
 	}
 
-	if (shouldAddPreflopAllIn(ctx))
-		sizings.push(ctx.sizingAllIn());
+	// LEI v3 — cada função de sizing (open/3bet/4bet/squeeze) já gere o seu
+	// próprio all-in POR CONSTRUÇÃO (dedupe garantido). O push global do SPR
+	// morreu (SPR≤7 do 4-bet enterrado — §C). 5-bet leva o all-in no seu array.
 
 	// pt91 — preserva a ação REAL no seu nó (re-injeta por cima das regras,
 	// dedupe). As regras 1/2/3 são a camada hipotética; isto garante que a
@@ -233,124 +183,96 @@ function applyAllinThreshold(ctx, sizings) {
 	return sizings.map(s => s >= thresholdchips ? sizeallin : s);
 }
 
-// pt29 tree-size control helpers (despacho Rui).
-// Em opens (primeira raise voluntaria preflop) a decisao "adicionar ALLIN
-// como opcao" passa a depender da stack INDIVIDUAL do jogador activo (BB
-// equivalent) em vez do SPR efectivo. Em pots ja levantados (3-bet+) a
-// logica SPR-efectivo original mantem-se via PREFLOP_ADD_ALLIN_SPR.
+// ── LEI v3 — RÉGUA ÚNICA DA EFETIVA (remaining-based) ────────────────────
+// eff = min(REMAINING de quem age, REMAINING do adversário do confronto).
+//   open / squeeze → adversário = o MAIOR remaining vivo (por falar / entre
+//     opener+callers). 3-bet/4-bet → adversário = o agressor anterior.
+// Substitui as 3 medidas antigas (effectiveStackBBAtOpen/VsRaiser/parser).
 
-function getActivePlayerStackBB(ctx) {
-	let pot = ctx.getPotState();
-	let player = ctx.getActivePlayer();
-	return pot.getChipsRemaining(player) / ctx.getSizeBigBlind();
+function remainingBB(ctx, p) {
+	return ctx.getPotState().getChipsRemaining(p) / ctx.getSizeBigBlind();
 }
 
-function isPreflopFirstVoluntaryRaise(ctx) {
-	// Blinds contam como bet 1 preflop. betCount === 1 = ainda nenhuma raise voluntaria.
-	return ctx.getStreet() == PREFLOP && ctx.getBetCount() == 1;
-}
-
-// pt86: blind-vs-blind = so restam as duas blinds vivas (SB-vs-BB folded-to-SB,
-// ou BB-vs-SB com a SB a limpar). Usa so a API ja existente.
-function isBlindVsBlind(ctx) {
-	let p = ctx.getActivePlayer();
-	let sb = ctx.getPlayerIndexSmallBlind();
-	let bb = ctx.getPlayerIndexBigBlind();
-	if (p != sb && p != bb)
-		return false;
+// vs o campo: min(actor, maior remaining vivo não-actor). Serve open e squeeze.
+function effVsFieldBB(ctx, player) {
 	let state = ctx.getPotState();
+	let maxOpp = 0;
 	for (let q = 0; q < ctx.getNumberOfPlayers(); q++) {
-		if (q == sb || q == bb)
-			continue;
-		if (!state.hasPlayerFolded(q))
-			return false;   // algum nao-blind ainda vivo -> multiway, nao BvB
+		if (q == player) continue;
+		if (state.hasPlayerFolded(q)) continue;
+		let r = remainingBB(ctx, q);
+		if (r > maxOpp) maxOpp = r;
 	}
-	return true;
-}
-
-function shouldAddPreflopAllIn(ctx) {
-	if (isPreflopFirstVoluntaryRaise(ctx)) {
-		// Opens: filtra por stack individual do jogador activo (pt29).
-		// pt86: 25 BB geral, 30 BB so em blind-vs-blind.
-		let threshold = isBlindVsBlind(ctx)
-			? STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB
-			: STACK_BB_FOR_OPEN_ALLIN_OPTION;
-		return getActivePlayerStackBB(ctx) <= threshold;
-	}
-	// pt91 (Regra 2 do Rui): o 3bet (betCount==2) controla o all-in DENTRO de
-	// getSizings3Bets (bandas IP/OP por efetivo + ISO da Regra 3). Não adicionar
-	// aqui, senão um 3bet fundo (>=40 IP / >=45 OP, que a Regra 2 quer SEM
-	// all-in) ganhava o jam pelo SPR. Squeeze (também betCount==2) mantém o
-	// all-in via os seus arrays SIZES_3BET_SQUEEZE_* (contêm ALLIN).
-	if (ctx.getBetCount() == 2)
-		return false;
-	// 4-bet+: mantem logica original SPR-efectivo.
-	return ctx.getStackPotRatio() <= PREFLOP_ADD_ALLIN_SPR;
+	if (maxOpp <= 0) return remainingBB(ctx, player);   // sem vivos (degenerado)
+	return Math.min(remainingBB(ctx, player), maxOpp);
 }
 
 function getSizingsOpening(ctx) {
 	let player = ctx.getActivePlayer();
-	let baseSizes = getOpenBaseSizes(ctx, player);
+	let eff = effVsFieldBB(ctx, player);
+	let ownBB = totalStackChips(ctx, player) / ctx.getSizeBigBlind();
+	let shortieOwn = IS_PKO && ownBB <= PKO_SHORTIE_BB;
+	let isBlind = (player == ctx.getPlayerIndexSmallBlind()
+		|| player == ctx.getPlayerIndexBigBlind());
 
-	// pt91 (Regra 1 do Rui): open com EFETIVO <= OPEN_ALLIN_ONLY_EFF_BB (capado
-	// pelo maior adversário vivo, nó-a-nó) → SÓ all-in (remove o min-raise).
-	// EXCEÇÃO (Regra 3): em PKO, se o PRÓPRIO opener for o shortie
-	// (<= PKO_SHORTIE_BB), mantém [min, all-in] em vez de só all-in.
-	let effBB = effectiveStackBBAtOpen(ctx, player);
-	let ownStackBB = totalStackChips(ctx, player) / ctx.getSizeBigBlind();
-	let shortieOwnOpen = IS_PKO && ownStackBB <= PKO_SHORTIE_BB;
-
-	if (effBB <= OPEN_ALLIN_ONLY_EFF_BB && !shortieOwnOpen)
+	// LEI v3 §A — colapso → SÓ JAM (exceto shortie próprio PKO). A letra do
+	// quadro: IP mantém >9 = 2bb (jam ≤9); as BLINDS (tabelas SBvsBB/BB-vs-limp)
+	// jam abaixo de 10 (<10).
+	let jam = isBlind
+		? (eff < BLIND_OPEN_JAM_BELOW_BB)
+		: (eff <= OPEN_ALLIN_ONLY_EFF_BB);
+	if (jam && !shortieOwn)
 		return [ctx.sizingAllIn()];
 
-	let sizings = baseSizes;
+	let sizings = getOpenBaseSizes(ctx, player, eff);
 
-	// pt91 (Regra 3): o shortie a abrir (PKO, <= PKO_SHORTIE_BB) leva min + all-in.
-	if (shortieOwnOpen)
+	// LEI v3 §A — linha de all-in por EFETIVA: IP<=25 / SB<=30 / BB(vs limp)<=25.
+	let threshold = (player == ctx.getPlayerIndexSmallBlind())
+		? STACK_BB_FOR_OPEN_ALLIN_OPTION_BVB   // SB (blind-vs-blind) = 30
+		: STACK_BB_FOR_OPEN_ALLIN_OPTION;      // IP e BB(vs limp) = 25
+	if (eff <= threshold)
 		sizings = pushAllInOnce(ctx, sizings.slice());
 
-	// pt91 (Regra 3): PKO + jogador AINDA POR FALAR já all-in ou <= PKO_SHORTIE_BB
-	// → +all-in (ISO) ADITIVO. Num nó de open, todos os adversários vivos ainda
-	// estão por falar (os anteriores já foldaram).
-	if (IS_PKO && anyYetToActOpponentShortOrAllIn(ctx, player, PKO_SHORTIE_BB))
+	// Regra 3 (shortie PKO): próprio shortie OU adversário por falar all-in/<=4.
+	if (shortieOwn ||
+		(IS_PKO && anyYetToActOpponentShortOrAllIn(ctx, player, PKO_SHORTIE_BB)))
 		sizings = pushAllInOnce(ctx, sizings.slice());
 
 	return sizings;
 }
 
-function getOpenBaseSizes(ctx, player) {
-	if (player == ctx.getPlayerIndexButton()) //BU
-		return SIZES_OPEN_BU.map(s => ctx.sizingBigBlinds(s));
-	if (player == ctx.getPlayerIndexSmallBlind()) //SB
-		return SIZES_OPEN_SB.map(s => ctx.sizingBigBlinds(s));
-	if (player == ctx.getPlayerIndexBigBlind()) //BB
-		return SIZES_OPEN_BB.map(s => ctx.sizingBigBlinds(s));
-
-	// pt89 (#GTO-OPEN-SIZE-NOT-PER-POSITION) — per-posição (era SIZES_OPEN_OTHERS
-	// partilhado). Reusa positionLabelForIdx (helper pt42b).
-	return openSizesForPosition(positionLabelForIdx(player, ctx.getNumberOfPlayers()))
-		.map(s => ctx.sizingBigBlinds(s));
+// LEI v3 §A — size base do open (single-size):
+//   Regra de Ouro: se a posição ABRIU de verdade → o size real SUBSTITUI a base.
+//   Senão: IP não-blind → OPEN_BASE_IP_BB (2 BB) · SB → tabela SBvsBB por eff ·
+//   BB → tabela BB-vs-limp por eff. (O colapso <=9 já foi tratado no caller.)
+function getOpenBaseSizes(ctx, player, eff) {
+	let real = realRaiseForNode(ctx);   // open real desta posição (bets=2) ou undefined
+	if (real !== undefined)
+		return [sizingBBorAllIn(ctx, real)];
+	if (player == ctx.getPlayerIndexSmallBlind())
+		return [ctx.sizingBigBlinds(sbOpenSizeByEff(eff))];
+	if (player == ctx.getPlayerIndexBigBlind())
+		return [ctx.sizingBigBlinds(bbVsLimpSizeByEff(eff))];
+	return [ctx.sizingBigBlinds(OPEN_BASE_IP_BB)];
 }
 
-// pt91 (Regra 1) — efetivo (BB) no nó de open = min(stack total do opener, maior
-// stack total entre adversários vivos). Nó-a-nó: foldados não contam.
-function effectiveStackBBAtOpen(ctx, player) {
-	let state = ctx.getPotState();
-	let bb = ctx.getSizeBigBlind();
-	let pTotal = totalStackChips(ctx, player);
-	let maxOpp = 0;
-	for (let q = 0; q < ctx.getNumberOfPlayers(); q++) {
-		if (q == player)
-			continue;
-		if (state.hasPlayerFolded(q))
-			continue;
-		let t = totalStackChips(ctx, q);
-		if (t > maxOpp)
-			maxOpp = t;
-	}
-	if (maxOpp <= 0)
-		return pTotal / bb;   // sem adversários vivos (degenerado)
-	return Math.min(pTotal, maxOpp) / bb;
+// LEI v3 §A — SBvsBB (fold até à SB, a SB abre). eff em BB. Só chamado com
+// eff > 9 (o colapso <=9 é universal no getSizingsOpening).
+function sbOpenSizeByEff(eff) {
+	if (eff <= 15) return 2.2;
+	if (eff <= 25) return 2.5;
+	if (eff <= 35) return 3;
+	if (eff <= 100) return 3.5;
+	return 4;
+}
+
+// LEI v3 §A — BB sobe sobre LIMP da SB. eff em BB. Só chamado com eff > 9.
+function bbVsLimpSizeByEff(eff) {
+	if (eff <= 14) return 2;
+	if (eff <= 20) return 2.5;
+	if (eff <= 30) return 3;
+	if (eff <= 100) return 3.5;
+	return 4;
 }
 
 // pt91 (Regra 3 do open) — há adversário AINDA POR FALAR já all-in ou com stack
@@ -371,84 +293,92 @@ function anyYetToActOpponentShortOrAllIn(ctx, player, thresholdBB) {
 	return false;
 }
 
-function openSizesForPosition(label) {
-	switch (label) {
-		case "UTG1": return SIZES_OPEN_UTG1;
-		case "UTG":  return SIZES_OPEN_UTG;
-		case "MP":   return SIZES_OPEN_MP;
-		case "HJ":   return SIZES_OPEN_HJ;
-		case "CO":   return SIZES_OPEN_CO;
-		default:     return SIZES_OPEN_OTHERS;   // fallback defensivo
-	}
-}
-
-// pt91 (Regra 2 do Rui) — sizing de 3bet por EFETIVO = min(stack total do
-// 3bettor, stack total do opener), em BB. IP/OP vs o opener. SUBSTITUI o
-// dispatch por posição (pt42b) E os arrays especiais SB/BB. Squeeze (callers>0)
-// mantém a lógica atual (SIZES_3BET_SQUEEZE_*). Regra 3 (PKO + adversário vivo
-// <= PKO_SHORTIE_BB) acrescenta all-in (ISO) ADITIVO, nó-a-nó.
+// LEI v3 §B (15 Jul 2026) — 3-bet por 4 BLOCOS (IP / SB / BB / SBvsBB) × OPEN,
+// por escalão fixo de EFETIVA (régua única = min remaining 3bettor vs agressor
+// anterior). [size, ALLIN] em todos os escalões; abaixo da banda = SÓ JAM.
+// Bónus KO +0.5 (só 3-bet). Regra 3 (PKO + adversário vivo ≤4) acrescenta all-in.
 function getSizings3Bets(ctx) {
 	let player = ctx.getActivePlayer();
 	let raiser = ctx.getLastRaiseAction().getPlayer();
 	let callers = ctx.getFlatCallCount();
 
-	// pt91 — squeeze SÓ se houver um caller VIVO e NÃO-all-in além do opener.
-	// Um shortie all-in atrás (ex.: SB auto-all-in pela ante, 0,05bb) é side-pot,
-	// NÃO faz squeeze a sério -> cai no 3bet normal (dinâmico, Regra 2). Sem isto,
-	// o getFlatCallCount conta o all-in e o nó ia para getSizingsSqueeze (fixo 11).
+	// squeeze SÓ se houver um caller VIVO e NÃO-all-in além do opener (um shortie
+	// all-in atrás é side-pot → cai no 3bet normal).
 	if (callers > 0 && hasLiveNonAllInCaller(ctx, player, raiser))
-		return getSizingsSqueeze(ctx, player, callers);
+		return getSizingsSqueeze(ctx, player, raiser);
 
-	let isIP = ctx.isPlayerInPosition(player, raiser);
-	let effBB = effectiveStackBBVsRaiser(ctx, player, raiser);
+	let block = threeBetBlock(ctx, player, raiser);
+	let eff = effVsAggressorBB(ctx, player, raiser);          // régua única (remaining)
 	let openToBB = totalChipsThisStreet(ctx, raiser) / ctx.getSizeBigBlind();
 
-	// LEI nova (§18, 11 Jul 2026) — BÓNUS KO: torneio KO + opener COBRE o
-	// 3-bettor (opener tem >= fichas totais) → +0.5 ao multiplicador.
+	// LEI v3 §B — BÓNUS KO: KO + opener COBRE o 3-bettor (≥ fichas totais) → +0.5.
 	let koBonus = (IS_PKO && totalStackChips(ctx, raiser) >= totalStackChips(ctx, player)) ? 0.5 : 0;
 
-	let sizings = threeBetSizings(effBB, isIP, openToBB, koBonus)
+	let sizings = threeBetSizingsV3(eff, block, openToBB, koBonus)
 		.map(s => sizingBBorAllIn(ctx, s));
 
-	// pt91 (Regra 3) — PKO + adversário vivo <= PKO_SHORTIE_BB → +all-in (ISO).
+	// Regra 3 — PKO + adversário vivo ≤ PKO_SHORTIE_BB → +all-in (ISO) aditivo.
 	if (IS_PKO && anyLiveOpponentAtMostBB(ctx, player, PKO_SHORTIE_BB))
 		pushAllInOnce(ctx, sizings);
 
 	return sizings;
 }
 
-// LEI nova (§18, 11 Jul 2026) — array de 3bet em BB (sentinela ALLIN).
-//   effBB < 17  -> [ALLIN]           (nó SÓ-jam, sem size)
-//   effBB >= 17 -> [size, ALLIN]     (SEMPRE size + jam; morreram os tetos 40/45)
-//   size = (multiplicador(escalão) + koBonus) * openToBB.
-//   koBonus (0 ou 0.5) vem do caller (getSizings3Bets), só em KO + opener cobre.
-//   Mirror EXACTO de hrc_script_gen.threebet_sizings_bb (sync cross-language).
-function threeBetSizings(effBB, isIP, openToBB, koBonus) {
-	if (effBB < 17)
-		return [ALLIN];
-	let mult = threeBetMultiplier(effBB, isIP) + (koBonus || 0);
-	let size = round2(mult * openToBB);
+// LEI v3 §B — bloco do 3-bet: SBvsBB (BB 3-beta o open da SB) / SB (cold 3-bet da
+// SB vs opener não-blind) / BB (idem BB) / IP (não-blind — sempre depois do opener).
+function threeBetBlock(ctx, player, raiser) {
+	let sb = ctx.getPlayerIndexSmallBlind();
+	let bb = ctx.getPlayerIndexBigBlind();
+	if (player == bb && raiser == sb) return "SBvsBB";
+	if (player == sb) return "SB";
+	if (player == bb) return "BB";
+	return "IP";
+}
+
+// LEI v3 §B — array de 3bet em BB (sentinela ALLIN). Abaixo da banda → [ALLIN].
+function threeBetSizingsV3(eff, block, openToBB, koBonus) {
+	let mult = threeBetMultV3(eff, block);
+	if (mult === null)
+		return [ALLIN];                       // abaixo da banda = só jam
+	let size = round2((mult + (koBonus || 0)) * openToBB);
 	return [size, ALLIN];
 }
 
-// LEI nova (§18, 11 Jul 2026) — multiplicador "x" sobre o open, por ESCALÃO fixo
-// de efetiva (sem interpolação). Só chamado com effBB >= 17 (o <17 é jam acima).
-//   escalão      IP    OP
-//   17..20      2.0   2.5
-//   21..25      2.2   3.0
-//   26..35      2.5   3.5
-//   36..70      3.0   4.0
-//   71+         3.5   4.5
-function threeBetMultiplier(effBB, isIP) {
-	if (effBB < 21)
-		return isIP ? 2.0 : 2.5;
-	if (effBB < 26)
-		return isIP ? 2.2 : 3.0;
-	if (effBB < 36)
-		return isIP ? 2.5 : 3.5;
-	if (effBB < 71)
-		return isIP ? 3.0 : 4.0;
-	return isIP ? 3.5 : 4.5;
+// LEI v3 §B — multiplicador × OPEN por escalão fixo (fronteira no escalão de baixo).
+//   IP:     17-25→2.25 · 26-35→2.5 · 36-60→3 · 61-90→3.5 · 91+→4   (<17 jam)
+//   SB:     18-25→3    · 26-30→3.5 · 31-80→4 · 81+→5               (<18 jam)
+//   BB:     16-20→2.5  · 21-25→3   · 26-35→3.5 · 36-80→4 · 81+→5   (<16 jam)
+//   SBvsBB: 16-25→2.2  · 26-35→2.5 · 36-100→3 · 101+→4             (<16 jam)
+function threeBetMultV3(eff, block) {
+	if (block == "IP") {
+		if (eff < 17) return null;
+		if (eff <= 25) return 2.25;
+		if (eff <= 35) return 2.5;
+		if (eff <= 60) return 3;
+		if (eff <= 90) return 3.5;
+		return 4;
+	}
+	if (block == "SB") {
+		if (eff < 18) return null;
+		if (eff <= 25) return 3;
+		if (eff <= 30) return 3.5;
+		if (eff <= 80) return 4;
+		return 5;
+	}
+	if (block == "BB") {
+		if (eff < 16) return null;
+		if (eff <= 20) return 2.5;
+		if (eff <= 25) return 3;
+		if (eff <= 35) return 3.5;
+		if (eff <= 80) return 4;
+		return 5;
+	}
+	// SBvsBB
+	if (eff < 16) return null;
+	if (eff <= 25) return 2.2;
+	if (eff <= 35) return 2.5;
+	if (eff <= 100) return 3;
+	return 4;
 }
 
 function round2(v) {
@@ -460,14 +390,9 @@ function sizingBBorAllIn(ctx, s) {
 	return s == ALLIN ? ctx.sizingAllIn() : ctx.sizingBigBlinds(s);
 }
 
-// Efetivo (BB) do confronto 3bettor vs opener = min dos stacks TOTAIS (resto +
-// o que já está no pote nesta street). Capado SÓ pelo opener (não por shorties
-// atrás) — despacho do Rui.
-function effectiveStackBBVsRaiser(ctx, player, raiser) {
-	let bb = ctx.getSizeBigBlind();
-	let pTotal = totalStackChips(ctx, player);
-	let rTotal = totalStackChips(ctx, raiser);
-	return Math.min(pTotal, rTotal) / bb;
+// LEI v3 — régua única vs o AGRESSOR anterior (3-bet/4-bet): min dos REMAINING.
+function effVsAggressorBB(ctx, player, aggressor) {
+	return Math.min(remainingBB(ctx, player), remainingBB(ctx, aggressor));
 }
 
 function totalStackChips(ctx, p) {
@@ -525,15 +450,68 @@ function positionLabelForIdx(idx, n) {
 	return labels[idx] || null;
 }
 
+// LEI v3 §C (15 Jul 2026) — 4-bet por 4 BLOCOS (IP/SB/BB/SBvsBB) × 3-BET (to-amount),
+// por escalão fixo de EFETIVA (régua única vs o 3-bettor). All-in SEMPRE no nó;
+// abaixo do 1º escalão com valor = SÓ ALL-IN. A regra SPR≤7 morre.
 function getSizings4Bets(ctx) {
 	let player = ctx.getActivePlayer();
-	let inposition = ctx.isPlayerInPosition(player, ctx.getLastRaiseAction().getPlayer());
-
-	return inposition ?
-		SIZES_POT_4BET_IP.map(s => ctx.sizingPot(s)) :
-		SIZES_POT_4BET_OOP.map(s => ctx.sizingPot(s));
+	let raiser = ctx.getLastRaiseAction().getPlayer();          // o 3-bettor
+	let block = fourBetBlock(ctx, player, raiser);
+	let eff = effVsAggressorBB(ctx, player, raiser);
+	let prev3betToBB = totalChipsThisStreet(ctx, raiser) / ctx.getSizeBigBlind();
+	return fourBetSizingsV3(eff, block, prev3betToBB).map(s => sizingBBorAllIn(ctx, s));
 }
 
+// LEI v3 §C — bloco do 4-bet: SBvsBB (a SB 4-beta o 3-bet do BB no BvB) / SB / BB
+// (4-bet da blind vs 3-bettor não-blind) / IP (não-blind).
+function fourBetBlock(ctx, player, raiser) {
+	let sb = ctx.getPlayerIndexSmallBlind();
+	let bb = ctx.getPlayerIndexBigBlind();
+	if (player == sb && raiser == bb) return "SBvsBB";
+	if (player == sb) return "SB";
+	if (player == bb) return "BB";
+	return "IP";
+}
+
+// LEI v3 §C — array de 4bet em BB. Abaixo da banda → [ALLIN]; senão [size, ALLIN].
+function fourBetSizingsV3(eff, block, prev3betToBB) {
+	let mult = fourBetMultV3(eff, block);
+	if (mult === null)
+		return [ALLIN];
+	return [round2(mult * prev3betToBB), ALLIN];
+}
+
+// LEI v3 §C — multiplicador × 3-BET por escalão (fronteira no escalão de baixo).
+//   IP:     26-35→2 · 36-60→2.2 · 61-90→2.5 · 91+→2.7   (<26 só allin)
+//   SB:     31-80→2.3 · 81+→2.5                         (<31 só allin)
+//   BB:     26-35→2.3 · 36-80→2.5 · 81+→3               (<26 só allin)
+//   SBvsBB: 36-100→2.2 · 101+→2.7                       (<36 só allin)
+function fourBetMultV3(eff, block) {
+	if (block == "IP") {
+		if (eff < 26) return null;
+		if (eff <= 35) return 2;
+		if (eff <= 60) return 2.2;
+		if (eff <= 90) return 2.5;
+		return 2.7;
+	}
+	if (block == "SB") {
+		if (eff < 31) return null;
+		if (eff <= 80) return 2.3;
+		return 2.5;
+	}
+	if (block == "BB") {
+		if (eff < 26) return null;
+		if (eff <= 35) return 2.3;
+		if (eff <= 80) return 2.5;
+		return 3;
+	}
+	// SBvsBB
+	if (eff < 36) return null;
+	if (eff <= 100) return 2.2;
+	return 2.7;
+}
+
+// 5-bet — mantém 0.4/0.5 pot (com all-in no array).
 function getSizings5Bets(ctx) {
 	let player = ctx.getActivePlayer();
 	let inposition = ctx.isPlayerInPosition(player, ctx.getLastRaiseAction().getPlayer());
@@ -543,13 +521,29 @@ function getSizings5Bets(ctx) {
 		SIZES_POT_5BET_OOP.map(s => ctx.sizingPot(s));
 }
 
-function getSizingsSqueeze(ctx, player, callers) {
-	let sizings = SIZES_3BET_SQUEEZE_IP;
-	if (player == ctx.getPlayerIndexSmallBlind())
-		sizings = SIZES_3BET_SQUEEZE_SB;
-	if (player == ctx.getPlayerIndexBigBlind())
-		sizings = SIZES_3BET_SQUEEZE_BB;
-	return sizings.map(s => ctx.sizingBigBlinds(s + SQUEEZE_INCREASE_PER_CALL * (callers - 1)));
+// LEI v3 §E (15 Jul 2026) — SQUEEZE × OPEN por escalão de EFETIVA (régua única =
+// min(squeezer, o MAIOR entre opener e callers) = effVsFieldBB no nó de squeeze).
+// IP/OOP; [size, ALLIN] em todos; <20 SÓ JAM. O +1bb por caller MORRE.
+function getSizingsSqueeze(ctx, player, raiser) {
+	let eff = effVsFieldBB(ctx, player);      // min(squeezer, maior vivo=max(opener,callers))
+	let openToBB = totalChipsThisStreet(ctx, raiser) / ctx.getSizeBigBlind();
+	let isOOP = (player == ctx.getPlayerIndexSmallBlind()
+		|| player == ctx.getPlayerIndexBigBlind());
+	let mult = squeezeMultV3(eff, isOOP);
+	if (mult === null)
+		return [ctx.sizingAllIn()];
+	return [ctx.sizingBigBlinds(round2(mult * openToBB)), ctx.sizingAllIn()];
+}
+
+// LEI v3 §E — multiplicador × OPEN (IP / OOP). <20 → null (jam).
+//   20-25→3/3.5 · 26-35→3.5/3.7 · 36-60→3.7/4 · 61-100→4/4.5 · 101+→4.5/5
+function squeezeMultV3(eff, isOOP) {
+	if (eff < 20) return null;
+	if (eff <= 25) return isOOP ? 3.5 : 3;
+	if (eff <= 35) return isOOP ? 3.7 : 3.5;
+	if (eff <= 60) return isOOP ? 4 : 3.7;
+	if (eff <= 100) return isOOP ? 4.5 : 4;
+	return isOOP ? 5 : 4.5;
 }
 
 function getSizingsPostflop(ctx) {

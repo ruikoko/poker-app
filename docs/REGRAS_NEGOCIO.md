@@ -636,6 +636,12 @@ within-bucket; o gate de qualidade fica em **acertar a posição** (`#IMPLICIT-L
 
 ## §17. Regra dos sizings por stack efetiva (gerador do script HRC) — LEI do Rui (11 Jun 2026)
 
+> ⚠️ **SUPERSEDED pela LEI DE SIZINGS v3 (`docs/LEI_SIZINGS_2026-07-15-v3.md`, carimbada
+> 15 Jul 2026)** onde conflituar. A v3 unifica a efetiva numa **régua única**
+> (`min(remaining de quem age, remaining do adversário do confronto)`) e reforma a linha
+> de all-in dos opens (§19). O texto abaixo fica como registo do estado até 15 Jul; para o
+> comportamento **actual/alvo**, ler a v3. Aplica-se também a §18 e §19 abaixo.
+
 **Confirmada pelo Rui** (escavação pt67) — é a regra que ele definiu. Para cada **raise
 pré-flop não-all-in** do agressor, o gerador (`hrc_script_gen.py:51,60` —
 `_OPEN_ALLIN_THRESHOLD_BB = 25`, `_NON_ALL_IN_OPEN_MIN_EFF_BB = 8.0`) emite:
