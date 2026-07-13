@@ -142,25 +142,50 @@ export default function HRCResults() {
                 </span>
               </div>
               {isOpen && (
-                <div style={{ padding: '4px 0 6px 34px' }}>
-                  {g.hands.map((h) => (
-                    <div key={h.hand_id} style={{ display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '5px 10px', fontSize: 13, color: C.text,
-                      borderBottom: `1px solid ${C.border}` }}>
-                      <span style={{ fontFamily: 'monospace', color: C.muted, flex: 1 }}>{h.hand_id}</span>
-                      <span style={{ color: C.muted, fontSize: 12 }}>
-                        {h.played_at ? h.played_at.slice(0, 16) : '—'}
-                      </span>
-                      {h.buy_in && <span style={{ color: C.green, fontSize: 12 }}>${h.buy_in}</span>}
-                      <span style={{ color: C.muted, fontSize: 11 }}>
-                        {h.zsize ? `${(h.zsize / 1e6).toFixed(1)} MB` : ''}
-                      </span>
-                      {/* Fase 2: botão HRC (amarelo) -> página da mão */}
-                      <span style={{ fontSize: 11, color: C.muted, fontStyle: 'italic' }}>
-                        página da mão · próxima fase
-                      </span>
-                    </div>
-                  ))}
+                <div style={{ padding: '2px 0 8px 34px' }}>
+                  {/* cabeçalho de colunas */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '3px 10px',
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: C.muted,
+                    textTransform: 'uppercase' }}>
+                    <span style={{ width: 52 }}>Data</span>
+                    <span style={{ width: 46 }}>Hora</span>
+                    <span style={{ width: 58, textAlign: 'right' }}>Tree</span>
+                    <span style={{ width: 130, paddingLeft: 14 }}>Mão nº</span>
+                    <span style={{ width: 48, textAlign: 'right' }}>Left</span>
+                    <span style={{ width: 66, textAlign: 'right' }}>Hero</span>
+                    <span style={{ width: 70, textAlign: 'right' }}>Stack</span>
+                    <span style={{ width: 66, textAlign: 'right' }}>1ª ação</span>
+                  </div>
+                  {g.hands.map((h) => {
+                    const dt = h.played_at || ''
+                    const data = dt.length >= 10 ? `${dt.slice(8, 10)}/${dt.slice(5, 7)}` : '—'
+                    const hora = dt.length >= 16 ? dt.slice(11, 16) : '—'
+                    return (
+                      <div key={h.hand_id} title={h.hand_id} style={{ display: 'flex', alignItems: 'center',
+                        gap: 0, padding: '5px 10px', fontSize: 13, color: C.text,
+                        borderBottom: `1px solid ${C.border}` }}>
+                        <span style={{ width: 52, color: C.muted, fontSize: 12 }}>{data}</span>
+                        <span style={{ width: 46, color: C.muted, fontSize: 12 }}>{hora}</span>
+                        <span style={{ width: 58, textAlign: 'right', color: C.muted, fontSize: 12 }}>
+                          {h.zsize ? `${(h.zsize / 1e6).toFixed(1)} MB` : '—'}
+                        </span>
+                        <span style={{ width: 130, paddingLeft: 14, fontFamily: 'monospace',
+                          fontWeight: 700, color: C.text }}>{h.num}</span>
+                        <span style={{ width: 48, textAlign: 'right', color: C.muted }}>
+                          {h.players_left ?? '—'}
+                        </span>
+                        <span style={{ width: 66, textAlign: 'right', color: C.yellow, fontWeight: 700 }}>
+                          {h.hero_pos || '—'}
+                        </span>
+                        <span style={{ width: 70, textAlign: 'right', color: C.green }}>
+                          {h.hero_stack_bb != null ? `${h.hero_stack_bb}bb` : '—'}
+                        </span>
+                        <span style={{ width: 66, textAlign: 'right', color: C.blue }}>
+                          {h.first_action_pos || '—'}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
