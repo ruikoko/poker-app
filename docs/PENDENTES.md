@@ -15,6 +15,13 @@ confirmado por timeline de deploy (LICAO 16 Jul).
   `hand` (página Wizard). EV = **% equity ICM** (`TABLE_EQUITY_PERCENT` dos zips). Árvore servida
   por API por-clique (`build_verify_tree` lazy).
 
+**🔵 FEATURE FUTURA — `#VILLAIN-AUTO-NOTES-NO-SHOWDOWN` (ditada 16 Jul; BACKLOG, NÃO implementar; desenho a ditar pelo Rui antes de construir):**
+Vilões — **notas automáticas de tendência por jogador, SEM depender de showdown**.
+- **Princípio do Rui:** a **ação em contexto já é informação** (não fazem falta as cartas). Ex.: **CO 30bb faz all-in de 3-bet sobre open do HJ 40bb pós-late-reg** = pouco ortodoxo / duvidoso / possível *spew* → nota de tendência.
+- **Motor:** avaliar **cada ação observada** do vilão contra o **espectro razoável do spot** (stacks, posições, fase do torneio, PKO); usar as **trees HRC como árbitro** quando existir spot equivalente (**ação com freq ~0% na solução = fora do mapa**).
+- **Fontes:** HH (ações, com OU sem showdown) · trees HRC · stats HM3 · **notas do Rui como semente**.
+- **Em aberto (decisão do Rui):** regras vs IA vs híbrido · apresentação na ficha do vilão · gatilho (quando/como se dispara).
+
 **Pós-VALE / dívidas que continuam:**
 - **2 GRAVITY** (`WN-…-24`, `WN-…-30`) por fechar — monitor ligado (avisa quando `done`).
 - **Epoch durável + botão "Reenviar ao HRC"** (dorme): `hrc_queue_release` é apagada por
