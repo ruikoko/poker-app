@@ -360,4 +360,8 @@ app.mount("/screenshots", StaticFiles(directory="/tmp/poker_screenshots"), name=
 
 @app.get("/")
 def root():
-    return {"app": "poker-app", "version": "0.2.0"}
+    # `sizing_rules` exposto publicamente p/ confirmar qual a LEI de sizing que
+    # o backend escreve neste deploy (etiqueta dos zips HRC). Read-only, inócuo.
+    from app.services.queue_export import SIZING_RULES_VERSION
+    return {"app": "poker-app", "version": "0.2.0",
+            "sizing_rules": SIZING_RULES_VERSION}

@@ -61,7 +61,7 @@ def _is_ft_tag(tag) -> bool:
 # Versão das regras de sizing (LEI §18). Bump a cada mudança de regra → cada
 # pack (manifest + meta.json) e cada release regista-a → painel distingue trees
 # da lei velha vs nova. "3bet-v2" = escalões fixos + jam sempre + bónus KO.
-SIZING_RULES_VERSION = "2026-07-11-3bet-v2"
+SIZING_RULES_VERSION = "2026-07-15-sizings-v3"
 
 BOUNTY_FORMATS = ("pko", "super ko", "ko", "mystery ko", "mystery")
 MYSTERY_FORMATS = ("mystery ko", "mystery")
