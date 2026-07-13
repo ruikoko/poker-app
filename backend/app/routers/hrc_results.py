@@ -18,7 +18,7 @@ import logging
 import re
 from collections import Counter, OrderedDict
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import require_auth
 from app.db import query, execute
@@ -243,3 +243,51 @@ def ev_loss_compute(limit: int = Query(12, ge=1, le=40),
         "SELECT count(*) AS n FROM hrc_jobs "
         "WHERE status = 'done' AND result_zip IS NOT NULL AND ev_loss_json IS NULL")[0]["n"]
     return {"computed": computed, "remaining": remaining}
+
+
+# ── Página da mão (Wizard) — Fase 2 ──────────────────────────────────────────
+@router.get("/hand/{db_id}")
+def hand_wizard(db_id: int, current_user=Depends(require_auth)):
+    """Árvore navegável de uma mão resolvida + barra de posições (stacks + coroas $)
+    + EV perdido. Read-only. Grelha 13×13 por nó vem do endpoint /node/{ni}."""
+    rows = query(
+        "SELECT h.hand_id, h.raw, h.tournament_format, h.tournament_name, h.position, "
+        "       h.played_at, j.result_zip, j.ev_loss_json AS ev "
+        "FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
+        "WHERE h.id = %s AND j.status = 'done' AND j.result_zip IS NOT NULL", (db_id,))
+    if not rows:
+        raise HTTPException(404, "mão não resolvida (sem result_zip)")
+    h = dict(rows[0])
+    zb = bytes(h["result_zip"])
+    from app.services.hrc_verify_tree import build_verify_tree
+    from app.services.hrc_hand import hand_bounties
+    tree = build_verify_tree({"raw": h["raw"]}, zb)
+    if tree.get("error"):
+        raise HTTPException(422, tree["error"])
+    crowns = hand_bounties(zb)
+    for p in tree.get("positions", []):
+        p["crown_usd"] = crowns.get(p["idx"])
+    ev = h.get("ev")
+    if ev is None:
+        ev = _cache_ev_for_job(db_id)
+    return {
+        "hand_id": h["hand_id"], "hand_db_id": db_id,
+        "tournament": h.get("tournament_name"), "format": _fmt_label(h.get("tournament_format")),
+        "played_at": _played_str(h.get("played_at")), "hero_pos": h.get("position"),
+        "ev_loss": ev, "tree": tree,
+    }
+
+
+@router.get("/hand/{db_id}/node/{ni}")
+def hand_node(db_id: int, ni: int, current_user=Depends(require_auth)):
+    """Detalhe de um nó: cartões de ação (%/combos/EV) + grelha 13×13. Read-only."""
+    rows = query(
+        "SELECT j.result_zip FROM hrc_jobs j "
+        "WHERE j.hand_db_id = %s AND j.status = 'done' AND j.result_zip IS NOT NULL", (db_id,))
+    if not rows:
+        raise HTTPException(404, "mão não resolvida")
+    from app.services.hrc_hand import node_detail
+    d = node_detail(bytes(rows[0]["result_zip"]), ni)
+    if d.get("error"):
+        raise HTTPException(422, d["error"])
+    return d

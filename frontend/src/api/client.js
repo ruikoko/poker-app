@@ -477,6 +477,8 @@ export const queue = {
 export const hrcResults = {
   summary:   ()          => req('GET',  '/hrc/results/summary'),
   evCompute: (limit = 12) => req('POST', `/hrc/results/ev-loss/compute?limit=${limit}`),
+  hand:      (id)         => req('GET',  `/hrc/results/hand/${id}`),
+  handNode:  (id, ni)     => req('GET',  `/hrc/results/hand/${id}/node/${ni}`),
 }
 
 export const tableSs = {
