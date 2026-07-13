@@ -52,9 +52,8 @@ export default function HRCResults() {
   const [evLeft, setEvLeft] = useState(null)   // nº por calcular durante o EV
   const evStarted = useRef(false)
   const navigate = useNavigate()
-  // Destino do clique numa mão. Hoje = página da mão atual (/hand/:id); re-aponta
-  // para o Wizard (Fase 2) quando existir, num único sítio.
-  const openHand = (id) => { if (id != null) navigate(`/hand/${id}`) }
+  // Destino do clique numa mão. Fase 2: página da mão Wizard (/hrc-results/hand/:id).
+  const openHand = (id) => { if (id != null) navigate(`/hrc-results/hand/${id}`) }
 
   useEffect(() => {
     hrcResults.summary().then(d => { setData(d); setEvTop(d.top_ev_loss || []) })

@@ -15,6 +15,7 @@ import HandDetailPage from './pages/HandDetailPage'
 import GTOBrainPage from './pages/GTOBrain'
 import HRCQueuePage from './pages/HRCQueue'
 import HRCResultsPage from './pages/HRCResults'
+import HRCHandPage from './pages/HRCHandPage'
 import HRCSessionsPage from './pages/HRCSessions'
 import HRCSessionDetailPage from './pages/HRCSessionDetail'
 import TableSSPage from './pages/TableSS'
@@ -73,6 +74,7 @@ export default function App() {
           <Route path="gto" element={<GTOBrainPage />} />
           <Route path="hrc" element={<HRCQueuePage />} />
           <Route path="hrc-results" element={<HRCResultsPage />} />
+          <Route path="hrc-results/hand/:id" element={<HRCHandPage />} />
           <Route path="hrc-sessions" element={<HRCSessionsPage />} />
           <Route path="hrc-sessions/:id" element={<HRCSessionDetailPage />} />
         </Route>
