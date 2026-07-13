@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { hrcResults } from '../api/client'
 
 // Resultados HRC — landing (Fase 1). Cartões 1 (totais) + 3 (top torneios por
@@ -50,6 +51,10 @@ export default function HRCResults() {
   const [evTop, setEvTop] = useState(null)     // top_ev_loss (preenche progressivo)
   const [evLeft, setEvLeft] = useState(null)   // nº por calcular durante o EV
   const evStarted = useRef(false)
+  const navigate = useNavigate()
+  // Destino do clique numa mão. Hoje = página da mão atual (/hand/:id); re-aponta
+  // para o Wizard (Fase 2) quando existir, num único sítio.
+  const openHand = (id) => { if (id != null) navigate(`/hand/${id}`) }
 
   useEffect(() => {
     hrcResults.summary().then(d => { setData(d); setEvTop(d.top_ev_loss || []) })
@@ -131,7 +136,11 @@ export default function HRCResults() {
           {evTop && evTop.length > 0 ? (
             <>
               {evTop.map((e) => (
-                <div key={e.hand_id} style={{ padding: '4px 0', borderBottom: `1px solid ${C.border}` }}>
+                <div key={e.hand_id} onClick={() => openHand(e.id)} title="Abrir a mão"
+                  style={{ padding: '4px 6px', margin: '0 -6px', borderBottom: `1px solid ${C.border}`,
+                    cursor: 'pointer', borderRadius: 6 }}
+                  onMouseEnter={ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                  onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap', maxWidth: 170 }} title={`${e.tournament} · ${e.num}`}>
@@ -218,9 +227,13 @@ export default function HRCResults() {
                     const data = dt.length >= 10 ? `${dt.slice(8, 10)}/${dt.slice(5, 7)}` : '—'
                     const hora = dt.length >= 16 ? dt.slice(11, 16) : '—'
                     return (
-                      <div key={h.hand_id} title={h.hand_id} style={{ display: 'flex', alignItems: 'center',
-                        gap: 0, padding: '5px 10px', fontSize: 13, color: C.text,
-                        borderBottom: `1px solid ${C.border}` }}>
+                      <div key={h.hand_id} title={`${h.hand_id} — abrir a mão`}
+                        onClick={() => openHand(h.id)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '5px 10px',
+                          fontSize: 13, color: C.text, borderBottom: `1px solid ${C.border}`,
+                          cursor: 'pointer' }}
+                        onMouseEnter={ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                        onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
                         <span style={{ width: 52, color: C.muted, fontSize: 12 }}>{data}</span>
                         <span style={{ width: 46, color: C.muted, fontSize: 12 }}>{hora}</span>
                         <span style={{ width: 58, textAlign: 'right', color: C.muted, fontSize: 12 }}>

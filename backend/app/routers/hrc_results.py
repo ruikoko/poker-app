@@ -167,6 +167,7 @@ def results_summary(current_user=Depends(require_auth)):
             ev_pending += 1
         elif isinstance(ev, dict) and ev.get("ok"):
             ev_rows.append({
+                "id": d["id"],
                 "hand_id": d["hand_id"], "num": _short_num(d["hand_id"]),
                 "tournament": name, "tn": tn, "site": site, "format": fmt,
                 "played_at": played_s,
@@ -178,6 +179,7 @@ def results_summary(current_user=Depends(require_auth)):
         by_site[site] += 1
         by_format[fmt] += 1
         recent.append({
+            "id": d["id"],
             "hand_id": d["hand_id"],
             "num": _short_num(d["hand_id"]),
             "site": site,
