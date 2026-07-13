@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { hrcResults } from '../api/client'
 
 // Resultados HRC — landing (Fase 1). Cartões 1 (totais) + 3 (top torneios por
@@ -13,6 +13,13 @@ const C = {
 
 function siteColor(s) { return s === 'GGPoker' ? C.red : s === 'Winamax' ? C.orange : C.muted }
 function fmtColor(f) { return f === 'PKO' ? C.orange : C.blue }
+function fmtPct(v) {
+  if (v == null) return '—'
+  if (v === 0) return '0%'
+  const a = Math.abs(v)
+  const d = a >= 0.1 ? 2 : a >= 0.01 ? 3 : 4
+  return v.toFixed(d) + '%'
+}
 
 function Badge({ children, color }) {
   return (
@@ -40,10 +47,39 @@ export default function HRCResults() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [open, setOpen] = useState({})   // tn -> bool
+  const [evTop, setEvTop] = useState(null)     // top_ev_loss (preenche progressivo)
+  const [evLeft, setEvLeft] = useState(null)   // nº por calcular durante o EV
+  const evStarted = useRef(false)
 
   useEffect(() => {
-    hrcResults.summary().then(setData).catch(e => setErr(e.message))
+    hrcResults.summary().then(d => { setData(d); setEvTop(d.top_ev_loss || []) })
+      .catch(e => setErr(e.message))
   }, [])
+
+  // Cartão 2 — calcula o EV perdido em ciclo incremental (cada chamada abre um
+  // punhado de zips; nenhum request abre os 74 de uma vez → sem timeout). Atualiza
+  // um estado SEPARADO (evTop/evLeft) para não re-disparar este effect.
+  useEffect(() => {
+    if (!data || evStarted.current || data.ev_ready || !data.ev_pending) return
+    evStarted.current = true
+    let cancelled = false
+    ;(async () => {
+      let remaining = data.ev_pending
+      setEvLeft(remaining)
+      while (remaining > 0 && !cancelled) {
+        try {
+          const r = await hrcResults.evCompute(12)
+          remaining = r.remaining
+          setEvLeft(remaining)
+          const fresh = await hrcResults.summary()
+          if (cancelled) break
+          setEvTop(fresh.top_ev_loss || [])   // top5 progressivo, sem tocar `data`
+        } catch { break }
+      }
+      if (!cancelled) setEvLeft(null)
+    })()
+    return () => { cancelled = true }
+  }, [data])
 
   if (err) return <div style={{ padding: 24, color: C.red }}>Erro: {err}</div>
   if (!data) return <div style={{ padding: 24, color: C.muted }}>A carregar…</div>
@@ -92,11 +128,32 @@ export default function HRCResults() {
         </Card>
 
         <Card title="Top 5 EV perdido (vs HRC)">
-          <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>
-            Em cálculo — <b>próxima fase</b>.<br />
-            Mede a % de equity ICM que a jogada real perdeu contra a resposta do HRC,
-            lida dos <code>evs</code> de cada nó.
-          </div>
+          {evTop && evTop.length > 0 ? (
+            <>
+              {evTop.map((e) => (
+                <div key={e.hand_id} style={{ padding: '4px 0', borderBottom: `1px solid ${C.border}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap', maxWidth: 170 }} title={`${e.tournament} · ${e.num}`}>
+                      <span style={{ color: C.yellow, fontWeight: 700 }}>{e.hero_pos}</span> {e.hero_class} · {e.num}
+                    </span>
+                    <span style={{ color: C.red, fontWeight: 800, fontSize: 14, marginLeft: 8 }}>
+                      −{fmtPct(e.loss_eq_pct)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {e.real_label} → HRC {e.best_label}
+                  </div>
+                </div>
+              ))}
+              {evLeft ? <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>a calcular… {evLeft} por fazer</div> : null}
+            </>
+          ) : evLeft != null ? (
+            <div style={{ color: C.muted, fontSize: 13 }}>A calcular EV… {evLeft} mãos por fazer</div>
+          ) : (
+            <div style={{ color: C.muted, fontSize: 13 }}>Sem dados de EV (% equity ICM perdida vs HRC).</div>
+          )}
         </Card>
 
         <Card title="Top 5 torneios (instâncias)">

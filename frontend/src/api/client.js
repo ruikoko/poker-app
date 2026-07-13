@@ -475,7 +475,8 @@ export const queue = {
 
 // ── SS de mesa (contexto players_left p/ HRC) ───────────────────────────────
 export const hrcResults = {
-  summary: () => req('GET', '/hrc/results/summary'),
+  summary:   ()          => req('GET',  '/hrc/results/summary'),
+  evCompute: (limit = 12) => req('POST', `/hrc/results/ev-loss/compute?limit=${limit}`),
 }
 
 export const tableSs = {

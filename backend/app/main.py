@@ -43,7 +43,7 @@ from app.services.hrc_jobs import ensure_hrc_jobs_schema
 from app.services.ft_boundary import ensure_ft_boundary_review_schema
 from app.routers.tournament_results import router as tournament_results_router
 from app.routers.hrc import router as hrc_router, ensure_hrc_schema
-from app.routers.hrc_results import router as hrc_results_router
+from app.routers.hrc_results import router as hrc_results_router, ensure_hrc_results_schema
 from app.routers.table_ss import (
     router as table_ss_router,
     ensure_table_ss_processing_log_schema,
@@ -285,6 +285,7 @@ async def lifespan(app: FastAPI):
     ensure_context_table_ss_column()
     ensure_capture_triage_column()
     ensure_hrc_jobs_schema()
+    ensure_hrc_results_schema()
     ensure_ft_boundary_review_schema()
     from app.services.name_propagation import ensure_name_quarantine_schema
     ensure_name_quarantine_schema()

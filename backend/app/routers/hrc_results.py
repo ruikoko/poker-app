@@ -13,17 +13,48 @@ Caderno + protótipo validados 14 Jul (`_local_only/proto_hrc_resultados/`, `JOU
 """
 from __future__ import annotations
 
+import json
+import logging
 import re
 from collections import Counter, OrderedDict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.auth import require_auth
-from app.db import query
+from app.db import query, execute
 from app.services.queue_export import derive_seats_in_preflop_order
 from app.services.hrc_verify import parse_hh_blinds, _hh_bb
+from app.services.hrc_ev import compute_ev_loss
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/hrc/results", tags=["hrc-results"])
+
+
+def ensure_hrc_results_schema():
+    """Coluna de cache do EV perdido por mão (Fase 1b). Determinístico por (mão,
+    zip) → calcula-se uma vez e reusa-se (evita re-abrir zips no /summary)."""
+    execute("ALTER TABLE hrc_jobs ADD COLUMN IF NOT EXISTS ev_loss_json JSONB")
+
+
+def _cache_ev_for_job(hand_db_id: int) -> dict | None:
+    """Calcula + GRAVA o EV perdido de uma mão resolvida em `hrc_jobs.ev_loss_json`.
+    Best-effort (devolve None em falha; não levanta). Puxa o result_zip só aqui."""
+    try:
+        rows = query(
+            "SELECT h.raw, j.result_zip FROM hands h JOIN hrc_jobs j ON j.hand_db_id = h.id "
+            "WHERE h.id = %s AND j.status = 'done' AND j.result_zip IS NOT NULL",
+            (hand_db_id,),
+        )
+        if not rows:
+            return None
+        r = compute_ev_loss({"raw": rows[0]["raw"]}, bytes(rows[0]["result_zip"]))
+        execute("UPDATE hrc_jobs SET ev_loss_json = %s WHERE hand_db_id = %s",
+                (json.dumps(r), hand_db_id))
+        return r
+    except Exception:
+        logger.exception("cache_ev_for_job falhou hand_db_id=%s", hand_db_id)
+        return None
 
 _PKO_FORMATS = {"pko", "super ko", "ko", "superko", "bounty"}
 _HERO_RE = re.compile(r"^Dealt to (.+?) \[", re.M)
@@ -107,7 +138,7 @@ def results_summary(current_user=Depends(require_auth)):
     rows = query(
         "SELECT h.id, h.hand_id, h.site, h.tournament_format, h.tournament_name, "
         "       h.tournament_number AS tn, h.buy_in, h.played_at, h.position, h.raw, "
-        "       j.result_zip_size AS zsize, j.completed_at, "
+        "       j.result_zip_size AS zsize, j.completed_at, j.ev_loss_json AS ev, "
         "       ts.players_left "
         "FROM hrc_jobs j JOIN hands h ON h.id = j.hand_db_id "
         "LEFT JOIN table_ss_processing_log ts ON ts.id = h.context_table_ss_id "
@@ -119,6 +150,8 @@ def results_summary(current_user=Depends(require_auth)):
     by_format: Counter = Counter()
     recent: list[dict] = []
     inst: "OrderedDict[str, dict]" = OrderedDict()
+    ev_rows: list[dict] = []
+    ev_pending = 0
 
     for r in rows:
         d = dict(r)
@@ -128,6 +161,19 @@ def results_summary(current_user=Depends(require_auth)):
         tn = str(d.get("tn") or "")
         name = d.get("tournament_name") or "—"
         raw = d.get("raw") or ""
+
+        ev = d.get("ev")
+        if ev is None:
+            ev_pending += 1
+        elif isinstance(ev, dict) and ev.get("ok"):
+            ev_rows.append({
+                "hand_id": d["hand_id"], "num": _short_num(d["hand_id"]),
+                "tournament": name, "tn": tn, "site": site, "format": fmt,
+                "played_at": played_s,
+                "hero_pos": ev.get("hero_pos"), "hero_class": ev.get("hero_class"),
+                "loss_eq_pct": ev.get("loss_eq_pct"), "loss_usd": ev.get("loss_usd"),
+                "real_label": ev.get("real_label"), "best_label": ev.get("best_label"),
+            })
 
         by_site[site] += 1
         by_format[fmt] += 1
@@ -159,6 +205,8 @@ def results_summary(current_user=Depends(require_auth)):
     for x in tourneys_inst:
         x["label"] = _instance_label(x["name"], x.get("played_at"), x["tn"])
 
+    ev_rows.sort(key=lambda x: (x["loss_eq_pct"] or 0), reverse=True)
+
     return {
         "total_resolved": len(rows),
         "by_site": dict(by_site),
@@ -166,7 +214,30 @@ def results_summary(current_user=Depends(require_auth)):
         "instances_total": len(inst),
         "top_tourneys_inst": tourneys_inst[:5],
         "recent_by_tourney": recent,
-        # Fase 1b — Cartão 2 "Top EV perdido" (motor de EV, partilhado c/ página da mão)
-        "ev_ready": False,
-        "top_ev_loss": [],
+        # Cartão 2 "Top EV perdido" — do cache `ev_loss_json`; as pendentes calculam-se
+        # pelo POST /ev-loss/compute (incremental, evita timeout a abrir 74 zips).
+        "top_ev_loss": ev_rows[:5],
+        "ev_computed": len(ev_rows),
+        "ev_pending": ev_pending,
+        "ev_ready": ev_pending == 0,
     }
+
+
+@router.post("/ev-loss/compute")
+def ev_loss_compute(limit: int = Query(12, ge=1, le=40),
+                    current_user=Depends(require_auth)):
+    """Calcula + cacheia o EV perdido de até `limit` mãos resolvidas ainda SEM cache
+    (`ev_loss_json IS NULL`). Incremental: o frontend chama em ciclo até `remaining=0`
+    (cada mão abre 1 zip; assim nenhum request abre os 74 de uma vez). Read-mostly."""
+    pend = query(
+        "SELECT j.hand_db_id FROM hrc_jobs j "
+        "WHERE j.status = 'done' AND j.result_zip IS NOT NULL AND j.ev_loss_json IS NULL "
+        "ORDER BY j.completed_at DESC NULLS LAST LIMIT %s", (limit,))
+    computed = 0
+    for r in pend:
+        if _cache_ev_for_job(r["hand_db_id"]) is not None:
+            computed += 1
+    remaining = query(
+        "SELECT count(*) AS n FROM hrc_jobs "
+        "WHERE status = 'done' AND result_zip IS NOT NULL AND ev_loss_json IS NULL")[0]["n"]
+    return {"computed": computed, "remaining": remaining}
