@@ -10,10 +10,16 @@ Ver `JOURNAL_2026-07-16.md` + `LEI_SIZINGS_2026-07-15-v3.md` (estado ✅). Etiqu
 confirmado por timeline de deploy (LICAO 16 Jul).
 
 **🟢 EM CURSO — Secção RESULTADOS HRC (por FASES; o Rui valida cada página no ar):**
-- Caderno + protótipo validados (14 Jul; `_local_only/proto_hrc_resultados/`). Arranque da
-  implementação na app. Dados: `landing` (3 cartões + lista colapsável por instância de torneio) +
-  `hand` (página Wizard). EV = **% equity ICM** (`TABLE_EQUITY_PERCENT` dos zips). Árvore servida
-  por API por-clique (`build_verify_tree` lazy).
+- **Fase 1 (landing) — NO AR + VALIDADA.** 3 cartões + lista colapsável por instância. Ajustes
+  do Rui aplicados: Cartão 3 `nome · dd/mm · #tn`; linhas `Data·Hora·Tree·Nº·Left·Hero·Stack·1ª ação`;
+  **WN = final do ID**. Tudo SQL, sem abrir zips.
+- **Fase 1b (Cartão 2 "Top EV perdido") — NO AR + VALIDADA.** Motor `hrc_ev` (% equity ICM,
+  casamento por VALOR); cache + `POST …/ev-loss/compute` incremental. **Ajuste (feito): mãos
+  CLICÁVEIS na landing** (Top 5 + linhas → `openHand`; hoje `/hand/:id`, re-aponta ao Wizard).
+- **Fase 2 (página da mão Wizard) — AUTORIZADA, EM CURSO.** Backend pronto (`hrc_hand.node_detail`
+  grelha 13×13 + endpoints `…/hand/{id}` e `…/node/{ni}`); `HRCHandPage.jsx` escrito. **FALTA:
+  ligar a rota `/hrc-results/hand/:id` + re-apontar `openHand`** (1º passo da retoma). Coroas $ na
+  barra diferidas (fonte $ = `all_players_actions`, não o zip). EV = % equity ICM; árvore por API.
 
 **🔵 FEATURE FUTURA — `#VILLAIN-AUTO-NOTES-NO-SHOWDOWN` (ditada 16 Jul; BACKLOG, NÃO implementar; desenho a ditar pelo Rui antes de construir):**
 Vilões — **notas automáticas de tendência por jogador, SEM depender de showdown**.
@@ -22,14 +28,30 @@ Vilões — **notas automáticas de tendência por jogador, SEM depender de show
 - **Fontes:** HH (ações, com OU sem showdown) · trees HRC · stats HM3 · **notas do Rui como semente**.
 - **Em aberto (decisão do Rui):** regras vs IA vs híbrido · apresentação na ficha do vilão · gatilho (quando/como se dispara).
 
+**🔵 FEATURE FUTURA — `#HRC-PARTILHA` (ditada 16 Jul; BACKLOG):** partilha da secção HRC —
+**logins / owner / fila** (vários utilizadores; dono da mão/torneio; fila partilhada). Desenho a
+ditar pelo Rui.
+
+**🔵 FEATURE FUTURA — `#WATCHER-SAVE-HRCZ` (ditada 16 Jul; BACKLOG):** botão "Abrir no HRC" com
+**save nativo `.hrcz`** (opção (a) das 3 do 14 Jul). **Teste do Rui — mecânica CONFIRMADA no PC:**
+os diálogos são **Save Resource → Guardar como / Save As** (conforme locale); o **`.hrcz` do
+formato do robot ≈ 67 MB** (vs **3-7 GB** das sims manuais); a escrita **pode levar minutos** em
+trees gordas. **FALTA:** prova de **reabertura** do `.hrcz` + **spike no Beelink** (correr no
+robot). Só depois se decide (a) save nativo vs (c) importar o Complete Export.
+
 **Pós-VALE / dívidas que continuam:**
-- **2 GRAVITY** (`WN-…-24`, `WN-…-30`) por fechar — monitor ligado (avisa quando `done`).
+- **Fase 2 (retoma):** ligar rota + re-apontar `openHand` → validar a página da mão à vista.
+- **Falhas restantes do 2º run (lobbys 500) + Saúde vs baseline — POR REPORTAR/fechar.** Parcial
+  feito (16 Jul): Golds por ler 0→**55** (12-13/07, Vision background não os leu) · SS sem match
+  0→**27** (12/07) · Gold sem tag 303→316 · órfãs 1→1 · quarentena nomes 6 · lobbys 2º run sem 500
+  no DB (transitório). **Falta:** destrinçar os 27 SS sem match · correr coroas (`/crowns`) ·
+  Marcadas (sem métrica no código) · consumir resíduo `it=12`+`gg_hh=1`.
 - **Epoch durável + botão "Reenviar ao HRC"** (dorme): `hrc_queue_release` é apagada por
   `set-aside`/`clear-released`/`reset-done` → o epoch perde o high-water-mark e o adapter salta em
   silêncio. Fix = epoch na linha da mão (`hands`). Não bloqueia as 15 (frescas).
 - **Censo das coroas pré-pt95 plausíveis** (resposta em dívida).
 - Caixa de pesquisa por nº no painel HRC · limpeza dos helpers Python mortos (CASO A/B etc).
-- 2 Golds + 1 TS de 13 Jul sem assentar · saves `.hrcz` (opção (c)) · worklists de triagem.
+- **2 Golds de 13 Jul sem assentar** (+ 1 TS) · worklists de triagem.
 - **⚠️ Rodar o `~/.pokerapp_db_ro.env`** (URL read-only re-exposto no output).
 
 ## 📌 FECHO DO DIA 15 Jul 2026 — LEI DE SIZINGS v3 + smoke ao robot
