@@ -1,5 +1,37 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 15 Jul 2026 — LEI DE SIZINGS v3 + smoke ao robot
+
+**★ LEI v3 implementada e LIVE (Fases 0-4), smoke lançado.** Ver `docs/JOURNAL_2026-07-15.md`
++ `docs/LEI_SIZINGS_2026-07-15-v3.md`. Backend v3 **confirmado ATIVO** (root
+`sizing_rules=2026-07-15-sizings-v3`). O Beelink resolve as 5 mãos do smoke **durante a noite**.
+
+**🔴 AMANHÃ (crítico — o "VALE" da lei depende disto):**
+- **Relatório tree-a-tree das 5** quando aterrarem em `hrc_jobs` (sizings reais por nó,
+  1 por cenário: colapso · open-c/-allin · 3-bet KO · 4-bet · squeeze) → **o Rui dá o "VALE"
+  final à lei v3**. Só depois a lei "vale" para exports reais; a fila fica fechada até lá.
+- Links das 5 (por link, regra permanente): GG-6162937781 (colapso) · GG-6139199035 (open) ·
+  GG-6164941286 (3-bet) · WN-…-231 (4-bet) · WN-…-185 (squeeze) — `<frontend>/api/queue/hrc/hand/<id>`.
+
+**Em curso (paralelo ao smoke):**
+- **Caixa de pesquisa por nº de mão no painel HRC** (370 linhas sem busca não se usa).
+- **Limpeza dos helpers Python mortos** (CASO A/B, `_compute_default_*`, `_array_for_*`,
+  `_bucket_*` — inertes; ~40 testes espalhados). Passagem dedicada.
+
+**🔴 Resposta em dívida:**
+- **Censo das coroas pré-pt95 plausíveis** — quantas leituras de coroa antigas podem estar
+  silenciosamente erradas sem cair na quarentena (caso `/hand/6570`, chamas curadas por re-leitura).
+
+**Após o VALE:**
+- **Implementação da secção Resultados HRC** (protótipo validado 14 Jul; ver fecho abaixo).
+
+**Dívidas antigas que continuam:**
+- 2 Golds + 1 TS de 13 Jul sem assentar (dedup/falha silenciosa/path).
+- Saves `.hrcz` / testar se o HRC importa o Complete Export (o Rui ainda não testou — opção (c)).
+- Worklists: 137 Golds por ler · Marcadas 431 · Gold sem tag ~315 · caso `Andre Figue..`.
+
+**⚠️ Rodar o `~/.pokerapp_db_ro.env`** (URL read-only exposto num comando por engano do Code).
+
 ## 📌 FECHO INTERCALAR 14 Jul 2026 — Resultados HRC (em curso)
 
 **★ Implementação da secção "Resultados HRC" EM CURSO.** Caderno de encargos ditado pelo Rui
