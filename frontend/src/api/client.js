@@ -474,6 +474,10 @@ export const queue = {
 }
 
 // ── SS de mesa (contexto players_left p/ HRC) ───────────────────────────────
+export const hrcResults = {
+  summary: () => req('GET', '/hrc/results/summary'),
+}
+
 export const tableSs = {
   upload: (file, opts = {}) => {
     const form = new FormData()

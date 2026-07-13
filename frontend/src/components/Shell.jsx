@@ -21,6 +21,7 @@ const NAV = [
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
   { to: '/hrc',         label: 'HRC' },
+  { to: '/hrc-results', label: 'Resultados HRC' },
   { to: '/hrc-sessions', label: 'HRC Sessões' },
 ]
 

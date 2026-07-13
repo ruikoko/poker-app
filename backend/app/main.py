@@ -43,6 +43,7 @@ from app.services.hrc_jobs import ensure_hrc_jobs_schema
 from app.services.ft_boundary import ensure_ft_boundary_review_schema
 from app.routers.tournament_results import router as tournament_results_router
 from app.routers.hrc import router as hrc_router, ensure_hrc_schema
+from app.routers.hrc_results import router as hrc_results_router
 from app.routers.table_ss import (
     router as table_ss_router,
     ensure_table_ss_processing_log_schema,
@@ -345,6 +346,7 @@ app.include_router(queue_router)
 app.include_router(lobbys_router)
 app.include_router(tournament_results_router)
 app.include_router(hrc_router)
+app.include_router(hrc_results_router)
 app.include_router(table_ss_router)
 app.include_router(import_health_router)
 app.include_router(capture_triage_router)
