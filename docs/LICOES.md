@@ -287,3 +287,13 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   DAEMON THREAD** (sobrevive ao ciclo do request, não bloqueia o event loop; padrão de
   `trigger_name_propagation`), não tasks do event loop. Cura: `trigger_import_reconciles`
   (`#HM3-IMPORT-NO-RECONCILE-REDISPATCH`). Ver `JOURNAL_2026-07-13`.
+
+- 2026-07-16 — **Etiqueta ≠ conteúdo: verificar a lei pela TIMELINE de deploy, não pelo rótulo.**
+  Os packs HRC carregam `sizing_rules_version` gravada **no release** (quando o Rui clica Enviar),
+  mas o `script.js` (o conteúdo real) é gerado **no pull** do adapter. Um zip pode sair com etiqueta
+  v3 e conteúdo v2 se o release foi pós-bump mas o deploy ainda não subira — ou o inverso (foi o que
+  abortou o smoke de 15 Jul: cliques pré-deploy → zips `2026-07-11-3bet-v2`). **→ Lição: para
+  afirmar "a mão saiu com a lei X" cruzar sempre a etiqueta com a timeline `commit/deploy < release
+  < pull < solve` (o `completed_at` do job > hora do deploy prova o conteúdo), e/ou ler os sizings
+  reais dos nós da tree.** No VALE de hoje: deploy 03:02/03:34 UTC < solves 05:50–13:29 UTC → v3
+  confirmado por conteúdo, não só rótulo. Ver `JOURNAL_2026-07-16.md`.

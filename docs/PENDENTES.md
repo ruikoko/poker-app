@@ -1,5 +1,30 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 16 Jul 2026 — ✅ VALE v3 + arranque Resultados HRC
+
+**✅ VALE DO RUI — LEI v3 VERIFICADA EM PRODUÇÃO.** Relatório tree-a-tree sobre 13 mãos reais
+resolvidas pelo robot: **187 nós, 0 violações**, todos os cenários provados (KO 9.0 · 4-bet 10.3 ·
+squeeze 9.0 · BB-vs-limp 3.0+ALLIN · SBvsBB open+3bet+4bet · colapso · call garantido no
+sobre-allin). A lei `2026-07-15-sizings-v3` **rege tudo o que o robot resolver a partir de agora**.
+Ver `JOURNAL_2026-07-16.md` + `LEI_SIZINGS_2026-07-15-v3.md` (estado ✅). Etiqueta=conteúdo
+confirmado por timeline de deploy (LICAO 16 Jul).
+
+**🟢 EM CURSO — Secção RESULTADOS HRC (por FASES; o Rui valida cada página no ar):**
+- Caderno + protótipo validados (14 Jul; `_local_only/proto_hrc_resultados/`). Arranque da
+  implementação na app. Dados: `landing` (3 cartões + lista colapsável por instância de torneio) +
+  `hand` (página Wizard). EV = **% equity ICM** (`TABLE_EQUITY_PERCENT` dos zips). Árvore servida
+  por API por-clique (`build_verify_tree` lazy).
+
+**Pós-VALE / dívidas que continuam:**
+- **2 GRAVITY** (`WN-…-24`, `WN-…-30`) por fechar — monitor ligado (avisa quando `done`).
+- **Epoch durável + botão "Reenviar ao HRC"** (dorme): `hrc_queue_release` é apagada por
+  `set-aside`/`clear-released`/`reset-done` → o epoch perde o high-water-mark e o adapter salta em
+  silêncio. Fix = epoch na linha da mão (`hands`). Não bloqueia as 15 (frescas).
+- **Censo das coroas pré-pt95 plausíveis** (resposta em dívida).
+- Caixa de pesquisa por nº no painel HRC · limpeza dos helpers Python mortos (CASO A/B etc).
+- 2 Golds + 1 TS de 13 Jul sem assentar · saves `.hrcz` (opção (c)) · worklists de triagem.
+- **⚠️ Rodar o `~/.pokerapp_db_ro.env`** (URL read-only re-exposto no output).
+
 ## 📌 FECHO DO DIA 15 Jul 2026 — LEI DE SIZINGS v3 + smoke ao robot
 
 **★ LEI v3 implementada e LIVE (Fases 0-4), smoke lançado.** Ver `docs/JOURNAL_2026-07-15.md`

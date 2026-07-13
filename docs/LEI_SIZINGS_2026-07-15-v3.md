@@ -2,10 +2,12 @@
 
 - **Versão:** `2026-07-15-sizings-v3`
 - **Ditada e carimbada pelo Rui:** 15 Julho 2026 (linha a linha; carimbo integral).
-- **Estado:** **APROVADA + IMPLEMENTADA (Fases 1-4, backend).** Portão 1 (opens+offset)
-  carimbado pelo Rui. Fases 2 (3-bet), 3 (4-bet/squeeze/5-bet) e 4 (limpeza JS) feitas e
-  em suite verde. **Falta o portão da Fase 5** — smoke 5/5 + trees REAIS no robot (fila
-  fechada; anti-massivo). Trees já resolvidas ficam da lei antiga (sem re-solve). ⚠️ Limpeza
+- **Estado:** ✅ **VERIFICADA EM PRODUÇÃO — VALE DO RUI (16 Jul 2026).** Relatório tree-a-tree
+  sobre 13 mãos resolvidas pelo robot: **187 nós MATCH, 0 violações**; todos os cenários provados
+  em trees reais (KO 9.0 · 4-bet 10.3 · squeeze 9.0 · BB-vs-limp 3.0+ALLIN · call garantido no
+  sobre-allin · cadeia SBvsBB · colapso). **Rege a partir de agora tudo o que o robot resolver.**
+  Ver `JOURNAL_2026-07-16.md`. (Fases 1-4 backend implementadas + Portão 1 carimbado antes.)
+  Trees já resolvidas com a lei antiga ficam como estão (sem re-solve). ⚠️ Limpeza
   Python dos helpers mortos (CASO A/B, `_compute_default_*`, `_array_for_*`, `_bucket_*`) fica
   como passagem dedicada — estão **inertes** (`build_sizings_overrides` devolve `{}`), não
   afetam runtime.

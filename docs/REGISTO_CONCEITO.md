@@ -420,3 +420,14 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   (position_v3) não é imune — só confirmar após o cross-check por stack. Âncora do caso: captura
   782 do tn 292179612 (rodou 1 cadeira; 6 conflitos → 1 revert; 8120b537=Pedro Borges). Ver
   `LICOES 2026-07-12`.
+
+- 2026-07-16 — **LEI DE SIZINGS v3 VERIFICADA EM PRODUÇÃO (VALE DO RUI).** A lei
+  `2026-07-15-sizings-v3` passou de "implementada + suite verde" a **verificada em trees REAIS
+  resolvidas pelo robot**: relatório tree-a-tree sobre 13 mãos do lote educacional, **187 nós
+  MATCH, 0 violações**, todos os cenários provados (opens IP/blind, colapso, 3-bet dos 4 blocos,
+  bónus KO +0.5, 4-bet com size e só-allin, squeeze IP/OOP e <20-jam, SBvsBB, BB-vs-limp, cadeia
+  open+3bet+4bet, open-allin com call garantido). **Rege a partir de agora tudo o que o robot
+  resolver.** Verificação: os sizings da lei **lêem-se dos nós da tree exportada**
+  (`build_verify_tree` → labels `R x.xbb [ALLIN]`), comparados nó-a-nó com o quadro; a **efetiva
+  de um open de blind é `min(SB,BB)`** (heads-up), não `max` do campo. → `LEI_SIZINGS_2026-07-15-v3.md`
+  (estado ✅), `JOURNAL_2026-07-16.md`.
