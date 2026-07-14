@@ -55,6 +55,16 @@ def test_over_read_flagged_when_counts_differ():
     assert res["over_read"] is True
 
 
+def test_matador_hero_resolved_by_real_name():
+    # o vencedor é o Hero (hash 'Hero'); a entrada dele em players_list vem sem
+    # posição → tem de resolver pelo NOME REAL (não '—') e marcar is_hero.
+    res = cr.classify_hand(_RAW, _PN)
+    assert len(res["matadores"]) == 1
+    m = res["matadores"][0]
+    assert m["is_hero"] is True
+    assert m["name"] == "Lauro Dermio"
+
+
 def test_hero_name_tolerant_to_truncation():
     assert cr._is_hero_name("Lauro Dermio") is True
     assert cr._is_hero_name("Lauro Der..") is True

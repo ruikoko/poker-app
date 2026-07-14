@@ -111,6 +111,8 @@ export default function CrownRecovery() {
                   ? h.matadores.map((m, i) => (
                     <div key={i} style={{ fontSize: 14 }}>
                       <b style={{ color: C.green }}>{m.name || '—'}</b> <span style={pos(C)}>{m.position}</span>
+                      {m.is_hero && <span style={{ fontSize: 10, color: '#08130d', background: C.gold,
+                        borderRadius: 4, padding: '1px 6px', marginLeft: 6, fontWeight: 700 }}>HERO</span>}
                     </div>))
                   : <div style={{ fontSize: 13, color: C.muted }}>matador não identificado na HH</div>}
               </div>

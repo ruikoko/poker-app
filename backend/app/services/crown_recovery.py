@@ -85,8 +85,10 @@ def _parse_busts(raw: str):
     return seats, button_seat, len(seats), busted
 
 
-def _winner_positions(raw: str, seats: dict, button_seat, num_players) -> set:
-    """Posições dos vencedores do pote (o matador — na coroa dele mora o verde)."""
+def _winners_with_hash(raw: str, seats: dict, button_seat, num_players) -> list:
+    """[(posição, hash)] dos vencedores do pote (o matador — na coroa dele mora o
+    verde). Mantém o HASH para distinguir o Hero (hash literal 'Hero') — cuja
+    entrada em players_list vem SEM posição, logo não casa pelo mapa posição→nome."""
     wins: set = set()
     for ln in (raw or "").splitlines():
         s = ln.strip()
@@ -95,13 +97,13 @@ def _winner_positions(raw: str, seats: dict, button_seat, num_players) -> set:
             m = _WON_SUMMARY_RE.match(s)
         if m:
             wins.add(m.group(1))
-    out: set = set()
+    out: list = []
     if button_seat and seats:
         for seat_num, h in seats.items():
             if h in wins:
                 p = _get_position(seat_num, button_seat, list(seats.keys()), num_players)
                 if p and p != "?":
-                    out.add(_norm_pos(p))
+                    out.append((_norm_pos(p), h))
     return out
 
 
@@ -133,10 +135,17 @@ def classify_hand(raw: str, pn) -> dict:
                 if pos and pos != "?":
                     busted_positions.add(_norm_pos(pos))
 
-    # matador(es) — onde ler o verde do KO (coroa do vencedor do pote)
-    winner_positions = _winner_positions(raw, seats, button_seat, num_hh)
+    # matador(es) — onde ler o verde do KO (coroa do vencedor do pote).
+    # Se o vencedor é o Hero (hash 'Hero'), resolve pelo NOME REAL do Hero — a
+    # entrada dele em players_list vem sem posição, logo não casa pelo mapa.
     pos_to_name = {_norm_pos(e.get("position")): e.get("name") for e in plist}
-    matadores = [{"name": pos_to_name.get(p), "position": p} for p in sorted(winner_positions)]
+    hero_name = next((e.get("name") for e in plist if _is_hero_name(e.get("name"))), "Hero")
+    matadores = []
+    for pos, h in _winners_with_hash(raw, seats, button_seat, num_hh):
+        if h == "Hero":
+            matadores.append({"name": hero_name, "position": pos, "is_hero": True})
+        else:
+            matadores.append({"name": pos_to_name.get(pos), "position": pos, "is_hero": False})
 
     group1, group2 = [], []
     for e in plist:
