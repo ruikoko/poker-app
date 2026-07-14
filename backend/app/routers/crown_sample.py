@@ -36,10 +36,11 @@ _ABS_TOL = 0.01
 _REL_TOL = 0.01
 
 _STATE: dict = {
-    "status": "idle",          # idle | running | done | error
+    "status": "idle",          # idle | running | done | cancelled | error
     "done": 0, "total": 0,
     "divergences": [],         # lista p/ o painel (com imagem)
     "reread_seats": 0,
+    "cancel": False,           # bandeira cooperativa de cancelamento
     "started_at": None, "finished_at": None, "error": None,
 }
 _LOCK = threading.Lock()
@@ -163,10 +164,15 @@ def _run_sample():
         return
     with _LOCK:
         _STATE.update(status="running", total=len(sample), done=0,
-                      divergences=[], reread_seats=0, error=None,
+                      divergences=[], reread_seats=0, error=None, cancel=False,
                       started_at=datetime.now(timezone.utc).isoformat(),
                       finished_at=None)
+    cancelled = False
     for r in sample:
+        with _LOCK:
+            if _STATE.get("cancel"):
+                cancelled = True
+                break
         divs = []
         try:
             img = query("SELECT raw_json->>'img_b64' AS img FROM entries "
@@ -194,9 +200,10 @@ def _run_sample():
                     "seats": divs,
                 })
     with _LOCK:
-        _STATE.update(status="done",
+        _STATE.update(status="cancelled" if cancelled else "done",
                       finished_at=datetime.now(timezone.utc).isoformat())
-    logger.info("[crown-sample] terminado: %d/%d, %d mãos com divergência",
+    logger.info("[crown-sample] %s: %d/%d, %d mãos com divergência",
+                "cancelado" if cancelled else "terminado",
                 _STATE["done"], _STATE["total"], len(_STATE["divergences"]))
 
 
@@ -211,6 +218,18 @@ def crown_sample_run(current_user=Depends(require_auth)):
         _STATE["status"] = "running"
     threading.Thread(target=_run_sample, daemon=True).start()
     return {"status": "running", "note": "amostrador arrancado (177 releituras em background)"}
+
+
+@router.post("/cancel")
+def crown_sample_cancel(current_user=Depends(require_auth)):
+    """Cancela o run em curso (bandeira cooperativa) — interrompe na PRÓXIMA
+    releitura, mantém o parcial já apurado (status→'cancelled'). NÃO escreve nada."""
+    with _LOCK:
+        if _STATE["status"] != "running":
+            return {"status": _STATE["status"], "note": "nada a cancelar"}
+        _STATE["cancel"] = True
+    return {"status": "cancelling",
+            "note": "interrompe na próxima releitura; mantém o parcial"}
 
 
 @router.get("")

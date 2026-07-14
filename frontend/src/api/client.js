@@ -361,6 +361,7 @@ export const ggHealth = {
   crowns: () => req('GET', '/gg-health/crowns'),
   // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
   crownSampleRun: () => req('POST', '/gg-health/crown-sample/run'),
+  crownSampleCancel: () => req('POST', '/gg-health/crown-sample/cancel'),
   crownSampleState: () => req('GET', '/gg-health/crown-sample'),
   // Re-leitura das coroas com o prompt NOVO (placa de $) — corrige e escreve (guarda base÷2).
   crownsReread: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/reread', { hand_ids: handIds, dry_run: dryRun }),
