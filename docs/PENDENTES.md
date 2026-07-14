@@ -1,5 +1,34 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 18 Jul 2026 — régua do resto-em-BB provada + detetor re-medido + forense da 6570 FECHADA
+
+*(Relógio do sistema reportou "14 Jul"; segue o fecho de 17 Jul → datado 18 Jul. Ver `JOURNAL_2026-07-18.md`.)*
+
+**✅ LIVE hoje:** régua do **resto-em-BB** provada (3/3 nas imagens do Rui — sobreviventes têm
+placa própria; corrige a confirmação anterior do #1) · **detetor re-medido** (488 varridas →
+**33 busts reais** / **10 coroas mal-lidas** / 18 falha real / 11 over-read) · fix do detetor
+(`161c7a3`: split resto-em-BB + **contraprova da mão-seguinte** que apanhou o 1042 + balde
+"re-ler placa") · fix dos cards (`ba74e25`: linkam à **página normal** `/hand/<id>`, não à
+Wizard) · **forense da 6570 (GG-6104058222) FECHADA** (culpado = re-apply do table-SS re-cola a
+leitura guardada; raiz = **coroas sem proveniência por-seat**). **Etapa 2 continua BLOQUEADA.**
+
+**🔴 RETOMA — por ordem:**
+
+- **a) DECISÃO DO RUI — cura do carimbo A/B** (recomendação Web: **A** — `bounty_source='manual'`
+  por-seat; todo o re-apply salta seats com `bounty_source ∈ {manual, green_ko}`. B = `crowns_locked`
+  à mão, mais grosso). **Tem de aterrar antes de qualquer escrita nova.**
+- **b) OLHO DO RUI nos 3 do balde 1** (todos `confirmed_gone` pela contraprova):
+  [GG-6132507189](https://comfortable-hope-production-a87a.up.railway.app/hand/2564) Ward E (SB)→Lauro (BTN·HERO) ·
+  [GG-6138747688](https://comfortable-hope-production-a87a.up.railway.app/hand/613) mahanluvalla (UTG)→MaLong07 (SB) ·
+  [GG-6101401982](https://comfortable-hope-production-a87a.up.railway.app/hand/7530) betosalada (BTN)→Lauro (BB·HERO).
+- **c) Com (a)+(b): construir a CURA PRIMEIRO → só depois Etapa 2** (estreia: **AVRELIY $265.62 ·
+  Phil $375** na 2480) → o Rui corrige a 6570 uma **5ª e última vez**, já protegida.
+- **d) Restante:** Fase 2 Wizard (veredicto + HH viewer + contexto do torneio) · rodar o
+  `~/.pokerapp_db_ro.env` · over-reads (**5 duros + 11 do detetor**) · worklists (Marcadas ~313 ·
+  Gold sem tag ~303 · FT do Sunday Special).
+
+---
+
 ## 📌 FECHO DO DIA 17 Jul 2026 — coroas (censos=0, régua, verde-KO) + cura no core + detetor de bounties recuperáveis
 
 *(Relógio do sistema reportou "14 Jul", mas segue o fecho de 16 Jul → datado 17 Jul. Ver `JOURNAL_2026-07-17.md`.)*
