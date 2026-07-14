@@ -24,6 +24,7 @@ import ImportHealthPage from './pages/ImportHealth'
 import CaptureTriagePage from './pages/CaptureTriage'
 import SuspiciousHandsPage from './pages/SuspiciousHands'
 import GGHealthPage from './pages/GGHealth'
+import CrownSamplePage from './pages/CrownSample'
 import { StudyTimerProvider } from './contexts/StudyTimerContext'
 
 function RequireAuth({ children }) {
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="marcadas-por-captura" element={<CaptureTriagePage />} />
           <Route path="suspeitas" element={<SuspiciousHandsPage />} />
           <Route path="gg-health" element={<GGHealthPage />} />
+          <Route path="crown-sample" element={<CrownSamplePage />} />
           <Route path="lobbys" element={<LobbysPage />} />
           <Route path="import-health" element={<ImportHealthPage />} />
           <Route path="stats" element={<StatsPage />} />

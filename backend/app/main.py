@@ -359,6 +359,8 @@ app.include_router(import_health_router)
 app.include_router(capture_triage_router)
 app.include_router(suspicious_router)
 app.include_router(gg_health_router)
+from app.routers.crown_sample import router as crown_sample_router
+app.include_router(crown_sample_router)
 
 # Serve uploaded screenshots as static files
 import os

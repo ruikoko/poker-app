@@ -359,6 +359,9 @@ export const ggHealth = {
   list: (group, page = 1, pageSize) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}${pageSize ? `&page_size=${pageSize}` : ''}`),
   // Painel Coroas (consolidação 11 Jul) — mãos com coroa < base÷2 p/ verificar à vista.
   crowns: () => req('GET', '/gg-health/crowns'),
+  // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
+  crownSampleRun: () => req('POST', '/gg-health/crown-sample/run'),
+  crownSampleState: () => req('GET', '/gg-health/crown-sample'),
   // Re-leitura das coroas com o prompt NOVO (placa de $) — corrige e escreve (guarda base÷2).
   crownsReread: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/reread', { hand_ids: handIds, dry_run: dryRun }),
   // Grupo "Valor alto": re-lê e AUTO-CARIMBA os seats cuja re-leitura bate o valor gravado.

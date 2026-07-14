@@ -18,6 +18,7 @@ const NAV = [
   { to: '/hm3',         label: 'HM3' },
   { to: '/table-ss',    label: 'SS Mesa' },
   { to: '/gg-health',   label: 'Saúde Import', badge: 'suspicious' },
+  { to: '/crown-sample', label: 'Amostrador coroas' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
   { to: '/hrc',         label: 'HRC' },
