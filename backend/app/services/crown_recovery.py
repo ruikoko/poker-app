@@ -35,6 +35,9 @@ _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
 _ALLIN_RE = re.compile(r"^(\S+): .*\ball[- ]in\b")
 # SUMMARY perdedor de showdown: "Seat N: <hash> (...) showed [..] and lost ..."
 _LOST_RE = re.compile(r"^Seat \d+: (\S+)\b.*\band lost\b")
+# vencedor do pote (o matador — onde está o verde do KO)
+_WON_COLLECTED_RE = re.compile(r"^(\S+) collected\b")
+_WON_SUMMARY_RE = re.compile(r"^Seat \d+: (\S+)\b.*\band won\b")
 
 
 def _norm_pos(p) -> str:
@@ -82,6 +85,26 @@ def _parse_busts(raw: str):
     return seats, button_seat, len(seats), busted
 
 
+def _winner_positions(raw: str, seats: dict, button_seat, num_players) -> set:
+    """Posições dos vencedores do pote (o matador — na coroa dele mora o verde)."""
+    wins: set = set()
+    for ln in (raw or "").splitlines():
+        s = ln.strip()
+        m = _WON_COLLECTED_RE.match(s)
+        if not m and "in chips" not in s:
+            m = _WON_SUMMARY_RE.match(s)
+        if m:
+            wins.add(m.group(1))
+    out: set = set()
+    if button_seat and seats:
+        for seat_num, h in seats.items():
+            if h in wins:
+                p = _get_position(seat_num, button_seat, list(seats.keys()), num_players)
+                if p and p != "?":
+                    out.add(_norm_pos(p))
+    return out
+
+
 def _players_list(pn):
     if isinstance(pn, str):
         try:
@@ -110,6 +133,11 @@ def classify_hand(raw: str, pn) -> dict:
                 if pos and pos != "?":
                     busted_positions.add(_norm_pos(pos))
 
+    # matador(es) — onde ler o verde do KO (coroa do vencedor do pote)
+    winner_positions = _winner_positions(raw, seats, button_seat, num_hh)
+    pos_to_name = {_norm_pos(e.get("position")): e.get("name") for e in plist}
+    matadores = [{"name": pos_to_name.get(p), "position": p} for p in sorted(winner_positions)]
+
     group1, group2 = [], []
     for e in plist:
         name = e.get("name")
@@ -125,5 +153,5 @@ def classify_hand(raw: str, pn) -> dict:
             group2.append(entry)          # não-bustou + não-Hero + NULL = falha real
     return {
         "num_hh": num_hh, "num_extracted": num_extracted, "over_read": over_read,
-        "group1": group1, "group2": group2,
+        "group1": group1, "group2": group2, "matadores": matadores,
     }

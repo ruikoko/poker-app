@@ -369,3 +369,16 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   quando a forense a mata (0/N), corrige-se em voz alta a afirmação anterior, não se deixa a versão
   plausível a contaminar as decisões.** (Corolário do adversarial-verify: uma hipótese sobrevive só
   depois de tentarem refutá-la com dados.) Ver `JOURNAL_2026-07-14` (forense verde-KO).
+
+- 2026-07-14 — **Nem o gravado nem a mecânica teórica ARBITRAM uma coroa — só a IMAGEM.** Na mão
+  2480 (matador AVRELIY) errei o valor da coroa dele DUAS vezes por raciocínio: primeiro "$125 =
+  frame pré-KO", depois "$187.5 = próprio + metade do eliminado". A imagem, à vista do Rui, mostrou
+  **dourada $265.62 + verde $187.5** — o gravado ($125) era **misread puro**, e o eliminado
+  (PhilVsSandw..) tinha bounty **$375** (não os $250 "base" que assumi: ele não estava fresco).
+  Tanto o valor gravado como a fórmula teórica (base÷2, own+verde) são PALPITES; a coroa real do
+  frame não obedece a nenhum. **→ Lição: uma coroa só se corrige/escreve DEPOIS de olhar a imagem
+  do frame — nunca a partir do gravado (pode ser misread) nem da mecânica do PKO (a acumulação real
+  é o que o frame mostrar). Qualquer fluxo que escreva um bounty TEM de mostrar a imagem primeiro e
+  gravar o que o olho lê, não o que o modelo calcula.** A fórmula do Rui `bounty_eliminado = verde ×
+  2` ganha-se ao LER o verde na imagem (aqui $187.5 × 2 = $375), não ao assumir a base. Desenho do
+  fluxo (A)+(B): imagem SEMPRE antes da escrita. Ver `JOURNAL_2026-07-14`, `#CROWN-RECOVERY`.
