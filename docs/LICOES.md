@@ -298,7 +298,7 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   reais dos nós da tree.** No VALE de hoje: deploy 03:02/03:34 UTC < solves 05:50–13:29 UTC → v3
   confirmado por conteúdo, não só rótulo. Ver `JOURNAL_2026-07-16.md`.
 
-- 2026-07-14 — **Audit que conta só LINHAS NOVAS acusa falsos desaparecimentos.** O audit da
+- 2026-07-17 — **Audit que conta só LINHAS NOVAS acusa falsos desaparecimentos.** O audit da
   leva de 13 Jul reportou "golds 16/18" e "TS 0/1" como se 2 golds + 1 TS se tivessem perdido.
   Investigação read-only: os 2 golds eram **duplicados reais** (dedup por `file_hash`, HTTP 200
   `duplicate`, não cria linha — prova: 621 golds, 621 hashes únicos, 0 hashes com >1 entry); o TS
@@ -311,7 +311,7 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   sempre pela BD (unicidade de hash, `xmax=0` do RETURNING) antes de tratar como incidente.** Ver
   `JOURNAL_2026-07-16.md` (dívida "2 Golds + 1 TS sem assentar" fechada como falso alarme).
 
-- 2026-07-14 — **O wipe de 8 Jul saldou as dívidas de PROMPT; a classe viva é o erro POR-IMAGEM,
+- 2026-07-17 — **O wipe de 8 Jul saldou as dívidas de PROMPT; a classe viva é o erro POR-IMAGEM,
   só medível por amostra.** Dois censos de coroas potencialmente erradas deram **0** pela MESMA
   razão estrutural: a BD foi limpa+reimportada a 8 Jul e as correções de prompt são anteriores
   (pt95/table-SS `824f23d` 1 Jul; anti-chama da Gold `13ef90d` 5 Jun) → **nenhuma leitura
@@ -323,10 +323,10 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   apesar do prompt bom → NÃO datável, NÃO contável por censo; a coroa in-band certa é
   indistinguível da errada só pelo valor). A segunda classe só se mede RE-LENDO uma amostra, nunca
   por censo de valor/versão.** Corolário: um "0" de censo por-versão é honesto mas não é
-  certificado de limpeza — dizê-lo sempre junto. Ver `JOURNAL_2026-07-14` (censos 1+2), amostrador
+  certificado de limpeza — dizê-lo sempre junto. Ver `JOURNAL_2026-07-17` (censos 1+2), amostrador
   das 177 (sliver 9 Jul + in-band Gold).
 
-- 2026-07-14 — **TODA operação em lote da app tem botão de CANCELAR — o Rui nunca fica refém de
+- 2026-07-17 — **TODA operação em lote da app tem botão de CANCELAR — o Rui nunca fica refém de
   um background.** O amostrador de coroas (177 releituras Vision, minutos) arrancou sem forma de
   parar; o Rui quis interromper a meio e não havia como (uma thread no servidor não se mata à
   distância). **→ Regra permanente: qualquer job em lote (releituras, reconciles massivos, robot,
@@ -336,7 +336,7 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   mata qualquer daemon + limpa cache in-process. Ver `crown_sample.py` (padrão de referência),
   memória `feedback_batch_ops_need_cancel`.
 
-- 2026-07-14 — **Releitura de verificação sobre a cópia COMPRIMIDA tem teto: o "sumiu" (—) é
+- 2026-07-17 — **Releitura de verificação sobre a cópia COMPRIMIDA tem teto: o "sumiu" (—) é
   fraco; só valor→valor pesa.** O amostrador re-lê a Gold a partir de `entries.raw_json.img_b64`,
   que é a cópia **comprimida 1280/JPEG85** (o original não é retido — dado à Vision só no upload e
   descartado). Logo uma coroa que **desaparece** na releitura pode ser **degradação da imagem, não
@@ -348,7 +348,7 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   (forte)" e declarar a limitação na própria UI. Para veredicto sobre os "—" é preciso o original
   (aqui: re-descarregar a Gold), não a cópia guardada.** Ver banner do painel `/crown-sample`.
 
-- 2026-07-14 — **Padrão "suspeito de uniforme" (149/155) verifica-se contra os OLHOS antes de
+- 2026-07-17 — **Padrão "suspeito de uniforme" (149/155) verifica-se contra os OLHOS antes de
   virar narrativa.** A auditoria aritmética reportou `delta=1` (sentados−extraídos) em **149 de 155**
   mãos e eu chamei-lhe "sistemático, estrutural, não corrupção" — dei-lhe uma explicação bonita
   (o seat que falta é o eliminado). O Rui verificou **7 mãos à vista** e em TODAS os extraídos eram
@@ -357,9 +357,9 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   distribuição quase-uniforme e alta (149/155, 90%+) é MAIS provável um bug de medida do que um
   facto do mundo; antes de lhe dar narrativa, cruzar com uma pequena amostra à vista — se a amostra
   contradiz a estatística, é a régua que está errada, não o mundo. Anular os números e re-medir,
-  não racionalizar.** Ver `JOURNAL_2026-07-14` (auditoria das 155, régua corrigida).
+  não racionalizar.** Ver `JOURNAL_2026-07-17` (auditoria das 155, régua corrigida).
 
-- 2026-07-14 — **Teoria plausível declara-se como ESPECULAÇÃO até à prova; morre limpa com 0/N na
+- 2026-07-17 — **Teoria plausível declara-se como ESPECULAÇÃO até à prova; morre limpa com 0/N na
   forense.** A hipótese "verde-KO somado" (a coroa do eliminador = placa própria + verde do
   eliminado, inflada) explicava tão bem os pares halving ($105→$55) que eu a dei por confirmada na
   Q2 ("a releitura é a certa"). A forense sobre 7 espécimes nomeados deu **0/7** — os eliminadores
@@ -368,9 +368,9 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   houver forense nos dados, apresenta-se rotulada como hipótese/especulação, nunca como facto — e
   quando a forense a mata (0/N), corrige-se em voz alta a afirmação anterior, não se deixa a versão
   plausível a contaminar as decisões.** (Corolário do adversarial-verify: uma hipótese sobrevive só
-  depois de tentarem refutá-la com dados.) Ver `JOURNAL_2026-07-14` (forense verde-KO).
+  depois de tentarem refutá-la com dados.) Ver `JOURNAL_2026-07-17` (forense verde-KO).
 
-- 2026-07-14 — **Nem o gravado nem a mecânica teórica ARBITRAM uma coroa — só a IMAGEM.** Na mão
+- 2026-07-17 — **Nem o gravado nem a mecânica teórica ARBITRAM uma coroa — só a IMAGEM.** Na mão
   2480 (matador AVRELIY) errei o valor da coroa dele DUAS vezes por raciocínio: primeiro "$125 =
   frame pré-KO", depois "$187.5 = próprio + metade do eliminado". A imagem, à vista do Rui, mostrou
   **dourada $265.62 + verde $187.5** — o gravado ($125) era **misread puro**, e o eliminado
@@ -381,4 +381,4 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   é o que o frame mostrar). Qualquer fluxo que escreva um bounty TEM de mostrar a imagem primeiro e
   gravar o que o olho lê, não o que o modelo calcula.** A fórmula do Rui `bounty_eliminado = verde ×
   2` ganha-se ao LER o verde na imagem (aqui $187.5 × 2 = $375), não ao assumir a base. Desenho do
-  fluxo (A)+(B): imagem SEMPRE antes da escrita. Ver `JOURNAL_2026-07-14`, `#CROWN-RECOVERY`.
+  fluxo (A)+(B): imagem SEMPRE antes da escrita. Ver `JOURNAL_2026-07-17`, `#CROWN-RECOVERY`.

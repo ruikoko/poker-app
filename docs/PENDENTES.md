@@ -1,5 +1,40 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 17 Jul 2026 — coroas (censos=0, régua, verde-KO) + cura no core + detetor de bounties recuperáveis
+
+*(Relógio do sistema reportou "14 Jul", mas segue o fecho de 16 Jul → datado 17 Jul. Ver `JOURNAL_2026-07-17.md`.)*
+
+**✅ LIVE hoje:** cura no core do reconcile (varredor independente + re-Vision; **27/27** no 1º
+sweep) · amostrador de coroas (modo "Ver candidatas" + Cancelar + banner de limitação; âmbito
+177→155) · censos pré-pt95 = **0** (×2, wipe saldou) · régua do delta corrigida (**150/155** delta
+0; era a chave `_meta`) · detetor de bounties recuperáveis (núcleo 4/4 + 488 varridas: **40 mãos/48
+seats G1 · 19 G2 · 11 over-read**) + **painel "Bounties recuperáveis" Etapa 1 (só-leitura)** + fix
+do matador sem nome (0/40). **Regra permanente:** todo o lote tem Cancelar.
+
+**🔴 RETOMA AMANHÃ — por ordem:**
+
+- **a) REENVIAR os 6 casos de validação COM LINKS** (violei `feedback_hand_refs_by_link` — o #6
+  saiu com link partido; sem links não há validação). Lista corrigida (`<frontend>/hrc-results/hand/<id>`):
+  1. [/hand/2491](https://comfortable-hope-production-a87a.up.railway.app/hrc-results/hand/2491) BH HR $525 — bustou **M Dziubdzie.. (SB)** → matador **Fergiac (UTG)**.
+  2. [/hand/8920](https://comfortable-hope-production-a87a.up.railway.app/hrc-results/hand/8920) Speed Racer $10 — bustou **bigscam (BTN)** → **Lauro Dermio (SB) · HERO**.
+  3. [/hand/1160](https://comfortable-hope-production-a87a.up.railway.app/hrc-results/hand/1160) Speed Racer $32 — bustou **PUGLIFE (BTN)** → **Tiziano991 (CO) + Lauro (SB) HERO** (multi-vencedor).
+  4. [/hand/1041](https://comfortable-hope-production-a87a.up.railway.app/hrc-results/hand/1041) BH HR $525 — bustou **Pokermen777 (UTG) + Golden Goos.. (MP)** → matador **Joao Da Sil.. (BB)**.
+  5. [/hand/3005](https://comfortable-hope-production-a87a.up.railway.app/hrc-results/hand/3005) Speed Racer $10 — bustou **jinx36 (CO)** → matador **Im88erAufOwn (BB)**.
+  6. [/hand/27503](https://comfortable-hope-production-a87a.up.railway.app/hrc-results/hand/27503) (GG-6177132682, o caso podre) — matador **Lauro Dermio (MP1) · HERO** (era o "—", agora nomeado).
+- **b) Após validação dos 6 → Etapa 2 (fluxo A+B, escrita só por carimbo):** abre imagem → botão
+  "sugerir" (Vision só ao verde) → escreve com `bounty_source='derived_green_ko'` + correção da
+  dourada do matador. **Estreia com os 2 carimbos da 2480:** AVRELIY dourada **$265.62** · Phil
+  bounty **$375** (`derived_green_ko`, o 1º carimbo). *A escrita NÃO liga até os 6 estarem sãos.*
+- **c) Over-reads à parte:** 5 duros da re-auditoria + 11 do detetor → revisão separada (não entram
+  no grupo-1 automático).
+- **d) Fase 2 Wizard:** veredicto do Rui (validar a página) + **HH viewer** (formato HM3/Winamax) +
+  **contexto do torneio** no cabeçalho (fase/prémios/top pago). Construção após validação.
+- **e) Env RO:** rodar o `~/.pokerapp_db_ro.env` — do lado do Rui (Railway).
+- **f) Worklists do Rui:** Marcadas ~313 · Gold sem tag ~303 · **Golds por ler = 0** (fecharam) ·
+  FT do Sunday Special (carimbo).
+
+---
+
 ## 📌 FECHO DO DIA 16 Jul 2026 — ✅ VALE v3 + arranque Resultados HRC
 
 **✅ VALE DO RUI — LEI v3 VERIFICADA EM PRODUÇÃO.** Relatório tree-a-tree sobre 13 mãos reais
