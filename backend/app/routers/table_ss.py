@@ -844,31 +844,38 @@ def _persist_table_ss_match(
 
 # ── Reconcile pós-import (R sobre TODAS as SS) ───────────────────────────────
 
-def reconcile_table_ss(hand_ids=None) -> dict:
-    """Corre R sobre TODAS as SS de mesa com read utilizável (já passaram
-    Vision+parse+site-gate: result ∈ {success, no_match_to_hand, tm_ambiguous} e
-    vision_json presente), recalculando o match de raiz e re-persistindo —
-    INCLUINDO as já `success`, para CORRIGIR um match anterior errado quando
-    chega uma mão melhor (vai além do relink B.1, que só re-tentava órfãs).
+def reconcile_table_ss(hand_ids=None, pending_only: bool = False) -> dict:
+    """Corre R sobre as SS de mesa com read utilizável (já passaram Vision+parse+
+    site-gate: result ∈ {success, no_match_to_hand, tm_ambiguous} e vision_json
+    presente), recalculando o match de raiz e re-persistindo.
+
+    Por defeito INCLUI as já `success`, para CORRIGIR um match anterior errado
+    quando chega uma mão melhor (vai além do relink B.1, que só re-tentava órfãs)
+    — é o modo do trigger de import (reimport re-desanon, #HRC-REIMPORT-REDEANON-
+    CASADAS). Com **`pending_only=True`** varre SÓ as pendentes (no_match/ambíguas):
+    é o modo do VARREDOR INDEPENDENTE (arranque+tick, #PENDING-SWEEP-GUARANTEED) —
+    não re-processa (nem re-desanoniza) as 1695 `success` a cada tick.
 
     Determinístico e idempotente: re-correr sem dados novos não muda nada (o
     link só é tocado quando o match muda de facto). O re-desanon + re-tag correm
     para TODO match success (não só quando `changed`) — no reimport o hand_id não
-    muda mas a mão em BD é nova e anónima (#HRC-REIMPORT-REDEANON-CASADAS); o
-    `_deanon_after_match` é idempotente (salta Discord/position_v3). Disparado
-    fire-and-forget após cada import. `hand_ids=[]` → curto-circuita (nada
-    importado). Devolve {checked, changed, success, orphan, ambiguous}.
+    muda mas a mão em BD é nova e anónima; o `_deanon_after_match` é idempotente
+    (salta Discord/position_v3). `hand_ids=[]` → curto-circuita (nada importado).
+    Devolve {checked, changed, success, orphan, ambiguous}.
     """
     if hand_ids is not None and len(hand_ids) == 0:
         return {"checked": 0, "changed": 0, "success": 0,
                 "orphan": 0, "ambiguous": 0}
 
+    _results = (["no_match_to_hand", "tm_ambiguous"] if pending_only
+                else ["success", "no_match_to_hand", "tm_ambiguous"])
     rows = query(
         """SELECT id, captured_at, site, vision_json, result, matched_hand_id,
                   original_filename, folder_tag
              FROM table_ss_processing_log
-            WHERE result IN ('success', 'no_match_to_hand', 'tm_ambiguous')
-              AND vision_json IS NOT NULL"""
+            WHERE result = ANY(%s)
+              AND vision_json IS NOT NULL""",
+        (_results,)
     )
     checked = changed = n_success = n_orphan = n_amb = 0
     for r in rows:
@@ -912,6 +919,59 @@ def relink_orphan_table_ss(hand_ids=None) -> dict:
     Agora delega no reconcile completo (R sobre TODAS as SS). Ver
     `reconcile_table_ss`."""
     return reconcile_table_ss(hand_ids)
+
+
+# ── Re-Vision das SS falhadas (varredor independente) ────────────────────────
+_VISION_RETRY_RESULTS = ("vision_failed", "json_invalid", "site_undetected")
+
+
+def retry_failed_table_ss_vision(limit: int = 5) -> dict:
+    """Re-corre a IA de leitura (Vision) nas SS onde ela FALHOU
+    (vision_failed / json_invalid / site_undetected) e que têm a imagem guardada,
+    em LOTE PEQUENO (anti-massivo). O reconcile normal ignora estas (exige
+    `vision_json`) → sem isto, uma leitura falhada nunca ressuscita.
+
+    Reutiliza `_process_table_ss` (re-lê + re-parseia + re-persiste por
+    file_hash + auto-casa). A imagem guardada é a COMPRIMIDA (1280/JPEG85 — a
+    original não é retida), logo é retry best-effort: uma falha por qualidade
+    pode repetir-se, mas uma falha TRANSITÓRIA (crédito/timeout da API) sara.
+    Determinístico, defensivo (nunca lança). `limit<=0` → no-op. Corre em daemon
+    thread (sem event loop) → usa `asyncio.run`. Devolve
+    {retried, now_success, still_failed}."""
+    if not limit or limit <= 0:
+        return {"retried": 0, "now_success": 0, "still_failed": 0}
+    import base64
+    import asyncio
+    rows = query(
+        "SELECT file_hash, original_filename, img_b64, folder_tag, source "
+        "FROM table_ss_processing_log "
+        "WHERE result = ANY(%s) AND img_b64 IS NOT NULL "
+        "ORDER BY uploaded_at DESC LIMIT %s",
+        (list(_VISION_RETRY_RESULTS), int(limit)))
+    retried = now_success = still_failed = 0
+    for r in rows:
+        retried += 1
+        try:
+            b64 = r["img_b64"] or ""
+            if "base64," in b64:                       # tolera data-URI
+                b64 = b64.split("base64,", 1)[1]
+            content = base64.b64decode(b64)
+            out = asyncio.run(_process_table_ss(
+                content, r.get("original_filename") or "retry.jpg",
+                source=r.get("source") or "vision_retry",
+                folder_tag=r.get("folder_tag")))
+            if out.get("result") == "success":
+                now_success += 1
+            else:
+                still_failed += 1
+        except Exception:  # pragma: no cover - defensivo
+            logger.exception("[table_ss_revision] retry falhou (hash %s)",
+                             r.get("file_hash"))
+            still_failed += 1
+    logger.info("[table_ss_revision] retried=%d now_success=%d still_failed=%d",
+                retried, now_success, still_failed)
+    return {"retried": retried, "now_success": now_success,
+            "still_failed": still_failed}
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:

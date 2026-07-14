@@ -294,6 +294,12 @@ async def lifespan(app: FastAPI):
     ensure_hrc_queue_release_schema()
     ensure_study_state_check_constraint()
 
+    # Varredor independente de pendentes (#PENDING-SWEEP-GUARANTEED) — re-casa SS/
+    # lobbys pendentes + re-Vision das SS falhadas, no arranque + tick periódico,
+    # desacoplado do request de import (que pode dar timeout antes do seu trigger).
+    from app.services.lobby_sync import start_pending_sweeper
+    start_pending_sweeper()
+
     # Arrancar bot Discord em background
     from app.discord_bot import start_bot, DISCORD_TOKEN, MONITORED_SERVERS
     if DISCORD_TOKEN and MONITORED_SERVERS:

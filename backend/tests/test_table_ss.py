@@ -858,12 +858,22 @@ def test_reconcile_empty_hand_ids_short_circuits(mq):
 
 @patch("app.routers.table_ss.query")
 def test_reconcile_select_includes_success_for_correction(mq):
-    # #FIX-B3: re-avalia TODAS (incl. success) → SELECT cobre os 3 results.
+    # #FIX-B3: re-avalia TODAS (incl. success) → params cobrem os 3 results.
     mq.return_value = []
     table_ss.reconcile_table_ss()
     sql = " ".join(mq.call_args[0][0].split())
-    assert "result IN ('success', 'no_match_to_hand', 'tm_ambiguous')" in sql
+    assert "result = ANY(%s)" in sql
     assert "vision_json IS NOT NULL" in sql
+    assert mq.call_args[0][1] == (["success", "no_match_to_hand", "tm_ambiguous"],)
+
+
+@patch("app.routers.table_ss.query")
+def test_reconcile_pending_only_excludes_success(mq):
+    # #PENDING-SWEEP-GUARANTEED: o varredor independente varre SÓ as pendentes
+    # (não re-desanoniza as success a cada tick).
+    mq.return_value = []
+    table_ss.reconcile_table_ss(pending_only=True)
+    assert mq.call_args[0][1] == (["no_match_to_hand", "tm_ambiguous"],)
 
 
 @patch("app.routers.table_ss._persist_table_ss_match", return_value=True)

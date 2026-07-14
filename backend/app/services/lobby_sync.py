@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -1042,3 +1044,65 @@ def trigger_import_reconciles(reason: str = "import") -> None:
             logger.exception("[reconciles/%s] lobby reconcile falhou", reason)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def sweep_pending(reason: str = "sweep") -> dict:
+    """VARREDOR INDEPENDENTE do import (#PENDING-SWEEP-GUARANTEED). Re-casa as SS
+    e lobbys PENDENTES E re-corre a Vision nas SS falhadas (lote pequeno). Fecha o
+    furo do trigger de import: esse só dispara no FIM do request de import — se o
+    import é pesado e o gateway dá timeout (502, #SYNC-ENDPOINTS-SYNCHRONOUS-TIMEOUT)
+    antes de chegar à linha do trigger, as pendentes morrem. Este varredor corre
+    desacoplado (arranque + tick periódico), logo apanha-as na mesma. Modo
+    `pending_only` no table-SS (não re-desanoniza as success a cada tick).
+    Idempotente + defensivo (cada passo isolado; nunca lança)."""
+    result: dict = {}
+    try:
+        from app.routers.table_ss import reconcile_table_ss
+        result["table_ss"] = reconcile_table_ss(pending_only=True)
+    except Exception:
+        logger.exception("[sweep/%s] table-SS reconcile falhou", reason)
+    try:
+        result["lobby"] = reconcile_lobby_logs()
+    except Exception:
+        logger.exception("[sweep/%s] lobby reconcile falhou", reason)
+    try:
+        from app.routers.table_ss import retry_failed_table_ss_vision
+        limit = int(os.getenv("PENDING_SWEEP_REVISION_LIMIT", "5"))
+        result["revision"] = retry_failed_table_ss_vision(limit=limit)
+    except Exception:
+        logger.exception("[sweep/%s] re-Vision das SS falhadas falhou", reason)
+    logger.info("[sweep/%s] %s", reason, result)
+    return result
+
+
+def start_pending_sweeper() -> None:
+    """Arranca o varredor independente: 1 passagem no ARRANQUE + TICK periódico,
+    ambos em daemon threads (sobrevivem ao request, não bloqueiam o boot/event
+    loop). Env: `PENDING_SWEEP_ENABLED` (default true), `PENDING_SWEEP_INTERVAL_MIN`
+    (default 20; mínimo 1). Defensivo — nunca parte o arranque."""
+    if os.getenv("PENDING_SWEEP_ENABLED", "true").strip().lower() in ("0", "false", "no"):
+        logger.info("[sweep] desactivado por env (PENDING_SWEEP_ENABLED)")
+        return
+    try:
+        interval = max(60, int(os.getenv("PENDING_SWEEP_INTERVAL_MIN", "20")) * 60)
+    except ValueError:
+        interval = 20 * 60
+
+    def _startup():
+        try:
+            sweep_pending(reason="startup")
+        except Exception:
+            logger.exception("[sweep] passagem de arranque falhou")
+
+    def _loop():
+        import time
+        while True:
+            time.sleep(interval)
+            try:
+                sweep_pending(reason="tick")
+            except Exception:
+                logger.exception("[sweep] tick falhou")
+
+    threading.Thread(target=_startup, daemon=True).start()
+    threading.Thread(target=_loop, daemon=True).start()
+    logger.info("[sweep] varredor independente ligado (intervalo=%ds)", interval)
