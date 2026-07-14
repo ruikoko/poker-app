@@ -59,9 +59,9 @@ export default function CrownSample() {
     <div style={{ padding: '18px 22px', color: C.text, maxWidth: 1000, margin: '0 auto' }}>
       <h1 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 4px' }}>Amostrador de coroas Gold</h1>
       <p style={{ color: C.muted, fontSize: 13, margin: '0 0 14px', lineHeight: 1.5 }}>
-        <b>Ver candidatas</b> — 127 da madrugada de 9 Jul + 50 sorteadas (sorteio fixo,
-        lista estável). Revê à vista as coroas <b>gravadas</b>. A releitura pela Vision
-        é <b>opcional</b>, por cima — e não escreve nada.
+        <b>Ver candidatas</b> — as Golds KO/PKO <b>pré-refinamento de 9 Jul</b> + uma amostra
+        sorteada do in-band (sorteio fixo, lista estável). Revê à vista as coroas
+        <b>gravadas</b>. A releitura pela Vision é <b>opcional</b>, por cima — e não escreve nada.
       </p>
 
       <div style={{ background: 'rgba(242,193,78,0.09)', border: `1px solid ${C.yellow}`,
@@ -90,7 +90,7 @@ export default function CrownSample() {
         )}
         {cands && (
           <span style={{ color: C.muted, fontSize: 13 }}>
-            {cands.total} candidatas · {cands.sliver} sliver
+            {cands.total} candidatas · {cands.sliver} pré-refinamento 9 Jul
           </span>
         )}
         {st && st.total > 0 && (running || st.status === 'done' || cancelled) && (
@@ -142,7 +142,7 @@ export default function CrownSample() {
                   </Link>
                   <span style={{ color: C.muted, fontSize: 12 }}>{c.tournament}</span>
                   {c.sliver && <span style={{ fontSize: 11, color: '#0b0d10', background: C.yellow,
-                    borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>sliver</span>}
+                    borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>pré-refinamento 9 Jul</span>}
                 </div>
                 {c.crowns.length === 0
                   ? <div style={{ color: C.muted, fontSize: 12, marginTop: 8 }}>sem coroas lidas</div>

@@ -347,3 +347,25 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   cópia degradada classifica CANDIDATOS, não veredictos; separar sempre "— (fraco)" de "valor→valor
   (forte)" e declarar a limitação na própria UI. Para veredicto sobre os "—" é preciso o original
   (aqui: re-descarregar a Gold), não a cópia guardada.** Ver banner do painel `/crown-sample`.
+
+- 2026-07-14 — **Padrão "suspeito de uniforme" (149/155) verifica-se contra os OLHOS antes de
+  virar narrativa.** A auditoria aritmética reportou `delta=1` (sentados−extraídos) em **149 de 155**
+  mãos e eu chamei-lhe "sistemático, estrutural, não corrupção" — dei-lhe uma explicação bonita
+  (o seat que falta é o eliminado). O Rui verificou **7 mãos à vista** e em TODAS os extraídos eram
+  EXATAMENTE os jogadores da mão → 7/7 limpas com "149/155 em falta" tem probabilidade ~zero → a
+  régua media OUTRA coisa (o "sentados" contava sit-outs/gente fora da mão). **→ Lição: uma
+  distribuição quase-uniforme e alta (149/155, 90%+) é MAIS provável um bug de medida do que um
+  facto do mundo; antes de lhe dar narrativa, cruzar com uma pequena amostra à vista — se a amostra
+  contradiz a estatística, é a régua que está errada, não o mundo. Anular os números e re-medir,
+  não racionalizar.** Ver `JOURNAL_2026-07-14` (auditoria das 155, régua corrigida).
+
+- 2026-07-14 — **Teoria plausível declara-se como ESPECULAÇÃO até à prova; morre limpa com 0/N na
+  forense.** A hipótese "verde-KO somado" (a coroa do eliminador = placa própria + verde do
+  eliminado, inflada) explicava tão bem os pares halving ($105→$55) que eu a dei por confirmada na
+  Q2 ("a releitura é a certa"). A forense sobre 7 espécimes nomeados deu **0/7** — os eliminadores
+  mostram o instantâneo FRESCO exato (base/2), sem verde somado; o padrão real era outro (o
+  ELIMINADO fica com coroa NULL). **→ Lição: uma teoria que "encaixa" não é prova; enquanto não
+  houver forense nos dados, apresenta-se rotulada como hipótese/especulação, nunca como facto — e
+  quando a forense a mata (0/N), corrige-se em voz alta a afirmação anterior, não se deixa a versão
+  plausível a contaminar as decisões.** (Corolário do adversarial-verify: uma hipótese sobrevive só
+  depois de tentarem refutá-la com dados.) Ver `JOURNAL_2026-07-14` (forense verde-KO).
