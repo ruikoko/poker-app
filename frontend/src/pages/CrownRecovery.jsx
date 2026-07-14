@@ -92,7 +92,7 @@ export default function CrownRecovery() {
             )}
             <div style={{ flex: 1, minWidth: 250 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                <Link to={`/hrc-results/hand/${h.hand_db_id}`}
+                <Link to={`/hand/${h.hand_db_id}`}
                   style={{ color: C.gold, fontWeight: 700, fontSize: 14, textDecoration: 'none',
                     fontFamily: 'ui-monospace,monospace' }}>{h.hand_id}</Link>
                 <span style={{ color: C.muted, fontSize: 12 }}>{h.tournament}</span>
@@ -138,7 +138,7 @@ export default function CrownRecovery() {
             {showOver && (
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {st.over_read.map(o => (
-                  <Link key={o.hand_db_id} to={`/hrc-results/hand/${o.hand_db_id}`}
+                  <Link key={o.hand_db_id} to={`/hand/${o.hand_db_id}`}
                     style={{ color: C.gold, textDecoration: 'none', border: `1px solid ${C.border}`,
                       borderRadius: 6, padding: '3px 8px', fontSize: 12, fontFamily: 'ui-monospace,monospace' }}>
                     {o.hand_id} <span style={{ color: C.muted }}>HH {o.num_hh}≠{o.num_extracted} Gold</span>
