@@ -38,6 +38,51 @@ _LOST_RE = re.compile(r"^Seat \d+: (\S+)\b.*\band lost\b")
 # vencedor do pote (o matador — onde está o verde do KO)
 _WON_COLLECTED_RE = re.compile(r"^(\S+) collected\b")
 _WON_SUMMARY_RE = re.compile(r"^Seat \d+: (\S+)\b.*\band won\b")
+# big blind do header ("Level1(500/1,000(150))" → 1000) e devolução de aposta
+# não-igualada ("Uncalled bet (25,500) returned to <hash>" → o all-in COBRIU o
+# adversário e ficou com este resto). Mesa (gate do tournament na contraprova).
+_BB_RE = re.compile(r"Level\d+\((?:[\d,]+)/([\d,]+)")
+_UNCALLED_RE = re.compile(r"Uncalled bet \(([\d,]+)\) returned to (\S+)")
+_TABLE_RE = re.compile(r"^Table '([^']+)'")
+
+# Régua do resto-em-BB (validada pelo Rui 3/3 na imagem): um all-in que PERDE
+# mas fica com >= 1 BB NÃO foi eliminado — a coroa NULL é leitura falhada de um
+# jogador VIVO (re-ler a placa), NUNCA um caso verde-KO. Resto ~0 (coberto) ou
+# < 1 BB = bust real (recuperável por verde × 2).
+_ALIVE_MIN_BB = 1.0
+
+
+def _num(s) -> int:
+    try:
+        return int(str(s).replace(",", "").strip())
+    except (ValueError, AttributeError):
+        return 0
+
+
+def _parse_bb(raw: str):
+    m = _BB_RE.search(raw or "")
+    return _num(m.group(1)) if m else None
+
+
+def _returned_by_hash(raw: str) -> dict:
+    """{hash: fichas devolvidas} — quem recebeu 'Uncalled bet returned' cobriu o
+    adversário e ficou com esse resto (não pode ter bustado se o resto for grande)."""
+    return {m.group(2): _num(m.group(1)) for m in _UNCALLED_RE.finditer(raw or "")}
+
+
+def _parse_table(raw: str):
+    for ln in (raw or "").splitlines():
+        m = _TABLE_RE.match(ln.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def seated_hashes(raw: str) -> set:
+    """Hashes SENTADOS numa HH (linhas 'Seat N: <hash> (X in chips)'). Usado pela
+    contraprova da mão-seguinte (o eliminado não se senta na mão a seguir)."""
+    return set(_SEAT_RE.match(ln.strip()).group(2)
+               for ln in (raw or "").splitlines() if _SEAT_RE.match(ln.strip()))
 
 
 def _norm_pos(p) -> str:
@@ -118,22 +163,41 @@ def _players_list(pn):
 
 def classify_hand(raw: str, pn) -> dict:
     """Classifica UMA mão. Devolve
-    {num_hh, num_extracted, over_read, group1:[{name,position}], group2:[{name,position}]}.
-    group1/group2 vazios quando não aplicável. Puro, read-only."""
+    {num_hh, num_extracted, over_read, group1, misread, group2, matadores,
+     bust_hashes, table}.
+    - group1 = bustou de VERDADE (all-in + perdeu + resto < 1 BB) + coroa NULL →
+      recuperável por verde × 2.
+    - misread = all-in que perdeu MAS ficou com >= 1 BB (VIVO) + coroa NULL →
+      leitura falhada da placa própria (re-ler), NUNCA verde × 2.
+    - group2 = coroa NULL num não-bustado não-Hero (folded/etc) → balde das coroas.
+    `bust_hashes`/`table` servem a contraprova da mão-seguinte no router. Puro."""
     seats, button_seat, num_hh, busted = _parse_busts(raw)
     plist = _players_list(pn)
     num_extracted = len(plist)
     over_read = (num_hh > 0 and num_extracted != num_hh)
 
-    # posição de cada hash bustado (via a função do parser)
+    # RÉGUA DO RESTO-EM-BB: separar quem bustou mesmo (resto ~0) de quem perdeu o
+    # all-in mas SOBREVIVEU (cobriu o adversário, ficou com o resto devolvido).
+    bb = _parse_bb(raw)
+    returned = _returned_by_hash(raw)
+    busted_real: set[str] = set()
+    alive_lost: set[str] = set()
+    for h in busted:
+        remain = returned.get(h, 0)                # coberto → 0 devolvido → bust
+        resto_bb = (remain / bb) if bb else 0.0    # sem BB conhecido → trata como bust
+        (alive_lost if resto_bb >= _ALIVE_MIN_BB else busted_real).add(h)
+
+    # posição de cada hash (via a função do parser) — separada por balde
     all_seat_nums = list(seats.keys())
     busted_positions: set[str] = set()
+    misread_positions: set[str] = set()
     if button_seat and all_seat_nums:
         for seat_num, h in seats.items():
-            if h in busted:
+            if h in busted_real or h in alive_lost:
                 pos = _get_position(seat_num, button_seat, all_seat_nums, num_hh)
                 if pos and pos != "?":
-                    busted_positions.add(_norm_pos(pos))
+                    (misread_positions if h in alive_lost
+                     else busted_positions).add(_norm_pos(pos))
 
     # matador(es) — onde ler o verde do KO (coroa do vencedor do pote).
     # Se o vencedor é o Hero (hash 'Hero'), resolve pelo NOME REAL do Hero — a
@@ -147,7 +211,7 @@ def classify_hand(raw: str, pn) -> dict:
         else:
             matadores.append({"name": pos_to_name.get(pos), "position": pos, "is_hero": False})
 
-    group1, group2 = [], []
+    group1, misread, group2 = [], [], []
     for e in plist:
         name = e.get("name")
         if e.get("bounty_value_usd") is not None:
@@ -157,10 +221,13 @@ def classify_hand(raw: str, pn) -> dict:
         pos = _norm_pos(e.get("position"))
         entry = {"name": name, "position": e.get("position")}
         if pos and pos in busted_positions:
-            group1.append(entry)          # bustou + NULL = recuperável
+            group1.append(entry)          # bustou (resto <1BB) + NULL = recuperável
+        elif pos and pos in misread_positions:
+            misread.append(entry)         # all-in perdido MAS vivo → re-ler placa
         else:
             group2.append(entry)          # não-bustou + não-Hero + NULL = falha real
     return {
         "num_hh": num_hh, "num_extracted": num_extracted, "over_read": over_read,
-        "group1": group1, "group2": group2, "matadores": matadores,
+        "group1": group1, "misread": misread, "group2": group2, "matadores": matadores,
+        "bust_hashes": sorted(busted_real), "table": _parse_table(raw),
     }

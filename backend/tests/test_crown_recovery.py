@@ -69,3 +69,60 @@ def test_hero_name_tolerant_to_truncation():
     assert cr._is_hero_name("Lauro Dermio") is True
     assert cr._is_hero_name("Lauro Der..") is True
     assert cr._is_hero_name("Random Villain") is False
+
+
+# ── Régua do resto-em-BB: all-in que PERDE mas SOBREVIVE (cobriu o adversário) ──
+# bbbb (SB) faz all-in 50k, Hero cobre só 20k, 30k DEVOLVIDOS → bbbb fica com
+# 30 BB (BB=1000) = VIVO. Coroa NULL = leitura falhada da placa própria, não verde-KO.
+_RAW_SURVIVOR = """Poker Hand #TM2: Tournament #888, Test KO Hold'em No Limit - Level5(500/1,000(150))
+Table '7' 6-max Seat #1 is the button
+Seat 1: aaaa (5,000 in chips)
+Seat 2: bbbb (50,000 in chips)
+Seat 3: cccc (1,000 in chips)
+Seat 4: dddd (1,000 in chips)
+Seat 5: eeee (1,000 in chips)
+Seat 6: Hero (20,000 in chips)
+bbbb: raises 49,000 to 50,000 and is all-in
+Hero: calls 20,000 and is all-in
+Uncalled bet (30,000) returned to bbbb
+*** SUMMARY ***
+Seat 2: bbbb (small blind) showed [Ah Kh] and lost with Ace high
+Seat 6: Hero showed [As Ks] and won (40,000) with a pair of Aces
+"""
+
+# Mesmo spot mas bbbb TOTALMENTE coberto (sem devolução) → resto 0 = bustou.
+_RAW_COVERED = _RAW_SURVIVOR.replace(
+    "Uncalled bet (30,000) returned to bbbb\n", "")
+
+
+def test_survivor_goes_to_misread_not_group1():
+    # bbbb (SB) perdeu o all-in mas ficou com 30 BB → misread (re-ler placa),
+    # NUNCA group1 (verde × 2). LiveGuy (UTG, não all-in) fica em group2.
+    res = cr.classify_hand(_RAW_SURVIVOR, _PN)
+    assert [g["name"] for g in res["group1"]] == []
+    assert [g["name"] for g in res["misread"]] == ["BustedGuy"]
+    assert [g["name"] for g in res["group2"]] == ["LiveGuy"]
+    assert "bbbb" not in res["bust_hashes"]      # não conta como bust
+
+
+def test_covered_allin_loss_is_real_bust():
+    # sem devolução → resto 0 → bust real → group1 + hash exposto p/ contraprova
+    res = cr.classify_hand(_RAW_COVERED, _PN)
+    assert [g["name"] for g in res["group1"]] == ["BustedGuy"]
+    assert res["misread"] == []
+    assert res["bust_hashes"] == ["bbbb"]
+
+
+def test_bb_and_returned_and_table_helpers():
+    assert cr._parse_bb(_RAW_SURVIVOR) == 1000
+    assert cr._returned_by_hash(_RAW_SURVIVOR) == {"bbbb": 30000}
+    assert cr._parse_table(_RAW_SURVIVOR) == "7"
+    assert cr.seated_hashes(_RAW_SURVIVOR) == {"aaaa", "bbbb", "cccc", "dddd", "eeee", "Hero"}
+
+
+def test_no_bb_defaults_to_bust():
+    # _RAW não tem blinds no header ("Level1") → bb None → trata all-in+lost como
+    # bust (comportamento seguro pré-régua; a contraprova do router é o backup).
+    res = cr.classify_hand(_RAW, _PN)
+    assert [g["name"] for g in res["group1"]] == ["BustedGuy"]
+    assert res["misread"] == []

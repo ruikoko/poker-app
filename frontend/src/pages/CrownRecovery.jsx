@@ -66,6 +66,7 @@ export default function CrownRecovery() {
           <span style={{ color: C.muted, fontSize: 13 }}>
             {st.done}/{st.total} varridas ·{' '}
             <b style={{ color: C.green }}>{st.group1_count}</b> recuperáveis ·{' '}
+            <b style={{ color: C.gold }}>{st.misread_count ?? 0}</b> re-ler placa ·{' '}
             {st.group2_count} falha real · {st.over_read_count} over-read
           </span>
         )}
@@ -120,6 +121,31 @@ export default function CrownRecovery() {
           </div>
         ))}
       </div>
+
+      {/* re-ler placa — all-in perdido MAS jogador VIVO (resto >= 1 BB) */}
+      {st && (st.status === 'done' || st.status === 'cancelled') && (st.misread_count ?? 0) > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <div style={{ ...lbl(C), color: C.gold, fontSize: 12 }}>
+            Re-ler placa — {st.misread_count} vivos (all-in perdido mas ficaram com stack)
+          </div>
+          <p style={{ color: C.muted, fontSize: 12, margin: '4px 0 8px', maxWidth: '70ch' }}>
+            Perderam o all-in mas <b>cobriram o adversário</b> (resto ≥ 1 BB) ou não bustaram —
+            a coroa NULL é <b>leitura falhada da placa própria</b>. Recupera-se <b>re-lendo a placa</b>,
+            <b> nunca</b> verde × 2. (Inclui os despromovidos pela contraprova da mão-seguinte.)
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {(st.misread || []).map(o => (
+              <Link key={o.hand_db_id} to={`/hand/${o.hand_db_id}`}
+                style={{ color: C.gold, textDecoration: 'none', border: `1px solid ${C.border}`,
+                  borderRadius: 6, padding: '3px 8px', fontSize: 12, fontFamily: 'ui-monospace,monospace' }}>
+                {o.hand_id}
+                <span style={{ color: C.muted }}> {(o.seats || []).map(s => s.name).join(', ')}
+                  {o.reason === 'seated_next_hand' ? ' · sentou-se na mão seguinte' : ''}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* grupo 2 + over-read (à parte) */}
       {st && (st.status === 'done' || st.status === 'cancelled') && (

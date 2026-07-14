@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth import require_auth
 from app.db import query
-from app.services.crown_recovery import classify_hand
+from app.services.crown_recovery import classify_hand, seated_hashes
 
 router = APIRouter(prefix="/api/gg-health/crown-recovery", tags=["crown-recovery"])
 logger = logging.getLogger("crown_recovery")
@@ -25,21 +25,49 @@ logger = logging.getLogger("crown_recovery")
 _STATE: dict = {
     "status": "idle",          # idle | running | done | cancelled | error
     "done": 0, "total": 0,
-    "group1": [], "group2": [], "over_read": [],
+    "group1": [], "misread": [], "group2": [], "over_read": [],
     "cancel": False,
     "started_at": None, "finished_at": None, "error": None,
 }
 _LOCK = threading.Lock()
 
 _POP_SQL = (
-    "SELECT h.id, h.hand_id, h.tournament_name, h.raw, h.player_names AS pn, "
-    "       e.id AS entry_id "
+    "SELECT h.id, h.hand_id, h.tournament_name, h.tournament_number, h.played_at, "
+    "       h.raw, h.player_names AS pn, e.id AS entry_id "
     "FROM hands h JOIN entries e ON e.id = h.entry_id AND e.entry_type='screenshot' "
     "     AND (e.raw_json->>'img_b64') IS NOT NULL "
     "WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
     "  AND lower(COALESCE(h.tournament_format,'')) ~ 'ko|pko|bounty' "
     "ORDER BY h.played_at DESC"
 )
+
+
+def _counter_proof(row, table, bust_hashes) -> dict:
+    """Contraprova barata (cinto e suspensórios): o eliminado NÃO se senta na mão
+    SEGUINTE da mesma mesa/torneio. Devolve {verdict, seated_next:[hashes vistos]}.
+    - confirmed_gone: mão-seguinte existe e nenhum bust_hash lá está → bust firme.
+    - seated_next: algum bust_hash sentado na mão-seguinte → NÃO bustou (despromove).
+    - no_next_hand: sem mão-seguinte na mesma mesa → inconclusivo (mantém a régua).
+    Defensivo: qualquer erro → no_next_hand (nunca parte o lote)."""
+    if not bust_hashes or not table or not row.get("tournament_number"):
+        return {"verdict": "no_next_hand", "seated_next": []}
+    try:
+        nxt = query(
+            "SELECT raw FROM hands WHERE site='GGPoker' "
+            "  AND tournament_number = %s AND raw LIKE %s "
+            "  AND played_at > %s AND id <> %s "
+            "ORDER BY played_at ASC, id ASC LIMIT 1",
+            (row["tournament_number"], f"%Table '{table}'%",
+             row["played_at"], row["id"]),
+        )
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("[crown-recovery] contraprova falhou (hand %s)", row.get("hand_id"))
+        return {"verdict": "no_next_hand", "seated_next": []}
+    if not nxt:
+        return {"verdict": "no_next_hand", "seated_next": []}
+    seated = seated_hashes(nxt[0]["raw"])
+    still = [h for h in bust_hashes if h in seated]
+    return {"verdict": "seated_next" if still else "confirmed_gone", "seated_next": still}
 
 
 def _run_scan():
@@ -53,7 +81,8 @@ def _run_scan():
         return
     with _LOCK:
         _STATE.update(status="running", total=len(rows), done=0,
-                      group1=[], group2=[], over_read=[], error=None, cancel=False,
+                      group1=[], misread=[], group2=[], over_read=[], error=None,
+                      cancel=False,
                       started_at=datetime.now(timezone.utc).isoformat(), finished_at=None)
     cancelled = False
     for r in rows:
@@ -70,13 +99,28 @@ def _run_scan():
                 with _LOCK:
                     _STATE["over_read"].append({**base, "num_hh": res["num_hh"],
                                                 "num_extracted": res["num_extracted"]})
-            elif res["group1"]:
-                with _LOCK:
-                    _STATE["group1"].append({**base, "busted": res["group1"],
-                                             "matadores": res["matadores"]})
-            if not res["over_read"] and res["group2"]:
-                with _LOCK:
-                    _STATE["group2"].append({**base, "seats": res["group2"]})
+            else:
+                if res["group1"]:
+                    # contraprova: o eliminado não se senta na mão-seguinte
+                    cp = _counter_proof(r, res.get("table"), res.get("bust_hashes"))
+                    if cp["verdict"] == "seated_next":
+                        # sentou-se na mão-seguinte → NÃO bustou → despromove p/ re-ler
+                        with _LOCK:
+                            _STATE["misread"].append({
+                                **base, "seats": res["group1"],
+                                "reason": "seated_next_hand", "seated_next": cp["seated_next"]})
+                    else:
+                        with _LOCK:
+                            _STATE["group1"].append({**base, "busted": res["group1"],
+                                                     "matadores": res["matadores"],
+                                                     "counter_proof": cp["verdict"]})
+                if res.get("misread"):
+                    with _LOCK:
+                        _STATE["misread"].append({**base, "seats": res["misread"],
+                                                  "reason": "alive_resto_bb"})
+                if res["group2"]:
+                    with _LOCK:
+                        _STATE["group2"].append({**base, "seats": res["group2"]})
         except Exception:  # pragma: no cover - defensivo (nunca parte o lote)
             logger.exception("[crown-recovery] classify falhou (hand %s)", r.get("hand_id"))
         with _LOCK:
@@ -84,9 +128,10 @@ def _run_scan():
     with _LOCK:
         _STATE.update(status="cancelled" if cancelled else "done",
                       finished_at=datetime.now(timezone.utc).isoformat())
-    logger.info("[crown-recovery] %s: %d/%d | G1=%d G2=%d over=%d",
+    logger.info("[crown-recovery] %s: %d/%d | G1=%d misread=%d G2=%d over=%d",
                 "cancelado" if cancelled else "terminado", _STATE["done"], _STATE["total"],
-                len(_STATE["group1"]), len(_STATE["group2"]), len(_STATE["over_read"]))
+                len(_STATE["group1"]), len(_STATE["misread"]),
+                len(_STATE["group2"]), len(_STATE["over_read"]))
 
 
 @router.post("/scan")
@@ -119,9 +164,11 @@ def crown_recovery_state(current_user=Depends(require_auth)):
         return {
             "status": _STATE["status"], "done": _STATE["done"], "total": _STATE["total"],
             "group1_count": len(_STATE["group1"]),
+            "misread_count": len(_STATE["misread"]),
             "group2_count": len(_STATE["group2"]),
             "over_read_count": len(_STATE["over_read"]),
             "group1": list(_STATE["group1"]),
+            "misread": list(_STATE["misread"]),
             "group2": list(_STATE["group2"]),
             "over_read": list(_STATE["over_read"]),
             "started_at": _STATE["started_at"], "finished_at": _STATE["finished_at"],
