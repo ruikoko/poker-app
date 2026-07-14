@@ -297,3 +297,31 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   < pull < solve` (o `completed_at` do job > hora do deploy prova o conteúdo), e/ou ler os sizings
   reais dos nós da tree.** No VALE de hoje: deploy 03:02/03:34 UTC < solves 05:50–13:29 UTC → v3
   confirmado por conteúdo, não só rótulo. Ver `JOURNAL_2026-07-16.md`.
+
+- 2026-07-14 — **Audit que conta só LINHAS NOVAS acusa falsos desaparecimentos.** O audit da
+  leva de 13 Jul reportou "golds 16/18" e "TS 0/1" como se 2 golds + 1 TS se tivessem perdido.
+  Investigação read-only: os 2 golds eram **duplicados reais** (dedup por `file_hash`, HTTP 200
+  `duplicate`, não cria linha — prova: 621 golds, 621 hashes únicos, 0 hashes com >1 entry); o TS
+  era um **re-import** (UPSERT por PK `(site,tournament_number)` → conta como *updated*, não
+  *inserted*). **Nenhuma perda de dados.** O import devolve 200 tanto para "inseriu" como para
+  "dedup/upsert"; um audit que só soma linhas novas trata os 200-sem-linha como falha. **→ Lição:
+  qualquer audit de leva tem de distinguir os 3 desfechos do import — `inserted` / `duplicate`
+  (dedup benigno) / `updated` (upsert benigno) — antes de acusar "sem assentar". "N enviados vs M
+  linhas novas" NÃO é um buraco de dados; é o comportamento correto do dedup/upsert. Confirmar
+  sempre pela BD (unicidade de hash, `xmax=0` do RETURNING) antes de tratar como incidente.** Ver
+  `JOURNAL_2026-07-16.md` (dívida "2 Golds + 1 TS sem assentar" fechada como falso alarme).
+
+- 2026-07-14 — **O wipe de 8 Jul saldou as dívidas de PROMPT; a classe viva é o erro POR-IMAGEM,
+  só medível por amostra.** Dois censos de coroas potencialmente erradas deram **0** pela MESMA
+  razão estrutural: a BD foi limpa+reimportada a 8 Jul e as correções de prompt são anteriores
+  (pt95/table-SS `824f23d` 1 Jul; anti-chama da Gold `13ef90d` 5 Jun) → **nenhuma leitura
+  pré-correção-de-prompt sobrevive na BD viva** (nem table-SS, nem Gold, nem carry). Mas isto NÃO
+  quer dizer "cano limpo": o caso `/hand/6570` (curado 15 Jul) é uma classe DIFERENTE — a Vision a
+  errar **numa imagem específica APESAR do prompt correto** (erro por-imagem, não artefacto de
+  versão). **→ Lição: distinguir sempre "erro de VERSÃO de prompt" (datável → um wipe/reimport
+  sana-o em bloco, contável por censo de data/versão) de "erro POR-IMAGEM" (a IA falha aquela foto
+  apesar do prompt bom → NÃO datável, NÃO contável por censo; a coroa in-band certa é
+  indistinguível da errada só pelo valor). A segunda classe só se mede RE-LENDO uma amostra, nunca
+  por censo de valor/versão.** Corolário: um "0" de censo por-versão é honesto mas não é
+  certificado de limpeza — dizê-lo sempre junto. Ver `JOURNAL_2026-07-14` (censos 1+2), amostrador
+  das 177 (sliver 9 Jul + in-band Gold).
