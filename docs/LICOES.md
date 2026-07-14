@@ -325,3 +325,25 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   por censo de valor/versão.** Corolário: um "0" de censo por-versão é honesto mas não é
   certificado de limpeza — dizê-lo sempre junto. Ver `JOURNAL_2026-07-14` (censos 1+2), amostrador
   das 177 (sliver 9 Jul + in-band Gold).
+
+- 2026-07-14 — **TODA operação em lote da app tem botão de CANCELAR — o Rui nunca fica refém de
+  um background.** O amostrador de coroas (177 releituras Vision, minutos) arrancou sem forma de
+  parar; o Rui quis interromper a meio e não havia como (uma thread no servidor não se mata à
+  distância). **→ Regra permanente: qualquer job em lote (releituras, reconciles massivos, robot,
+  reimports) nasce com cancelamento cooperativo — bandeira verificada no topo de cada iteração +
+  endpoint `/cancel` + botão no painel; interrompe na próxima unidade, MANTÉM o parcial já apurado
+  ("interrompido a N/M"), nunca perde o feito.** Fallback duro: um redeploy reinicia o processo e
+  mata qualquer daemon + limpa cache in-process. Ver `crown_sample.py` (padrão de referência),
+  memória `feedback_batch_ops_need_cancel`.
+
+- 2026-07-14 — **Releitura de verificação sobre a cópia COMPRIMIDA tem teto: o "sumiu" (—) é
+  fraco; só valor→valor pesa.** O amostrador re-lê a Gold a partir de `entries.raw_json.img_b64`,
+  que é a cópia **comprimida 1280/JPEG85** (o original não é retido — dado à Vision só no upload e
+  descartado). Logo uma coroa que **desaparece** na releitura pode ser **degradação da imagem, não
+  prova** de erro no gravado. Já um par **valor→valor** com padrão sistemático (ex.: halving
+  $40→$20, $105→$55 em várias mãos do mesmo torneio) **não é degradação** — a compressão não divide
+  números por 2 de forma limpa; é assinatura real (aqui: gravado somou o verde-KO pré-refinamento
+  GREEN_KO → releitura lê só o dourado = correto). **→ Lição: uma verificação por releitura sobre
+  cópia degradada classifica CANDIDATOS, não veredictos; separar sempre "— (fraco)" de "valor→valor
+  (forte)" e declarar a limitação na própria UI. Para veredicto sobre os "—" é preciso o original
+  (aqui: re-descarregar a Gold), não a cópia guardada.** Ver banner do painel `/crown-sample`.
