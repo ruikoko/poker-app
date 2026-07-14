@@ -86,6 +86,42 @@ def _seats_to_vision_data(seats: list[dict], hero_nick: Optional[str]) -> dict:
     }
 
 
+def _merge_sealed_crowns(prev_list, new_list) -> int:
+    """SELO (invariante do Rui): preserva no players_list RECONSTRUÍDO as coroas
+    VALIDADAS do players_list ANTERIOR. O re-deanon reconstrói o players_list da
+    leitura table-SS guardada → sem isto apaga a correção manual (raiz da 6570).
+    Match por nome (case/espaço-insensível). Copia valor + `bounty_source` +
+    `bounty_confirmed` (para o selo PERSISTIR nos próximos re-deanons) e limpa
+    qualquer `crown_review` herdado. Devolve nº de seats preservados. Muta `new_list`."""
+    from app.services.eliminated_bounty import (
+        is_bounty_sealed, BOUNTY_SOURCE_KEY, BOUNTY_CONFIRMED_KEY)
+    if not prev_list:
+        return 0
+    sealed = {}
+    for p in prev_list:
+        if isinstance(p, dict) and is_bounty_sealed(p):
+            nm = (p.get("name") or "").strip().lower()
+            if nm:
+                sealed[nm] = p
+    if not sealed:
+        return 0
+    n = 0
+    for q in (new_list or []):
+        if not isinstance(q, dict):
+            continue
+        s = sealed.get((q.get("name") or "").strip().lower())
+        if not s:
+            continue
+        q["bounty_value_usd"] = s.get("bounty_value_usd")
+        if s.get(BOUNTY_SOURCE_KEY) is not None:
+            q[BOUNTY_SOURCE_KEY] = s.get(BOUNTY_SOURCE_KEY)
+        if s.get(BOUNTY_CONFIRMED_KEY):
+            q[BOUNTY_CONFIRMED_KEY] = True
+        q.pop("crown_review", None)
+        n += 1
+    return n
+
+
 def _guard_suspect_crowns(players_list, tn) -> dict:
     """#FLAME-AS-CROWN-GUARD (11 Jul, decisão A do Rui) — guarda **base÷2** no FUNIL
     da escrita de coroas (table-SS E position_v3/Gold). Uma coroa ($ bounty) < base÷2
@@ -108,9 +144,10 @@ def _guard_suspect_crowns(players_list, tn) -> dict:
     base = rows[0]["buy_in_bounty"] if rows else None
     if not base:
         return out
+    from app.services.eliminated_bounty import is_bounty_sealed
     floor = float(base) / 2.0
     for p in players_list:
-        if p.get("bounty_confirmed"):
+        if is_bounty_sealed(p):        # selado (manual/green_ko/confirmed) → intocável
             continue
         bv = p.get("bounty_value_usd")
         try:
@@ -452,6 +489,14 @@ def deanonymize_hand_from_table_ss(
         return {"status": "skip_real_match", "hand_db_id": hand_db_id,
                 "match_method": existing_mm}
 
+    # Guarda 3-b — SELO DE NOMES (invariante do Rui, 18 Jul): o Rui verificou os
+    # nomes desta mão à mão (`verified_by_user`, editor Saúde GG) → nenhum re-deanon
+    # automático os re-mapeia. (As coroas têm selo próprio por-seat, abaixo; esta
+    # guarda protege a IDENTIDADE. `verified_by_user` vence match_method — deanon_status.)
+    from app.services.deanon_status import _verified_by_user_of
+    if _verified_by_user_of(h.get("player_names")):
+        return {"status": "skip_verified_by_user", "hand_db_id": hand_db_id}
+
     # Guarda 4 (#DESANON-ANCHOR-REQUIRES-HERO-IN-IMAGE, 12 Jul) — a desanon do table-SS
     # ancora nos NOMES lidos da imagem; se o Rui NÃO está entre os seats da Vision (print
     # PÓS-BUST, ou de outra mesa em multi-tabling), a imagem não pode nomear ninguém com
@@ -516,6 +561,17 @@ def deanonymize_hand_from_table_ss(
         return {"status": "no_map", "hand_db_id": hand_db_id}
 
     vision_data = _seats_to_vision_data(seats, hero_nick)
+    # SELO DAS COROAS (invariante do Rui, forense 6570): o re-deanon reconstrói o
+    # players_list INTEIRO da leitura table-SS guardada → sem isto, apaga qualquer
+    # correção manual do Rui (é a raiz da 6570). Preserva do players_list ANTERIOR
+    # os seats VALIDADOS (valor + source + confirmed), por nome. O apa tem selo
+    # próprio no `_enrich_all_players_actions` (via seat prévio). Corre ANTES da
+    # guarda ½-base (que já salta os selados).
+    _n_sealed = _merge_sealed_crowns(_prev_pn.get("players_list"),
+                                     vision_data["players_list"])
+    if _n_sealed:
+        logger.info("[crown-seal] hand %s: %d coroa(s) selada(s) preservada(s) no "
+                    "players_list (re-deanon não pisa)", hand_db_id, _n_sealed)
     # #FLAME-AS-CROWN-GUARD — base÷2 + grelha (chama/valor impossível) → NULL + por rever.
     _guard_suspect_crowns(
         vision_data["players_list"],

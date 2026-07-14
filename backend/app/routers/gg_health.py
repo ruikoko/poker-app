@@ -1812,9 +1812,12 @@ def crowns_reread(payload: dict = Body(...),
         if not vmap:
             results.append({"hand_id": hid, "error": "Vision sem seats",
                             "vision_error": verr.get("error")}); continue
+        from app.services.eliminated_bounty import is_bounty_sealed
         pl = pn.get("players_list") or []
         orig = {str(p.get("name") or "").strip().lower(): p.get("bounty_value_usd") for p in pl}
         for p in pl:                                   # aplicar a leitura nova
+            if is_bounty_sealed(p):                    # SELO — re-leitura não pisa o carimbo
+                continue
             nm = str(p.get("name") or "").strip().lower()
             if nm and nm in vmap:
                 p["bounty_value_usd"] = vmap[nm]

@@ -1063,6 +1063,9 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
         except Exception:
             pass  # ficheiro delicado: a guarda nunca pode partir um import
 
+    # SELO das coroas (invariante do Rui) — importado uma vez p/ o loop.
+    from app.services.eliminated_bounty import is_bounty_sealed
+
     # Preservar metadata — não é um jogador
     if "_meta" in all_players:
         enriched["_meta"] = all_players["_meta"]
@@ -1090,7 +1093,15 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
         # entry da Gold); copia-a na MESMA passagem que leva os nomes. Antes só se
         # copiava o VPIP → as 332 mãos Gold ficavam sem coroas. Valor cru aqui; a
         # guarda half-base vive no consumo (queue_export) e no backfill.
-        new_info["bounty_value_usd"] = vision_info.get("bounty_value_usd", 0)
+        # SELO (invariante do Rui, forense 6570): uma coroa VALIDADA não é reescrita
+        # pela leitura da Vision no re-deanon/re-apply. `dict(info)` já traz o valor
+        # + source/confirmed selados do apa prévio → preserva-se; salta a Vision + log.
+        if is_bounty_sealed(info):
+            logger.info("[crown-seal] apa %s (%s) selado (%s) — coroa preservada, "
+                        "leitura Vision saltada", player_key, real_name or "?",
+                        info.get("bounty_source") or "confirmed")
+        else:
+            new_info["bounty_value_usd"] = vision_info.get("bounty_value_usd", 0)
         new_info["country"] = vision_info.get("country")
         # Campo `played` RESERVADO p/ sitting-outs futuros (§B.3) — não populado aqui.
 
@@ -1716,6 +1727,7 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
                 # a partir da nova leitura Vision, SEM tocar anon_map/apa/match_method.
                 # Faz o backfill de coroa funcionar nas mãos já enriquecidas.
                 if force:
+                    from app.services.eliminated_bounty import is_bounty_sealed
                     fresh_by_name = {}
                     for fp in (raw_json.get("players_list") or []):
                         if isinstance(fp, dict):
@@ -1730,7 +1742,11 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
                         fp = fresh_by_name.get((p.get("name") or "").strip().lower())
                         if not fp:
                             continue
+                        # SELO — a coroa validada não é reescrita pela re-Vision (país/VPIP sim).
+                        _sealed = is_bounty_sealed(p)
                         for k in ("bounty_value_usd", "bounty_pct", "country"):
+                            if k == "bounty_value_usd" and _sealed:
+                                continue
                             if fp.get(k) is not None:
                                 p[k] = fp.get(k)
                         changed = True

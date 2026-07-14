@@ -2100,21 +2100,34 @@ def set_bounties_override(payload: dict = Body(...),
             try:
                 val = float(bounties[nm])
                 if not dry:
+                    # SELO (invariante do Rui): carimbo manual → nenhum processo
+                    # automático (re-deanon/re-apply/scrub) escreve por cima. Marca
+                    # `bounty_source='manual'` nos DOIS stores + limpa 'por rever'.
                     e["bounty_value_usd"] = val
+                    e["bounty_source"] = "manual"
+                    e.pop("crown_review", None)
                     if nm in apa_by_name:
                         apa_by_name[nm]["bounty_value_usd"] = val
+                        apa_by_name[nm]["bounty_source"] = "manual"
+                        apa_by_name[nm].pop("crown_review", None)
                 entry["new"] = val
                 updated.append(nm)
             except (ValueError, TypeError):
                 entry["error"] = "valor inválido"
         if nm in confirm:
             if not dry:
+                # `bounty_confirmed` faz parte do selo (is_bounty_sealed) → espelha
+                # no apa para os DOIS stores ficarem selados coerentes.
                 e["bounty_confirmed"] = True
+                if nm in apa_by_name:
+                    apa_by_name[nm]["bounty_confirmed"] = True
             entry["confirm"] = True
             confirmed.append(nm)
         if nm in unconfirm:
             if not dry:
                 e.pop("bounty_confirmed", None)
+                if nm in apa_by_name:
+                    apa_by_name[nm].pop("bounty_confirmed", None)
             entry["confirm"] = False
             unconfirmed.append(nm)
         plan.append(entry)

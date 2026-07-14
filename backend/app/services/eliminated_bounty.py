@@ -46,6 +46,29 @@ REVIEW_LIVE_ZERO = "live_crown_read_zero"     # KO (base TS>0) + VIVO (HH) + cor
 BOUNTY_SOURCE_KEY = "bounty_source"
 SOURCE_GREEN_KO = "green_ko"                  # derivado do verde-KO na coroa do eliminador
 
+# ── SELO do bounty (invariante do Rui, 18 Jul) ────────────────────────────────
+# "O que o Rui valida fica selado — NENHUM processo automático escreve por cima."
+# Um valor selado é intocável para os caminhos AUTOMÁTICOS (re-apply table-SS,
+# re-deanon, backfills, scrub). Só a mão do Rui (endpoints manuais) o muda.
+SOURCE_MANUAL = "manual"                       # carimbo do Rui (/set-bounties, editor Saúde GG)
+SOURCE_DERIVED_GREEN_KO = "derived_green_ko"   # fluxo Etapa-2 (Vision ao verde, carimbado)
+# Fontes que SELAM um seat. `green_ko` já era de-facto selado (`_preserves_green_ko`);
+# generaliza-se para todas + o flag `bounty_confirmed` (exceção manual pré-existente).
+SEALED_BOUNTY_SOURCES = frozenset(
+    {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO})
+BOUNTY_CONFIRMED_KEY = "bounty_confirmed"
+
+
+def is_bounty_sealed(seat) -> bool:
+    """True se a coroa deste seat foi VALIDADA (carimbo do Rui / cura curada /
+    confirmada) → nenhum processo automático a pisa. Cobre `bounty_source` selado
+    E o flag `bounty_confirmed` (exceção manual antiga). Fonte única do invariante —
+    todos os caminhos automáticos de escrita de coroas consultam esta função."""
+    if not isinstance(seat, dict):
+        return False
+    return (seat.get(BOUNTY_SOURCE_KEY) in SEALED_BOUNTY_SOURCES
+            or bool(seat.get(BOUNTY_CONFIRMED_KEY)))
+
 # ── Sinal de ELIMINADO (autoritativo — HH) ───────────────────────────────────
 # Linha de acção: "<key>: bets 47,944 and is all-in" (key = hash GG ou "Hero").
 # Restrito a UMA linha ([^:\n], [^\n]*) senão [^:]+ engole newlines (bug apanhado 9 Jul).
@@ -211,6 +234,15 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
         val, review, source = resolve_seat_bounty(
             name, seat.get("bounty_value_usd"), busted_names=busted,
             green_kos=greens, bounty_base=bounty_base, has_ts_no_bounty=has_ts_no_bounty)
+        # SELO (invariante do Rui): um seat validado NÃO é pisado por este funil
+        # automático. Excepção única — um green_ko FRESCO refresca um seat selado
+        # SÓ por green_ko (comportamento antigo da cura); um selo manual/derived/
+        # confirmed é intocável (cobre também o bug do pop-source no ramo vivo).
+        if is_bounty_sealed(seat):
+            only_green = (seat.get(BOUNTY_SOURCE_KEY) == SOURCE_GREEN_KO
+                          and not seat.get(BOUNTY_CONFIRMED_KEY))
+            if not (only_green and source == SOURCE_GREEN_KO):
+                return 0
         if not is_busted:
             # idempotência: só toca se muda algo (passthrough KO-com-coroa e vanilla-já-limpo
             # não fazem churn; vanilla-com-coroa e vivo-$0 mudam → aplicam).
@@ -220,8 +252,6 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
                 return 0
             _apply_seat_bounty(seat, val, review, source)
             return 1
-        if _preserves_green_ko(seat, source):
-            return 0                                # idempotência: não desfaz um green_ko curado
         _apply_seat_bounty(seat, val, review, source)
         return 1
 
@@ -242,14 +272,6 @@ def scrub_eliminated_bounties(apa: Optional[dict], pn: Optional[dict],
             continue
         _handle(p, nm, is_busted)                   # mesmo resultado → apa↔pn coerentes
     return touched
-
-
-def _preserves_green_ko(seat: dict, new_source) -> bool:
-    """Idempotência: um seat JÁ curado por verde (`bounty_source='green_ko'`) NÃO é
-    desfeito por um scrub SEM verde fresco (que daria NULL). Só um NOVO green_ko o
-    sobrescreve. Sem isto, um apply MUST-only clobberava a cura do reread/ingest."""
-    return (seat.get(BOUNTY_SOURCE_KEY) == SOURCE_GREEN_KO
-            and new_source != SOURCE_GREEN_KO)
 
 
 def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
