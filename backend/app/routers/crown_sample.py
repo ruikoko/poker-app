@@ -79,6 +79,10 @@ def _select_sample() -> list[dict]:
     sliver = query(
         "SELECT h.id, h.hand_id, h.tournament_name, h.player_names AS pn, "
         "       ts.buy_in_bounty AS base, e.id AS entry_id, e.created_at AS gold_at " + base_join +
+        # #CROWN-SAMPLE-SCOPE (adenda Rui): filtra o sliver por formato KO/PKO —
+        # o sliver era SÓ por timestamp e arrastava vanilla (Daily Hypers sem
+        # coroas para auditar; 22 de 177). O in-band já filtrava.
+        "AND lower(COALESCE(h.tournament_format,'')) ~ 'ko|pko|bounty' "
         "AND e.created_at >= %s AND e.created_at <= %s",
         (_SLIVER_START, _SLIVER_END))
     sliver_ids = {r["id"] for r in sliver}
