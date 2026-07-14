@@ -31,6 +31,9 @@ logger = logging.getLogger("crown_sample")
 _SLIVER_START = "2026-07-09 00:05:00+01"
 _SLIVER_END = "2026-07-09 04:31:00+01"
 _INBAND_RANDOM = 50
+# Seed FIXA do sorteio das 50 → a lista de candidatas é estável (mesmo após
+# redeploy); o Rui revê sempre as MESMAS 177.
+_SEED = 20260714
 # Tolerância p/ "igual": abs<=0.01 OU relativa<=1% (wobble de OCR não é divergência).
 _ABS_TOL = 0.01
 _REL_TOL = 0.01
@@ -38,7 +41,8 @@ _REL_TOL = 0.01
 _STATE: dict = {
     "status": "idle",          # idle | running | done | cancelled | error
     "done": 0, "total": 0,
-    "divergences": [],         # lista p/ o painel (com imagem)
+    "candidates": [],          # 177 candidatas c/ coroas GRAVADAS (preview, sem Vision)
+    "divergences": [],         # lista p/ o painel (com imagem), após releitura
     "reread_seats": 0,
     "cancel": False,           # bandeira cooperativa de cancelamento
     "started_at": None, "finished_at": None, "error": None,
@@ -99,7 +103,9 @@ def _select_sample() -> list[dict]:
                          if _is_num(v))
         if has_inband:
             inband.append(r)
-    random.shuffle(inband)
+    # ordena por id (determinístico) ANTES do shuffle com seed fixa → estável.
+    inband.sort(key=lambda r: r["id"])
+    random.Random(_SEED).shuffle(inband)
     picked = list(sliver) + inband[:_INBAND_RANDOM]
     for p in picked:
         p["_sliver"] = p["id"] in sliver_ids
@@ -153,9 +159,32 @@ def _reread_crowns(img_b64: str) -> dict | None:
     return out
 
 
+def _build_candidates(force: bool = False) -> list[dict]:
+    """Seleciona (ou reusa) as 177 e monta as candidatas com as coroas GRAVADAS
+    por seat — SEM Vision, sem custo, sem escrita. Cacheado em `_STATE` para o
+    preview ("Ver candidatas") e o run usarem o MESMO conjunto (sorteio fixo →
+    lista estável). `force=True` re-seleciona."""
+    with _LOCK:
+        if _STATE.get("candidates") and not force:
+            return list(_STATE["candidates"])
+    sample = _select_sample()
+    cands = []
+    for r in sample:
+        stored = _crowns_of(r["pn"])
+        cands.append({
+            "hand_db_id": r["id"], "hand_id": r["hand_id"],
+            "entry_id": r.get("entry_id"), "tournament": r["tournament_name"],
+            "sliver": r["_sliver"],
+            "crowns": [{"seat": k, "stored": v} for k, v in stored.items()],
+        })
+    with _LOCK:
+        _STATE["candidates"] = cands
+    return list(cands)
+
+
 def _run_sample():
     try:
-        sample = _select_sample()
+        cands = _build_candidates()   # reusa o preview → mesmo conjunto
     except Exception as exc:  # pragma: no cover - defensivo
         logger.exception("[crown-sample] seleção falhou")
         with _LOCK:
@@ -163,41 +192,41 @@ def _run_sample():
                           finished_at=datetime.now(timezone.utc).isoformat())
         return
     with _LOCK:
-        _STATE.update(status="running", total=len(sample), done=0,
+        _STATE.update(status="running", total=len(cands), done=0,
                       divergences=[], reread_seats=0, error=None, cancel=False,
                       started_at=datetime.now(timezone.utc).isoformat(),
                       finished_at=None)
     cancelled = False
-    for r in sample:
+    for c in cands:
         with _LOCK:
             if _STATE.get("cancel"):
                 cancelled = True
                 break
         divs = []
         try:
-            img = query("SELECT raw_json->>'img_b64' AS img FROM entries "
-                        "WHERE id = (SELECT entry_id FROM hands WHERE id=%s)",
-                        (r["id"],))
-            img_b64 = img[0]["img"] if img else None
+            img_b64 = None
+            if c.get("entry_id") is not None:
+                img = query("SELECT raw_json->>'img_b64' AS img FROM entries WHERE id=%s",
+                            (c["entry_id"],))
+                img_b64 = img[0]["img"] if img else None
             reread = _reread_crowns(img_b64) if img_b64 else None
             if reread is not None:
-                stored = _crowns_of(r["pn"])
-                for name, sval in stored.items():
+                for cr in c["crowns"]:
+                    name, sval = cr["seat"], cr["stored"]
                     rval = reread.get(name)
                     with _LOCK:
                         _STATE["reread_seats"] += 1
                     if _diff(sval, rval):
                         divs.append({"seat": name, "stored": sval, "reread": rval})
         except Exception:  # pragma: no cover - defensivo (nunca parte o lote)
-            logger.exception("[crown-sample] releitura falhou (hand %s)", r.get("hand_id"))
+            logger.exception("[crown-sample] releitura falhou (hand %s)", c.get("hand_id"))
         with _LOCK:
             _STATE["done"] += 1
             if divs:
                 _STATE["divergences"].append({
-                    "hand_db_id": r["id"], "hand_id": r["hand_id"],
-                    "entry_id": r.get("entry_id"),
-                    "tournament": r["tournament_name"], "sliver": r["_sliver"],
-                    "seats": divs,
+                    "hand_db_id": c["hand_db_id"], "hand_id": c["hand_id"],
+                    "entry_id": c.get("entry_id"), "tournament": c["tournament"],
+                    "sliver": c["sliver"], "seats": divs,
                 })
     with _LOCK:
         _STATE.update(status="cancelled" if cancelled else "done",
@@ -218,6 +247,17 @@ def crown_sample_run(current_user=Depends(require_auth)):
         _STATE["status"] = "running"
     threading.Thread(target=_run_sample, daemon=True).start()
     return {"status": "running", "note": "amostrador arrancado (177 releituras em background)"}
+
+
+@router.get("/candidates")
+def crown_sample_candidates(reselect: bool = False, current_user=Depends(require_auth)):
+    """Modo "Ver candidatas": as 177 com a IMAGEM (entry_id) + coroas GRAVADAS
+    por seat + selo do grupo (sliver) + link da mão. SEM Vision, sem custo, sem
+    escrita. Sorteio fixo → lista estável. `reselect=true` re-seleciona."""
+    cands = _build_candidates(force=reselect)
+    return {"total": len(cands),
+            "sliver": sum(1 for c in cands if c["sliver"]),
+            "candidates": cands}
 
 
 @router.post("/cancel")
