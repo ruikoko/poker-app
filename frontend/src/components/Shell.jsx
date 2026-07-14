@@ -19,6 +19,7 @@ const NAV = [
   { to: '/table-ss',    label: 'SS Mesa' },
   { to: '/gg-health',   label: 'Saúde Import', badge: 'suspicious' },
   { to: '/crown-sample', label: 'Amostrador coroas' },
+  { to: '/crown-recovery', label: 'Bounties recuperáveis' },
   { to: '/villains',    label: 'Vilões' },
   { to: '/gto',         label: 'GTO' },
   { to: '/hrc',         label: 'HRC' },

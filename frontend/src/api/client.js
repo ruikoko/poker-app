@@ -360,6 +360,9 @@ export const ggHealth = {
   // Painel Coroas (consolidação 11 Jul) — mãos com coroa < base÷2 p/ verificar à vista.
   crowns: () => req('GET', '/gg-health/crowns'),
   // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
+  crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
+  crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),
+  crownRecoveryState: () => req('GET', '/gg-health/crown-recovery'),
   crownSampleCandidates: (reselect = false) => req('GET', `/gg-health/crown-sample/candidates${reselect ? '?reselect=true' : ''}`),
   crownSampleRun: () => req('POST', '/gg-health/crown-sample/run'),
   crownSampleCancel: () => req('POST', '/gg-health/crown-sample/cancel'),
