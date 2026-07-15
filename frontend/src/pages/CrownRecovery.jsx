@@ -243,38 +243,50 @@ function DropsWorklist({ C }) {
 }
 
 function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refHandDb, refHandId, onResolved }) {
-  const [val, setVal] = useState('')          // VAZIO — nunca a referência (palpite perigoso); só a imagem arbitra
+  // Fundamento validado pelo Rui: a leitura ISOLADA (a que salta) é o misread — pode ser a
+  // ALTA ou a BAIXA. O card deixa corrigir QUALQUER das duas placas (preenche a errada).
+  const [lowV, setLowV] = useState('')
+  const [refV, setRefV] = useState('')
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
 
-  // REGRA DA CASA: resolvido → SAI DA LISTA NA HORA (onResolved remove o card). Só fica se falhar.
   const stamp = async () => {
-    const v = parseFloat(val)
-    if (isNaN(v)) { setMsg({ ok: false, t: 'Valor inválido — lê da imagem' }); return }
+    const jobs = []
+    const lv = parseFloat(lowV), rv = parseFloat(refV)
+    if (!isNaN(lv)) jobs.push({ hand: handId, val: lv, tag: `$${lowVal}` })
+    if (kind === 'queda' && !isNaN(rv)) jobs.push({ hand: refHandId, val: rv, tag: `$${refVal}` })
+    if (!jobs.length) { setMsg({ ok: false, t: 'Preenche a placa errada (lê da imagem)' }); return }
     setStamping(true); setMsg(null)
     try {
-      const r = await tableSs.setBounties(handId, { bounties: { [player]: v }, sources: { [player]: 'manual' } })
-      if ((r?.partial || []).length) { setStamping(false); setMsg({ ok: false, t: '⚠ gravado só num store (mismatch de nome) — avisa o Code' }) }
-      else if ((r?.updated || []).length) { onResolved && onResolved() }   // carimbado → fora
-      else { setStamping(false); setMsg({ ok: false, t: `Nome não encontrado no players_list${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` }) }
+      const probs = []
+      for (const j of jobs) {
+        const r = await tableSs.setBounties(j.hand, { bounties: { [player]: j.val }, sources: { [player]: 'manual' } })
+        if ((r?.partial || []).length) probs.push(`${j.tag}: parcial (avisa o Code)`)
+        else if (!(r?.updated || []).length) probs.push(`${j.tag}: não encontrado`)
+      }
+      if (probs.length) { setStamping(false); setMsg({ ok: false, t: '⚠ ' + probs.join(' · ') }) }
+      else onResolved && onResolved()   // carimbado → SAI DA LISTA NA HORA
     } catch (e) { setStamping(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
   }
   const dismiss = async () => {
     setStamping(true); setMsg(null)
-    try {
-      await ggHealth.crownDropsDismiss(handId, player)
-      onResolved && onResolved()                                       // dispensado → fora
-    } catch (e) { setStamping(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
+    try { await ggHealth.crownDropsDismiss(handId, player); onResolved && onResolved() }
+    catch (e) { setStamping(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
   }
+  const inp = (v, setV) => (
+    <input value={v} onChange={e => setV(e.target.value)} inputMode="decimal" placeholder="valor da imagem"
+      style={{ width: 96, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
+        borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
+  )
 
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11,
       padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <HandImage handDbId={handDb} caption={`$${lowVal} (a rever)`} />
-        {kind === 'queda' && <HandImage handDbId={refHandDb} caption={`$${refVal} (referência)`} />}
+        <HandImage handDbId={handDb} caption={`$${lowVal} · ${handId}`} />
+        {kind === 'queda' && <HandImage handDbId={refHandDb} caption={`$${refVal} · ${refHandId || 'vizinha'}`} />}
       </div>
-      <div style={{ flex: 1, minWidth: 240 }}>
+      <div style={{ flex: 1, minWidth: 260 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontSize: 14 }}>{player}</b>
           <span style={{ fontSize: 10, color: '#08130d', background: kind === 'queda' ? C.red : C.gold,
@@ -284,25 +296,31 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refH
         </div>
         <div style={{ marginTop: 6, fontSize: 13 }}>
           {kind === 'queda'
-            ? <>leu <b style={{ color: C.red }}>${lowVal}</b> (a rever) · referência anterior{' '}
-                <b style={{ color: C.green }}>${refVal}</b> {refHandId && <span style={{ color: C.muted, fontSize: 11 }}>({refHandId})</span>}</>
+            ? <>a leitura <b>isolada</b> é o misread (a coroa não salta de ida-e-volta) — corrige a que
+                a imagem <b>desmente</b>: a <b style={{ color: C.red }}>${lowVal}</b> OU a <b style={{ color: C.green }}>${refVal}</b>.</>
             : <>leu <b style={{ color: C.gold }}>${lowVal}</b> = {ratio}B — fora da grelha das metades</>}
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ color: C.muted, fontSize: 13 }}>corrigir $</span>
-          <input value={val} onChange={e => setVal(e.target.value)} inputMode="decimal" placeholder="valor da imagem"
-            style={{ width: 100, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
-              borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: C.muted, fontSize: 13, minWidth: 168 }}>corrigir a <b style={{ color: C.red }}>${lowVal}</b> <span style={{ fontSize: 11 }}>({handId})</span></span>
+            {inp(lowV, setLowV)}
+          </div>
+          {kind === 'queda' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ color: C.muted, fontSize: 13, minWidth: 168 }}>corrigir a <b style={{ color: C.green }}>${refVal}</b> <span style={{ fontSize: 11 }}>({refHandId})</span></span>
+              {inp(refV, setRefV)}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={stamp} disabled={stamping}
-            style={{ background: C.gold, color: '#08130d', border: 'none',
-              borderRadius: 8, padding: '5px 13px', fontWeight: 800, fontSize: 13,
-              cursor: stamping ? 'default' : 'pointer' }}>
+            style={{ background: C.gold, color: '#08130d', border: 'none', borderRadius: 8,
+              padding: '5px 13px', fontWeight: 800, fontSize: 13, cursor: stamping ? 'default' : 'pointer' }}>
             {stamping ? '…' : 'Carimbar (manual)'}
           </button>
           <button onClick={dismiss} disabled={stamping}
-            style={{ background: 'transparent', color: C.text, border: `1px solid ${C.border}`,
-              borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13,
-              cursor: stamping ? 'default' : 'pointer' }}>
+            style={{ background: 'transparent', color: C.text, border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: stamping ? 'default' : 'pointer' }}>
             Dispensar (legítimo)
           </button>
           {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
