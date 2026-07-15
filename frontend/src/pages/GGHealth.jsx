@@ -5,6 +5,7 @@ import ImportHealthPage from './ImportHealth'
 import CaptureTriagePage from './CaptureTriage'
 import SuspiciousHandsPage from './SuspiciousHands'
 import LiveZeroCrownsPage from './LiveZeroCrowns'
+import CrossingSamplePage from './CrossingSample'
 import HandImage from '../components/HandImage'
 
 // "Saúde Import" (casa única consolidada 11 Jul — desenho da antiga Saúde GG).
@@ -26,6 +27,7 @@ const NEEDS = [
   { key: 'suspeitas', label: 'Mãos suspeitas', color: '#ef4444' },
   { key: 'coroas', label: 'Coroas (verificar)', color: '#eab308' },
   { key: 'live_zero', label: 'Vivo com coroa $0', color: '#ef4444' },
+  { key: 'crossing_sample', label: 'Cruzamento — amostra', color: '#38bdf8' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
@@ -36,7 +38,7 @@ const IMPORTP = [
   { key: 'import', label: 'Saúde do Import', color: '#38bdf8' },
 ]
 // Grupos migrados que renderizam uma página inteira (não a lista de imagens).
-const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread', 'live_zero'])
+const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread', 'live_zero', 'crossing_sample'])
 const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY, ...IMPORTP].map(g => [g.key, g.label]))
 // As 11 tags canónicas (Ação 1) — espelho de _TAG_BUTTONS no backend.
 const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
@@ -1312,6 +1314,7 @@ export default function GGHealth() {
            group === 'suspeitas' ? <SuspiciousHandsPage /> :
            group === 'golds_unread' ? <GoldsUnreadPanel /> :
            group === 'live_zero' ? <LiveZeroCrownsPage /> :
+           group === 'crossing_sample' ? <CrossingSamplePage /> :
            group === 'coroas' ? <CoroasPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (

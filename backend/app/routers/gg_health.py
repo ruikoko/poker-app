@@ -1515,6 +1515,118 @@ def live_zero_dismiss(payload: dict = Body(...),
     return {"status": "dismissed", "hand_id": hand_id, "name": name}
 
 
+# ── LEI DO CRUZAMENTO — amostra do balde PREENCHER (validação do critério) ─────
+_CROSS_TRUNC = re.compile(r"(\.\.+|…)\s*$")
+
+
+def _cross_norm(s):
+    return re.sub(r"\s+", " ", _CROSS_TRUNC.sub("", (s or "").strip().lower()))
+
+
+def _cross_num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/crossing/fill-sample")
+def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
+                         seed: Optional[int] = None,
+                         current_user=Depends(require_auth)):
+    """AMOSTRA read-only do balde PREENCHER da LEI DO CRUZAMENTO (validação do critério
+    pelo Rui — NADA escreve). Cada caso: seat com coroa VAZIA no gravado + o valor que
+    uma fonte IRMÃ (Gold ou outra SS) leu, com a IMAGEM das DUAS capturas (a que falhou
+    + a que leu) e a hora de cada uma → o Rui confere na placa. Sorteio por `seed` (fixo
+    p/ repetir) ou aleatório (omitir → varia a cada refresh)."""
+    from app.services.eliminated_bounty import is_bounty_sealed
+    ko = {r["tournament_number"] for r in query(
+        "SELECT tournament_number FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty > 0")}
+    # todas as capturas table-SS por mão (id, vision_json, captured_at)
+    ss_rows = query(
+        "SELECT matched_hand_id AS mh, id, vision_json AS vj, captured_at::text AS cap "
+        "  FROM table_ss_processing_log "
+        " WHERE matched_hand_id IS NOT NULL AND result='success' "
+        "   AND img_b64 IS NOT NULL")
+    ss_by_hand: dict = {}
+    for r in ss_rows:
+        vj = r["vj"] if isinstance(r["vj"], dict) else json.loads(r["vj"] or "{}")
+        ss_by_hand.setdefault(r["mh"], []).append(
+            {"kind": "ss", "id": r["id"], "cap": r["cap"],
+             "url": f"/api/table-ss/image/{r['id']}",
+             "crowns": {_cross_norm(s.get("nick")): _cross_num(s.get("bounty_usd"))
+                        for s in (vj.get("seats") or []) if s.get("nick")}})
+    rows = query(
+        "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.context_table_ss_id AS ssid, "
+        "       h.player_names AS pn, e.id AS entry_id, e.raw_json AS grj, "
+        "       e.created_at::text AS gold_at "
+        "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND h.player_names->'players_list' IS NOT NULL")
+    cases = []
+    for r in rows:
+        if r["tn"] not in ko:
+            continue
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        pl = pn.get("players_list") or []
+        # capturas Gold: crowns por nome (players_list + raw_vision)
+        gold = None
+        grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
+        rv = grj.get("raw_vision") if isinstance(grj, dict) else None
+        if isinstance(rv, str) and rv.strip().startswith("TM"):
+            gc: dict = {}
+            for p in (grj.get("players_list") or []):
+                v = _cross_num(p.get("bounty_value_usd"))
+                if p.get("name") and v is not None:
+                    gc[_cross_norm(p["name"])] = v
+            for ln in rv.splitlines():
+                if ln.startswith("PLAYER:"):
+                    parts = [x.strip() for x in ln.split("PLAYER:", 1)[1].split("|")]
+                    if len(parts) >= 4:
+                        v = _cross_num(parts[3])
+                        if parts[0] and parts[0] != "NONE" and v is not None:
+                            gc.setdefault(_cross_norm(parts[0]), v)
+            gold = {"kind": "gold", "id": r["entry_id"], "cap": r.get("gold_at"),
+                    "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}
+        caps = ([gold] if gold else []) + ss_by_hand.get(r["hand_id"], [])
+        if len(caps) < 2 and not gold:
+            pass  # ainda pode haver 2 SS
+        # seat a preencher: gravado vazio, uma captura tem valor > 0
+        for p in pl:
+            if is_bounty_sealed(p):
+                continue
+            nm = p.get("name")
+            cur_v = _cross_num(p.get("bounty_value_usd"))
+            if cur_v is not None and cur_v > 0:
+                continue
+            key = _cross_norm(nm)
+            read = next((c for c in caps if (c["crowns"].get(key) or 0) > 0
+                         and c["kind"] == "gold"), None) \
+                or next((c for c in caps if (c["crowns"].get(key) or 0) > 0), None)
+            if not read:
+                continue
+            failed = next((c for c in caps if c["id"] != read["id"]
+                           and c["crowns"].get(key) in (None, 0)), None)
+            # a captura ligada (context) como "falhou", se não houver outra
+            if not failed and r["ssid"]:
+                failed = next((c for c in caps if c["kind"] == "ss" and c["id"] == r["ssid"]), None)
+            cases.append({
+                "hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": nm,
+                "stored": p.get("bounty_value_usd"),
+                "value": read["crowns"][key],
+                "read": {"source": read["kind"], "capture_id": read["id"],
+                         "image_url": read["url"], "captured_at": read["cap"]},
+                "failed": ({"source": failed["kind"], "capture_id": failed["id"],
+                            "image_url": failed["url"], "captured_at": failed["cap"]}
+                           if failed else None),
+            })
+    import random
+    rng = random.Random(seed) if seed is not None else random.Random()
+    rng.shuffle(cases)
+    return {"total_fill_seats": len(cases), "sample": cases[:n]}
+
+
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────
 @router.get("/spurious-crown-non-ko-scan")
 def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):

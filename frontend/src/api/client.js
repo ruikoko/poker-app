@@ -365,6 +365,10 @@ export const ggHealth = {
   liveZeroList: () => req('GET', '/gg-health/live-zero/list'),
   liveZeroDismiss: (handId, name) =>
     req('POST', '/gg-health/live-zero/dismiss', { hand_id: handId, name }),
+  // LEI DO CRUZAMENTO — amostra read-only do balde PREENCHER (validação do critério
+  // à vista, com as 2 imagens). NADA escreve.
+  crossingFillSample: (n = 4, seed) =>
+    req('GET', `/gg-health/crossing/fill-sample?n=${n}${seed != null ? `&seed=${seed}` : ''}`),
   // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
   crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
   crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),
