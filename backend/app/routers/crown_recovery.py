@@ -215,9 +215,15 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
                     "hand_db_id": b[2], "hand_id": b[3], "player": b[4],
                     "low": b[1], "ref": a[1], "ref_hand_db_id": a[2], "ref_hand_id": a[3],
                     "entry_id": b[5], "ref_entry_id": a[5], "kind": "misread"})
+    # ANTI-DUPLICADO (regra do Rui: o mais específico manda): um seat que já é `misread`
+    # (sinal DURO — a coroa caiu) NÃO reaparece em `fora-grelha` (sinal fraco). O misread
+    # é o cartão dono; o off-grid só mostra o que o misread não apanha.
+    drop_keys = {(d["hand_id"], _norm_key(d["player"])) for d in drops}
     # dedup off-grid por (player, valor) — mostra 1 por caso
     seen = set(); og = []
     for o in sorted(off_grid, key=lambda x: (str(x["player"]).lower(), x["value"])):
+        if (o["hand_id"], _norm_key(o["player"])) in drop_keys:
+            continue                       # já vive no cartão Quedas·misread
         kk = (_norm_key(o["player"]), o["value"])
         if kk in seen:
             continue

@@ -998,8 +998,9 @@ function CoroasPanel() {
         desc="Coroa >0 mas < base÷2 — a Vision leu a chama (VPIP %) em vez da coroa ($)." />
       <Section title="Coroa por ler ($0)" color="#eab308" hands={data.unread}
         desc="Coroa a $0 — não foi lida (avatar tapado). Rever/re-ler, não é valor errado." />
-      <Section title="Valor alto — confirmar" color="#38bdf8" hands={data.high_confirm || []}
-        desc="Coroa > 3×base — em PKO fundo é POSSÍVEL (acumulação de KOs). Isto é CONFIRMAÇÃO, não suspeita: na verificação de 11 Jul 7/7 eram reais. Sem carimbo (✓) NÃO vai a export; confirma à vista para libertar." />
+      {/* "Valor alto — confirmar" REMOVIDO (15 Jul): era o fantasma do gate >3× extinto
+          (#CROWN-HIGH-IS-ACCUMULATION) — coroa alta = acumulação legítima, exporta sem
+          confirmar. Pedia trabalho sem objeto. */}
     </div>
   )
 }

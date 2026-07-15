@@ -304,8 +304,11 @@ def crowns_to_verify(current_user=Depends(require_auth)):
     lista com IMAGEM + seats afetados para o Rui confirmar à vista (`tableSs.setBounties`
     com `confirm[]`) ou corrigir o valor. Fonte única `detect_bounty_below_half` (a
     mesma da guarda `bounty_below_half_base` do export)."""
+    # #CROWN-HIGH-IS-ACCUMULATION (Rui, 15 Jul): o gate >3×base EXTINGUIU-SE (coroa alta =
+    # acumulação legítima, exporta sem confirmar). O grupo "Valor alto — confirmar" era o
+    # FANTASMA desse gate morto — pedia uma confirmação sem objeto → removido também daqui.
     from app.services.queue_export import (
-        TS_GATED_FORMATS, detect_bounty_below_half, detect_bounty_above_3x)
+        TS_GATED_FORMATS, detect_bounty_below_half)
     rows = query(
         """SELECT h.id, h.hand_id, h.tournament_name, h.played_at::text AS played_at,
                   h.player_names AS pn, h.context_table_ss_id AS ss_id,
@@ -320,14 +323,13 @@ def crowns_to_verify(current_user=Depends(require_auth)):
             ORDER BY h.played_at DESC""",
         (list(TS_GATED_FORMATS),),
     )
-    impossible, unread, high_confirm = [], [], []
+    impossible, unread = [], []
     by_source = {"table_ss": 0, "gold": 0, "other": 0}
     for r in rows:
         below = detect_bounty_below_half(r["pn"], r["base"])
-        above = detect_bounty_above_3x(r["pn"], r["base"])
-        if not below and not above:
+        if not below:
             continue
-        flagged = below or above            # p/ deteção de origem (uma mão tem 1 dos 2)
+        flagged = below                     # p/ deteção de origem
         # ── ORIGEM do valor: compara-o com a coroa da captura table-SS
         #    (bate → escreveu-o o table-SS); senão veio do Gold/carry/reread. ──
         ss_vals = {}
@@ -360,26 +362,14 @@ def crowns_to_verify(current_user=Depends(require_auth)):
             "image_url": src_img,             # a imagem da FONTE do valor
             "image_is_source": True,
         }
-        if below:
-            by_source[source] += 1
-            kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
-            (impossible if kind == "impossible" else unread).append({
-                **base_item, "kind": kind, "floor": below[0]["floor"],
-                "seats": [{"name": b["name"], "value": b["value"]} for b in below]})
-        if above:
-            _pn = r["pn"]
-            if isinstance(_pn, str):
-                _pn = json.loads(_pn or "{}")
-            _reread = {e.get("name"): e.get("crown_reread")
-                       for e in ((_pn or {}).get("players_list") or [])}
-            high_confirm.append({
-                **base_item, "kind": "high", "ceil": above[0]["ceil"],
-                "seats": [{"name": a["name"], "value": a["value"],
-                           "reread": _reread.get(a["name"])} for a in above]})
+        by_source[source] += 1
+        kind = "impossible" if any((b["value"] or 0) > 0 for b in below) else "unread"
+        (impossible if kind == "impossible" else unread).append({
+            **base_item, "kind": kind, "floor": below[0]["floor"],
+            "seats": [{"name": b["name"], "value": b["value"]} for b in below]})
     return {"count": len(impossible) + len(unread),
-            "high_count": len(high_confirm),
             "by_source": by_source,
-            "impossible": impossible, "unread": unread, "high_confirm": high_confirm}
+            "impossible": impossible, "unread": unread}
 
 
 @router.get("/list")
