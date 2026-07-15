@@ -450,3 +450,19 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   trajetória manda** (O Sander = $819) → corrige+carimba; candidata a **re-leitura automática da melhor
   imagem**. Distinta do swap (a classe grande, ver sweep) e do misread de dígitos verdadeiro.
   → `JOURNAL_2026-07-20.md`.
+- 2026-07-20 — **Problema:** construí o detetor "≥3 seats no mesmo valor = mass-read suspeito" (painel
+  dos 24) **sem validar o fundamento de MESA com o Rui** → ele matou-o à vista em 4 cards (3 jogadores
+  a 1.5×base = 1 KO cada é **banal** em PKO; a regra nasceu de quem não joga). E a "prova de queda" que
+  o sustentava era ela própria um **misread** (o $281.25 do bkmze). → **LEI (contrato):** uma regra de
+  deteção nova **só vira painel DEPOIS de o Rui validar o FUNDAMENTO DE MESA** (normal vs suspeito em
+  jogo REAL). Medir + mostrar exemplos + **perguntar ANTES de construir**. Quem não joga não inventa
+  regras de poker. → CLAUDE.md LEIS DE ENTREGA.
+- 2026-07-20 — **Problema:** escrita de coroa **falhava CALADA** (GG-6055575313 BrooooooK: apa
+  "BrooooooK" $0 vs players_list "BroooooK" $125 — nicks diferentes p/ o mesmo seat, variância de OCR).
+  `/set-bounties` casava por nome-exato → `not_found` (ou só 1 store) → **$0 fossilizado no apa**, e o
+  CrownCell fechava a mostrar "feito" → o card reaparecia. → **Solução:** `/set-bounties` **alinha os 2
+  stores por nome NORMALIZADO** (colapsar corridas de letras), match único, escreve nos **dois** +
+  reporta `partial`; CrownCell/DropCard/Group1Card passam a **VERIFICAR** (`not_found`/`partial` →
+  avisa, **não fecha**). **LEI (Rui):** escrita que falha **diz-se na hora**; as duas gavetas
+  escrevem/lêem **alinhadas** — raiz da classe `$0-vivo` (446 seats), não só o sintoma.
+  → `JOURNAL_2026-07-20.md`.
