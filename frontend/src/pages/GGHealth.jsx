@@ -4,6 +4,7 @@ import { ggHealth, tableSs, captureTriage, suspicious, importHealth, absImageUrl
 import ImportHealthPage from './ImportHealth'
 import CaptureTriagePage from './CaptureTriage'
 import SuspiciousHandsPage from './SuspiciousHands'
+import LiveZeroCrownsPage from './LiveZeroCrowns'
 import HandImage from '../components/HandImage'
 
 // "Saúde Import" (casa única consolidada 11 Jul — desenho da antiga Saúde GG).
@@ -24,6 +25,7 @@ const NEEDS = [
   { key: 'marcadas', label: 'Marcadas/captura', color: '#f59e0b' },
   { key: 'suspeitas', label: 'Mãos suspeitas', color: '#ef4444' },
   { key: 'coroas', label: 'Coroas (verificar)', color: '#eab308' },
+  { key: 'live_zero', label: 'Vivo com coroa $0', color: '#ef4444' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
@@ -34,7 +36,7 @@ const IMPORTP = [
   { key: 'import', label: 'Saúde do Import', color: '#38bdf8' },
 ]
 // Grupos migrados que renderizam uma página inteira (não a lista de imagens).
-const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread'])
+const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread', 'live_zero'])
 const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY, ...IMPORTP].map(g => [g.key, g.label]))
 // As 11 tags canónicas (Ação 1) — espelho de _TAG_BUTTONS no backend.
 const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
@@ -1151,8 +1153,9 @@ export default function GGHealth() {
     captureTriage.count().then(r => (r.count ?? r.total ?? null)).catch(() => null),
     suspicious.count().then(r => r.total).catch(() => null),
     importHealth.get().then(sumImportIssues).catch(() => null),
-  ]).then(([coroas, marcadas, suspeitas, imp]) =>
-    setExtra({ coroas, marcadas, suspeitas, import: imp }))
+    ggHealth.liveZeroList().then(r => r.count).catch(() => null),
+  ]).then(([coroas, marcadas, suspeitas, imp, live_zero]) =>
+    setExtra({ coroas, marcadas, suspeitas, import: imp, live_zero }))
   useEffect(() => { loadSummary(); loadExtra() }, [])
   useEffect(() => {
     if (!group || group === 'ft_quarantine' || group === 'name_quarantine' || group === 'lobby_edition' || MIGRATED.has(group)) { setList(null); return }
@@ -1307,6 +1310,7 @@ export default function GGHealth() {
            group === 'marcadas' ? <CaptureTriagePage /> :
            group === 'suspeitas' ? <SuspiciousHandsPage /> :
            group === 'golds_unread' ? <GoldsUnreadPanel /> :
+           group === 'live_zero' ? <LiveZeroCrownsPage /> :
            group === 'coroas' ? <CoroasPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (

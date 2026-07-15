@@ -1391,20 +1391,18 @@ def eliminated_scrub_apply(
             "seats_written": written if confirm else 0, "plan": plan}
 
 
-# ── GATE da guarda VIVO-$0 (irmão do eliminated-crown-scan) ───────────────────
-@router.get("/live-crown-zero-scan")
-def live_crown_zero_scan(current_user=Depends(require_auth_or_api_key)):
-    """GATE da guarda vivo-$0 (só-tagadas, GG KO). Reporta jogadores VIVOS (não bustados
-    pela HH) com coroa $0 em torneios KO (buy_in_bounty do TS > 0). Dois baldes:
-    - `silent_zero` = coroa $0/null SEM bounty_review → CONTAMINAÇÃO (grava $0 em silêncio).
-      GATE DURO: >0 após reimporte OU qualquer ingest GG = PARAR + investigar + corrigir.
-    - `review` = $0 com review='live_crown_read_zero' → honesto (guarda activa — OK).
-    Torneios não-KO ou sem TS ficam FORA (a guarda não se aplica). NADA escreve."""
+# ── GATE + WORKLIST da guarda VIVO-$0 (irmão do eliminated-crown-scan) ─────────
+def _live_zero_seats() -> tuple[int, list, list]:
+    """Núcleo partilhado (gate + worklist). Varre as mãos GG KO tagadas e devolve
+    (scanned, silent, review) — silent = coroa $0 SEM review (contaminação, escrita
+    calada); review = $0 com review honesto. Cada seat traz `db_id`+`played_at` para
+    a imagem/link do painel de resolução. NADA escreve."""
     base = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL AND buy_in_bounty > 0")}
     rows = query(
-        "SELECT hand_id, tournament_number, tournament_name, raw, "
+        "SELECT id AS db_id, hand_id, tournament_number, tournament_name, "
+        "       played_at::text AS played_at, raw, "
         "       all_players_actions AS apa, player_names AS pn "
         "  FROM hands "
         " WHERE site='GGPoker' AND played_at >= '2026-01-01' "
@@ -1432,18 +1430,88 @@ def live_crown_zero_scan(current_user=Depends(require_auth_or_api_key)):
                 bv = 0.0
             if bv > 0:
                 continue
-            item = {"hand_id": r["hand_id"], "tournament_name": r["tournament_name"],
-                    "name": nm, "review": p.get(BOUNTY_REVIEW_KEY)}
+            item = {"id": r["db_id"], "hand_id": r["hand_id"],
+                    "tournament_name": r["tournament_name"],
+                    "played_at": r["played_at"], "name": nm,
+                    "floor": round(b / 2.0, 2), "review": p.get(BOUNTY_REVIEW_KEY)}
             if p.get(BOUNTY_REVIEW_KEY):
                 review.append(item)     # honesto (guarda activa)
             else:
                 silent.append(item)     # coroa $0 gravada em silêncio = contaminação
+    return scanned, silent, review
+
+
+@router.get("/live-crown-zero-scan")
+def live_crown_zero_scan(current_user=Depends(require_auth_or_api_key)):
+    """GATE da guarda vivo-$0 (só-tagadas, GG KO). Reporta jogadores VIVOS (não bustados
+    pela HH) com coroa $0 em torneios KO (buy_in_bounty do TS > 0). Dois baldes:
+    - `silent_zero` = coroa $0/null SEM bounty_review → CONTAMINAÇÃO (grava $0 em silêncio).
+      GATE DURO: >0 após reimporte OU qualquer ingest GG = PARAR + investigar + corrigir.
+    - `review` = $0 com review='live_crown_read_zero' → honesto (guarda activa — OK).
+    Torneios não-KO ou sem TS ficam FORA (a guarda não se aplica). NADA escreve."""
+    scanned, silent, review = _live_zero_seats()
     return {"scanned_ko_tagged_hands": scanned,
             # ★ crivo da guarda vivo-$0: tem de ser 0 pós-reimporte.
             "silent_zero_contamination": len(silent),
             "gate": "hard: silent_zero_contamination>0 => PARAR+investigar (nunca curado)",
             "counts": {"silent": len(silent), "review": len(review)},
             "silent_zero": silent, "review": review}
+
+
+# ── WORKLIST de resolução do vivo-$0 (a escrita passa por /set-bounties, que ALINHA
+#    apa+players_list pelo nome normalizado — o fix do desalinhamento é o que a torna real) ──
+def _ensure_live_zero_dismissed():
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS live_zero_dismissed ("
+                        "hand_id TEXT, name TEXT, created_at TIMESTAMPTZ DEFAULT now(), "
+                        "PRIMARY KEY (hand_id, name))")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _live_zero_dismissed_set() -> set:
+    try:
+        _ensure_live_zero_dismissed()
+        return {(r["hand_id"], r["name"])
+                for r in query("SELECT hand_id, name FROM live_zero_dismissed")}
+    except Exception:  # pragma: no cover - defensivo
+        return set()
+
+
+@router.get("/live-zero/list")
+def live_zero_list(current_user=Depends(require_auth_or_api_key)):
+    """WORKLIST de resolução (LEI 1/3). Só os `silent_zero` (escrita calada — os `review`
+    são a guarda honesta, ficam no crivo). Cada card: imagem + nº+link + coroa a carimbar
+    (≥ base÷2 = `floor`). Carimbar via /set-bounties (sela + ALINHA as 2 gavetas) tira-o
+    daqui (coroa > 0); Dispensar também. Exclui os já dispensados. READ-ONLY."""
+    dismissed = _live_zero_dismissed_set()
+    _, silent, _ = _live_zero_seats()
+    hands = [s for s in silent if (s["hand_id"], s["name"]) not in dismissed]
+    return {"count": len(hands), "hands": hands}
+
+
+@router.post("/live-zero/dismiss")
+def live_zero_dismiss(payload: dict = Body(...),
+                      current_user=Depends(require_auth_or_api_key)):
+    """Dispensar um seat vivo-$0 (revisto, sem imagem para corrigir / legítimo): sai da
+    worklist, não escreve coroa. Body: {hand_id, name}."""
+    hand_id = (payload or {}).get("hand_id")
+    name = (payload or {}).get("name")
+    if not hand_id or not name:
+        raise HTTPException(400, "hand_id + name obrigatórios")
+    _ensure_live_zero_dismissed()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO live_zero_dismissed (hand_id, name) VALUES (%s,%s) "
+                        "ON CONFLICT DO NOTHING", (hand_id, name))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "dismissed", "hand_id": hand_id, "name": name}
 
 
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────

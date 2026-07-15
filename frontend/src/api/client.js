@@ -360,6 +360,11 @@ export const ggHealth = {
   list: (group, page = 1, pageSize) => req('GET', `/gg-health/list?group=${encodeURIComponent(group)}&page=${page}${pageSize ? `&page_size=${pageSize}` : ''}`),
   // Painel Coroas (consolidação 11 Jul) — mãos com coroa < base÷2 p/ verificar à vista.
   crowns: () => req('GET', '/gg-health/crowns'),
+  // Worklist vivo-$0 (jogador VIVO com coroa $0 gravada calada em torneio KO): carimbar a
+  // coroa (≥ base÷2) via /set-bounties (alinha as 2 gavetas) ou dispensar.
+  liveZeroList: () => req('GET', '/gg-health/live-zero/list'),
+  liveZeroDismiss: (handId, name) =>
+    req('POST', '/gg-health/live-zero/dismiss', { hand_id: handId, name }),
   // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
   crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
   crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),
