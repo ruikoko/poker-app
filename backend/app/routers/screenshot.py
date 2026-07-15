@@ -2000,6 +2000,30 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     }
 
 
+@router.post("/orphans/{entry_id}/relink")
+def force_relink_orphan(entry_id: int, current_user=Depends(require_auth_or_api_key)):
+    """Força o re-link Gold (`_enrich_hand_from_orphan_entry`) de UMA entry screenshot já
+    LIGADA à sua mão — INDEPENDENTE do status (o `/rematch` só apanha órfãs `status='new'`).
+    Idempotente; RESPEITA o SELO (uma mão `verified_by_user` NÃO é re-derivada, guard
+    screenshot.py:1701). Maintenance + prova do ghost (c) do selo de nomes. Bearer.
+    Body: nenhum (entry_id no path)."""
+    rows = query("SELECT id, raw_json FROM entries WHERE id=%s AND entry_type='screenshot'",
+                 (entry_id,))
+    if not rows:
+        raise HTTPException(404, "entry screenshot não encontrada")
+    raw = rows[0].get("raw_json") or {}
+    hrows = query("SELECT id, hand_id FROM hands WHERE entry_id=%s LIMIT 1", (entry_id,))
+    if not hrows:
+        tm = (raw.get("tm") or "").replace("TM", "")
+        if tm:
+            hrows = query("SELECT id, hand_id FROM hands WHERE hand_id=%s LIMIT 1", (f"GG-{tm}",))
+    if not hrows:
+        return {"status": "no_hand", "entry_id": entry_id}
+    result = _enrich_hand_from_orphan_entry(entry_id, hrows[0]["id"], raw)
+    return {"status": result.get("status", "relinked"), "entry_id": entry_id,
+            "hand_id": hrows[0]["hand_id"], "result": result}
+
+
 @router.post("/orphans/{entry_id}/rematch")
 def rematch_orphan(entry_id: int, current_user=Depends(require_auth)):
     """Tenta novamente o match de um screenshot órfão com a HH já importada."""
