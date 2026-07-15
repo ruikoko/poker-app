@@ -1,5 +1,38 @@
 # Pendentes — backlog vivo
 
+## 📌 FECHO DO DIA 19 Jul 2026 — Etapa 2 dos bounties + selo de nomes (3 fantasmas) + saga do $437.5
+
+*(Relógio do sistema reportou "15 Jul"; segue o fecho de 18 Jul → datado 19 Jul. Ver `JOURNAL_2026-07-19.md`.)*
+
+### 🔴🔴 1ª ENTREGA DE AMANHÃ — A COLHEITA ESTÁ PARADA ATÉ ISTO (nada de novo se constrói antes):
+
+**LISTA COMPLETA dos carimbos do Rui de HOJE, mão a mão, com gravado/não-gravado na BD.** A
+resposta ficou **4× por dar** hoje — é a primeira coisa a entregar. Âmbito:
+- **bounties recuperáveis** carimbados (Etapa 2, `derived_green_ko`) + qualquer `/set-bounties manual`;
+- **quedas** corrigidas/dispensadas (tabela `crown_drop_dismissed` + `bounty_source=manual` recentes);
+- os dois casos conhecidos: **$421.87 na GG-6090481210** (corrigido por endpoint, selado `manual` —
+  confirmado nos 2 stores) e **$31.25 na GG-6118062432** (o Rui carimbou — CONFIRMAR se gravou);
+- para cada: valor carimbado · `bounty_source` · gravado em `all_players_actions` E `player_names`? ·
+  link da mão.
+- Query pronta: `bounty_source IN ('manual','derived_green_ko')` com `created_at`/uploaded recente,
+  cruzado com o `crown_suggestion_cache` e `crown_drop_dismissed`.
+
+### 🔴 RETOMA (depois da lista):
+- **PROVA do selo de nomes** (GG-6177132682): o Rui corrige o HJ 1× → forço reconcile + re-link +
+  re-deanon → o nome tem de sobreviver. Só então fecha a reincidência.
+- **Auditoria de tags** — fechar o tamanho do buraco **só-folder-tag** do pós-wipe (destrinçar
+  Gold-lane que nunca tagou vs reimport-flat do `done`). Quadro parcial no journal.
+- **$437.5 → $421.87 FECHADO** (misread provado pela imagem; LICÃO "só a placa arbitra o valor").
+- Fase 2 Wizard · rodar `~/.pokerapp_db_ro.env` + **a chave HRC `~/.pokerapp_watcher.env`** (ambas
+  re-expostas hoje) · worklists (Marcadas · Gold sem tag · FT Sunday Special).
+
+**✅ LIVE hoje:** selo coroas/nomes (`46e5f11`, provado na 6570) · gate >3× extinto (`5dea94a`, +112
+mãos) · Etapa 2 (`4768e9b`) · worklist quedas + Sugerir-todos + cache + lightbox universal + input
+vazio + Dispensar + migração de unidade (`fce4af1`→`5ce23e0`) · 3 fantasmas de nomes curados
+(`8cb9fe4`) · LICÃO da imagem (`3029241`). Suite 1482 passed.
+
+---
+
 ## 📌 FECHO DO DIA 18 Jul 2026 — régua do resto-em-BB provada + detetor re-medido + forense da 6570 FECHADA
 
 *(Relógio do sistema reportou "14 Jul"; segue o fecho de 17 Jul → datado 18 Jul. Ver `JOURNAL_2026-07-18.md`.)*
