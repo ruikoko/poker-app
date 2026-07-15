@@ -92,7 +92,7 @@ def _select_sample() -> list[dict]:
 
     # candidatos in-band (fora do sliver): mão KO/PKO com base e ≥1 coroa in-band.
     rest = query(
-        "SELECT h.id, h.hand_id, h.tournament_name, h.player_names AS pn, "
+        "SELECT h.id, h.hand_id, h.tournament_name, h.player_names AS pn, h.played_at, "
         "       ts.buy_in_bounty AS base, e.id AS entry_id " + base_join +
         "AND ts.buy_in_bounty IS NOT NULL "
         "AND lower(COALESCE(h.tournament_format,'')) ~ 'ko|pko|bounty'")
@@ -110,8 +110,9 @@ def _select_sample() -> list[dict]:
                          if _is_num(v))
         if has_inband:
             inband.append(r)
-    # ordena por id (determinístico) ANTES do shuffle com seed fixa → estável.
-    inband.sort(key=lambda r: r["id"])
+    # ordena por PLAYED_AT (não pelo id — número GG/id ≠ ordem temporal; coerência com
+    # a régua das coroas; id só desempata) ANTES do shuffle com seed fixa → estável.
+    inband.sort(key=lambda r: (r["played_at"] or "", r["id"]))
     random.Random(_SEED).shuffle(inband)
     picked = list(sliver) + inband[:_INBAND_RANDOM]
     for p in picked:
