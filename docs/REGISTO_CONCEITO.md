@@ -452,3 +452,14 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   a envenenava), os 8 valores do Rui **sobreviveram** (dupla camada: `skip_verified_by_user` nos
   nomes + `[crown-seal] … coroa preservada` nas 7 coroas `manual`, contra o veneno guardado
   29/21/33/36/32/36/0). Suite 1482 passed. Ver `LEI_SELO_COROAS_NOMES.md`, `test_crown_seal.py`.
+
+- 2026-07-15 — **VALIDADE DE COROAS: guardas duras = `<½base` + "não-desce"; a grelha das metades
+  é SINALIZADOR LEVE, não guarda (carimbo do Rui).** A grelha física (`B, 1.5B, 1.75B, …=(2−2⁻ᵏ)B`
+  solo; `1.25B, 1.375B, …` split /4) valida "fisicamente possível", **não** "correto para esta
+  leitura" — um misread que calha num valor de grelha ($125=1B onde eram $250) passa. Prova: 99,88%
+  das 4940 coroas caem na grelha das metades (6 fora), mas os 25 misreads reais (queda mesmo-hash)
+  estão quase todos DENTRO da grelha. → **Guardas duras (bloqueiam): `<½base` (chama) + "não-desce"
+  (coroa do mesmo hash nunca desce; validado por HH).** A grelha das metades fica **sinalizador
+  leve**: fora-de-grelha → **lista de revisão do Rui** (não bloqueia; a imagem arbitra). Lista de
+  revisão actual = **23 (não-desce)** + **6 (fora-de-grelha)** = 29 casos. Splits confirmados na HH
+  entram na grelha por construção (whitelist). Ver `LEI_SELO_COROAS_NOMES.md`, `#CROWN-VALIDITY-GRID`.

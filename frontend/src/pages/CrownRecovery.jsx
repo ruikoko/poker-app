@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ggHealth, API_ROOT } from '../api/client'
+import { ggHealth, tableSs, API_ROOT } from '../api/client'
 
-// Bounties recuperáveis (#CROWN-RECOVERY) — ETAPA 1: painel SÓ-LEITURA.
-// Grupo 1 = jogador bustou na HH E coroa NULL → recuperável (lê o verde na coroa
-// do matador; bounty = verde × 2). A escrita (fluxo A+B) liga-se por cima depois.
+// Bounties recuperáveis (#CROWN-RECOVERY) — ETAPA 2: sugerir (Vision só-ao-verde) +
+// carimbar (escrita SELADA). Grupo 1 = jogador bustou na HH E coroa NULL → o bounty
+// dele está a VERDE na coroa do matador; grava-se TAL-E-QUAL (SEM ×2, unidade=coroa)
+// com bounty_source='derived_green_ko'. A dourada do matador corrige-se à mão ('manual').
+// Só a imagem arbitra os valores; a escrita só acontece por carimbo do Rui.
 
 const C = {
   card: '#161d19', border: 'rgba(255,255,255,0.10)', text: '#e8ece9',
@@ -44,8 +46,10 @@ export default function CrownRecovery() {
       <p style={{ color: C.muted, fontSize: 13, margin: '0 0 14px', lineHeight: 1.5, maxWidth: '70ch' }}>
         Mãos onde um jogador <b style={{ color: C.red }}>bustou</b> (all-in + perdeu, da HH) e a
         coroa dourada dele ficou <b style={{ color: C.red }}>NULL</b> — o bounty está a{' '}
-        <b style={{ color: C.green }}>verde</b> na coroa de quem o eliminou. <b>Etapa 1: só leitura</b>
-        {' '}— valida a lista à vista; a escrita liga-se por cima depois. Só a imagem arbitra os valores.
+        <b style={{ color: C.green }}>verde</b> na coroa de quem o eliminou. <b>Etapa 2</b>: carrega{' '}
+        <b>Sugerir</b> (a Vision lê só o verde) ou lê à mão da imagem, e <b>Carimbar</b> grava{' '}
+        <b>selado</b> — o verde <b>tal-e-qual</b> (sem ×2) como <code>derived_green_ko</code>, a dourada
+        do matador como <code>manual</code>. Nenhum processo automático pisa um carimbo. Só a imagem arbitra.
       </p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -74,52 +78,9 @@ export default function CrownRecovery() {
 
       {idle && <div style={{ color: C.muted, fontSize: 14 }}>Carrega em “Correr detetor” para varrer as KO/PKO com Gold.</div>}
 
-      {/* grupo 1 — recuperáveis */}
+      {/* grupo 1 — recuperáveis (Etapa 2: sugerir + carimbar) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {g1.map(h => (
-          <div key={h.hand_db_id} style={{ background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 12, padding: 14, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            {h.entry_id != null && (
-              <img src={`${API_ROOT}/api/screenshots/image/${h.entry_id}`} alt="gold" loading="lazy"
-                onError={e => { e.currentTarget.style.display = 'none'
-                  const n = e.currentTarget.nextSibling; if (n) n.style.display = 'flex' }}
-                style={{ width: 320, maxWidth: '100%', borderRadius: 9, objectFit: 'contain',
-                  border: `1px solid ${C.border}`, background: '#000' }} />
-            )}
-            {h.entry_id != null && (
-              <div style={{ display: 'none', width: 320, maxWidth: '100%', minHeight: 120,
-                alignItems: 'center', justifyContent: 'center', borderRadius: 9,
-                border: `1px dashed ${C.border}`, color: C.muted, fontSize: 12 }}>imagem indisponível</div>
-            )}
-            <div style={{ flex: 1, minWidth: 250 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                <Link to={`/hand/${h.hand_db_id}`}
-                  style={{ color: C.gold, fontWeight: 700, fontSize: 14, textDecoration: 'none',
-                    fontFamily: 'ui-monospace,monospace' }}>{h.hand_id}</Link>
-                <span style={{ color: C.muted, fontSize: 12 }}>{h.tournament}</span>
-              </div>
-              <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 8,
-                background: 'rgba(224,112,95,.07)', border: '1px solid rgba(224,112,95,.3)' }}>
-                <div style={lbl(C)}>Bustou · coroa em branco</div>
-                {h.busted.map((b, i) => (
-                  <div key={i} style={{ fontSize: 14 }}><b>{b.name}</b> <span style={pos(C)}>{b.position}</span></div>
-                ))}
-              </div>
-              <div style={{ marginTop: 8, padding: '9px 11px', borderRadius: 8,
-                background: 'rgba(70,201,138,.07)', border: '1px solid rgba(70,201,138,.28)' }}>
-                <div style={lbl(C)}>Verde do KO → coroa do matador</div>
-                {(h.matadores && h.matadores.length)
-                  ? h.matadores.map((m, i) => (
-                    <div key={i} style={{ fontSize: 14 }}>
-                      <b style={{ color: C.green }}>{m.name || '—'}</b> <span style={pos(C)}>{m.position}</span>
-                      {m.is_hero && <span style={{ fontSize: 10, color: '#08130d', background: C.gold,
-                        borderRadius: 4, padding: '1px 6px', marginLeft: 6, fontWeight: 700 }}>HERO</span>}
-                    </div>))
-                  : <div style={{ fontSize: 13, color: C.muted }}>matador não identificado na HH</div>}
-              </div>
-            </div>
-          </div>
-        ))}
+        {g1.map(h => <Group1Card key={h.hand_db_id} h={h} C={C} onDone={refresh} />)}
       </div>
 
       {/* re-ler placa — all-in perdido MAS jogador VIVO (resto >= 1 BB) */}
@@ -175,6 +136,130 @@ export default function CrownRecovery() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Etapa 2 — cartão do grupo 1 com sugerir (Vision só-ao-verde) + carimbar (selado) ──
+function Group1Card({ h, C, onDone }) {
+  const busted = h.busted || []
+  const matadores = (h.matadores || []).filter(m => m.name)
+  const [vals, setVals] = useState({})           // name -> string (valor a escrever)
+  const [sugg, setSugg] = useState(null)         // name -> verde sugerido pela Vision
+  const [suggesting, setSuggesting] = useState(false)
+  const [stamping, setStamping] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [done, setDone] = useState(false)
+
+  const setVal = (name, v) => setVals(s => ({ ...s, [name]: v }))
+
+  const suggest = async () => {
+    setSuggesting(true); setMsg(null)
+    try {
+      const r = await ggHealth.crownRecoverySuggest(h.hand_id)
+      const item = (r?.report || []).find(x => x.hand_id === h.hand_id)
+      const seats = item?.seats || []
+      const next = {}
+      seats.forEach(s => { if (s.bounty != null) next[s.name] = String(s.bounty) })
+      if (Object.keys(next).length) {
+        setSugg(next); setVals(v => ({ ...next, ...v }))   // prefill sem apagar edições
+        setMsg({ ok: true, t: 'Vision leu o verde — confirma antes de carimbar.' })
+      } else {
+        setMsg({ ok: false, t: item?.expected === 'por rever'
+          ? 'Sem Gold / verde não guardado — lê à mão da imagem.'
+          : 'Vision não leu verde legível — lê à mão da imagem.' })
+      }
+    } catch (e) { setMsg({ ok: false, t: 'Falha a sugerir: ' + (e?.message || e) }) }
+    finally { setSuggesting(false) }
+  }
+
+  const stamp = async () => {
+    // constrói o carimbo: eliminado(verde)→derived_green_ko ; matador(dourada)→manual
+    const bounties = {}, sources = {}
+    busted.forEach(b => {
+      const v = parseFloat(vals[b.name]); if (!isNaN(v)) { bounties[b.name] = v; sources[b.name] = 'derived_green_ko' }
+    })
+    matadores.forEach(m => {
+      const v = parseFloat(vals[m.name]); if (!isNaN(v)) { bounties[m.name] = v; sources[m.name] = 'manual' }
+    })
+    if (!Object.keys(bounties).length) { setMsg({ ok: false, t: 'Nada para carimbar — preenche pelo menos 1 valor.' }); return }
+    setStamping(true); setMsg(null)
+    try {
+      const r = await tableSs.setBounties(h.hand_id, { bounties, sources })
+      const nf = (r?.not_found || [])
+      setDone(true)
+      setMsg({ ok: true, t: `Carimbado ✓ (${(r?.updated || []).length} selados${nf.length ? `, ${nf.length} não encontrados: ${nf.join(', ')}` : ''}).` })
+      if (onDone) setTimeout(onDone, 1200)
+    } catch (e) { setMsg({ ok: false, t: 'Falha a carimbar: ' + (e?.message || e) }) }
+    finally { setStamping(false) }
+  }
+
+  const row = (name, tag, tagColor) => (
+    <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 13, minWidth: 130 }}><b>{name}</b></span>
+      <span style={{ fontSize: 10, color: '#08130d', background: tagColor, borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{tag}</span>
+      <span style={{ color: C.muted, fontSize: 13 }}>$</span>
+      <input value={vals[name] ?? ''} onChange={e => setVal(name, e.target.value)}
+        placeholder={sugg?.[name] != null ? String(sugg[name]) : '—'} inputMode="decimal"
+        style={{ width: 90, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
+          borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
+      {sugg?.[name] != null && <span style={{ color: C.green, fontSize: 11 }}>Vision: ${sugg[name]}</span>}
+    </div>
+  )
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${done ? C.green : C.border}`,
+      borderRadius: 12, padding: 14, display: 'flex', gap: 16, flexWrap: 'wrap', opacity: done ? 0.7 : 1 }}>
+      {h.entry_id != null && (
+        <img src={`${API_ROOT}/api/screenshots/image/${h.entry_id}`} alt="gold" loading="lazy"
+          onError={e => { e.currentTarget.style.display = 'none'
+            const n = e.currentTarget.nextSibling; if (n) n.style.display = 'flex' }}
+          style={{ width: 320, maxWidth: '100%', borderRadius: 9, objectFit: 'contain',
+            border: `1px solid ${C.border}`, background: '#000' }} />
+      )}
+      {h.entry_id != null && (
+        <div style={{ display: 'none', width: 320, maxWidth: '100%', minHeight: 120,
+          alignItems: 'center', justifyContent: 'center', borderRadius: 9,
+          border: `1px dashed ${C.border}`, color: C.muted, fontSize: 12 }}>imagem indisponível</div>
+      )}
+      <div style={{ flex: 1, minWidth: 280 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <Link to={`/hand/${h.hand_db_id}`}
+            style={{ color: C.gold, fontWeight: 700, fontSize: 14, textDecoration: 'none',
+              fontFamily: 'ui-monospace,monospace' }}>{h.hand_id}</Link>
+          <span style={{ color: C.muted, fontSize: 12 }}>{h.tournament}</span>
+        </div>
+
+        {/* editor de carimbo: eliminado (verde) + matador (dourada) */}
+        <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 8,
+          background: 'rgba(224,112,95,.07)', border: '1px solid rgba(224,112,95,.3)' }}>
+          <div style={lbl(C)}>Eliminado · bounty = verde (tal-e-qual, sem ×2)</div>
+          {busted.map(b => row(b.name, 'verde', C.green))}
+        </div>
+        {matadores.length > 0 && (
+          <div style={{ marginTop: 8, padding: '9px 11px', borderRadius: 8,
+            background: 'rgba(230,179,74,.07)', border: '1px solid rgba(230,179,74,.28)' }}>
+            <div style={lbl(C)}>Matador · coroa dourada (correção à mão)</div>
+            {matadores.map(m => row(m.name, m.is_hero ? 'HERO' : 'dourada', C.gold))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button onClick={suggest} disabled={suggesting || stamping || done}
+            style={{ background: 'transparent', color: C.green, border: `1px solid ${C.green}`,
+              borderRadius: 8, padding: '6px 12px', fontWeight: 700, fontSize: 13,
+              cursor: suggesting || done ? 'default' : 'pointer' }}>
+            {suggesting ? 'A ler o verde…' : 'Sugerir (Vision só-ao-verde)'}
+          </button>
+          <button onClick={stamp} disabled={stamping || done}
+            style={{ background: done ? '#2a2f37' : C.gold, color: done ? C.muted : '#08130d', border: 'none',
+              borderRadius: 8, padding: '6px 14px', fontWeight: 800, fontSize: 13,
+              cursor: stamping || done ? 'default' : 'pointer' }}>
+            {done ? 'Carimbado ✓' : stamping ? 'A carimbar…' : 'Carimbar (selar)'}
+          </button>
+          {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
+        </div>
+      </div>
     </div>
   )
 }

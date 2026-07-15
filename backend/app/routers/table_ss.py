@@ -2062,12 +2062,21 @@ def set_bounties_override(payload: dict = Body(...),
     - `confirm: [nick,...]`  → marca `bounty_confirmed=true` (aceita a coroa <½-base como
       legítima; sai das suspeitas e do gate ½-base do HRC — exceção manual registada).
     - `unconfirm: [nick,...]` → remove o flag.
+    - `sources: {nick: 'manual'|'derived_green_ko'}` → proveniência do SELO por nick
+      (Etapa 2 dos bounties recuperáveis: o verde do eliminado grava-se com
+      `derived_green_ko`; a coroa dourada corrigida à mão fica `manual`, o default).
+      Qualquer valor fora de {manual, derived_green_ko} cai para `manual` (só selamos com
+      fontes seladas — nunca uma fonte automática por engano).
     - `dry_run: true` → devolve o PLANO (valores antes/depois + confirmações), não grava.
     Nicks ausentes do players_list ficam intactos + devolvidos em `not_found` (não se
-    inventa). Body: {hand_id, bounties?:{nick:coroa}, confirm?:[], unconfirm?:[], dry_run?}."""
+    inventa). Body: {hand_id, bounties?:{nick:coroa}, sources?:{nick:src}, confirm?:[], unconfirm?:[], dry_run?}."""
     import json as _json
+    from app.services.eliminated_bounty import SEALED_BOUNTY_SOURCES, SOURCE_MANUAL
     hand_id = payload.get("hand_id")
     bounties = payload.get("bounties") or {}
+    sources = payload.get("sources") or {}
+    if not isinstance(sources, dict):
+        sources = {}
     confirm = [n for n in (payload.get("confirm") or [])]
     unconfirm = [n for n in (payload.get("unconfirm") or [])]
     dry = bool(payload.get("dry_run"))
@@ -2099,18 +2108,26 @@ def set_bounties_override(payload: dict = Body(...),
         if nm in bounties:
             try:
                 val = float(bounties[nm])
+                # proveniência do selo: 'derived_green_ko' (verde do eliminado, Etapa 2)
+                # OU 'manual' (default). Fontes não-seladas caem para manual.
+                src = sources.get(nm) or SOURCE_MANUAL
+                if src not in SEALED_BOUNTY_SOURCES:
+                    src = SOURCE_MANUAL
                 if not dry:
-                    # SELO (invariante do Rui): carimbo manual → nenhum processo
-                    # automático (re-deanon/re-apply/scrub) escreve por cima. Marca
-                    # `bounty_source='manual'` nos DOIS stores + limpa 'por rever'.
+                    # SELO (invariante do Rui): carimbo → nenhum processo automático
+                    # (re-deanon/re-apply/scrub) escreve por cima. Marca `bounty_source`
+                    # nos DOIS stores + limpa 'por rever'.
                     e["bounty_value_usd"] = val
-                    e["bounty_source"] = "manual"
+                    e["bounty_source"] = src
                     e.pop("crown_review", None)
+                    e.pop("bounty_review", None)
                     if nm in apa_by_name:
                         apa_by_name[nm]["bounty_value_usd"] = val
-                        apa_by_name[nm]["bounty_source"] = "manual"
+                        apa_by_name[nm]["bounty_source"] = src
                         apa_by_name[nm].pop("crown_review", None)
+                        apa_by_name[nm].pop("bounty_review", None)
                 entry["new"] = val
+                entry["source"] = src
                 updated.append(nm)
             except (ValueError, TypeError):
                 entry["error"] = "valor inválido"

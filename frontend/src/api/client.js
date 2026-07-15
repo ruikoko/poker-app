@@ -363,6 +363,10 @@ export const ggHealth = {
   crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
   crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),
   crownRecoveryState: () => req('GET', '/gg-health/crown-recovery'),
+  // Etapa 2 — "sugerir só-ao-verde": corre a Vision na Gold e devolve o bounty do
+  // eliminado derivado do VERDE (tal-e-qual, SEM ×2). Read-only (não escreve).
+  crownRecoverySuggest: (handId) =>
+    req('POST', `/screenshots/green-ko-dryrun?hand_ids=${encodeURIComponent(handId)}`),
   crownSampleCandidates: (reselect = false) => req('GET', `/gg-health/crown-sample/candidates${reselect ? '?reselect=true' : ''}`),
   crownSampleRun: () => req('POST', '/gg-health/crown-sample/run'),
   crownSampleCancel: () => req('POST', '/gg-health/crown-sample/cancel'),
@@ -535,9 +539,11 @@ export const tableSs = {
     req('POST', '/table-ss/verify-deanon', { hand_id: handId, verified }),
   // Fase 2 — editar/confirmar coroas ($). Grava players_list + apa. confirm[] aceita
   // uma coroa <½-base como legítima. dryRun → só o plano (pré-visualização).
-  setBounties: (handId, { bounties, confirm, unconfirm, dryRun } = {}) =>
+  // sources{nick:'manual'|'derived_green_ko'} → proveniência do SELO (Etapa 2: o verde
+  // do eliminado grava-se 'derived_green_ko'; a dourada corrigida à mão 'manual').
+  setBounties: (handId, { bounties, sources, confirm, unconfirm, dryRun } = {}) =>
     req('POST', '/table-ss/set-bounties', {
-      hand_id: handId, bounties, confirm, unconfirm, dry_run: dryRun,
+      hand_id: handId, bounties, sources, confirm, unconfirm, dry_run: dryRun,
     }),
 }
 
