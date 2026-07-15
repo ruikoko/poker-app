@@ -86,6 +86,26 @@ filtro ao-vivo embutido), tal como `HandImage`/`ZoomImg` são a fonte única das
 **LEI 4 — auditoria retroativa.** Ao mudar estas leis, auditar TODOS os painéis existentes
 contra a LEI 1 e reportar a tabela (painel × requisito × ✓/✗) **antes de trabalho novo**.
 
+**Tabela re-corrida (15 Jul 2026) — todos os painéis de resolução ✓:**
+
+| Painel | base `<Worklist>` | filtro ao-vivo | `<HandImage>` | nº+link | Dispensar | escrita selada |
+|---|---|---|---|---|---|---|
+| CrownRecovery (quedas) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ `/set-bounties` |
+| CaptureTriage (marcadas) | ✓ | ✓ | ✓ | ✓ | ✓ descartar | ✓ tag canónica |
+| **SuspiciousHands** (novo) | ✓ | ✓ (dismiss+resolve) | ✓ | ✓ | ✓ | ✓ `/revert-to-anon` |
+| GGHealth › FtQuarantine | bespoke¹ | ✓ refresh() | ✓ (helper central) | ✓ | ✓ | ✓ ftConfirm/ftPromote |
+| GGHealth › NamePropagation | bespoke¹ | ✓ load() | ✓ (helper central) | ✓ | ✓ | ✓ namesApply/choose |
+| GGHealth › LobbyEdition | bespoke¹ | ✓ load() | ✓ (helper central) | ✓ | — (crivo) | ✓ manual_edition |
+| CrownSample | — | — | ✓ | ✓ | — | — |
+
+¹ **Isento do `<Worklist>` literal por desenho:** fluxos multi-secção (needs/ready/done) ou
+cards de conflito de 2 lados com plano dry-run — validados com o Rui (pt-noite). Cumprem LEI 1
+funcionalmente (reload-on-resolve + src pelo helper central `absImageUrl`, nunca `${API_ROOT}`
+à mão). Não se força a abstração simples sobre eles (risco de partir trabalho validado).
+
+**CrownSample = AUDITORIA (decisão do Rui, 15 Jul):** é amostra visual read-only, **isenta do
+DoD de resolução** (não tem card-que-sai nem escrita). Fica fora do contrato de worklist.
+
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
 **O PC onde este projecto é desenvolvido é o mesmo onde o utilizador joga poker.** As salas (GGPoker, PokerStars, Winamax, WPN, iPoker, 888) têm anti-cheat agressivo que scanneia processos activos. Qualquer processo "suspeito" (editores, terminais, ferramentas de análise, scripts Python a correr) pode gerar falsos positivos e prejudicar a conta.
