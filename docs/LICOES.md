@@ -466,3 +466,10 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   avisa, **não fecha**). **LEI (Rui):** escrita que falha **diz-se na hora**; as duas gavetas
   escrevem/lêem **alinhadas** — raiz da classe `$0-vivo` (446 seats), não só o sintoma.
   → `JOURNAL_2026-07-20.md`.
+- 2026-07-15 — **Problema (armadilha JS, irmã da escrita-calada):** o guard "não sai da lista se a
+  escrita falhou" (LEI 1) verificava `if (r.not_found || r.partial)` — mas ambos são **arrays**, e um
+  `[]` é **truthy** em JS → o guard disparava SEMPRE (mesmo em sucesso) e mostrava erro num write bom, OU
+  (invertido) nunca. → **Regra:** ao ler `not_found`/`partial` do `/set-bounties`, testar **`.length`**
+  (`r?.not_found?.length`), nunca a verdade do array. Varrido o resto do frontend (CrownRecovery/
+  HandHistoryViewer já usavam `|| []` + `.length` — só o painel novo tinha o risco). → painel `Vivo com
+  coroa $0` (`LiveZeroCrowns.jsx`, bloco b).
