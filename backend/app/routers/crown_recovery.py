@@ -371,12 +371,16 @@ def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(requi
     text = _extract_hand_data_from_image_claude(img, detect_image_mime(img) or "image/png")
     data = _parse_vision_response(text) if text else {}
     greens = parse_green_kos(data)
-    # (a) eliminado → verde derivado (só quando 1 eliminado + 1 verde = limpo)
+    # (a) eliminado → coroa = VERDE × 2 (física do Rui; resolve_seat_bounty já ×2).
+    # `busted` = coroa (o que se grava); `busted_greens` = o verde CRU lido (= coroa÷2),
+    # para o painel mostrar "verde $X → coroa $Y" à vista.
     busted_out = {}
+    busted_greens = {}
     for name in sorted(busted):
         val, _review, source = resolve_seat_bounty(name, None, busted_names=busted, green_kos=greens)
         if source == SOURCE_GREEN_KO and val is not None:
             busted_out[name] = val
+            busted_greens[name] = round(val / 2.0, 2)   # verde cru = coroa ÷ 2
     # (b) coroa dourada de cada jogador (players_list.bounty_value_usd da Vision)
     crowns = {}
     for p in (data.get("players_list") or []):
@@ -386,8 +390,8 @@ def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(requi
                 crowns[nm] = float(bv)
             except (TypeError, ValueError):
                 pass
-    result = {"hand_id": hand_id, "busted": busted_out, "crowns": crowns,
-              "greens": greens, "image": "gold",
+    result = {"hand_id": hand_id, "busted": busted_out, "busted_greens": busted_greens,
+              "crowns": crowns, "greens": greens, "image": "gold",
               "last_crowns": last_crowns, "base": base,
               "green_total": round(sum(g["value"] for g in greens), 2) if greens else None}
     _cache_suggestion(hand_id, result)     # a sugestão PAGA persiste (não evapora no refresh)

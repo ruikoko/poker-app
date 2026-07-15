@@ -342,7 +342,8 @@ function Group1Card({ h, C, onDone, suggestion }) {
   const busted = h.busted || []
   const matadores = (h.matadores || []).filter(m => m.name)
   const [vals, setVals] = useState({})           // name -> string (valor a escrever)
-  const [sugg, setSugg] = useState(null)         // name -> valor sugerido pela Vision
+  const [sugg, setSugg] = useState(null)         // name -> valor sugerido pela Vision (COROA)
+  const [bgreens, setBgreens] = useState({})     // name -> verde CRU lido (coroa = verde×2)
   const [meta, setMeta] = useState(null)         // {last:{nome:coroa}, base, greenTotal}
   const [suggesting, setSuggesting] = useState(false)
   const multi = busted.length > 1                // multi-eliminação (verde = soma)
@@ -355,6 +356,7 @@ function Group1Card({ h, C, onDone, suggestion }) {
   // aplica {busted, crowns, last_crowns, base, green_total} da Vision
   const applySuggestion = (r) => {
     setMeta({ last: r?.last_crowns || {}, base: r?.base ?? null, greenTotal: r?.green_total ?? null })
+    setBgreens(r?.busted_greens || {})   // verde cru por eliminado → mostra "verde $X → coroa $Y"
     const next = {}
     // eliminado → verde derivado (KO limpo) OU, em multi-KO, a última coroa conhecida (esperado)
     Object.entries(r?.busted || {}).forEach(([name, v]) => { if (v != null) next[name] = String(v) })
@@ -424,7 +426,9 @@ function Group1Card({ h, C, onDone, suggestion }) {
         placeholder={sugg?.[name] != null ? String(sugg[name]) : '—'} inputMode="decimal"
         style={{ width: 90, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
           borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
-      {sugg?.[name] != null && <span style={{ color: C.green, fontSize: 11 }}>Vision: ${sugg[name]}</span>}
+      {sugg?.[name] != null && (bgreens?.[name] != null
+        ? <span style={{ color: C.green, fontSize: 11 }}>Vision: verde ${bgreens[name]} → coroa <b>${sugg[name]}</b></span>
+        : <span style={{ color: C.green, fontSize: 11 }}>Vision: ${sugg[name]}</span>)}
       {hint && <span style={{ color: C.gold, fontSize: 11 }}>{hint.label}</span>}
     </div>
   )
