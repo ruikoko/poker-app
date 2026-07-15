@@ -1990,7 +1990,12 @@ def set_anon_map_override(payload: dict = Body(...),
     # chave-hash); o duplicado de nome é barrado À ENTRADA por
     # _assert_no_duplicate_real_names (guarda viva que substitui a antiga pós-enrich).
     new_pn = {**(pn or {}), "anon_map": anon_map, "match_method": "table_ss",
-              "source": "manual_blinds_override", "deanon_partial": bool(missing)}
+              "source": "manual_blinds_override", "deanon_partial": bool(missing),
+              # SELO DE NOMES (invariante do Rui): um override manual do anon_map É a
+              # verificação do Rui → carimba SEMPRE. Sem isto a correção ficava órfã e
+              # qualquer automático (re-deanon/reconcile/re-enrich) a pisava (reincidência
+              # tipo-6570-com-nomes, GG-6177132682). Era a hipótese (a).
+              "verified_by_user": True}
     # O Hero do anon_map é autoritário — repõe também o campo pn.hero (a desanon
     # errada podia tê-lo deixado com o nick de um vilão; ex. swap R Sanchez↔Lauro).
     if anon_map.get("Hero"):

@@ -1692,9 +1692,16 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     # enrich completo. Sem isto, hands com match_method='v2' mas anon_map={}
     # (estado degenerate causado por enrich correr quando apa só tinha _meta)
     # ficavam presas — re-enrich nunca corria, apa permanecia com hashes.
-    if (existing_mm in ("anchors_stack_elimination_v2", POSITION_V3_MATCH_METHOD)
+    # SELO DE NOMES (invariante do Rui): uma mão VERIFICADA à mão (verified_by_user)
+    # NUNCA é re-derivada por este caminho Gold — era o ghost (c) da reincidência
+    # tipo-6570-com-nomes (GG-6177132682): após o /set-anon-map a mão fica
+    # match_method='table_ss', que NÃO estava neste guard → o re-link Gold re-derivava
+    # position_v3 e pisava a correção. Verified entra no guard (preserva nomes; tags/bounty
+    # continuam a refrescar abaixo).
+    _is_verified = bool(isinstance(pn_existing, dict) and pn_existing.get("verified_by_user"))
+    if (_is_verified or (existing_mm in ("anchors_stack_elimination_v2", POSITION_V3_MATCH_METHOD)
             and raw_already_present
-            and existing_anon_map):
+            and existing_anon_map)):
         # apa já enriquecido → NÃO re-corre o algoritmo v2 caro (anon_map). MAS
         # continua a fazer as duas coisas que NÃO dependem do re-enrich, senão
         # perdem-se silenciosamente quando uma 2ª/3ª entry da MESMA mão (mesma

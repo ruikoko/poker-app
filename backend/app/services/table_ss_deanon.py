@@ -810,6 +810,13 @@ def reconcile_tournament_deanon(tournament_number: str, *, conn=None) -> dict:
     try:
         from app.services.villain_rules import apply_villain_rules
         for hand_db_id, old_map, apa, pn in per_hand:
+            # SELO DE NOMES (invariante do Rui): mão verificada à mão NÃO é re-escrita pela
+            # votação do torneio. Era o caminho FANTASMA da reincidência tipo-6570-com-nomes:
+            # a Guarda 3-b protegia o deanon por-mão, mas ESTE re-mapeamento por-torneio (que
+            # corre no fim de cada deanon e nos imports) pisava a correção. O mapa verificado
+            # continua a VOTAR (fica em `anon_maps`), só não é sobrescrito.
+            if isinstance(pn, dict) and pn.get("verified_by_user"):
+                continue
             hash_apa = _rekey_apa_to_hashes(apa, old_map)
             hashes = [k for k in hash_apa if k != "_meta"]
             new_map = {hsh: canonical[hsh] for hsh in hashes if hsh in canonical}
