@@ -373,12 +373,14 @@ def crown_block_misreads(current_user=Depends(require_auth_or_api_key)):
                 continue
             out_seats, any_proof = [], False
             for m in members:
-                prior = [c for (t, c) in traj[(p["tn"], m["key"])] if t < p["played_at"]]
-                proof = any(c > val + 0.5 for c in prior)
+                # PROVA: qualquer leitura do MESMO seat no torneio > val (antes OU depois) —
+                # a coroa não desce; se dá val num sítio e >val noutro, val é o misread do bloco.
+                higher = [c for (t, c) in traj[(p["tn"], m["key"])] if c > val + 0.5]
+                proof = bool(higher)
                 any_proof = any_proof or proof
                 out_seats.append({"nick": m["nick"], "position": m["position"],
                                   "current": val, "has_proof": proof,
-                                  "ref": max(prior) if prior else None, "sealed": m["sealed"]})
+                                  "ref": max(higher) if higher else None, "sealed": m["sealed"]})
             if any_proof:
                 cards.append({"hand_db_id": p["id"], "hand_id": p["hand_id"],
                               "tournament": p["tname"], "base_half": p["B"],
