@@ -52,6 +52,11 @@ function LiveZeroCard({ h, onResolved }) {
           <span style={{ fontSize: 12, color: '#8b9691' }}>{h.tournament_name || ''}</span>
           <span style={{ fontSize: 11, color: '#8b9691' }}>{fmt(h.played_at)}</span>
           <span style={{ fontSize: 11, color: '#eab308' }}>piso ${h.floor} (base÷2)</span>
+          {h.bucket === 'silent'
+            ? <span title="$0 gravado SEM marca de revisão = escrita calada (alarme do crivo)"
+                style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 5, color: '#ef4444', background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.35)' }}>calado (alarme)</span>
+            : <span title="a guarda leu a placa e não conseguiu a coroa → $0 honesto, à espera do carimbo"
+                style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 5, color: '#eab308', background: 'rgba(234,179,8,0.14)', border: '1px solid rgba(234,179,8,0.35)' }}>por ler</span>}
         </div>
         <div style={{ marginTop: 8, fontSize: 13 }}>
           <b style={{ color: '#fca5a5' }}>{h.name}</b>

@@ -1483,14 +1483,25 @@ def _live_zero_dismissed_set() -> set:
 
 @router.get("/live-zero/list")
 def live_zero_list(current_user=Depends(require_auth_or_api_key)):
-    """WORKLIST de resolução (LEI 1/3). Só os `silent_zero` (escrita calada — os `review`
-    são a guarda honesta, ficam no crivo). Cada card: imagem + nº+link + coroa a carimbar
-    (≥ base÷2 = `floor`). Carimbar via /set-bounties (sela + ALINHA as 2 gavetas) tira-o
-    daqui (coroa > 0); Dispensar também. Exclui os já dispensados. READ-ONLY."""
+    """WORKLIST de resolução (LEI 1/3). TODOS os lugares vivos-$0 tagados KO — os DOIS
+    baldes, porque AMBOS precisam do carimbo da coroa real:
+    - `review` = a guarda leu a placa e não conseguiu a coroa → gravou $0 honesto (é ISTO
+      que o Rui vem ler à imagem e selar — o grosso do trabalho);
+    - `silent` = $0 gravado sem review (contaminação) → também se carimba, e além disso é
+      alarme do crivo (`/live-crown-zero-scan` conta-o à parte para o gate do reimporte).
+    Cada card: imagem + nº+link + coroa a carimbar (≥ base÷2 = `floor`) + `bucket`.
+    Carimbar via /set-bounties (sela + ALINHA as 2 gavetas) tira-o daqui (coroa > 0);
+    Dispensar também. Exclui os já dispensados. READ-ONLY."""
     dismissed = _live_zero_dismissed_set()
-    _, silent, _ = _live_zero_seats()
-    hands = [s for s in silent if (s["hand_id"], s["name"]) not in dismissed]
-    return {"count": len(hands), "hands": hands}
+    _, silent, review = _live_zero_seats()
+    items = ([{**s, "bucket": "silent"} for s in silent]
+             + [{**s, "bucket": "review"} for s in review])
+    hands = [s for s in items if (s["hand_id"], s["name"]) not in dismissed]
+    hands.sort(key=lambda s: (s["bucket"] != "silent", s["played_at"] or ""), reverse=False)
+    return {"count": len(hands),
+            "counts": {"silent": len([h for h in hands if h["bucket"] == "silent"]),
+                       "review": len([h for h in hands if h["bucket"] == "review"])},
+            "hands": hands}
 
 
 @router.post("/live-zero/dismiss")
