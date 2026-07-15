@@ -382,3 +382,20 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   gravar o que o olho lê, não o que o modelo calcula.** A fórmula do Rui `bounty_eliminado = verde ×
   2` ganha-se ao LER o verde na imagem (aqui $187.5 × 2 = $375), não ao assumir a base. Desenho do
   fluxo (A)+(B): imagem SEMPRE antes da escrita. Ver `JOURNAL_2026-07-17`, `#CROWN-RECOVERY`.
+
+- 2026-07-18 — **Nenhum caso de COROA se fecha sem a IMAGEM aberta — contas de stacks validam a
+  MÃO, não o VALOR.** Na "queda" GG-6090481210 ($437.5→$421.87) construí três teses (mecânica GG
+  desconhecida de −B/8; indexação errada; e o match de stacks 6/7 a "provar" que a imagem pertencia
+  à ...1210) e dei o veredicto **"ambas as placas confirmadas, queda real, caso aberto"** — **sem
+  ninguém ter olhado a placa**. Quando o Rui finalmente abriu a imagem (entry 1720), a coroa do
+  Lauro dizia **$421.87**, não $437.5: o gravado era um **misread da Vision** e **não havia queda
+  nenhuma** (421.87→421.87). As minhas contas de stacks estavam certas quanto à MÃO (a imagem é
+  mesmo da ...1210) e completamente irrelevantes quanto ao VALOR (o que a placa mostra). **→ Lição:
+  o valor de uma coroa é um facto ótico — só a imagem o arbitra. Match de stacks, dyadic-fits,
+  mecânica teórica, "referência anterior" — tudo valida a IDENTIDADE da mão ou a plausibilidade,
+  NUNCA o número na placa. Um caso de coroa só se fecha (real/misread/o que for) DEPOIS de a imagem
+  estar aberta e lida a olho. E "placa confirmada" só se escreve quando alguém olhou mesmo a placa —
+  nunca por inferência.** Corolário operacional: quando o Rui pede a imagem, ela é a prioridade
+  absoluta e tem de vir num link que ABRA (o meu 1º link caiu no dashboard por estar no domínio do
+  frontend, que não serve `/api` em produção — a imagem vive no backend). Ver `feedback_hand_refs_by_link`,
+  `feedback_review_panel_no_prefill_guess`, e o fecho da GG-6090481210 (corrigida a $421.87 selado).
