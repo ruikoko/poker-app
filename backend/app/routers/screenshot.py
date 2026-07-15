@@ -2171,6 +2171,46 @@ def get_screenshot_image(entry_id: int, current_user=Depends(require_auth)):
     )
 
 
+def _serve_img_b64(raw_json, entry_id_for_name) -> Response:
+    """Descodifica img_b64 de um raw_json e serve como binário. 404 se ausente."""
+    raw = raw_json or {}
+    img_b64 = raw.get("img_b64")
+    if not img_b64:
+        raise HTTPException(status_code=404, detail="Imagem não disponível")
+    mime = raw.get("mime_type", "image/jpeg")
+    try:
+        img_bytes = base64.b64decode(img_b64)
+    except Exception as e:
+        logger.error(f"Failed to decode image entry {entry_id_for_name}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao descodificar imagem")
+    return Response(content=img_bytes, media_type=mime,
+                    headers={"Cache-Control": "private, max-age=3600",
+                             "Content-Disposition": f'inline; filename="hand_{entry_id_for_name}.jpg"'})
+
+
+@router.get("/hand-image/{hand_db_id}")
+def get_hand_image(hand_db_id: int, current_user=Depends(require_auth_or_api_key)):
+    """Serve a MELHOR imagem de UMA mão, resolvendo o entry SERVER-SIDE — os painéis passam
+    `hand_db_id` e NUNCA adivinham qual entry tem a imagem (a doença recorrente: `h.entry_id`
+    aponta muitas vezes ao entry `hand_history`, sem img_b64 → 404 → imagem partida). Ordem:
+    (1) `h.entry_id` se for screenshot/replayer_link com img_b64; (2) qualquer entry
+    screenshot/replayer_link com img_b64 do MESMO tm da mão. 404 se não houver. Bearer|cookie."""
+    rows = query(
+        "SELECT e.raw_json FROM hands h JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.id = %s AND e.entry_type IN ('screenshot','replayer_link') "
+        "   AND (e.raw_json->>'img_b64') IS NOT NULL", (hand_db_id,))
+    if not rows:
+        rows = query(
+            "SELECT e.raw_json FROM hands h "
+            "  JOIN entries e ON e.entry_type IN ('screenshot','replayer_link') "
+            "   AND (e.raw_json->>'img_b64') IS NOT NULL "
+            "   AND replace(e.raw_json->>'tm','TM','') = replace(h.hand_id,'GG-','') "
+            " WHERE h.id = %s ORDER BY e.id DESC LIMIT 1", (hand_db_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="Sem imagem para esta mão")
+    return _serve_img_b64(rows[0].get("raw_json"), f"hand{hand_db_id}")
+
+
 @router.get("/hand/{hand_id}")
 def get_hand_screenshot(hand_id: int, current_user=Depends(require_auth)):
     """Devolve o screenshot_url e player_names de uma mão."""

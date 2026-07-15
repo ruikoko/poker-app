@@ -559,6 +559,11 @@ export const tableSs = {
     }),
 }
 
+// URL da imagem de UMA mão (o backend resolve o entry certo). FONTE ÚNICA do src das
+// imagens de mão — os painéis usam <HandImage handDbId={...}/>, nunca montam o URL à mão.
+export const handImageUrl = (handDbId) =>
+  handDbId != null ? `${API_ROOT}/api/screenshots/hand-image/${handDbId}` : null
+
 // ── GTO Brain ──────────────────────────────────────────────────────────────
 export const gto = {
   match: (params) => {

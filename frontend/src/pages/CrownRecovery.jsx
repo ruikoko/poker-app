@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ggHealth, tableSs, API_ROOT } from '../api/client'
-import ZoomImg from '../components/ZoomImg'
+import { ggHealth, tableSs } from '../api/client'
+import HandImage from '../components/HandImage'
 
 // Bounties recuperáveis (#CROWN-RECOVERY) — ETAPA 2: sugerir (Vision só-ao-verde) +
 // carimbar (escrita SELADA). Grupo 1 = jogador bustou na HH E coroa NULL → o bounty
@@ -242,12 +242,11 @@ function DropsWorklist({ C }) {
         {drops.map((d, i) => (
           <DropCard key={'d' + i} C={C} kind="queda" player={d.player}
             handId={d.hand_id} handDb={d.hand_db_id} lowVal={d.low} refVal={d.ref}
-            entryId={d.entry_id} refEntryId={d.ref_entry_id} refHandId={d.ref_hand_id} />
+            refHandDb={d.ref_hand_db_id} refHandId={d.ref_hand_id} />
         ))}
         {off.map((o, i) => (
           <DropCard key={'o' + i} C={C} kind="fora-de-grelha" player={o.player}
-            handId={o.hand_id} handDb={o.hand_db_id} lowVal={o.value} ratio={o.ratio}
-            entryId={o.entry_id} />
+            handId={o.hand_id} handDb={o.hand_db_id} lowVal={o.value} ratio={o.ratio} />
         ))}
         {!loading && total === 0 && <div style={{ color: C.muted, fontSize: 13 }}>Nenhum caso — coroas limpas.</div>}
       </div>
@@ -255,13 +254,11 @@ function DropsWorklist({ C }) {
   )
 }
 
-function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId }) {
+function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refHandDb, refHandId }) {
   const [val, setVal] = useState('')          // VAZIO — nunca a referência (palpite perigoso); só a imagem arbitra
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
   const [done, setDone] = useState(false)     // 'stamped' | 'dismissed' | false
-  const imgUrl = entryId != null ? `${API_ROOT}/api/screenshots/image/${entryId}` : null
-  const refImgUrl = refEntryId != null ? `${API_ROOT}/api/screenshots/image/${refEntryId}` : null
 
   const stamp = async () => {
     const v = parseFloat(val)
@@ -283,21 +280,12 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entr
     finally { setStamping(false) }
   }
 
-  const thumb = (src, label) => src && (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <ZoomImg src={src} alt={label}
-        style={{ width: 200, maxWidth: '100%', borderRadius: 7, objectFit: 'contain',
-          border: `1px solid ${C.border}`, background: '#000' }} />
-      <span style={{ fontSize: 10, color: C.muted, textAlign: 'center' }}>{label} (clica p/ zoom)</span>
-    </div>
-  )
-
   return (
     <div style={{ background: C.card, border: `1px solid ${done ? C.green : C.border}`, borderRadius: 11,
       padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap', opacity: done ? 0.65 : 1 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {thumb(imgUrl, `$${lowVal} (a rever)`)}
-        {kind === 'queda' && thumb(refImgUrl, `$${refVal} (referência)`)}
+        <HandImage handDbId={handDb} caption={`$${lowVal} (a rever)`} />
+        {kind === 'queda' && <HandImage handDbId={refHandDb} caption={`$${refVal} (referência)`} />}
       </div>
       <div style={{ flex: 1, minWidth: 240 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -440,18 +428,7 @@ function Group1Card({ h, C, onDone, suggestion }) {
   return (
     <div style={{ background: C.card, border: `1px solid ${done ? C.green : C.border}`,
       borderRadius: 12, padding: 14, display: 'flex', gap: 16, flexWrap: 'wrap', opacity: done ? 0.7 : 1 }}>
-      {h.entry_id != null && (
-        <ZoomImg src={`${API_ROOT}/api/screenshots/image/${h.entry_id}`} alt="gold"
-          onError={e => { e.currentTarget.style.display = 'none'
-            const n = e.currentTarget.nextSibling; if (n) n.style.display = 'flex' }}
-          style={{ width: 320, maxWidth: '100%', borderRadius: 9, objectFit: 'contain',
-            border: `1px solid ${C.border}`, background: '#000' }} />
-      )}
-      {h.entry_id != null && (
-        <div style={{ display: 'none', width: 320, maxWidth: '100%', minHeight: 120,
-          alignItems: 'center', justifyContent: 'center', borderRadius: 9,
-          border: `1px dashed ${C.border}`, color: C.muted, fontSize: 12 }}>imagem indisponível</div>
-      )}
+      <HandImage handDbId={h.hand_db_id} alt="gold" style={{ width: 320 }} />
       <div style={{ flex: 1, minWidth: 280 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <Link to={`/hand/${h.hand_db_id}`}
