@@ -25,6 +25,13 @@ export default function CrownRecovery() {
 
   const refresh = () => ggHealth.crownRecoveryState().then(setSt).catch(() => {})
   useEffect(() => { refresh(); return () => clearInterval(poll.current) }, [])
+  // REGRA DA CASA: ao voltar ao separador, re-confere o estado contra a BD (o backend já
+  // filtra os resolvidos ao vivo, b3d6c0f) → um caso corrigido por OUTRA via sai da lista.
+  useEffect(() => {
+    const onFocus = () => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
   // Recarrega as sugestões PAGAS do cache backend → o lote sobrevive ao refresh.
   useEffect(() => {
     ggHealth.crownSuggestionsCache()
@@ -213,11 +220,26 @@ export default function CrownRecovery() {
 function DropsWorklist({ C }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
-  const load = () => { setLoading(true); ggHealth.crownDrops().then(setData).catch(() => setData(null)).finally(() => setLoading(false)) }
+  const [resolved, setResolved] = useState(() => new Set())   // saídos na hora (otimista)
+  const load = () => {
+    setLoading(true)
+    ggHealth.crownDrops().then(d => { setData(d); setResolved(new Set()) })
+      .catch(() => setData(null)).finally(() => setLoading(false))
+  }
   useEffect(() => { load() }, [])
+  // REGRA DA CASA: a lista confere contra a BD AO VIVO — ao voltar ao separador re-carrega
+  // (correções por OUTRA via — editor da mão, outro painel — saem da lista sem Recarregar).
+  useEffect(() => {
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+  const keyOf = (x) => `${x.hand_id}|${(x.player || '').toLowerCase()}`
+  // resolvido no card → sai NA HORA + re-confere a BD (o /drops já exclui selado/dispensado)
+  const onResolved = (k) => { setResolved(s => new Set(s).add(k)); setTimeout(load, 500) }
 
-  const drops = data?.drops || []
-  const off = data?.off_grid || []
+  const drops = (data?.drops || []).filter(d => !resolved.has(keyOf(d)))
+  const off = (data?.off_grid || []).filter(o => !resolved.has(keyOf(o)))
   const total = drops.length + off.length
 
   return (
@@ -239,14 +261,16 @@ function DropsWorklist({ C }) {
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {drops.map((d, i) => (
-          <DropCard key={'d' + i} C={C} kind="queda" player={d.player}
+        {drops.map(d => (
+          <DropCard key={keyOf(d)} C={C} kind="queda" player={d.player}
             handId={d.hand_id} handDb={d.hand_db_id} lowVal={d.low} refVal={d.ref}
-            refHandDb={d.ref_hand_db_id} refHandId={d.ref_hand_id} />
+            refHandDb={d.ref_hand_db_id} refHandId={d.ref_hand_id}
+            onResolved={() => onResolved(keyOf(d))} />
         ))}
-        {off.map((o, i) => (
-          <DropCard key={'o' + i} C={C} kind="fora-de-grelha" player={o.player}
-            handId={o.hand_id} handDb={o.hand_db_id} lowVal={o.value} ratio={o.ratio} />
+        {off.map(o => (
+          <DropCard key={keyOf(o)} C={C} kind="fora-de-grelha" player={o.player}
+            handId={o.hand_id} handDb={o.hand_db_id} lowVal={o.value} ratio={o.ratio}
+            onResolved={() => onResolved(keyOf(o))} />
         ))}
         {!loading && total === 0 && <div style={{ color: C.muted, fontSize: 13 }}>Nenhum caso — coroas limpas.</div>}
       </div>
@@ -254,35 +278,33 @@ function DropsWorklist({ C }) {
   )
 }
 
-function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refHandDb, refHandId }) {
+function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refHandDb, refHandId, onResolved }) {
   const [val, setVal] = useState('')          // VAZIO — nunca a referência (palpite perigoso); só a imagem arbitra
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
-  const [done, setDone] = useState(false)     // 'stamped' | 'dismissed' | false
 
+  // REGRA DA CASA: resolvido → SAI DA LISTA NA HORA (onResolved remove o card). Só fica se falhar.
   const stamp = async () => {
     const v = parseFloat(val)
     if (isNaN(v)) { setMsg({ ok: false, t: 'Valor inválido — lê da imagem' }); return }
     setStamping(true); setMsg(null)
     try {
       const r = await tableSs.setBounties(handId, { bounties: { [player]: v }, sources: { [player]: 'manual' } })
-      if ((r?.updated || []).length) { setDone('stamped'); setMsg({ ok: true, t: `Carimbado ✓ $${v} (manual)` }) }
-      else setMsg({ ok: false, t: `Nome não encontrado no players_list${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` })
-    } catch (e) { setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
-    finally { setStamping(false) }
+      if ((r?.updated || []).length) { onResolved && onResolved() }   // carimbado → fora
+      else { setStamping(false); setMsg({ ok: false, t: `Nome não encontrado no players_list${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` }) }
+    } catch (e) { setStamping(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
   }
   const dismiss = async () => {
     setStamping(true); setMsg(null)
     try {
       await ggHealth.crownDropsDismiss(handId, player)
-      setDone('dismissed'); setMsg({ ok: true, t: 'Dispensado (legítimo) ✓' })
-    } catch (e) { setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
-    finally { setStamping(false) }
+      onResolved && onResolved()                                       // dispensado → fora
+    } catch (e) { setStamping(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
   }
 
   return (
-    <div style={{ background: C.card, border: `1px solid ${done ? C.green : C.border}`, borderRadius: 11,
-      padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap', opacity: done ? 0.65 : 1 }}>
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11,
+      padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <HandImage handDbId={handDb} caption={`$${lowVal} (a rever)`} />
         {kind === 'queda' && <HandImage handDbId={refHandDb} caption={`$${refVal} (referência)`} />}
@@ -306,17 +328,17 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refH
           <input value={val} onChange={e => setVal(e.target.value)} inputMode="decimal" placeholder="valor da imagem"
             style={{ width: 100, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
               borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
-          <button onClick={stamp} disabled={stamping || !!done}
-            style={{ background: done ? '#2a2f37' : C.gold, color: done ? C.muted : '#08130d', border: 'none',
+          <button onClick={stamp} disabled={stamping}
+            style={{ background: C.gold, color: '#08130d', border: 'none',
               borderRadius: 8, padding: '5px 13px', fontWeight: 800, fontSize: 13,
-              cursor: stamping || done ? 'default' : 'pointer' }}>
-            {done === 'stamped' ? 'Carimbado ✓' : stamping ? '…' : 'Carimbar (manual)'}
+              cursor: stamping ? 'default' : 'pointer' }}>
+            {stamping ? '…' : 'Carimbar (manual)'}
           </button>
-          <button onClick={dismiss} disabled={stamping || !!done}
-            style={{ background: 'transparent', color: done ? C.muted : C.text, border: `1px solid ${C.border}`,
+          <button onClick={dismiss} disabled={stamping}
+            style={{ background: 'transparent', color: C.text, border: `1px solid ${C.border}`,
               borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13,
-              cursor: stamping || done ? 'default' : 'pointer' }}>
-            {done === 'dismissed' ? 'Dispensado ✓' : 'Dispensar (legítimo)'}
+              cursor: stamping ? 'default' : 'pointer' }}>
+            Dispensar (legítimo)
           </button>
           {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
         </div>

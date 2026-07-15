@@ -435,3 +435,18 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   de ecrã, cosmética, não comparação de física). (2) quando um user reporta "bug de ordenação", **provar
   com a trajetória temporal COMPLETA** (a série de leituras por `played_at`), não com 1 par — foi a
   trajetória que provou que a queda era real. → `JOURNAL_2026-07-20.md`.
+- 2026-07-20 — **REGRA DA CASA (worklists):** nenhuma lista mostra trabalho já feito — o Rui nunca
+  re-encontra um caso que resolveu. **Solução (padrão para TODA worklist):** resolvido **sai da lista
+  NA HORA** por qualquer via — (1) carimbo/dispensar no card → o card **sai já** (`onResolved` remove,
+  sem Recarregar); (2) correção por OUTRA via (editor da mão, outro painel, recado ao Code) → a lista
+  **confere contra a BD ao vivo** (o filtro `_drop_resolved`/estado do `b3d6c0f` + re-`load` no **focus**
+  do separador). Aplicado a grupo1 + quedas; a arquitetura (backend filtra resolvido + frontend remove
+  otimista + re-confere no focus) é o molde de qualquer worklist futura. → `JOURNAL_2026-07-20.md`.
+- 2026-07-20 — **CLASSE nova de leitura não-fiável: OCLUSÃO FÍSICA (≠ OCR, ≠ swap).** As "quedas" de
+  dígito (O Sander 819→812→813; Lauro 30→24) eram o **painel do IT (overlay) POR CIMA da placa** no
+  frame da captura (o Rui estava lá) → a placa desse seat ficou tapada. **Assinatura barata:** o MESMO
+  seat a variar **±poucos dólares** em mãos vizinhas (819/812/813) = oclusão, **não** acumulação (que
+  só sobe em saltos de ½-coroa) nem swap (valor de OUTRO seat). **Regra:** a **leitura limpa da
+  trajetória manda** (O Sander = $819) → corrige+carimba; candidata a **re-leitura automática da melhor
+  imagem**. Distinta do swap (a classe grande, ver sweep) e do misread de dígitos verdadeiro.
+  → `JOURNAL_2026-07-20.md`.
