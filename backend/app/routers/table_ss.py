@@ -2183,62 +2183,81 @@ def set_bounties_override(payload: dict = Body(...),
     pl = pn.get("players_list") or []
     # APA §B.2 (Fase 1): mapa nome→entrada por real_name || chave (byte-idêntico hoje;
     # em Fase 2 a chave do apa é o hash e o patch continua a bater pelo nome real).
+    # RAIZ da classe (Rui): os 2 stores (apa por real_name, players_list por name) podem ter
+    # NOMES DIFERENTES para o MESMO seat (variância de OCR: "BrooooooK" vs "BroooooK") → o
+    # carimbo por-nome exato falhava CALADO num deles ($0 fossilizado no apa). Fix: alinhar
+    # por NOME NORMALIZADO (minúsculas + colapsar corridas de letras iguais) quando o exato
+    # falha, SÓ se o match normalizado for ÚNICO (senão não adivinha). Escreve nos DOIS stores.
+    _norm_nm = lambda s: re.sub(r"(.)\1+", r"\1", re.sub(r"\s+", "", (s or "").lower()))
     apa_by_name = {(v.get("real_name") or k): v
                    for k, v in apa.items() if k != "_meta" and isinstance(v, dict)}
+    pl_by_name = {e.get("name"): e for e in pl}
+    apa_by_norm, pl_by_norm = {}, {}
+    for _v in apa_by_name.values():
+        apa_by_norm.setdefault(_norm_nm(_v.get("real_name")), []).append(_v)
+    for _e in pl:
+        pl_by_norm.setdefault(_norm_nm(_e.get("name")), []).append(_e)
+
+    def _store_for(nm, exact, by_norm):
+        s = exact.get(nm)
+        if s is not None:
+            return s
+        c = by_norm.get(_norm_nm(nm)) or []
+        return c[0] if len(c) == 1 else None      # normalizado ÚNICO; senão não adivinha
+
     updated, confirmed, unconfirmed, plan = [], [], [], []
-    touched = set(bounties) | set(confirm) | set(unconfirm)
-    for e in pl:
-        nm = e.get("name")
-        if nm not in touched:
+    partial = []                                   # gravado num store só (o outro não existe)
+    not_found = []
+    touched = list(dict.fromkeys(list(bounties) + list(confirm) + list(unconfirm)))
+    for nm in touched:
+        e = _store_for(nm, pl_by_name, pl_by_norm)          # players_list
+        aseat = _store_for(nm, apa_by_name, apa_by_norm)    # all_players_actions
+        if e is None and aseat is None:
+            not_found.append(nm)
             continue
-        entry = {"name": nm, "old": e.get("bounty_value_usd"),
-                 "was_confirmed": bool(e.get("bounty_confirmed"))}
+        stores = [s for s in (e, aseat) if s is not None]
+        entry = {"name": nm, "old": (e or aseat or {}).get("bounty_value_usd"),
+                 "was_confirmed": bool((e or aseat or {}).get("bounty_confirmed")),
+                 "stores": ("pl" if e else "") + ("+apa" if aseat else "")}
         if nm in bounties:
             try:
                 val = float(bounties[nm])
-                # proveniência do selo: 'derived_green_ko' (verde do eliminado, Etapa 2)
-                # OU 'manual' (default). Fontes não-seladas caem para manual.
                 src = sources.get(nm) or SOURCE_MANUAL
                 if src not in SEALED_BOUNTY_SOURCES:
                     src = SOURCE_MANUAL
                 if not dry:
-                    # SELO (invariante do Rui): carimbo → nenhum processo automático
-                    # (re-deanon/re-apply/scrub) escreve por cima. Marca `bounty_source`
-                    # nos DOIS stores + limpa 'por rever'.
-                    e["bounty_value_usd"] = val
-                    e["bounty_source"] = src
-                    e.pop("crown_review", None)
-                    e.pop("bounty_review", None)
-                    if nm in apa_by_name:
-                        apa_by_name[nm]["bounty_value_usd"] = val
-                        apa_by_name[nm]["bounty_source"] = src
-                        apa_by_name[nm].pop("crown_review", None)
-                        apa_by_name[nm].pop("bounty_review", None)
+                    # SELO nos DOIS stores (carimbo intocável por automático) + limpa 'por rever'.
+                    for s in stores:
+                        s["bounty_value_usd"] = val
+                        s["bounty_source"] = src
+                        s.pop("crown_review", None)
+                        s.pop("bounty_review", None)
                 entry["new"] = val
                 entry["source"] = src
                 updated.append(nm)
+                if e is None or aseat is None:
+                    partial.append(nm)              # só existe num store → escrita PARCIAL (honesto)
             except (ValueError, TypeError):
                 entry["error"] = "valor inválido"
         if nm in confirm:
             if not dry:
-                # `bounty_confirmed` faz parte do selo (is_bounty_sealed) → espelha
-                # no apa para os DOIS stores ficarem selados coerentes.
-                e["bounty_confirmed"] = True
-                if nm in apa_by_name:
-                    apa_by_name[nm]["bounty_confirmed"] = True
+                for s in stores:
+                    s["bounty_confirmed"] = True
             entry["confirm"] = True
             confirmed.append(nm)
+            if e is None or aseat is None:
+                partial.append(nm)
         if nm in unconfirm:
             if not dry:
-                e.pop("bounty_confirmed", None)
-                if nm in apa_by_name:
-                    apa_by_name[nm].pop("bounty_confirmed", None)
+                for s in stores:
+                    s.pop("bounty_confirmed", None)
             entry["confirm"] = False
             unconfirmed.append(nm)
         plan.append(entry)
-    not_found = [n for n in touched if n not in {p["name"] for p in plan}]
+    partial = list(dict.fromkeys(partial))
     if dry:
-        return {"dry_run": True, "hand_id": hand_id, "plan": plan, "not_found": not_found}
+        return {"dry_run": True, "hand_id": hand_id, "plan": plan,
+                "not_found": not_found, "partial": partial}
     pn["players_list"] = pl
     conn = get_conn()
     try:
@@ -2248,10 +2267,11 @@ def set_bounties_override(payload: dict = Body(...),
         conn.commit()
     finally:
         conn.close()
-    logger.info("table-ss set-bounties: %s updated=%d confirmed=%d unconfirmed=%d not_found=%d",
-                hand_id, len(updated), len(confirmed), len(unconfirmed), len(not_found))
+    logger.info("table-ss set-bounties: %s updated=%d confirmed=%d unconfirmed=%d not_found=%d partial=%d",
+                hand_id, len(updated), len(confirmed), len(unconfirmed), len(not_found), len(partial))
     return {"status": "set", "hand_id": hand_id, "updated": updated,
-            "confirmed": confirmed, "unconfirmed": unconfirmed, "not_found": not_found}
+            "confirmed": confirmed, "unconfirmed": unconfirmed,
+            "not_found": not_found, "partial": partial}
 
 
 # ── Varrimento de integridade de lugares (READ-ONLY) — padrão da GG-6118579134 ──

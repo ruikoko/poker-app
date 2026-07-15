@@ -369,10 +369,6 @@ export const ggHealth = {
     req('POST', '/gg-health/crown-recovery/suggest', { hand_id: handId }),
   // Worklist de coroas suspeitas (read-only): quedas mesmo-hash + fora-de-grelha.
   crownDrops: () => req('GET', '/gg-health/crown-recovery/drops'),
-  // Mass-reads confirmáveis (captura leu 1 valor em bloco; ≥1 seat com prova de queda).
-  crownBlockMisreads: () => req('GET', '/gg-health/crown-recovery/block-misreads'),
-  crownBlockDismiss: (handId) =>
-    req('POST', '/gg-health/crown-recovery/block-misreads/dismiss', { hand_id: handId }),
   // Cache das sugestões PAGAS (persiste entre refreshes) — {hand_id: payload}.
   crownSuggestionsCache: () => req('GET', '/gg-health/crown-recovery/suggestions-cache'),
   // Dispensar um caso de queda (legítimo — re-entrada/crescimento/migração). Não escreve.
