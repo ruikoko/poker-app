@@ -45,6 +45,11 @@ REVIEW_LIVE_ZERO = "live_crown_read_zero"     # KO (base TS>0) + VIVO (HH) + cor
 # contaminação (o "forte" da heurística é só um proxy visível deste crivo).
 BOUNTY_SOURCE_KEY = "bounty_source"
 SOURCE_GREEN_KO = "green_ko"                  # derivado do verde-KO na coroa do eliminador
+# FÍSICA DO VERDE (decisão Rui, 20 Jul, provada pela imagem — GG-6132507189 Ward E):
+# o VERDE lido na coroa de quem elimina = METADE da coroa da vítima → a coroa da casa
+# (o instantâneo, unidade da BD) do eliminado = verde × 2. Supersede o "tal-e-qual sem
+# ×2" (17-18 Jul), que foi erro de tradução da mecânica. Ver REGISTO_CONCEITO 2026-07-20.
+GREEN_TO_CROWN_FACTOR = 2.0
 
 # ── SELO do bounty (invariante do Rui, 18 Jul) ────────────────────────────────
 # "O que o Rui valida fica selado — NENHUM processo automático escreve por cima."
@@ -99,8 +104,9 @@ def busted_real_names(raw: Optional[str], apa: Optional[dict]) -> set:
 
 
 # ── Verde-KO (Vision — SHOULD; nunca gate do invariante) ──────────────────────
-# Linha do prompt novo: "GREEN_KO: <winner_name> | <value>" (o valor verde = instantâneo
-# do bounty do eliminado, na coroa de quem o eliminou).
+# Linha do prompt novo: "GREEN_KO: <winner_name> | <value>" (o valor verde na coroa de
+# quem elimina = METADE da coroa da vítima → coroa da vítima = verde × 2, ver
+# GREEN_TO_CROWN_FACTOR e resolve_seat_bounty).
 def parse_green_kos(vision_data: Optional[dict]) -> list:
     """Lista de {winner, value} dos verdes-KO que a Vision emitiu. [] se ausente."""
     out = []
@@ -137,7 +143,8 @@ def resolve_seat_bounty(
         · Sem base e sem TS (formato desconhecido) OU coroa >0 num KO → coroa da Vision
           tal-e-qual (value, None, None); caminho normal INALTERADO (#KO-CROWN-INSTANT-FIX).
     - Seat ELIMINADO (HH) → NUNCA a coroa por-seat da Vision. Se houver exatamente 1
-      eliminado E 1 verde → (verde, None, 'green_ko') [proveniência marcada = crivo].
+      eliminado E 1 verde → (verde × 2, None, 'green_ko') [coroa da vítima = verde×2,
+      GREEN_TO_CROWN_FACTOR; proveniência marcada = crivo].
       Senão (0 verdes, >1 verde, >1 eliminado) → (None, review, None).
 
     `source` é a marca de proveniência (SOURCE_GREEN_KO só quando derivado do verde);
@@ -161,8 +168,10 @@ def resolve_seat_bounty(
         return vision_crown, None, None
     greens = green_kos or []
     # Caso limpo (SHOULD): 1 eliminado nesta mão + 1 verde → liga-se sem ambiguidade.
+    # FÍSICA DO VERDE (Rui, 20 Jul): o verde na coroa do matador = METADE da coroa da
+    # vítima → a coroa da casa (instantâneo) do eliminado = verde × 2 (GREEN_TO_CROWN_FACTOR).
     if len(busted_names) == 1 and len(greens) == 1:
-        return greens[0]["value"], None, SOURCE_GREEN_KO
+        return round(greens[0]["value"] * GREEN_TO_CROWN_FACTOR, 2), None, SOURCE_GREEN_KO
     if not greens:
         return None, REVIEW_NO_GREEN, None
     return None, REVIEW_AMBIGUOUS, None
@@ -170,7 +179,7 @@ def resolve_seat_bounty(
 
 def _apply_seat_bounty(seat: dict, val, review, source) -> None:
     """CIRÚRGICO — só toca os 3 campos do bounty; nome/stack/posição/cartas intactos."""
-    seat["bounty_value_usd"] = val                 # None (NULL) ou o verde (instantâneo)
+    seat["bounty_value_usd"] = val                 # None (NULL) ou a coroa (verde×2)
     if review:
         seat[BOUNTY_REVIEW_KEY] = review
     else:

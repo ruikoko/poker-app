@@ -399,3 +399,19 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   absoluta e tem de vir num link que ABRA (o meu 1º link caiu no dashboard por estar no domínio do
   frontend, que não serve `/api` em produção — a imagem vive no backend). Ver `feedback_hand_refs_by_link`,
   `feedback_review_panel_no_prefill_guess`, e o fecho da GG-6090481210 (corrigida a $421.87 selado).
+
+## 2026-07-20 — física do verde-KO: a coroa da vítima = verde × 2
+
+- 2026-07-20 — **Problema:** a coroa do jogador eliminado num KO era gravada como o **verde
+  tal-e-qual** (sem ×2) — uma tradução errada da mecânica PKO 50/50 assumida em 17-18 Jul sem
+  ninguém ter arbitrado a física pela imagem. Resultado: 9 `derived_green_ko` (+2 `green_ko`) a
+  METADE do valor certo (Ward E $62.5 quando as suas ~10 leituras do torneio diziam sempre $125).
+  → **Solução:** o Rui arbitrou pela IMAGEM (GG-6132507189) — **verde na coroa do matador = metade
+  da coroa da vítima → coroa = verde × 2**. Fix no **chokepoint único** (`resolve_seat_bounty`,
+  `GREEN_TO_CROWN_FACTOR=2.0`) cobre a Etapa 2 e o scrub de ingest de uma vez; conceito falso
+  "migração de unidade" extinto; os 9 re-carimbados a dobrar por endpoint (selados). **→ Lição:**
+  uma "mecânica traduzida" (regra derivada de raciocínio, não de olhar a evidência) é uma hipótese,
+  não um facto — a física de um valor ótico (a coroa) só se sela DEPOIS de a imagem a arbitrar
+  (corolário direto da lição do $437.5, agora aplicada à REGRA e não só ao caso). E ao corrigir uma
+  fórmula partilhada, fazê-lo no chokepoint (1 sítio) e não em cada caller. → `JOURNAL_2026-07-20.md`;
+  `REGISTO_CONCEITO 2026-07-20`.

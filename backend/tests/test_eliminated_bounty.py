@@ -41,12 +41,12 @@ def test_resolve_non_eliminated_passthrough():
     assert val == 253.75 and rev is None and src is None
 
 
-def test_resolve_eliminated_one_green_derives_instant():
-    # 1 eliminado + 1 verde → grava o verde (instantâneo, source green_ko); ×2 → total.
+def test_resolve_eliminated_one_green_derives_crown_x2():
+    # 1 eliminado + 1 verde → coroa da vítima = verde × 2 (física do Rui, 20 Jul); green_ko.
     greens = [{"winner": "YanayB", "value": 102.27}]
     val, rev, src = resolve_seat_bounty("Lauro Dermio", 170.63,
                                         busted_names={"Lauro Dermio"}, green_kos=greens)
-    assert val == 102.27 and rev is None and src == SOURCE_GREEN_KO   # NUNCA 170.63
+    assert val == 204.54 and rev is None and src == SOURCE_GREEN_KO   # verde×2; NUNCA 170.63
 
 
 def test_resolve_eliminated_no_green_is_review():
@@ -96,9 +96,9 @@ def test_scrub_with_green_derives_both_with_source():
     apa, pn = _apa_pn()
     vd = {"green_kos": [{"winner": "YanayB", "value": 102.27}]}
     scrub_eliminated_bounties(apa, pn, _HH, vision_data=vd)
-    assert apa["Hero"]["bounty_value_usd"] == 102.27                # NUNCA 170.63
+    assert apa["Hero"]["bounty_value_usd"] == 204.54               # verde×2; NUNCA 170.63
     assert apa["Hero"][BOUNTY_SOURCE_KEY] == SOURCE_GREEN_KO
-    assert pn["players_list"][0]["bounty_value_usd"] == 102.27
+    assert pn["players_list"][0]["bounty_value_usd"] == 204.54
     assert pn["players_list"][0][BOUNTY_SOURCE_KEY] == SOURCE_GREEN_KO
 
 

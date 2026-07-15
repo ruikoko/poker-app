@@ -207,8 +207,7 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
         for i in range(len(seq) - 1):
             a, b = seq[i], seq[i + 1]
             # SELO: se o valor BAIXO (o que seria acusado) está SELADO = carimbo do Rui →
-            # NUNCA entra no detetor (validado; não se acusa a si próprio). Cobre também o
-            # caso da migração de unidade (o baixo selado = coroa certa, o alto era o total).
+            # NUNCA entra no detetor (validado; não se acusa a si próprio).
             if b[6]:
                 continue
             if b[1] < a[1] and (a[1] - b[1]) >= 1.0:      # queda >= $1 (exclui cosmético)
@@ -223,14 +222,12 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
         if kk in seen:
             continue
         seen.add(kk); og.append(o)
-    # Dispensados (legítimos: re-entrada/crescimento/migração) — não reaparecem.
+    # Dispensados (legítimos: re-entrada/crescimento) — não reaparecem.
     dismissed = _drops_dismissed_set()
     drops = [d for d in drops if (d["hand_id"], _norm_key(d["player"])) not in dismissed]
     og = [o for o in og if (o["hand_id"], _norm_key(o["player"])) not in dismissed]
-    n_mig = sum(1 for d in drops if d.get("kind") == "unit_migration")
     return {"drops": drops, "off_grid": og,
-            "counts": {"drops": len(drops), "misread": len(drops) - n_mig,
-                       "unit_migration": n_mig, "off_grid": len(og)}}
+            "counts": {"drops": len(drops), "misread": len(drops), "off_grid": len(og)}}
 
 
 def _ensure_drops_dismissed():
@@ -256,8 +253,8 @@ def _drops_dismissed_set() -> set:
 
 @router.post("/drops/dismiss")
 def crown_drops_dismiss(payload: dict = Body(...), current_user=Depends(require_auth_or_api_key)):
-    """Dispensar um caso da revisão de quedas (legítimo — re-entrada/crescimento/migração de
-    unidade): NÃO escreve coroa, só marca para não reaparecer. Body: {hand_id, player}."""
+    """Dispensar um caso da revisão de quedas (legítimo — re-entrada/crescimento): NÃO
+    escreve coroa, só marca para não reaparecer. Body: {hand_id, player}."""
     hand_id = (payload or {}).get("hand_id")
     player = (payload or {}).get("player")
     if not hand_id or not player:
@@ -274,13 +271,43 @@ def crown_drops_dismiss(payload: dict = Body(...), current_user=Depends(require_
     return {"status": "dismissed", "hand_id": hand_id, "player": player}
 
 
+@router.post("/drops/undismiss")
+def crown_drops_undismiss(payload: dict = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """Reabrir casos de queda dispensados — remove a(s) linha(s) de `crown_drop_dismissed`
+    → voltam à worklist. Body: {hand_id, player} (surgical) OU {all: true} (reabre todos).
+    Usado para desfazer as dispensas feitas sob a premissa FALSA "migração de unidade" (os
+    valores altos antigos eram COROAS CERTAS; a fórmula do verde passou a ×2). Devolve nº reaberto."""
+    all_flag = bool((payload or {}).get("all"))
+    hand_id = (payload or {}).get("hand_id")
+    player = (payload or {}).get("player")
+    if not all_flag and not (hand_id and player):
+        raise HTTPException(400, "hand_id+player OU all:true obrigatórios")
+    _ensure_drops_dismissed()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if all_flag:
+                cur.execute("DELETE FROM crown_drop_dismissed")
+            else:
+                cur.execute("DELETE FROM crown_drop_dismissed WHERE hand_id=%s AND player=%s",
+                            (hand_id, _norm_key(player)))
+            n = cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("[crown-recovery] undismiss all=%s hand=%s player=%s -> %d reaberto(s)",
+                all_flag, hand_id, player, n)
+    return {"status": "undismissed", "reopened": n}
+
+
 @router.post("/suggest")
 def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(require_auth)):
     """Etapa 2 — "sugerir" LÊ AMBOS numa só chamada (pedido do Rui): corre a Vision UMA vez
-    na Gold e devolve (a) `busted` = bounty do ELIMINADO derivado do VERDE (tal-e-qual, sem
-    ×2); (b) `crowns` = a coroa DOURADA de cada jogador lida no `players_list` (para o
-    matador). Read-only — NÃO escreve. O Rui confere/edita os dois antes de carimbar.
-    Body: {hand_id}."""
+    na Gold e devolve (a) `busted` = coroa do ELIMINADO = VERDE × 2 (fórmula do Rui, 20 Jul;
+    GREEN_TO_CROWN_FACTOR); (b) `crowns` = a coroa DOURADA de cada jogador lida no
+    `players_list` (para o matador). `greens`/`green_total` trazem o verde CRU (informativo).
+    Read-only — NÃO escreve. O Rui confere/edita antes de carimbar. Body: {hand_id}."""
     import base64
     from app.services.eliminated_bounty import (
         busted_real_names, resolve_seat_bounty, parse_green_kos, SOURCE_GREEN_KO)

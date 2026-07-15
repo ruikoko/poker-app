@@ -5,9 +5,9 @@ import ZoomImg from '../components/ZoomImg'
 
 // Bounties recuperáveis (#CROWN-RECOVERY) — ETAPA 2: sugerir (Vision só-ao-verde) +
 // carimbar (escrita SELADA). Grupo 1 = jogador bustou na HH E coroa NULL → o bounty
-// dele está a VERDE na coroa do matador; grava-se TAL-E-QUAL (SEM ×2, unidade=coroa)
-// com bounty_source='derived_green_ko'. A dourada do matador corrige-se à mão ('manual').
-// Só a imagem arbitra os valores; a escrita só acontece por carimbo do Rui.
+// dele está a VERDE na coroa do matador; a coroa da casa = VERDE × 2 (fórmula do Rui,
+// 20 Jul) com bounty_source='derived_green_ko'. A dourada do matador corrige-se à mão
+// ('manual'). Só a imagem arbitra os valores; a escrita só acontece por carimbo do Rui.
 
 const C = {
   card: '#161d19', border: 'rgba(255,255,255,0.10)', text: '#e8ece9',
@@ -84,7 +84,7 @@ export default function CrownRecovery() {
         coroa dourada dele ficou <b style={{ color: C.red }}>NULL</b> — o bounty está a{' '}
         <b style={{ color: C.green }}>verde</b> na coroa de quem o eliminou. <b>Etapa 2</b>: carrega{' '}
         <b>Sugerir</b> (a Vision lê só o verde) ou lê à mão da imagem, e <b>Carimbar</b> grava{' '}
-        <b>selado</b> — o verde <b>tal-e-qual</b> (sem ×2) como <code>derived_green_ko</code>, a dourada
+        <b>selado</b> — a coroa = <b>verde × 2</b> como <code>derived_green_ko</code>, a dourada
         do matador como <code>manual</code>. Nenhum processo automático pisa um carimbo. Só a imagem arbitra.
       </p>
 
@@ -240,7 +240,7 @@ function DropsWorklist({ C }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {drops.map((d, i) => (
-          <DropCard key={'d' + i} C={C} kind="queda" dropKind={d.kind} player={d.player}
+          <DropCard key={'d' + i} C={C} kind="queda" player={d.player}
             handId={d.hand_id} handDb={d.hand_db_id} lowVal={d.low} refVal={d.ref}
             entryId={d.entry_id} refEntryId={d.ref_entry_id} refHandId={d.ref_hand_id} />
         ))}
@@ -255,8 +255,7 @@ function DropsWorklist({ C }) {
   )
 }
 
-function DropCard({ C, kind, dropKind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId }) {
-  const isMig = kind === 'queda' && dropKind === 'unit_migration'   // total→coroa, não é queda
+function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId }) {
   const [val, setVal] = useState('')          // VAZIO — nunca a referência (palpite perigoso); só a imagem arbitra
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -303,19 +302,16 @@ function DropCard({ C, kind, dropKind, player, handId, handDb, lowVal, refVal, r
       <div style={{ flex: 1, minWidth: 240 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontSize: 14 }}>{player}</b>
-          <span style={{ fontSize: 10, color: '#08130d', background: isMig ? C.gold : (kind === 'queda' ? C.red : C.gold),
-            borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{isMig ? 'migração de unidade (provável)' : kind}</span>
+          <span style={{ fontSize: 10, color: '#08130d', background: kind === 'queda' ? C.red : C.gold,
+            borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{kind}</span>
           <Link to={`/hand/${handDb}`} style={{ color: C.gold, fontSize: 12, textDecoration: 'none',
             fontFamily: 'ui-monospace,monospace' }}>{handId}</Link>
         </div>
         <div style={{ marginTop: 6, fontSize: 13 }}>
-          {isMig
-            ? <>leu <b style={{ color: C.green }}>${lowVal}</b> (coroa, <b>selado</b>) · o ${refVal} anterior era o{' '}
-                <b>TOTAL</b> (unidade errada) — <b>não é queda</b>, é migração de unidade. Confirma na imagem e dispensa.</>
-            : kind === 'queda'
-              ? <>leu <b style={{ color: C.red }}>${lowVal}</b> (a rever) · referência anterior{' '}
-                  <b style={{ color: C.green }}>${refVal}</b> {refHandId && <span style={{ color: C.muted, fontSize: 11 }}>({refHandId})</span>}</>
-              : <>leu <b style={{ color: C.gold }}>${lowVal}</b> = {ratio}B — fora da grelha das metades</>}
+          {kind === 'queda'
+            ? <>leu <b style={{ color: C.red }}>${lowVal}</b> (a rever) · referência anterior{' '}
+                <b style={{ color: C.green }}>${refVal}</b> {refHandId && <span style={{ color: C.muted, fontSize: 11 }}>({refHandId})</span>}</>
+            : <>leu <b style={{ color: C.gold }}>${lowVal}</b> = {ratio}B — fora da grelha das metades</>}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ color: C.muted, fontSize: 13 }}>corrigir $</span>
@@ -463,7 +459,7 @@ function Group1Card({ h, C, onDone, suggestion }) {
         {/* editor de carimbo: eliminado (verde) + matador (dourada) */}
         <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 8,
           background: 'rgba(224,112,95,.07)', border: '1px solid rgba(224,112,95,.3)' }}>
-          <div style={lbl(C)}>Eliminado · bounty = verde (tal-e-qual, sem ×2){multi ? ' · MULTI-KO (verde = soma)' : ''}</div>
+          <div style={lbl(C)}>Eliminado · coroa = verde × 2{multi ? ' · MULTI-KO (soma dos verdes ×2)' : ''}</div>
           {busted.map(b => row(b.name, 'verde', C.green, multi ? expectedFor(b.name) : null))}
           {multi && meta && (
             <div style={{ marginTop: 6, fontSize: 12, color: C.muted }}>
