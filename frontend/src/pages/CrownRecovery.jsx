@@ -254,7 +254,8 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refH
     setStamping(true); setMsg(null)
     try {
       const r = await tableSs.setBounties(handId, { bounties: { [player]: v }, sources: { [player]: 'manual' } })
-      if ((r?.updated || []).length) { onResolved && onResolved() }   // carimbado → fora
+      if ((r?.partial || []).length) { setStamping(false); setMsg({ ok: false, t: '⚠ gravado só num store (mismatch de nome) — avisa o Code' }) }
+      else if ((r?.updated || []).length) { onResolved && onResolved() }   // carimbado → fora
       else { setStamping(false); setMsg({ ok: false, t: `Nome não encontrado no players_list${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` }) }
     } catch (e) { setStamping(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
   }
@@ -383,9 +384,13 @@ function Group1Card({ h, C, onDone, suggestion }) {
     setStamping(true); setMsg(null)
     try {
       const r = await tableSs.setBounties(h.hand_id, { bounties, sources })
-      const nf = (r?.not_found || [])
+      const nf = (r?.not_found || []), part = (r?.partial || [])
+      if (nf.length || part.length) {   // NUNCA "feito" calado se algo não gravou nos 2 stores
+        setMsg({ ok: false, t: `⚠ ${part.length ? 'parcial (só 1 store): ' + part.join(', ') : ''}${nf.length ? ' não encontrados: ' + nf.join(', ') : ''} — avisa o Code` })
+        return
+      }
       setDone(true)
-      setMsg({ ok: true, t: `Carimbado ✓ (${(r?.updated || []).length} selados${nf.length ? `, ${nf.length} não encontrados: ${nf.join(', ')}` : ''}).` })
+      setMsg({ ok: true, t: `Carimbado ✓ (${(r?.updated || []).length} selados).` })
       if (onDone) setTimeout(onDone, 1200)
     } catch (e) { setMsg({ ok: false, t: 'Falha a carimbar: ' + (e?.message || e) }) }
     finally { setStamping(false) }

@@ -198,7 +198,14 @@ export function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
         + (accept ? `\nAceitar abaixo de ½-base como legítima (sai das suspeitas + gate HRC).` : '')
         + `\n\nGravar?`
       if (!window.confirm(msg)) { setBusy(false); return }
-      await tableSs.setBounties(handId, body)
+      const res = await tableSs.setBounties(handId, body)
+      // NUNCA "feito" calado: se não gravou (nome não bate) ou gravou só num store, AVISA e NÃO fecha.
+      const nf = res?.not_found || [], part = res?.partial || []
+      if (nf.length || part.length) {
+        alert('⚠ NÃO gravou' + (part.length ? ' (parcial: ' + part.join(', ') + ')' : '')
+          + (nf.length ? ' — nome não encontrado: ' + nf.join(', ') : '') + '. Avisa o Code (mismatch de nome).')
+        setBusy(false); return
+      }
       setEditing(false)
       onEdited && onEdited()
     } catch (e) { alert('Erro: ' + (e.message || e)); setBusy(false) }
