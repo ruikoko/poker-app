@@ -363,10 +363,10 @@ export const ggHealth = {
   crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
   crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),
   crownRecoveryState: () => req('GET', '/gg-health/crown-recovery'),
-  // Etapa 2 — "sugerir só-ao-verde": corre a Vision na Gold e devolve o bounty do
-  // eliminado derivado do VERDE (tal-e-qual, SEM ×2). Read-only (não escreve).
+  // Etapa 2 — "sugerir": corre a Vision UMA vez e devolve AMBOS — {busted:{nome:verde},
+  // crowns:{nome:dourada}}. Read-only (não escreve). O Rui confere/edita antes de carimbar.
   crownRecoverySuggest: (handId) =>
-    req('POST', `/screenshots/green-ko-dryrun?hand_ids=${encodeURIComponent(handId)}`),
+    req('POST', '/gg-health/crown-recovery/suggest', { hand_id: handId }),
   // Worklist de coroas suspeitas (read-only): quedas mesmo-hash + fora-de-grelha.
   crownDrops: () => req('GET', '/gg-health/crown-recovery/drops'),
   crownSampleCandidates: (reselect = false) => req('GET', `/gg-health/crown-sample/candidates${reselect ? '?reselect=true' : ''}`),

@@ -13,7 +13,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 
 from app.auth import require_auth
 from app.db import query
@@ -215,6 +215,67 @@ def crown_drops(current_user=Depends(require_auth)):
         seen.add(kk); og.append(o)
     return {"drops": drops, "off_grid": og,
             "counts": {"drops": len(drops), "off_grid": len(og)}}
+
+
+@router.post("/suggest")
+def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(require_auth)):
+    """Etapa 2 — "sugerir" LÊ AMBOS numa só chamada (pedido do Rui): corre a Vision UMA vez
+    na Gold e devolve (a) `busted` = bounty do ELIMINADO derivado do VERDE (tal-e-qual, sem
+    ×2); (b) `crowns` = a coroa DOURADA de cada jogador lida no `players_list` (para o
+    matador). Read-only — NÃO escreve. O Rui confere/edita os dois antes de carimbar.
+    Body: {hand_id}."""
+    import base64
+    from app.services.eliminated_bounty import (
+        busted_real_names, resolve_seat_bounty, parse_green_kos, SOURCE_GREEN_KO)
+    from app.routers.screenshot import (
+        _extract_hand_data_from_image_claude, _parse_vision_response)
+    from app.services.image_utils import detect_image_mime
+    hand_id = (payload or {}).get("hand_id")
+    if not hand_id:
+        return {"error": "hand_id obrigatório", "busted": {}, "crowns": {}, "image": "none"}
+    rows = query(
+        "SELECT h.id, h.raw, h.all_players_actions AS apa, "
+        "       e.raw_json->>'img_b64' AS gold_img "
+        "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.hand_id = %s", (hand_id,))
+    if not rows:
+        return {"error": "mão não encontrada", "busted": {}, "crowns": {}, "image": "none"}
+    r = rows[0]
+    import json as _json
+    apa = r["apa"] if isinstance(r["apa"], dict) else _json.loads(r["apa"] or "{}")
+    busted = busted_real_names(r["raw"], apa)
+    b64 = r["gold_img"]
+    if not b64:
+        # sem Gold → o verde/coroas não estão guardados; lê à mão da imagem na página.
+        return {"hand_id": hand_id, "busted": {}, "crowns": {}, "image": "none",
+                "note": "sem Gold — lê à mão da imagem"}
+    if "," in b64[:40]:
+        b64 = b64.split(",", 1)[1]
+    try:
+        img = base64.b64decode(b64)
+    except Exception:
+        return {"hand_id": hand_id, "busted": {}, "crowns": {}, "image": "none",
+                "error": "imagem ilegível"}
+    text = _extract_hand_data_from_image_claude(img, detect_image_mime(img) or "image/png")
+    data = _parse_vision_response(text) if text else {}
+    greens = parse_green_kos(data)
+    # (a) eliminado → verde derivado (só quando 1 eliminado + 1 verde = limpo)
+    busted_out = {}
+    for name in sorted(busted):
+        val, _review, source = resolve_seat_bounty(name, None, busted_names=busted, green_kos=greens)
+        if source == SOURCE_GREEN_KO and val is not None:
+            busted_out[name] = val
+    # (b) coroa dourada de cada jogador (players_list.bounty_value_usd da Vision)
+    crowns = {}
+    for p in (data.get("players_list") or []):
+        nm = p.get("name"); bv = p.get("bounty_value_usd")
+        if nm and bv is not None:
+            try:
+                crowns[nm] = float(bv)
+            except (TypeError, ValueError):
+                pass
+    return {"hand_id": hand_id, "busted": busted_out, "crowns": crowns,
+            "greens": greens, "image": "gold"}
 
 
 @router.post("/scan")

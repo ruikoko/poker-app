@@ -17,7 +17,10 @@ export default function CrownRecovery() {
   const [st, setSt] = useState(null)
   const [busy, setBusy] = useState(false)
   const [showOver, setShowOver] = useState(false)
+  const [suggestions, setSuggestions] = useState({})   // hand_id -> {busted, crowns}
+  const [batch, setBatch] = useState({ running: false, done: 0, total: 0 })
   const poll = useRef(null)
+  const cancelRef = useRef(false)
 
   const refresh = () => ggHealth.crownRecoveryState().then(setSt).catch(() => {})
   useEffect(() => { refresh(); return () => clearInterval(poll.current) }, [])
@@ -39,6 +42,30 @@ export default function CrownRecovery() {
   const running = st?.status === 'running'
   const idle = !st || st.status === 'idle'
   const g1 = st?.group1 || []
+  const COST_PER_SUGGEST = 0.015          // ~$ por leitura Vision (estimativa; afina-se)
+  const pending = g1.filter(h => !suggestions[h.hand_id])
+
+  // LOTE "Sugerir todos": lê o verde+dourada de TODOS os pendentes, em lotes de 3, com
+  // progresso e CANCELAR (regra permanente). NADA escreve — só pré-preenche os cards.
+  const suggestAll = async () => {
+    if (!pending.length || batch.running) return
+    cancelRef.current = false
+    setBatch({ running: true, done: 0, total: pending.length })
+    const CONC = 3
+    for (let i = 0; i < pending.length; i += CONC) {
+      if (cancelRef.current) break
+      await Promise.all(pending.slice(i, i + CONC).map(async h => {
+        if (cancelRef.current) return
+        try {
+          const r = await ggHealth.crownRecoverySuggest(h.hand_id)
+          setSuggestions(s => ({ ...s, [h.hand_id]: r }))
+        } catch { /* falha individual não pára o lote */ }
+        finally { setBatch(b => ({ ...b, done: b.done + 1 })) }
+      }))
+    }
+    setBatch(b => ({ ...b, running: false }))
+  }
+  const cancelBatch = () => { cancelRef.current = true }
 
   return (
     <div style={{ padding: '18px 22px', color: C.text, maxWidth: 1000, margin: '0 auto' }}>
@@ -76,11 +103,41 @@ export default function CrownRecovery() {
         )}
       </div>
 
+      {/* Lote "Sugerir todos" — lê verde+dourada de todos os pendentes (Vision), com custo */}
+      {g1.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+          <button onClick={suggestAll} disabled={batch.running || pending.length === 0}
+            style={{ background: batch.running || !pending.length ? '#2a2f37' : 'transparent',
+              color: batch.running || !pending.length ? C.muted : C.green,
+              border: `1px solid ${batch.running || !pending.length ? C.border : C.green}`,
+              borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 13,
+              cursor: batch.running || !pending.length ? 'default' : 'pointer' }}>
+            {batch.running ? 'A sugerir…' : `Sugerir todos (${pending.length})`}
+          </button>
+          {!batch.running && pending.length > 0 && (
+            <span style={{ color: C.muted, fontSize: 12 }}>
+              {pending.length} leituras Vision (~${(pending.length * COST_PER_SUGGEST).toFixed(2)}) · nada se escreve
+            </span>
+          )}
+          {batch.running && (
+            <>
+              <span style={{ color: C.muted, fontSize: 13 }}>{batch.done}/{batch.total}</span>
+              <button onClick={cancelBatch}
+                style={{ background: 'transparent', color: C.red, border: `1px solid ${C.red}`,
+                  borderRadius: 8, padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                Cancelar
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {idle && <div style={{ color: C.muted, fontSize: 14 }}>Carrega em “Correr detetor” para varrer as KO/PKO com Gold.</div>}
 
       {/* grupo 1 — recuperáveis (Etapa 2: sugerir + carimbar) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {g1.map(h => <Group1Card key={h.hand_db_id} h={h} C={C} onDone={refresh} />)}
+        {g1.map(h => <Group1Card key={h.hand_db_id} h={h} C={C} onDone={refresh}
+          suggestion={suggestions[h.hand_id]} />)}
       </div>
 
       {/* Coroas — revisão de quedas (worklist na app; quedas mesmo-hash + fora-de-grelha) */}
@@ -267,11 +324,11 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entr
 }
 
 // ── Etapa 2 — cartão do grupo 1 com sugerir (Vision só-ao-verde) + carimbar (selado) ──
-function Group1Card({ h, C, onDone }) {
+function Group1Card({ h, C, onDone, suggestion }) {
   const busted = h.busted || []
   const matadores = (h.matadores || []).filter(m => m.name)
   const [vals, setVals] = useState({})           // name -> string (valor a escrever)
-  const [sugg, setSugg] = useState(null)         // name -> verde sugerido pela Vision
+  const [sugg, setSugg] = useState(null)         // name -> valor sugerido pela Vision
   const [suggesting, setSuggesting] = useState(false)
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -279,23 +336,32 @@ function Group1Card({ h, C, onDone }) {
 
   const setVal = (name, v) => setVals(s => ({ ...s, [name]: v }))
 
+  // aplica {busted, crowns} da Vision: verde→eliminado, dourada→matador (deste card)
+  const applySuggestion = (r) => {
+    const next = {}
+    Object.entries(r?.busted || {}).forEach(([name, v]) => { if (v != null) next[name] = String(v) })
+    const matadorNames = new Set(matadores.map(m => m.name))
+    Object.entries(r?.crowns || {}).forEach(([name, v]) => {
+      if (v != null && matadorNames.has(name)) next[name] = String(v)
+    })
+    if (Object.keys(next).length) {
+      setSugg(next); setVals(v => ({ ...next, ...v }))   // prefill sem apagar edições
+      setMsg({ ok: true, t: 'Vision leu o verde e a dourada — confere antes de carimbar.' })
+      return true
+    }
+    setMsg({ ok: false, t: r?.image === 'none'
+      ? 'Sem Gold — lê à mão da imagem.'
+      : 'Vision não leu valores legíveis — lê à mão da imagem.' })
+    return false
+  }
+
+  // sugestão vinda do LOTE ("Sugerir todos") — pré-preenche quando chega
+  useEffect(() => { if (suggestion && !done) applySuggestion(suggestion) }, [suggestion])
+
   const suggest = async () => {
     setSuggesting(true); setMsg(null)
-    try {
-      const r = await ggHealth.crownRecoverySuggest(h.hand_id)
-      const item = (r?.report || []).find(x => x.hand_id === h.hand_id)
-      const seats = item?.seats || []
-      const next = {}
-      seats.forEach(s => { if (s.bounty != null) next[s.name] = String(s.bounty) })
-      if (Object.keys(next).length) {
-        setSugg(next); setVals(v => ({ ...next, ...v }))   // prefill sem apagar edições
-        setMsg({ ok: true, t: 'Vision leu o verde — confirma antes de carimbar.' })
-      } else {
-        setMsg({ ok: false, t: item?.expected === 'por rever'
-          ? 'Sem Gold / verde não guardado — lê à mão da imagem.'
-          : 'Vision não leu verde legível — lê à mão da imagem.' })
-      }
-    } catch (e) { setMsg({ ok: false, t: 'Falha a sugerir: ' + (e?.message || e) }) }
+    try { applySuggestion(await ggHealth.crownRecoverySuggest(h.hand_id)) }
+    catch (e) { setMsg({ ok: false, t: 'Falha a sugerir: ' + (e?.message || e) }) }
     finally { setSuggesting(false) }
   }
 
