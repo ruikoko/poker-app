@@ -167,14 +167,36 @@ def _reread_crowns(img_b64: str) -> dict | None:
     return out
 
 
+def _refresh_crowns_live(cands: list[dict]) -> list[dict]:
+    """Re-lê as coroas GRAVADAS (player_names) da BD para a seleção já congelada —
+    mantém a lista estável, mas os valores acompanham os selos novos. Read-only."""
+    ids = [c["hand_db_id"] for c in cands if c.get("hand_db_id") is not None]
+    if not ids:
+        return list(cands)
+    rows = query("SELECT id, player_names AS pn FROM hands WHERE id = ANY(%s)", (ids,))
+    live = {r["id"]: _crowns_of(r["pn"]) for r in rows}
+    out = []
+    for c in cands:
+        nc = dict(c)
+        st = live.get(c.get("hand_db_id"))
+        if st is not None:
+            nc["crowns"] = [{"seat": k, "stored": v} for k, v in st.items()]
+        out.append(nc)
+    return out
+
+
 def _build_candidates(force: bool = False) -> list[dict]:
     """Seleciona (ou reusa) as 177 e monta as candidatas com as coroas GRAVADAS
     por seat — SEM Vision, sem custo, sem escrita. Cacheado em `_STATE` para o
     preview ("Ver candidatas") e o run usarem o MESMO conjunto (sorteio fixo →
     lista estável). `force=True` re-seleciona."""
     with _LOCK:
-        if _STATE.get("candidates") and not force:
-            return list(_STATE["candidates"])
+        cached = _STATE.get("candidates")
+    if cached and not force:
+        # SELEÇÃO congelada (sorteio fixo), mas VALORES ao vivo: re-lê as coroas
+        # gravadas da BD a cada chamada → uma mão selada esta semana mostra o valor
+        # novo (antes o cache servia o valor antigo até `reselect`). Read-only.
+        return _refresh_crowns_live(cached)
     sample = _select_sample()
     cands = []
     for r in sample:

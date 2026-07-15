@@ -124,7 +124,7 @@ export default function CrownSample() {
               <HandImage handDbId={c.hand_db_id} alt="gold" style={{ width: 300 }} />
               <div style={{ flex: 1, minWidth: 240 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                  <Link to={`/hrc-results/hand/${c.hand_db_id}`}
+                  <Link to={`/hand/${c.hand_db_id}`}
                     style={{ color: C.yellow, fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>
                     {c.hand_id}
                   </Link>
