@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ggHealth, API_ROOT } from '../api/client'
-import ZoomImg from '../components/ZoomImg'
+import { ggHealth } from '../api/client'
+import HandImage from '../components/HandImage'
 
 // Amostrador de coroas Gold — #CROWN-SAMPLE-VERIFY.
 // Modo por defeito: "Ver candidatas" (177 mãos com IMAGEM + coroas GRAVADAS por
@@ -121,20 +121,7 @@ export default function CrownSample() {
           return (
             <div key={c.hand_db_id} style={{ background: C.card, border: `1px solid ${C.border}`,
               borderRadius: 10, padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-              {c.entry_id != null && (
-                <ZoomImg src={`${API_ROOT}/api/screenshots/image/${c.entry_id}`} alt="gold"
-                  onError={e => { e.currentTarget.style.display = 'none'
-                    const n = e.currentTarget.nextSibling; if (n) n.style.display = 'flex' }}
-                  style={{ width: 300, maxWidth: '100%', borderRadius: 8, objectFit: 'contain',
-                    border: `1px solid ${C.border}`, background: '#000' }} />
-              )}
-              {c.entry_id != null && (
-                <div style={{ display: 'none', width: 300, maxWidth: '100%', minHeight: 110,
-                  alignItems: 'center', justifyContent: 'center', borderRadius: 8,
-                  border: `1px dashed ${C.border}`, color: C.muted, fontSize: 12 }}>
-                  imagem indisponível — abre a mão
-                </div>
-              )}
+              <HandImage handDbId={c.hand_db_id} alt="gold" style={{ width: 300 }} />
               <div style={{ flex: 1, minWidth: 240 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                   <Link to={`/hrc-results/hand/${c.hand_db_id}`}

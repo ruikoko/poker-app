@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ggHealth, tableSs, captureTriage, suspicious, importHealth, API_ROOT } from '../api/client'
+import { ggHealth, tableSs, captureTriage, suspicious, importHealth, absImageUrl } from '../api/client'
 import ImportHealthPage from './ImportHealth'
 import CaptureTriagePage from './CaptureTriage'
 import SuspiciousHandsPage from './SuspiciousHands'
-import ZoomImg from '../components/ZoomImg'
+import HandImage from '../components/HandImage'
 
 // "Saúde Import" (casa única consolidada 11 Jul — desenho da antiga Saúde GG).
 // Vista por IMAGEM + painéis migrados (Saúde Import, Marcadas/captura, Mãos
@@ -85,7 +85,7 @@ function NumBadge({ im }) {
   return <span style={{ fontSize: 11, color: '#64748b' }}>—</span>
 }
 
-function imgSrc(im) { return API_ROOT + im.image_url }
+function imgSrc(im) { return absImageUrl(im.image_url) }
 
 function Row({ im, group, onZoom, selected, onToggleSel, onLink, onResolve = () => {} }) {
   const src = imgSrc(im)
@@ -220,7 +220,7 @@ function SwapModal({ im, onClose, onDone }) {
         {err && <div style={{ color: '#fca5a5', marginBottom: 8, fontSize: 13 }}>Erro: {err}</div>}
         {!data ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <ZoomImg src={API_ROOT + data.capture.image_url} alt="" style={{ width: 300, maxWidth: '100%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
+            <HandImage url={data.capture.image_url} style={{ width: 300, alignSelf: 'flex-start' }} />
             <div style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>Ficheiro nº <b>{data.capture.filename_num || '—'}</b> — compara os stacks da imagem com cada mão e clica na dona.</div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -309,8 +309,8 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onApprove = () => {}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {t.images.table_ss.map((im, i) => (
                 <div key={i} style={{ textAlign: 'center' }}>
-                  <img src={API_ROOT + im.image_url} alt="" loading="lazy"
-                    onClick={() => onZoom(API_ROOT + im.image_url)}
+                  <img src={imgSrc(im)} alt="" loading="lazy"
+                    onClick={() => onZoom(imgSrc(im))}
                     style={{ width: 100, height: 66, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
                   <div style={{ fontSize: 12, fontWeight: 700, color: (im.players_left != null && im.players_left <= 9) ? '#22c55e' : '#c9d1d9' }}>{im.players_left ?? '—'}</div>
                   <div style={{ fontSize: 9, color: 'var(--muted)' }}>{(im.captured_at || '').slice(11, 16)}</div>
@@ -330,8 +330,8 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onApprove = () => {}
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '8px 0 3px' }}>Outras imagens das mãos ({t.images.hand_images.length})</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {t.images.hand_images.map((im, i) => (
-                <img key={i} src={API_ROOT + im.image_url} alt="" loading="lazy" title={im.hand_id}
-                  onClick={() => onZoom(API_ROOT + im.image_url)}
+                <img key={i} src={imgSrc(im)} alt="" loading="lazy" title={im.hand_id}
+                  onClick={() => onZoom(imgSrc(im))}
                   style={{ width: 76, height: 50, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
               ))}
             </div>
@@ -563,8 +563,8 @@ function SideColumn({ side, isHash, actionLabel, onAct, busy, onZoom, onAttach }
       {imgs.length > 0 ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
           {imgs.map((im, i) => (
-            <img key={i} src={API_ROOT + im.image_url} alt="" loading="lazy" title={im.hand_id || ''}
-              onClick={() => onZoom(API_ROOT + im.image_url)}
+            <img key={i} src={imgSrc(im)} alt="" loading="lazy" title={im.hand_id || ''}
+              onClick={() => onZoom(imgSrc(im))}
               style={{ width: 92, height: 60, objectFit: 'cover', borderRadius: 5, cursor: 'zoom-in', border: '1px solid #30363d' }} />
           ))}
         </div>
@@ -884,9 +884,7 @@ function CrownHand({ h, onDone }) {
   }
   return (
     <div style={{ ...card, padding: 12, marginBottom: 10, display: 'flex', gap: 12 }}>
-      {h.image_url
-        ? <ZoomImg src={API_ROOT + h.image_url} alt="" style={{ width: 260, maxWidth: '38%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
-        : <div style={{ width: 260, maxWidth: '38%', color: 'var(--muted)', fontSize: 12, padding: 8 }}>(sem imagem guardada)</div>}
+      <HandImage url={h.image_url} style={{ width: 260, maxWidth: '38%', alignSelf: 'flex-start' }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <Link to={`/hand/${h.id}`} style={{ fontFamily: mono, color: '#818cf8', fontSize: 13, fontWeight: 700 }}>{h.hand_id}</Link>

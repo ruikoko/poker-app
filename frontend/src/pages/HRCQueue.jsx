@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { API_ROOT, hands as handsApi, hrc, queue } from '../api/client'
+import { absImageUrl, hands as handsApi, hrc, queue } from '../api/client'
 import { dateTimeLisbon } from '../utils/datetime'
 
 // Cores por cenário do aggressor (espelha build_queue_zip / classify_aggressor_source).
@@ -218,10 +218,9 @@ function VerifyDetail({ res, handDbId }) {
   if (res === 'busy') return <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>A verificar…</div>
   if (res === 'err' || !res) return <div style={{ padding: 14, color: '#ef4444', fontSize: 12 }}>Erro a carregar a verificação.</div>
   const v = VERIFY_VERDICT[res.verdict] || { c: '#94a3b8', label: res.verdict }
-  // capture_url vem relativo (/api/...); prefixar API_ROOT p/ bater no BACKEND em
-  // prod (frontend e backend são domínios distintos) — igual às imagens que já
-  // funcionam (BASE = API_ROOT + /api). Em dev API_ROOT='' → Vite proxy.
-  const captureSrc = res.capture_url ? `${API_ROOT}${res.capture_url}` : null
+  // capture_url vem relativo (/api/...); absImageUrl prefixa API_ROOT 1× (fonte única,
+  // igual a todas as imagens da app) — em prod frontend e backend são domínios distintos.
+  const captureSrc = absImageUrl(res.capture_url)
   return (
     <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.02)' }}>
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
