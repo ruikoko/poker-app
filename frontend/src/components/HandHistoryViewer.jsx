@@ -74,6 +74,57 @@ function NickBadge({ name, isHero }) {
   )
 }
 
+// Editor de NOME de um lugar (o que faltava): ✎ ao lado do nick → fixa o nome real do
+// seat (por POSIÇÃO), carimbando verified_by_user (SELO). Nenhum automático o pisa depois.
+function NameEditor({ handId, position, name, onEdited }) {
+  const [editing, setEditing] = useState(false)
+  // não pré-preenche um hash (nome por-mapear): só um nome legível serve de default
+  const looksHash = /^[0-9a-f]{6,}$/i.test((name || '').trim())
+  const [val, setVal] = useState(name && !looksHash ? name : '')
+  const [busy, setBusy] = useState(false)
+  if (!handId || !position) return null
+  const save = async () => {
+    const nm = val.trim()
+    if (!nm) { alert('Nome vazio — lê o nome da imagem'); return }
+    if (!window.confirm(`Fixar o nome do lugar ${position} como "${nm}"?\n\nFica VERIFICADO por ti — nenhum processo automático (reconcile / re-link / re-deanon) o pisa.`)) return
+    setBusy(true)
+    try {
+      await tableSs.setSeatName(handId, position, nm)
+      setEditing(false); onEdited && onEdited()
+    } catch (e) { alert('Erro: ' + (e?.message || e)); setBusy(false) }
+  }
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button onClick={() => setEditing(e => !e)} title="fixar nome do lugar (verificar)" style={{
+        background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 11, padding: 0, marginLeft: 3,
+      }}>✎</button>
+      {editing && (
+        <div onClick={e => e.stopPropagation()} style={{
+          position: 'absolute', top: '100%', left: 0, zIndex: 50, marginTop: 4,
+          background: '#161b22', border: '1px solid #30363d', borderRadius: 6, padding: 10, minWidth: 210,
+          boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Nome real do lugar <b>{position}</b> (da imagem)</div>
+          <input value={val} onChange={e => setVal(e.target.value)} placeholder="nome da imagem" autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') save() }} style={{
+              width: '100%', boxSizing: 'border-box', background: '#0b0d13', color: '#c9d1d9',
+              border: '1px solid #30363d', borderRadius: 4, padding: '4px 8px', fontSize: 12,
+            }} />
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <button onClick={save} disabled={busy} style={{
+              flex: 1, cursor: busy ? 'wait' : 'pointer', background: 'rgba(34,197,94,0.15)',
+              border: '1px solid rgba(34,197,94,0.45)', color: '#4ade80', borderRadius: 4, fontSize: 12, fontWeight: 700, padding: '4px 8px',
+            }}>{busy ? '…' : 'Fixar (verificado)'}</button>
+            <button onClick={() => setEditing(false)} style={{
+              background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 4, fontSize: 12, padding: '4px 8px', cursor: 'pointer',
+            }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </span>
+  )
+}
+
 // MESA stack format: "19,520 (32 BB)" — fichas + BB maiúsculas.
 // formatBB devolve "Nbb"/"N.Xbb"; substituímos para " BB" maiúsc.
 function formatTableStack(chips, bb) {
@@ -264,6 +315,8 @@ export default function HandHistoryViewer({ hand, onEdited }) {
             }}>
               <PosBadge pos={p.position} />
               <NickBadge name={p.name} isHero={isHero} />
+              {!isHero && <NameEditor handId={hand.hand_id} position={p.position}
+                name={p.name_key || p.name} onEdited={onEdited} />}
               <span style={{
                 fontSize: 14, color: '#fbbf24', fontFamily: 'monospace',
                 fontWeight: 700, marginLeft: 'auto',

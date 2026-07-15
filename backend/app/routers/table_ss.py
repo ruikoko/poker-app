@@ -2021,6 +2021,52 @@ def set_anon_map_override(payload: dict = Body(...),
             "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing)}
 
 
+@router.post("/set-seat-name")
+def set_seat_name(payload: dict = Body(...),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Editor de UM lugar (o que faltava na página da mão): fixa o NOME real de um seat
+    identificado pela POSIÇÃO (HJ/MP/CO/…), carimbando `verified_by_user` (SELO DE NOMES).
+    Merge por cima do anon_map ATUAL (preserva os outros seats) → reusa o `/set-anon-map`
+    (mesmo enrich + guardas + villain_rules). Nenhum automático (reconcile/re-link/re-deanon)
+    o pisa depois. Body: {hand_id, position, real_name}."""
+    import json as _json
+    hand_id = (payload or {}).get("hand_id")
+    position = ((payload or {}).get("position") or "").strip()
+    real_name = ((payload or {}).get("real_name") or "").strip()
+    if not hand_id or not position or not real_name:
+        raise HTTPException(400, "hand_id + position + real_name obrigatórios")
+    rows = query("SELECT all_players_actions apa, player_names pn FROM hands WHERE hand_id=%s",
+                 (hand_id,))
+    if not rows:
+        raise HTTPException(404, "mão não encontrada")
+    apa = rows[0]["apa"]; pn = rows[0]["pn"] or {}
+    if isinstance(apa, str):
+        apa = _json.loads(apa or "{}")
+    if isinstance(pn, str):
+        pn = _json.loads(pn or "{}")
+    apa = apa or {}
+    _np = lambda s: (s or "").strip().upper()
+    matches = [k for k, v in apa.items()
+               if k != "_meta" and isinstance(v, dict) and _np(v.get("position")) == _np(position)]
+    if not matches:
+        raise HTTPException(404, f"nenhum lugar na posição {position}")
+    if len(matches) > 1:
+        raise HTTPException(409, f"posição {position} ambígua ({len(matches)} lugares)")
+    target = matches[0]
+    # anon_map completo = mapa atual + TODOS os hashes do apa (preserva nomes já dados),
+    # com o alvo sobrescrito. Sem isto, os seats fora do mapa atual cairiam em 'missing'.
+    full_map = dict((pn or {}).get("anon_map") or {})
+    for k, v in apa.items():
+        if k == "_meta" or not isinstance(v, dict) or k in full_map:
+            continue
+        nm = v.get("real_name") or ((pn or {}).get("hero") if k == "Hero" else None)
+        if nm:
+            full_map[k] = nm
+    full_map[target] = real_name
+    return set_anon_map_override({"hand_id": hand_id, "anon_map": full_map},
+                                 current_user=current_user)
+
+
 @router.post("/revert-to-anon")
 def revert_to_anon(payload: dict = Body(...),
                    current_user=Depends(require_auth_or_api_key)):

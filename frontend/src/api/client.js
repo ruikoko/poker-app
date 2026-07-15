@@ -552,6 +552,11 @@ export const tableSs = {
     req('POST', '/table-ss/set-bounties', {
       hand_id: handId, bounties, sources, confirm, unconfirm, dry_run: dryRun,
     }),
+  // Fixa o NOME real de UM lugar (por posição), carimbando verified_by_user (selo).
+  setSeatName: (handId, position, realName) =>
+    req('POST', '/table-ss/set-seat-name', {
+      hand_id: handId, position, real_name: realName,
+    }),
 }
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────
