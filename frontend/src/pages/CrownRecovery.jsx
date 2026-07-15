@@ -360,7 +360,7 @@ function Group1Card({ h, C, onDone, suggestion }) {
     if (hasHints) {
       setSugg(next); setVals(v => ({ ...next, ...v }))   // prefill sem apagar edições
       setMsg({ ok: true, t: multi
-        ? 'Multi-KO: cada eliminado pré-preenchido com a última coroa conhecida — verde total = contraprova da soma.'
+        ? 'Multi-KO: cada eliminado pré-preenchido com a última coroa conhecida — contraprova: soma das coroas ÷ 2 = verde total.'
         : 'Vision leu o verde e a dourada — confere antes de carimbar.' })
       return true
     }
@@ -440,14 +440,20 @@ function Group1Card({ h, C, onDone, suggestion }) {
         {/* editor de carimbo: eliminado (verde) + matador (dourada) */}
         <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 8,
           background: 'rgba(224,112,95,.07)', border: '1px solid rgba(224,112,95,.3)' }}>
-          <div style={lbl(C)}>Eliminado · coroa = verde × 2{multi ? ' · MULTI-KO (soma dos verdes ×2)' : ''}</div>
+          <div style={lbl(C)}>Eliminado · {multi ? 'MULTI-KO · coroa de cada = última conhecida' : 'coroa = verde × 2'}</div>
           {busted.map(b => row(b.name, 'verde', C.green, multi ? expectedFor(b.name) : null))}
-          {multi && meta && (
-            <div style={{ marginTop: 6, fontSize: 12, color: C.muted }}>
-              soma esperada = <b style={{ color: C.gold }}>${sumExpected.toFixed(2)}</b>
-              {meta.greenTotal != null && <> · verde total na imagem = <b style={{ color: C.green }}>${meta.greenTotal}</b> (contraprova)</>}
-            </div>
-          )}
+          {multi && meta && (() => {
+            // CANON regra 5: verde total = soma das coroas das vítimas ÷ 2 (não a soma inteira).
+            const half = sumExpected / 2
+            const gt = meta.greenTotal
+            const ok = gt != null && Math.abs(half - gt) < 0.5
+            return (
+              <div style={{ marginTop: 6, fontSize: 12, color: C.muted }}>
+                soma das coroas = <b style={{ color: C.gold }}>${sumExpected.toFixed(2)}</b> · ÷2 = <b style={{ color: C.gold }}>${half.toFixed(2)}</b>
+                {gt != null && <> · verde total na placa = <b style={{ color: C.green }}>${gt}</b> {ok ? '✓' : '(confere na imagem)'}</>}
+              </div>
+            )
+          })()}
         </div>
         {matadores.length > 0 && (
           <div style={{ marginTop: 8, padding: '9px 11px', borderRadius: 8,
