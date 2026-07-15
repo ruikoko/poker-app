@@ -1740,15 +1740,14 @@ def build_queue_zip(
                                     "detail": {"floor": _below[0]["floor"],
                                                "below": [b["name"] for b in _below][:8]}})
                     continue
-                # Simétrico: coroa > 3×base sem carimbo do Rui → grupo "Valor alto —
-                # confirmar" do painel; não solve com coroa alta por confirmar.
-                _above = detect_bounty_above_3x(h.get("player_names"), starting_bounty)
-                if _above:
-                    skipped.append({"hand_id": hand_id,
-                                    "reason": "bounty_above_3x_unconfirmed",
-                                    "detail": {"ceil": _above[0]["ceil"],
-                                               "above": [a["name"] for a in _above][:8]}})
-                    continue
+                # #CROWN-HIGH-IS-ACCUMULATION (decisão do Rui, 15 Jul): coroa alta =
+                # acumulação legítima de KOs (validado por HH: a coroa do mesmo hash
+                # só SOBE). O gate ">3×base sem confirmar" EXTINGUIU-SE — bloqueava 112
+                # mãos com coroas acumuladas verdadeiras. O detetor de misread passou a
+                # ser a régua "não-desce" (revisão à parte), não o teto 3×. Guardas que
+                # FICAM: `<½base` (chama, acima) + selo (`is_bounty_sealed`) + guarda A
+                # (eliminado/verde-KO). `detect_bounty_above_3x` mantém-se só p/ o
+                # auto-confirm por consistência (não bloqueia o export).
 
             hh_text = convert_gg_hh_to_pokerstars_compatible(h, bounty_ctx=bctx)
             if not hh_text:

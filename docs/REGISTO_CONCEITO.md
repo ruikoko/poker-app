@@ -431,3 +431,24 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   (`build_verify_tree` → labels `R x.xbb [ALLIN]`), comparados nó-a-nó com o quadro; a **efetiva
   de um open de blind é `min(SB,BB)`** (heads-up), não `max` do campo. → `LEI_SIZINGS_2026-07-15-v3.md`
   (estado ✅), `JOURNAL_2026-07-16.md`.
+
+- 2026-07-15 — **MECÂNICA PKO + UNIDADE DA APP = COROA (confirmada pelo Rui com prints GG).**
+  (1) **A coroa no ecrã = METADE do bounty total** = o que se ganha ao eliminar. A **BD guarda
+  COROAS** (o que a Vision lê) — é a **unidade única** da app; o ×2 para "total" só vive no consumo
+  (HRC), não na escrita. (2) **Ao eliminar:** o **verde** que aparece no matador = a **coroa da
+  vítima** (dinheiro instantâneo); a **coroa do matador SOBE metade da coroa da vítima**. Logo o
+  verde **lê-se e escreve-se TAL-E-QUAL** no seat do eliminado (**SEM ×2** — corrige o plano antigo
+  de `verde×2`; estreia Etapa 2: AVRELIY $265.62 · Phil **$187.50**). (3) **A coroa de um jogador
+  (mesmo hash) NUNCA DESCE** — uma descida é **erro de leitura** (validado por HH: das 26 quedas
+  medidas, 25 mesmo-hash = misread, 1 = re-entrada). **Re-entrada = hash NOVO**, não descida. →
+  Corolário: o detetor de misread é a régua **"não-desce"** (limiar 2 leituras), não a grelha
+  `{B,1.5B,2B}` (esta mal-rotula 1.75B e a acumulação funda >2B como falsa-inválida) nem o teto 3×
+  (extinto — coroa alta = acumulação legítima). Fonte da base: `tournament_summaries.buy_in_bounty`
+  (bounty inicial total); coroa-base `B = buy_in_bounty/2`. Ver `LEI_SELO_COROAS_NOMES.md`,
+  `JOURNAL` (esta sessão), `#CROWN-HIGH-IS-ACCUMULATION`.
+
+- 2026-07-15 — **PROVA DO SELO na cena do crime (6570 / GG-6104058222).** O invariante "carimbo
+  intocável por automático" foi **provado ao vivo**: forçado o re-apply (`/redeanon`, o caminho que
+  a envenenava), os 8 valores do Rui **sobreviveram** (dupla camada: `skip_verified_by_user` nos
+  nomes + `[crown-seal] … coroa preservada` nas 7 coroas `manual`, contra o veneno guardado
+  29/21/33/36/32/36/0). Suite 1482 passed. Ver `LEI_SELO_COROAS_NOMES.md`, `test_crown_seal.py`.
