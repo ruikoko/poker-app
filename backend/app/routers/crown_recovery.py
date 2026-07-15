@@ -14,7 +14,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, get_conn
@@ -173,9 +173,10 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
       Cosméticos (queda < $1) excluídos.
     - **FORA-DE-GRELHA**: coroa que não cai na grelha das metades (sinalizador leve).
     A escrita é o carimbo (`/set-bounties`, `manual`) — aqui NÃO se escreve nada."""
+    from app.services.eliminated_bounty import is_bounty_sealed
     rows = query(_DROPS_SQL)
     from collections import defaultdict
-    tl = defaultdict(list)              # (tn, hash) -> [(played_at, crown, hand_db, hand_id, name, entry_id)]
+    tl = defaultdict(list)              # (tn, hash) -> [(played_at, crown, hand_db, hand_id, name, entry_id, sealed)]
     off_grid = []
     for r in rows:
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
@@ -192,7 +193,8 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
             if bv is None or bv <= 0:
                 continue
             nm = v.get("real_name") or k
-            tl[(r["tn"], k)].append((r["played_at"], round(bv, 2), r["id"], r["hand_id"], nm, r["entry_id"]))
+            tl[(r["tn"], k)].append((r["played_at"], round(bv, 2), r["id"], r["hand_id"], nm,
+                                     r["entry_id"], is_bounty_sealed(v)))
             if not _on_halves_grid(bv, B):
                 off_grid.append({"hand_db_id": r["id"], "hand_id": r["hand_id"], "player": nm,
                                  "value": round(bv, 2), "ratio": round(bv / B, 4) if B else None,
@@ -203,10 +205,16 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
         for i in range(len(seq) - 1):
             a, b = seq[i], seq[i + 1]
             if b[1] < a[1] and (a[1] - b[1]) >= 1.0:      # queda >= $1 (exclui cosmético)
+                # MIGRAÇÃO DE UNIDADE (não é queda): o valor BAIXO está SELADO (carimbo do
+                # Rui na unidade certa = coroa) e é EXATAMENTE metade do alto (o alto era a
+                # leitura antiga em unidade errada = bounty TOTAL). Distingue-se de misread.
+                b_sealed = b[6]
+                is_migration = b_sealed and abs(b[1] - a[1] / 2.0) <= max(0.5, 0.02 * a[1])
                 drops.append({
                     "hand_db_id": b[2], "hand_id": b[3], "player": b[4],
                     "low": b[1], "ref": a[1], "ref_hand_db_id": a[2], "ref_hand_id": a[3],
-                    "entry_id": b[5], "ref_entry_id": a[5]})
+                    "entry_id": b[5], "ref_entry_id": a[5],
+                    "kind": "unit_migration" if is_migration else "misread"})
     # dedup off-grid por (player, valor) — mostra 1 por caso
     seen = set(); og = []
     for o in sorted(off_grid, key=lambda x: (str(x["player"]).lower(), x["value"])):
@@ -214,8 +222,55 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
         if kk in seen:
             continue
         seen.add(kk); og.append(o)
+    # Dispensados (legítimos: re-entrada/crescimento/migração) — não reaparecem.
+    dismissed = _drops_dismissed_set()
+    drops = [d for d in drops if (d["hand_id"], _norm_key(d["player"])) not in dismissed]
+    og = [o for o in og if (o["hand_id"], _norm_key(o["player"])) not in dismissed]
+    n_mig = sum(1 for d in drops if d.get("kind") == "unit_migration")
     return {"drops": drops, "off_grid": og,
-            "counts": {"drops": len(drops), "off_grid": len(og)}}
+            "counts": {"drops": len(drops), "misread": len(drops) - n_mig,
+                       "unit_migration": n_mig, "off_grid": len(og)}}
+
+
+def _ensure_drops_dismissed():
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS crown_drop_dismissed ("
+                        "hand_id TEXT, player TEXT, created_at TIMESTAMPTZ DEFAULT now(), "
+                        "PRIMARY KEY (hand_id, player))")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _drops_dismissed_set() -> set:
+    try:
+        _ensure_drops_dismissed()
+        rows = query("SELECT hand_id, player FROM crown_drop_dismissed")
+        return {(r["hand_id"], _norm_key(r["player"])) for r in rows}
+    except Exception:  # pragma: no cover - defensivo
+        return set()
+
+
+@router.post("/drops/dismiss")
+def crown_drops_dismiss(payload: dict = Body(...), current_user=Depends(require_auth_or_api_key)):
+    """Dispensar um caso da revisão de quedas (legítimo — re-entrada/crescimento/migração de
+    unidade): NÃO escreve coroa, só marca para não reaparecer. Body: {hand_id, player}."""
+    hand_id = (payload or {}).get("hand_id")
+    player = (payload or {}).get("player")
+    if not hand_id or not player:
+        raise HTTPException(400, "hand_id + player obrigatórios")
+    _ensure_drops_dismissed()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO crown_drop_dismissed (hand_id, player) VALUES (%s,%s) "
+                        "ON CONFLICT DO NOTHING", (hand_id, _norm_key(player)))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "dismissed", "hand_id": hand_id, "player": player}
 
 
 @router.post("/suggest")

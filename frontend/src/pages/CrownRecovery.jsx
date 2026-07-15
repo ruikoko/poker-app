@@ -240,7 +240,7 @@ function DropsWorklist({ C }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {drops.map((d, i) => (
-          <DropCard key={'d' + i} C={C} kind="queda" player={d.player}
+          <DropCard key={'d' + i} C={C} kind="queda" dropKind={d.kind} player={d.player}
             handId={d.hand_id} handDb={d.hand_db_id} lowVal={d.low} refVal={d.ref}
             entryId={d.entry_id} refEntryId={d.ref_entry_id} refHandId={d.ref_hand_id} />
         ))}
@@ -255,22 +255,31 @@ function DropsWorklist({ C }) {
   )
 }
 
-function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId }) {
-  const [val, setVal] = useState(refVal != null ? String(refVal) : '')
+function DropCard({ C, kind, dropKind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId }) {
+  const isMig = kind === 'queda' && dropKind === 'unit_migration'   // total→coroa, não é queda
+  const [val, setVal] = useState('')          // VAZIO — nunca a referência (palpite perigoso); só a imagem arbitra
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
-  const [done, setDone] = useState(false)
+  const [done, setDone] = useState(false)     // 'stamped' | 'dismissed' | false
   const imgUrl = entryId != null ? `${API_ROOT}/api/screenshots/image/${entryId}` : null
   const refImgUrl = refEntryId != null ? `${API_ROOT}/api/screenshots/image/${refEntryId}` : null
 
   const stamp = async () => {
     const v = parseFloat(val)
-    if (isNaN(v)) { setMsg({ ok: false, t: 'Valor inválido' }); return }
+    if (isNaN(v)) { setMsg({ ok: false, t: 'Valor inválido — lê da imagem' }); return }
     setStamping(true); setMsg(null)
     try {
       const r = await tableSs.setBounties(handId, { bounties: { [player]: v }, sources: { [player]: 'manual' } })
-      if ((r?.updated || []).length) { setDone(true); setMsg({ ok: true, t: `Carimbado ✓ $${v} (manual)` }) }
+      if ((r?.updated || []).length) { setDone('stamped'); setMsg({ ok: true, t: `Carimbado ✓ $${v} (manual)` }) }
       else setMsg({ ok: false, t: `Nome não encontrado no players_list${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` })
+    } catch (e) { setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
+    finally { setStamping(false) }
+  }
+  const dismiss = async () => {
+    setStamping(true); setMsg(null)
+    try {
+      await ggHealth.crownDropsDismiss(handId, player)
+      setDone('dismissed'); setMsg({ ok: true, t: 'Dispensado (legítimo) ✓' })
     } catch (e) { setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
     finally { setStamping(false) }
   }
@@ -294,27 +303,36 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entr
       <div style={{ flex: 1, minWidth: 240 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontSize: 14 }}>{player}</b>
-          <span style={{ fontSize: 10, color: '#08130d', background: kind === 'queda' ? C.red : C.gold,
-            borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{kind}</span>
+          <span style={{ fontSize: 10, color: '#08130d', background: isMig ? C.gold : (kind === 'queda' ? C.red : C.gold),
+            borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{isMig ? 'migração de unidade (provável)' : kind}</span>
           <Link to={`/hand/${handDb}`} style={{ color: C.gold, fontSize: 12, textDecoration: 'none',
             fontFamily: 'ui-monospace,monospace' }}>{handId}</Link>
         </div>
         <div style={{ marginTop: 6, fontSize: 13 }}>
-          {kind === 'queda'
-            ? <>leu <b style={{ color: C.red }}>${lowVal}</b> (a rever) · referência anterior{' '}
-                <b style={{ color: C.green }}>${refVal}</b> {refHandId && <span style={{ color: C.muted, fontSize: 11 }}>({refHandId})</span>}</>
-            : <>leu <b style={{ color: C.gold }}>${lowVal}</b> = {ratio}B — fora da grelha das metades</>}
+          {isMig
+            ? <>leu <b style={{ color: C.green }}>${lowVal}</b> (coroa, <b>selado</b>) · o ${refVal} anterior era o{' '}
+                <b>TOTAL</b> (unidade errada) — <b>não é queda</b>, é migração de unidade. Confirma na imagem e dispensa.</>
+            : kind === 'queda'
+              ? <>leu <b style={{ color: C.red }}>${lowVal}</b> (a rever) · referência anterior{' '}
+                  <b style={{ color: C.green }}>${refVal}</b> {refHandId && <span style={{ color: C.muted, fontSize: 11 }}>({refHandId})</span>}</>
+              : <>leu <b style={{ color: C.gold }}>${lowVal}</b> = {ratio}B — fora da grelha das metades</>}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ color: C.muted, fontSize: 13 }}>corrigir $</span>
           <input value={val} onChange={e => setVal(e.target.value)} inputMode="decimal" placeholder="valor da imagem"
             style={{ width: 100, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
               borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
-          <button onClick={stamp} disabled={stamping || done}
+          <button onClick={stamp} disabled={stamping || !!done}
             style={{ background: done ? '#2a2f37' : C.gold, color: done ? C.muted : '#08130d', border: 'none',
               borderRadius: 8, padding: '5px 13px', fontWeight: 800, fontSize: 13,
               cursor: stamping || done ? 'default' : 'pointer' }}>
-            {done ? 'Carimbado ✓' : stamping ? '…' : 'Carimbar (manual)'}
+            {done === 'stamped' ? 'Carimbado ✓' : stamping ? '…' : 'Carimbar (manual)'}
+          </button>
+          <button onClick={dismiss} disabled={stamping || !!done}
+            style={{ background: 'transparent', color: done ? C.muted : C.text, border: `1px solid ${C.border}`,
+              borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13,
+              cursor: stamping || done ? 'default' : 'pointer' }}>
+            {done === 'dismissed' ? 'Dispensado ✓' : 'Dispensar (legítimo)'}
           </button>
           {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
         </div>
