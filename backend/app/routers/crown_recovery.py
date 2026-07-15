@@ -134,6 +134,89 @@ def _run_scan():
                 len(_STATE["group2"]), len(_STATE["over_read"]))
 
 
+_DROPS_SQL = (
+    "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.played_at, "
+    "       h.player_names AS pn, h.all_players_actions AS apa, h.entry_id, "
+    "       ts.buy_in_bounty AS bib "
+    "FROM hands h JOIN tournament_summaries ts "
+    "  ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
+    "WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+    "  AND ts.buy_in_bounty IS NOT NULL AND ts.buy_in_bounty > 0"
+)
+
+
+def _on_halves_grid(crown: float, B: float) -> bool:
+    """Grelha das METADES (solo KO): B, 1.5B, 1.75B, …=(2−2⁻ᵏ)B; >=2B livre; <B fora."""
+    if B <= 0:
+        return True
+    q = crown / B
+    if q >= 2 - 1e-9:
+        return True
+    if q < 1 - 1e-9:
+        return False
+    tol = max(1.0, 0.005 * crown)
+    grid = [1.0] + [2 - 2 ** -k for k in range(1, 7)]
+    return any(abs(crown - g * B) <= tol for g in grid)
+
+
+def _norm_key(s):
+    import re as _re
+    return _re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+@router.get("/drops")
+def crown_drops(current_user=Depends(require_auth)):
+    """Worklist SÓ-LEITURA de coroas SUSPEITAS, para o Rui trabalhar NA app (regra da casa):
+    - **QUEDAS**: a coroa do MESMO hash desce entre mãos (impossível no PKO → misread). Cada
+      caso traz o valor BAIXO (a mão a rever) + a referência ALTA anterior, com imagens.
+      Cosméticos (queda < $1) excluídos.
+    - **FORA-DE-GRELHA**: coroa que não cai na grelha das metades (sinalizador leve).
+    A escrita é o carimbo (`/set-bounties`, `manual`) — aqui NÃO se escreve nada."""
+    rows = query(_DROPS_SQL)
+    from collections import defaultdict
+    tl = defaultdict(list)              # (tn, hash) -> [(played_at, crown, hand_db, hand_id, name, entry_id)]
+    off_grid = []
+    for r in rows:
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        B = float(r["bib"]) / 2.0
+        for k, v in (apa or {}).items():
+            if k == "_meta" or not isinstance(v, dict):
+                continue
+            bv = v.get("bounty_value_usd")
+            try:
+                bv = float(bv) if bv is not None else None
+            except (TypeError, ValueError):
+                bv = None
+            if bv is None or bv <= 0:
+                continue
+            nm = v.get("real_name") or k
+            tl[(r["tn"], k)].append((r["played_at"], round(bv, 2), r["id"], r["hand_id"], nm, r["entry_id"]))
+            if not _on_halves_grid(bv, B):
+                off_grid.append({"hand_db_id": r["id"], "hand_id": r["hand_id"], "player": nm,
+                                 "value": round(bv, 2), "ratio": round(bv / B, 4) if B else None,
+                                 "entry_id": r["entry_id"]})
+    drops = []
+    for key, seq in tl.items():
+        seq = sorted(seq, key=lambda x: (x[0] or ""))
+        for i in range(len(seq) - 1):
+            a, b = seq[i], seq[i + 1]
+            if b[1] < a[1] and (a[1] - b[1]) >= 1.0:      # queda >= $1 (exclui cosmético)
+                drops.append({
+                    "hand_db_id": b[2], "hand_id": b[3], "player": b[4],
+                    "low": b[1], "ref": a[1], "ref_hand_db_id": a[2], "ref_hand_id": a[3],
+                    "entry_id": b[5], "ref_entry_id": a[5]})
+    # dedup off-grid por (player, valor) — mostra 1 por caso
+    seen = set(); og = []
+    for o in sorted(off_grid, key=lambda x: (str(x["player"]).lower(), x["value"])):
+        kk = (_norm_key(o["player"]), o["value"])
+        if kk in seen:
+            continue
+        seen.add(kk); og.append(o)
+    return {"drops": drops, "off_grid": og,
+            "counts": {"drops": len(drops), "off_grid": len(og)}}
+
+
 @router.post("/scan")
 def crown_recovery_scan(current_user=Depends(require_auth)):
     """Arranca (ou re-arranca) o scan em daemon thread. Idempotente. Read-only."""

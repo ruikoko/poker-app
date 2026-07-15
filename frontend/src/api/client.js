@@ -367,6 +367,8 @@ export const ggHealth = {
   // eliminado derivado do VERDE (tal-e-qual, SEM ×2). Read-only (não escreve).
   crownRecoverySuggest: (handId) =>
     req('POST', `/screenshots/green-ko-dryrun?hand_ids=${encodeURIComponent(handId)}`),
+  // Worklist de coroas suspeitas (read-only): quedas mesmo-hash + fora-de-grelha.
+  crownDrops: () => req('GET', '/gg-health/crown-recovery/drops'),
   crownSampleCandidates: (reselect = false) => req('GET', `/gg-health/crown-sample/candidates${reselect ? '?reselect=true' : ''}`),
   crownSampleRun: () => req('POST', '/gg-health/crown-sample/run'),
   crownSampleCancel: () => req('POST', '/gg-health/crown-sample/cancel'),

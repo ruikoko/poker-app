@@ -83,6 +83,9 @@ export default function CrownRecovery() {
         {g1.map(h => <Group1Card key={h.hand_db_id} h={h} C={C} onDone={refresh} />)}
       </div>
 
+      {/* Coroas — revisão de quedas (worklist na app; quedas mesmo-hash + fora-de-grelha) */}
+      <DropsWorklist C={C} />
+
       {/* re-ler placa — all-in perdido MAS jogador VIVO (resto >= 1 BB) */}
       {st && (st.status === 'done' || st.status === 'cancelled') && (st.misread_count ?? 0) > 0 && (
         <div style={{ marginTop: 22 }}>
@@ -136,6 +139,129 @@ export default function CrownRecovery() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Coroas — revisão de quedas: worklist NA app (quedas mesmo-hash + fora-de-grelha) ──
+function DropsWorklist({ C }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [zoom, setZoom] = useState(null)     // src da imagem ampliada
+  const load = () => { setLoading(true); ggHealth.crownDrops().then(setData).catch(() => setData(null)).finally(() => setLoading(false)) }
+  useEffect(() => { load() }, [])
+
+  const drops = data?.drops || []
+  const off = data?.off_grid || []
+  const total = drops.length + off.length
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>Coroas — revisão de quedas</h2>
+        <span style={{ color: C.muted, fontSize: 12 }}>
+          {loading ? 'a carregar…' : `${drops.length} quedas + ${off.length} fora-de-grelha = ${total} casos`}
+        </span>
+        <button onClick={load} disabled={loading} style={{ background: 'transparent', color: C.text,
+          border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 12 }}>
+          Recarregar
+        </button>
+      </div>
+      <p style={{ color: C.muted, fontSize: 12, margin: '0 0 12px', maxWidth: '74ch', lineHeight: 1.5 }}>
+        A coroa do mesmo jogador <b>nunca desce</b> — uma queda é <b>leitura errada</b>. Vê a imagem,
+        compara os dois valores e <b>corrige</b> (grava selado <code>manual</code>, intocável por automático).
+        As fora-de-grelha são sinalizador leve. Só a imagem arbitra.
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {drops.map((d, i) => (
+          <DropCard key={'d' + i} C={C} kind="queda" player={d.player}
+            handId={d.hand_id} handDb={d.hand_db_id} lowVal={d.low} refVal={d.ref}
+            entryId={d.entry_id} refEntryId={d.ref_entry_id} refHandId={d.ref_hand_id}
+            onZoom={setZoom} />
+        ))}
+        {off.map((o, i) => (
+          <DropCard key={'o' + i} C={C} kind="fora-de-grelha" player={o.player}
+            handId={o.hand_id} handDb={o.hand_db_id} lowVal={o.value} ratio={o.ratio}
+            entryId={o.entry_id} onZoom={setZoom} />
+        ))}
+        {!loading && total === 0 && <div style={{ color: C.muted, fontSize: 13 }}>Nenhum caso — coroas limpas.</div>}
+      </div>
+
+      {zoom && (
+        <div onClick={() => setZoom(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, cursor: 'zoom-out', padding: 20 }}>
+          <img src={zoom} alt="zoom" style={{ maxWidth: '96vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: 8 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId, onZoom }) {
+  const [val, setVal] = useState(refVal != null ? String(refVal) : '')
+  const [stamping, setStamping] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [done, setDone] = useState(false)
+  const imgUrl = entryId != null ? `${API_ROOT}/api/screenshots/image/${entryId}` : null
+  const refImgUrl = refEntryId != null ? `${API_ROOT}/api/screenshots/image/${refEntryId}` : null
+
+  const stamp = async () => {
+    const v = parseFloat(val)
+    if (isNaN(v)) { setMsg({ ok: false, t: 'Valor inválido' }); return }
+    setStamping(true); setMsg(null)
+    try {
+      const r = await tableSs.setBounties(handId, { bounties: { [player]: v }, sources: { [player]: 'manual' } })
+      if ((r?.updated || []).length) { setDone(true); setMsg({ ok: true, t: `Carimbado ✓ $${v} (manual)` }) }
+      else setMsg({ ok: false, t: `Nome não encontrado no players_list${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` })
+    } catch (e) { setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
+    finally { setStamping(false) }
+  }
+
+  const thumb = (src, label) => src && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <img src={src} alt={label} loading="lazy" onClick={() => onZoom(src)}
+        style={{ width: 200, maxWidth: '100%', borderRadius: 7, objectFit: 'contain', cursor: 'zoom-in',
+          border: `1px solid ${C.border}`, background: '#000' }} />
+      <span style={{ fontSize: 10, color: C.muted, textAlign: 'center' }}>{label} (clica p/ zoom)</span>
+    </div>
+  )
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${done ? C.green : C.border}`, borderRadius: 11,
+      padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap', opacity: done ? 0.65 : 1 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {thumb(imgUrl, `$${lowVal} (a rever)`)}
+        {kind === 'queda' && thumb(refImgUrl, `$${refVal} (referência)`)}
+      </div>
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 14 }}>{player}</b>
+          <span style={{ fontSize: 10, color: '#08130d', background: kind === 'queda' ? C.red : C.gold,
+            borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{kind}</span>
+          <Link to={`/hand/${handDb}`} style={{ color: C.gold, fontSize: 12, textDecoration: 'none',
+            fontFamily: 'ui-monospace,monospace' }}>{handId}</Link>
+        </div>
+        <div style={{ marginTop: 6, fontSize: 13 }}>
+          {kind === 'queda'
+            ? <>leu <b style={{ color: C.red }}>${lowVal}</b> (a rever) · referência anterior{' '}
+                <b style={{ color: C.green }}>${refVal}</b> {refHandId && <span style={{ color: C.muted, fontSize: 11 }}>({refHandId})</span>}</>
+            : <>leu <b style={{ color: C.gold }}>${lowVal}</b> = {ratio}B — fora da grelha das metades</>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ color: C.muted, fontSize: 13 }}>corrigir $</span>
+          <input value={val} onChange={e => setVal(e.target.value)} inputMode="decimal" placeholder="valor da imagem"
+            style={{ width: 100, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
+              borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
+          <button onClick={stamp} disabled={stamping || done}
+            style={{ background: done ? '#2a2f37' : C.gold, color: done ? C.muted : '#08130d', border: 'none',
+              borderRadius: 8, padding: '5px 13px', fontWeight: 800, fontSize: 13,
+              cursor: stamping || done ? 'default' : 'pointer' }}>
+            {done ? 'Carimbado ✓' : stamping ? '…' : 'Carimbar (manual)'}
+          </button>
+          {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
+        </div>
+      </div>
     </div>
   )
 }
