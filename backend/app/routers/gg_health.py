@@ -1530,19 +1530,55 @@ def _cross_num(v):
         return None
 
 
+def _cross_trajectory():
+    """(tn, nome_norm) → [(played_at, coroa)] de TODAS as mãos GG 2026 — a trajetória
+    do jogador no torneio (a coroa só SOBE). Usada pelo crivo do não-desce."""
+    traj: dict = {}
+    for r in query(
+            "SELECT tournament_number AS tn, played_at::text AS pa, player_names AS pn "
+            "  FROM hands WHERE site='GGPoker' AND played_at >= '2026-01-01' "
+            "   AND player_names->'players_list' IS NOT NULL"):
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        for p in (pn.get("players_list") or []):
+            v = _cross_num(p.get("bounty_value_usd"))
+            if v is not None and v > 0 and p.get("name"):
+                traj.setdefault((r["tn"], _cross_norm(p["name"])), []).append((r["pa"], v))
+    return traj
+
+
+def _cross_sieve(prop, base, tn, key, played_at, traj):
+    """CRIVO DA FÍSICA (ordem do Rui — 'outra captura leu' NÃO é prova). Devolve
+    (ok, reason). O valor da fonte irmã só se PROPÕE se passar:
+    - FLOOR: coroa nunca < base÷2 (fresh) → `$36` num torneio de base $250 chumba;
+    - NÃO-DESCE: a coroa do mesmo jogador só sobe no torneio → não pode ser < uma
+      leitura ANTERIOR nem > uma POSTERIOR (contra a trajetória = misread)."""
+    if base and prop < base / 2 - 0.01:
+        return False, "below_floor"
+    seq = traj.get((tn, key)) or []
+    before = [v for (t, v) in seq if t < played_at]
+    after = [v for (t, v) in seq if t > played_at]
+    if before and prop < max(before) - 0.5:
+        return False, "descends_vs_earlier"
+    if after and prop > min(after) + 0.5:
+        return False, "exceeds_later"
+    return True, None
+
+
 @router.get("/crossing/fill-sample")
 def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
                          seed: Optional[int] = None,
                          current_user=Depends(require_auth)):
-    """AMOSTRA read-only do balde PREENCHER da LEI DO CRUZAMENTO (validação do critério
-    pelo Rui — NADA escreve). Cada caso: seat com coroa VAZIA no gravado + o valor que
-    uma fonte IRMÃ (Gold ou outra SS) leu, com a IMAGEM das DUAS capturas (a que falhou
-    + a que leu) e a hora de cada uma → o Rui confere na placa. Sorteio por `seed` (fixo
-    p/ repetir) ou aleatório (omitir → varia a cada refresh)."""
+    """AMOSTRA read-only do balde PREENCHER da LEI DO CRUZAMENTO, JÁ CRIVADA pela física
+    (validação do critério pelo Rui — NADA escreve). Só entram em `sample` os valores da
+    fonte irmã que passam o crivo (floor base÷2 + não-desce vs trajetória). Os que chumbam
+    vão em `suspects` ('irmã suspeita'), com a razão — para o Rui ver que o crivo apanha o
+    lixo (ex. o Mundico $36←$640.62). Cada caso traz as DUAS imagens (leu ✓ / falhou ✗) +
+    horas. Sorteio por `seed` (fixo) ou aleatório (omitir)."""
     from app.services.eliminated_bounty import is_bounty_sealed
-    ko = {r["tournament_number"] for r in query(
-        "SELECT tournament_number FROM tournament_summaries "
+    ko = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty > 0")}
+    traj = _cross_trajectory()
     # todas as capturas table-SS por mão (id, vision_json, captured_at)
     ss_rows = query(
         "SELECT matched_hand_id AS mh, id, vision_json AS vj, captured_at::text AS cap "
@@ -1559,14 +1595,16 @@ def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
                         for s in (vj.get("seats") or []) if s.get("nick")}})
     rows = query(
         "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.context_table_ss_id AS ssid, "
+        "       h.played_at::text AS pa, "
         "       h.player_names AS pn, e.id AS entry_id, e.raw_json AS grj, "
         "       e.created_at::text AS gold_at "
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
         " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
         "   AND h.player_names->'players_list' IS NOT NULL")
-    cases = []
+    cases, suspects = [], []
     for r in rows:
-        if r["tn"] not in ko:
+        base = ko.get(r["tn"])
+        if not base:
             continue
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
         pl = pn.get("players_list") or []
@@ -1611,20 +1649,29 @@ def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
             # a captura ligada (context) como "falhou", se não houver outra
             if not failed and r["ssid"]:
                 failed = next((c for c in caps if c["kind"] == "ss" and c["id"] == r["ssid"]), None)
-            cases.append({
+            prop = read["crowns"][key]
+            ok, reason = _cross_sieve(prop, base, r["tn"], key, r["pa"], traj)
+            case = {
                 "hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": nm,
                 "stored": p.get("bounty_value_usd"),
-                "value": read["crowns"][key],
+                "value": prop, "base": base, "floor": round(base / 2.0, 2),
+                "sieve_ok": ok, "sieve_reason": reason,
                 "read": {"source": read["kind"], "capture_id": read["id"],
                          "image_url": read["url"], "captured_at": read["cap"]},
                 "failed": ({"source": failed["kind"], "capture_id": failed["id"],
                             "image_url": failed["url"], "captured_at": failed["cap"]}
                            if failed else None),
-            })
+            }
+            (cases if ok else suspects).append(case)
     import random
     rng = random.Random(seed) if seed is not None else random.Random()
-    rng.shuffle(cases)
-    return {"total_fill_seats": len(cases), "sample": cases[:n]}
+    rng.shuffle(cases); rng.shuffle(suspects)
+    return {
+        # o balde PREENCHER JÁ CRIVADO: sample = sobreviventes (proposta), suspects = filtrados.
+        "counts": {"passed": len(cases), "suspect": len(suspects),
+                   "total": len(cases) + len(suspects)},
+        "total_fill_seats": len(cases) + len(suspects),
+        "sample": cases[:n], "suspects": suspects[:n]}
 
 
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────

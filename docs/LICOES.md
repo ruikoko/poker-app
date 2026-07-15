@@ -466,6 +466,16 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   avisa, **não fecha**). **LEI (Rui):** escrita que falha **diz-se na hora**; as duas gavetas
   escrevem/lêem **alinhadas** — raiz da classe `$0-vivo` (446 seats), não só o sintoma.
   → `JOURNAL_2026-07-20.md`.
+- 2026-07-16 — **`#SS-BIG-NUMBER-DIGIT-DROP` (a doença dos números grandes na SS — a "O Sander"
+  outra vez).** A Vision do table-SS **larga dígitos de placas grandes**: `GG-6077755353` Mundico
+  coroa real **$640.62** lida como **$36** (base $250 → piso $125). "Outra captura leu" **NÃO é
+  prova** — a fonte irmã também erra, e erra em grande. → **LEI (Rui):** no cruzamento, um valor da
+  fonte irmã só se **propõe** se passar o **crivo da física**: (1) **floor** — coroa nunca < base÷2;
+  (2) **não-desce** — a coroa só sobe na trajetória do hash no torneio (não < uma leitura anterior,
+  não > uma posterior). O que chumba → balde **"irmã suspeita"**, nunca proposta. Medida: das 127
+  propostas PREENCHER, **39 chumbam** (36 floor, 3 trajetória) → **88 sobrevivem** — e mesmo essas
+  só avançam com o **aval do olho do Rui à 2ª amostra crivada**. O balde PREENCHER **congela** até lá.
+  → `crossing/fill-sample` (crivo + amostra propostas/suspeitas), `REGISTO_CONCEITO 2026-07-16`.
 - 2026-07-15 — **Problema (armadilha JS, irmã da escrita-calada):** o guard "não sai da lista se a
   escrita falhou" (LEI 1) verificava `if (r.not_found || r.partial)` — mas ambos são **arrays**, e um
   `[]` é **truthy** em JS → o guard disparava SEMPRE (mesmo em sucesso) e mostrava erro num write bom, OU
