@@ -62,6 +62,30 @@ O Beelink tem **SEMPRE exatamente 1** watcher exe — o **activo**. Nunca dois, 
 
 **⚠️ pt95 (`#TABLE-SS-BOUNTY-UNDERREAD`):** a Vision do **table-SS** (`table_ss_vision.py`) andava a ler a **CHAMA (%)** e a metê-la no `bounty_usd` (a coroa) — o prompt nem mencionava a chama. **77/278 mãos PKO table-SS GG (28%) tinham ≥1 bounty mal lido**; a **coroa fresca (inicial)** = `buy_in_bounty ÷ 2` (`base÷2`) → uma coroa **nunca fica ABAIXO da inicial** (`< base÷2` = leitura errada). *(`base÷2` é a coroa inicial derivada do campo `buy_in_bounty` do TS — adaptação na fronteira do TS, não parte da física interna; a física é a do CANON.)* Fix: prompt distingue coroa $ vs chama % (chama só mencionada p/ IGNORAR, **não gravada**) + **guarda dura** em `queue_export.build_queue_zip` (GG PKO com coroa < base÷2 → skip `bounty_below_half_base`, não solve com prémios errados). A Vision lê a **original** no upload; a compressão 1280/JPEG85 é só p/ guardar (não degrada a leitura ao vivo, mas limita o re-read do histórico da cópia guardada).
 
+## ⚠️ LEIS DE ENTREGA (contrato obrigatório — como o selo e o CANON)
+
+Ditadas pelo Rui após a **4ª variação do mesmo defeito em 3 dias** (o carimbo/trabalho que
+reaparece na lista). São **lei**, verificadas por **checklist**, não por memória.
+
+**LEI 1 — DEFINITION OF DONE de qualquer painel/worklist novo.** Não vai a produção sem, TODOS:
+- **filtro ao-vivo** — resolvido **sai da lista na hora** (remoção otimista no card) **E** a lista
+  re-confere a BD ao vivo (backend filtra o resolvido + re-`load` no `focus` do separador);
+- **imagens via `<HandImage>`** (nunca `${API_ROOT}/...` à mão) · **zoom** (lightbox) ·
+- **nº GG** visível + link `/hand/<id>` · **Dispensar** (legítimo) · **escrita SELADA**
+  (`/set-bounties` manual/derived, `/set-anon-map` verified_by_user).
+Antes de dizer "pronto": correr a **checklist** e mostrá-la (✓/✗ por requisito).
+
+**LEI 2 — REGRA DA CLASSE.** Um defeito corrigido num sítio SÓ fecha com a resposta a
+**"onde mais existe este padrão?"** — com o **grep/auditoria à vista**. Corrigir o caso e ignorar
+a classe = **entrega incompleta**. (Ex.: `$0` vivo numa mão → varrer a classe inteira na BD.)
+
+**LEI 3 — COMPONENTES ÚNICOS SÃO LEI.** Uma worklist usa o **componente-base comum** (com o
+filtro ao-vivo embutido), tal como `HandImage`/`ZoomImg` são a fonte única das imagens.
+**Proibido construir listas à mão** — quem constrói uma lista nova sem o componente-base viola a lei.
+
+**LEI 4 — auditoria retroativa.** Ao mudar estas leis, auditar TODOS os painéis existentes
+contra a LEI 1 e reportar a tabela (painel × requisito × ✓/✗) **antes de trabalho novo**.
+
 ## ⚠️ REGRA DE OURO — LER ANTES DE QUALQUER ACÇÃO
 
 **O PC onde este projecto é desenvolvido é o mesmo onde o utilizador joga poker.** As salas (GGPoker, PokerStars, Winamax, WPN, iPoker, 888) têm anti-cheat agressivo que scanneia processos activos. Qualquer processo "suspeito" (editores, terminais, ferramentas de análise, scripts Python a correr) pode gerar falsos positivos e prejudicar a conta.
