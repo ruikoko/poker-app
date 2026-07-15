@@ -1,8 +1,9 @@
 # CANON DOS BOUNTIES — a lei das coroas (ditado pelo Rui)
 
-> **Estado: 🟡 RASCUNHO — à espera do carimbo do Rui.** Depois de carimbado, fica LEI:
-> **nada sobre coroas se decide fora deste documento.** Como a lei dos sizings e a lei do
-> selo, isto rege TODO o código que lê, deriva, grava ou mostra uma coroa ($ bounty).
+> **Estado: ✅ LEI EM VIGOR (carimbada pelo Rui, 20 Jul 2026).**
+> **Nada sobre coroas se decide fora deste documento.** Como a lei dos sizings e a lei do
+> selo, isto rege TODO o código que lê, deriva, grava ou mostra uma coroa ($ bounty). Qualquer
+> outra fonte que descreva a física das coroas é histórica — em conflito, **este documento ganha**.
 
 ## 0. A premissa (a frase que manda)
 

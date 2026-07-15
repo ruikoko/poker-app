@@ -1,5 +1,9 @@
 # LEI DO SELO — coroas e nomes validados (18 Jul 2026)
 
+> **A FÍSICA das coroas ($ bounty) vive no `docs/CANON_BOUNTIES.md` (LEI).** Este documento
+> rege o **SELO** (o que o Rui valida é intocável); o CANON rege a **aritmética** das coroas
+> (coroa do morto = verde × 2, etc.). São leis irmãs — nenhuma decide a matéria da outra.
+
 > **Estado: ✅ LEI EM VIGOR.** Como a lei dos sizings, isto rege TODO o código
 > que escreve coroas ($ bounty) ou nomes (desanon) numa mão GG — o que existe hoje
 > e o que se escrever amanhã. Origem: decisão do Rui (18 Jul) + forense da 6570

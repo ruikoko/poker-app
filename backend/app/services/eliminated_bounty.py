@@ -45,10 +45,10 @@ REVIEW_LIVE_ZERO = "live_crown_read_zero"     # KO (base TS>0) + VIVO (HH) + cor
 # contaminação (o "forte" da heurística é só um proxy visível deste crivo).
 BOUNTY_SOURCE_KEY = "bounty_source"
 SOURCE_GREEN_KO = "green_ko"                  # derivado do verde-KO na coroa do eliminador
-# FÍSICA DO VERDE (decisão Rui, 20 Jul, provada pela imagem — GG-6132507189 Ward E):
-# o VERDE lido na coroa de quem elimina = METADE da coroa da vítima → a coroa da casa
-# (o instantâneo, unidade da BD) do eliminado = verde × 2. Supersede o "tal-e-qual sem
-# ×2" (17-18 Jul), que foi erro de tradução da mecânica. Ver REGISTO_CONCEITO 2026-07-20.
+# CANON DOS BOUNTIES (docs/CANON_BOUNTIES.md, LEI): a COROA é o bounty — é a única unidade.
+# Ao eliminar, o VERDE na coroa de quem elimina = a coroa da vítima ÷ 2 (regras 2-3) → a coroa
+# do eliminado que se grava = verde × 2 (regra 4). Provado pela imagem (GG-6132507189, Ward E).
+# "instantâneo"/"total"/conversões = vocabulário BANIDO pelo CANON; a unidade é a coroa, ponto.
 GREEN_TO_CROWN_FACTOR = 2.0
 
 # ── SELO do bounty (invariante do Rui, 18 Jul) ────────────────────────────────
