@@ -18,10 +18,10 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 
-from app.auth import require_auth
-from app.db import query
+from app.auth import require_auth, require_auth_or_api_key
+from app.db import query, get_conn
 from app.hero_names import HERO_NAMES, HERO_NAMES_ALL
 from app.services.queue_export import TS_GATED_FORMATS, detect_bounty_below_half
 
@@ -170,8 +170,9 @@ def list_suspicious(current_user=Depends(require_auth)):
     painel **Coroas** da Saúde Import (`GET /api/gg-health/crowns`), onde se vê a
     imagem e se corrige. Ficam aqui **O teu nome num vilão** (veneno 2) + **Hero
     alheio** (veneno 3, 12 Jul — o pn.hero não é conta do Rui; ângulo cego do 2)."""
-    g2 = _hero_name_on_villain_hands()
-    g3 = _hero_alheio_hands()
+    dismissed = _dismissed_set()
+    g2 = [h for h in _hero_name_on_villain_hands() if h["hand_id"] not in dismissed]
+    g3 = [h for h in _hero_alheio_hands() if h["hand_id"] not in dismissed]
     return {
         "counts": {"hero_name_on_villain": len(g2),
                    "hero_alheio": len(g3), "total": len(g2) + len(g3)},
@@ -207,7 +208,46 @@ def list_suspicious(current_user=Depends(require_auth)):
 def count_suspicious(current_user=Depends(require_auth)):
     """READ-ONLY. Só a contagem (badge). Venenos hero-num-vilão + hero-alheio (as
     coroas foram para o painel Coroas)."""
-    g2 = _hero_name_on_villain_hands()
-    g3 = _hero_alheio_hands()
+    dismissed = _dismissed_set()
+    g2 = [h for h in _hero_name_on_villain_hands() if h["hand_id"] not in dismissed]
+    g3 = [h for h in _hero_alheio_hands() if h["hand_id"] not in dismissed]
     return {"hero_name_on_villain": len(g2), "hero_alheio": len(g3),
             "total": len(g2) + len(g3)}
+
+
+def _ensure_dismissed():
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS suspicious_dismissed ("
+                        "hand_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now())")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _dismissed_set() -> set:
+    try:
+        _ensure_dismissed()
+        return {r["hand_id"] for r in query("SELECT hand_id FROM suspicious_dismissed")}
+    except Exception:  # pragma: no cover - defensivo
+        return set()
+
+
+@router.post("/dismiss")
+def dismiss_suspicious(payload: dict = Body(...),
+                       current_user=Depends(require_auth_or_api_key)):
+    """Dispensar uma mão suspeita (revista pelo Rui, legítima) — sai da fila. Body: {hand_id}."""
+    hand_id = (payload or {}).get("hand_id")
+    if not hand_id:
+        raise HTTPException(400, "hand_id obrigatório")
+    _ensure_dismissed()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO suspicious_dismissed (hand_id) VALUES (%s) "
+                        "ON CONFLICT DO NOTHING", (hand_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "dismissed", "hand_id": hand_id}

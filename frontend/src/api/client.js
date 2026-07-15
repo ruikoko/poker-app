@@ -351,6 +351,7 @@ export const captureTriage = {
 export const suspicious = {
   list:  () => req('GET', '/suspicious-hands'),
   count: () => req('GET', '/suspicious-hands/count'),
+  dismiss: (handId) => req('POST', '/suspicious-hands/dismiss', { hand_id: handId }),
 }
 
 // ── Saúde das mãos GG (vista por imagem, read-only) ─────────────────────────

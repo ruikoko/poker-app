@@ -1,0 +1,308 @@
+Pasta-mãe: C:\Users\User\Desktop\Batmen
+Login OK: rui@pokerapp.com
+
+Fonte de verdade (BD): 286 ficheiros com tag conhecida.
+
+DRY-RUN — na raiz do done\it: 1438 ficheiro(s)
+  realojar: 283   ·   ficam na raiz (sem tag na BD): 1155
+    102  → done\it\ICM PKO\   (tag icm-pko)
+     84  → done\it\PKO Pos\   (tag pos-pko)
+     66  → done\it\Nota\   (tag nota)
+     18  → done\it\ICM\   (tag icm)
+      9  → done\it\ICM PKO FT\   (tag icm-pko-ft)
+      2  → done\it\NPKO Pos\   (tag pos-nko)
+      2  → done\it\PKO Pos FT\   (tag pos-pko-ft)
+
+BD com tag mas NÃO na raiz do done\it: 3  (já em subpasta: 0 · ausentes do done\it: 3)
+   [ausente do done\it]  GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 60 _ 120 - Table 10_!)@(#_$&%^_6138652474-20260702170308-1.png
+   [ausente do done\it]  GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 10,000 _ 20,000 - Table 27_!)@(#_$&%^_6139252038-20260702192446-105.png
+   [ausente do done\it]  GGPoker-Speed Racer Bounty Europe $108 [10 BB] _ Buy-in $108 - Blinds 2,000 _ 4,000 - Table 20_!)@(#_$&%^_61-20260702203946-147.png
+
+--- plano completo (dry-run) ---
+   ICM PKO\            GGPoker-Bounty Hunters 40 Grand $108 _ Buy-in $108 - Blinds 100 _ 200 - Table 2_!)@(#_$&%^_6139006800-20260702203617-143.png
+   ICM PKO\            GGPoker-Bounty Hunters 40 Grand $108 _ Buy-in $108 - Blinds 125 _ 250 - Table 2_!)@(#_$&%^_6139007387-20260702204821-149.png
+   ICM PKO\            GGPoker-Bounty Hunters 40 Grand $108 _ Buy-in $108 - Blinds 200 _ 400 - Table 2_!)@(#_$&%^_6140209477-20260702212910-179.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,000 _ 2,000 - Table 15_!)@(#_$&%^_6139393955-20260702195404-125.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,000 _ 2,000 - Table 15_!)@(#_$&%^_6139394107-20260702200426-129.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,250 _ 2,500 - Table 12_!)@(#_$&%^_6139760339-20260702203058-140.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,250 _ 2,500 - Table 21_!)@(#_$&%^_6132924404-20260630202251-98.png
+   ICM PKO\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,250 _ 2,500 - Table 21_!)@(#_$&%^_6132924556-20260630202502-100.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,500 _ 3,000 - Table 21_!)@(#_$&%^_6132924867-20260630203255-109.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,500 _ 3,000 - Table 21_!)@(#_$&%^_6132925110-20260630203812-112.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 1,500 _ 3,000 - Table 21_!)@(#_$&%^_6132925158-20260630203853-113.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 2,000 _ 4,000 - Table 21_!)@(#_$&%^_6132925362-20260630204555-116.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 2,500 _ 5,000 - Table 12_!)@(#_$&%^_6139761400-20260702210900-161.png
+   ICM PKO\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 2,500 _ 5,000 - Table 12_!)@(#_$&%^_6139761784-20260702212203-170.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 2,500 _ 5,000 - Table 21_!)@(#_$&%^_6132925926-20260630210929-127.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 2,500 _ 5,000 - Table 21_!)@(#_$&%^_6132926002-20260630211220-128.png
+   ICM PKO\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 2,500 _ 5,000 - Table 21_!)@(#_$&%^_6132926198-20260630211730-133.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 200 _ 400 - Table 15_!)@(#_$&%^_6139390231-20260702183510-59.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 200 _ 400 - Table 15_!)@(#_$&%^_6139390587-20260702184002-62.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 200 _ 400 - Table 15_!)@(#_$&%^_6139390707-20260702184321-65.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 200 _ 400 - Table 15_!)@(#_$&%^_6139390707-20260702184404-66.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 3,000 _ 6,000 - Table 21_!)@(#_$&%^_6132926687-20260630213517-155.png
+   ICM PKO\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 3,500 _ 7,000 - Table 21_!)@(#_$&%^_6132926800-20260630214050-158.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 300 _ 600 - Table 15_!)@(#_$&%^_6139391384-20260702185648-78.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 300 _ 600 - Table 15_!)@(#_$&%^_6139391384-20260702185650-79.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 400 _ 800 - Table 15_!)@(#_$&%^_6139392205-20260702191752-99.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 400 _ 800 - Table 21_!)@(#_$&%^_6132921605-20260630190759-44.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 400 _ 800 - Table 21_!)@(#_$&%^_6132921768-20260630191220-49.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 600 _ 1,200 - Table 15_!)@(#_$&%^_6139393276-20260702193925-116.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 600 _ 1,200 - Table 15_!)@(#_$&%^_6139393276-20260702193927-117.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 800 _ 1,600 - Table 15_!)@(#_$&%^_6139393457-20260702194158-119.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 800 _ 1,600 - Table 15_!)@(#_$&%^_6139393709-20260702194802-120.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 800 _ 1,600 - Table 21_!)@(#_$&%^_6132922989-20260630194319-71.png
+   Nota\               GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 800 _ 1,600 - Table 21_!)@(#_$&%^_6132923055-20260630194406-72.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 800 _ 1,600 - Table 21_!)@(#_$&%^_6132923055-20260630194412-73.png
+   PKO Pos\            GGPoker-Bounty Hunters Big Game $215 _ Buy-in $215 - Blinds 800 _ 1,600 - Table 21_!)@(#_$&%^_6132923089-20260630194549-77.png
+   PKO Pos\            GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 100 _ 200 - Table 152_!)@(#_$&%^_6132386230-20260630173837-5.png
+   Nota\               GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 100 _ 200 - Table 152_!)@(#_$&%^_6132386230-20260630173839-6.png
+   PKO Pos\            GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 100 _ 200 - Table 152_!)@(#_$&%^_6132386308-20260630174043-8.png
+   Nota\               GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 100 _ 200 - Table 152_!)@(#_$&%^_6132386404-20260630174146-9.png
+   Nota\               GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 300 _ 600 - Table 220_!)@(#_$&%^_6132547903-20260630184830-37.png
+   ICM PKO\            GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 300 _ 600 - Table 220_!)@(#_$&%^_6132548188-20260630185116-40.png
+   Nota\               GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 400 _ 800 - Table 220_!)@(#_$&%^_6133349817-20260630192248-54.png
+   ICM PKO\            GGPoker-Bounty Hunters Daily Main $54 _ Buy-in $54 - Blinds 500 _ 1,000 - Table 220_!)@(#_$&%^_6133349952-20260630192455-57.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 150 _ 300 - Table 50_!)@(#_$&%^_6131798901-20260630180532-20.png
+   ICM PKO FT\         GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 25,000 _ 50,000 - Table 85_!)@(#_$&%^_61338-20260630214042-157.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 25,000 _ 50,000 - Table 85_!)@(#_$&%^_61338-20260630214422-160.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 3,000 _ 6,000 - Table 35_!)@(#_$&%^_6132932-20260630195512-83.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 30,000 _ 60,000 - Table 85_!)@(#_$&%^_61338-20260630214945-163.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 400 _ 800 - Table 50_!)@(#_$&%^_6133110160-20260630185025-38.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 50,000 _ 100,000 - Table 70_!)@(#_$&%^_6133-20260630212744-147.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $32 _ Buy-in $32 - Blinds 60,000 _ 120,000 - Table 70_!)@(#_$&%^_6133-20260630212926-149.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 1,250 _ 2,500 - Table 8_!)@(#_$&%^_61392556-20260702212634-175.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 2,000 _ 4,000 - Table 17_!)@(#_$&%^_6139493-20260702214202-190.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 300 _ 600 - Table 42_!)@(#_$&%^_6133305142-20260630203240-108.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 350 _ 700 - Table 42_!)@(#_$&%^_6133305497-20260630203726-110.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 400 _ 800 - Table 8_!)@(#_$&%^_6139254732-20260702204840-151.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 60 _ 120 - Table 8_!)@(#_$&%^_6132597589-20260630192801-59.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $54 _ Buy-in $54 - Blinds 60 _ 120 - Table 8_!)@(#_$&%^_6132597589-20260630192806-60.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 1,750 _ 3,500 - Table 9_!)@(#_$&%^_61396544-20260702223540-203.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 1,750 _ 3,500 - Table 9_!)@(#_$&%^_61396544-20260702223634-204.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 1,750 _ 3,500 - Table 9_!)@(#_$&%^_61396545-20260702223841-205.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 125 _ 250 - Table 11_!)@(#_$&%^_6132226813-20260630185049-39.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 125 _ 250 - Table 9_!)@(#_$&%^_6139652113-20260702205219-154.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 2,000 _ 4,000 - Table 9_!)@(#_$&%^_61396546-20260702224253-207.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 200 _ 400 - Table 9_!)@(#_$&%^_6139652579-20260702211548-165.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 250 _ 500 - Table 3_!)@(#_$&%^_6133571186-20260630212233-139.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 250 _ 500 - Table 3_!)@(#_$&%^_6133571186-20260630212239-140.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 3,500 _ 7,000 - Table 19_!)@(#_$&%^_6132128-20260630210325-122.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 3,500 _ 7,000 - Table 8_!)@(#_$&%^_61397921-20260702230600-209.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 350 _ 700 - Table 9_!)@(#_$&%^_6139653123-20260702213846-187.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 350 _ 700 - Table 9_!)@(#_$&%^_6139653156-20260702214149-188.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 350 _ 700 - Table 9_!)@(#_$&%^_6139653156-20260702214151-189.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 5,000 _ 10,000 - Table 19_!)@(#_$&%^_613212-20260630211807-135.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 5,000 _ 10,000 - Table 9_!)@(#_$&%^_6139655-20260702231456-211.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 5,000 _ 10,000 - Table 9_!)@(#_$&%^_6139655-20260702231907-213.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 50 _ 100 - Table 11_!)@(#_$&%^_6132225862-20260630181551-23.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 50 _ 100 - Table 11_!)@(#_$&%^_6132225862-20260630181606-24.png
+   Nota\               GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 50 _ 100 - Table 2_!)@(#_$&%^_6139260474-20260702182339-54.png
+   PKO Pos\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 60 _ 120 - Table 11_!)@(#_$&%^_6132226229-20260630182637-29.png
+   ICM PKO\            GGPoker-Bounty Hunters Deepstack Turbo $88 _ Buy-in $88 - Blinds 600 _ 1,200 - Table 30_!)@(#_$&%^_613222803-20260630200504-87.png
+   ICM PKO\            GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 125 _ 250 - Table 91_!)@(#_$&%^_6138363600-20260702170537-2.png
+   PKO Pos\            GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 250 _ 500 - Table 135_!)@(#_$&%^_6139139785-20260702173500-30.png
+   ICM PKO\            GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 250 _ 500 - Table 77_!)@(#_$&%^_6132235035-20260630173327-1.png
+   PKO Pos\            GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 250 _ 500 - Table 77_!)@(#_$&%^_6132235035-20260630173359-3.png
+   PKO Pos\            GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 300 _ 600 - Table 77_!)@(#_$&%^_6132235656-20260630175510-18.png
+   Nota\               GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 400 _ 800 - Table 135_!)@(#_$&%^_6139141549-20260702181314-43.png
+   ICM PKO\            GGPoker-Bounty Hunters Forty Stack $44 _ Buy-in $44 - Blinds 400 _ 800 - Table 135_!)@(#_$&%^_6139141669-20260702181406-44.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,000 _ 2,000 - Table 40_!)@(#_$&%^_6132707139-20260630205255-120.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,000 _ 2,000 - Table 40_!)@(#_$&%^_6132707211-20260630205526-121.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,000 _ 2,000 - Table 40_!)@(#_$&%^_6132707300-20260630210446-124.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,000 _ 2,000 - Table 40_!)@(#_$&%^_6132707416-20260630210847-126.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,250 _ 2,500 - Table 40_!)@(#_$&%^_6132707588-20260630211423-131.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,500 _ 3,000 - Table 40_!)@(#_$&%^_6132707724-20260630211904-137.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,500 _ 3,000 - Table 40_!)@(#_$&%^_6132707789-20260630212255-141.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,500 _ 3,000 - Table 40_!)@(#_$&%^_6132707836-20260630212346-142.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,500 _ 3,000 - Table 40_!)@(#_$&%^_6132707836-20260630212413-143.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,500 _ 3,000 - Table 40_!)@(#_$&%^_6132707880-20260630212525-146.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,750 _ 3,500 - Table 40_!)@(#_$&%^_6132708008-20260630213055-150.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,750 _ 3,500 - Table 40_!)@(#_$&%^_6132708024-20260630213134-152.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 1,750 _ 3,500 - Table 40_!)@(#_$&%^_6132708171-20260630213856-156.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 100 _ 200 - Table 25_!)@(#_$&%^_6139189391-20260702174207-36.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 100 _ 200 - Table 25_!)@(#_$&%^_6139189391-20260702174257-37.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 100 _ 200 - Table 6_!)@(#_$&%^_6132505544-20260630174243-10.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 100 _ 200 - Table 6_!)@(#_$&%^_6132505544-20260630174245-11.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 125 _ 250 - Table 25_!)@(#_$&%^_6139189644-20260702174641-40.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 125 _ 250 - Table 25_!)@(#_$&%^_6139190264-20260702180348-42.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 125 _ 250 - Table 6_!)@(#_$&%^_6132505699-20260630174848-16.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 125 _ 250 - Table 6_!)@(#_$&%^_6132505726-20260630174938-17.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 125 _ 250 - Table 6_!)@(#_$&%^_6132505882-20260630180348-19.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 125 _ 250 - Table 6_!)@(#_$&%^_6132505924-20260630180600-21.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 2,000 _ 4,000 - Table 40_!)@(#_$&%^_6132708274-20260630214500-161.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 2,000 _ 4,000 - Table 40_!)@(#_$&%^_6132708340-20260630214726-162.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 200 _ 400 - Table 6_!)@(#_$&%^_6132506329-20260630182439-27.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 200 _ 400 - Table 6_!)@(#_$&%^_6132506440-20260630183041-30.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 200 _ 400 - Table 6_!)@(#_$&%^_6132506604-20260630183813-31.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 200 _ 400 - Table 6_!)@(#_$&%^_6132506604-20260630183815-32.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 250 _ 500 - Table 25_!)@(#_$&%^_6139192763-20260702184052-63.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 250 _ 500 - Table 25_!)@(#_$&%^_6139192763-20260702184200-64.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 250 _ 500 - Table 25_!)@(#_$&%^_6139193339-20260702184858-73.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 250 _ 500 - Table 6_!)@(#_$&%^_6132506695-20260630184403-35.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 250 _ 500 - Table 6_!)@(#_$&%^_6132506765-20260630184451-36.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 300 _ 600 - Table 25_!)@(#_$&%^_6139193724-20260702185522-76.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 300 _ 600 - Table 25_!)@(#_$&%^_6139193724-20260702185644-77.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 300 _ 600 - Table 25_!)@(#_$&%^_6139193903-20260702190624-88.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 300 _ 600 - Table 25_!)@(#_$&%^_6139194502-20260702191432-96.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 300 _ 600 - Table 6_!)@(#_$&%^_6132507189-20260630190806-45.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 300 _ 600 - Table 6_!)@(#_$&%^_6132507348-20260630191424-50.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 350 _ 700 - Table 25_!)@(#_$&%^_6139194557-20260702191644-98.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 350 _ 700 - Table 6_!)@(#_$&%^_6132507914-20260630193002-61.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 400 _ 800 - Table 18_!)@(#_$&%^_6138967086-20260702193323-113.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 400 _ 800 - Table 6_!)@(#_$&%^_6132507997-20260630193122-62.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 400 _ 800 - Table 6_!)@(#_$&%^_6132508210-20260630193523-65.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 400 _ 800 - Table 6_!)@(#_$&%^_6132508210-20260630193552-68.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 400 _ 800 - Table 6_!)@(#_$&%^_6132508570-20260630194426-74.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 400 _ 800 - Table 6_!)@(#_$&%^_6132508570-20260630194510-76.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 500 _ 1,000 - Table 6_!)@(#_$&%^_6132508761-20260630194829-78.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 500 _ 1,000 - Table 6_!)@(#_$&%^_6132508956-20260630195255-81.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 500 _ 1,000 - Table 6_!)@(#_$&%^_6132509050-20260630195638-85.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 600 _ 1,200 - Table 6_!)@(#_$&%^_6133549369-20260630200933-89.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 600 _ 1,200 - Table 6_!)@(#_$&%^_6133549369-20260630200947-90.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 600 _ 1,200 - Table 6_!)@(#_$&%^_6133549695-20260630201829-91.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 600 _ 1,200 - Table 6_!)@(#_$&%^_6133549754-20260630201923-92.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 600 _ 1,200 - Table 6_!)@(#_$&%^_6133549754-20260630201926-93.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 600 _ 1,200 - Table 6_!)@(#_$&%^_6133549826-20260630202120-94.png
+   PKO Pos\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 700 _ 1,400 - Table 40_!)@(#_$&%^_6132706398-20260630203109-105.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 700 _ 1,400 - Table 40_!)@(#_$&%^_6132706434-20260630203146-106.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 700 _ 1,400 - Table 6_!)@(#_$&%^_6133550071-20260630202703-103.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 700 _ 1,400 - Table 6_!)@(#_$&%^_6133550071-20260630202725-104.png
+   ICM PKO\            GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 800 _ 1,600 - Table 40_!)@(#_$&%^_6132706718-20260630203922-114.png
+   Nota\               GGPoker-Bounty Hunters HR $525 _ Buy-in $525 - Blinds 800 _ 1,600 - Table 40_!)@(#_$&%^_6132706945-20260630204638-117.png
+   PKO Pos\            GGPoker-Bounty Hunters Hyper Special $108 _ Buy-in $108 - Blinds 125 _ 250 - Table 6_!)@(#_$&%^_6140309209-20260702221854-193.png
+   PKO Pos\            GGPoker-Bounty Hunters Hyper Special $108 _ Buy-in $108 - Blinds 150 _ 300 - Table 6_!)@(#_$&%^_6140309321-20260702222532-196.png
+   Nota\               GGPoker-Bounty Hunters Hyper Special $108 _ Buy-in $108 - Blinds 60 _ 120 - Table 6_!)@(#_$&%^_6139218947-20260702220316-192.png
+   ICM PKO\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 1,000 _ 2,000 - Table 16_!)@(#_$&%^_6139197184-20260702201712-136.png
+   ICM PKO\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 1,750 _ 3,500 - Table 16_!)@(#_$&%^_6139198540-20260702204931-152.png
+   PKO Pos\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 125 _ 250 - Table 10_!)@(#_$&%^_6138653978-20260702173911-34.png
+   PKO Pos\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 2,000 _ 4,000 - Table 16_!)@(#_$&%^_6139198688-20260702205402-155.png
+   Nota\               GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 2,000 _ 4,000 - Table 16_!)@(#_$&%^_6139198882-20260702210641-160.png
+   ICM PKO\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 2,500 _ 5,000 - Table 16_!)@(#_$&%^_6139199035-20260702211131-162.png
+   ICM PKO\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 2,500 _ 5,000 - Table 16_!)@(#_$&%^_6139199072-20260702211255-163.png
+   ICM PKO\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 200 _ 400 - Table 10_!)@(#_$&%^_6138656105-20260702181857-49.png
+   PKO Pos\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 200 _ 400 - Table 10_!)@(#_$&%^_6138656589-20260702182722-55.png
+   PKO Pos\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 350 _ 700 - Table 10_!)@(#_$&%^_6138658777-20260702190741-89.png
+   PKO Pos\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 350 _ 700 - Table 10_!)@(#_$&%^_6138658777-20260702190846-90.png
+   Nota\               GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 600 _ 1,200 - Table 26_!)@(#_$&%^_6139146847-20260702194909-121.png
+   ICM PKO\            GGPoker-Bounty Hunters Special $150 _ Buy-in $150 - Blinds 75 _ 150 - Table 10_!)@(#_$&%^_6138652772-20260702171036-4.png
+   Nota\               GGPoker-Daily Hyper $100 _ Buy-in $100 - Blinds 150 _ 300 - Table 6_!)@(#_$&%^_6139157896-20260702211405-164.png
+   ICM\                GGPoker-Daily Hyper $100 _ Buy-in $100 - Blinds 250 _ 500 - Table 11_!)@(#_$&%^_6139049060-20260702212103-168.png
+   ICM\                GGPoker-Daily Hyper $100 _ Buy-in $100 - Blinds 400 _ 800 - Table 16_!)@(#_$&%^_6139158396-20260702213156-180.png
+   ICM\                GGPoker-Daily Hyper $100 _ Buy-in $100 - Blinds 500 _ 1,000 - Table 16_!)@(#_$&%^_6139158439-20260702213330-184.png
+   ICM\                GGPoker-Daily Hyper $50 _ Buy-in $50 - Blinds 175 _ 350 - Table 6_!)@(#_$&%^_6138342549-20260702171755-18.png
+   ICM\                GGPoker-Daily Hyper $50 _ Buy-in $50 - Blinds 250 _ 500 - Table 15_!)@(#_$&%^_6132715300-20260630202127-95.png
+   NPKO Pos\           GGPoker-Daily Hyper $50 _ Buy-in $50 - Blinds 250 _ 500 - Table 15_!)@(#_$&%^_6132715300-20260630202151-97.png
+   ICM\                GGPoker-Daily Hyper $50 _ Buy-in $50 - Blinds 250 _ 500 - Table 6_!)@(#_$&%^_6138342736-20260702172439-22.png
+   ICM\                GGPoker-Daily Hyper $50 _ Buy-in $50 - Blinds 300 _ 600 - Table 6_!)@(#_$&%^_6138342775-20260702172617-26.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 1,250 _ 2,500 - Table 18_!)@(#_$&%^_6138607404-20260702184726-71.png
+   Nota\               GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 125 _ 250 - Table 10_!)@(#_$&%^_6132920297-20260630181015-22.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 175 _ 350 - Table 9_!)@(#_$&%^_6138854213-20260702181632-46.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 2,000 _ 4,000 - Table 18_!)@(#_$&%^_6138607606-20260702190129-82.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 2,500 _ 5,000 - Table 18_!)@(#_$&%^_6138607650-20260702190419-86.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 3,500 _ 7,000 - Table 12_!)@(#_$&%^_6138895970-20260702190901-91.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 3,500 _ 7,000 - Table 12_!)@(#_$&%^_6138896036-20260702191100-94.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 300 _ 600 - Table 17_!)@(#_$&%^_6138905902-20260702212648-177.png
+   ICM\                GGPoker-Daily Hyper $60 _ Buy-in $60 - Blinds 400 _ 800 - Table 9_!)@(#_$&%^_6138854846-20260702183235-57.png
+   ICM\                GGPoker-Daily Hyper $80 _ Buy-in $80 - Blinds 150 _ 300 - Table 11_!)@(#_$&%^_6138684097-20260702171428-10.png
+   ICM\                GGPoker-Daily Hyper $80 _ Buy-in $80 - Blinds 300 _ 600 - Table 11_!)@(#_$&%^_6138684534-20260702172442-23.png
+   ICM\                GGPoker-Daily Hyper $80 _ Buy-in $80 - Blinds 300 _ 600 - Table 11_!)@(#_$&%^_6138684636-20260702172654-28.png
+   Nota\               GGPoker-Daily Hyper $80 _ Buy-in $80 - Blinds 80 _ 160 - Table 6_!)@(#_$&%^_6132375835-20260630185520-43.png
+   Nota\               GGPoker-Forty Stack $44 _ Buy-in $44 - Blinds 600 _ 1,200 - Table 24_!)@(#_$&%^_6131786845-20260630173712-4.png
+   Nota\               GGPoker-Forty Stack $44 _ Buy-in $44 - Blinds 700 _ 1,400 - Table 24_!)@(#_$&%^_6131787121-20260630174455-12.png
+   NPKO Pos\           GGPoker-Forty Stack $44 _ Buy-in $44 - Blinds 700 _ 1,400 - Table 24_!)@(#_$&%^_6131787152-20260630174656-14.png
+   Nota\               GGPoker-Forty Stack $44 _ Buy-in $44 - Blinds 700 _ 1,400 - Table 24_!)@(#_$&%^_6131787152-20260630174658-15.png
+   ICM PKO\            GGPoker-Thursday Throwdown $150 [Bounty] _ Buy-in $150 - Blinds 1,000 _ 2,000 - Table 45_!)@(#_$&%^_61394935-20260702212419-172.png
+   ICM PKO\            GGPoker-Thursday Throwdown $150 [Bounty] _ Buy-in $150 - Blinds 500 _ 1,000 - Table 45_!)@(#_$&%^_6139491633-20260702201431-133.png
+   PKO Pos\            GGPoker-Thursday Throwdown $150 [Bounty] _ Buy-in $150 - Blinds 700 _ 1,400 - Table 45_!)@(#_$&%^_6139492995-20260702205538-156.png
+   Nota\               GGPoker-Thursday Throwdown $150 [Bounty] _ Buy-in $150 - Blinds 700 _ 1,400 - Table 45_!)@(#_$&%^_6139492995-20260702205631-157.png
+   ICM PKO\            Winamax-Winamax EXPLORER(1119954951)(#063)-20260630193439-63.png
+   ICM PKO\            Winamax-Winamax EXPLORER(1121061665)(#084)-20260702195124-122.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0000)-20260630222553-172.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0000)-20260630222639-173.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630211244-129.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630213250-153.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630213322-154.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630220334-164.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630220616-165.png
+   PKO Pos\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630220646-166.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630220828-167.png
+   PKO Pos\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630220850-168.png
+   PKO Pos\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630221256-169.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630221444-170.png
+   PKO Pos\            Winamax-Winamax GRAVITY(1119959324)(#0001)-20260630222054-171.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0005)-20260630202451-99.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0005)-20260630204933-118.png
+   ICM PKO\            Winamax-Winamax GRAVITY(1119959324)(#0008)-20260630200321-86.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630224443-174.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630224557-175.png
+   PKO Pos FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630224724-176.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630224815-177.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630224906-178.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630225140-179.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630225334-180.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630225441-181.png
+   ICM PKO FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630230516-182.png
+   PKO Pos FT\         Winamax-Winamax GRAVITY(1119959324)(#0011)-20260630230643-183.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#002)-20260702223904-206.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#002)-20260702224505-208.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702210525-158.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702212012-167.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702213301-182.png
+   PKO Pos\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702213814-186.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702222400-194.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702222603-197.png
+   PKO Pos\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702222632-198.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702222756-199.png
+   ICM PKO\            Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702222951-201.png
+   Nota\               Winamax-Winamax HIGHROLLER(1120632836)(#003)-20260702223022-202.png
+   PKO Pos\            Winamax-Winamax HIGHROLLER(1120632836)(#006)-20260702214612-191.png
+   ICM PKO\            Winamax-Winamax INTERSTELLAR(1119959499)(#010)-20260630191032-47.png
+   ICM PKO\            Winamax-Winamax INTERSTELLAR(1119959499)(#010)-20260630192308-55.png
+   ICM PKO\            Winamax-Winamax INTERSTELLAR(1119959499)(#010)-20260630194029-69.png
+   ICM PKO\            Winamax-Winamax INTERSTELLAR(1119959499)(#010)-20260630194837-79.png
+   PKO Pos\            Winamax-Winamax INTERSTELLAR(1121065207)(#010)-20260702192529-107.png
+   PKO Pos\            Winamax-Winamax INTERSTELLAR(1121065207)(#010)-20260702192927-112.png
+   PKO Pos\            Winamax-Winamax INTERSTELLAR(1121065207)(#010)-20260702195207-124.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1119960847)(#014)-20260630173852-7.png
+   PKO Pos\            Winamax-Winamax ODYSSEY(1119960847)(#014)-20260630174621-13.png
+   PKO Pos\            Winamax-Winamax ODYSSEY(1119960847)(#014)-20260630181736-25.png
+   PKO Pos\            Winamax-Winamax ODYSSEY(1119960847)(#014)-20260630181839-26.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1119960847)(#014)-20260630184334-33.png
+   PKO Pos\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702171926-20.png
+   Nota\               Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702171928-21.png
+   Nota\               Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702172531-24.png
+   PKO Pos\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702172533-25.png
+   PKO Pos\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702173931-35.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702175152-41.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702182048-51.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702182243-53.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702183523-60.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702184420-67.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702185322-75.png
+   ICM PKO\            Winamax-Winamax ODYSSEY(1121066281)(#012)-20260702191221-95.png
+   ICM PKO\            Winamax-Winamax PRIME TIME(1119953254)(#0017)-20260630212500-144.png
+   ICM PKO\            Winamax-Winamax PRIME TIME(1121060355)(#0007)-20260702202314-138.png
+   PKO Pos\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702173602-32.png
+   PKO Pos\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702182802-56.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702184435-68.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702184541-70.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702190112-80.png
+   PKO Pos\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702190157-85.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702192751-110.png
+   Nota\               Winamax-Winamax ZENITH(1121066627)(#001)-20260702194016-118.png
+   Nota\               Winamax-Winamax ZENITH(1121066627)(#001)-20260702195454-126.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702195503-127.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702200216-128.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702200437-130.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702200637-131.png
+   Nota\               Winamax-Winamax ZENITH(1121066627)(#001)-20260702200642-132.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702201443-135.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#001)-20260702202859-139.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#002)-20260702203652-145.png
+   PKO Pos\            Winamax-Winamax ZENITH(1121066627)(#002)-20260702203833-146.png
+   ICM PKO\            Winamax-Winamax ZENITH(1121066627)(#002)-20260702204407-148.png
+
+   (1155 sem tag → ficam na raiz; não se adivinha)
+
+(DRY-RUN — nada movido. Aprova e corre com --apply para mover.)

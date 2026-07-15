@@ -1,51 +1,42 @@
-# Few-shot visual da leitura de coroas — contrato + protocolo de medição
+Checkpoint honesto de (a) — 2 dos parciais migrados, e a decisão sobre os que não são worklists de resolução.
 
-**Estado: 🟡 instrumento pronto, à espera das 3 imagens do Rui + do A/B (números antes de adotar).**
+  (a) — progresso
 
-Ideia (pergunta do Rui, confirmada): antes da imagem ALVO, mandar à Vision 1-2 **exemplos
-anotados** que ensinam a distinguir a **coroa** (placard dourado $ em cima do avatar) da
-**chama** (círculo laranja junto ao timer = VPIP %, a IGNORAR). Depois **medir** se a taxa de
-"chama-lida-como-coroa" cai — e a que custo — **antes** de ligar em produção.
+  ┌────────────────────────────┬──────────────────┬─────────────┬───────────┬──────┬──────┬──────────────┬────────┐
+  │           Painel           │      estado      │   filtro    │ HandImage │ zoom │ nº   │  Dispensar   │ selada │
+  │                            │                  │   ao-vivo   │           │      │  GG  │              │        │
+  ├────────────────────────────┼──────────────────┼─────────────┼───────────┼──────┼──────┼──────────────┼────────┤
+  │ CrownRecovery              │ ✅ sobre         │ ✓           │ ✓         │ ✓    │ ✓    │ ✓            │ ✓      │
+  │ (grupo1/quedas)            │ <Worklist>       │             │           │      │      │              │        │
+  ├────────────────────────────┼──────────────────┼─────────────┼───────────┼──────┼──────┼──────────────┼────────┤
+  │ CaptureTriage              │ ✅ migrado agora │ ✓           │ ✓         │ ✓    │ ✓    │ ✓            │ ✓      │
+  │                            │                  │             │           │      │      │ (descartar)  │ (tag)  │
+  ├────────────────────────────┼──────────────────┼─────────────┼───────────┼──────┼──────┼──────────────┼────────┤
+  │ GGHealth (FT · Edições ·   │ ⏳ a seguir      │ ~→✓         │ ✗→✓       │ ✓    │ ✓    │ ✓            │ ✓      │
+  │ Nomes)                     │                  │             │           │      │      │              │        │
+  ├────────────────────────────┼──────────────────┼─────────────┼───────────┼──────┼──────┼──────────────┼────────┤
+  │ SuspiciousHands            │ ⏳ decisão       │ ✗           │ ✗         │ ✗    │ ✓    │ ✗            │ ✗      │
+  ├────────────────────────────┼──────────────────┼─────────────┼───────────┼──────┼──────┼──────────────┼────────┤
+  │ CrownSample                │ ⏳ decisão       │ ✗           │ ✓         │ ✓    │ ✓    │ ✗            │ ✗      │
+  └────────────────────────────┴──────────────────┴─────────────┴───────────┴──────┴──────┴──────────────┴────────┘
 
-## As 3 imagens (dropa-as AQUI, com estes nomes exatos)
+  Componente-base <Worklist> (LEI 3) construído e a provar-se — CrownRecovery + CaptureTriage assentam nele; filtro
+  ao-vivo (otimista + focus-reload) embutido, não reimplementado à mão.
 
-| ficheiro | o que é | legenda (caption) usada na chamada |
-|---|---|---|
-| `01_placard_isolado.png` | só o **placard dourado** $ recortado | "Isto é a COROA: o placard rectangular DOURADO com um valor em $ ($50, $75…) que fica DIRECTAMENTE por CIMA do avatar. É ISTO que vai em `bounty_usd`." |
-| `02_jogador_completo.png` | **um jogador inteiro**, anotável (placard em cima + chama na avatar + timer) | "Neste jogador: o $ no placard em CIMA = COROA (bounty_usd). O círculo LARANJA na avatar junto ao timer (ex.: 27%) = CHAMA/VPIP — IGNORAR, NUNCA vai em bounty_usd." |
-| `03_mesa_8.png` | a **mesa de 8** completa | "Mesa completa: cada jogador tem placard $ (coroa, em cima) e pode ter chama % (laranja, na avatar). Lê só o $ do placard por seat; nunca a %." |
+  As 2 decisões que faltam (para não repetir o erro dos mass-reads)
 
-> As legendas vivem em `captions.json` (já criado com o texto acima — edita à vontade).
-> Formatos aceites: `.png`/`.jpg`. Recorta o mais **apertado** possível (menos pixéis = mais
-> barato — ver custo). Se um exemplo não existir, a chamada usa só os que existem (1 chega).
+  1. CrownSample é AUDITORIA, não resolução. Sampleia ~177 capturas e relê coroas para conferir — não é "resolve-e-sai".
+  Já tem HandImage/zoom/nº-GG. O DoD de resolução (Dispensar/escrita-selada/sai-da-lista) não se aplica a uma amostra.
+  → Recomendo: fica fora do DoD de resolução (é ferramenta de auditoria, categoria diferente). Se quiseres que passe a
+  resolver (carimbo por seat + sai), digo e faço — mas é uma mudança de propósito.
+  2. SuspiciousHands é DIAGNÓSTICO ("só mostra e aponta"). Para virar worklist de resolução preciso das ações no card (é
+  o que a tua LEI diz para eu não inventar):
+    - bounty < ½base → carimbo da coroa (como as quedas)?
+    - hero_alheio / hero_villain (venenos) → reverter-à-anónima (endpoint existe)?
+    - + Dispensar (marcar revisto)?
 
-## Como o few-shot injecta (código)
+  GGHealth (FT/Edições/Nomes) é resolução genuína e não precisa de decisão — migro-o já para o <Worklist> + HandImage
+  (adiciona o otimista+focus ao reload-após-ação que já têm).
 
-`extract_table_ss_json(image_bytes, ..., examples=[...])` — quando `examples` é dado, o `content`
-da mensagem fica: `[caption1, img1, caption2, img2, …, "Agora lê a imagem ALVO:", img_alvo, PROMPT]`.
-Sem `examples` (default `None`) → comportamento ATUAL, byte-idêntico. **Nada muda em produção até
-ligarmos** (o worker normal chama sem `examples`).
-
-## Custo extra por chamada (calculado)
-
-Tokens de imagem ≈ `w×h/750` (ref. do código: imagem 1280px ≈ **1229 tok**). Sonnet 4.6 input = **$3/1M**.
-
-| exemplo | tamanho típico | ~tokens | ~custo |
-|---|---|---|---|
-| placard isolado (~200×80) | pequeno | ~25 | ~$0.0001 |
-| jogador completo (~300×400) | médio | ~160 | ~$0.0005 |
-| mesa de 8 (~1280) | grande | ~1229 | ~$0.0037 |
-| legendas (3×~50 tok) | — | ~150 | ~$0.0005 |
-
-- **2 exemplos pequenos (placard + jogador) + legendas ≈ +~335 tok ≈ +$0.001/chamada** (+7% sobre os ~$0.014 atuais).
-- **+ a mesa de 8 ≈ +$0.0037** → **~$0.005/chamada no total** (+36%).
-- **A/B de 20 leituras × 2 (com/sem) ≈ ~$0.66.** Negligível — decide-se pelos números de qualidade, não pelo custo.
-
-## Protocolo A/B (o que corro quando as imagens cá estiverem)
-
-1. Amostra: **20 capturas** table-SS reais (variadas: mesas cheias, PKO com coroas altas).
-2. Para cada: corre a Vision **SEM** exemplos e **COM** exemplos (via `POST /api/table-ss/crown-ab`, dry-run, sem escrever).
-3. **Métrica principal — taxa de chama-como-coroa:** nº de seats cujo `bounty_usd` sai um valor
-   compatível com uma **%** (inteiro pequeno tipo 16/27/43) e/ou **< base÷2** (impossível para coroa fresca).
-4. **Métrica de acordo:** onde há verdade selada (mãos que o Rui carimbou), % de seats que batem certo.
-5. Reporto: taxa chama-como-coroa (com vs sem), acordo com a verdade, e o custo real medido. **Decides tu** se adota.
+  Confirmas as ações do SuspiciousHands + o destino do CrownSample, e eu fecho a tabela toda ✓? Enquanto respondes,
+  arranco o GGHealth (seguro). Diz "arranca GGHealth" ou dá-me as decisões.
