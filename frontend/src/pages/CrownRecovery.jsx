@@ -159,6 +159,9 @@ export default function CrownRecovery() {
       {/* Coroas — revisão de quedas (worklist na app; quedas mesmo-hash + fora-de-grelha) */}
       <DropsWorklist C={C} />
 
+      {/* Mass-reads confirmáveis (última peça: captura leu 1 valor em bloco + prova de queda) */}
+      <BlockMisreadsWorklist C={C} />
+
       {/* re-ler placa — all-in perdido MAS jogador VIVO (resto >= 1 BB) */}
       {st && (st.status === 'done' || st.status === 'cancelled') && (st.misread_count ?? 0) > 0 && (
         <div style={{ marginTop: 22 }}>
@@ -339,6 +342,114 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refH
               borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13,
               cursor: stamping ? 'default' : 'pointer' }}>
             Dispensar (legítimo)
+          </button>
+          {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Mass-reads (bloco): captura leu 1 valor não-fresco em ≥3 seats + ≥1 com prova de queda ──
+function BlockMisreadsWorklist({ C }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [resolved, setResolved] = useState(() => new Set())
+  const load = () => {
+    setLoading(true)
+    ggHealth.crownBlockMisreads().then(d => { setData(d); setResolved(new Set()) })
+      .catch(() => setData(null)).finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+  useEffect(() => {   // REGRA DA CASA: re-confere a BD ao voltar ao separador
+    const f = () => load(); window.addEventListener('focus', f)
+    return () => window.removeEventListener('focus', f)
+  }, [])
+  const onResolved = (hid) => { setResolved(s => new Set(s).add(hid)); setTimeout(load, 500) }
+  const cards = (data?.cards || []).filter(c => !resolved.has(c.hand_id))
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>Coroas — mass-reads (bloco)</h2>
+        <span style={{ color: C.muted, fontSize: 12 }}>{loading ? 'a carregar…' : `${cards.length} capturas`}</span>
+        <button onClick={load} disabled={loading} style={{ background: 'transparent', color: C.text,
+          border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 12 }}>Recarregar</button>
+      </div>
+      <p style={{ color: C.muted, fontSize: 12, margin: '0 0 12px', maxWidth: '74ch', lineHeight: 1.5 }}>
+        Uma captura leu o <b>mesmo valor</b> em ≥3 seats e <b>≥1 tem prova de queda</b> (a trajetória
+        desse seat era mais alta antes) — a leitura do bloco está errada. Corrige os seats errados
+        <b> de uma vez</b> (selado <code>manual</code>). Só a imagem arbitra.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {cards.map(c => <BlockCard key={c.hand_id + '|' + c.block_value} C={C} card={c}
+          onResolved={() => onResolved(c.hand_id)} />)}
+        {!loading && cards.length === 0 && <div style={{ color: C.muted, fontSize: 13 }}>Nenhum bloco — coroas em cruzeiro.</div>}
+      </div>
+    </div>
+  )
+}
+
+function BlockCard({ C, card, onResolved }) {
+  const [vals, setVals] = useState({})
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const setV = (nick, v) => setVals(s => ({ ...s, [nick]: v }))
+  const stamp = async () => {
+    const bounties = {}, sources = {}
+    for (const s of card.seats) {
+      const v = parseFloat(vals[s.nick]); if (!isNaN(v)) { bounties[s.nick] = v; sources[s.nick] = 'manual' }
+    }
+    if (!Object.keys(bounties).length) { setMsg({ ok: false, t: 'Preenche pelo menos 1 seat (lê da imagem)' }); return }
+    setBusy(true); setMsg(null)
+    try {
+      const r = await tableSs.setBounties(card.hand_id, { bounties, sources })
+      if ((r?.updated || []).length) onResolved && onResolved()
+      else { setBusy(false); setMsg({ ok: false, t: `Nenhum gravado${(r?.not_found || []).length ? ': ' + r.not_found.join(', ') : ''}` }) }
+    } catch (e) { setBusy(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
+  }
+  const dismiss = async () => {
+    setBusy(true); setMsg(null)
+    try { await ggHealth.crownBlockDismiss(card.hand_id); onResolved && onResolved() }
+    catch (e) { setBusy(false); setMsg({ ok: false, t: 'Falha: ' + (e?.message || e) }) }
+  }
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11,
+      padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+      <HandImage handDbId={card.hand_db_id} alt="captura" style={{ width: 300 }} />
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, color: '#08130d', background: C.red, borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>bloco</span>
+          <Link to={`/hand/${card.hand_db_id}`} style={{ color: C.gold, fontSize: 12, textDecoration: 'none', fontFamily: 'ui-monospace,monospace' }}>{card.hand_id}</Link>
+          <span style={{ color: C.muted, fontSize: 12 }}>{card.tournament}</span>
+        </div>
+        <div style={{ marginTop: 6, fontSize: 13 }}>
+          captura leu <b style={{ color: C.red }}>${card.block_value}</b> em <b>{card.seats.length}</b> seats · base/2 = ${card.base_half}
+        </div>
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {card.seats.map(s => (
+            <div key={s.nick} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, minWidth: 150 }}>
+                <span style={pos(C)}>{s.position || '—'}</span> <b>{s.nick}</b>
+              </span>
+              {s.has_proof
+                ? <span style={{ color: C.gold, fontSize: 11 }} title="a trajetória deste seat era mais alta antes → prova">prova: era ${s.ref}</span>
+                : <span style={{ color: C.muted, fontSize: 11 }}>{s.sealed ? 'selado' : 'sem prova própria'}</span>}
+              <span style={{ color: C.muted, fontSize: 13, marginLeft: 'auto' }}>$</span>
+              <input value={vals[s.nick] ?? ''} onChange={e => setV(s.nick, e.target.value)} inputMode="decimal"
+                placeholder={s.sealed ? '(selado)' : 'valor da imagem'} disabled={s.sealed}
+                style={{ width: 90, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
+                  borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace', opacity: s.sealed ? 0.5 : 1 }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button onClick={stamp} disabled={busy} style={{ background: C.gold, color: '#08130d', border: 'none',
+            borderRadius: 8, padding: '5px 13px', fontWeight: 800, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>
+            {busy ? '…' : 'Carimbar (selar)'}
+          </button>
+          <button onClick={dismiss} disabled={busy} style={{ background: 'transparent', color: C.text,
+            border: `1px solid ${C.border}`, borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>
+            Dispensar (bloco legítimo)
           </button>
           {msg && <span style={{ fontSize: 12, color: msg.ok ? C.green : C.red }}>{msg.t}</span>}
         </div>
