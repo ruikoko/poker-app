@@ -68,6 +68,30 @@ def _crowns_of(pn) -> dict:
     return out
 
 
+def _classify_status(pn, base) -> str:
+    """EM FALHA vs CURADA (redesenho do amostrador, ordem do Rui). Uma mão está
+    'em_falha' se tem ≥1 seat NÃO-selado com coroa problemática — vazia (null/$0),
+    suspeita (0<coroa<base÷2 = provável chama), ou marcada p/ rever. Senão 'curada'
+    (tudo selado ou plausível). O contador do painel conta SÓ as em_falha."""
+    from app.services.eliminated_bounty import is_bounty_sealed
+    if isinstance(pn, str):
+        try:
+            pn = json.loads(pn or "{}")
+        except Exception:
+            pn = {}
+    try:
+        b = float(base)
+    except (TypeError, ValueError):
+        b = None
+    for e in ((pn or {}).get("players_list") or []):
+        if is_bounty_sealed(e):
+            continue                       # carimbo do Rui → não é falha
+        v = e.get("bounty_value_usd")
+        if v is None or v == 0 or (b and v > 0 and v < b / 2) or e.get("bounty_review"):
+            return "em_falha"
+    return "curada"
+
+
 def _select_sample() -> list[dict]:
     """127 sliver + 50 aleatórias in-band (excl. sliver). Determinístico salvo a
     aleatoriedade das 50. Read-only."""
@@ -174,13 +198,16 @@ def _refresh_crowns_live(cands: list[dict]) -> list[dict]:
     if not ids:
         return list(cands)
     rows = query("SELECT id, player_names AS pn FROM hands WHERE id = ANY(%s)", (ids,))
-    live = {r["id"]: _crowns_of(r["pn"]) for r in rows}
+    live = {r["id"]: r["pn"] for r in rows}
     out = []
     for c in cands:
         nc = dict(c)
-        st = live.get(c.get("hand_db_id"))
-        if st is not None:
-            nc["crowns"] = [{"seat": k, "stored": v} for k, v in st.items()]
+        pn = live.get(c.get("hand_db_id"))
+        if pn is not None:
+            crowns = _crowns_of(pn)
+            nc["crowns"] = [{"seat": k, "stored": v} for k, v in crowns.items()]
+            # RE-CLASSIFICA ao vivo → selar move de 'em_falha' p/ 'curada' na hora.
+            nc["status"] = _classify_status(pn, c.get("base"))
         out.append(nc)
     return out
 
@@ -204,7 +231,8 @@ def _build_candidates(force: bool = False) -> list[dict]:
         cands.append({
             "hand_db_id": r["id"], "hand_id": r["hand_id"],
             "entry_id": r.get("entry_id"), "tournament": r["tournament_name"],
-            "sliver": r["_sliver"],
+            "sliver": r["_sliver"], "base": r.get("base"),
+            "status": _classify_status(r["pn"], r.get("base")),
             "crowns": [{"seat": k, "stored": v} for k, v in stored.items()],
         })
     with _LOCK:
@@ -285,7 +313,10 @@ def crown_sample_candidates(reselect: bool = False, current_user=Depends(require
     por seat + selo do grupo (sliver) + link da mão. SEM Vision, sem custo, sem
     escrita. Sorteio fixo → lista estável. `reselect=true` re-seleciona."""
     cands = _build_candidates(force=reselect)
+    em_falha = sum(1 for c in cands if c.get("status") == "em_falha")
     return {"total": len(cands),
+            "em_falha": em_falha,                 # ← o contador do painel (só pendências)
+            "curadas": len(cands) - em_falha,
             "sliver": sum(1 for c in cands if c["sliver"]),
             "candidates": cands}
 

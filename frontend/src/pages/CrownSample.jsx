@@ -23,7 +23,14 @@ export default function CrownSample() {
 
   const loadCands = () => ggHealth.crownSampleCandidates().then(setCands).catch(() => {})
   const refresh = () => ggHealth.crownSampleState().then(setSt).catch(() => {})
-  useEffect(() => { loadCands(); refresh(); return () => clearInterval(poll.current) }, [])
+  useEffect(() => {
+    loadCands(); refresh()
+    // selar uma mão (noutra aba/página) → ao voltar, re-lê a BD e a mão salta
+    // de "em falha" para "curada" na hora (backend re-classifica ao vivo).
+    const onFocus = () => loadCands()
+    window.addEventListener('focus', onFocus)
+    return () => { clearInterval(poll.current); window.removeEventListener('focus', onFocus) }
+  }, [])
 
   useEffect(() => {
     clearInterval(poll.current)
@@ -53,8 +60,13 @@ export default function CrownSample() {
   }, [st?.divergences])
 
   const list = cands?.candidates || []
-  const nPages = Math.max(1, Math.ceil(list.length / PAGE))
-  const pageItems = list.slice(page * PAGE, page * PAGE + PAGE)
+  // Redesenho (ordem do Rui): EM FALHA (cards, onde o olho trabalha) vs CURADAS
+  // (lista compacta nº+link). Uma mão selada re-classifica-se ao vivo (backend
+  // re-lê a BD a cada refresh) → salta de secção na hora.
+  const emFalha = list.filter(c => c.status === 'em_falha')
+  const curadas = list.filter(c => c.status === 'curada')
+  const nPages = Math.max(1, Math.ceil(emFalha.length / PAGE))
+  const pageItems = emFalha.slice(page * PAGE, page * PAGE + PAGE)
 
   return (
     <div style={{ padding: '18px 22px', color: C.text, maxWidth: 1000, margin: '0 auto' }}>
@@ -91,7 +103,9 @@ export default function CrownSample() {
         )}
         {cands && (
           <span style={{ color: C.muted, fontSize: 13 }}>
-            {cands.total} candidatas · {cands.sliver} pré-refinamento 9 Jul
+            <b style={{ color: (cands.em_falha ?? 0) ? C.red : C.green, fontSize: 15 }}>{cands.em_falha ?? 0}</b> em falha
+            {' · '}<b style={{ color: C.green }}>{cands.curadas ?? 0}</b> curadas
+            {' · '}{cands.total} na amostra · {cands.sliver} pré-refinamento 9 Jul
           </span>
         )}
         {st && st.total > 0 && (running || st.status === 'done' || cancelled) && (
@@ -102,8 +116,21 @@ export default function CrownSample() {
         )}
       </div>
 
-      {/* paginação */}
-      {list.length > PAGE && (
+      {!cands && <div style={{ color: C.muted }}>A carregar candidatas…</div>}
+
+      {/* ── SECÇÃO 1: EM FALHA / POR VERIFICAR (cards completos) ── */}
+      <div style={{ fontSize: 14, fontWeight: 800, margin: '4px 0 8px', color: emFalha.length ? C.red : C.green }}>
+        Em falha / por verificar ({emFalha.length})
+        <span style={{ fontWeight: 400, color: C.muted, fontSize: 12, marginLeft: 8 }}>
+          coroas vazias, suspeitas (&lt; base÷2) ou por confirmar — é aqui que trabalhas
+        </span>
+      </div>
+      {emFalha.length === 0 && cands && (
+        <div style={{ color: C.green, fontSize: 13, marginBottom: 8 }}>✓ Nada por verificar na amostra.</div>
+      )}
+
+      {/* paginação (só sobre as em falha) */}
+      {emFalha.length > PAGE && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
             style={pgBtn(page === 0)}>← anterior</button>
@@ -112,8 +139,6 @@ export default function CrownSample() {
             style={pgBtn(page >= nPages - 1)}>seguinte →</button>
         </div>
       )}
-
-      {!cands && <div style={{ color: C.muted }}>A carregar candidatas…</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {pageItems.map(c => {
@@ -165,6 +190,27 @@ export default function CrownSample() {
           )
         })}
       </div>
+
+      {/* ── SECÇÃO 2: CURADAS (lista compacta nº + link, sem imagem) ── */}
+      {curadas.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, margin: '0 0 8px', color: C.green }}>
+            Curadas ({curadas.length})
+            <span style={{ fontWeight: 400, color: C.muted, fontSize: 12, marginLeft: 8 }}>
+              coroas seladas/plausíveis — não contam como pendência
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+            {curadas.map(c => (
+              <Link key={c.hand_db_id} to={`/hand/${c.hand_db_id}`} title={c.tournament}
+                style={{ color: C.muted, fontSize: 12.5, fontFamily: 'ui-monospace,monospace',
+                  textDecoration: 'none' }}>
+                {c.hand_id}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
