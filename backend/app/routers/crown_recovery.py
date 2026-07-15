@@ -463,21 +463,56 @@ def crown_recovery_cancel(current_user=Depends(require_auth)):
     return {"status": "cancelling", "note": "interrompe na próxima mão; mantém o parcial"}
 
 
+def _drop_resolved(cards: list) -> list:
+    """Filtra os cards cujo(s) seat(s) JÁ têm coroa preenchida na BD (recuperados) —
+    INDEPENDENTE do scan em memória (que pode estar velho após carimbos/reload/deploy).
+    Fecha o "carimbo que volta": o painel reconhece os resolvidos SEMPRE, venha o estado
+    de onde vier. Um card FICA se ainda houver ≥1 seat sem coroa. Fail-open (erro → mostra
+    tudo, nunca esconde por engano)."""
+    if not cards:
+        return cards
+    ids = [c.get("hand_db_id") for c in cards if c.get("hand_db_id") is not None]
+    if not ids:
+        return cards
+    try:
+        rows = query("SELECT id, player_names FROM hands WHERE id = ANY(%s)", (ids,))
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("[crown-recovery] filtro de resolvidos falhou — mostra tudo (seguro)")
+        return cards
+    crown_by_id = {}
+    for r in rows:
+        pn = r["player_names"] if isinstance(r["player_names"], dict) else json.loads(r["player_names"] or "{}")
+        crown_by_id[r["id"]] = {p.get("name"): p.get("bounty_value_usd")
+                                for p in (pn or {}).get("players_list") or [] if isinstance(p, dict)}
+    out = []
+    for c in cards:
+        crowns = crown_by_id.get(c.get("hand_db_id"), {})
+        names = [s.get("name") for s in (c.get("busted") or c.get("seats") or []) if isinstance(s, dict)]
+        still_null = [n for n in names if crowns.get(n) is None]
+        if still_null or not names:          # ainda por recuperar (ou sem info → mantém)
+            out.append(c)
+    return out
+
+
 @router.get("")
-def crown_recovery_state(current_user=Depends(require_auth)):
+def crown_recovery_state(current_user=Depends(require_auth_or_api_key)):
     """Progresso + worklists (grupo 1 recuperável, grupo 2 falha real, over-read).
-    NÃO escreve nada."""
+    NÃO escreve nada. Os grupos com carimbo (grupo 1 + misread) são filtrados AO VIVO
+    contra a BD → um seat já recuperado NUNCA reaparece (independente do scan em memória)."""
     with _LOCK:
-        return {
-            "status": _STATE["status"], "done": _STATE["done"], "total": _STATE["total"],
-            "group1_count": len(_STATE["group1"]),
-            "misread_count": len(_STATE["misread"]),
-            "group2_count": len(_STATE["group2"]),
-            "over_read_count": len(_STATE["over_read"]),
-            "group1": list(_STATE["group1"]),
-            "misread": list(_STATE["misread"]),
-            "group2": list(_STATE["group2"]),
-            "over_read": list(_STATE["over_read"]),
-            "started_at": _STATE["started_at"], "finished_at": _STATE["finished_at"],
-            "error": _STATE["error"],
-        }
+        group1 = list(_STATE["group1"])
+        misread = list(_STATE["misread"])
+        group2 = list(_STATE["group2"])
+        over_read = list(_STATE["over_read"])
+        status = _STATE["status"]; done = _STATE["done"]; total = _STATE["total"]
+        started_at = _STATE["started_at"]; finished_at = _STATE["finished_at"]; error = _STATE["error"]
+    # filtro AO VIVO fora do lock (faz I/O à BD) — fecha o "carimbo que volta"
+    group1 = _drop_resolved(group1)
+    misread = _drop_resolved(misread)
+    return {
+        "status": status, "done": done, "total": total,
+        "group1_count": len(group1), "misread_count": len(misread),
+        "group2_count": len(group2), "over_read_count": len(over_read),
+        "group1": group1, "misread": misread, "group2": group2, "over_read": over_read,
+        "started_at": started_at, "finished_at": finished_at, "error": error,
+    }

@@ -415,3 +415,23 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   (corolário direto da lição do $437.5, agora aplicada à REGRA e não só ao caso). E ao corrigir uma
   fórmula partilhada, fazê-lo no chokepoint (1 sítio) e não em cada caller. → `JOURNAL_2026-07-20.md`;
   `REGISTO_CONCEITO 2026-07-20`.
+
+- 2026-07-20 — **Problema:** "o carimbo que volta" (3º episódio) — o Rui carimbou 26 recuperáveis, os
+  cards REAPARECERAM como por-fazer. **Causa:** o worklist assenta num scan EM-MEMÓRIA (`_STATE`) + o
+  `done` do card é estado LOCAL do frontend → após reload/deploy o snapshot velho re-mostra tudo (a BD
+  TINHA gravado: 11→42 `derived_green_ko`, coerente nos 2 stores). → **Solução:** o endpoint de estado
+  filtra os grupos com carimbo AO VIVO contra a BD (`_drop_resolved`: seat com coroa preenchida → sai),
+  fail-open. **→ Lição: um worklist com scan em-memória TEM de re-verificar "resolvido" contra a BD viva
+  em CADA leitura — nunca confiar no snapshot velho nem num `done` só-frontend. O painel reconhece o
+  resolvido SEMPRE, venha o estado de onde vier.** → `JOURNAL_2026-07-20.md`.
+- 2026-07-20 — **Problema:** reportado "o detetor de quedas ordena por NÚMERO GG, não pelo relógio"
+  (número GG ≠ ordem temporal em multi-mesa). **Verificação:** o detetor JÁ ordena por `played_at`
+  (`crown_recovery.py:206`); o caso citado (GG-6138656105 $52.5 vs GG-6138653978 $87.5) é uma **queda
+  REAL** — 4 sinais concordam (played_at, header cru da HH, `captured_at` da captura, Level 5→7) e a
+  **trajetória completa** da coroa do Hero no torneio (`35→52.5→87.5→87.5→52.5→105→105→204.5`) mostra o
+  $52.5@18:18 como um **mergulho de 1 mão entre $87.5 e $105** = misread (não há bust/re-entry, stack
+  ~64k). **→ Lição dupla:** (1) usar **sempre `played_at`** (nunca número GG / `id`) para comparar
+  "antes/depois" — o número GG não segue o relógio; auditado: só o **amostrador** ordena por `id` (ordem
+  de ecrã, cosmética, não comparação de física). (2) quando um user reporta "bug de ordenação", **provar
+  com a trajetória temporal COMPLETA** (a série de leituras por `played_at`), não com 1 par — foi a
+  trajetória que provou que a queda era real. → `JOURNAL_2026-07-20.md`.
