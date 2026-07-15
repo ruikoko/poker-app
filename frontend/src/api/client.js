@@ -559,10 +559,18 @@ export const tableSs = {
     }),
 }
 
-// URL da imagem de UMA mão (o backend resolve o entry certo). FONTE ÚNICA do src das
-// imagens de mão — os painéis usam <HandImage handDbId={...}/>, nunca montam o URL à mão.
+// ── FONTE ÚNICA dos src de imagem (lei do lightbox p/ imagens) ───────────────
+// Nenhum painel monta `${API_ROOT}/...` à mão. Usa-se via <HandImage .../> ou, quando
+// só é preciso o URL (galerias com lightbox próprio), via estes helpers.
+// 1) por MÃO (o backend resolve o entry certo — evita a doença do entry_id ambíguo):
 export const handImageUrl = (handDbId) =>
   handDbId != null ? `${API_ROOT}/api/screenshots/hand-image/${handDbId}` : null
+// 2) por ENTRY conhecido (quando se sabe mesmo qual o entry da imagem):
+export const entryImageUrl = (entryId) =>
+  entryId != null ? `${API_ROOT}/api/screenshots/image/${entryId}` : null
+// 3) URL do backend (relativo `/api/...` ou absoluto/data:) → prefixa API_ROOT 1×:
+export const absImageUrl = (u) =>
+  !u ? null : (/^(https?:|data:)/.test(u) ? u : `${API_ROOT}${u}`)
 
 // ── GTO Brain ──────────────────────────────────────────────────────────────
 export const gto = {

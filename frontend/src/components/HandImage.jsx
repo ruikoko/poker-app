@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import ZoomImg from './ZoomImg'
-import { handImageUrl } from '../api/client'
+import { handImageUrl, entryImageUrl, absImageUrl } from '../api/client'
 
-// FONTE ÚNICA da imagem de uma mão (lei do lightbox + fim da doença "imagem partida").
-// Recebe `handDbId` e monta o src pelo helper central (`handImageUrl`) → o backend resolve
-// o entry certo (o `h.entry_id` aponta muitas vezes ao HH sem imagem). Nenhum painel volta
-// a construir `${API_ROOT}/api/screenshots/image/${entry_id}` à mão. Zoom no clique (ZoomImg).
-// Uso: <HandImage handDbId={h.hand_db_id} alt="..." style={{width:320}} caption="$125 (a rever)" />
-export default function HandImage({ handDbId, alt = 'imagem da mão', style, caption }) {
+// FONTE ÚNICA de QUALQUER imagem num painel (lei do lightbox + fim da doença "imagem partida").
+// Monta o src pelos helpers centrais → nenhum painel volta a construir `${API_ROOT}/...` à mão.
+// Aceita UMA de: `handDbId` (o backend resolve o entry certo — preferido, evita o entry_id
+// ambíguo), `entryId` (quando se sabe o entry), ou `url` (URL do backend relativo/absoluto).
+// Zoom no clique (ZoomImg). Fallback "sem imagem" em vez de ícone partido.
+// Uso: <HandImage handDbId={h.hand_db_id} style={{width:320}} caption="$125 (a rever)" />
+export default function HandImage({ handDbId, entryId, url, alt = 'imagem da mão', style, caption }) {
   const [broken, setBroken] = useState(false)
-  const src = handImageUrl(handDbId)
+  const src = handDbId != null ? handImageUrl(handDbId)
+    : entryId != null ? entryImageUrl(entryId)
+    : absImageUrl(url)
   if (!src || broken) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',

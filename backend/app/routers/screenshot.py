@@ -2190,11 +2190,15 @@ def _serve_img_b64(raw_json, entry_id_for_name) -> Response:
 
 @router.get("/hand-image/{hand_db_id}")
 def get_hand_image(hand_db_id: int, current_user=Depends(require_auth_or_api_key)):
-    """Serve a MELHOR imagem de UMA mão, resolvendo o entry SERVER-SIDE — os painéis passam
-    `hand_db_id` e NUNCA adivinham qual entry tem a imagem (a doença recorrente: `h.entry_id`
-    aponta muitas vezes ao entry `hand_history`, sem img_b64 → 404 → imagem partida). Ordem:
-    (1) `h.entry_id` se for screenshot/replayer_link com img_b64; (2) qualquer entry
-    screenshot/replayer_link com img_b64 do MESMO tm da mão. 404 se não houver. Bearer|cookie."""
+    """Serve a imagem da LEITURA de UMA mão, resolvendo a fonte SERVER-SIDE — os painéis passam
+    `hand_db_id` e NUNCA adivinham qual capture tem a imagem (a doença recorrente: `h.entry_id`
+    aponta muitas vezes ao entry `hand_history`, sem img_b64 → 404 → imagem partida). As coroas
+    GG lêem-se de DUAS origens: a GOLD (entry screenshot/replayer_link) E o print de MESA do IT
+    (`table_ss_processing_log.img_b64`, via `hands.context_table_ss_id`). Ordem:
+    (1) `h.entry_id` se for screenshot/replayer_link com img_b64; (2) entry screenshot/replayer
+    do MESMO tm; (3) **o print table-SS da mão** (a leitura por-testemunha vive AQUI, não em
+    `entries` — era o buraco: mãos table_ss-deanon davam 404 com a imagem a existir). 404 só se
+    NENHUMA fonte tiver imagem. Bearer|cookie."""
     rows = query(
         "SELECT e.raw_json FROM hands h JOIN entries e ON e.id = h.entry_id "
         " WHERE h.id = %s AND e.entry_type IN ('screenshot','replayer_link') "
@@ -2206,9 +2210,17 @@ def get_hand_image(hand_db_id: int, current_user=Depends(require_auth_or_api_key
             "   AND (e.raw_json->>'img_b64') IS NOT NULL "
             "   AND replace(e.raw_json->>'tm','TM','') = replace(h.hand_id,'GG-','') "
             " WHERE h.id = %s ORDER BY e.id DESC LIMIT 1", (hand_db_id,))
-    if not rows:
-        raise HTTPException(status_code=404, detail="Sem imagem para esta mão")
-    return _serve_img_b64(rows[0].get("raw_json"), f"hand{hand_db_id}")
+    if rows:
+        return _serve_img_b64(rows[0].get("raw_json"), f"hand{hand_db_id}")
+    # (3) print table-SS da mão (a imagem da leitura por-testemunha)
+    tss = query(
+        "SELECT l.img_b64 FROM hands h JOIN table_ss_processing_log l "
+        "  ON l.id = h.context_table_ss_id "
+        " WHERE h.id = %s AND l.img_b64 IS NOT NULL", (hand_db_id,))
+    if tss:
+        return _serve_img_b64({"img_b64": tss[0]["img_b64"], "mime_type": "image/jpeg"},
+                              f"tss_hand{hand_db_id}")
+    raise HTTPException(status_code=404, detail="Sem imagem para esta mão")
 
 
 @router.get("/hand/{hand_id}")
