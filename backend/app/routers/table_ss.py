@@ -2067,6 +2067,43 @@ def set_seat_name(payload: dict = Body(...),
                                  current_user=current_user)
 
 
+@router.post("/crown-ab")
+def crown_vision_ab(payload: dict = Body(...),
+                    current_user=Depends(require_auth_or_api_key)):
+    """A/B da leitura de coroas: corre a Vision numa captura table-SS COM e SEM few-shot
+    visual e devolve as DUAS leituras — **NÃO escreve** (instrumento de medição,
+    docs/vision_examples). Os exemplos vêm no body (as imagens vivem em docs/, não são
+    deployadas); em produção o worker chama SEM examples (byte-idêntico). Custo: 2 chamadas
+    Vision por captura. Body: {capture_id?|hand_id?, examples?:[{caption,b64,mime}]}."""
+    import base64 as _b64, json as _json
+    from app.services.table_ss_vision import extract_table_ss_json
+    capture_id = (payload or {}).get("capture_id")
+    hand_id = (payload or {}).get("hand_id")
+    examples = (payload or {}).get("examples") or []
+    if capture_id:
+        rows = query("SELECT img_b64 FROM table_ss_processing_log WHERE id=%s", (capture_id,))
+    elif hand_id:
+        rows = query("SELECT l.img_b64 FROM hands h JOIN table_ss_processing_log l "
+                     "  ON l.id = h.context_table_ss_id WHERE h.hand_id=%s", (hand_id,))
+    else:
+        raise HTTPException(400, "capture_id ou hand_id obrigatório")
+    if not rows or not rows[0].get("img_b64"):
+        raise HTTPException(404, "captura sem imagem")
+    try:
+        img = _b64.b64decode(rows[0]["img_b64"])
+    except Exception:
+        raise HTTPException(422, "img_b64 ilegível")
+    def _read(exs):
+        raw = extract_table_ss_json(img, "image/jpeg", examples=exs)
+        try:
+            return _json.loads(raw) if raw else None
+        except Exception:
+            return None
+    return {"capture_id": capture_id, "hand_id": hand_id, "n_examples": len(examples),
+            "without_fewshot": _read(None),
+            "with_fewshot": _read(examples) if examples else None}
+
+
 @router.post("/revert-to-anon")
 def revert_to_anon(payload: dict = Body(...),
                    current_user=Depends(require_auth_or_api_key)):

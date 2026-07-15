@@ -1,0 +1,5 @@
+{
+  "01_placard_isolado.png": "Isto e a COROA: o placard rectangular DOURADO com um valor em $ ($50, $75...) que fica DIRECTAMENTE por CIMA do avatar. E ISTO que vai em bounty_usd.",
+  "02_jogador_completo.png": "Neste jogador: o $ no placard em CIMA = COROA (bounty_usd). O circulo LARANJA na avatar junto ao timer (ex.: 27%) = CHAMA/VPIP - IGNORAR, NUNCA vai em bounty_usd.",
+  "03_mesa_8.png": "Mesa completa: cada jogador tem placard $ (coroa, em cima) e pode ter chama % (laranja, na avatar). Le so o $ do placard por seat; nunca a %."
+}

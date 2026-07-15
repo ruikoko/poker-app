@@ -132,6 +132,7 @@ _TABLE_PROMPT = (
 def extract_table_ss_json(
     image_bytes: bytes, mime_type: str = "image/png",
     err_out: Optional[dict] = None,
+    examples: Optional[list] = None,
 ) -> Optional[str]:
     """Chama Claude Sonnet 4.6 com a SS da mesa. Devolve raw JSON text ou None
     em caso de falha API. Sonnet 4.6 não aceita prefill — apanha o 1º {...} via
@@ -154,25 +155,24 @@ def extract_table_ss_json(
     try:
         client = Anthropic()
         b64 = base64.b64encode(image_bytes).decode("ascii")
+        # FEW-SHOT visual (opcional, medição — docs/vision_examples): 1-2 exemplos ANOTADOS
+        # antes da imagem ALVO ensinam coroa (placard $) vs chama (VPIP %). `examples=None`
+        # (default) → comportamento ATUAL byte-idêntico (o worker de produção não passa examples).
+        content = []
+        for ex in (examples or []):
+            if ex.get("caption"):
+                content.append({"type": "text", "text": ex["caption"]})
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": ex.get("mime", "image/png"), "data": ex["b64"]}})
+        if examples:
+            content.append({"type": "text", "text": "Agora lê a imagem ALVO (a que deves extrair):"})
+        content.append({"type": "image", "source": {
+            "type": "base64", "media_type": mime_type, "data": b64}})
+        content.append({"type": "text", "text": _TABLE_PROMPT})
         response = client.messages.create(
             model=_MODEL,
             max_tokens=2048,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": mime_type,
-                                "data": b64,
-                            },
-                        },
-                        {"type": "text", "text": _TABLE_PROMPT},
-                    ],
-                },
-            ],
+            messages=[{"role": "user", "content": content}],
         )
         text = (response.content[0].text or "").strip()
         m = re.search(r"\{.*\}", text, re.DOTALL)
