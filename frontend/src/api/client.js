@@ -369,6 +369,8 @@ export const ggHealth = {
     req('POST', '/gg-health/crown-recovery/suggest', { hand_id: handId }),
   // Worklist de coroas suspeitas (read-only): quedas mesmo-hash + fora-de-grelha.
   crownDrops: () => req('GET', '/gg-health/crown-recovery/drops'),
+  // Cache das sugestões PAGAS (persiste entre refreshes) — {hand_id: payload}.
+  crownSuggestionsCache: () => req('GET', '/gg-health/crown-recovery/suggestions-cache'),
   crownSampleCandidates: (reselect = false) => req('GET', `/gg-health/crown-sample/candidates${reselect ? '?reselect=true' : ''}`),
   crownSampleRun: () => req('POST', '/gg-health/crown-sample/run'),
   crownSampleCancel: () => req('POST', '/gg-health/crown-sample/cancel'),

@@ -9,14 +9,15 @@ Scan em daemon thread com CANCELAR (regra permanente: toda op em lote cancela;
 mantém o parcial). Read-only — NÃO escreve. A escrita é o fluxo (A)+(B), gated
 pelo carimbo do Rui, mostrando SEMPRE a imagem antes (LICAO 14 Jul)."""
 from __future__ import annotations
+import json
 import logging
 import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends
 
-from app.auth import require_auth
-from app.db import query
+from app.auth import require_auth, require_auth_or_api_key
+from app.db import query, get_conn
 from app.services.crown_recovery import classify_hand, seated_hashes
 
 router = APIRouter(prefix="/api/gg-health/crown-recovery", tags=["crown-recovery"])
@@ -165,7 +166,7 @@ def _norm_key(s):
 
 
 @router.get("/drops")
-def crown_drops(current_user=Depends(require_auth)):
+def crown_drops(current_user=Depends(require_auth_or_api_key)):
     """Worklist SÓ-LEITURA de coroas SUSPEITAS, para o Rui trabalhar NA app (regra da casa):
     - **QUEDAS**: a coroa do MESMO hash desce entre mãos (impossível no PKO → misread). Cada
       caso traz o valor BAIXO (a mão a rever) + a referência ALTA anterior, com imagens.
@@ -230,13 +231,16 @@ def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(requi
     from app.routers.screenshot import (
         _extract_hand_data_from_image_claude, _parse_vision_response)
     from app.services.image_utils import detect_image_mime
+    from app.services.eliminated_bounty import busted_keys_from_hh
     hand_id = (payload or {}).get("hand_id")
     if not hand_id:
         return {"error": "hand_id obrigatório", "busted": {}, "crowns": {}, "image": "none"}
     rows = query(
-        "SELECT h.id, h.raw, h.all_players_actions AS apa, "
-        "       e.raw_json->>'img_b64' AS gold_img "
+        "SELECT h.id, h.raw, h.all_players_actions AS apa, h.tournament_number AS tn, "
+        "       h.played_at, e.raw_json->>'img_b64' AS gold_img, ts.buy_in_bounty AS bib "
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+        "  LEFT JOIN tournament_summaries ts "
+        "    ON ts.site='GGPoker' AND ts.tournament_number = h.tournament_number "
         " WHERE h.hand_id = %s", (hand_id,))
     if not rows:
         return {"error": "mão não encontrada", "busted": {}, "crowns": {}, "image": "none"}
@@ -244,6 +248,31 @@ def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(requi
     import json as _json
     apa = r["apa"] if isinstance(r["apa"], dict) else _json.loads(r["apa"] or "{}")
     busted = busted_real_names(r["raw"], apa)
+    base = (float(r["bib"]) / 2.0) if r["bib"] else None
+    # ÚLTIMA COROA CONHECIDA de cada eliminado (valor ESPERADO em multi-KO): o seu hash na
+    # última mão ANTERIOR do torneio com coroa lida. Sem leitura anterior → provável fresco=B.
+    last_crowns = {}
+    try:
+        b_keys = busted_keys_from_hh(r["raw"])
+        key2name = {k: (v.get("real_name") or k) for k, v in apa.items()
+                    if k != "_meta" and isinstance(v, dict)}
+        if b_keys and r["tn"]:
+            prior = query("SELECT all_players_actions AS apa FROM hands "
+                          " WHERE site='GGPoker' AND tournament_number=%s AND played_at < %s "
+                          " ORDER BY played_at DESC", (r["tn"], r["played_at"]))
+            for k in b_keys:
+                nm = key2name.get(k, k)
+                for pr in prior:
+                    pa = pr["apa"] if isinstance(pr["apa"], dict) else _json.loads(pr["apa"] or "{}")
+                    v = (pa or {}).get(k)
+                    if isinstance(v, dict) and v.get("bounty_value_usd"):
+                        try:
+                            last_crowns[nm] = round(float(v["bounty_value_usd"]), 2)
+                        except (TypeError, ValueError):
+                            pass
+                        break
+    except Exception:  # pragma: no cover - defensivo
+        pass
     b64 = r["gold_img"]
     if not b64:
         # sem Gold → o verde/coroas não estão guardados; lê à mão da imagem na página.
@@ -274,8 +303,55 @@ def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(requi
                 crowns[nm] = float(bv)
             except (TypeError, ValueError):
                 pass
-    return {"hand_id": hand_id, "busted": busted_out, "crowns": crowns,
-            "greens": greens, "image": "gold"}
+    result = {"hand_id": hand_id, "busted": busted_out, "crowns": crowns,
+              "greens": greens, "image": "gold",
+              "last_crowns": last_crowns, "base": base,
+              "green_total": round(sum(g["value"] for g in greens), 2) if greens else None}
+    _cache_suggestion(hand_id, result)     # a sugestão PAGA persiste (não evapora no refresh)
+    return result
+
+
+def _ensure_suggestion_cache():
+    """Tabela lazy de cache das sugestões da Vision (uma leitura PAGA por mão). Persiste
+    entre refreshes/reinícios → o Rui nunca perde o lote a meio da colheita."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS crown_suggestion_cache ("
+                        "hand_id TEXT PRIMARY KEY, payload JSONB NOT NULL, "
+                        "created_at TIMESTAMPTZ DEFAULT now())")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _cache_suggestion(hand_id: str, payload: dict) -> None:
+    try:
+        _ensure_suggestion_cache()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO crown_suggestion_cache (hand_id, payload) VALUES (%s,%s) "
+                            "ON CONFLICT (hand_id) DO UPDATE SET payload=EXCLUDED.payload, "
+                            "created_at=now()", (hand_id, json.dumps(payload)))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:  # pragma: no cover - defensivo (cache nunca parte a leitura)
+        logger.exception("[crown-recovery] cache da sugestão falhou (hand %s)", hand_id)
+
+
+@router.get("/suggestions-cache")
+def crown_suggestions_cache(current_user=Depends(require_auth_or_api_key)):
+    """Devolve TODAS as sugestões da Vision já pagas ({hand_id: payload}). O painel
+    recarrega-as no load → o lote sobrevive ao refresh. Read-only."""
+    try:
+        _ensure_suggestion_cache()
+        rows = query("SELECT hand_id, payload FROM crown_suggestion_cache")
+        return {"cache": {r["hand_id"]: r["payload"] for r in rows}}
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("[crown-recovery] leitura do cache falhou")
+        return {"cache": {}}
 
 
 @router.post("/scan")

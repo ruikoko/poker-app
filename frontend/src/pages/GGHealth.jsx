@@ -4,6 +4,7 @@ import { ggHealth, tableSs, captureTriage, suspicious, importHealth, API_ROOT } 
 import ImportHealthPage from './ImportHealth'
 import CaptureTriagePage from './CaptureTriage'
 import SuspiciousHandsPage from './SuspiciousHands'
+import ZoomImg from '../components/ZoomImg'
 
 // "Saúde Import" (casa única consolidada 11 Jul — desenho da antiga Saúde GG).
 // Vista por IMAGEM + painéis migrados (Saúde Import, Marcadas/captura, Mãos
@@ -219,7 +220,7 @@ function SwapModal({ im, onClose, onDone }) {
         {err && <div style={{ color: '#fca5a5', marginBottom: 8, fontSize: 13 }}>Erro: {err}</div>}
         {!data ? <div style={{ color: 'var(--muted)' }}>A carregar…</div> : (
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <img src={API_ROOT + data.capture.image_url} alt="" style={{ width: 300, maxWidth: '100%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
+            <ZoomImg src={API_ROOT + data.capture.image_url} alt="" style={{ width: 300, maxWidth: '100%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
             <div style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>Ficheiro nº <b>{data.capture.filename_num || '—'}</b> — compara os stacks da imagem com cada mão e clica na dona.</div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -884,7 +885,7 @@ function CrownHand({ h, onDone }) {
   return (
     <div style={{ ...card, padding: 12, marginBottom: 10, display: 'flex', gap: 12 }}>
       {h.image_url
-        ? <img src={API_ROOT + h.image_url} alt="" loading="lazy" style={{ width: 260, maxWidth: '38%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
+        ? <ZoomImg src={API_ROOT + h.image_url} alt="" style={{ width: 260, maxWidth: '38%', borderRadius: 6, border: '1px solid #2a2d3a', alignSelf: 'flex-start' }} />
         : <div style={{ width: 260, maxWidth: '38%', color: 'var(--muted)', fontSize: 12, padding: 8 }}>(sem imagem guardada)</div>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>

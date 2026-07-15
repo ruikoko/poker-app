@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ggHealth, API_ROOT } from '../api/client'
+import ZoomImg from '../components/ZoomImg'
 
 // Amostrador de coroas Gold — #CROWN-SAMPLE-VERIFY.
 // Modo por defeito: "Ver candidatas" (177 mãos com IMAGEM + coroas GRAVADAS por
@@ -121,7 +122,7 @@ export default function CrownSample() {
             <div key={c.hand_db_id} style={{ background: C.card, border: `1px solid ${C.border}`,
               borderRadius: 10, padding: 12, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               {c.entry_id != null && (
-                <img src={`${API_ROOT}/api/screenshots/image/${c.entry_id}`} alt="gold" loading="lazy"
+                <ZoomImg src={`${API_ROOT}/api/screenshots/image/${c.entry_id}`} alt="gold"
                   onError={e => { e.currentTarget.style.display = 'none'
                     const n = e.currentTarget.nextSibling; if (n) n.style.display = 'flex' }}
                   style={{ width: 300, maxWidth: '100%', borderRadius: 8, objectFit: 'contain',

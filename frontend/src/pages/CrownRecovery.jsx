@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ggHealth, tableSs, API_ROOT } from '../api/client'
+import ZoomImg from '../components/ZoomImg'
 
 // Bounties recuperáveis (#CROWN-RECOVERY) — ETAPA 2: sugerir (Vision só-ao-verde) +
 // carimbar (escrita SELADA). Grupo 1 = jogador bustou na HH E coroa NULL → o bounty
@@ -24,6 +25,12 @@ export default function CrownRecovery() {
 
   const refresh = () => ggHealth.crownRecoveryState().then(setSt).catch(() => {})
   useEffect(() => { refresh(); return () => clearInterval(poll.current) }, [])
+  // Recarrega as sugestões PAGAS do cache backend → o lote sobrevive ao refresh.
+  useEffect(() => {
+    ggHealth.crownSuggestionsCache()
+      .then(r => { if (r?.cache) setSuggestions(s => ({ ...r.cache, ...s })) })
+      .catch(() => {})
+  }, [])
   useEffect(() => {
     clearInterval(poll.current)
     if (st?.status === 'running') poll.current = setInterval(refresh, 2500)
@@ -42,7 +49,9 @@ export default function CrownRecovery() {
   const running = st?.status === 'running'
   const idle = !st || st.status === 'idle'
   const g1 = st?.group1 || []
-  const COST_PER_SUGGEST = 0.015          // ~$ por leitura Vision (estimativa; afina-se)
+  // Custo real por leitura Vision (claude-sonnet-4-6, preços oficiais $3/$15 por 1M):
+  // imagem 1280px ~1229 tok + prompt ~1100 → input $0.0070 · output ~450 tok → $0.0068 = ~$0.014.
+  const COST_PER_SUGGEST = 0.014
   const pending = g1.filter(h => !suggestions[h.hand_id])
 
   // LOTE "Sugerir todos": lê o verde+dourada de TODOS os pendentes, em lotes de 3, com
@@ -204,7 +213,6 @@ export default function CrownRecovery() {
 function DropsWorklist({ C }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [zoom, setZoom] = useState(null)     // src da imagem ampliada
   const load = () => { setLoading(true); ggHealth.crownDrops().then(setData).catch(() => setData(null)).finally(() => setLoading(false)) }
   useEffect(() => { load() }, [])
 
@@ -234,28 +242,20 @@ function DropsWorklist({ C }) {
         {drops.map((d, i) => (
           <DropCard key={'d' + i} C={C} kind="queda" player={d.player}
             handId={d.hand_id} handDb={d.hand_db_id} lowVal={d.low} refVal={d.ref}
-            entryId={d.entry_id} refEntryId={d.ref_entry_id} refHandId={d.ref_hand_id}
-            onZoom={setZoom} />
+            entryId={d.entry_id} refEntryId={d.ref_entry_id} refHandId={d.ref_hand_id} />
         ))}
         {off.map((o, i) => (
           <DropCard key={'o' + i} C={C} kind="fora-de-grelha" player={o.player}
             handId={o.hand_id} handDb={o.hand_db_id} lowVal={o.value} ratio={o.ratio}
-            entryId={o.entry_id} onZoom={setZoom} />
+            entryId={o.entry_id} />
         ))}
         {!loading && total === 0 && <div style={{ color: C.muted, fontSize: 13 }}>Nenhum caso — coroas limpas.</div>}
       </div>
-
-      {zoom && (
-        <div onClick={() => setZoom(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, cursor: 'zoom-out', padding: 20 }}>
-          <img src={zoom} alt="zoom" style={{ maxWidth: '96vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: 8 }} />
-        </div>
-      )}
     </div>
   )
 }
 
-function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId, onZoom }) {
+function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entryId, refEntryId, refHandId }) {
   const [val, setVal] = useState(refVal != null ? String(refVal) : '')
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -277,8 +277,8 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, entr
 
   const thumb = (src, label) => src && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <img src={src} alt={label} loading="lazy" onClick={() => onZoom(src)}
-        style={{ width: 200, maxWidth: '100%', borderRadius: 7, objectFit: 'contain', cursor: 'zoom-in',
+      <ZoomImg src={src} alt={label}
+        style={{ width: 200, maxWidth: '100%', borderRadius: 7, objectFit: 'contain',
           border: `1px solid ${C.border}`, background: '#000' }} />
       <span style={{ fontSize: 10, color: C.muted, textAlign: 'center' }}>{label} (clica p/ zoom)</span>
     </div>
@@ -329,24 +329,35 @@ function Group1Card({ h, C, onDone, suggestion }) {
   const matadores = (h.matadores || []).filter(m => m.name)
   const [vals, setVals] = useState({})           // name -> string (valor a escrever)
   const [sugg, setSugg] = useState(null)         // name -> valor sugerido pela Vision
+  const [meta, setMeta] = useState(null)         // {last:{nome:coroa}, base, greenTotal}
   const [suggesting, setSuggesting] = useState(false)
+  const multi = busted.length > 1                // multi-eliminação (verde = soma)
   const [stamping, setStamping] = useState(false)
   const [msg, setMsg] = useState(null)
   const [done, setDone] = useState(false)
 
   const setVal = (name, v) => setVals(s => ({ ...s, [name]: v }))
 
-  // aplica {busted, crowns} da Vision: verde→eliminado, dourada→matador (deste card)
+  // aplica {busted, crowns, last_crowns, base, green_total} da Vision
   const applySuggestion = (r) => {
+    setMeta({ last: r?.last_crowns || {}, base: r?.base ?? null, greenTotal: r?.green_total ?? null })
     const next = {}
+    // eliminado → verde derivado (KO limpo) OU, em multi-KO, a última coroa conhecida (esperado)
     Object.entries(r?.busted || {}).forEach(([name, v]) => { if (v != null) next[name] = String(v) })
+    busted.forEach(b => {
+      if (next[b.name] == null && r?.last_crowns?.[b.name] != null) next[b.name] = String(r.last_crowns[b.name])
+    })
+    // matador → coroa dourada (só os nomes que são matadores neste card)
     const matadorNames = new Set(matadores.map(m => m.name))
     Object.entries(r?.crowns || {}).forEach(([name, v]) => {
       if (v != null && matadorNames.has(name)) next[name] = String(v)
     })
-    if (Object.keys(next).length) {
+    const hasHints = Object.keys(next).length || (r?.last_crowns && Object.keys(r.last_crowns).length)
+    if (hasHints) {
       setSugg(next); setVals(v => ({ ...next, ...v }))   // prefill sem apagar edições
-      setMsg({ ok: true, t: 'Vision leu o verde e a dourada — confere antes de carimbar.' })
+      setMsg({ ok: true, t: multi
+        ? 'Multi-KO: cada eliminado pré-preenchido com a última coroa conhecida — verde total = contraprova da soma.'
+        : 'Vision leu o verde e a dourada — confere antes de carimbar.' })
       return true
     }
     setMsg({ ok: false, t: r?.image === 'none'
@@ -354,6 +365,10 @@ function Group1Card({ h, C, onDone, suggestion }) {
       : 'Vision não leu valores legíveis — lê à mão da imagem.' })
     return false
   }
+  // valor ESPERADO de um eliminado: última coroa conhecida, ou "fresco ~$B"
+  const expectedFor = (name) => (meta?.last?.[name] != null
+    ? { v: meta.last[name], label: `esperado $${meta.last[name]}` }
+    : (meta?.base != null ? { v: meta.base, label: `fresco ~$${meta.base}` } : null))
 
   // sugestão vinda do LOTE ("Sugerir todos") — pré-preenche quando chega
   useEffect(() => { if (suggestion && !done) applySuggestion(suggestion) }, [suggestion])
@@ -386,7 +401,7 @@ function Group1Card({ h, C, onDone, suggestion }) {
     finally { setStamping(false) }
   }
 
-  const row = (name, tag, tagColor) => (
+  const row = (name, tag, tagColor, hint) => (
     <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
       <span style={{ fontSize: 13, minWidth: 130 }}><b>{name}</b></span>
       <span style={{ fontSize: 10, color: '#08130d', background: tagColor, borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>{tag}</span>
@@ -396,14 +411,19 @@ function Group1Card({ h, C, onDone, suggestion }) {
         style={{ width: 90, background: '#0e1512', color: C.text, border: `1px solid ${C.border}`,
           borderRadius: 6, padding: '4px 7px', fontSize: 13, fontFamily: 'ui-monospace,monospace' }} />
       {sugg?.[name] != null && <span style={{ color: C.green, fontSize: 11 }}>Vision: ${sugg[name]}</span>}
+      {hint && <span style={{ color: C.gold, fontSize: 11 }}>{hint.label}</span>}
     </div>
   )
+  // soma dos valores esperados dos eliminados (contraprova do verde total, multi-KO)
+  const sumExpected = busted.reduce((s, b) => {
+    const e = expectedFor(b.name); return s + (e ? Number(e.v) : 0)
+  }, 0)
 
   return (
     <div style={{ background: C.card, border: `1px solid ${done ? C.green : C.border}`,
       borderRadius: 12, padding: 14, display: 'flex', gap: 16, flexWrap: 'wrap', opacity: done ? 0.7 : 1 }}>
       {h.entry_id != null && (
-        <img src={`${API_ROOT}/api/screenshots/image/${h.entry_id}`} alt="gold" loading="lazy"
+        <ZoomImg src={`${API_ROOT}/api/screenshots/image/${h.entry_id}`} alt="gold"
           onError={e => { e.currentTarget.style.display = 'none'
             const n = e.currentTarget.nextSibling; if (n) n.style.display = 'flex' }}
           style={{ width: 320, maxWidth: '100%', borderRadius: 9, objectFit: 'contain',
@@ -425,8 +445,14 @@ function Group1Card({ h, C, onDone, suggestion }) {
         {/* editor de carimbo: eliminado (verde) + matador (dourada) */}
         <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 8,
           background: 'rgba(224,112,95,.07)', border: '1px solid rgba(224,112,95,.3)' }}>
-          <div style={lbl(C)}>Eliminado · bounty = verde (tal-e-qual, sem ×2)</div>
-          {busted.map(b => row(b.name, 'verde', C.green))}
+          <div style={lbl(C)}>Eliminado · bounty = verde (tal-e-qual, sem ×2){multi ? ' · MULTI-KO (verde = soma)' : ''}</div>
+          {busted.map(b => row(b.name, 'verde', C.green, multi ? expectedFor(b.name) : null))}
+          {multi && meta && (
+            <div style={{ marginTop: 6, fontSize: 12, color: C.muted }}>
+              soma esperada = <b style={{ color: C.gold }}>${sumExpected.toFixed(2)}</b>
+              {meta.greenTotal != null && <> · verde total na imagem = <b style={{ color: C.green }}>${meta.greenTotal}</b> (contraprova)</>}
+            </div>
+          )}
         </div>
         {matadores.length > 0 && (
           <div style={{ marginTop: 8, padding: '9px 11px', borderRadius: 8,
