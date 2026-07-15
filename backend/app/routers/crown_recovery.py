@@ -193,9 +193,11 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
             if bv is None or bv <= 0:
                 continue
             nm = v.get("real_name") or k
+            _sealed = is_bounty_sealed(v)
             tl[(r["tn"], k)].append((r["played_at"], round(bv, 2), r["id"], r["hand_id"], nm,
-                                     r["entry_id"], is_bounty_sealed(v)))
-            if not _on_halves_grid(bv, B):
+                                     r["entry_id"], _sealed))
+            # SELO: um valor validado pelo Rui NUNCA entra num detetor (nem na grelha).
+            if not _sealed and not _on_halves_grid(bv, B):
                 off_grid.append({"hand_db_id": r["id"], "hand_id": r["hand_id"], "player": nm,
                                  "value": round(bv, 2), "ratio": round(bv / B, 4) if B else None,
                                  "entry_id": r["entry_id"]})
@@ -204,17 +206,16 @@ def crown_drops(current_user=Depends(require_auth_or_api_key)):
         seq = sorted(seq, key=lambda x: (x[0] or ""))
         for i in range(len(seq) - 1):
             a, b = seq[i], seq[i + 1]
+            # SELO: se o valor BAIXO (o que seria acusado) está SELADO = carimbo do Rui →
+            # NUNCA entra no detetor (validado; não se acusa a si próprio). Cobre também o
+            # caso da migração de unidade (o baixo selado = coroa certa, o alto era o total).
+            if b[6]:
+                continue
             if b[1] < a[1] and (a[1] - b[1]) >= 1.0:      # queda >= $1 (exclui cosmético)
-                # MIGRAÇÃO DE UNIDADE (não é queda): o valor BAIXO está SELADO (carimbo do
-                # Rui na unidade certa = coroa) e é EXATAMENTE metade do alto (o alto era a
-                # leitura antiga em unidade errada = bounty TOTAL). Distingue-se de misread.
-                b_sealed = b[6]
-                is_migration = b_sealed and abs(b[1] - a[1] / 2.0) <= max(0.5, 0.02 * a[1])
                 drops.append({
                     "hand_db_id": b[2], "hand_id": b[3], "player": b[4],
                     "low": b[1], "ref": a[1], "ref_hand_db_id": a[2], "ref_hand_id": a[3],
-                    "entry_id": b[5], "ref_entry_id": a[5],
-                    "kind": "unit_migration" if is_migration else "misread"})
+                    "entry_id": b[5], "ref_entry_id": a[5], "kind": "misread"})
     # dedup off-grid por (player, valor) — mostra 1 por caso
     seen = set(); og = []
     for o in sorted(off_grid, key=lambda x: (str(x["player"]).lower(), x["value"])):

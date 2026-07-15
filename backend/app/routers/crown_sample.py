@@ -51,7 +51,10 @@ _LOCK = threading.Lock()
 
 
 def _crowns_of(pn) -> dict:
-    """{name: bounty_value_usd} do player_names gravado (só seats com coroa)."""
+    """{name: bounty_value_usd} do player_names gravado (só seats com coroa).
+    SELO (invariante do Rui): seats VALIDADOS (manual/derived_green_ko/green_ko/confirmed)
+    NÃO entram — o amostrador nunca re-lê nem oferece corrigir por cima de um carimbo."""
+    from app.services.eliminated_bounty import is_bounty_sealed
     if isinstance(pn, str):
         try:
             pn = json.loads(pn or "{}")
@@ -60,7 +63,7 @@ def _crowns_of(pn) -> dict:
     out = {}
     for e in ((pn or {}).get("players_list") or []):
         bv = e.get("bounty_value_usd")
-        if bv is not None and e.get("name"):
+        if bv is not None and e.get("name") and not is_bounty_sealed(e):
             out[e["name"]] = bv
     return out
 

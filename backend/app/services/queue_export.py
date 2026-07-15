@@ -95,10 +95,15 @@ def detect_bounty_below_half(player_names, starting_bounty):
             pn = json.loads(pn)
         except (ValueError, TypeError):
             pn = {}
+    from app.services.eliminated_bounty import is_bounty_sealed
     floor = float(starting_bounty) / 2.0
     below = []
     for e in ((pn or {}).get("players_list") or []):
-        if e.get("bounty_confirmed"):        # aceite manualmente pelo Rui → exceção
+        # SELO (invariante do Rui): um valor VALIDADO pelo Rui (manual/derived_green_ko/
+        # green_ko/confirmed) NUNCA entra num detetor — o carimbo não se acusa a si próprio.
+        # Antes só isentava `bounty_confirmed` → um verde carimbado `derived_green_ko` abaixo
+        # de ½base (Curtis $92.75) era listado como chama. Agora isenta o selo inteiro.
+        if is_bounty_sealed(e):
             continue
         v = e.get("bounty_value_usd")
         if v is not None and float(v) < floor:
@@ -129,10 +134,11 @@ def detect_bounty_above_3x(player_names, starting_bounty):
             pn = json.loads(pn)
         except (ValueError, TypeError):
             pn = {}
+    from app.services.eliminated_bounty import is_bounty_sealed
     ceil = float(starting_bounty) * _HIGH_CROWN_FACTOR
     above = []
     for e in ((pn or {}).get("players_list") or []):
-        if e.get("bounty_confirmed"):        # carimbado pelo Rui → exceção
+        if is_bounty_sealed(e):        # SELO — valor validado pelo Rui não entra no detetor
             continue
         v = e.get("bounty_value_usd")
         if v is not None and float(v) > ceil:
