@@ -33,6 +33,7 @@ Fontes **NÃO** seladas (automáticas — podem ser reescritas): `gold`, `table_
 | `POST /api/table-ss/set-bounties` (valor) | `bounty_source='manual'` nos **dois** stores (apa + players_list) | `routers/table_ss.py` |
 | `POST /api/table-ss/set-bounties` (confirm) | `bounty_confirmed=True` espelhado apa+players_list | `routers/table_ss.py` |
 | Editor Saúde GG Fase 1-E (nomes) | `verified_by_user=True` | `routers/table_ss.py:/set-anon-map` |
+| **Editor de nome por-lugar (página da mão)** | `verified_by_user=True` (merge 1 seat → reusa `/set-anon-map`) | `routers/table_ss.py:/set-seat-name` |
 | Fluxo Etapa-2 (bounties recuperáveis) | `bounty_source='derived_green_ko'` | (cura verde carimbada) |
 
 ## 4. Os caminhos AUTOMÁTICOS e a guarda do selo (os 7 corrigidos)
@@ -101,3 +102,15 @@ Checklist ao adicionar/rever um escritor de `bounty_value_usd` ou de nomes/anon_
 
 A prova viva desta lei está em `backend/tests/test_crown_seal.py` (corrigir → forçar
 re-apply → o valor sobrevive). Se um escritor novo partir essa prova, viola a lei.
+
+## 7. Provas em produção (reincidências fechadas)
+
+- **COROAS — 6570 (GG-6104058222), 19 Jul** (`JOURNAL_2026-07-19 §1`): forçado o re-apply do
+  table-SS, 8/8 valores selados sobreviveram (`[crown-seal]`).
+- **NOMES — GG-6177132682, 20 Jul** (`JOURNAL_2026-07-20 §3`): o Rui corrigiu o HJ pelo editor
+  novo (`16170930 → fungus_among_us`, `verified_by_user=True`); forçados os **3 processos
+  automáticos** que historicamente pisavam a correção — **sobreviveu aos três**:
+  `reconcile` (votação, skip silencioso `table_ss_deanon.py:818`) · `re-link Gold`
+  (`already_enriched`, guarda `screenshot.py:1701`) · `re-deanon` (`skip_verified_by_user`,
+  `table_ss_deanon.py:498`). A reincidência da 6570-com-nomes está **morta**. Ferramenta de prova:
+  `POST /api/screenshots/orphans/{entry_id}/relink` (força o re-link Gold de uma mão já ligada).
