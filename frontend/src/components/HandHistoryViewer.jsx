@@ -76,7 +76,8 @@ function NickBadge({ name, isHero }) {
 
 // Editor de NOME de um lugar (o que faltava): ✎ ao lado do nick → fixa o nome real do
 // seat (por POSIÇÃO), carimbando verified_by_user (SELO). Nenhum automático o pisa depois.
-function NameEditor({ handId, position, name, onEdited }) {
+// Exportado: usado no HandHistoryViewer E no HandTimeline (a "disposição da mesa" real).
+export function NameEditor({ handId, position, name, onEdited }) {
   const [editing, setEditing] = useState(false)
   // não pré-preenche um hash (nome por-mapear): só um nome legível serve de default
   const looksHash = /^[0-9a-f]{6,}$/i.test((name || '').trim())

@@ -11,7 +11,7 @@
 
 import React, { useState } from 'react'
 import { parseHH, formatBB, formatActionLabel } from '../lib/handParser'
-import { CrownCell } from './HandHistoryViewer'
+import { CrownCell, NameEditor } from './HandHistoryViewer'
 import { DeanonBanner } from './DeanonBadge'
 import HandCard from './HandCard'
 
@@ -91,6 +91,7 @@ export default function HandTimeline({ hand, onEdited }) {
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
           {p.name}{p.isHero && <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.5px', color: '#22d3ee', marginLeft: 5 }}>HERO</span>}
         </span>
+        {!p.isHero && <NameEditor handId={hand.hand_id} position={p.position} name={p.name_key || p.name} onEdited={onEdited} />}
         <span style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12.5, color: '#fbbf24', fontWeight: 700, whiteSpace: 'nowrap' }}>
           {N(p.startStack)}<span style={{ display: 'block', color: '#7d8aa3', fontSize: 11 }}>{formatBB(p.startStack / bb)}</span>
         </span>
