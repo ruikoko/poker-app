@@ -466,6 +466,17 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   avisa, **não fecha**). **LEI (Rui):** escrita que falha **diz-se na hora**; as duas gavetas
   escrevem/lêem **alinhadas** — raiz da classe `$0-vivo` (446 seats), não só o sintoma.
   → `JOURNAL_2026-07-20.md`.
+- 2026-07-16 — **Fósseis-chama PLAUSÍVEIS existem — a grelha das metades é quem os apanha.** A
+  régua "<½base = chama" (o detetor dos fósseis extintos) só vê a chama VPIP LIDA COMO COROA quando
+  cai **abaixo** de ½base. Mas há a **variante plausível**: a chama **acima** de ½base (hntsrf $67,
+  mirroring $26/$67, crossaa $40) — a régua <½base **não a vê**. **Quem a apanha é a grelha das
+  metades** (`_on_halves_grid`): a chama é um % arbitrário → cai **fora-de-grelha** (entre os pontos
+  1·B, 1.5·B, 1.75·B…). **Padrão "chamas em bloco":** quando a chama entra, entra a **mesa/vários
+  seats de uma vez** (GG-6090110597 ATM2009/XunekasNF/rickzera; GG-6113445304 hntsrf/Dmitry) →
+  **≥2 seats fora-de-grelha na MESMA captura = candidata forte a chamas-em-bloco.** O Rui corrige
+  pela placa e sela (`manual`). **Varrimento (16 Jul):** 0 mãos pendentes com ≥2 fora-de-grelha
+  (todas já seladas) + 1 seat single (GG-6075628827 crossaa $40). O detetor real desta variante =
+  **fora-de-grelha**, não <½base. → `crown_recovery._on_halves_grid`, painel Quedas (off_grid).
 - 2026-07-16 — **`#SS-BIG-NUMBER-DIGIT-DROP` (a doença dos números grandes na SS — a "O Sander"
   outra vez).** A Vision do table-SS **larga dígitos de placas grandes**: `GG-6077755353` Mundico
   coroa real **$640.62** lida como **$36** (base $250 → piso $125). "Outra captura leu" **NÃO é
