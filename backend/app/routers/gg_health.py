@@ -1569,6 +1569,16 @@ def _cross_sieve(prop, base, tn, key, played_at, traj):
     return True, None
 
 
+def _gold_photo_time(grj, fallback):
+    """Hora da FOTO do Gold (replayer) = `file_meta.date + time` — NÃO o `entry.created_at`
+    (que é a hora do PROCESSAMENTO/reimport, ex. 07-10). Sem file_meta → fallback. Corrige o
+    'mais recente' dos conflitos (comparar relógios errados dava falsos 'recent_below_max')."""
+    fm = (grj or {}).get("file_meta") if isinstance(grj, dict) else None
+    if isinstance(fm, dict) and fm.get("date"):
+        return f"{fm['date']} {fm.get('time') or '00:00'}"
+    return fallback
+
+
 def _cross_gold_crowns(grj):
     """{nome_norm: coroa} da Gold (players_list + raw_vision). None se não é Gold real."""
     rv = grj.get("raw_vision") if isinstance(grj, dict) else None
@@ -1626,7 +1636,7 @@ def _crossing_all_fills():
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
         grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
         gc = _cross_gold_crowns(grj)
-        gold = ({"kind": "gold", "id": r["entry_id"], "cap": r.get("gold_at"),
+        gold = ({"kind": "gold", "id": r["entry_id"], "cap": _gold_photo_time(grj, r.get("gold_at")),
                  "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}
                 if gc is not None else None)
         caps = ([gold] if gold else []) + ss_by_hand.get(r["hand_id"], [])
@@ -1857,7 +1867,7 @@ def _crossing_conflicts():
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
         grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
         gc = _cross_gold_crowns(grj)
-        caps = ([{"source": "gold", "id": r["entry_id"], "cap": r.get("gold_at") or "",
+        caps = ([{"source": "gold", "id": r["entry_id"], "cap": _gold_photo_time(grj, r.get("gold_at")) or "",
                   "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}] if gc is not None else [])
         caps += ssb.get(r["hand_id"], [])
         for p in (pn.get("players_list") or []):
@@ -1916,17 +1926,12 @@ def _crossing_conflicts():
                 item["reason"] = "ambas_impossiveis"   # nenhuma na grelha → olho
                 eye.append(item)
             else:
-                # ≥2 possíveis: conflito real de valores válidos → (B) crescimento óbvio ou olho.
-                mxg = max(grid_valid)
-                ok, sreason = _cross_sieve(mxg, base, r["tn"], key, r["pa"], traj)
-                # tolerância de cêntimos também aqui: "mais recente ≈ máximo" a < $1 = crescimento.
-                if abs(recent["crowns"][key] - mxg) < _JITTER and ok:
-                    item["winner"] = mxg
-                    auto.append(item)                  # o maior válido é o mais recente + não-desce
-                else:
-                    item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mxg) >= _JITTER
-                                      else sreason or "ambos_possiveis")
-                    eye.append(item)
+                # ≥2 valores POSSÍVEIS (na grelha) na MESMA mão. A coroa é FIXA nesse momento
+                # (todas as capturas são da mesma mão) → NÃO há crescimento nem "mais recente":
+                # um dos on-grid é um misread coincidente (ex. $25 = chama VPIP 25 = 2.5B). Não se
+                # auto-decide → OLHO do Rui, com AMBAS as leituras + imagens à vista.
+                item["reason"] = "ambos_possiveis"
+                eye.append(item)
     return auto, exclusion, eye
 
 
