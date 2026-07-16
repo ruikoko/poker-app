@@ -1735,14 +1735,10 @@ def crossing_plan(current_user=Depends(require_auth)):
     }
 
 
-@router.post("/crossing/apply")
-def crossing_apply(payload: dict = Body(default=None),
-                   current_user=Depends(require_auth)):
-    """CARIMBO ÚNICO EM LOTE do Rui (LEI DO CRUZAMENTO). Escreve as coroas crivadas
-    (SELADAS, `bounty_source='cross_capture'`) + os nomes completos. Idempotente e
-    defensivo. Só corre com `{"confirm": true}` (o carimbo). NADA nos suspeitos."""
-    if not (payload or {}).get("confirm"):
-        raise HTTPException(400, "carimbo exige {confirm: true}")
+def _do_crossing_apply():
+    """NÚCLEO da aplicação do cruzamento (coroas crivadas SELADAS cross_capture + nomes
+    completos). Sem confirm/HTTP — partilhado pelo carimbo do Rui E pelo reconcile de
+    import (o reimport nasce cruzado). Idempotente/transacional; selos intocáveis."""
     from app.services.eliminated_bounty import (
         BOUNTY_SOURCE_KEY, SOURCE_CROSS_CAPTURE, is_bounty_sealed)
     fills, _ = _crossing_all_fills()
@@ -1798,6 +1794,17 @@ def crossing_apply(payload: dict = Body(default=None),
         conn.close()
     return {"status": "applied", "crowns_written": crowns_written,
             "names_written": names_written, "hands_touched": hands_touched}
+
+
+@router.post("/crossing/apply")
+def crossing_apply(payload: dict = Body(default=None),
+                   current_user=Depends(require_auth)):
+    """CARIMBO ÚNICO EM LOTE do Rui (LEI DO CRUZAMENTO). Escreve as coroas crivadas
+    (SELADAS, `bounty_source='cross_capture'`) + os nomes completos. Só corre com
+    `{"confirm": true}` (o carimbo). NADA nos suspeitos."""
+    if not (payload or {}).get("confirm"):
+        raise HTTPException(400, "carimbo exige {confirm: true}")
+    return _do_crossing_apply()
 
 
 # ── LEI DO CRUZAMENTO — CONFLITOS (decisão (B) do Rui) ─────────────────────────
@@ -1880,14 +1887,9 @@ def crossing_conflicts_plan(current_user=Depends(require_auth)):
             "eye": {"seats": len(eye), "hands": len({e["hand_id"] for e in eye})}}
 
 
-@router.post("/crossing/conflicts/apply")
-def crossing_conflicts_apply(payload: dict = Body(default=None),
-                             current_user=Depends(require_auth)):
-    """CARIMBO dos conflitos AUTO (B) — escreve o vencedor (mais recente = max, crescimento
-    óbvio) SELADO com `bounty_source='cross_conflict'`. Só os `eye` ficam para o olho. Exige
-    `{confirm:true}`. Idempotente/transacional. Selos intocáveis."""
-    if not (payload or {}).get("confirm"):
-        raise HTTPException(400, "carimbo exige {confirm: true}")
+def _do_crossing_conflicts_apply():
+    """NÚCLEO da resolução AUTO (B) dos conflitos (crescimento óbvio → o mais recente=max,
+    SELADO cross_conflict). Sem confirm/HTTP — partilhado pelo carimbo E pelo reconcile."""
     from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, is_bounty_sealed
     auto, _ = _crossing_conflicts()
     by_hand: dict = {}
@@ -1919,6 +1921,33 @@ def crossing_conflicts_apply(payload: dict = Body(default=None),
     finally:
         conn.close()
     return {"status": "applied", "crowns_written": written, "hands_touched": hands_touched}
+
+
+@router.post("/crossing/conflicts/apply")
+def crossing_conflicts_apply(payload: dict = Body(default=None),
+                             current_user=Depends(require_auth)):
+    """CARIMBO dos conflitos AUTO (B). Exige `{confirm:true}`. Só os `eye` ficam p/ o olho."""
+    if not (payload or {}).get("confirm"):
+        raise HTTPException(400, "carimbo exige {confirm: true}")
+    return _do_crossing_conflicts_apply()
+
+
+def run_crossing_auto(reason: str = "import") -> dict:
+    """LEI DO CRUZAMENTO no merge (ordem do Rui: 'o reimport nasce cruzado'). Corre a
+    aplicação automática — nomes completos + coroas crivadas (SELADAS cross_capture) +
+    conflitos de crescimento óbvio (B, SELADOS cross_conflict). Só toca não-selados; o
+    olho do Rui fica com os conflitos incompatíveis. Idempotente/defensivo (nunca lança)."""
+    out = {}
+    try:
+        out["fills_names"] = _do_crossing_apply()
+    except Exception:
+        logger.exception("[crossing/%s] apply fills+names falhou", reason)
+    try:
+        out["conflicts_auto"] = _do_crossing_conflicts_apply()
+    except Exception:
+        logger.exception("[crossing/%s] apply conflitos auto falhou", reason)
+    logger.info("[crossing/%s] %s", reason, out)
+    return out
 
 
 @router.get("/crossing/conflicts/eye")

@@ -1042,6 +1042,13 @@ def trigger_import_reconciles(reason: str = "import") -> None:
                         reason, r.get("resolved"), r.get("written"), r.get("still_unresolved"), r.get("scanned"))
         except Exception:
             logger.exception("[reconciles/%s] lobby reconcile falhou", reason)
+        try:
+            # LEI DO CRUZAMENTO no merge (ordem do Rui): o reimport nasce cruzado — nomes
+            # completos + coroas crivadas + conflitos de crescimento óbvio, tudo SELADO.
+            from app.routers.gg_health import run_crossing_auto
+            run_crossing_auto(reason=reason)
+        except Exception:
+            logger.exception("[reconciles/%s] crossing auto falhou", reason)
 
     threading.Thread(target=_run, daemon=True).start()
 

@@ -470,3 +470,20 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   leve**: fora-de-grelha → **lista de revisão do Rui** (não bloqueia; a imagem arbitra). Lista de
   revisão actual = **23 (não-desce)** + **6 (fora-de-grelha)** = 29 casos. Splits confirmados na HH
   entram na grelha por construção (whitelist). Ver `LEI_SELO_COROAS_NOMES.md`, `#CROWN-VALIDITY-GRID`.
+
+- 2026-07-16 — **LEI DO CRUZAMENTO (nomes + coroas de todas as fontes; ordem do Rui).** Gold =
+  principal · SS = complemento (preenche o que a Gold falhou, confirma o resto; **TODAS as SS
+  contam**, não só a ligada por `context_table_ss_id`) · sem Gold, a SS assume · âmbito: **nomes,
+  coroas** · selos intocáveis. **A table-SS falha coroas em bloco (24% mesa-vazia, `#SS-BIG-NUMBER-
+  DIGIT-DROP` larga dígitos de placas grandes: $640.62→$36); a Gold nunca (0%).** Por isso "outra
+  captura leu" **NÃO é prova** — a fonte irmã também erra. **Crivo da física obrigatório** antes de
+  propor coroa: (1) **floor** — nunca < base÷2; (2) **não-desce** — a coroa só sobe na trajetória do
+  hash. Chumba → "irmã suspeita" (vitrine), nunca proposta. **Nomes:** completo > truncado; se ambos
+  truncados, o mais longo (`name_merge.best_completion`). **Conflitos (2 valores >0):** decisão **(B)**
+  — crescimento óbvio (o maior é o mais recente e ≥ base, passa a física) → fica o mais recente pelo
+  CANON, selado `cross_conflict`; incompatíveis → card para o olho (`/set-bounties` manual). **Escrita
+  selada:** fontes novas `cross_capture` (preenche) e `cross_conflict` (B) em `SEALED_BOUNTY_SOURCES`.
+  **Histórico:** carimbo único do Rui (88 coroas + 822 nomes, 39 suspeitas congeladas; 65 conflitos
+  auto + 74 ao olho). **Reimport nasce cruzado:** `run_crossing_auto` no `trigger_import_reconciles`
+  (path-agnóstico, corre com a trajetória completa pós-import). Anatomia: `gg_health.py`
+  (`_crossing_all_fills`/`_cross_sieve`/`_crossing_conflicts`), `name_merge.py`, `LICOES 2026-07-16`.
