@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { ggHealth, tableSs } from '../api/client'
 import Worklist from '../components/Worklist'
@@ -83,6 +83,8 @@ function LiveZeroCard({ h, onResolved }) {
 }
 
 export default function LiveZeroCrownsPage() {
+  const [elim, setElim] = useState(null)
+  useEffect(() => { ggHealth.liveZeroEliminated().then(d => setElim(d)).catch(() => {}) }, [])
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
       <h1 style={{ fontSize: 20, margin: '0 0 4px' }}>Vivo com coroa $0</h1>
@@ -98,6 +100,28 @@ export default function LiveZeroCrownsPage() {
         keyOf={(h) => `${h.hand_id}|${h.name}`}
         renderCard={(h, { resolve }) => <LiveZeroCard h={h} onResolved={resolve} />}
       />
+
+      {/* ── BALDE 1 (informativo): eliminados cross-hand — saíram do painel ── */}
+      {elim && elim.count > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#8b9691', margin: '0 0 4px' }}>
+            Eliminados (saíram do painel) — {elim.count} seats / {elim.hands_count} mãos
+          </div>
+          <div style={{ fontSize: 12, color: '#8b9691', marginBottom: 8, maxWidth: 820 }}>
+            O hash destes seats <b>não reaparece</b> numa mão posterior do torneio → estão
+            <b> eliminados</b> (a régua por-mão não os apanhava). O $0 deles é o padrão do bust —
+            recupera-se pelo <b>verde×2</b> (fluxo dos recuperáveis), não com carimbo de coroa aqui.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+            {elim.items.map((e, i) => (
+              <Link key={i} to={`/hand/${e.id}`} title={e.tournament_name}
+                style={{ color: '#8b9691', fontSize: 12, fontFamily: 'ui-monospace,monospace', textDecoration: 'none' }}>
+                {e.hand_id}·{e.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

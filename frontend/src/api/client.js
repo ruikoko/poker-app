@@ -363,6 +363,7 @@ export const ggHealth = {
   // Worklist vivo-$0 (jogador VIVO com coroa $0 gravada calada em torneio KO): carimbar a
   // coroa (≥ base÷2) via /set-bounties (alinha as 2 gavetas) ou dispensar.
   liveZeroList: () => req('GET', '/gg-health/live-zero/list'),
+  liveZeroEliminated: () => req('GET', '/gg-health/live-zero/eliminated'),
   liveZeroDismiss: (handId, name) =>
     req('POST', '/gg-health/live-zero/dismiss', { hand_id: handId, name }),
   // LEI DO CRUZAMENTO — amostra read-only do balde PREENCHER (validação do critério
