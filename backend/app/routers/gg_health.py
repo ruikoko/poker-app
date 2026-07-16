@@ -1868,31 +1868,41 @@ def _crossing_conflicts():
                 continue                       # concordam → não é conflito
             recent = max(reads, key=lambda c: c["cap"])
             mx = max(c["crowns"][key] for c in reads)
-            # RÉGUA FÍSICA (correção do Rui): o limiar é a COROA FRESCA (base÷2), NÃO a base.
-            # $37.5 = fresca $25 + 1 KO = são; a régua velha (< base $50) mandava-o ao olho.
-            # `_cross_sieve` já usa base÷2 no floor + o não-desce → é a régua certa.
-            ok, sreason = _cross_sieve(mx, base, r["tn"], key, r["pa"], traj)
+            floor = round(base / 2.0, 2)
             readings = sorted(({"value": c["crowns"][key], "source": c["source"],
                                 "captured_at": c["cap"] or None, "image_url": c["url"]}
                                for c in reads), key=lambda x: x["captured_at"] or "")
-            floor = round(base / 2.0, 2)
             item = {"hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
                     "tournament": r.get("tname"), "base_source": "ts",
                     "stored": sv, "winner": mx, "base": base, "floor": floor,
                     "readings": readings}
-            # EXCLUSÃO DE PARTES: TODAS as leituras < KO inicial (impossíveis) E o stored é
-            # são (≥ KO inicial + na grelha) → a chama morre, fica o stored. Física certa.
-            stored_sound = sv >= floor - 0.01 and _on_halves_grid(sv, floor)
-            if mx < floor - 0.01 and stored_sound:
-                item["kept"] = sv
+            # EXCLUSÃO DE PARTES (generalizada — decisão do Rui): a régua é a PERTENÇA À GRELHA,
+            # não a comparação de leituras. Candidatas = stored + todas as leituras. Uma é
+            # "possível" sse >= KO inicial (base÷2) E na grelha das metades. Se houver EXATAMENTE
+            # UMA possível (as outras < KO ou fora-de-grelha = a grelha não as fabrica), essa
+            # ganha SOZINHA (física certa). ≥2 possíveis = conflito real → (B) crescimento/olho.
+            # 0 possíveis = todas impossíveis → olho.
+            candidates = {round(c["crowns"][key], 2) for c in reads}
+            candidates.add(round(sv, 2))
+            grid_valid = sorted(v for v in candidates
+                                if v >= floor - 0.01 and _on_halves_grid(v, floor))
+            if len(grid_valid) == 1:
+                item["kept"] = grid_valid[0]           # a possível ganha; as impossíveis morrem
                 exclusion.append(item)
-            elif abs(recent["crowns"][key] - mx) < 0.5 and ok:
-                auto.append(item)              # crescimento óbvio (o maior é o mais recente e
-                #                                passa a física: >= coroa fresca base÷2 + não-desce)
-            else:
-                item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mx) >= 0.5
-                                  else sreason or "fails_physics")
+            elif len(grid_valid) == 0:
+                item["reason"] = "ambas_impossiveis"   # nenhuma na grelha → olho
                 eye.append(item)
+            else:
+                # ≥2 possíveis: conflito real de valores válidos → (B) crescimento óbvio ou olho.
+                mxg = max(grid_valid)
+                ok, sreason = _cross_sieve(mxg, base, r["tn"], key, r["pa"], traj)
+                if abs(recent["crowns"][key] - mxg) < 0.5 and ok:
+                    item["winner"] = mxg
+                    auto.append(item)                  # o maior válido é o mais recente + não-desce
+                else:
+                    item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mxg) >= 0.5
+                                      else sreason or "ambos_possiveis")
+                    eye.append(item)
     return auto, exclusion, eye
 
 
@@ -1971,12 +1981,12 @@ def _do_crossing_exclusion_apply():
             if not rows:
                 continue
             pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
-            seats = {x["seat"] for x in items}
+            kept_map = {x["seat"]: x["kept"] for x in items}
             changed = False
             for p in (pn.get("players_list") or []):
-                if p.get("name") in seats and not is_bounty_sealed(p) \
-                        and p.get("bounty_value_usd") not in (None, 0):
-                    p[BOUNTY_SOURCE_KEY] = SOURCE_CROSS_EXCLUSION   # valor mantém-se (stored são)
+                if p.get("name") in kept_map and not is_bounty_sealed(p):
+                    p["bounty_value_usd"] = kept_map[p["name"]]     # a única possível (pode ≠ stored)
+                    p[BOUNTY_SOURCE_KEY] = SOURCE_CROSS_EXCLUSION
                     written += 1
                     changed = True
             if changed:

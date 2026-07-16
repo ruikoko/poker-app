@@ -216,7 +216,9 @@ export default function ConflictsEye() {
                 flexWrap: 'wrap', border: '1px solid #21262d', borderRadius: 8, background: '#0f1319', padding: '7px 10px' }}>
                 <Link to={`/hand/${x.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 12.5, textDecoration: 'none' }}>{x.hand_id}</Link>
                 <b style={{ color: '#c9d1d9', fontSize: 12.5 }}>{x.seat}</b>
-                <span style={{ fontSize: 12, color: '#f87171' }}>chama ${(x.readings?.[0]?.value) ?? '?'} ✗</span>
+                <span style={{ fontSize: 12, color: '#f87171' }}>
+                  fora-da-grelha {(x.readings || []).map(r => r.value).filter(v => Math.abs(v - x.kept) >= 0.5).map(v => `$${v}`).join(' ') || '✗'} ✗
+                </span>
                 <span style={{ fontSize: 12, color: '#86efac' }}>ficou <b>${x.kept}</b> ✓</span>
                 <span style={{ fontSize: 11, color: '#8b9691' }}>{x.tournament} · fresca ${x.floor}</span>
                 <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
