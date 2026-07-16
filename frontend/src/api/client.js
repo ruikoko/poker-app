@@ -364,6 +364,9 @@ export const ggHealth = {
   // coroa (≥ base÷2) via /set-bounties (alinha as 2 gavetas) ou dispensar.
   liveZeroList: () => req('GET', '/gg-health/live-zero/list'),
   liveZeroEliminated: () => req('GET', '/gg-health/live-zero/eliminated'),
+  liveZeroWholeTable: () => req('GET', '/gg-health/live-zero/whole-table'),
+  liveZeroWholeTableReread: () => req('POST', '/gg-health/live-zero/whole-table/reread'),
+  liveZeroWholeTableCancel: () => req('POST', '/gg-health/live-zero/whole-table/cancel'),
   liveZeroDismiss: (handId, name) =>
     req('POST', '/gg-health/live-zero/dismiss', { hand_id: handId, name }),
   // LEI DO CRUZAMENTO — amostra read-only do balde PREENCHER (validação do critério

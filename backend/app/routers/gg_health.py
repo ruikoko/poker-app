@@ -1557,6 +1557,121 @@ def live_zero_dismiss(payload: dict = Body(...),
     return {"status": "dismissed", "hand_id": hand_id, "name": name}
 
 
+# ── BALDE 2 (mesas-toda-$0): releitura dirigida da SS (Vision), sem escrita → cards p/ carimbo ──
+import threading as _wt_threading
+
+_WT_STATE = {"status": "idle", "done": 0, "total": 0, "cancel": False,
+             "results": [], "error": None}
+_WT_LOCK = _wt_threading.Lock()
+
+
+def _whole_table_zero_hands() -> list:
+    """As mãos tagadas-KO onde a maioria dos seats VIVOS tem coroa $0 (a SS falhou a mesa
+    em bloco). ≥3 seats, ≥70% zerados. READ-ONLY."""
+    from app.services.eliminated_bounty import busted_real_names, is_bounty_sealed
+    base = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty > 0")}
+    rows = query(
+        "SELECT id, hand_id, tournament_number AS tn, tournament_name AS tname, "
+        "       played_at::text AS pa, raw, all_players_actions AS apa, player_names AS pn, "
+        "       context_table_ss_id AS ssid "
+        "  FROM hands WHERE site='GGPoker' AND played_at >= '2026-01-01' "
+        "   AND player_names->>'match_method' IS NOT NULL "
+        "   AND player_names->'players_list' IS NOT NULL "
+        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 OR COALESCE(array_length(discord_tags,1),0)>0)")
+    out = []
+    for r in rows:
+        b = base.get(r["tn"])
+        if not b or not r["ssid"]:
+            continue
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        busted = busted_real_names(r["raw"], apa)
+        pl = pn.get("players_list") or []
+        zero = [p.get("name") for p in pl if p.get("name") and p.get("name") not in busted
+                and not is_bounty_sealed(p)
+                and float(p.get("bounty_value_usd") or 0) <= 0]
+        if len(pl) >= 3 and len(zero) / len(pl) >= 0.7:
+            out.append({"id": r["id"], "hand_id": r["hand_id"], "ssid": r["ssid"],
+                        "tournament_name": r["tname"], "floor": round(b / 2.0, 2),
+                        "zero_seats": zero})
+    return out
+
+
+def _run_wt_reread():
+    from app.routers.crown_recovery import _norm_key
+    try:
+        hands = _whole_table_zero_hands()
+    except Exception as exc:  # pragma: no cover
+        with _WT_LOCK:
+            _WT_STATE.update(status="error", error=str(exc))
+        return
+    with _WT_LOCK:
+        _WT_STATE.update(status="running", total=len(hands), done=0, results=[],
+                         cancel=False, error=None)
+    for h in hands:
+        with _WT_LOCK:
+            if _WT_STATE["cancel"]:
+                break
+        crowns = {}
+        try:
+            c = query("SELECT img_b64 FROM table_ss_processing_log WHERE id=%s", (h["ssid"],))
+            if c and c[0]["img_b64"]:
+                crowns = _crowns_from_witness(c[0]["img_b64"], gold=False)  # {nome_lower: coroa}
+        except Exception:
+            logger.exception("[wt-reread] falha na mão %s", h["hand_id"])
+        by_norm = {_norm_key(k): v for k, v in crowns.items()}
+        seats = []
+        for nm in h["zero_seats"]:
+            read = crowns.get((nm or "").strip().lower())
+            if read is None:
+                read = by_norm.get(_norm_key(nm))
+            seats.append({"name": nm, "read": read})
+        got = sum(1 for s in seats if s["read"] and float(s["read"] or 0) > 0)
+        with _WT_LOCK:
+            _WT_STATE["results"].append({
+                "hand_id": h["hand_id"], "id": h["id"], "ssid": h["ssid"],
+                "tournament_name": h["tournament_name"], "floor": h["floor"],
+                "seats": seats, "n_read": got, "n_seats": len(seats)})
+            _WT_STATE["done"] += 1
+    with _WT_LOCK:
+        if _WT_STATE["status"] != "error":
+            _WT_STATE["status"] = "cancelled" if _WT_STATE["cancel"] else "done"
+
+
+@router.get("/live-zero/whole-table")
+def live_zero_whole_table(current_user=Depends(require_auth)):
+    """Estado do balde 2 + a LISTA das mesas-toda-$0 (nº+link+imagem) mesmo sem releitura."""
+    with _WT_LOCK:
+        st = dict(_WT_STATE)
+    st["hands"] = _whole_table_zero_hands()
+    return st
+
+
+@router.post("/live-zero/whole-table/reread")
+def live_zero_whole_table_reread(current_user=Depends(require_auth)):
+    """Arranca a RELEITURA (Vision, prompt atual) das mesas-toda-$0 em background. Custo = 1
+    chamada Vision por mão (o painel mostra o total antes). NÃO escreve — o resultado vai a
+    cards de confirmação para o carimbo do Rui (/set-bounties)."""
+    with _WT_LOCK:
+        if _WT_STATE["status"] == "running":
+            return {"status": "running", "note": "já a correr"}
+        _WT_STATE.update(status="running", done=0, total=0, results=[], cancel=False, error=None)
+    _wt_threading.Thread(target=_run_wt_reread, daemon=True).start()
+    return {"status": "running"}
+
+
+@router.post("/live-zero/whole-table/cancel")
+def live_zero_whole_table_cancel(current_user=Depends(require_auth)):
+    """Cancela a releitura (bandeira cooperativa) — para na próxima mão, mantém o parcial."""
+    with _WT_LOCK:
+        if _WT_STATE["status"] != "running":
+            return {"status": _WT_STATE["status"], "note": "nada a cancelar"}
+        _WT_STATE["cancel"] = True
+    return {"status": "cancelling"}
+
+
 # ── LEI DO CRUZAMENTO — amostra do balde PREENCHER (validação do critério) ─────
 _CROSS_TRUNC = re.compile(r"(\.\.+|…)\s*$")
 

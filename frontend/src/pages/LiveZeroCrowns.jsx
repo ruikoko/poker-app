@@ -82,6 +82,96 @@ function LiveZeroCard({ h, onResolved }) {
   )
 }
 
+function WholeTableConfirmCard({ r }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const readable = (r.seats || []).filter(s => s.read && Number(s.read) > 0)
+  const stamp = async () => {
+    if (!readable.length) { setMsg('Nada legível para carimbar.'); return }
+    if (!window.confirm(`Carimbar ${readable.length} coroas relidas em ${r.hand_id} (selado manual)?`)) return
+    setBusy(true); setMsg(null)
+    try {
+      const bounties = Object.fromEntries(readable.map(s => [s.name, Number(s.read)]))
+      const res = await tableSs.setBounties(r.hand_id, { bounties })
+      if (res?.not_found?.length || res?.partial?.length) { setBusy(false); setMsg('nomes não casaram — verifica'); return }
+      setMsg(`✓ ${readable.length} carimbadas.`)
+    } catch (e) { setBusy(false); setMsg('Falha: ' + (e?.message || e)) }
+  }
+  return (
+    <div style={{ display: 'flex', gap: 14, padding: 12, border: '1px solid #30363d', borderRadius: 10, background: '#161b22', opacity: busy ? 0.5 : 1 }}>
+      <HandImage handDbId={r.id} alt="mesa" style={{ width: 260 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <Link to={`/hand/${r.id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>{r.hand_id}</Link>
+          <span style={{ fontSize: 12, color: '#8b9691' }}>{r.tournament_name}</span>
+          <span style={{ fontSize: 11, color: r.n_read ? '#86efac' : '#f87171' }}>releu {r.n_read}/{r.n_seats}</span>
+        </div>
+        <div style={{ fontSize: 12, marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
+          {(r.seats || []).map((s, i) => (
+            <span key={i} style={{ fontFamily: 'ui-monospace,monospace', color: s.read ? '#c9d1d9' : '#6b7280' }}>
+              {s.name}: <span style={{ color: '#f87171' }}>$0</span>→<b style={{ color: s.read ? '#86efac' : '#6b7280' }}>{s.read ? `$${s.read}` : '—'}</b>
+            </span>
+          ))}
+        </div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={stamp} disabled={busy || !readable.length} style={{ background: readable.length ? 'rgba(34,197,94,0.14)' : '#21262d', border: `1px solid ${readable.length ? 'rgba(34,197,94,0.5)' : '#30363d'}`, color: readable.length ? '#86efac' : '#6b7280', borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>
+            Carimbar os lidos ({readable.length})
+          </button>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('✓') ? '#86efac' : '#ef4444' }}>{msg}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WholeTablePanel() {
+  const [st, setSt] = useState(null)
+  const load = () => ggHealth.liveZeroWholeTable().then(setSt).catch(() => {})
+  useEffect(() => { load() }, [])
+  useEffect(() => {
+    if (st?.status !== 'running') return
+    const t = setInterval(load, 3000)
+    return () => clearInterval(t)
+  }, [st?.status])
+  const running = st?.status === 'running'
+  const hands = st?.hands || []
+  const reread = async () => {
+    if (!window.confirm(`Reler ${hands.length} mesas via Vision? Custo = ${hands.length} chamadas. Não escreve — vais confirmar cada uma.`)) return
+    await ggHealth.liveZeroWholeTableReread(); load()
+  }
+  if (!st || hands.length === 0) return null
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: '#eab308', margin: '0 0 4px' }}>
+        Mesas-toda-$0 — releitura dirigida ({hands.length} mãos)
+      </div>
+      <div style={{ fontSize: 12, color: '#8b9691', marginBottom: 10, maxWidth: 820 }}>
+        A SS falhou as coroas em bloco. Relê a captura com a Vision (prompt atual) e confere:
+        <b> nada escreve</b> — carimbas tu cada card. Custo = 1 chamada por mesa.
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <button onClick={reread} disabled={running} style={{ background: running ? '#21262d' : 'rgba(234,179,8,0.14)', border: '1px solid rgba(234,179,8,0.5)', color: running ? '#6b7280' : '#eab308', borderRadius: 8, padding: '6px 14px', fontWeight: 700, fontSize: 13, cursor: running ? 'default' : 'pointer' }}>
+          {running ? `A reler… ${st.done}/${st.total}` : `↻ Reler as ${hands.length} (Vision · ${hands.length} chamadas)`}
+        </button>
+        {running && <button onClick={() => ggHealth.liveZeroWholeTableCancel().then(load)} style={{ background: 'transparent', border: '1px solid #ef4444', color: '#f87171', borderRadius: 8, padding: '6px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancelar</button>}
+        {st.status === 'cancelled' && <span style={{ fontSize: 12, color: '#f87171' }}>interrompida (parcial mantido)</span>}
+        {st.status === 'done' && <span style={{ fontSize: 12, color: '#86efac' }}>releitura concluída</span>}
+      </div>
+      {(st.results && st.results.length > 0) ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {st.results.map((r, i) => <WholeTableConfirmCard key={`${r.hand_id}-${i}`} r={r} />)}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+          {hands.map((h, i) => (
+            <Link key={i} to={`/hand/${h.id}`} title={h.tournament_name} style={{ color: '#8b9691', fontSize: 12, fontFamily: 'ui-monospace,monospace', textDecoration: 'none' }}>{h.hand_id}</Link>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function LiveZeroCrownsPage() {
   const [elim, setElim] = useState(null)
   useEffect(() => { ggHealth.liveZeroEliminated().then(d => setElim(d)).catch(() => {}) }, [])
@@ -100,6 +190,9 @@ export default function LiveZeroCrownsPage() {
         keyOf={(h) => `${h.hand_id}|${h.name}`}
         renderCard={(h, { resolve }) => <LiveZeroCard h={h} onResolved={resolve} />}
       />
+
+      {/* ── BALDE 2: mesas-toda-$0 → releitura dirigida (cards de confirmação) ── */}
+      <WholeTablePanel />
 
       {/* ── BALDE 1 (informativo): eliminados cross-hand — saíram do painel ── */}
       {elim && elim.count > 0 && (
