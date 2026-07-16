@@ -375,6 +375,7 @@ export const ggHealth = {
   crossingConflictsApply: () => req('POST', '/gg-health/crossing/conflicts/apply', { confirm: true }),
   crossingConflictsEye: (n = 30) => req('GET', `/gg-health/crossing/conflicts/eye?n=${n}`),
   crossingConflictsAutoSample: (n = 4) => req('GET', `/gg-health/crossing/conflicts/auto-sample?n=${n}`),
+  crossingConflictsExclusion: () => req('GET', '/gg-health/crossing/conflicts/exclusion'),
   // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
   crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
   crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),

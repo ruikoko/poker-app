@@ -60,12 +60,14 @@ SOURCE_DERIVED_GREEN_KO = "derived_green_ko"   # fluxo Etapa-2 (Vision ao verde,
 SOURCE_CROSS_CAPTURE = "cross_capture"         # LEI DO CRUZAMENTO — coroa preenchida da fonte
 # irmã (Gold/outra SS), CRIVADA pela física (floor + não-desce) e carimbada em LOTE pelo Rui.
 SOURCE_CROSS_CONFLICT = "cross_conflict"        # conflito resolvido por (B): crescimento óbvio
-# (mais recente = max e ≥ base) → fica o mais recente, pela física do CANON.
+# (mais recente = max e ≥ coroa fresca base÷2) → fica o mais recente, pela física do CANON.
+SOURCE_CROSS_EXCLUSION = "cross_exclusion"      # conflito resolvido por EXCLUSÃO DE PARTES: a
+# leitura < KO inicial (base÷2) é impossível → morre; fica o `stored` são (≥ base÷2 + na grelha).
 # Fontes que SELAM um seat. `green_ko` já era de-facto selado (`_preserves_green_ko`);
 # generaliza-se para todas + o flag `bounty_confirmed` (exceção manual pré-existente).
 SEALED_BOUNTY_SOURCES = frozenset(
     {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO,
-     SOURCE_CROSS_CAPTURE, SOURCE_CROSS_CONFLICT})
+     SOURCE_CROSS_CAPTURE, SOURCE_CROSS_CONFLICT, SOURCE_CROSS_EXCLUSION})
 BOUNTY_CONFIRMED_KEY = "bounty_confirmed"
 
 

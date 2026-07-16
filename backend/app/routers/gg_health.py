@@ -1811,12 +1811,16 @@ def crossing_apply(payload: dict = Body(default=None),
 
 # ── LEI DO CRUZAMENTO — CONFLITOS (decisão (B) do Rui) ─────────────────────────
 def _crossing_conflicts():
-    """Seats NÃO-selados com coroa >0 onde as fontes DISCORDAM (≥2 valores >0 distintos).
-    Decisão (B) do Rui: **crescimento óbvio** (o MAIOR é o MAIS RECENTE e ≥ base, e passa
-    o crivo da física) → resolve-se pelo CANON (fica o mais recente), fonte `cross_conflict`.
-    Os **incompatíveis** (o mais recente é menor = misread, ou < base) → card para o olho.
-    Devolve (auto, eye). NADA escreve."""
+    """Seats NÃO-selados com coroa >0 onde as fontes DISCORDAM. Três baldes (decisão do Rui):
+    - **auto** (B): crescimento óbvio — o MAIOR é o MAIS RECENTE e passa a física (≥ coroa
+      fresca base÷2 + não-desce) → fica o mais recente (`cross_conflict`).
+    - **exclusion**: TODAS as leituras < KO inicial (base÷2) = impossíveis → morrem; o `stored`
+      é são (≥ base÷2 + na grelha das metades) → fica o stored (`cross_exclusion`). Física certa,
+      sem comparar leituras suspeitas → resolve-se sozinha (painel informativo, sem trava).
+    - **eye**: incompatíveis (o recente é menor = misread, ou stored não-são) → olho do Rui.
+    Devolve (auto, exclusion, eye). NADA escreve."""
     from app.services.eliminated_bounty import is_bounty_sealed
+    from app.routers.crown_recovery import _on_halves_grid
     ko = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty > 0")}
@@ -1840,7 +1844,7 @@ def _crossing_conflicts():
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
         " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
         "   AND h.player_names->'players_list' IS NOT NULL")
-    auto, eye = [], []
+    auto, exclusion, eye = [], [], []
     for r in rows:
         base = ko.get(r["tn"])
         if not base:
@@ -1871,28 +1875,36 @@ def _crossing_conflicts():
             readings = sorted(({"value": c["crowns"][key], "source": c["source"],
                                 "captured_at": c["cap"] or None, "image_url": c["url"]}
                                for c in reads), key=lambda x: x["captured_at"] or "")
+            floor = round(base / 2.0, 2)
             item = {"hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
                     "tournament": r.get("tname"), "base_source": "ts",
-                    "stored": sv, "winner": mx, "base": base, "floor": round(base / 2.0, 2),
+                    "stored": sv, "winner": mx, "base": base, "floor": floor,
                     "readings": readings}
-            if abs(recent["crowns"][key] - mx) < 0.5 and ok:
+            # EXCLUSÃO DE PARTES: TODAS as leituras < KO inicial (impossíveis) E o stored é
+            # são (≥ KO inicial + na grelha) → a chama morre, fica o stored. Física certa.
+            stored_sound = sv >= floor - 0.01 and _on_halves_grid(sv, floor)
+            if mx < floor - 0.01 and stored_sound:
+                item["kept"] = sv
+                exclusion.append(item)
+            elif abs(recent["crowns"][key] - mx) < 0.5 and ok:
                 auto.append(item)              # crescimento óbvio (o maior é o mais recente e
                 #                                passa a física: >= coroa fresca base÷2 + não-desce)
             else:
                 item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mx) >= 0.5
                                   else sreason or "fails_physics")
                 eye.append(item)
-    return auto, eye
+    return auto, exclusion, eye
 
 
 @router.get("/crossing/conflicts/plan")
 def crossing_conflicts_plan(current_user=Depends(require_auth)):
     """DRY-RUN dos conflitos (B). auto = crescimento óbvio (resolve pela física); eye =
     incompatível (card). READ-ONLY."""
-    auto, eye = _crossing_conflicts()
+    auto, exclusion, eye = _crossing_conflicts()
     return {"auto": {"seats": len(auto), "hands": len({a["hand_id"] for a in auto}),
                      "examples": [{"hand_id": a["hand_id"], "seat": a["seat"],
                                    "stored": a["stored"], "winner": a["winner"]} for a in auto[:8]]},
+            "exclusion": {"seats": len(exclusion), "hands": len({e["hand_id"] for e in exclusion})},
             "eye": {"seats": len(eye), "hands": len({e["hand_id"] for e in eye})}}
 
 
@@ -1900,7 +1912,7 @@ def _do_crossing_conflicts_apply():
     """NÚCLEO da resolução AUTO (B) dos conflitos (crescimento óbvio → o mais recente=max,
     SELADO cross_conflict). Sem confirm/HTTP — partilhado pelo carimbo E pelo reconcile."""
     from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, is_bounty_sealed
-    auto, _ = _crossing_conflicts()
+    auto, _exc, _ = _crossing_conflicts()
     by_hand: dict = {}
     for a in auto:
         by_hand.setdefault(a["hand_db_id"], []).append(a)
@@ -1941,20 +1953,57 @@ def crossing_conflicts_apply(payload: dict = Body(default=None),
     return _do_crossing_conflicts_apply()
 
 
+def _do_crossing_exclusion_apply():
+    """EXCLUSÃO DE PARTES (decisão do Rui — resolve-se sozinha). Sela o `stored` são
+    (`cross_exclusion`) nos conflitos onde a leitura era uma chama < KO inicial. O valor
+    NÃO muda (o stored já é o são); só se sela p/ proteger + sair do detetor. Física certa,
+    sem trava. Sem confirm/HTTP — partilhado pelo reconcile."""
+    from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, SOURCE_CROSS_EXCLUSION, is_bounty_sealed
+    _a, exclusion, _e = _crossing_conflicts()
+    by_hand: dict = {}
+    for x in exclusion:
+        by_hand.setdefault(x["hand_db_id"], []).append(x)
+    written = hands_touched = 0
+    conn = get_conn()
+    try:
+        for hid, items in by_hand.items():
+            rows = query("SELECT player_names AS pn FROM hands WHERE id=%s", (hid,))
+            if not rows:
+                continue
+            pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
+            seats = {x["seat"] for x in items}
+            changed = False
+            for p in (pn.get("players_list") or []):
+                if p.get("name") in seats and not is_bounty_sealed(p) \
+                        and p.get("bounty_value_usd") not in (None, 0):
+                    p[BOUNTY_SOURCE_KEY] = SOURCE_CROSS_EXCLUSION   # valor mantém-se (stored são)
+                    written += 1
+                    changed = True
+            if changed:
+                hands_touched += 1
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET player_names=%s WHERE id=%s",
+                                (json.dumps(pn), hid))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "applied", "sealed": written, "hands_touched": hands_touched}
+
+
 def run_crossing_auto(reason: str = "import") -> dict:
     """LEI DO CRUZAMENTO no merge (ordem do Rui: 'o reimport nasce cruzado'). Corre a
     aplicação automática — nomes completos + coroas crivadas (SELADAS cross_capture) +
-    conflitos de crescimento óbvio (B, SELADOS cross_conflict). Só toca não-selados; o
-    olho do Rui fica com os conflitos incompatíveis. Idempotente/defensivo (nunca lança)."""
+    conflitos de crescimento óbvio (B, `cross_conflict`) + exclusão de partes (chama < KO
+    morre, fica o stored são, `cross_exclusion`). Só toca não-selados; o olho do Rui fica
+    com os conflitos incompatíveis. Idempotente/defensivo (nunca lança)."""
     out = {}
-    try:
-        out["fills_names"] = _do_crossing_apply()
-    except Exception:
-        logger.exception("[crossing/%s] apply fills+names falhou", reason)
-    try:
-        out["conflicts_auto"] = _do_crossing_conflicts_apply()
-    except Exception:
-        logger.exception("[crossing/%s] apply conflitos auto falhou", reason)
+    for label, fn in (("fills_names", _do_crossing_apply),
+                      ("conflicts_auto", _do_crossing_conflicts_apply),
+                      ("conflicts_exclusion", _do_crossing_exclusion_apply)):
+        try:
+            out[label] = fn()
+        except Exception:
+            logger.exception("[crossing/%s] %s falhou", reason, label)
     logger.info("[crossing/%s] %s", reason, out)
     return out
 
@@ -1964,8 +2013,19 @@ def crossing_conflicts_eye(n: int = Query(20, ge=1, le=200),
                            current_user=Depends(require_auth)):
     """Os conflitos INCOMPATÍVEIS para o olho do Rui — seat + os valores lidos (com fonte,
     hora e IMAGEM de cada) → ele escolhe. A escrita é o /set-bounties (manual, selado)."""
-    _, eye = _crossing_conflicts()
+    _a, _x, eye = _crossing_conflicts()
     return {"count": len(eye), "conflicts": eye[:n]}
+
+
+@router.get("/crossing/conflicts/exclusion")
+def crossing_conflicts_exclusion(n: int = Query(200, ge=1, le=500),
+                                 current_user=Depends(require_auth)):
+    """PAINEL INFORMATIVO (não-worklist): conflitos resolvidos por EXCLUSÃO DE PARTES — a
+    chama < KO inicial morreu, ficou o `stored` são. Cada linha: mão (nº+link) + as leituras
+    (com imagem) + o valor que ficou (`kept`). Não prende nada, não conta como pendência.
+    A resolução (selo `cross_exclusion`) corre sozinha no reconcile de import."""
+    _a, exclusion, _e = _crossing_conflicts()
+    return {"count": len(exclusion), "items": exclusion[:n]}
 
 
 @router.get("/crossing/conflicts/auto-sample")
@@ -1977,7 +2037,7 @@ def crossing_conflicts_auto_sample(n: int = Query(4, ge=1, le=12),
     fonte + hora + IMAGEM de cada) + o vencedor → confere na placa se os rótulos dizem a
     verdade. READ-ONLY. O texto 'leu $X' vem do vision_json/raw_vision da captura (fiel à
     leitura; se não bate na placa = misread da Vision, não erro de atribuição)."""
-    auto, _ = _crossing_conflicts()
+    auto, _x, _e = _crossing_conflicts()
     import random
     rng = random.Random(seed) if seed is not None else random.Random()
     rng.shuffle(auto)

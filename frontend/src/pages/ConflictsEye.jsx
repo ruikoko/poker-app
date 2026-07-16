@@ -109,12 +109,14 @@ export default function ConflictsEye() {
   const [eye, setEye] = useState(null)
   const [autoSample, setAutoSample] = useState(null)   // trava dos rótulos
   const [autoOk, setAutoOk] = useState(false)          // o Rui validou a amostra
+  const [exclusion, setExclusion] = useState(null)     // painel informativo (resolvidos por exclusão)
   const [applying, setApplying] = useState(false)
   const [msg, setMsg] = useState(null)
   const load = () => {
     ggHealth.crossingConflictsPlan().then(setPlan).catch(() => {})
     ggHealth.crossingConflictsEye(40).then(d => setEye(d.conflicts || [])).catch(() => {})
     ggHealth.crossingConflictsAutoSample(4).then(d => setAutoSample(d.sample || [])).catch(() => {})
+    ggHealth.crossingConflictsExclusion().then(d => setExclusion(d.items || [])).catch(() => {})
   }
   useEffect(() => {
     load()
@@ -173,6 +175,7 @@ export default function ConflictsEye() {
           padding: '12px 14px', margin: '8px 0 18px' }}>
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <b style={{ color: '#86efac' }}>{plan.auto.seats}</b> conflitos AUTO (crescimento óbvio) / {plan.auto.hands} mãos
+            {plan.exclusion && <> · <b style={{ color: '#8b9691' }}>{plan.exclusion.seats}</b> por exclusão (sozinhos)</>}
             {' · '}<b style={{ color: '#f87171' }}>{plan.eye.seats}</b> para o teu olho / {plan.eye.hands} mãos
           </div>
           <button onClick={applyAuto} disabled={applying || !plan.auto.seats || !autoOk}
@@ -195,6 +198,37 @@ export default function ConflictsEye() {
           <EyeCard key={`${c.hand_id}-${c.seat}-${i}`} c={c} onResolved={() => resolveOne(c.hand_id, c.seat)} />
         ))}
       </div>
+
+      {/* ── PAINEL INFORMATIVO: resolvidos por exclusão de partes (não é worklist) ── */}
+      {exclusion && exclusion.length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#8b9691', margin: '0 0 4px' }}>
+            Resolvidos por exclusão de partes ({exclusion.length})
+          </div>
+          <div style={{ fontSize: 12, color: '#8b9691', marginBottom: 10, maxWidth: 820 }}>
+            A leitura era uma <b>chama abaixo do KO inicial</b> (impossível) → morreu; ficou o valor
+            são (≥ base÷2, na grelha). <b>Registo, não trabalho</b> — não prende nada, não conta como
+            pendência. Selam-se sozinhos (<code>cross_exclusion</code>) no reconcile de import.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {exclusion.map((x, i) => (
+              <div key={`x-${x.hand_id}-${x.seat}-${i}`} style={{ display: 'flex', gap: 10, alignItems: 'center',
+                flexWrap: 'wrap', border: '1px solid #21262d', borderRadius: 8, background: '#0f1319', padding: '7px 10px' }}>
+                <Link to={`/hand/${x.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 12.5, textDecoration: 'none' }}>{x.hand_id}</Link>
+                <b style={{ color: '#c9d1d9', fontSize: 12.5 }}>{x.seat}</b>
+                <span style={{ fontSize: 12, color: '#f87171' }}>chama ${(x.readings?.[0]?.value) ?? '?'} ✗</span>
+                <span style={{ fontSize: 12, color: '#86efac' }}>ficou <b>${x.kept}</b> ✓</span>
+                <span style={{ fontSize: 11, color: '#8b9691' }}>{x.tournament} · fresca ${x.floor}</span>
+                <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                  {(x.readings || []).map((r, j) => (
+                    <HandImage key={j} url={r.image_url} alt="" style={{ width: 90 }} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
