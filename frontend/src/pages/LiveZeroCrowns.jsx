@@ -174,7 +174,11 @@ function WholeTablePanel() {
 
 export default function LiveZeroCrownsPage() {
   const [elim, setElim] = useState(null)
-  useEffect(() => { ggHealth.liveZeroEliminated().then(d => setElim(d)).catch(() => {}) }, [])
+  const [none, setNone] = useState(null)
+  useEffect(() => {
+    ggHealth.liveZeroEliminated().then(d => setElim(d)).catch(() => {})
+    ggHealth.liveZeroNone().then(d => setNone(d)).catch(() => {})
+  }, [])
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
       <h1 style={{ fontSize: 20, margin: '0 0 4px' }}>Vivo com coroa $0</h1>
@@ -193,6 +197,30 @@ export default function LiveZeroCrownsPage() {
 
       {/* ── BALDE 2: mesas-toda-$0 → releitura dirigida (cards de confirmação) ── */}
       <WholeTablePanel />
+
+      {/* ── BALDE 3: NONE / sem identidade — leitura falhada do seat ── */}
+      {none && none.count > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#f87171', margin: '0 0 4px' }}>
+            NONE / sem identidade — {none.count} seat(s)
+          </div>
+          <div style={{ fontSize: 12, color: '#8b9691', marginBottom: 8, maxWidth: 820 }}>
+            O seat foi lido <b>sem nome</b> (leitura falhada) → não se carimba coroa num seat sem
+            dono. Re-ler o seat da imagem, ou limpar o fantasma. Confere na imagem primeiro.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {none.items.map((n, i) => (
+              <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', border: '1px solid #21262d', borderRadius: 8, background: '#0f1319', padding: 10 }}>
+                <HandImage handDbId={n.id} alt="mão" style={{ width: 200 }} />
+                <div>
+                  <Link to={`/hand/${n.id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>{n.hand_id}</Link>
+                  <div style={{ fontSize: 12, color: '#8b9691', marginTop: 4 }}>seat <b style={{ color: '#f87171' }}>{n.name}</b> · {n.tournament_name}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── BALDE 1 (informativo): eliminados cross-hand — saíram do painel ── */}
       {elim && elim.count > 0 && (

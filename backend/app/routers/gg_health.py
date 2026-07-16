@@ -1420,8 +1420,9 @@ def _live_zero_seats() -> tuple:
         "   AND player_names->'players_list' IS NOT NULL "
         "   AND (COALESCE(array_length(hm3_tags,1),0)>0 "
         "        OR COALESCE(array_length(discord_tags,1),0)>0)")
+    _BAD = {None, "", "none", "null", "nan"}
     scanned = 0
-    silent, review, eliminated = [], [], []
+    silent, review, eliminated, none_seats = [], [], [], []
     for r in rows:
         b = base.get(r["tournament_number"])
         if not b:                       # não-KO ou sem TS → guarda não se aplica
@@ -1432,7 +1433,13 @@ def _live_zero_seats() -> tuple:
         busted = busted_real_names(r["raw"], apa)
         name2hash = {(v.get("real_name") or k): k for k, v in apa.items()
                      if k != "_meta" and isinstance(v, dict)}
-        for p in pn.get("players_list") or []:
+        pl = pn.get("players_list") or []
+        # zero-live seats desta mão (p/ decidir se é MESA-TODA — vai ao balde 2, fora do worklist)
+        zero_live = [p for p in pl if p.get("name") and p.get("name") not in busted
+                     and (float(p.get("bounty_value_usd") or 0) <= 0
+                          if str(p.get("bounty_value_usd") or 0) not in ("", "None") else True)]
+        is_whole = len(pl) >= 3 and len(zero_live) / len(pl) >= 0.7
+        for p in pl:
             nm = p.get("name")
             if not nm or nm in busted:
                 continue                # eliminado NESTA mão (verde-KO) = outro crivo
@@ -1446,18 +1453,25 @@ def _live_zero_seats() -> tuple:
                     "tournament_name": r["tournament_name"],
                     "played_at": r["played_at"], "name": nm,
                     "floor": round(b / 2.0, 2), "review": p.get(BOUNTY_REVIEW_KEY)}
-            # CROSS-HAND: o hash deste seat reaparece numa mão POSTERIOR do torneio? Se NÃO,
-            # está eliminado (a régua por-mão não o apanhou) → balde dos recuperáveis.
+            # BALDE 3 — NONE / sem identidade: leitura falhada do seat (nem carimba coroa).
+            if str(nm).strip().lower() in _BAD:
+                none_seats.append(item)
+                continue
+            # BALDE 1 — CROSS-HAND: o hash reaparece numa mão POSTERIOR? Se NÃO → eliminado.
             h = name2hash.get(nm)
             ls = last_seen.get((r["tournament_number"], h)) if h else None
             if h and ls is not None and ls <= r["played_at"]:
                 eliminated.append(item)
                 continue
+            # BALDE 2 — MESA-TODA-$0: sai do worklist (tem o fluxo de releitura dirigida).
+            if is_whole:
+                continue
+            # BALDE 4 — GENUÍNO (individual): fica no painel.
             if p.get(BOUNTY_REVIEW_KEY):
-                review.append(item)     # vivo honesto (guarda activa)
+                review.append(item)
             else:
-                silent.append(item)     # vivo, coroa $0 gravada em silêncio
-    return scanned, silent, review, eliminated
+                silent.append(item)
+    return scanned, silent, review, eliminated, none_seats
 
 
 @router.get("/live-crown-zero-scan")
@@ -1468,13 +1482,13 @@ def live_crown_zero_scan(current_user=Depends(require_auth_or_api_key)):
       GATE DURO: >0 após reimporte OU qualquer ingest GG = PARAR + investigar + corrigir.
     - `review` = $0 com review='live_crown_read_zero' → honesto (guarda activa — OK).
     Torneios não-KO ou sem TS ficam FORA (a guarda não se aplica). NADA escreve."""
-    scanned, silent, review, eliminated = _live_zero_seats()
+    scanned, silent, review, eliminated, none_seats = _live_zero_seats()
     return {"scanned_ko_tagged_hands": scanned,
             # ★ crivo da guarda vivo-$0: tem de ser 0 pós-reimporte.
             "silent_zero_contamination": len(silent),
             "gate": "hard: silent_zero_contamination>0 => PARAR+investigar (nunca curado)",
             "counts": {"silent": len(silent), "review": len(review),
-                       "eliminated_cross_hand": len(eliminated)},
+                       "eliminated_cross_hand": len(eliminated), "none_identity": len(none_seats)},
             "silent_zero": silent, "review": review}
 
 
@@ -1513,7 +1527,7 @@ def live_zero_list(current_user=Depends(require_auth_or_api_key)):
     Carimbar via /set-bounties (sela + ALINHA as 2 gavetas) tira-o daqui (coroa > 0);
     Dispensar também. Exclui os já dispensados. READ-ONLY."""
     dismissed = _live_zero_dismissed_set()
-    _, silent, review, _elim = _live_zero_seats()   # eliminados cross-hand JÁ saíram do painel
+    _, silent, review, _elim, _none = _live_zero_seats()  # eliminados+NONE+mesa-toda JÁ fora
     items = ([{**s, "bucket": "silent"} for s in silent]
              + [{**s, "bucket": "review"} for s in review])
     hands = [s for s in items if (s["hand_id"], s["name"]) not in dismissed]
@@ -1530,10 +1544,19 @@ def live_zero_eliminated(current_user=Depends(require_auth_or_api_key)):
     numa mão posterior do torneio = ELIMINADOS (a régua por-mão não os apanhou). Saíram do
     painel — o $0 deles é o padrão do bust (recupera-se pelo verde×2, fluxo dos recuperáveis).
     Lista informativa (nº+link+imagem) para o Rui ver que saíram. READ-ONLY."""
-    _, _, _, eliminated = _live_zero_seats()
+    _, _, _, eliminated, _none = _live_zero_seats()
     return {"count": len(eliminated),
             "hands_count": len({e["hand_id"] for e in eliminated}),
             "items": eliminated}
+
+
+@router.get("/live-zero/none")
+def live_zero_none(current_user=Depends(require_auth_or_api_key)):
+    """BALDE 3 (NONE / sem identidade): seats cujo NOME é 'NONE'/vazio = leitura falhada do
+    seat inteiro (nem nome nem coroa). NÃO se carimba coroa num seat sem dono — re-ler o seat
+    da imagem, ou limpar o fantasma. Lista com imagem para o Rui ver antes de agir. READ-ONLY."""
+    _, _, _, _elim, none_seats = _live_zero_seats()
+    return {"count": len(none_seats), "items": none_seats}
 
 
 @router.post("/live-zero/dismiss")

@@ -364,6 +364,7 @@ export const ggHealth = {
   // coroa (≥ base÷2) via /set-bounties (alinha as 2 gavetas) ou dispensar.
   liveZeroList: () => req('GET', '/gg-health/live-zero/list'),
   liveZeroEliminated: () => req('GET', '/gg-health/live-zero/eliminated'),
+  liveZeroNone: () => req('GET', '/gg-health/live-zero/none'),
   liveZeroWholeTable: () => req('GET', '/gg-health/live-zero/whole-table'),
   liveZeroWholeTableReread: () => req('POST', '/gg-health/live-zero/whole-table/reread'),
   liveZeroWholeTableCancel: () => req('POST', '/gg-health/live-zero/whole-table/cancel'),
