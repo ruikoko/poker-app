@@ -74,19 +74,21 @@ function EyeCard({ c, onResolved }) {
   )
 }
 
-function AutoCard({ c }) {
+function AutoSelectCard({ c, checked, onToggle, value, onValue }) {
   const dv = distinctVals(c.readings)
   return (
-    <div style={{ border: '1px solid #30363d', borderRadius: 10, background: '#161b22', padding: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+    <div style={{ border: `1px solid ${checked ? 'rgba(34,197,94,0.4)' : '#30363d'}`, borderRadius: 10,
+      background: checked ? 'rgba(34,197,94,0.05)' : '#0f1319', padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+        <input type="checkbox" checked={checked} onChange={onToggle} style={{ width: 16, height: 16 }} />
         <Link to={`/hand/${c.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>{c.hand_id}</Link>
         <b style={{ color: '#fca5a5' }}>{c.seat}</b>
-        <span style={{ fontSize: 12 }}>
-          <span style={{ color: '#8b9691' }}>AUTO escreveria </span>
-          <b style={{ color: '#86efac', fontFamily: 'ui-monospace,monospace' }}>${c.winner}</b>
-        </span>
+        <span style={{ fontSize: 12, color: '#8b9691' }}>vai selar</span>
+        <input type="number" step="0.01" value={value} onChange={e => onValue(e.target.value)}
+          disabled={!checked} style={{ width: 92, fontFamily: 'ui-monospace,monospace', fontSize: 13,
+            background: '#0b0d13', color: '#86efac', border: '1px solid #30363d', borderRadius: 6, padding: '3px 7px' }} />
         <span style={{ fontSize: 11, color: '#8b9691', width: '100%' }}>
-          {c.tournament} · base ${c.base} · coroa fresca ${c.floor}
+          {c.tournament} · B (coroa fresca) ${c.floor} · gravado ${c.stored}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
@@ -107,15 +109,22 @@ function AutoCard({ c }) {
 export default function ConflictsEye() {
   const [plan, setPlan] = useState(null)
   const [eye, setEye] = useState(null)
-  const [autoSample, setAutoSample] = useState(null)   // trava dos rótulos
-  const [autoOk, setAutoOk] = useState(false)          // o Rui validou a amostra
+  const [autoList, setAutoList] = useState(null)       // os 33 AUTO p/ seleção em lote
+  const [sel, setSel] = useState({})                   // key -> bool (pré-marcados)
+  const [edit, setEdit] = useState({})                 // key -> valor a selar (default winner)
   const [exclusion, setExclusion] = useState(null)     // painel informativo (resolvidos por exclusão)
   const [applying, setApplying] = useState(false)
   const [msg, setMsg] = useState(null)
+  const keyOf = (c) => `${c.hand_id}|${c.seat}`
   const load = () => {
     ggHealth.crossingConflictsPlan().then(setPlan).catch(() => {})
     ggHealth.crossingConflictsEye(40).then(d => setEye(d.conflicts || [])).catch(() => {})
-    ggHealth.crossingConflictsAutoSample(4).then(d => setAutoSample(d.sample || [])).catch(() => {})
+    ggHealth.crossingConflictsAutoList().then(d => {
+      const items = d.items || []
+      setAutoList(items)
+      setSel(Object.fromEntries(items.map(c => [keyOf(c), true])))       // pré-marcados
+      setEdit(Object.fromEntries(items.map(c => [keyOf(c), String(c.winner)])))
+    }).catch(() => {})
     ggHealth.crossingConflictsExclusion().then(d => setExclusion(d.items || [])).catch(() => {})
   }
   useEffect(() => {
@@ -124,15 +133,20 @@ export default function ConflictsEye() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
-  const applyAuto = async () => {
-    if (!window.confirm(`Carimbar ${plan?.auto?.seats ?? '?'} conflitos AUTO (crescimento óbvio, fica o mais recente, selado)?`)) return
+  const applySelected = async () => {
+    const items = (autoList || []).filter(c => sel[keyOf(c)]).map(c => ({
+      hand_id: c.hand_id, seat: c.seat, value: Number(edit[keyOf(c)]),
+    })).filter(x => x.value > 0)
+    if (!items.length) { setMsg('Nada selecionado.'); return }
+    if (!window.confirm(`Carimbar ${items.length} conflitos selecionados (selado manual)? Os desmarcados ficam para correção individual.`)) return
     setApplying(true); setMsg(null)
     try {
-      const r = await ggHealth.crossingConflictsApply()
-      setMsg(`✓ ${r.crowns_written} conflitos auto carimbados em ${r.hands_touched} mãos.`)
+      const r = await ggHealth.crossingConflictsApplySelected(items)
+      setMsg(`✓ ${r.sealed} selados em ${r.hands_touched} mãos.`)
       load()
     } catch (e) { setMsg('Falha: ' + (e?.message || e)) } finally { setApplying(false) }
   }
+  const nSel = (autoList || []).filter(c => sel[keyOf(c)]).length
   const resolveOne = (handId, seat) => {
     setEye(list => (list || []).filter(c => !(c.hand_id === handId && c.seat === seat)))
     ggHealth.crossingConflictsPlan().then(setPlan).catch(() => {})
@@ -140,52 +154,45 @@ export default function ConflictsEye() {
   return (
     <div style={{ padding: 24, maxWidth: 1040 }}>
       <h1 style={{ fontSize: 20, margin: '0 0 4px' }}>Conflitos de coroa (cruzamento)</h1>
-      <p style={{ fontSize: 12, color: '#8b9691', marginTop: 0, maxWidth: 820 }}>
-        Duas fontes leram valores diferentes para o mesmo seat. <b>(B)</b>: crescimento óbvio
-        (o maior é o mais recente e ≥ <b>coroa fresca base÷2</b>, passa a física) resolve-se sozinho
-        pelo CANON; os <b>incompatíveis</b> ficam para o teu olho. <b>Trava dos rótulos:</b> valida
-        a amostra abaixo (os "leu $X" batem nas placas?) antes de carimbar o lote.
+      <p style={{ fontSize: 12, color: '#8b9691', marginTop: 0, maxWidth: 840 }}>
+        Duas fontes leram valores diferentes para o mesmo seat. A <b>exclusão</b> (grelha) e a
+        tolerância de cêntimos resolvem-se sozinhas. Os <b>candidatos a crescimento óbvio</b> (2
+        valores possíveis) já <b>NÃO</b> se carimbam às cegas — o $40=2×B pode ser chama on-grid
+        que nenhuma régua apanha. <b>Seleção em lote:</b> vês os cards pré-marcados, <b>desmarcas os
+        podres</b>, editas o valor se preciso, e carimbas os selecionados.
       </p>
 
-      {/* ── TRAVA: amostra AUTO ao olho (os rótulos batem nas placas?) ── */}
-      {autoSample && autoSample.length > 0 && (
-        <div style={{ border: '1px solid rgba(234,179,8,0.4)', borderRadius: 10, background: 'rgba(234,179,8,0.06)', padding: '12px 14px', margin: '8px 0 14px' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: '#eab308', marginBottom: 4 }}>
-            Amostra AUTO — valida os rótulos ({autoSample.length} ao acaso)
+      {/* ── SELEÇÃO EM LOTE dos AUTO (o lote cego morreu) ── */}
+      {autoList && autoList.length > 0 && (
+        <div style={{ border: '1px solid rgba(34,197,94,0.35)', borderRadius: 10, background: 'rgba(34,197,94,0.05)', padding: '12px 14px', margin: '8px 0 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#86efac' }}>
+              Crescimento óbvio — seleção em lote ({nSel}/{autoList.length} marcados)
+            </div>
+            <button onClick={() => setSel(Object.fromEntries(autoList.map(c => [keyOf(c), true])))}
+              style={{ background: 'transparent', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 6, padding: '3px 10px', fontSize: 12, cursor: 'pointer' }}>marcar todos</button>
+            <button onClick={() => setSel({})}
+              style={{ background: 'transparent', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 6, padding: '3px 10px', fontSize: 12, cursor: 'pointer' }}>desmarcar todos</button>
+            <button onClick={applySelected} disabled={applying || !nSel}
+              style={{ marginLeft: 'auto', background: nSel ? 'rgba(34,197,94,0.15)' : '#21262d', border: `1px solid ${nSel ? 'rgba(34,197,94,0.5)' : '#30363d'}`,
+                color: nSel ? '#86efac' : '#6b7280', borderRadius: 8, padding: '7px 16px', fontWeight: 800, fontSize: 13, cursor: (applying || !nSel) ? 'default' : 'pointer' }}>
+              {applying ? 'A carimbar…' : `Carimbar selecionados (${nSel})`}
+            </button>
+            {msg && <span style={{ fontSize: 13, color: msg.startsWith('✓') ? '#86efac' : '#ef4444' }}>{msg}</span>}
           </div>
           <div style={{ fontSize: 12, color: '#8b9691', marginBottom: 10 }}>
-            Cada card mostra as leituras (valor + fonte + hora + imagem) e o <b>vencedor</b> que o AUTO
-            escreveria. Confere na <b>placa</b> de cada imagem se o "leu $X" é verdade. Se algum mentir,
-            NÃO valides — a regra AUTO morre e tudo vai ao olho.
+            Confere a placa de cada imagem. Desmarca os podres (ficam para correção individual). Os
+            marcados selam-se com o valor à esquerda (edita-o se a placa disser outro).
           </div>
-          <button onClick={() => ggHealth.crossingConflictsAutoSample(4).then(d => { setAutoSample(d.sample || []); setAutoOk(false) })}
-            style={{ background: 'transparent', border: '1px solid #30363d', color: '#c9d1d9', borderRadius: 8, padding: '4px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginBottom: 10 }}>↻ Outras 4</button>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {autoSample.map((c, i) => <AutoCard key={`${c.hand_id}-${c.seat}-${i}`} c={c} />)}
+            {autoList.map((c) => {
+              const k = keyOf(c)
+              return <AutoSelectCard key={k} c={c} checked={!!sel[k]}
+                onToggle={() => setSel(s => ({ ...s, [k]: !s[k] }))}
+                value={edit[k] ?? String(c.winner)}
+                onValue={(v) => setEdit(e => ({ ...e, [k]: v }))} />
+            })}
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, cursor: 'pointer' }}>
-            <input type="checkbox" checked={autoOk} onChange={e => setAutoOk(e.target.checked)} />
-            <span>Vi a amostra — os rótulos <b>"leu $X" batem nas placas</b> (autorizo o carimbo AUTO).</span>
-          </label>
-        </div>
-      )}
-
-      {plan && (
-        <div style={{ border: '1px solid rgba(56,189,248,0.4)', borderRadius: 10, background: 'rgba(56,189,248,0.06)',
-          padding: '12px 14px', margin: '8px 0 18px' }}>
-          <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-            <b style={{ color: '#86efac' }}>{plan.auto.seats}</b> conflitos AUTO (crescimento óbvio) / {plan.auto.hands} mãos
-            {plan.exclusion && <> · <b style={{ color: '#8b9691' }}>{plan.exclusion.seats}</b> por exclusão (sozinhos)</>}
-            {' · '}<b style={{ color: '#f87171' }}>{plan.eye.seats}</b> para o teu olho / {plan.eye.hands} mãos
-          </div>
-          <button onClick={applyAuto} disabled={applying || !plan.auto.seats || !autoOk}
-            title={!autoOk ? 'Valida a amostra dos rótulos primeiro (checkbox acima)' : ''}
-            style={{ marginTop: 10, background: autoOk ? 'rgba(34,197,94,0.15)' : '#21262d', border: `1px solid ${autoOk ? 'rgba(34,197,94,0.5)' : '#30363d'}`,
-              color: autoOk ? '#86efac' : '#6b7280', borderRadius: 8, padding: '7px 16px', fontWeight: 800, fontSize: 13,
-              cursor: (applying || !autoOk) ? 'default' : 'pointer' }}>
-            {applying ? 'A carimbar…' : autoOk ? `Carimbar ${plan.auto.seats} conflitos AUTO (selado)` : `🔒 Valida a amostra primeiro`}
-          </button>
-          {msg && <span style={{ marginLeft: 12, fontSize: 13, color: msg.startsWith('✓') ? '#86efac' : '#ef4444' }}>{msg}</span>}
         </div>
       )}
 

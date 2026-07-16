@@ -1972,13 +1972,58 @@ def _do_crossing_conflicts_apply():
     return {"status": "applied", "crowns_written": written, "hands_touched": hands_touched}
 
 
-@router.post("/crossing/conflicts/apply")
-def crossing_conflicts_apply(payload: dict = Body(default=None),
-                             current_user=Depends(require_auth)):
-    """CARIMBO dos conflitos AUTO (B). Exige `{confirm:true}`. Só os `eye` ficam p/ o olho."""
-    if not (payload or {}).get("confirm"):
-        raise HTTPException(400, "carimbo exige {confirm: true}")
-    return _do_crossing_conflicts_apply()
+@router.post("/crossing/conflicts/apply-selected")
+def crossing_conflicts_apply_selected(payload: dict = Body(...),
+                                      current_user=Depends(require_auth)):
+    """SELEÇÃO EM LOTE (o lote cego morreu — ordem do Rui). O Rui varre os 33 AUTO como
+    cards pré-marcados, desmarca os podres (ex. WhereIsMyBeer $40=chama), edita valores se
+    quiser, e carimba os SELECIONADOS num clique. Body: {items:[{hand_id, seat, value}]}.
+    Sela cada um (`bounty_source='manual'` — arbítrio do Rui na placa), alinhando as 2
+    gavetas (apa + players_list) pelo nome. Idempotente/transacional."""
+    from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, SOURCE_MANUAL, is_bounty_sealed
+    items = (payload or {}).get("items") or []
+    by_hand: dict = {}
+    for it in items:
+        hid, seat, val = it.get("hand_id"), it.get("seat"), it.get("value")
+        if hid and seat and val is not None:
+            by_hand.setdefault(hid, {})[seat] = val
+    _nm = lambda s: re.sub(r"(.)\1+", r"\1", re.sub(r"\s+", "", (s or "").lower()))
+    written = hands_touched = 0
+    conn = get_conn()
+    try:
+        for hid, seatmap in by_hand.items():
+            rows = query("SELECT id, player_names AS pn, all_players_actions AS apa "
+                         "FROM hands WHERE hand_id=%s", (hid,))
+            if not rows:
+                continue
+            pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
+            apa = rows[0]["apa"] if isinstance(rows[0]["apa"], dict) else json.loads(rows[0]["apa"] or "{}")
+            by_norm = {_nm(k): v for k, v in seatmap.items()}
+            changed = False
+            for p in (pn.get("players_list") or []):
+                want = seatmap.get(p.get("name")) or by_norm.get(_nm(p.get("name")))
+                if want is not None and not is_bounty_sealed(p):
+                    p["bounty_value_usd"] = float(want)
+                    p[BOUNTY_SOURCE_KEY] = SOURCE_MANUAL
+                    written += 1
+                    changed = True
+            for k, v in (apa or {}).items():   # alinha o apa por nome
+                if k == "_meta" or not isinstance(v, dict) or is_bounty_sealed(v):
+                    continue
+                want = seatmap.get(v.get("real_name")) or by_norm.get(_nm(v.get("real_name")))
+                if want is not None:
+                    v["bounty_value_usd"] = float(want)
+                    v[BOUNTY_SOURCE_KEY] = SOURCE_MANUAL
+                    changed = True
+            if changed:
+                hands_touched += 1
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET player_names=%s, all_players_actions=%s WHERE hand_id=%s",
+                                (json.dumps(pn), json.dumps(apa), hid))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "applied", "sealed": written, "hands_touched": hands_touched}
 
 
 def _do_crossing_exclusion_apply():
@@ -2024,9 +2069,11 @@ def run_crossing_auto(reason: str = "import") -> dict:
     conflitos de crescimento óbvio (B, `cross_conflict`) + exclusão de partes (chama < KO
     morre, fica o stored são, `cross_exclusion`). Só toca não-selados; o olho do Rui fica
     com os conflitos incompatíveis. Idempotente/defensivo (nunca lança)."""
+    # ⚠️ O AUTO (crescimento óbvio, 2 possíveis) SAIU do auto-aplicar (o lote cego morreu):
+    # o $40=2×B pode ser chama on-grid que nenhuma régua apanha → passa a SELEÇÃO EM LOTE
+    # (olho do Rui). Só ficam automáticos: fills/nomes (crivados) + exclusão (grid-certa).
     out = {}
     for label, fn in (("fills_names", _do_crossing_apply),
-                      ("conflicts_auto", _do_crossing_conflicts_apply),
                       ("conflicts_exclusion", _do_crossing_exclusion_apply)):
         try:
             out[label] = fn()
@@ -2056,20 +2103,14 @@ def crossing_conflicts_exclusion(n: int = Query(200, ge=1, le=500),
     return {"count": len(exclusion), "items": exclusion[:n]}
 
 
-@router.get("/crossing/conflicts/auto-sample")
-def crossing_conflicts_auto_sample(n: int = Query(4, ge=1, le=12),
-                                   seed: Optional[int] = None,
-                                   current_user=Depends(require_auth)):
-    """AMOSTRA dos conflitos AUTO (trava do Rui — os rótulos 'leu $X' batem nas PLACAS?).
-    Antes de qualquer carimbo em lote, o Rui vê n autos ao acaso com as leituras (valor +
-    fonte + hora + IMAGEM de cada) + o vencedor → confere na placa se os rótulos dizem a
-    verdade. READ-ONLY. O texto 'leu $X' vem do vision_json/raw_vision da captura (fiel à
-    leitura; se não bate na placa = misread da Vision, não erro de atribuição)."""
+@router.get("/crossing/conflicts/auto-list")
+def crossing_conflicts_auto_list(current_user=Depends(require_auth)):
+    """LISTA COMPLETA dos conflitos AUTO para a SELEÇÃO EM LOTE (o lote cego morreu). Cada
+    item: o `winner` que se escreveria + as leituras (valor+fonte+hora+IMAGEM) + torneio + B
+    (coroa fresca) → o Rui varre, desmarca os podres (chama on-grid como o $40=2×B do
+    WhereIsMyBeer) e carimba os selecionados. READ-ONLY."""
     auto, _x, _e = _crossing_conflicts()
-    import random
-    rng = random.Random(seed) if seed is not None else random.Random()
-    rng.shuffle(auto)
-    return {"auto_total": len(auto), "sample": auto[:n]}
+    return {"count": len(auto), "items": auto}
 
 
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────
