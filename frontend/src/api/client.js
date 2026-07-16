@@ -369,6 +369,8 @@ export const ggHealth = {
   // à vista, com as 2 imagens). NADA escreve.
   crossingFillSample: (n = 4, seed) =>
     req('GET', `/gg-health/crossing/fill-sample?n=${n}${seed != null ? `&seed=${seed}` : ''}`),
+  crossingPlan: () => req('GET', '/gg-health/crossing/plan'),          // dry-run (números finais)
+  crossingApply: () => req('POST', '/gg-health/crossing/apply', { confirm: true }),  // carimbo único
   // Amostrador de coroas Gold (verificação por releitura, 177 mãos) — NÃO escreve.
   crownRecoveryScan: () => req('POST', '/gg-health/crown-recovery/scan'),
   crownRecoveryCancel: () => req('POST', '/gg-health/crown-recovery/cancel'),

@@ -10,7 +10,7 @@ import HandImage from '../components/HandImage'
 
 const fmt = (t) => t ? String(t).replace('T', ' ').replace('Z', '').slice(0, 16) : '—'
 const srcLabel = (s) => s === 'gold' ? 'Gold' : 'SS de mesa'
-const reasonLabel = (r) => r === 'below_floor' ? 'abaixo do piso (base÷2) — impossível'
+const reasonLabel = (r) => r === 'below_floor' ? 'abaixo da base — impossível'
   : r === 'descends_vs_earlier' ? 'desce vs leitura anterior (a coroa só sobe)'
     : r === 'exceeds_later' ? 'excede leitura posterior'
       : r || '—'
@@ -44,7 +44,7 @@ function CrossCard({ c, suspect }) {
           <b style={{ color: '#ef4444', fontFamily: 'ui-monospace,monospace' }}>{c.stored == null ? 'vazio' : `$${c.stored}`}</b>
           <span style={{ color: '#8b9691' }}> · fonte irmã leu </span>
           <b style={{ color: suspect ? '#f87171' : '#86efac', fontFamily: 'ui-monospace,monospace' }}>${c.value}</b>
-          <span style={{ color: '#8b9691' }}> ({srcLabel(c.read.source)}) · piso ${c.floor}</span>
+          <span style={{ color: '#8b9691' }}> ({srcLabel(c.read.source)}) · base÷2 ${c.floor}</span>
         </span>
         {suspect && (
           <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.14)',
@@ -65,12 +65,25 @@ export default function CrossingSample() {
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [plan, setPlan] = useState(null)
+  const [applying, setApplying] = useState(false)
+  const [applied, setApplied] = useState(null)
   const load = () => {
     setBusy(true); setErr(null)
     ggHealth.crossingFillSample(4).then(d => { setData(d); setBusy(false) })
       .catch(e => { setErr(e?.message || String(e)); setBusy(false) })
   }
-  useEffect(() => { load() }, [])
+  const loadPlan = () => ggHealth.crossingPlan().then(setPlan).catch(() => {})
+  const apply = async () => {
+    if (!window.confirm(`CARIMBO ÚNICO EM LOTE — escrever ${plan?.crowns?.seats ?? '?'} coroas (seladas) `
+      + `+ ${plan?.names?.seats ?? '?'} nomes completos? Os suspeitos NÃO se tocam.`)) return
+    setApplying(true)
+    try {
+      const r = await ggHealth.crossingApply()
+      setApplied(r); loadPlan(); load()
+    } catch (e) { setErr(e?.message || String(e)) } finally { setApplying(false) }
+  }
+  useEffect(() => { load(); loadPlan() }, [])
   return (
     <div style={{ padding: 24, maxWidth: 1000 }}>
       <h1 style={{ fontSize: 20, margin: '0 0 4px' }}>Cruzamento — amostra (validar critério)</h1>
@@ -85,6 +98,36 @@ export default function CrossingSample() {
           <b style={{ color: '#86efac' }}>{data.counts.passed}</b> passam o crivo
           {' · '}<b style={{ color: '#f87171' }}>{data.counts.suspect}</b> irmãs suspeitas
           {' · '}{data.counts.total} propostas brutas
+        </div>
+      )}
+
+      {/* ── DRY-RUN + CARIMBO ÚNICO (aval dado) ── */}
+      {plan && (
+        <div style={{ border: '1px solid rgba(56,189,248,0.4)', borderRadius: 10,
+          background: 'rgba(56,189,248,0.06)', padding: '12px 14px', margin: '4px 0 18px' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#38bdf8', marginBottom: 6 }}>
+            Dry-run do histórico — carimbo único em lote
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+            Coroas a preencher (crivadas): <b style={{ color: '#86efac' }}>{plan.crowns.seats}</b> seats / {plan.crowns.hands} mãos
+            <span style={{ color: '#8b9691' }}> (as {plan.crowns.suspects_frozen} suspeitas ficam na vitrine)</span><br />
+            Nomes completos &gt; truncados: <b style={{ color: '#86efac' }}>{plan.names.seats}</b> seats / {plan.names.hands} mãos<br />
+            <span style={{ color: '#8b9691', fontSize: 12 }}>
+              Coroas escrevem SELADAS (fonte <code>cross_capture</code>); nomes completam-se; selos intocáveis.
+            </span>
+          </div>
+          {applied ? (
+            <div style={{ marginTop: 8, color: '#86efac', fontSize: 13, fontWeight: 700 }}>
+              ✓ Carimbado: {applied.crowns_written} coroas + {applied.names_written} nomes em {applied.hands_touched} mãos.
+            </div>
+          ) : (
+            <button onClick={apply} disabled={applying || (!plan.crowns.seats && !plan.names.seats)}
+              style={{ marginTop: 10, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.5)',
+                color: '#86efac', borderRadius: 8, padding: '7px 16px', fontWeight: 800, fontSize: 13,
+                cursor: applying ? 'default' : 'pointer' }}>
+              {applying ? 'A carimbar…' : `Carimbar em lote (${plan.crowns.seats} coroas + ${plan.names.seats} nomes)`}
+            </button>
+          )}
         </div>
       )}
       <div style={{ margin: '10px 0 14px' }}>

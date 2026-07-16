@@ -1564,29 +1564,41 @@ def _cross_sieve(prop, base, tn, key, played_at, traj):
     return True, None
 
 
-@router.get("/crossing/fill-sample")
-def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
-                         seed: Optional[int] = None,
-                         current_user=Depends(require_auth)):
-    """AMOSTRA read-only do balde PREENCHER da LEI DO CRUZAMENTO, JÁ CRIVADA pela física
-    (validação do critério pelo Rui — NADA escreve). Só entram em `sample` os valores da
-    fonte irmã que passam o crivo (floor base÷2 + não-desce vs trajetória). Os que chumbam
-    vão em `suspects` ('irmã suspeita'), com a razão — para o Rui ver que o crivo apanha o
-    lixo (ex. o Mundico $36←$640.62). Cada caso traz as DUAS imagens (leu ✓ / falhou ✗) +
-    horas. Sorteio por `seed` (fixo) ou aleatório (omitir)."""
+def _cross_gold_crowns(grj):
+    """{nome_norm: coroa} da Gold (players_list + raw_vision). None se não é Gold real."""
+    rv = grj.get("raw_vision") if isinstance(grj, dict) else None
+    if not (isinstance(rv, str) and rv.strip().startswith("TM")):
+        return None
+    gc: dict = {}
+    for p in (grj.get("players_list") or []):
+        v = _cross_num(p.get("bounty_value_usd"))
+        if p.get("name") and v is not None:
+            gc[_cross_norm(p["name"])] = v
+    for ln in rv.splitlines():
+        if ln.startswith("PLAYER:"):
+            parts = [x.strip() for x in ln.split("PLAYER:", 1)[1].split("|")]
+            if len(parts) >= 4:
+                v = _cross_num(parts[3])
+                if parts[0] and parts[0] != "NONE" and v is not None:
+                    gc.setdefault(_cross_norm(parts[0]), v)
+    return gc
+
+
+def _crossing_all_fills():
+    """Núcleo da LEI DO CRUZAMENTO (coroas). Devolve (survivors, suspects). survivor =
+    seat com coroa VAZIA no gravado + valor da fonte irmã (Gold principal, senão a MAIOR
+    das SS) que PASSA o crivo da física (`_cross_sieve`). suspect = chumba o crivo. Cada
+    item traz refs das 2 capturas (leu/falhou) p/ a amostra montar imagens. NADA escreve."""
     from app.services.eliminated_bounty import is_bounty_sealed
     ko = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty > 0")}
     traj = _cross_trajectory()
-    # todas as capturas table-SS por mão (id, vision_json, captured_at)
-    ss_rows = query(
-        "SELECT matched_hand_id AS mh, id, vision_json AS vj, captured_at::text AS cap "
-        "  FROM table_ss_processing_log "
-        " WHERE matched_hand_id IS NOT NULL AND result='success' "
-        "   AND img_b64 IS NOT NULL")
     ss_by_hand: dict = {}
-    for r in ss_rows:
+    for r in query(
+            "SELECT matched_hand_id AS mh, id, vision_json AS vj, captured_at::text AS cap "
+            "  FROM table_ss_processing_log "
+            " WHERE matched_hand_id IS NOT NULL AND result='success' AND img_b64 IS NOT NULL"):
         vj = r["vj"] if isinstance(r["vj"], dict) else json.loads(r["vj"] or "{}")
         ss_by_hand.setdefault(r["mh"], []).append(
             {"kind": "ss", "id": r["id"], "cap": r["cap"],
@@ -1595,9 +1607,8 @@ def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
                         for s in (vj.get("seats") or []) if s.get("nick")}})
     rows = query(
         "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.context_table_ss_id AS ssid, "
-        "       h.played_at::text AS pa, "
-        "       h.player_names AS pn, e.id AS entry_id, e.raw_json AS grj, "
-        "       e.created_at::text AS gold_at "
+        "       h.played_at::text AS pa, h.player_names AS pn, "
+        "       e.id AS entry_id, e.raw_json AS grj, e.created_at::text AS gold_at "
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
         " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
         "   AND h.player_names->'players_list' IS NOT NULL")
@@ -1607,52 +1618,35 @@ def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
         if not base:
             continue
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
-        pl = pn.get("players_list") or []
-        # capturas Gold: crowns por nome (players_list + raw_vision)
-        gold = None
         grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
-        rv = grj.get("raw_vision") if isinstance(grj, dict) else None
-        if isinstance(rv, str) and rv.strip().startswith("TM"):
-            gc: dict = {}
-            for p in (grj.get("players_list") or []):
-                v = _cross_num(p.get("bounty_value_usd"))
-                if p.get("name") and v is not None:
-                    gc[_cross_norm(p["name"])] = v
-            for ln in rv.splitlines():
-                if ln.startswith("PLAYER:"):
-                    parts = [x.strip() for x in ln.split("PLAYER:", 1)[1].split("|")]
-                    if len(parts) >= 4:
-                        v = _cross_num(parts[3])
-                        if parts[0] and parts[0] != "NONE" and v is not None:
-                            gc.setdefault(_cross_norm(parts[0]), v)
-            gold = {"kind": "gold", "id": r["entry_id"], "cap": r.get("gold_at"),
-                    "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}
+        gc = _cross_gold_crowns(grj)
+        gold = ({"kind": "gold", "id": r["entry_id"], "cap": r.get("gold_at"),
+                 "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}
+                if gc is not None else None)
         caps = ([gold] if gold else []) + ss_by_hand.get(r["hand_id"], [])
-        if len(caps) < 2 and not gold:
-            pass  # ainda pode haver 2 SS
-        # seat a preencher: gravado vazio, uma captura tem valor > 0
-        for p in pl:
+        for p in (pn.get("players_list") or []):
             if is_bounty_sealed(p):
                 continue
-            nm = p.get("name")
             cur_v = _cross_num(p.get("bounty_value_usd"))
             if cur_v is not None and cur_v > 0:
                 continue
-            key = _cross_norm(nm)
-            read = next((c for c in caps if (c["crowns"].get(key) or 0) > 0
-                         and c["kind"] == "gold"), None) \
-                or next((c for c in caps if (c["crowns"].get(key) or 0) > 0), None)
+            key = _cross_norm(p.get("name"))
+            # Gold principal; senão a captura SS com o MAIOR valor (a fresta é sempre a coroa
+            # mais completa — o crivo protege contra o inflar).
+            read = next((c for c in caps if (c["crowns"].get(key) or 0) > 0 and c["kind"] == "gold"), None)
+            if not read:
+                ssv = [c for c in caps if (c["crowns"].get(key) or 0) > 0]
+                read = max(ssv, key=lambda c: c["crowns"][key]) if ssv else None
             if not read:
                 continue
             failed = next((c for c in caps if c["id"] != read["id"]
                            and c["crowns"].get(key) in (None, 0)), None)
-            # a captura ligada (context) como "falhou", se não houver outra
             if not failed and r["ssid"]:
                 failed = next((c for c in caps if c["kind"] == "ss" and c["id"] == r["ssid"]), None)
             prop = read["crowns"][key]
             ok, reason = _cross_sieve(prop, base, r["tn"], key, r["pa"], traj)
             case = {
-                "hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": nm,
+                "hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
                 "stored": p.get("bounty_value_usd"),
                 "value": prop, "base": base, "floor": round(base / 2.0, 2),
                 "sieve_ok": ok, "sieve_reason": reason,
@@ -1663,15 +1657,147 @@ def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
                            if failed else None),
             }
             (cases if ok else suspects).append(case)
+    return cases, suspects
+
+
+@router.get("/crossing/fill-sample")
+def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
+                         seed: Optional[int] = None,
+                         current_user=Depends(require_auth)):
+    """AMOSTRA read-only do balde PREENCHER, JÁ CRIVADA pela física. `sample` = sobreviventes
+    (proposta); `suspects` = crivados ('irmã suspeita'), com a razão. Cada caso traz as DUAS
+    imagens (leu ✓ / falhou ✗) + horas. Sorteio por `seed` (fixo) ou aleatório (omitir)."""
+    cases, suspects = _crossing_all_fills()
     import random
     rng = random.Random(seed) if seed is not None else random.Random()
     rng.shuffle(cases); rng.shuffle(suspects)
     return {
-        # o balde PREENCHER JÁ CRIVADO: sample = sobreviventes (proposta), suspects = filtrados.
         "counts": {"passed": len(cases), "suspect": len(suspects),
                    "total": len(cases) + len(suspects)},
         "total_fill_seats": len(cases) + len(suspects),
         "sample": cases[:n], "suspects": suspects[:n]}
+
+
+def _crossing_name_fixes():
+    """Núcleo da LEI DO CRUZAMENTO (nomes). Lista de {hand_id, hand_db_id, hash, from, to}
+    — nomes truncados no apa que ganham a forma mais completa de qualquer fonte irmã
+    (regra `name_merge.best_completion`; selo `verified_by_user` intocável). NADA escreve."""
+    from app.services.name_merge import best_completion, names_pool, is_truncated
+    ss_by_hand: dict = {}
+    for r in query(
+            "SELECT matched_hand_id AS mh, vision_json AS vj FROM table_ss_processing_log "
+            " WHERE matched_hand_id IS NOT NULL AND result='success'"):
+        vj = r["vj"] if isinstance(r["vj"], dict) else json.loads(r["vj"] or "{}")
+        ss_by_hand.setdefault(r["mh"], []).append(vj)
+    rows = query(
+        "SELECT h.id, h.hand_id, h.player_names AS pn, h.all_players_actions AS apa, "
+        "       e.raw_json AS grj "
+        "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND h.player_names IS NOT NULL")
+    fixes = []
+    for r in rows:
+        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
+        pool = names_pool(apa, pn.get("players_list"), grj, ss_by_hand.get(r["hand_id"], []))
+        for k, v in (apa or {}).items():
+            if k == "_meta" or not isinstance(v, dict) or v.get("verified_by_user"):
+                continue
+            nm = v.get("real_name")
+            if not is_truncated(nm):
+                continue
+            best = best_completion(nm, pool)
+            if best:
+                fixes.append({"hand_id": r["hand_id"], "hand_db_id": r["id"],
+                              "hash": k, "from": nm, "to": best})
+    return fixes
+
+
+@router.get("/crossing/plan")
+def crossing_plan(current_user=Depends(require_auth)):
+    """DRY-RUN da LEI DO CRUZAMENTO (o Rui deu aval à 2ª amostra). Números finais para o
+    carimbo ÚNICO em lote: coroas a PREENCHER (as 88 crivadas) + nomes completos>truncados.
+    READ-ONLY — só escreve no /crossing/apply."""
+    fills, suspects = _crossing_all_fills()
+    names = _crossing_name_fixes()
+    return {
+        "crowns": {"seats": len(fills),
+                   "hands": len({f["hand_id"] for f in fills}),
+                   "suspects_frozen": len(suspects),
+                   "examples": [{"hand_id": f["hand_id"], "seat": f["seat"],
+                                 "value": f["value"], "source": f["read"]["source"]}
+                                for f in fills[:8]]},
+        "names": {"seats": len(names),
+                  "hands": len({f["hand_id"] for f in names}),
+                  "examples": [{"hand_id": f["hand_id"], "from": f["from"], "to": f["to"]}
+                               for f in names[:8]]},
+    }
+
+
+@router.post("/crossing/apply")
+def crossing_apply(payload: dict = Body(default=None),
+                   current_user=Depends(require_auth)):
+    """CARIMBO ÚNICO EM LOTE do Rui (LEI DO CRUZAMENTO). Escreve as coroas crivadas
+    (SELADAS, `bounty_source='cross_capture'`) + os nomes completos. Idempotente e
+    defensivo. Só corre com `{"confirm": true}` (o carimbo). NADA nos suspeitos."""
+    if not (payload or {}).get("confirm"):
+        raise HTTPException(400, "carimbo exige {confirm: true}")
+    from app.services.eliminated_bounty import (
+        BOUNTY_SOURCE_KEY, SOURCE_CROSS_CAPTURE, is_bounty_sealed)
+    fills, _ = _crossing_all_fills()
+    names = _crossing_name_fixes()
+    # agrupa por mão
+    by_hand: dict = {}
+    for f in fills:
+        by_hand.setdefault(f["hand_db_id"], {"crowns": [], "names": []})["crowns"].append(f)
+    for f in names:
+        by_hand.setdefault(f["hand_db_id"], {"crowns": [], "names": []})["names"].append(f)
+    crowns_written = names_written = hands_touched = 0
+    conn = get_conn()
+    try:
+        for hid, work in by_hand.items():
+            rows = query("SELECT player_names AS pn, all_players_actions AS apa "
+                         "FROM hands WHERE id=%s", (hid,))
+            if not rows:
+                continue
+            pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
+            apa = rows[0]["apa"] if isinstance(rows[0]["apa"], dict) else json.loads(rows[0]["apa"] or "{}")
+            pl = pn.get("players_list") or []
+            changed = False
+            # coroas: preenche o seat por nome, SELA com cross_capture (não pisa selados)
+            cw = {c["seat"]: c["value"] for c in work["crowns"]}
+            for p in pl:
+                if p.get("name") in cw and not is_bounty_sealed(p):
+                    cur_v = p.get("bounty_value_usd")
+                    if cur_v is None or cur_v == 0:
+                        p["bounty_value_usd"] = cw[p["name"]]
+                        p[BOUNTY_SOURCE_KEY] = SOURCE_CROSS_CAPTURE
+                        crowns_written += 1
+                        changed = True
+            # nomes: completa apa.real_name + players_list.name (selo intocável)
+            nmap = {f["hash"]: f["to"] for f in work["names"]}
+            for k, to in nmap.items():
+                v = apa.get(k)
+                if isinstance(v, dict) and not v.get("verified_by_user"):
+                    old = v.get("real_name")
+                    if old and old != to:
+                        v["real_name"] = to
+                        names_written += 1
+                        changed = True
+                        for p in pl:
+                            if p.get("name") == old and not p.get("verified_by_user"):
+                                p["name"] = to
+            if changed:
+                hands_touched += 1
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET player_names=%s, all_players_actions=%s WHERE id=%s",
+                                (json.dumps(pn), json.dumps(apa), hid))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "applied", "crowns_written": crowns_written,
+            "names_written": names_written, "hands_touched": hands_touched}
 
 
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────

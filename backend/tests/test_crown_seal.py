@@ -18,6 +18,7 @@ def test_is_bounty_sealed_predicate():
     assert is_bounty_sealed({"bounty_source": SOURCE_MANUAL})
     assert is_bounty_sealed({"bounty_source": SOURCE_GREEN_KO})
     assert is_bounty_sealed({"bounty_source": SOURCE_DERIVED_GREEN_KO})
+    assert is_bounty_sealed({"bounty_source": "cross_capture"})   # carimbo em lote (LEI DO CRUZAMENTO)
     assert is_bounty_sealed({"bounty_confirmed": True})
     # NÃO selados: fontes automáticas (fallback), sem marca, tipos inválidos.
     assert not is_bounty_sealed({"bounty_source": "gold"})
@@ -25,7 +26,8 @@ def test_is_bounty_sealed_predicate():
     assert not is_bounty_sealed({"bounty_value_usd": 100})
     assert not is_bounty_sealed({})
     assert not is_bounty_sealed(None)
-    assert {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO} == set(SEALED_BOUNTY_SOURCES)
+    assert {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO,
+            "cross_capture"} == set(SEALED_BOUNTY_SOURCES)
 
 
 # ── PROVA: re-apply do apa (o culpado da 6570) não pisa o carimbo ─────────────

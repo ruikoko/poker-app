@@ -57,10 +57,12 @@ GREEN_TO_CROWN_FACTOR = 2.0
 # re-deanon, backfills, scrub). Só a mão do Rui (endpoints manuais) o muda.
 SOURCE_MANUAL = "manual"                       # carimbo do Rui (/set-bounties, editor Saúde GG)
 SOURCE_DERIVED_GREEN_KO = "derived_green_ko"   # fluxo Etapa-2 (Vision ao verde, carimbado)
+SOURCE_CROSS_CAPTURE = "cross_capture"         # LEI DO CRUZAMENTO — coroa preenchida da fonte
+# irmã (Gold/outra SS), CRIVADA pela física (floor + não-desce) e carimbada em LOTE pelo Rui.
 # Fontes que SELAM um seat. `green_ko` já era de-facto selado (`_preserves_green_ko`);
 # generaliza-se para todas + o flag `bounty_confirmed` (exceção manual pré-existente).
 SEALED_BOUNTY_SOURCES = frozenset(
-    {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO})
+    {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO, SOURCE_CROSS_CAPTURE})
 BOUNTY_CONFIRMED_KEY = "bounty_confirmed"
 
 
