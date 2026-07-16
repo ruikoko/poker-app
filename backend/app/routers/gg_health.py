@@ -1864,7 +1864,10 @@ def _crossing_conflicts():
                 continue                       # concordam → não é conflito
             recent = max(reads, key=lambda c: c["cap"])
             mx = max(c["crowns"][key] for c in reads)
-            ok, _reason = _cross_sieve(mx, base, r["tn"], key, r["pa"], traj)
+            # RÉGUA FÍSICA (correção do Rui): o limiar é a COROA FRESCA (base÷2), NÃO a base.
+            # $37.5 = fresca $25 + 1 KO = são; a régua velha (< base $50) mandava-o ao olho.
+            # `_cross_sieve` já usa base÷2 no floor + o não-desce → é a régua certa.
+            ok, sreason = _cross_sieve(mx, base, r["tn"], key, r["pa"], traj)
             readings = sorted(({"value": c["crowns"][key], "source": c["source"],
                                 "captured_at": c["cap"] or None, "image_url": c["url"]}
                                for c in reads), key=lambda x: x["captured_at"] or "")
@@ -1872,11 +1875,12 @@ def _crossing_conflicts():
                     "tournament": r.get("tname"), "base_source": "ts",
                     "stored": sv, "winner": mx, "base": base, "floor": round(base / 2.0, 2),
                     "readings": readings}
-            if abs(recent["crowns"][key] - mx) < 0.5 and mx >= base and ok:
-                auto.append(item)              # crescimento óbvio → fica o mais recente (=max)
+            if abs(recent["crowns"][key] - mx) < 0.5 and ok:
+                auto.append(item)              # crescimento óbvio (o maior é o mais recente e
+                #                                passa a física: >= coroa fresca base÷2 + não-desce)
             else:
                 item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mx) >= 0.5
-                                  else "below_base" if mx < base else "fails_physics")
+                                  else sreason or "fails_physics")
                 eye.append(item)
     return auto, eye
 
@@ -1962,6 +1966,22 @@ def crossing_conflicts_eye(n: int = Query(20, ge=1, le=200),
     hora e IMAGEM de cada) → ele escolhe. A escrita é o /set-bounties (manual, selado)."""
     _, eye = _crossing_conflicts()
     return {"count": len(eye), "conflicts": eye[:n]}
+
+
+@router.get("/crossing/conflicts/auto-sample")
+def crossing_conflicts_auto_sample(n: int = Query(4, ge=1, le=12),
+                                   seed: Optional[int] = None,
+                                   current_user=Depends(require_auth)):
+    """AMOSTRA dos conflitos AUTO (trava do Rui — os rótulos 'leu $X' batem nas PLACAS?).
+    Antes de qualquer carimbo em lote, o Rui vê n autos ao acaso com as leituras (valor +
+    fonte + hora + IMAGEM de cada) + o vencedor → confere na placa se os rótulos dizem a
+    verdade. READ-ONLY. O texto 'leu $X' vem do vision_json/raw_vision da captura (fiel à
+    leitura; se não bate na placa = misread da Vision, não erro de atribuição)."""
+    auto, _ = _crossing_conflicts()
+    import random
+    rng = random.Random(seed) if seed is not None else random.Random()
+    rng.shuffle(auto)
+    return {"auto_total": len(auto), "sample": auto[:n]}
 
 
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────
