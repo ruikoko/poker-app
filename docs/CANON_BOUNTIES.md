@@ -4,6 +4,10 @@
 > **Nada sobre coroas se decide fora deste documento.** Como a lei dos sizings e a lei do
 > selo, isto rege TODO o código que lê, deriva, grava ou mostra uma coroa ($ bounty). Qualquer
 > outra fonte que descreva a física das coroas é histórica — em conflito, **este documento ganha**.
+>
+> **📎 Anexo:** `CANON_BOUNTIES_DEGRAUS.md` — a **tabela dos degraus** (valores possíveis de
+> coroa até ~3 KOs, por formato/B). É a régua física do detetor fora-de-grelha e da exclusão
+> de partes dos conflitos.
 
 ## 0. A premissa (a frase que manda)
 
