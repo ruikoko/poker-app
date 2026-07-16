@@ -2217,6 +2217,7 @@ def set_bounties_override(payload: dict = Body(...),
             continue
         stores = [s for s in (e, aseat) if s is not None]
         entry = {"name": nm, "old": (e or aseat or {}).get("bounty_value_usd"),
+                 "old_source": (e or aseat or {}).get("bounty_source"),
                  "was_confirmed": bool((e or aseat or {}).get("bounty_confirmed")),
                  "stores": ("pl" if e else "") + ("+apa" if aseat else "")}
         if nm in bounties:
@@ -2267,6 +2268,28 @@ def set_bounties_override(payload: dict = Body(...),
         conn.commit()
     finally:
         conn.close()
+    # RASTO DO SELO (crown_seal_log) — só DEPOIS do commit (antes mentiria se falhasse).
+    # Cobre as 3 mutações desta rota: carimbo/correção de valor, confirmação e o DESFAZER
+    # (unconfirm → linha nova com o selo em baixo; nunca se apaga a linha antiga).
+    from app.services.crown_seal_log import (
+        ORIGIN_SET_BOUNTIES, actor_of, log_seals, seal_row)
+    _origin = (payload.get("origin") or ORIGIN_SET_BOUNTIES)[:120]   # o card pode dizer o fluxo
+    _pending = []
+    for _e in plan:
+        _nm = _e.get("name")
+        if _nm in updated:
+            _pending.append(seal_row(hand_id, _nm, _e.get("old"), _e.get("new"),
+                                     old_source=_e.get("old_source"), new_source=_e.get("source"),
+                                     confirmed=_nm in confirmed or _e.get("was_confirmed")))
+        elif _nm in confirmed:
+            _pending.append(seal_row(hand_id, _nm, _e.get("old"), _e.get("old"),
+                                     old_source=_e.get("old_source"),
+                                     new_source=_e.get("old_source"), confirmed=True))
+        elif _nm in unconfirmed:
+            _pending.append(seal_row(hand_id, _nm, _e.get("old"), _e.get("old"),
+                                     old_source=_e.get("old_source"),
+                                     new_source=_e.get("old_source"), confirmed=False))
+    log_seals(_pending, origin=_origin, actor=actor_of(current_user))
     logger.info("table-ss set-bounties: %s updated=%d confirmed=%d unconfirmed=%d not_found=%d partial=%d",
                 hand_id, len(updated), len(confirmed), len(unconfirmed), len(not_found), len(partial))
     return {"status": "set", "hand_id": hand_id, "updated": updated,

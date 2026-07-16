@@ -1955,11 +1955,14 @@ def _do_crossing_apply():
         by_hand.setdefault(f["hand_db_id"], {"crowns": [], "names": []})["crowns"].append(f)
     for f in names:
         by_hand.setdefault(f["hand_db_id"], {"crowns": [], "names": []})["names"].append(f)
+    from app.services.crown_seal_log import (
+        ORIGIN_CROSSING_APPLY, log_seals, seal_row)
+    seal_log = []                      # rasto dos selos — gravado SÓ após o commit
     crowns_written = names_written = hands_touched = 0
     conn = get_conn()
     try:
         for hid, work in by_hand.items():
-            rows = query("SELECT player_names AS pn, all_players_actions AS apa "
+            rows = query("SELECT hand_id, player_names AS pn, all_players_actions AS apa "
                          "FROM hands WHERE id=%s", (hid,))
             if not rows:
                 continue
@@ -1975,6 +1978,8 @@ def _do_crossing_apply():
                     if cur_v is None or cur_v == 0:
                         p["bounty_value_usd"] = cw[p["name"]]
                         p[BOUNTY_SOURCE_KEY] = SOURCE_CROSS_CAPTURE
+                        seal_log.append(seal_row(rows[0]["hand_id"], p.get("name"), cur_v,
+                                                 cw[p["name"]], new_source=SOURCE_CROSS_CAPTURE))
                         crowns_written += 1
                         changed = True
             # nomes: completa apa.real_name + players_list.name (selo intocável)
@@ -1998,6 +2003,7 @@ def _do_crossing_apply():
         conn.commit()
     finally:
         conn.close()
+    log_seals(seal_log, origin=ORIGIN_CROSSING_APPLY, actor="crossing_apply")
     return {"status": "applied", "crowns_written": crowns_written,
             "names_written": names_written, "hands_touched": hands_touched}
 
@@ -2155,15 +2161,18 @@ def _do_crossing_conflicts_apply():
     """NÚCLEO da resolução AUTO (B) dos conflitos (crescimento óbvio → o mais recente=max,
     SELADO cross_conflict). Sem confirm/HTTP — partilhado pelo carimbo E pelo reconcile."""
     from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, is_bounty_sealed
+    from app.services.crown_seal_log import (
+        ORIGIN_CROSSING_CONFLICT_AUTO, log_seals, seal_row)
     auto, _exc, _ = _crossing_conflicts()
     by_hand: dict = {}
     for a in auto:
         by_hand.setdefault(a["hand_db_id"], []).append(a)
+    seal_log = []                      # rasto dos selos — gravado SÓ após o commit
     written = hands_touched = 0
     conn = get_conn()
     try:
         for hid, items in by_hand.items():
-            rows = query("SELECT player_names AS pn FROM hands WHERE id=%s", (hid,))
+            rows = query("SELECT hand_id, player_names AS pn FROM hands WHERE id=%s", (hid,))
             if not rows:
                 continue
             pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
@@ -2172,6 +2181,10 @@ def _do_crossing_conflicts_apply():
             changed = False
             for p in pl:
                 if p.get("name") in wmap and not is_bounty_sealed(p):
+                    seal_log.append(seal_row(rows[0]["hand_id"], p.get("name"),
+                                             p.get("bounty_value_usd"), wmap[p["name"]],
+                                             old_source=p.get(BOUNTY_SOURCE_KEY),
+                                             new_source="cross_conflict"))
                     p["bounty_value_usd"] = wmap[p["name"]]
                     p[BOUNTY_SOURCE_KEY] = "cross_conflict"
                     written += 1
@@ -2184,6 +2197,7 @@ def _do_crossing_conflicts_apply():
         conn.commit()
     finally:
         conn.close()
+    log_seals(seal_log, origin=ORIGIN_CROSSING_CONFLICT_AUTO, actor="crossing_conflicts_auto")
     return {"status": "applied", "crowns_written": written, "hands_touched": hands_touched}
 
 
@@ -2196,6 +2210,8 @@ def crossing_conflicts_apply_selected(payload: dict = Body(...),
     Sela cada um (`bounty_source='manual'` — arbítrio do Rui na placa), alinhando as 2
     gavetas (apa + players_list) pelo nome. Idempotente/transacional."""
     from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, SOURCE_MANUAL, is_bounty_sealed
+    from app.services.crown_seal_log import (
+        ORIGIN_CROSSING_EYE, actor_of, log_seals, seal_row)
     items = (payload or {}).get("items") or []
     by_hand: dict = {}
     for it in items:
@@ -2203,6 +2219,7 @@ def crossing_conflicts_apply_selected(payload: dict = Body(...),
         if hid and seat and val is not None:
             by_hand.setdefault(hid, {})[seat] = val
     _nm = lambda s: re.sub(r"(.)\1+", r"\1", re.sub(r"\s+", "", (s or "").lower()))
+    seal_log = []                      # rasto dos selos — gravado SÓ após o commit
     written = hands_touched = 0
     conn = get_conn()
     try:
@@ -2218,6 +2235,9 @@ def crossing_conflicts_apply_selected(payload: dict = Body(...),
             for p in (pn.get("players_list") or []):
                 want = seatmap.get(p.get("name")) or by_norm.get(_nm(p.get("name")))
                 if want is not None and not is_bounty_sealed(p):
+                    seal_log.append(seal_row(hid, p.get("name"), p.get("bounty_value_usd"),
+                                             float(want), old_source=p.get(BOUNTY_SOURCE_KEY),
+                                             new_source=SOURCE_MANUAL))
                     p["bounty_value_usd"] = float(want)
                     p[BOUNTY_SOURCE_KEY] = SOURCE_MANUAL
                     written += 1
@@ -2238,6 +2258,7 @@ def crossing_conflicts_apply_selected(payload: dict = Body(...),
         conn.commit()
     finally:
         conn.close()
+    log_seals(seal_log, origin=ORIGIN_CROSSING_EYE, actor=actor_of(current_user))
     return {"status": "applied", "sealed": written, "hands_touched": hands_touched}
 
 
@@ -2247,15 +2268,18 @@ def _do_crossing_exclusion_apply():
     NÃO muda (o stored já é o são); só se sela p/ proteger + sair do detetor. Física certa,
     sem trava. Sem confirm/HTTP — partilhado pelo reconcile."""
     from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, SOURCE_CROSS_EXCLUSION, is_bounty_sealed
+    from app.services.crown_seal_log import (
+        ORIGIN_CROSSING_EXCLUSION, log_seals, seal_row)
     _a, exclusion, _e = _crossing_conflicts()
     by_hand: dict = {}
     for x in exclusion:
         by_hand.setdefault(x["hand_db_id"], []).append(x)
+    seal_log = []                      # rasto dos selos — gravado SÓ após o commit
     written = hands_touched = 0
     conn = get_conn()
     try:
         for hid, items in by_hand.items():
-            rows = query("SELECT player_names AS pn FROM hands WHERE id=%s", (hid,))
+            rows = query("SELECT hand_id, player_names AS pn FROM hands WHERE id=%s", (hid,))
             if not rows:
                 continue
             pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
@@ -2263,6 +2287,10 @@ def _do_crossing_exclusion_apply():
             changed = False
             for p in (pn.get("players_list") or []):
                 if p.get("name") in kept_map and not is_bounty_sealed(p):
+                    seal_log.append(seal_row(rows[0]["hand_id"], p.get("name"),
+                                             p.get("bounty_value_usd"), kept_map[p["name"]],
+                                             old_source=p.get(BOUNTY_SOURCE_KEY),
+                                             new_source=SOURCE_CROSS_EXCLUSION))
                     p["bounty_value_usd"] = kept_map[p["name"]]     # a única possível (pode ≠ stored)
                     p[BOUNTY_SOURCE_KEY] = SOURCE_CROSS_EXCLUSION
                     written += 1
@@ -2275,6 +2303,7 @@ def _do_crossing_exclusion_apply():
         conn.commit()
     finally:
         conn.close()
+    log_seals(seal_log, origin=ORIGIN_CROSSING_EXCLUSION, actor="crossing_exclusion")
     return {"status": "applied", "sealed": written, "hands_touched": hands_touched}
 
 
@@ -2433,6 +2462,8 @@ def crowns_high_reread_confirm(payload: dict = Body(...),
     lado a lado. body: {"hand_ids":[...], "dry_run":bool}. NÃO altera valores — só o
     flag; divergentes ficam intactos p/ o olho do Rui."""
     from app.services.queue_export import detect_bounty_above_3x
+    from app.services.crown_seal_log import (
+        ORIGIN_HIGH_REREAD_CONFIRM, actor_of, log_seals, seal_row)
     hand_ids = payload.get("hand_ids") or []
     dry_run = bool(payload.get("dry_run", False))
     results = []
@@ -2459,6 +2490,7 @@ def crowns_high_reread_confirm(payload: dict = Body(...),
             results.append({"hand_id": hid, "error": "Vision sem leitura"}); continue
         pl = pn.get("players_list") or []
         confirmed, diverge = [], []
+        seal_log = []                  # rasto dos selos — gravado SÓ após o commit
         for e in pl:
             if e.get("name") not in high_names:
                 continue
@@ -2467,6 +2499,9 @@ def crowns_high_reread_confirm(payload: dict = Body(...),
             tol = max(1.0, (stored or 0) * 0.005)
             if reread is not None and stored is not None and abs(stored - reread) <= tol:
                 if not dry_run:
+                    seal_log.append(seal_row(hid, e.get("name"), stored, stored,
+                                             old_source=e.get("bounty_source"),
+                                             new_source=e.get("bounty_source"), confirmed=True))
                     e["bounty_confirmed"] = True
                     e.pop("crown_reread", None)          # limpa divergência antiga
                 confirmed.append({"name": e.get("name"), "value": stored})
@@ -2483,6 +2518,7 @@ def crowns_high_reread_confirm(payload: dict = Body(...),
                 conn.commit()
             finally:
                 conn.close()
+            log_seals(seal_log, origin=ORIGIN_HIGH_REREAD_CONFIRM, actor=actor_of(current_user))
         results.append({"hand_id": hid, "auto_confirmed": confirmed, "diverge": diverge})
     return {"results": results, "dry_run": dry_run}
 

@@ -307,7 +307,7 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
     from app.db import query, get_conn
     # buy_in_bounty do TS (GG) → torneio KO? (guarda vivo-$0). LEFT JOIN: None se não há TS
     # ou não-GG → guarda vivo-$0 NÃO dispara (passthrough), como manda a decisão.
-    rows = query("SELECT h.id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
+    rows = query("SELECT h.id, h.hand_id, h.raw, h.all_players_actions AS apa, h.player_names AS pn, "
                  "       h.hm3_tags, h.discord_tags, h.site, "
                  "       ts.buy_in_bounty AS bounty_base, "
                  "       (ts.tournament_number IS NOT NULL) AS has_ts "
@@ -329,6 +329,11 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
     # vanilla = GG + TS presente + sem bounty → guarda vanilla (coroa forçada a NULL).
     has_ts_no_bounty = (r.get("site") == "GGPoker" and bool(r.get("has_ts"))
                         and not (base and float(base) > 0))
+    # RASTO DO SELO (crown_seal_log): este funil é o único caminho AUTOMÁTICO que sela
+    # (`green_ko`, derivado do verde). Fotografa-se o ANTES por seat para o rasto saber o
+    # valor anterior — os manuais fazem o mesmo nas suas rotas.
+    _before = {p.get("name"): (p.get("bounty_value_usd"), p.get(BOUNTY_SOURCE_KEY))
+               for p in (pn.get("players_list") or []) if isinstance(p, dict) and p.get("name")}
     n = scrub_eliminated_bounties(apa, pn, r["raw"], vision_data, tagged=True,
                                   bounty_base=base, has_ts_no_bounty=has_ts_no_bounty)
     if n:
@@ -341,4 +346,17 @@ def scrub_and_persist(hand_db_id: int, vision_data: Optional[dict] = None,
             conn.commit()
         finally:
             conn.close()
+        from app.services.crown_seal_log import (
+            ORIGIN_SCRUB_GREEN_KO, log_seals, seal_row)
+        _rows = []
+        for p in (pn.get("players_list") or []):
+            if not isinstance(p, dict) or not is_bounty_sealed(p):
+                continue                                   # só SELOS entram no rasto
+            _old_v, _old_s = _before.get(p.get("name"), (None, None))
+            if _old_s == p.get(BOUNTY_SOURCE_KEY) and _old_v == p.get("bounty_value_usd"):
+                continue                                   # já estava assim → não é escrita nova
+            _rows.append(seal_row(r["hand_id"], p.get("name"), _old_v,
+                                  p.get("bounty_value_usd"), old_source=_old_s,
+                                  new_source=p.get(BOUNTY_SOURCE_KEY)))
+        log_seals(_rows, origin=ORIGIN_SCRUB_GREEN_KO, actor="automatico")
     return n
