@@ -59,10 +59,13 @@ SOURCE_MANUAL = "manual"                       # carimbo do Rui (/set-bounties, 
 SOURCE_DERIVED_GREEN_KO = "derived_green_ko"   # fluxo Etapa-2 (Vision ao verde, carimbado)
 SOURCE_CROSS_CAPTURE = "cross_capture"         # LEI DO CRUZAMENTO — coroa preenchida da fonte
 # irmã (Gold/outra SS), CRIVADA pela física (floor + não-desce) e carimbada em LOTE pelo Rui.
+SOURCE_CROSS_CONFLICT = "cross_conflict"        # conflito resolvido por (B): crescimento óbvio
+# (mais recente = max e ≥ base) → fica o mais recente, pela física do CANON.
 # Fontes que SELAM um seat. `green_ko` já era de-facto selado (`_preserves_green_ko`);
 # generaliza-se para todas + o flag `bounty_confirmed` (exceção manual pré-existente).
 SEALED_BOUNTY_SOURCES = frozenset(
-    {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO, SOURCE_CROSS_CAPTURE})
+    {SOURCE_MANUAL, SOURCE_GREEN_KO, SOURCE_DERIVED_GREEN_KO,
+     SOURCE_CROSS_CAPTURE, SOURCE_CROSS_CONFLICT})
 BOUNTY_CONFIRMED_KEY = "bounty_confirmed"
 
 

@@ -1800,6 +1800,136 @@ def crossing_apply(payload: dict = Body(default=None),
             "names_written": names_written, "hands_touched": hands_touched}
 
 
+# ── LEI DO CRUZAMENTO — CONFLITOS (decisão (B) do Rui) ─────────────────────────
+def _crossing_conflicts():
+    """Seats NÃO-selados com coroa >0 onde as fontes DISCORDAM (≥2 valores >0 distintos).
+    Decisão (B) do Rui: **crescimento óbvio** (o MAIOR é o MAIS RECENTE e ≥ base, e passa
+    o crivo da física) → resolve-se pelo CANON (fica o mais recente), fonte `cross_conflict`.
+    Os **incompatíveis** (o mais recente é menor = misread, ou < base) → card para o olho.
+    Devolve (auto, eye). NADA escreve."""
+    from app.services.eliminated_bounty import is_bounty_sealed
+    ko = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
+        "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
+        "WHERE site='GGPoker' AND buy_in_bounty > 0")}
+    traj = _cross_trajectory()
+    ssb: dict = {}
+    for r in query(
+            "SELECT matched_hand_id AS mh, id, vision_json AS vj, captured_at::text AS cap "
+            "  FROM table_ss_processing_log "
+            " WHERE matched_hand_id IS NOT NULL AND result='success' AND img_b64 IS NOT NULL"):
+        vj = r["vj"] if isinstance(r["vj"], dict) else json.loads(r["vj"] or "{}")
+        ssb.setdefault(r["mh"], []).append(
+            {"source": "ss", "id": r["id"], "cap": r["cap"] or "",
+             "url": f"/api/table-ss/image/{r['id']}",
+             "crowns": {_cross_norm(s.get("nick")): _cross_num(s.get("bounty_usd"))
+                        for s in (vj.get("seats") or []) if s.get("nick")}})
+    rows = query(
+        "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.played_at::text AS pa, "
+        "       h.player_names AS pn, e.id AS entry_id, e.raw_json AS grj, "
+        "       e.created_at::text AS gold_at "
+        "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+        " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND h.player_names->'players_list' IS NOT NULL")
+    auto, eye = [], []
+    for r in rows:
+        base = ko.get(r["tn"])
+        if not base:
+            continue
+        pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
+        grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
+        gc = _cross_gold_crowns(grj)
+        caps = ([{"source": "gold", "id": r["entry_id"], "cap": r.get("gold_at") or "",
+                  "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}] if gc is not None else [])
+        caps += ssb.get(r["hand_id"], [])
+        for p in (pn.get("players_list") or []):
+            if is_bounty_sealed(p):
+                continue
+            sv = _cross_num(p.get("bounty_value_usd"))
+            if sv is None or sv <= 0:
+                continue
+            key = _cross_norm(p.get("name"))
+            reads = [c for c in caps if (c["crowns"].get(key) or 0) > 0]
+            vals = {round(c["crowns"][key], 2) for c in reads}
+            if not vals or (len(vals) == 1 and abs(next(iter(vals)) - sv) < 0.5):
+                continue                       # concordam → não é conflito
+            recent = max(reads, key=lambda c: c["cap"])
+            mx = max(c["crowns"][key] for c in reads)
+            ok, _reason = _cross_sieve(mx, base, r["tn"], key, r["pa"], traj)
+            readings = sorted(({"value": c["crowns"][key], "source": c["source"],
+                                "captured_at": c["cap"] or None, "image_url": c["url"]}
+                               for c in reads), key=lambda x: x["captured_at"] or "")
+            item = {"hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
+                    "stored": sv, "winner": mx, "base": base, "readings": readings}
+            if abs(recent["crowns"][key] - mx) < 0.5 and mx >= base and ok:
+                auto.append(item)              # crescimento óbvio → fica o mais recente (=max)
+            else:
+                item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mx) >= 0.5
+                                  else "below_base" if mx < base else "fails_physics")
+                eye.append(item)
+    return auto, eye
+
+
+@router.get("/crossing/conflicts/plan")
+def crossing_conflicts_plan(current_user=Depends(require_auth)):
+    """DRY-RUN dos conflitos (B). auto = crescimento óbvio (resolve pela física); eye =
+    incompatível (card). READ-ONLY."""
+    auto, eye = _crossing_conflicts()
+    return {"auto": {"seats": len(auto), "hands": len({a["hand_id"] for a in auto}),
+                     "examples": [{"hand_id": a["hand_id"], "seat": a["seat"],
+                                   "stored": a["stored"], "winner": a["winner"]} for a in auto[:8]]},
+            "eye": {"seats": len(eye), "hands": len({e["hand_id"] for e in eye})}}
+
+
+@router.post("/crossing/conflicts/apply")
+def crossing_conflicts_apply(payload: dict = Body(default=None),
+                             current_user=Depends(require_auth)):
+    """CARIMBO dos conflitos AUTO (B) — escreve o vencedor (mais recente = max, crescimento
+    óbvio) SELADO com `bounty_source='cross_conflict'`. Só os `eye` ficam para o olho. Exige
+    `{confirm:true}`. Idempotente/transacional. Selos intocáveis."""
+    if not (payload or {}).get("confirm"):
+        raise HTTPException(400, "carimbo exige {confirm: true}")
+    from app.services.eliminated_bounty import BOUNTY_SOURCE_KEY, is_bounty_sealed
+    auto, _ = _crossing_conflicts()
+    by_hand: dict = {}
+    for a in auto:
+        by_hand.setdefault(a["hand_db_id"], []).append(a)
+    written = hands_touched = 0
+    conn = get_conn()
+    try:
+        for hid, items in by_hand.items():
+            rows = query("SELECT player_names AS pn FROM hands WHERE id=%s", (hid,))
+            if not rows:
+                continue
+            pn = rows[0]["pn"] if isinstance(rows[0]["pn"], dict) else json.loads(rows[0]["pn"] or "{}")
+            pl = pn.get("players_list") or []
+            wmap = {a["seat"]: a["winner"] for a in items}
+            changed = False
+            for p in pl:
+                if p.get("name") in wmap and not is_bounty_sealed(p):
+                    p["bounty_value_usd"] = wmap[p["name"]]
+                    p[BOUNTY_SOURCE_KEY] = "cross_conflict"
+                    written += 1
+                    changed = True
+            if changed:
+                hands_touched += 1
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE hands SET player_names=%s WHERE id=%s",
+                                (json.dumps(pn), hid))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "applied", "crowns_written": written, "hands_touched": hands_touched}
+
+
+@router.get("/crossing/conflicts/eye")
+def crossing_conflicts_eye(n: int = Query(20, ge=1, le=200),
+                           current_user=Depends(require_auth)):
+    """Os conflitos INCOMPATÍVEIS para o olho do Rui — seat + os valores lidos (com fonte,
+    hora e IMAGEM de cada) → ele escolhe. A escrita é o /set-bounties (manual, selado)."""
+    _, eye = _crossing_conflicts()
+    return {"count": len(eye), "conflicts": eye[:n]}
+
+
 # ── GATE da guarda VANILLA (#SPURIOUS-CROWN-NON-KO) ───────────────────────────
 @router.get("/spurious-crown-non-ko-scan")
 def spurious_crown_non_ko_scan(current_user=Depends(require_auth_or_api_key)):
