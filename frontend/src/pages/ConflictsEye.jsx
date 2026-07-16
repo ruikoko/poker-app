@@ -14,8 +14,11 @@ const reasonLabel = (r) => r === 'recent_below_max' ? 'a leitura mais recente é
   : r === 'below_floor' ? 'o maior é < coroa fresca (base÷2) — provável chama/misread'
     : r === 'descends_vs_earlier' ? 'desce vs leitura anterior (a coroa só sobe)'
       : r === 'exceeds_later' ? 'excede leitura posterior'
-        : r === 'fails_physics' ? 'falha a física da trajetória'
-          : r || '—'
+        : r === 'split_arbitra' ? 'valor de SPLIT° em jogo (pote dividido) — arbitra tu'
+          : r === 'ambas_impossiveis' ? 'ambas fora-da-grelha (nenhuma possível)'
+            : r === 'ambos_possiveis' ? 'ambas possíveis (na grelha) — decide'
+              : r === 'fails_physics' ? 'falha a física da trajetória'
+                : r || '—'
 
 function distinctVals(readings) {
   const m = new Map()
