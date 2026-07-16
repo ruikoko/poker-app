@@ -1825,7 +1825,7 @@ def _crossing_conflicts():
     - **eye**: incompatíveis (o recente é menor = misread, ou stored não-são) → olho do Rui.
     Devolve (auto, exclusion, eye). NADA escreve."""
     from app.services.eliminated_bounty import is_bounty_sealed
-    from app.routers.crown_recovery import _on_halves_grid
+    from app.routers.crown_recovery import _on_halves_grid, _on_split_grid
     ko = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty > 0")}
@@ -1903,8 +1903,14 @@ def _crossing_conflicts():
             candidates.add(round(sv, 2))
             grid_valid = sorted(v for v in candidates
                                 if v >= floor - 0.01 and _on_halves_grid(v, floor))
-            if len(grid_valid) == 1:
-                item["kept"] = grid_valid[0]           # a possível ganha; as impossíveis morrem
+            # SPLIT° presente (nota #1): um valor que SÓ bate num split° não é chama nem degrau
+            # simples → NÃO se auto-descarta; o olho do Rui arbitra.
+            has_split = any(v not in grid_valid and _on_split_grid(v, floor) for v in candidates)
+            if has_split:
+                item["reason"] = "split_arbitra"       # split° em jogo → olho
+                eye.append(item)
+            elif len(grid_valid) == 1:
+                item["kept"] = grid_valid[0]           # a possível ganha; as impossíveis (chama) morrem
                 exclusion.append(item)
             elif len(grid_valid) == 0:
                 item["reason"] = "ambas_impossiveis"   # nenhuma na grelha → olho

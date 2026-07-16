@@ -146,18 +146,38 @@ _DROPS_SQL = (
 )
 
 
+# GRELHA DOS DEGRAUS (docs/CANON_BOUNTIES_DEGRAUS.md, LEI). Em [1B, 2B) discrimina pelos
+# degraus SIMPLES (1B, 1.5B, 1.75B, 1.875B… = as metades (2−2⁻ᵏ)B); >= 2B a grelha adensa e
+# perde poder (nota #3) → LIVRE; < 1B (abaixo do KO inicial) → fora. B = KO inicial =
+# buy_in_bounty ÷ 2 (NUNCA a base/buy-in bounty). Tolerância de CÊNTIMOS (< $1, ESTRITO):
+# distingue $26 (chama, a $1 de $25) de $25 (degrau) mas aceita a tremura ($25.66 ≈ $25).
+_STEP_MULT = [1.0] + [2 - 2 ** -k for k in range(1, 7)]   # 1, 1.5, 1.75, 1.875, 1.9375, …
+
+
+# SPLITS° (pote dividido na HH) — raros. NÃO entram na grelha do detetor; quando um valor SÓ
+# bate num split°, é SINAL para o olho do Rui arbitrar (nota #1 do CANON_BOUNTIES_DEGRAUS).
+_SPLIT_MULT = (1.25, 1.625, 1.8125, 2.125, 2.375, 2.625, 2.875, 3.25)
+
+
 def _on_halves_grid(crown: float, B: float) -> bool:
-    """Grelha das METADES (solo KO): B, 1.5B, 1.75B, …=(2−2⁻ᵏ)B; >=2B livre; <B fora."""
+    """Uma coroa cai num degrau SÃO do torneio (em [1B,2B))? >= 2B livre; < 1B fora.
+    Tolerância de cêntimos (< $1 estrito). B = KO inicial (buy_in_bounty÷2)."""
     if B <= 0:
         return True
     q = crown / B
     if q >= 2 - 1e-9:
-        return True
+        return True                               # >= 2B → zona densa, não discrimina → livre
     if q < 1 - 1e-9:
+        return False                              # abaixo da coroa fresca (KO inicial) → fora
+    return any(abs(crown - g * B) < 1.0 for g in _STEP_MULT)   # < $1 = cêntimos (estrito)
+
+
+def _on_split_grid(crown: float, B: float) -> bool:
+    """Bate num degrau de SPLIT° (raro, pote dividido)? Só usado para NÃO auto-descartar um
+    split legítimo — quando presente num conflito, vai ao olho do Rui (não à exclusão cega)."""
+    if not B or B <= 0:
         return False
-    tol = max(1.0, 0.005 * crown)
-    grid = [1.0] + [2 - 2 ** -k for k in range(1, 7)]
-    return any(abs(crown - g * B) <= tol for g in grid)
+    return any(abs(crown - g * B) < 1.0 for g in _SPLIT_MULT)
 
 
 def _norm_key(s):
