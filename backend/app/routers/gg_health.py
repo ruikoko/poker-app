@@ -1606,7 +1606,8 @@ def _crossing_all_fills():
              "crowns": {_cross_norm(s.get("nick")): _cross_num(s.get("bounty_usd"))
                         for s in (vj.get("seats") or []) if s.get("nick")}})
     rows = query(
-        "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.context_table_ss_id AS ssid, "
+        "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.tournament_name AS tname, "
+        "       h.context_table_ss_id AS ssid, "
         "       h.played_at::text AS pa, h.player_names AS pn, "
         "       e.id AS entry_id, e.raw_json AS grj, e.created_at::text AS gold_at "
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
@@ -1647,6 +1648,7 @@ def _crossing_all_fills():
             ok, reason = _cross_sieve(prop, base, r["tn"], key, r["pa"], traj)
             case = {
                 "hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
+                "tournament": r.get("tname"), "base_source": "ts",
                 "stored": p.get("bounty_value_usd"),
                 "value": prop, "base": base, "floor": round(base / 2.0, 2),
                 "sieve_ok": ok, "sieve_reason": reason,
@@ -1831,7 +1833,8 @@ def _crossing_conflicts():
              "crowns": {_cross_norm(s.get("nick")): _cross_num(s.get("bounty_usd"))
                         for s in (vj.get("seats") or []) if s.get("nick")}})
     rows = query(
-        "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.played_at::text AS pa, "
+        "SELECT h.id, h.hand_id, h.tournament_number AS tn, h.tournament_name AS tname, "
+        "       h.played_at::text AS pa, "
         "       h.player_names AS pn, e.id AS entry_id, e.raw_json AS grj, "
         "       e.created_at::text AS gold_at "
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
@@ -1866,7 +1869,9 @@ def _crossing_conflicts():
                                 "captured_at": c["cap"] or None, "image_url": c["url"]}
                                for c in reads), key=lambda x: x["captured_at"] or "")
             item = {"hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
-                    "stored": sv, "winner": mx, "base": base, "readings": readings}
+                    "tournament": r.get("tname"), "base_source": "ts",
+                    "stored": sv, "winner": mx, "base": base, "floor": round(base / 2.0, 2),
+                    "readings": readings}
             if abs(recent["crowns"][key] - mx) < 0.5 and mx >= base and ok:
                 auto.append(item)              # crescimento óbvio → fica o mais recente (=max)
             else:

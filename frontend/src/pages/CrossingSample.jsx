@@ -44,7 +44,10 @@ function CrossCard({ c, suspect }) {
           <b style={{ color: '#ef4444', fontFamily: 'ui-monospace,monospace' }}>{c.stored == null ? 'vazio' : `$${c.stored}`}</b>
           <span style={{ color: '#8b9691' }}> · fonte irmã leu </span>
           <b style={{ color: suspect ? '#f87171' : '#86efac', fontFamily: 'ui-monospace,monospace' }}>${c.value}</b>
-          <span style={{ color: '#8b9691' }}> ({srcLabel(c.read.source)}) · base÷2 ${c.floor}</span>
+          <span style={{ color: '#8b9691' }}> ({srcLabel(c.read.source)})</span>
+        </span>
+        <span style={{ fontSize: 11, color: '#8b9691', width: '100%' }}>
+          {c.tournament} · base ${c.base} <span style={{ opacity: 0.7 }}>(buy-in bounty, {c.base_source || 'TS'})</span> · coroa fresca ${c.floor}
         </span>
         {suspect && (
           <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.14)',

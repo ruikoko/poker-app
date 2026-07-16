@@ -45,8 +45,11 @@ function EyeCard({ c, onResolved }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
         <Link to={`/hand/${c.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>{c.hand_id}</Link>
         <b style={{ color: '#fca5a5' }}>{c.seat}</b>
-        <span style={{ fontSize: 12, color: '#8b9691' }}>gravado ${c.stored} · base {c.base}</span>
+        <span style={{ fontSize: 12, color: '#8b9691' }}>gravado ${c.stored}</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 5, padding: '1px 7px' }}>{reasonLabel(c.reason)}</span>
+        <span style={{ fontSize: 11, color: '#8b9691', width: '100%' }}>
+          {c.tournament} · base ${c.base} <span style={{ opacity: 0.7 }}>(buy-in bounty, {c.base_source || 'TS'})</span> · coroa fresca ${c.floor}
+        </span>
       </div>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
         {dv.map(([val, r]) => (
