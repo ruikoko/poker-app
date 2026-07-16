@@ -17,8 +17,9 @@ const reasonLabel = (r) => r === 'recent_below_max' ? 'a leitura mais recente é
         : r === 'split_arbitra' ? 'valor de SPLIT° em jogo (pote dividido) — arbitra tu'
           : r === 'ambas_impossiveis' ? 'ambas fora-da-grelha (nenhuma possível)'
             : r === 'ambos_possiveis' ? 'ambas possíveis (na grelha) — decide'
-              : r === 'fails_physics' ? 'falha a física da trajetória'
-                : r || '—'
+              : r === 'off_nao_chama' ? 'o valor a descartar é DECIMAL (não é chama) — arbitra tu'
+                : r === 'fails_physics' ? 'falha a física da trajetória'
+                  : r || '—'
 
 function distinctVals(readings) {
   const m = new Map()
@@ -32,11 +33,13 @@ function distinctVals(readings) {
 function EyeCard({ c, onResolved }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  const pick = async (val) => {
+  const [free, setFree] = useState('')
+  const seal = async (val) => {
+    if (!(Number(val) > 0)) { setMsg('Valor inválido.'); return }
     if (!window.confirm(`Selar ${c.seat} = $${val} (manual)?`)) return
     setBusy(true); setMsg(null)
     try {
-      const r = await tableSs.setBounties(c.hand_id, { bounties: { [c.seat]: val } })
+      const r = await tableSs.setBounties(c.hand_id, { bounties: { [c.seat]: Number(val) } })
       if (r?.not_found?.length || r?.partial?.length) {
         setBusy(false); setMsg('nome não casou — verifica'); return
       }
@@ -44,19 +47,31 @@ function EyeCard({ c, onResolved }) {
     } catch (e) { setBusy(false); setMsg('Falha: ' + (e?.message || e)) }
   }
   const dv = distinctVals(c.readings)
+  const storedInReadings = dv.some(([v]) => Math.abs(v - c.stored) < 0.01)
   return (
     <div style={{ border: '1px solid rgba(239,68,68,0.35)', borderRadius: 10, background: 'rgba(239,68,68,0.05)',
       padding: 14, opacity: busy ? 0.5 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
         <Link to={`/hand/${c.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>{c.hand_id}</Link>
         <b style={{ color: '#fca5a5' }}>{c.seat}</b>
-        <span style={{ fontSize: 12, color: '#8b9691' }}>gravado ${c.stored}</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 5, padding: '1px 7px' }}>{reasonLabel(c.reason)}</span>
         <span style={{ fontSize: 11, color: '#8b9691', width: '100%' }}>
-          {c.tournament} · base ${c.base} <span style={{ opacity: 0.7 }}>(buy-in bounty, {c.base_source || 'TS'})</span> · coroa fresca ${c.floor}
+          gravado <b style={{ color: '#c9d1d9' }}>${c.stored}</b> <span style={{ opacity: 0.8 }}>(fonte: {c.stored_source || '—'}{c.stored_seen_in_hands > 1 ? ` · visto em ${c.stored_seen_in_hands} mãos do torneio` : ''})</span>
+          {' · '}{c.tournament} · coroa fresca ${c.floor}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+        {/* o GRAVADO como opção (com proveniência) quando não é uma das leituras à vista */}
+        {!storedInReadings && c.stored > 0 && (
+          <div style={{ minWidth: 180 }}>
+            <div style={{ fontSize: 12, marginBottom: 4 }}>
+              <b style={{ color: '#e6e9ee', fontFamily: 'ui-monospace,monospace' }}>${c.stored}</b>
+              <span style={{ color: '#8b9691' }}> · gravado ({c.stored_source}{c.stored_seen_in_hands > 1 ? `, ${c.stored_seen_in_hands} mãos` : ''})</span>
+            </div>
+            <div style={{ width: '100%', maxWidth: 300, minHeight: 60, borderRadius: 7, border: '1px dashed rgba(255,255,255,0.15)', color: '#8b9691', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 8 }}>sem imagem própria (leitura/propagação)</div>
+            <button onClick={() => seal(c.stored)} disabled={busy} style={{ marginTop: 6, width: '100%', background: 'rgba(34,197,94,0.14)', border: '1px solid rgba(34,197,94,0.5)', color: '#86efac', borderRadius: 8, padding: '5px 10px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>Mantém ${c.stored} (selar)</button>
+          </div>
+        )}
         {dv.map(([val, r]) => (
           <div key={val} style={{ minWidth: 200 }}>
             <div style={{ fontSize: 12, marginBottom: 4 }}>
@@ -64,7 +79,7 @@ function EyeCard({ c, onResolved }) {
               <span style={{ color: '#8b9691' }}> · {src(r.source)} · {fmt(r.captured_at)}</span>
             </div>
             <HandImage url={r.image_url} alt={`$${val}`} style={{ width: '100%', maxWidth: 300 }} />
-            <button onClick={() => pick(val)} disabled={busy} style={{ marginTop: 6, width: '100%',
+            <button onClick={() => seal(val)} disabled={busy} style={{ marginTop: 6, width: '100%',
               background: 'rgba(34,197,94,0.14)', border: '1px solid rgba(34,197,94,0.5)', color: '#86efac',
               borderRadius: 8, padding: '5px 10px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>
               Fica ${val} (selar)
@@ -72,7 +87,14 @@ function EyeCard({ c, onResolved }) {
           </div>
         ))}
       </div>
-      {msg && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 6 }}>{msg}</div>}
+      {/* CAMPO LIVRE: nenhum dos valores é o da placa → corrige tu */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: '#8b9691' }}>Nenhum bate a placa? Corrige:</span>
+        <input type="number" step="0.01" placeholder="$___" value={free} onChange={e => setFree(e.target.value)} disabled={busy}
+          style={{ width: 100, fontFamily: 'ui-monospace,monospace', fontSize: 13, background: '#0b0d13', color: '#c9d1d9', border: '1px solid #30363d', borderRadius: 6, padding: '4px 8px' }} />
+        <button onClick={() => seal(free)} disabled={busy || !(Number(free) > 0)} style={{ background: 'rgba(56,189,248,0.14)', border: '1px solid rgba(56,189,248,0.5)', color: '#38bdf8', borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>Corrigir e selar</button>
+        {msg && <span style={{ color: '#ef4444', fontSize: 12 }}>{msg}</span>}
+      </div>
     </div>
   )
 }

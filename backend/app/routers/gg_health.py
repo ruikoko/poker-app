@@ -1708,6 +1708,15 @@ def _cross_norm(s):
 _JITTER = 1.0
 
 
+def _is_flame_candidate(v) -> bool:
+    """Regra do Rui: a CHAMA (VPIP) é SEMPRE um INTEIRO 0-100. Um valor com cêntimos NUNCA é
+    chama — é outra classe (dígitos largados / swap / oclusão). Só um inteiro 0-100 pode ser
+    'candidato a chama' e ser auto-descartado pela exclusão; os decimais suspeitos vão ao olho."""
+    if v is None:
+        return False
+    return abs(v - round(v)) < 0.001 and 0 <= v <= 100
+
+
 def _cross_num(v):
     try:
         return float(v)
@@ -2067,9 +2076,16 @@ def _crossing_conflicts():
             readings = sorted(({"value": c["crowns"][key], "source": c["source"],
                                 "captured_at": c["cap"] or None, "image_url": c["url"]}
                                for c in reads), key=lambda x: x["captured_at"] or "")
+            # PROVENIÊNCIA do gravado (o Rui não arbitra números órfãos): a fonte selada
+            # (manual/cross_*) ou 'leitura original' (None); + corroboração na TRAJETÓRIA do
+            # hash (em quantas mãos do torneio este valor aparece — se em várias, é real).
+            stored_src = p.get("bounty_source") or "leitura original"
+            seq = traj.get((r["tn"], key)) or []
+            stored_seen = sum(1 for (_t, v) in seq if abs(v - sv) < 0.5)
             item = {"hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
                     "tournament": r.get("tname"), "base_source": "ts",
-                    "stored": sv, "winner": mx, "base": base, "floor": floor,
+                    "stored": sv, "stored_source": stored_src, "stored_seen_in_hands": stored_seen,
+                    "winner": mx, "base": base, "floor": floor,
                     "readings": readings}
             # TOLERÂNCIA DE CÊNTIMOS (Rui): leituras dentro de <$1 = a MESMA coroa (tremura de
             # leitura), NÃO conflito. Se TODO o espectro (leituras + stored) cai em <$1:
@@ -2096,12 +2112,20 @@ def _crossing_conflicts():
             # SPLIT° presente (nota #1): um valor que SÓ bate num split° não é chama nem degrau
             # simples → NÃO se auto-descarta; o olho do Rui arbitra.
             has_split = any(v not in grid_valid and _on_split_grid(v, floor) for v in candidates)
+            off = [v for v in candidates if v not in grid_valid]
+            # REGRA DA CHAMA (Rui): a exclusão só auto-descarta os que MORREM se forem chamas
+            # (inteiro 0-100). Se algum valor que morreria for DECIMAL (nunca chama = dígitos/
+            # swap/oclusão), NÃO se auto-descarta → olho do Rui arbitra.
+            off_has_non_flame = any(not _is_flame_candidate(v) for v in off)
             if has_split:
                 item["reason"] = "split_arbitra"       # split° em jogo → olho
                 eye.append(item)
-            elif len(grid_valid) == 1:
-                item["kept"] = grid_valid[0]           # a possível ganha; as impossíveis (chama) morrem
+            elif len(grid_valid) == 1 and not off_has_non_flame:
+                item["kept"] = grid_valid[0]           # a possível ganha; as chamas (inteiras) morrem
                 exclusion.append(item)
+            elif len(grid_valid) == 1:
+                item["reason"] = "off_nao_chama"       # o que morreria é decimal (não chama) → olho
+                eye.append(item)
             elif len(grid_valid) == 0:
                 item["reason"] = "ambas_impossiveis"   # nenhuma na grelha → olho
                 eye.append(item)
