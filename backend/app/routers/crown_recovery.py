@@ -388,17 +388,25 @@ def crown_recovery_suggest(payload: dict = Body(...), current_user=Depends(requi
             busted_out[name] = val
             busted_greens[name] = round(val / 2.0, 2)   # verde cru = coroa ÷ 2
     # (b) coroa dourada de cada jogador (players_list.bounty_value_usd da Vision)
+    #     PORTEIRO (Rui): uma coroa lida < KO inicial (base=base÷2) é impossível → NÃO se
+    #     sugere (rejeitada à nascença). Sem chão (base None) → passa (não rejeita às cegas).
     crowns = {}
+    gated_below_floor = 0
     for p in (data.get("players_list") or []):
         nm = p.get("name"); bv = p.get("bounty_value_usd")
         if nm and bv is not None:
             try:
-                crowns[nm] = float(bv)
+                fv = float(bv)
             except (TypeError, ValueError):
-                pass
+                continue
+            if base and fv < base - 0.5:       # < KO inicial → rejeitada pelo porteiro
+                gated_below_floor += 1
+                continue
+            crowns[nm] = fv
     result = {"hand_id": hand_id, "busted": busted_out, "busted_greens": busted_greens,
               "crowns": crowns, "greens": greens, "image": "gold",
-              "last_crowns": last_crowns, "base": base,
+              "last_crowns": last_crowns, "base": base, "gated_below_floor": gated_below_floor,
+              "no_floor": base is None,        # sem TS → sem chão para validar (passou, não rejeitou)
               "green_total": round(sum(g["value"] for g in greens), 2) if greens else None}
     _cache_suggestion(hand_id, result)     # a sugestão PAGA persiste (não evapora no refresh)
     return result

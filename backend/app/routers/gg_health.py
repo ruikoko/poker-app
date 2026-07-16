@@ -1523,6 +1523,11 @@ def _cross_norm(s):
     return re.sub(r"\s+", " ", _CROSS_TRUNC.sub("", (s or "").strip().lower()))
 
 
+# TOLERÂNCIA DE CÊNTIMOS (Rui): duas leituras a diferir < $1 = a mesma coroa (tremura de
+# leitura), não conflito. Diferenças de DÓLARES (>= $1) = conflito real.
+_JITTER = 1.0
+
+
 def _cross_num(v):
     try:
         return float(v)
@@ -1864,8 +1869,8 @@ def _crossing_conflicts():
             key = _cross_norm(p.get("name"))
             reads = [c for c in caps if (c["crowns"].get(key) or 0) > 0]
             vals = {round(c["crowns"][key], 2) for c in reads}
-            if not vals or (len(vals) == 1 and abs(next(iter(vals)) - sv) < 0.5):
-                continue                       # concordam → não é conflito
+            if not vals:
+                continue
             recent = max(reads, key=lambda c: c["cap"])
             mx = max(c["crowns"][key] for c in reads)
             floor = round(base / 2.0, 2)
@@ -1876,6 +1881,18 @@ def _crossing_conflicts():
                     "tournament": r.get("tname"), "base_source": "ts",
                     "stored": sv, "winner": mx, "base": base, "floor": floor,
                     "readings": readings}
+            # TOLERÂNCIA DE CÊNTIMOS (Rui): leituras dentro de <$1 = a MESMA coroa (tremura de
+            # leitura), NÃO conflito. Se TODO o espectro (leituras + stored) cai em <$1:
+            #  - idênticas (≤1¢) → não há nada (concordam) → skip;
+            #  - tremura → fica a mais recente, sela, vai à vitrine informativa (sem gastar o olho).
+            allvals = list(vals) + [round(sv, 2)]
+            if max(allvals) - min(allvals) < _JITTER:
+                if len(vals) == 1 and abs(next(iter(vals)) - sv) < 0.01:
+                    continue                   # verdadeiramente iguais → nada a resolver
+                item["kept"] = recent["crowns"][key]
+                item["jitter"] = True
+                exclusion.append(item)
+                continue
             # EXCLUSÃO DE PARTES (generalizada — decisão do Rui): a régua é a PERTENÇA À GRELHA,
             # não a comparação de leituras. Candidatas = stored + todas as leituras. Uma é
             # "possível" sse >= KO inicial (base÷2) E na grelha das metades. Se houver EXATAMENTE
@@ -1896,11 +1913,12 @@ def _crossing_conflicts():
                 # ≥2 possíveis: conflito real de valores válidos → (B) crescimento óbvio ou olho.
                 mxg = max(grid_valid)
                 ok, sreason = _cross_sieve(mxg, base, r["tn"], key, r["pa"], traj)
-                if abs(recent["crowns"][key] - mxg) < 0.5 and ok:
+                # tolerância de cêntimos também aqui: "mais recente ≈ máximo" a < $1 = crescimento.
+                if abs(recent["crowns"][key] - mxg) < _JITTER and ok:
                     item["winner"] = mxg
                     auto.append(item)                  # o maior válido é o mais recente + não-desce
                 else:
-                    item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mxg) >= 0.5
+                    item["reason"] = ("recent_below_max" if abs(recent["crowns"][key] - mxg) >= _JITTER
                                       else sreason or "ambos_possiveis")
                     eye.append(item)
     return auto, exclusion, eye
