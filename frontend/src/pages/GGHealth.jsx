@@ -1161,7 +1161,17 @@ export default function GGHealth() {
     ggHealth.liveZeroList().then(r => r.count).catch(() => null),
   ]).then(([coroas, marcadas, suspeitas, imp, live_zero]) =>
     setExtra({ coroas, marcadas, suspeitas, import: imp, live_zero }))
-  useEffect(() => { loadSummary(); loadExtra() }, [])
+  // CONTADORES AO VIVO (LEI 1 vale para contadores, não só listas): re-lê no mount,
+  // no FOCO da aba, e sempre que se volta ao Dashboard (group→null) — um caso resolvido
+  // num painel filho (carimbo do cruzamento, selo de coroa) baixa o número na hora.
+  const refreshCounters = () => { loadSummary(); loadExtra() }
+  useEffect(() => {
+    refreshCounters()
+    const onFocus = () => refreshCounters()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!group) refreshCounters() }, [group])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!group || group === 'ft_quarantine' || group === 'name_quarantine' || group === 'lobby_edition' || MIGRATED.has(group)) { setList(null); return }
     setList(null)
