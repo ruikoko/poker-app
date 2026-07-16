@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ggHealth, tableSs } from '../api/client'
 import HandImage from '../components/HandImage'
+import Worklist from '../components/Worklist'
 
 // Bounties recuperáveis (#CROWN-RECOVERY) — ETAPA 2: sugerir (Vision só-ao-verde) +
 // carimbar (escrita SELADA). Grupo 1 = jogador bustou na HH E coroa NULL → o bounty
