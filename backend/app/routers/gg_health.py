@@ -296,6 +296,119 @@ def golds_unread(current_user=Depends(require_auth_or_api_key)):
     return {"count": len(lst), "hands": lst}
 
 
+# ── Painel "Imagens sem tag — Gold e capturas" (read-only) ────────────────────
+# Vizinha TAGADA: hipótese do Rui (não facto) — o print sai tarde, apanha a mão SEGUINTE, a
+# tag vai para a mão errada e a que interessa fica sem tag. "um ou dois minutos" + margem de
+# uma mão → 180 s. Além disso: vazio. SÓ mostra o dado (a mão tagada mais perto), não conclui.
+_NEIGHBOR_CAP_S = 180
+
+
+def _tagged_index() -> dict:
+    """{tn: [(played_at_dt, hand_id, hand_db_id, tags[])]} das mãos GG 2026 TAGADAS."""
+    idx: dict = {}
+    for r in query(
+            "SELECT tournament_number AS tn, hand_id, id AS db_id, played_at::text AS pa, "
+            "       discord_tags, hm3_tags FROM hands "
+            " WHERE site='GGPoker' AND played_at >= '2026-01-01' AND tournament_number IS NOT NULL "
+            "   AND (COALESCE(array_length(hm3_tags,1),0)>0 OR COALESCE(array_length(discord_tags,1),0)>0)"):
+        try:
+            t = datetime.fromisoformat(r["pa"])
+        except (ValueError, TypeError):
+            continue
+        tags = list(r.get("discord_tags") or []) + list(r.get("hm3_tags") or [])
+        idx.setdefault(r["tn"], []).append((t, r["hand_id"], r["db_id"], tags))
+    return idx
+
+
+def _nearest_tagged(tn, played_at_str, idx):
+    """A mão TAGADA mais próxima no tempo do MESMO torneio (≤ _NEIGHBOR_CAP_S). Devolve
+    {hand_id, hand_db_id, tags, diff_seconds, is_after} ou None se não houver nenhuma perto."""
+    lst = idx.get(tn)
+    if not lst or not played_at_str:
+        return None
+    try:
+        t0 = datetime.fromisoformat(played_at_str)
+    except (ValueError, TypeError):
+        return None
+    best = None
+    for t, hid, db_id, tags in lst:
+        d = abs((t - t0).total_seconds())
+        if best is None or d < best[0]:
+            best = (d, hid, db_id, tags, t > t0)
+    if best is None or best[0] > _NEIGHBOR_CAP_S:
+        return None
+    return {"hand_id": best[1], "hand_db_id": best[2], "tags": best[3],
+            "diff_seconds": int(round(best[0])), "is_after": bool(best[4])}
+
+
+def _untagged_row(r, source, image_url, idx):
+    """Uma linha do painel: nº GG + torneio + buy-in + data/hora (Lisboa naive) + posição do
+    Hero + imagem + vizinha tagada. Posição do Hero: `apa['Hero'].position` (Gold/position_v3);
+    fallback `vision_json.hero_position` (só capturas); '—' se nenhuma."""
+    apa = r.get("apa")
+    if isinstance(apa, str):
+        try:
+            apa = json.loads(apa or "{}")
+        except (ValueError, TypeError):
+            apa = {}
+    hero = (apa or {}).get("Hero") if isinstance(apa, dict) else None
+    hero_pos = (hero.get("position") if isinstance(hero, dict) else None) or r.get("vj_hero_pos")
+    return {
+        "hand_id": r["hand_id"], "hand_db_id": r["id"],
+        "tournament_name": r.get("tournament_name"), "buy_in": r.get("buy_in"),
+        "played_at": r["played_at"],            # ISO Lisboa-naive (o frontend separa data/hora)
+        "hero_position": hero_pos, "source": source, "image_url": image_url,
+        "nearest_tagged": _nearest_tagged(r.get("tn"), r["played_at"], idx),
+    }
+
+
+@router.get("/untagged-images")
+def untagged_images(current_user=Depends(require_auth)):
+    """Painel 'Imagens sem tag — Gold e capturas' (read-only, SÓ para ver). DUAS populações
+    DISJUNTAS (A ∩ B = 0, provado): `gold` = Gold casada a mão SEM tag (crivo do tile 'Gold
+    sem tag'); `captures` = mão desanon por table-SS SEM tag, por triar (crivo do
+    'Marcadas/captura'). Cada linha traz a `nearest_tagged` (mão tagada mais perto no mesmo
+    torneio, ≤180 s) — hipótese do Rui do print atrasado, dado cru sem conclusão. NADA escreve."""
+    idx = _tagged_index()
+    buyin = ("(SELECT buy_in_text FROM tournament_summaries ts WHERE ts.site='GGPoker' "
+             "AND ts.tournament_number = h.tournament_number LIMIT 1)")
+    gold_rows = query(
+        f"""SELECT h.id, h.hand_id, h.tournament_name, h.tournament_number AS tn,
+                   h.played_at::text AS played_at, h.all_players_actions AS apa,
+                   e.id AS ss_id, {buyin} AS buy_in
+              FROM entries e JOIN hands h ON h.entry_id = e.id
+             WHERE e.entry_type='screenshot' AND (e.raw_json->>'img_b64') IS NOT NULL
+               AND {_GG}
+               AND COALESCE(array_length(h.discord_tags,1),0)=0
+               AND COALESCE(array_length(h.hm3_tags,1),0)=0
+             ORDER BY h.played_at""")
+    gold = [_untagged_row(r, "gold", f"/api/screenshots/image/{r['ss_id']}", idx) for r in gold_rows]
+    cap_rows = query(
+        f"""SELECT h.id, h.hand_id, h.tournament_name, h.tournament_number AS tn,
+                   h.played_at::text AS played_at, h.all_players_actions AS apa,
+                   h.context_table_ss_id AS ss_id, l.vision_json AS vj, {buyin} AS buy_in
+              FROM hands h
+              LEFT JOIN table_ss_processing_log l ON l.id = h.context_table_ss_id
+             WHERE h.site='GGPoker' AND h.context_table_ss_id IS NOT NULL
+               AND (h.player_names->>'match_method')='table_ss' AND h.capture_triage IS NULL
+               AND (h.discord_tags IS NULL OR h.discord_tags = '{{}}')
+               AND (h.hm3_tags IS NULL OR h.hm3_tags = '{{}}')
+               AND h.played_at >= '2026-01-01' AND h.study_state <> 'mtt_archive'
+             ORDER BY h.played_at""")
+    captures = []
+    for r in cap_rows:
+        vj = r.get("vj")
+        if isinstance(vj, str):
+            try:
+                vj = json.loads(vj or "{}")
+            except (ValueError, TypeError):
+                vj = {}
+        r["vj_hero_pos"] = (vj or {}).get("hero_position") if isinstance(vj, dict) else None
+        captures.append(_untagged_row(r, "table_ss", f"/api/table-ss/image/{r['ss_id']}", idx))
+    return {"counts": {"gold": len(gold), "captures": len(captures)},
+            "gold": gold, "captures": captures}
+
+
 @router.get("/crowns")
 def crowns_to_verify(current_user=Depends(require_auth)):
     """Painel COROAS da Saúde Import (consolidação 11 Jul) — mãos GG PKO/KO cuja

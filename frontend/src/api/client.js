@@ -406,6 +406,8 @@ export const ggHealth = {
   crownsHighConfirm: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/high-reread-confirm', { hand_ids: handIds, dry_run: dryRun }),
   // Fallback SS por seat: preenche coroas NULL/$0 pela outra testemunha (Gold/table-SS) da mesma mão.
   crownsFallbackFill: (handIds, dryRun = false) => req('POST', '/gg-health/crowns/fallback-fill', { hand_ids: handIds, dry_run: dryRun }),
+  // Painel "Imagens sem tag — Gold e capturas" (read-only): duas populações disjuntas.
+  untaggedImages: () => req('GET', '/gg-health/untagged-images'),
   // Ação 1 — taga N mãos com UMA tag (string) ou VÁRIAS (array) de uma vez. ACRESCENTA.
   // confirm=true força apesar do aviso de conflito de formato.
   tag: (handIds, tagOrTags, confirm = false) => req('POST', '/gg-health/tag', {
