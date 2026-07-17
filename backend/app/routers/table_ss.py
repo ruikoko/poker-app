@@ -2140,6 +2140,58 @@ def folder_tags_by_filename(current_user=Depends(require_auth)):
     return {"count": len(m), "map": m}
 
 
+# ── Casamento de nomes entre gavetas (players_list ↔ all_players_actions) ─────
+# Os 2 stores podem ter grafias DIFERENTES do MESMO seat (variância de OCR: "BrooooK"
+# vs "BroooooK") OU um cortado pela captura ("Manooundergr..") — o carimbo por-nome exato
+# falhava calado num deles. Casa por: 1) exato; 2) normalizado ÚNICO (minúsculas + colapsa
+# corridas de letras iguais); 3) PONTE DE TRUNCATURA (Peça 2).
+_TRUNC_RE = re.compile(r"(\.\.+|…)\s*$")          # nome cortado pela captura (IT/Gold)
+
+
+def _norm_name_key(s):
+    """minúsculas + sem espaços + colapsa corridas de letras iguais (variância de OCR)."""
+    return re.sub(r"(.)\1+", r"\1", re.sub(r"\s+", "", (s or "").lower()))
+
+
+def _strip_trunc(s):
+    return _TRUNC_RE.sub("", (s or "")).strip()
+
+
+def _match_store(nm, name_to_seat):
+    """Casa `nm` a UM seat em `name_to_seat` (dict nome→seat). Ordem:
+    1) exato; 2) normalizado ÚNICO; 3) PONTE DE TRUNCATURA (Peça 2) — um nome cortado
+       (termina em '..'/'…') casa por PREFIXO contra a outra gaveta, **SÓ se houver UM
+       único candidato** (com ambiguidade NÃO adivinha → None). O corte pode estar de
+       qualquer lado (o `nm` cortado, ou o candidato na gaveta cortado). Stem mínimo de 3
+       para não casar prefixos degenerados.
+    Devolve o seat ou None (ausente/ambíguo → None — nunca adivinha)."""
+    s = name_to_seat.get(nm)
+    if s is not None:
+        return s
+    q_norm = _norm_name_key(nm)
+    by_norm = {}
+    for name, seat in name_to_seat.items():
+        by_norm.setdefault(_norm_name_key(name), []).append(seat)
+    c = by_norm.get(q_norm) or []
+    if len(c) == 1:
+        return c[0]
+    if len(c) > 1:
+        return None                          # normalizado ambíguo → não adivinha
+    # (3) ponte de truncatura — prefixo, único
+    q_trunc = bool(_TRUNC_RE.search(nm or ""))
+    q_stem = _norm_name_key(_strip_trunc(nm)) if q_trunc else q_norm
+    cands, seen = [], set()
+    for name, seat in name_to_seat.items():
+        c_norm = _norm_name_key(name)
+        c_trunc = bool(_TRUNC_RE.search(name or ""))
+        c_stem = _norm_name_key(_strip_trunc(name)) if c_trunc else c_norm
+        hit = ((q_trunc and len(q_stem) >= 3 and c_norm.startswith(q_stem))
+               or (c_trunc and len(c_stem) >= 3 and q_norm.startswith(c_stem)))
+        if hit and id(seat) not in seen:
+            seen.add(id(seat)); cands.append(seat)
+    return cands[0] if len(cands) == 1 else None
+
+
 @router.post("/set-bounties")
 def set_bounties_override(payload: dict = Body(...),
                           current_user=Depends(require_auth_or_api_key)):
@@ -2188,30 +2240,18 @@ def set_bounties_override(payload: dict = Body(...),
     # carimbo por-nome exato falhava CALADO num deles ($0 fossilizado no apa). Fix: alinhar
     # por NOME NORMALIZADO (minúsculas + colapsar corridas de letras iguais) quando o exato
     # falha, SÓ se o match normalizado for ÚNICO (senão não adivinha). Escreve nos DOIS stores.
-    _norm_nm = lambda s: re.sub(r"(.)\1+", r"\1", re.sub(r"\s+", "", (s or "").lower()))
+    # Ponte de nomes entre as 2 gavetas: exato → normalizado único → truncatura (Peça 2).
     apa_by_name = {(v.get("real_name") or k): v
                    for k, v in apa.items() if k != "_meta" and isinstance(v, dict)}
     pl_by_name = {e.get("name"): e for e in pl}
-    apa_by_norm, pl_by_norm = {}, {}
-    for _v in apa_by_name.values():
-        apa_by_norm.setdefault(_norm_nm(_v.get("real_name")), []).append(_v)
-    for _e in pl:
-        pl_by_norm.setdefault(_norm_nm(_e.get("name")), []).append(_e)
-
-    def _store_for(nm, exact, by_norm):
-        s = exact.get(nm)
-        if s is not None:
-            return s
-        c = by_norm.get(_norm_nm(nm)) or []
-        return c[0] if len(c) == 1 else None      # normalizado ÚNICO; senão não adivinha
 
     updated, confirmed, unconfirmed, plan = [], [], [], []
     partial = []                                   # gravado num store só (o outro não existe)
     not_found = []
     touched = list(dict.fromkeys(list(bounties) + list(confirm) + list(unconfirm)))
     for nm in touched:
-        e = _store_for(nm, pl_by_name, pl_by_norm)          # players_list
-        aseat = _store_for(nm, apa_by_name, apa_by_norm)    # all_players_actions
+        e = _match_store(nm, pl_by_name)          # players_list
+        aseat = _match_store(nm, apa_by_name)     # all_players_actions
         if e is None and aseat is None:
             not_found.append(nm)
             continue
