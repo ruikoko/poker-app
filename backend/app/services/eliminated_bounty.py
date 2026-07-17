@@ -88,13 +88,48 @@ _ALLIN_RE = re.compile(r"^([^:\n]+):[^\n]*\band is all-in\b", re.M)
 # Colecta do pote: "<key> collected 180,816 from pot" (sem ':').
 _COLLECT_RE = re.compile(r"^([^\n:]+?) collected [\d,]+", re.M)
 
+# ── ALL-IN por POST FORÇADO (conta, não frase) ────────────────────────────────
+# O GG NÃO escreve "and is all-in" quando o stack inteiro se esgota a postar
+# ante+cega (o short-stack fica all-in no post da cega, sem linha de acção). Ambos
+# os detetores de bust ancoravam na frase → 61 lugares / 50 mãos invisíveis (100%
+# deste mecanismo). O sinal que NÃO falha é aritmético: soma do que foi FORÇADO a
+# pôr (ante + cegas) >= stack de entrada = all-in. Some-se ao all-in por frase.
+_SEAT_STACK_RE = re.compile(r"^Seat \d+: (\S+) \(([\d,]+) in chips\)", re.M)
+_POST_RE = re.compile(r"^(\S+): posts (?:the ante|small blind|big blind) ([\d,]+)", re.M)
+
+
+def _hh_int(s) -> int:
+    try:
+        return int(str(s).replace(",", "").strip())
+    except (ValueError, TypeError, AttributeError):
+        return 0
+
+
+def forced_allin_keys(raw: Optional[str]) -> set:
+    """Chaves-HH ALL-IN por POST FORÇADO: a soma do que foram OBRIGADOS a pôr
+    (ante + cegas) >= o stack com que ENTRARAM na mão → ficaram sem fichas ao
+    postar, sem que o GG escreva 'all-in'. É CONTA, não leitura de texto.
+
+    GUARDA (a mais importante): quem postou mas SOBROU stack (posts < stack) NÃO
+    entra — perder um pote não é bustar; só é bust quem ficou sem fichas. A conta
+    do stack é o que separa as duas coisas."""
+    if not raw:
+        return set()
+    stacks = {m.group(1): _hh_int(m.group(2)) for m in _SEAT_STACK_RE.finditer(raw)}
+    posts: dict = {}
+    for m in _POST_RE.finditer(raw):
+        posts[m.group(1)] = posts.get(m.group(1), 0) + _hh_int(m.group(2))
+    return {h for h, st in stacks.items() if st > 0 and posts.get(h, 0) >= st}
+
 
 def busted_keys_from_hh(raw: Optional[str]) -> set:
     """Chaves-da-HH (hash GG / 'Hero') ELIMINADAS nesta mão: foram all-in E NÃO
-    coletaram nenhum pote (perderam o all-in). Autoritativo (HH), independente da Vision."""
+    coletaram nenhum pote (perderam o all-in). Autoritativo (HH), independente da Vision.
+    All-in = frase "and is all-in" OU post forçado (ante+cega >= stack, `forced_allin_keys`)."""
     if not raw:
         return set()
     allin = {m.group(1).strip() for m in _ALLIN_RE.finditer(raw)}
+    allin |= forced_allin_keys(raw)                # + all-in por post forçado (conta)
     collected = {m.group(1).strip() for m in _COLLECT_RE.finditer(raw)}
     return {k for k in allin if k not in collected}
 

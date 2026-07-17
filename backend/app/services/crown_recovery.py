@@ -24,6 +24,7 @@ import re
 
 from app.parsers.gg_hands import _get_position
 from app.hero_names import HERO_NAMES_ALL
+from app.services.eliminated_bounty import forced_allin_keys
 
 # Só as linhas de SENTAR (topo da HH): "Seat N: <hash> (X in chips)". Exigir
 # "in chips" é crucial — senão as linhas do SUMMARY "Seat N: <hash> (button)
@@ -126,6 +127,10 @@ def _parse_busts(raw: str):
         lo = _LOST_RE.match(s)
         if lo:
             lost.add(lo.group(1))
+    # + ALL-IN por POST FORÇADO (ante+cega >= stack; a frase 'all-in' falha-os no GG).
+    # Some-se ao all-in por frase; o cruzamento com `lost` (perdeu) fica igual — a
+    # guarda contra falso-positivo é a conta do stack em forced_allin_keys.
+    allin |= forced_allin_keys(raw)
     busted = {h for h in (allin & lost)}
     return seats, button_seat, len(seats), busted
 
