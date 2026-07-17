@@ -1590,18 +1590,17 @@ _PHANTOM_NAMES = {None, "", "none", "null", "nan"}
 
 
 def _is_phantom_seat(p) -> bool:
-    """Lugar FANTASMA no players_list: nome NONE/vazio **E** sem dados nenhuns (sem coroa,
-    sem seat, sem posição, sem stack). É um registo a mais, sem correspondência em nenhuma
-    fonte (HH/apa/captura) — NÃO um jogador. GUARDA: só é fantasma se estiver mesmo vazio —
-    um lugar com QUALQUER valor (coroa/seat/posição/stack) NUNCA é apagado."""
+    """Lugar NONE/sem-nome com COROA NULA no players_list → lixo a apagar. A placa arbitrou
+    (GG-6113716239: 6 cadeiras ocupadas, mesa 6-max) — um lugar NONE não é ninguém; as fichas
+    agarradas não são de nenhum jogador. Apaga-se **mesmo com stack**, MAS só com coroa NULA.
+    GUARDA DURA (a que interessa): um NONE com coroa > 0 NUNCA se apaga — não se destrói um
+    valor. Jogadores reais (nome != NONE) nunca entram aqui, tenham a coroa que tiverem."""
     if not isinstance(p, dict):
         return False
     if str(p.get("name")).strip().lower() not in _PHANTOM_NAMES:
         return False
-    return (p.get("bounty_value_usd") in (None, 0, 0.0, "0")
-            and not p.get("seat") and not p.get("position")
-            and p.get("stack_bb") in (None, "", 0, 0.0)
-            and p.get("stack_chips") in (None, "", 0, 0.0))
+    bv = p.get("bounty_value_usd")
+    return bv is None or bv == 0 or bv == 0.0 or bv == "0"     # coroa nula → lixo; coroa >0 → intocável
 
 
 @router.post("/prune-phantom-seats")
@@ -1624,8 +1623,12 @@ def prune_phantom_seats(payload: dict = Body(...),
     pl = pn.get("players_list") or []
     removed = [{"idx": i, "seat_obj": p} for i, p in enumerate(pl) if _is_phantom_seat(p)]
     kept = [p for p in pl if not _is_phantom_seat(p)]
+    # prova por nome+coroa dos lugares que FICAM (para o antes/depois à vista)
+    kept_seats = [{"name": p.get("name"), "bounty_value_usd": p.get("bounty_value_usd")}
+                  for p in kept]
     result = {"hand_id": hand_id, "before": len(pl), "removed": len(removed),
-              "after": len(kept), "removed_seats": removed, "dry_run": dry}
+              "after": len(kept), "removed_seats": removed, "kept_seats": kept_seats,
+              "dry_run": dry}
     if dry or not removed:
         return result
     pn["players_list"] = kept

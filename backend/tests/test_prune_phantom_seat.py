@@ -4,24 +4,28 @@ from unittest.mock import patch, MagicMock
 from app.routers import gg_health
 
 
-def test_phantom_true_for_empty_none():
+def test_phantom_true_for_none_null_crown_even_with_stack():
+    # O caso real da GG-6113716239: NONE com stack de 3 fichas MAS coroa nula → lixo.
     assert gg_health._is_phantom_seat(
-        {"name": "NONE", "seat": None, "position": None,
-         "bounty_value_usd": None, "stack_bb": None, "stack_chips": None}) is True
+        {"name": "NONE", "stack": 3, "stack_raw": 3.4, "stack_unit": "chips",
+         "stack_chips": 3, "bounty_pct": 0, "bounty_review": "live_crown_read_zero",
+         "bounty_value_usd": None}) is True
     assert gg_health._is_phantom_seat({"name": ""}) is True
-    assert gg_health._is_phantom_seat({"name": "null"}) is True
+    assert gg_health._is_phantom_seat({"name": "null", "bounty_value_usd": 0}) is True
 
 
 def test_phantom_false_for_real_seat():
     assert gg_health._is_phantom_seat(
         {"name": "Kuruzslo", "position": "MP", "bounty_value_usd": 22.5}) is False
+    # jogador real com coroa NULA também nunca entra (nome != NONE)
+    assert gg_health._is_phantom_seat({"name": "PedroTavares", "bounty_value_usd": None}) is False
 
 
-def test_guard_none_name_but_has_value_is_not_phantom():
-    # nome NONE mas com coroa/seat/posição → NÃO é fantasma (não se apaga um valor)
+def test_guard_none_with_crown_is_never_deleted():
+    # GUARDA DURA: NONE com coroa > 0 NUNCA se apaga (não se destrói um valor)
     assert gg_health._is_phantom_seat({"name": "NONE", "bounty_value_usd": 11.25}) is False
-    assert gg_health._is_phantom_seat({"name": "none", "seat": 6}) is False
-    assert gg_health._is_phantom_seat({"name": "NONE", "position": "BB"}) is False
+    assert gg_health._is_phantom_seat(
+        {"name": "none", "stack_chips": 3, "bounty_value_usd": 50}) is False
 
 
 def test_endpoint_removes_only_phantom_and_writes():
