@@ -1401,6 +1401,24 @@ def _tournament_last_seen() -> dict:
     return last
 
 
+def _is_cross_hand_eliminated(hash_key, hand_played_at,
+                             tourn_last_seen_ts, tourn_last_hand_ts) -> bool:
+    """CORREÇÃO 3 (bust cross-hand). Um seat está ELIMINADO sse o seu hash NÃO reaparece
+    numa mão POSTERIOR do torneio **E** o torneio TEM mão posterior. A ÚLTIMA mão gravada
+    de cada torneio NUNCA pode condenar lugares vivos: aí `last_seen == played_at` para
+    TODOS os que estão sentados (ninguém reaparece porque não há mais mãos gravadas, não
+    por bust) → o teste antigo `ls <= played_at` marcava-os todos como eliminados.
+
+    - hash ausente/None, ou sem carimbo temporal → False (sem cross-hand possível).
+    - `tourn_last_hand <= played_at` (esta É a última mão gravada do torneio) → False.
+    - senão: hash cuja última aparição é <= esta mão (não reaparece depois) → True."""
+    if not hash_key or tourn_last_seen_ts is None or tourn_last_hand_ts is None:
+        return False
+    if tourn_last_hand_ts <= hand_played_at:
+        return False                        # última mão gravada do torneio → não condena vivos
+    return tourn_last_seen_ts <= hand_played_at
+
+
 def _live_zero_seats() -> tuple:
     """Núcleo partilhado (gate + worklist). Varre as mãos GG KO tagadas e devolve
     (scanned, silent, review, eliminated). silent/review = jogadores VIVOS com coroa $0;
@@ -1410,6 +1428,12 @@ def _live_zero_seats() -> tuple:
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty IS NOT NULL AND buy_in_bounty > 0")}
     last_seen = _tournament_last_seen()
+    # CORREÇÃO 3: última mão gravada por torneio (max dos last_seen) — a régua do bust
+    # cross-hand nunca condena vivos nessa mão (ver _is_cross_hand_eliminated).
+    tourn_last_hand: dict = {}
+    for (tn, _h), ts in last_seen.items():
+        if tn not in tourn_last_hand or ts > tourn_last_hand[tn]:
+            tourn_last_hand[tn] = ts
     rows = query(
         "SELECT id AS db_id, hand_id, tournament_number, tournament_name, "
         "       played_at::text AS played_at, raw, "
@@ -1458,9 +1482,11 @@ def _live_zero_seats() -> tuple:
                 none_seats.append(item)
                 continue
             # BALDE 1 — CROSS-HAND: o hash reaparece numa mão POSTERIOR? Se NÃO → eliminado.
+            # CORREÇÃO 3: a última mão gravada do torneio nunca condena vivos.
             h = name2hash.get(nm)
             ls = last_seen.get((r["tournament_number"], h)) if h else None
-            if h and ls is not None and ls <= r["played_at"]:
+            tlast = tourn_last_hand.get(r["tournament_number"])
+            if _is_cross_hand_eliminated(h, r["played_at"], ls, tlast):
                 eliminated.append(item)
                 continue
             # BALDE 2 — MESA-TODA-$0: sai do worklist (tem o fluxo de releitura dirigida).
@@ -1588,37 +1614,55 @@ _WT_STATE = {"status": "idle", "done": 0, "total": 0, "cancel": False,
 _WT_LOCK = _wt_threading.Lock()
 
 
+def _whole_table_zero_select(players_list) -> tuple:
+    """PURO (CORREÇÃO 1). Lugares da captura com coroa POR PREENCHER — VIVOS **OU**
+    bustados-nesta-mão — excluindo os já SELADOS (carimbo do Rui / cura curada). O card
+    da releitura mostra e relê TODOS estes; quem já tem coroa selada fica fora.
+
+    Devolve (qualifies, zero_seats, n_total):
+    - `zero_seats` = X (nomes por preencher e NÃO selados);
+    - `n_total`    = Y (lugares da captura) → 'a mostrar X de Y lugares';
+    - `qualifies`  = mesa-toda-$0: ≥3 lugares e ≥70% por preencher."""
+    from app.services.eliminated_bounty import is_bounty_sealed
+    pl = players_list or []
+    zero = [p.get("name") for p in pl
+            if p.get("name") and not is_bounty_sealed(p)
+            and float(p.get("bounty_value_usd") or 0) <= 0]
+    n_total = len(pl)
+    qualifies = n_total >= 3 and (len(zero) / n_total) >= 0.7
+    return qualifies, zero, n_total
+
+
 def _whole_table_zero_hands() -> list:
-    """As mãos tagadas-KO onde a maioria dos seats VIVOS tem coroa $0 (a SS falhou a mesa
-    em bloco). ≥3 seats, ≥70% zerados. READ-ONLY."""
-    from app.services.eliminated_bounty import busted_real_names, is_bounty_sealed
+    """As mãos tagadas-KO onde a maioria dos seats tem coroa $0 (a SS falhou a mesa em
+    bloco). ≥3 seats, ≥70% por preencher. READ-ONLY.
+    CORREÇÃO 2: Mystery KO fora do balde (critério do HRC pt41 — `MYSTERY_FORMATS`).
+    CORREÇÃO 1: inclui bustados-nesta-mão sem coroa; exclui selados; devolve n_total (Y)."""
+    from app.services.queue_export import MYSTERY_FORMATS
     base = {r["tournament_number"]: float(r["buy_in_bounty"]) for r in query(
         "SELECT tournament_number, buy_in_bounty FROM tournament_summaries "
         "WHERE site='GGPoker' AND buy_in_bounty > 0")}
     rows = query(
         "SELECT id, hand_id, tournament_number AS tn, tournament_name AS tname, "
-        "       played_at::text AS pa, raw, all_players_actions AS apa, player_names AS pn, "
+        "       played_at::text AS pa, player_names AS pn, "
         "       context_table_ss_id AS ssid "
         "  FROM hands WHERE site='GGPoker' AND played_at >= '2026-01-01' "
         "   AND player_names->>'match_method' IS NOT NULL "
         "   AND player_names->'players_list' IS NOT NULL "
-        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 OR COALESCE(array_length(discord_tags,1),0)>0)")
+        "   AND lower(COALESCE(tournament_format,'')) <> ALL(%s::text[]) "   # Mystery fora (pt41)
+        "   AND (COALESCE(array_length(hm3_tags,1),0)>0 OR COALESCE(array_length(discord_tags,1),0)>0)",
+        (list(MYSTERY_FORMATS),))
     out = []
     for r in rows:
         b = base.get(r["tn"])
         if not b or not r["ssid"]:
             continue
-        apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
-        busted = busted_real_names(r["raw"], apa)
-        pl = pn.get("players_list") or []
-        zero = [p.get("name") for p in pl if p.get("name") and p.get("name") not in busted
-                and not is_bounty_sealed(p)
-                and float(p.get("bounty_value_usd") or 0) <= 0]
-        if len(pl) >= 3 and len(zero) / len(pl) >= 0.7:
+        qualifies, zero, n_total = _whole_table_zero_select(pn.get("players_list") or [])
+        if qualifies:
             out.append({"id": r["id"], "hand_id": r["hand_id"], "ssid": r["ssid"],
                         "tournament_name": r["tname"], "floor": round(b / 2.0, 2),
-                        "zero_seats": zero})
+                        "zero_seats": zero, "n_total": n_total})
     return out
 
 
@@ -1656,7 +1700,8 @@ def _run_wt_reread():
             _WT_STATE["results"].append({
                 "hand_id": h["hand_id"], "id": h["id"], "ssid": h["ssid"],
                 "tournament_name": h["tournament_name"], "floor": h["floor"],
-                "seats": seats, "n_read": got, "n_seats": len(seats)})
+                "seats": seats, "n_read": got, "n_seats": len(seats),
+                "n_total": h.get("n_total", len(seats))})   # Y = lugares da captura (X de Y)
             _WT_STATE["done"] += 1
     with _WT_LOCK:
         if _WT_STATE["status"] != "error":

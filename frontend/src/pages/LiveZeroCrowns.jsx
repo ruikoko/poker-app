@@ -27,11 +27,12 @@ function LiveZeroCard({ h, onResolved }) {
     try {
       const r = await tableSs.setBounties(h.hand_id, { bounties: { [h.name]: v } })
       // escrita ALINHADA: se o nome não casou em nenhuma gaveta, NÃO sai da lista (LEI 1).
-      // not_found/partial são ARRAYS — testar .length (um [] é truthy em JS).
+      // not_found/partial são ARRAYS — testar .length (um [] é truthy em JS). Distingue
+      // partial (gravou numa gaveta) de not_found (não gravou nada) — Peça 1.
       if (r?.not_found?.length || r?.partial?.length) {
         setBusy(false)
-        setMsg(r.not_found?.length ? `nome não encontrado ("${h.name}") — não escreveu`
-          : `escrita PARCIAL (${(r.partial || []).join(', ')}) — verifica o nome`)
+        setMsg(r.not_found?.length ? `não gravou nada — nome não encontrado ("${h.name}")`
+          : `gravado só numa gaveta (${(r.partial || []).join(', ')}) — a outra tem grafia diferente`)
         return
       }
       onResolved && onResolved()          // coroa > 0 selada → SAI DA LISTA NA HORA
@@ -82,29 +83,41 @@ function LiveZeroCard({ h, onResolved }) {
   )
 }
 
-function WholeTableConfirmCard({ r }) {
+function WholeTableConfirmCard({ r, onStamped }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [done, setDone] = useState(false)      // LEI 1: card carimbado fica inerte
   const readable = (r.seats || []).filter(s => s.read && Number(s.read) > 0)
+  const nTotal = r.n_total ?? r.n_seats        // Y = lugares da captura (X de Y)
   const stamp = async () => {
+    if (done) return
     if (!readable.length) { setMsg('Nada legível para carimbar.'); return }
     if (!window.confirm(`Carimbar ${readable.length} coroas relidas em ${r.hand_id} (selado manual)?`)) return
     setBusy(true); setMsg(null)
     try {
       const bounties = Object.fromEntries(readable.map(s => [s.name, Number(s.read)]))
       const res = await tableSs.setBounties(r.hand_id, { bounties })
-      if (res?.not_found?.length || res?.partial?.length) { setBusy(false); setMsg('nomes não casaram — verifica'); return }
-      setMsg(`✓ ${readable.length} carimbadas.`)
+      const nf = res?.not_found || [], part = res?.partial || []
+      if (nf.length || part.length) {        // Peça 1: partial ≠ not_found
+        setBusy(false)
+        setMsg(nf.length ? `não gravou nada — nome não encontrado: ${nf.join(', ')}`
+          : `gravado só numa gaveta (${part.join(', ')}) — a outra tem grafia diferente`)
+        return
+      }
+      setDone(true); setBusy(false)
+      setMsg(`✓ ${readable.length} carimbadas — selado.`)
+      onStamped && onStamped(r.hand_id)      // LEI 1: sai da lista + a lista re-confere a BD
     } catch (e) { setBusy(false); setMsg('Falha: ' + (e?.message || e)) }
   }
   return (
-    <div style={{ display: 'flex', gap: 14, padding: 12, border: '1px solid #30363d', borderRadius: 10, background: '#161b22', opacity: busy ? 0.5 : 1 }}>
+    <div style={{ display: 'flex', gap: 14, padding: 12, border: '1px solid #30363d', borderRadius: 10, background: '#161b22', opacity: (busy || done) ? 0.5 : 1 }}>
       <HandImage handDbId={r.id} alt="mesa" style={{ width: 260 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <Link to={`/hand/${r.id}`} style={{ color: '#60a5fa', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>{r.hand_id}</Link>
           <span style={{ fontSize: 12, color: '#8b9691' }}>{r.tournament_name}</span>
           <span style={{ fontSize: 11, color: r.n_read ? '#86efac' : '#f87171' }}>releu {r.n_read}/{r.n_seats}</span>
+          <span style={{ fontSize: 11, color: '#8b9691' }}>a mostrar {r.n_seats} de {nTotal} lugares</span>
         </div>
         <div style={{ fontSize: 12, marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
           {(r.seats || []).map((s, i) => (
@@ -114,8 +127,8 @@ function WholeTableConfirmCard({ r }) {
           ))}
         </div>
         <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={stamp} disabled={busy || !readable.length} style={{ background: readable.length ? 'rgba(34,197,94,0.14)' : '#21262d', border: `1px solid ${readable.length ? 'rgba(34,197,94,0.5)' : '#30363d'}`, color: readable.length ? '#86efac' : '#6b7280', borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer' }}>
-            Carimbar os lidos ({readable.length})
+          <button onClick={stamp} disabled={busy || done || !readable.length} style={{ background: (readable.length && !done) ? 'rgba(34,197,94,0.14)' : '#21262d', border: `1px solid ${(readable.length && !done) ? 'rgba(34,197,94,0.5)' : '#30363d'}`, color: (readable.length && !done) ? '#86efac' : '#6b7280', borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: (busy || done) ? 'default' : 'pointer' }}>
+            {done ? '✓ selado' : `Carimbar os lidos (${readable.length})`}
           </button>
           {msg && <span style={{ fontSize: 12, color: msg.startsWith('✓') ? '#86efac' : '#ef4444' }}>{msg}</span>}
         </div>
@@ -126,7 +139,12 @@ function WholeTableConfirmCard({ r }) {
 
 function WholeTablePanel() {
   const [st, setSt] = useState(null)
+  const [stamped, setStamped] = useState(() => new Set())   // LEI 1: cards carimbados saem já
   const load = () => ggHealth.liveZeroWholeTable().then(setSt).catch(() => {})
+  const onStamped = (handId) => {
+    setStamped(prev => { const n = new Set(prev); n.add(handId); return n })  // remoção otimista
+    load()                                                   // re-confere a BD ao vivo (LEI 1)
+  }
   useEffect(() => { load() }, [])
   useEffect(() => {
     if (st?.status !== 'running') return
@@ -157,9 +175,14 @@ function WholeTablePanel() {
         {st.status === 'cancelled' && <span style={{ fontSize: 12, color: '#f87171' }}>interrompida (parcial mantido)</span>}
         {st.status === 'done' && <span style={{ fontSize: 12, color: '#86efac' }}>releitura concluída</span>}
       </div>
-      {(st.results && st.results.length > 0) ? (
+      {(() => {
+        const results = (st.results || []).filter(r => !stamped.has(r.hand_id))
+        return results.length > 0
+      })() ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {st.results.map((r, i) => <WholeTableConfirmCard key={`${r.hand_id}-${i}`} r={r} />)}
+          {(st.results || []).filter(r => !stamped.has(r.hand_id)).map((r, i) => (
+            <WholeTableConfirmCard key={`${r.hand_id}-${i}`} r={r} onStamped={onStamped} />
+          ))}
         </div>
       ) : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>

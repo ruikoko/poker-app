@@ -199,11 +199,15 @@ export function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
         + `\n\nGravar?`
       if (!window.confirm(msg)) { setBusy(false); return }
       const res = await tableSs.setBounties(handId, body)
-      // NUNCA "feito" calado: se não gravou (nome não bate) ou gravou só num store, AVISA e NÃO fecha.
+      // NUNCA "feito" calado: se não gravou (nome não bate) ou gravou só numa gaveta, AVISA
+      // e NÃO fecha. Distingue partial (gravou numa) de not_found (não gravou nada) — Peça 1.
       const nf = res?.not_found || [], part = res?.partial || []
       if (nf.length || part.length) {
-        alert('⚠ NÃO gravou' + (part.length ? ' (parcial: ' + part.join(', ') + ')' : '')
-          + (nf.length ? ' — nome não encontrado: ' + nf.join(', ') : '') + '. Avisa o Code (mismatch de nome).')
+        const lines = []
+        if (part.length) lines.push('gravado só numa gaveta (' + part.join(', ')
+          + ') — a outra gaveta tem grafia diferente deste nome')
+        if (nf.length) lines.push('não gravou nada — nome não encontrado: ' + nf.join(', '))
+        alert('⚠ ' + lines.join('. ') + '.')
         setBusy(false); return
       }
       setEditing(false)
