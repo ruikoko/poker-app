@@ -1,5 +1,48 @@
 # Pendentes — backlog vivo
 
+## 📌 PROVENIÊNCIA DA LEITURA (Vision) — não medido / a decidir
+
+*(Registado nesta sessão; relógio do sistema reportou 17 Jul 2026. Ordem do Rui: só escrita em docs.)*
+
+### 🟠 Pendente — o `vision_json` não guarda proveniência nenhuma da leitura
+
+- **Facto:** o `vision_json` (das capturas table-SS, `table_ss_processing_log`) **não guarda
+  proveniência** da leitura — **sem modelo, sem versão de prompt, sem timestamp da leitura,
+  sem tentativas reais de Vision**. (O `attempt_count` da tabela **não** é isso — é um contador
+  comum, ex.: 161 capturas partilham `attempt=16`; não indica nada sobre a leitura.)
+- **Consequência PROVADA:** não foi possível dizer **com que prompt** a captura **`ssid 202`
+  (GG-6132707211)** foi lida — a única anomalia de leitura-ao-meio conhecida. A pergunta
+  ficou sem resposta por o dado não existir.
+- **Consequência ESTRUTURAL:** sem segunda fonte, **uma leitura é juiz de si própria**. Onde
+  **não há Gold**, **nada audita a captura** — o valor lido entra sem contraditório. (A grelha
+  dos degraus **não** serve de auditoria: liberta tudo o que é ≥2B e a assinatura < 1B já é
+  removida pela guarda do piso — ver o caso encerrado abaixo.)
+- **Proposta (para quando for decidido — NÃO é para agora):** toda a leitura futura grava
+  `{modelo, versão-do-prompt, timestamp-da-leitura}` no `vision_json` (ou colunas próprias).
+  **Sem proveniência, não se audita nada.**
+- **NÃO MEDIDO (assim se escreve):** "quantas leituras-ao-meio existem em mãos SEM Gold" —
+  **não se sabe**; só se saberia **relendo as imagens**. Não há número; não se inventa um.
+
+### ✅ Caso ENCERRADO — GG-6132707211 (leitura-ao-meio isolada)
+
+- A **Vision leu METADE** em **7 de 7 lugares** da captura (`ssid 202`), casados por nome,
+  **sem ninguém eliminado** na mão (logo não é "verde" de KO).
+- A **placa foi confirmada pelo Rui**: mostra a coroa **CHEIA** — **$593,75 no astrol0g**
+  (a Vision gravara $296,875 = metade). A leitura-ao-meio **não está na imagem**.
+- A **coroa Gold gravada está CORRETA** (o `stored` não está contaminado); os cards do olho
+  desta mão são **falsos-conflitos** que o Rui arbitra.
+- **Anomalia ISOLADA: 1 em 1234** capturas GG com `vision_json` (0 casos parciais/near-miss).
+- **Causa desconhecida; NÃO investigada — decisão do Rui** (1 em 1234 não justifica).
+- **`#KO-CROWN-INSTANT-FIX` CANCELADO:** a premissa ("a captura mostra a coroa instantânea =
+  metade") foi **desmentida pela placa** (mostra a cheia). Fazer a máquina reconciliar o ×2 a
+  partir dessa premissa **inflacionaria coroas em silêncio** — escrita automática que não se
+  faz. Não reconstruir/re-propor sem prova nova. (Lição de método: sem a imagem, a resposta é
+  "não sei", não uma teoria nova — duas explicações anteriores [verde, instantâneo] vinham com
+  ar de facto e estavam erradas.)
+
+---
+
+
 ## 📌 FECHO DO DIA 19 Jul 2026 — Etapa 2 dos bounties + selo de nomes (3 fantasmas) + saga do $437.5
 
 *(Relógio do sistema reportou "15 Jul"; segue o fecho de 18 Jul → datado 19 Jul. Ver `JOURNAL_2026-07-19.md`.)*
