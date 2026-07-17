@@ -1585,6 +1585,61 @@ def live_zero_none(current_user=Depends(require_auth_or_api_key)):
     return {"count": len(none_seats), "items": none_seats}
 
 
+# ── Apagar lugares FANTASMA do players_list (nome NONE/vazio + sem dados) ──────
+_PHANTOM_NAMES = {None, "", "none", "null", "nan"}
+
+
+def _is_phantom_seat(p) -> bool:
+    """Lugar FANTASMA no players_list: nome NONE/vazio **E** sem dados nenhuns (sem coroa,
+    sem seat, sem posição, sem stack). É um registo a mais, sem correspondência em nenhuma
+    fonte (HH/apa/captura) — NÃO um jogador. GUARDA: só é fantasma se estiver mesmo vazio —
+    um lugar com QUALQUER valor (coroa/seat/posição/stack) NUNCA é apagado."""
+    if not isinstance(p, dict):
+        return False
+    if str(p.get("name")).strip().lower() not in _PHANTOM_NAMES:
+        return False
+    return (p.get("bounty_value_usd") in (None, 0, 0.0, "0")
+            and not p.get("seat") and not p.get("position")
+            and p.get("stack_bb") in (None, "", 0, 0.0)
+            and p.get("stack_chips") in (None, "", 0, 0.0))
+
+
+@router.post("/prune-phantom-seats")
+def prune_phantom_seats(payload: dict = Body(...),
+                        current_user=Depends(require_auth_or_api_key)):
+    """Apaga lugares FANTASMA (nome NONE/vazio + SEM dados) do players_list de UMA mão.
+    Cirúrgico: só remove entradas que `_is_phantom_seat` confirma vazias (nunca um lugar com
+    valor). `apa` NÃO é tocado (o fantasma vive só no players_list). dry_run devolve o plano.
+    Body: {hand_id, dry_run?}."""
+    hand_id = (payload or {}).get("hand_id")
+    dry = bool((payload or {}).get("dry_run"))
+    if not hand_id:
+        raise HTTPException(400, "hand_id obrigatório")
+    rows = query("SELECT id, player_names FROM hands WHERE hand_id = %s", (hand_id,))
+    if not rows:
+        raise HTTPException(404, "mão não encontrada")
+    pn = rows[0]["player_names"] or {}
+    if isinstance(pn, str):
+        pn = json.loads(pn)
+    pl = pn.get("players_list") or []
+    removed = [{"idx": i, "seat_obj": p} for i, p in enumerate(pl) if _is_phantom_seat(p)]
+    kept = [p for p in pl if not _is_phantom_seat(p)]
+    result = {"hand_id": hand_id, "before": len(pl), "removed": len(removed),
+              "after": len(kept), "removed_seats": removed, "dry_run": dry}
+    if dry or not removed:
+        return result
+    pn["players_list"] = kept
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE hands SET player_names = %s WHERE id = %s",
+                        (json.dumps(pn), rows[0]["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return result
+
+
 @router.post("/live-zero/dismiss")
 def live_zero_dismiss(payload: dict = Body(...),
                       current_user=Depends(require_auth_or_api_key)):
