@@ -15,7 +15,7 @@ const mono = "'Fira Code',monospace"
 const fmt = (iso) => iso ? String(iso).replace('T', ' ').slice(0, 16) : '—'
 const rowKey = (r) => `${r.hand_id}|${r.folder_tag}`   // uma mão pode estar em A (pos) e B (nota)
 
-function Row({ r, onZoom, accent, checked, onToggle }) {
+function Row({ r, onZoom, accent, checked, onToggle, onUseAsDest }) {
   const [open, setOpen] = useState(false)
   const src = absImageUrl(r.image_url)
   const p = r.prev
@@ -46,13 +46,19 @@ function Row({ r, onZoom, accent, checked, onToggle }) {
               mão anterior na mesma mesa <span style={{ color: '#f59e0b' }}>(candidata — NÃO dona provada)</span>
             </div>
             {p ? (
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Link to={`/hand/${p.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: mono, fontWeight: 700 }}>{p.hand_id}</Link>
                 <span> · {fmt(p.played_at)}</span> · <b style={{ color: p.had_flop ? '#86efac' : '#f87171' }}>{p.had_flop ? 'teve flop' : 'sem flop'}</b>
+                <button onClick={() => onUseAsDest?.(p.hand_id)}
+                  title="Usar esta como destino do MOVER (só atalho — confirma tu)"
+                  style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, border: '1px solid #f59e0b66', background: 'transparent', color: '#f59e0b', cursor: 'pointer', fontWeight: 700 }}>
+                  usar como destino →
+                </button>
               </div>
             ) : <div>— nenhuma anterior na mesma mesa em BD</div>}
             <div style={{ marginTop: 6, fontStyle: 'italic', color: '#64748b' }}>
               a dona pode estar várias mãos atrás; o Rui re-taga tarde. É pista, não resposta — só a imagem arbitra.
+              O "usar como destino" é <b>atalho</b>, não resposta — escreve o nº GG que quiseres.
             </div>
           </div>
         </div>
@@ -61,7 +67,7 @@ function Row({ r, onZoom, accent, checked, onToggle }) {
   )
 }
 
-function Section({ title, note, accent, items, onZoom, sel, toggle, selectAll, clearSection, emptyOk }) {
+function Section({ title, note, accent, items, onZoom, sel, toggle, selectAll, clearSection, emptyOk, onUseAsDest }) {
   const allSel = items.length > 0 && items.every(r => sel.has(rowKey(r)))
   return (
     <div style={{ marginBottom: 22, background: '#0f1117', borderRadius: 8, border: '1px solid #21262d' }}>
@@ -80,7 +86,7 @@ function Section({ title, note, accent, items, onZoom, sel, toggle, selectAll, c
       {items.length === 0
         ? <div style={{ padding: 16, fontSize: 12, color: emptyOk ? '#22c55e' : '#8b9691' }}>{emptyOk ? '✓ vazio' : '— nada'}</div>
         : items.map((r, i) => <Row key={`${r.ssid}-${i}`} r={r} onZoom={onZoom} accent={accent}
-            checked={sel.has(rowKey(r))} onToggle={() => toggle(r)} />)}
+            checked={sel.has(rowKey(r))} onToggle={() => toggle(r)} onUseAsDest={onUseAsDest} />)}
     </div>
   )
 }
@@ -92,6 +98,7 @@ export default function LatePrintsPage() {
   const [sel, setSel] = useState(new Set())        // rowKey selecionadas
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [dest, setDest] = useState('')             // mão de destino (nº GG) — ESCOLHIDA por ele
 
   const load = () => ggHealth.latePrints().then(d => { setData(d); setSel(new Set()) }).catch(e => setErr(e.message))
   useEffect(() => { load() }, [])
@@ -153,6 +160,59 @@ export default function LatePrintsPage() {
     }
   }
 
+  // MOVER: tira a(s) tag(s) das mãos marcadas E põe-nas na mão de DESTINO (escolhida por ele —
+  // pode ser qualquer uma; a "anterior" é só atalho). Ensaio (custo) + Cancelar antes de escrever.
+  const moveSelected = async () => {
+    const keys = [...sel]
+    if (!keys.length) { setMsg('Marca pelo menos uma mão.'); return }
+    const d = dest.trim()
+    if (!d) { setMsg('Escreve o nº GG da mão de destino (ou usa o atalho "anterior").'); return }
+    const rows = keys.map(k => byKey[k])
+    const removeItems = rows.map(r => ({ hand_id: r.hand_id, tag: r.folder_tag, action: 'remove' }))
+    const distinctTags = [...new Set(rows.map(r => r.folder_tag))]
+    const addItems = distinctTags.map(tag => ({ hand_id: d, tag, action: 'add' }))
+    const items = [...removeItems, ...addItems]
+    setBusy(true); setMsg('')
+    try {
+      const pv = await tagDecisions.preview(items)
+      const destItems = pv.items.filter(i => i.action === 'add')
+      const missing = destItems.find(i => !i.exists)
+      if (missing) { setMsg(`A mão de destino ${d} não existe na base. Verifica o nº GG.`); setBusy(false); return }
+      const outN = pv.items.filter(i => i.action === 'remove' && i.will_change).length
+      const goes = destItems.filter(i => i.will_change).map(i => i.tag)
+      const already = destItems.filter(i => !i.will_change).map(i => i.tag)
+      const detail = [
+        `Tirar ${outN} tag(s) de ${rows.length} mão(s).`,
+        goes.length ? `Pôr em ${d}: ${goes.join(', ')}.` : null,
+        already.length ? `${d} já tem: ${already.join(', ')} (não escrevo em duplicado).` : null,
+      ].filter(Boolean).join('\n')
+      if (!window.confirm(`Mover tags — CUSTO:\n\n${detail}\n\nFica SELADO. Confirmar?`)) { setBusy(false); return }
+      const res = await tagDecisions.batch(items)
+      const okKeys = new Set(res.results.filter(r => r.ok && r.action === 'remove' && r.changed).map(r => `${r.hand_id}|${r.tag}`))
+      setData(dd => ({
+        counts: { pos: (dd.pos || []).filter(r => !okKeys.has(rowKey(r))).length,
+                  nota: (dd.nota || []).filter(r => !okKeys.has(rowKey(r))).length },
+        pos: (dd.pos || []).filter(r => !okKeys.has(rowKey(r))),
+        nota: (dd.nota || []).filter(r => !okKeys.has(rowKey(r))),
+      }))
+      setSel(new Set())
+      const fails = res.results.filter(r => !r.ok)
+      const addRes = res.results.filter(r => r.action === 'add')
+      const addedOk = addRes.filter(r => r.ok && r.changed).map(r => r.tag)
+      const addDup = addRes.filter(r => r.ok && r.already_present).map(r => r.tag)
+      const parts = [`✓ ${res.results.filter(r => r.action === 'remove' && r.ok).length} tirada(s).`]
+      if (addedOk.length) parts.push(`Posta(s) em ${d}: ${addedOk.join(', ')}.`)
+      if (addDup.length) parts.push(`${d} já tinha: ${addDup.join(', ')}.`)
+      if (fails.length) parts.push(`⚠️ ${fails.length} FALHOU: ${fails.map(r => `${r.hand_id} (${r.tag}): ${r.error}`).join('; ')}`)
+      setMsg(parts.join(' '))
+      load()
+    } catch (e) {
+      setMsg('Erro: ' + (e.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div style={{ padding: 4 }}>
       <h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Prints fora de tempo — a mão não deu tempo</h2>
@@ -172,24 +232,33 @@ export default function LatePrintsPage() {
         <>
           <Section title="A · Impossíveis — tag pos (< 9 s)" accent="#ef4444" emptyOk
             note="Tag pos-pko/pos-nko = spot pós-flop. Aos 9 s a mão nem chegou ao flop → um print de spot pós-flop é IMPOSSÍVEL, tenha a mão ido ao flop ou não. A impossibilidade está na TAG. Provável print da mão anterior, casado à mão errada."
-            items={data.pos || []} onZoom={setZoom} sel={sel} toggle={toggle} selectAll={selectAll} clearSection={clearSection} />
+            items={data.pos || []} onZoom={setZoom} sel={sel} toggle={toggle} selectAll={selectAll} clearSection={clearSection} onUseAsDest={setDest} />
           <Section title="B · tag nota (< 9 s) — só para olhar" accent="#38bdf8"
             note="Tag nota = pode ser sobre o PRÉ-FLOP → aqui NÃO há impossibilidade nenhuma. As 3 verificadas pelo Rui estavam erradas, mas 3 casos não fazem regra: é lista para olhar, não veredito."
-            items={data.nota || []} onZoom={setZoom} sel={sel} toggle={toggle} selectAll={selectAll} clearSection={clearSection} />
+            items={data.nota || []} onZoom={setZoom} sel={sel} toggle={toggle} selectAll={selectAll} clearSection={clearSection} onUseAsDest={setDest} />
         </>
       )}
       {sel.size > 0 && (
         <div style={{ position: 'fixed', bottom: 18, left: '50%', transform: 'translateX(-50%)', zIndex: 1500,
           background: '#0f172a', border: '1px solid #334155', borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
-          padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
+          padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', maxWidth: '94vw' }}>
           <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700 }}>{sel.size} mão(s) marcada(s)</span>
           <button onClick={removeSelected} disabled={busy}
             style={{ fontSize: 13, fontWeight: 800, padding: '7px 16px', borderRadius: 6, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#ef4444', color: '#fff', opacity: busy ? 0.6 : 1 }}>
-            {busy ? 'A tirar…' : 'Tirar tag em lote'}
+            {busy ? '…' : 'Só tirar'}
+          </button>
+          <span style={{ width: 1, height: 24, background: '#334155' }} />
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>ou mover para</span>
+          <input value={dest} onChange={e => setDest(e.target.value)} placeholder="GG-…"
+            style={{ fontSize: 12, fontFamily: mono, padding: '6px 8px', borderRadius: 5, width: 140,
+              background: '#0b0d13', border: '1px solid #2a3550', color: '#e2e8f0', outline: 'none' }} />
+          <button onClick={moveSelected} disabled={busy || !dest.trim()}
+            style={{ fontSize: 13, fontWeight: 800, padding: '7px 16px', borderRadius: 6, border: 'none', cursor: (busy || !dest.trim()) ? 'not-allowed' : 'pointer', background: '#22c55e', color: '#052e16', opacity: (busy || !dest.trim()) ? 0.5 : 1 }}>
+            {busy ? '…' : 'Tirar e pôr aqui'}
           </button>
           <button onClick={clearAll} disabled={busy}
             style={{ fontSize: 12, padding: '7px 12px', borderRadius: 6, border: '1px solid #475569', cursor: 'pointer', background: 'transparent', color: '#cbd5e1' }}>
-            Limpar seleção
+            Limpar
           </button>
         </div>
       )}

@@ -80,9 +80,11 @@ def test_gg_health_routes_through_seal():
 
 
 # ── 3. seal_and_recompute: INSERT do rasto + UPDATE só em discord_tags (HM3 intacta) ──
-def _cur_with_ids(ids):
+def _cur_with_ids(ids, discord_tags=None):
+    """Cursor mock: o SELECT de existência (fetchall) devolve as rows dadas; a leitura de
+    discord_tags controla a deteção de 'já lá está' no add."""
     cur = MagicMock()
-    cur.fetchall.return_value = [{"id": i} for i in ids]
+    cur.fetchall.return_value = [{"id": i, "discord_tags": discord_tags} for i in ids]
     return cur
 
 
@@ -133,17 +135,71 @@ def test_remove_endpoint_missing_fields_400():
             tdr.remove_tag({"hand_id": "GG-1"}, current_user={})       # sem tag
 
 
-# ── 5. Lote com FALHA HONESTA (Peça 1) ───────────────────────────────────────
+# ── 5. add HONESTO: "já lá está" não escreve em duplicado nem finge ───────────
+def test_apply_one_add_already_present_is_noop():
+    cur = _cur_with_ids([5], discord_tags=["nota", "pos-pko"])
+    with patch.object(tdr, "seal_and_recompute") as seal:
+        res = tdr._apply_one(cur, "GG-1", "nota", "add", actor="x", origin="o")
+    assert res["already_present"] is True and res["changed"] is False
+    seal.assert_not_called()                    # não escreve em duplicado
+
+
+def test_apply_one_add_absent_seals():
+    cur = _cur_with_ids([5], discord_tags=["nota"])
+    with patch.object(tdr, "seal_and_recompute", return_value=[5]) as seal:
+        res = tdr._apply_one(cur, "GG-1", "pos-pko", "add", actor="x", origin="o")
+    assert res["already_present"] is False and res["changed"] is True
+    seal.assert_called_once()
+
+
+def test_apply_one_remove_seals_even_if_absent():
+    # o remove sela SEMPRE (mesmo ausente agora) → impede o writer de repor no reprocessamento.
+    cur = _cur_with_ids([5], discord_tags=[])
+    with patch.object(tdr, "seal_and_recompute", return_value=[5]) as seal:
+        res = tdr._apply_one(cur, "GG-1", "pos-pko", "remove", actor="x", origin="o")
+    assert res["changed"] is True
+    seal.assert_called_once()
+
+
+def test_apply_one_hand_not_found():
+    with pytest.raises(ValueError):
+        tdr._apply_one(_cur_with_ids([]), "GG-NADA", "nota", "add", actor="x", origin="o")
+
+
+def test_add_endpoint_already_present_honest():
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = _cur_with_ids([3], discord_tags=["nota"])
+    with patch.object(tdr, "get_conn", return_value=conn), \
+         patch.object(tdr, "seal_and_recompute") as seal, \
+         patch.object(tdr, "_refresh_villains") as vr:
+        res = tdr.add_tag({"hand_id": "GG-1", "tag": "nota"}, current_user={})
+    assert res["status"] == "already_present" and res["already_present"] is True
+    seal.assert_not_called()
+    vr.assert_not_called()
+
+
+def test_add_endpoint_adds_when_absent():
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = _cur_with_ids([3], discord_tags=["nota"])
+    with patch.object(tdr, "get_conn", return_value=conn), \
+         patch.object(tdr, "seal_and_recompute", return_value=[3]) as seal, \
+         patch.object(tdr, "_refresh_villains"):
+        res = tdr.add_tag({"hand_id": "GG-1", "tag": "pos-pko"}, current_user={"email": "rui@x"})
+    assert res["status"] == "added" and res["already_present"] is False
+    assert seal.call_args.args[1:] == ("GG-1", "pos-pko", "add")
+
+
+# ── 6. Lote: FALHA HONESTA + MOVER (tirar de A, pôr em B) ─────────────────────
 def test_batch_reports_partial_failure_honestly():
     # 3 itens: 2 ok, 1 falha (mão inexistente → ValueError). Reporta a verdade.
-    def fake_seal(cur, hand_id, tag, action, **kw):
+    def fake_apply(cur, hand_id, tag, action, **kw):
         if hand_id == "GG-BAD":
-            return []          # não encontrada → _apply_one levanta ValueError
-        return [1]
+            raise ValueError(f"mão {hand_id} não encontrada")
+        return {"hand_id": hand_id, "tag": tag, "action": action,
+                "changed": True, "already_present": False, "hand_db_ids": [1]}
     conn = MagicMock()
-    conn.cursor.return_value.__enter__.return_value = MagicMock()
     with patch.object(tdr, "get_conn", return_value=conn), \
-         patch.object(tdr, "seal_and_recompute", side_effect=fake_seal), \
+         patch.object(tdr, "_apply_one", side_effect=fake_apply), \
          patch.object(tdr, "_refresh_villains"):
         res = tdr.batch({"items": [
             {"hand_id": "GG-1", "tag": "pos-pko", "action": "remove"},
@@ -153,8 +209,25 @@ def test_batch_reports_partial_failure_honestly():
     assert res["n_ok"] == 2 and res["n_failed"] == 1
     bad = [r for r in res["results"] if not r["ok"]]
     assert len(bad) == 1 and bad[0]["hand_id"] == "GG-BAD" and "não encontrada" in bad[0]["error"]
-    # um item falhado NÃO impede os outros de serem selados/commitados.
-    assert conn.commit.call_count == 2
+    assert conn.commit.call_count == 2         # o falho não impede os outros
+
+
+def test_batch_move_remove_from_a_add_to_b():
+    # O caso real: tirar 'nota' da A + pô-la na B (dona certa), num só lote.
+    def fake_apply(cur, hand_id, tag, action, **kw):
+        return {"hand_id": hand_id, "tag": tag, "action": action,
+                "changed": True, "already_present": False, "hand_db_ids": [1]}
+    conn = MagicMock()
+    with patch.object(tdr, "get_conn", return_value=conn), \
+         patch.object(tdr, "_apply_one", side_effect=fake_apply), \
+         patch.object(tdr, "_refresh_villains"):
+        res = tdr.batch({"items": [
+            {"hand_id": "GG-A", "tag": "nota", "action": "remove"},
+            {"hand_id": "GG-B", "tag": "nota", "action": "add"},
+        ]}, current_user={})
+    assert res["n_ok"] == 2 and res["n_failed"] == 0
+    got = {(r["hand_id"], r["action"]) for r in res["results"]}
+    assert got == {("GG-A", "remove"), ("GG-B", "add")}
 
 
 def test_batch_empty_400():

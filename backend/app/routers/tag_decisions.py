@@ -29,8 +29,12 @@ logger = logging.getLogger("tag_decisions")
 
 def _apply_one(cur, hand_id, tag, action, *, actor, origin):
     """Aplica UMA decisão + re-avalia vilões das mãos afectadas. Devolve dict-resultado.
-    Levanta ValueError/HTTPException-friendly em erro de validação; o call site do lote
-    apanha e transforma em item-erro (falha honesta)."""
+    Levanta ValueError em erro de validação/mão inexistente; o call site do lote apanha e
+    transforma em item-erro (falha honesta).
+
+    HONESTO (add): se a mão de destino JÁ tem a tag, NÃO escreve em duplicado nem finge —
+    devolve `already_present=True, changed=False`. (O remove sela sempre: mesmo que a tag
+    esteja ausente agora, o selo impede que um writer a volte a pôr no reprocessamento.)"""
     hand_id = (hand_id or "").strip()
     tag = (tag or "").strip()
     if not hand_id:
@@ -39,10 +43,18 @@ def _apply_one(cur, hand_id, tag, action, *, actor, origin):
         raise ValueError("tag em falta")
     if action not in VALID_ACTIONS:
         raise ValueError(f"acção inválida: {action!r}")
-    affected = seal_and_recompute(cur, hand_id, tag, action, actor=actor, origin=origin)
-    if not affected:
+    cur.execute("SELECT id, discord_tags FROM hands WHERE hand_id = %s", (hand_id,))
+    hrows = cur.fetchall()
+    if not hrows:
         raise ValueError(f"mão {hand_id} não encontrada")
-    return {"hand_id": hand_id, "tag": tag, "action": action, "hand_db_ids": affected}
+    present = any(tag in (r.get("discord_tags") or []) for r in hrows)
+    if action == "add" and present:
+        return {"hand_id": hand_id, "tag": tag, "action": action,
+                "already_present": True, "changed": False,
+                "hand_db_ids": [r["id"] for r in hrows]}
+    affected = seal_and_recompute(cur, hand_id, tag, action, actor=actor, origin=origin)
+    return {"hand_id": hand_id, "tag": tag, "action": action,
+            "already_present": False, "changed": True, "hand_db_ids": affected}
 
 
 def _refresh_villains(hand_db_ids):
@@ -95,9 +107,13 @@ def add_tag(payload: dict = Body(...), current_user=Depends(require_auth)):
         raise HTTPException(400, str(e))
     finally:
         conn.close()
+    if res.get("already_present"):              # honesto: não finge que fez
+        return {"status": "already_present", "hand_id": res["hand_id"], "tag": res["tag"],
+                "already_present": True}
     _refresh_villains(res["hand_db_ids"])
     logger.info("[tag-seal] ADD %s a %s por %s", res["tag"], res["hand_id"], actor)
-    return {"status": "added", "hand_id": res["hand_id"], "tag": res["tag"]}
+    return {"status": "added", "hand_id": res["hand_id"], "tag": res["tag"],
+            "already_present": False}
 
 
 @router.post("/preview")
@@ -149,9 +165,12 @@ def batch(payload: dict = Body(...), current_user=Depends(require_auth)):
                 res = _apply_one(cur, it.get("hand_id"), it.get("tag"),
                                  it.get("action") or "remove", actor=actor, origin=ORIGIN_BATCH)
             conn.commit()
-            refresh.extend(res["hand_db_ids"])
+            if res.get("changed"):                 # só re-avalia vilões do que mudou
+                refresh.extend(res["hand_db_ids"])
             results.append({"hand_id": res["hand_id"], "tag": res["tag"],
-                            "action": res["action"], "ok": True})
+                            "action": res["action"], "ok": True,
+                            "already_present": bool(res.get("already_present")),
+                            "changed": bool(res.get("changed"))})
         except ValueError as e:
             conn.rollback()
             results.append({"hand_id": (it.get("hand_id") or "").strip(),
