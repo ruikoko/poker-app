@@ -435,12 +435,14 @@ def _prev_hand_same_table(tn, played_at_str, table):
 
 
 def _late_prints() -> list:
-    """Capturas GG com folder_tag casadas a mãos que TIVERAM flop (HH: `*** FLOP ***`,
-    determinístico) e tiradas < 9 s do início da mão (captured_at − played_at). Régua FÍSICA:
-    abaixo dos ~10 s a mão nem chegou ao flop → um print de spot pós-flop é impossível; corte
-    conservador a 9 s (as 8 verificadas pelo Rui têm ≤8 s; 0 em [9,10)). FT incluído (a mão
-    demora o que demora). A faixa 10-20 s foi verificada uma-a-uma pelo Rui: 27 capturas, 0
-    erros = comportamento NORMAL dele, não suspeita → removida. Ordenado por intervalo."""
+    """Capturas GG (folder_tag) tiradas < 9 s do início da mão (captured_at − played_at),
+    EXCLUINDO mãos de MESA FINAL (qualquer tag '-ft' — decisão do Rui: FT fora de tudo).
+
+    Régua na TAG, NÃO na mão: aos 9 s a mão não chegou ao flop → um print de spot pós-flop é
+    IMPOSSÍVEL, tenha a mão ido ao flop ou não (a impossibilidade está na tag 'pos', não no
+    flop). Por isso NÃO se filtra por flop; `had_flop` guarda-se só para MOSTRAR. Cada linha
+    traz o `folder_tag` (tag da captura) para o caller dividir em pos/nota. Ordenado por
+    intervalo. `prev` (anterior na mesma mesa) = HEURÍSTICA de dona, candidata não provada."""
     rows = query(
         "SELECT l.id AS ssid, l.folder_tag, l.captured_at::text AS cap, l.reason_detail, "
         "       h.id AS db_id, h.hand_id, h.played_at::text AS pa, h.tournament_number AS tn, "
@@ -448,8 +450,7 @@ def _late_prints() -> list:
         "  FROM table_ss_processing_log l "
         "  JOIN hands h ON h.hand_id = l.matched_hand_id "
         " WHERE l.folder_tag IS NOT NULL AND l.result='success' AND l.captured_at IS NOT NULL "
-        "   AND h.played_at IS NOT NULL AND h.site='GGPoker' AND h.played_at >= '2026-01-01' "
-        "   AND position('*** FLOP ***' in COALESCE(h.raw,'')) > 0")
+        "   AND h.played_at IS NOT NULL AND h.site='GGPoker' AND h.played_at >= '2026-01-01'")
     out = []
     for r in rows:
         try:
@@ -458,10 +459,14 @@ def _late_prints() -> list:
             continue
         if iv < 0 or iv >= 9:
             continue
+        tags = list(r["discord_tags"] or []) + list(r["hm3_tags"] or [])
+        if any(str(t).endswith("-ft") for t in tags):     # MESA FINAL fora de tudo (Rui)
+            continue
         out.append({
             "ssid": r["ssid"], "hand_id": r["hand_id"], "hand_db_id": r["db_id"],
-            "tags": list(r["discord_tags"] or []) + list(r["hm3_tags"] or []),
-            "folder_tag": r["folder_tag"], "interval_s": int(iv), "interval_raw": iv,
+            "folder_tag": r["folder_tag"], "tags": tags,
+            "interval_s": int(iv), "interval_raw": iv,
+            "had_flop": "*** FLOP ***" in (r["raw"] or ""),
             "match_method": r["reason_detail"],
             "image_url": f"/api/table-ss/image/{r['ssid']}",
             "prev": _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"])),
@@ -474,14 +479,18 @@ def _late_prints() -> list:
 
 @router.get("/late-prints")
 def late_prints(current_user=Depends(require_auth)):
-    """Painel 'Prints fora de tempo — a mão não deu tempo' (read-only). Capturas em mãos que
-    TIVERAM flop, tiradas < 9 s do início — régua FÍSICA: a mão nem chegou ao flop, logo um
-    print de spot pós-flop é IMPOSSÍVEL. Verificado pelo Rui à imagem: 8/8 erros (mãos
-    anteriores). A faixa 10-20 s ('suspeitos') foi verificada uma-a-uma: 27 capturas, 0 erros
-    → comportamento normal, removida. A `prev` (mão anterior na mesma mesa) é HEURÍSTICA de
-    dona — candidata, não provada (a dona pode estar várias mãos atrás). NADA escreve."""
+    """Painel 'Prints fora de tempo — a mão não deu tempo' (read-only). Régua na TAG + < 9 s,
+    MESA FINAL fora de tudo. DUAS listas:
+    - `pos` (tag pos-pko/pos-nko): aos 9 s a mão não chegou ao flop → print de spot pós-flop
+      é IMPOSSÍVEL, com ou sem flop na mão (apanha a GG-6132923055, pos sem flop).
+    - `nota` (tag nota): SEM impossibilidade — uma nota pode ser sobre o pré-flop. É lista para
+      OLHAR (as 3 verificadas pelo Rui estavam erradas; 3 casos não fazem regra), não veredito.
+    Outras tags (icm, speed-racer) ficam de fora (sem impossibilidade). A `prev` é HEURÍSTICA
+    de dona — candidata, não provada. NADA escreve."""
     rows = _late_prints()
-    return {"count": len(rows), "hands": rows}
+    pos = [r for r in rows if str(r["folder_tag"] or "").startswith("pos")]
+    nota = [r for r in rows if str(r["folder_tag"] or "") == "nota"]
+    return {"counts": {"pos": len(pos), "nota": len(nota)}, "pos": pos, "nota": nota}
 
 
 @router.get("/crowns")

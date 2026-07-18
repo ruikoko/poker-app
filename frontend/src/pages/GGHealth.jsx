@@ -1163,7 +1163,7 @@ export default function GGHealth() {
     suspicious.count().then(r => r.total).catch(() => null),
     importHealth.get().then(sumImportIssues).catch(() => null),
     ggHealth.liveZeroList().then(r => r.count).catch(() => null),
-    ggHealth.latePrints().then(r => r.count).catch(() => null),
+    ggHealth.latePrints().then(r => r.counts.pos + r.counts.nota).catch(() => null),
   ]).then(([coroas, marcadas, suspeitas, imp, live_zero, late_prints]) =>
     setExtra({ coroas, marcadas, suspeitas, import: imp, live_zero, late_prints }))
   // CONTADORES AO VIVO (LEI 1 vale para contadores, não só listas): re-lê no mount,
