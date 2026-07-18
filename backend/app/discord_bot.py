@@ -294,9 +294,10 @@ def _apply_channel_tags(entry_id: int, tags: list[str], channel_name: str | None
                 SET tags = ARRAY(
                         SELECT DISTINCT unnest(COALESCE(tags, '{}'::text[]) || %s::text[])
                     ),
-                    discord_tags = ARRAY(
+                    -- SELO DA TAG: append via apply_tag_decisions (tag tirada pelo Rui não volta).
+                    discord_tags = apply_tag_decisions(hand_id, ARRAY(
                         SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[])
-                    ),
+                    )),
                     origin = COALESCE(origin, 'discord')
                 WHERE entry_id = %s
                 """,

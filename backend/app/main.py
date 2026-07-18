@@ -54,6 +54,7 @@ from app.routers.capture_triage import (
     router as capture_triage_router,
     ensure_capture_triage_column,
 )
+from app.routers.tag_decisions import router as tag_decisions_router
 
 load_dotenv()
 
@@ -291,6 +292,8 @@ async def lifespan(app: FastAPI):
     ensure_name_quarantine_schema()
     from app.services.crown_seal_log import ensure_crown_seal_log_schema
     ensure_crown_seal_log_schema()
+    from app.services.tag_decisions import ensure_tag_decisions_schema
+    ensure_tag_decisions_schema()
     ensure_hrc_schema()
     from app.routers.queue import ensure_hrc_queue_release_schema
     ensure_hrc_queue_release_schema()
@@ -359,6 +362,7 @@ app.include_router(hrc_results_router)
 app.include_router(table_ss_router)
 app.include_router(import_health_router)
 app.include_router(capture_triage_router)
+app.include_router(tag_decisions_router)
 app.include_router(suspicious_router)
 app.include_router(gg_health_router)
 from app.routers.crown_sample import router as crown_sample_router

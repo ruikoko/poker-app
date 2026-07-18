@@ -169,9 +169,10 @@ def tag_capture_triage(hand_id: str, body: TagBody, current_user=Depends(require
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            # SELO DA TAG: append via apply_tag_decisions (uma tag tirada pelo Rui não volta).
             cur.execute(
-                "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
-                "COALESCE(discord_tags, '{}'::text[]) || %s::text[])), "
+                "UPDATE hands SET discord_tags = apply_tag_decisions(hand_id, ARRAY("
+                "SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[]))), "
                 "capture_triage = 'resolved', "
                 "folder_ft_source = COALESCE(%s, folder_ft_source) WHERE id = %s",
                 ([tag], ft_source, hand_db_id),

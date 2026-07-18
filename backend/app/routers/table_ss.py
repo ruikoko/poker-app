@@ -1133,9 +1133,11 @@ def _apply_folder_tag_to_hand(
         with conn.cursor() as cur:
             # pt73 — escreve a tag final + a proveniência do '-ft' (manual/auto).
             # COALESCE: não apaga um 'manual'/'auto' anterior quando ft_source=None.
+            # SELO DA TAG: o append passa por apply_tag_decisions → uma tag que o Rui
+            # tirou (decisão selada) NÃO volta neste reprocessamento. hm3_tags intacta.
             cur.execute(
-                "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
-                "COALESCE(discord_tags, '{}'::text[]) || %s::text[])), "
+                "UPDATE hands SET discord_tags = apply_tag_decisions(hand_id, ARRAY("
+                "SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[]))), "
                 "folder_ft_source = COALESCE(%s, folder_ft_source) WHERE id = %s",
                 ([final_tag], ft_source, matched_hand_db_id),
             )

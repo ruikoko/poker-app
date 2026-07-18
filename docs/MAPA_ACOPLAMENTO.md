@@ -315,11 +315,26 @@ A entrada `(9999, "pos-nko")` em `HM3_REAL_TAGS` é sintética: `pos-nko` é nom
 | `['icm-pko', 'pko-pos']` | Partilhada em múltiplos canais. |
 | `null` | Mão muito antiga, antes da coluna existir — interpretar como `[]`. |
 
+**★ SELO DA TAG (`tag_decisions`, 18 Jul 2026) — o que o Rui decide manda sobre o automático.**
+Antes: o Rui não conseguia CORRIGIR uma tag — se a tirasse, VOLTAVA (10 writers re-acrescentam
+por append a cada reprocessamento). Agora **cada** um dos 10 writers embrulha o seu RHS na função
+SQL **`apply_tag_decisions(hand_id, base[])`** = `(base ∪ adds) − removes` (removes por último;
+latest-wins por (hand_id, tag)). As decisões vivem em **`tag_decisions(hand_id, tag, action∈{add,
+remove})`**, append-only (regras `DO INSTEAD NOTHING` na BD; corrigir = INSERT novo). Serviço:
+`backend/app/services/tag_decisions.py` (`seal_and_recompute`, `apply_decisions_py` espelho puro).
+Endpoints: `routers/tag_decisions.py` (`/remove` botão da mão · `/batch` lote falha-honesta ·
+`/preview` custo · `/add`). UI: `components/DiscordTagSeal.jsx` (página da mão) + selecção em
+lote no painel `LatePrints.jsx`. **Só toca `discord_tags`; `hm3_tags` intacta.** Os 10 writers:
+`table_ss.py:_apply_folder_tag_to_hand`, `capture_triage.py:apply_tag`, `screenshot.py` (guard-enrich
++ enrich), `discord_bot.py:_apply_channel_tags`, `hand_service.py` (placeholder upgrade + append_channel),
+`ft_boundary.py:_persist_ft_correction`, `gg_health.py` `/tag`+`/untag` (estes selam decisões, não
+escrevem o array cru). Teste `test_tag_decisions.py::test_all_appending_writers_wrapped` guarda a classe.
+
 **Comportamento esperado quando muda:**
 
 - Adicionar `'nota'` a uma mão com `match_method` populado: passa a cumprir regra C. `recalculate-hands` actualiza counters de villains.
-- Remover canal: write idempotente via `array_remove` (não usado actualmente — só append).
-- O write é sempre **append**, nunca overwrite. `DISTINCT unnest` garante deduplicação.
+- Remover uma tag: hoje passa pelo SELO (`/tag-decisions/remove` ou `/gg-health/untag`) — fica selada, **não volta** no reprocessamento.
+- O write dos writers automáticos é **append**, mas SEMPRE via `apply_tag_decisions` → uma decisão selada de remoção ganha ao append. `DISTINCT unnest` garante deduplicação.
 
 **Armadilhas conhecidas:**
 

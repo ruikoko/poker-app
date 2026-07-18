@@ -1721,9 +1721,11 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
             with conn.cursor() as cur:
                 _ch = _resolve_channel_name_for_entry(entry_id)
                 if _ch:
+                    # SELO DA TAG: append via apply_tag_decisions (tag tirada pelo Rui não volta).
                     cur.execute(
-                        "UPDATE hands SET discord_tags = ARRAY(SELECT DISTINCT unnest("
-                        "COALESCE(discord_tags, '{}'::text[]) || %s::text[])) WHERE id = %s",
+                        "UPDATE hands SET discord_tags = apply_tag_decisions(hand_id, ARRAY("
+                        "SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[]))) "
+                        "WHERE id = %s",
                         ([_ch], hand_db_id),
                     )
                 cur.execute(
@@ -1942,8 +1944,10 @@ def _enrich_hand_from_orphan_entry(entry_id: int, hand_db_id: int, raw_json: dic
     from app.discord_bot import _resolve_channel_name_for_entry
     _discord_channel = _resolve_channel_name_for_entry(entry_id)
     if _discord_channel:
+        # SELO DA TAG: append via apply_tag_decisions (tag tirada pelo Rui não volta).
         extra_updates.append(
-            "discord_tags = ARRAY(SELECT DISTINCT unnest(COALESCE(discord_tags, '{}'::text[]) || %s::text[]))"
+            "discord_tags = apply_tag_decisions(hand_id, ARRAY(SELECT DISTINCT unnest("
+            "COALESCE(discord_tags, '{}'::text[]) || %s::text[])))"
         )
         extra_params.append([_discord_channel])
 

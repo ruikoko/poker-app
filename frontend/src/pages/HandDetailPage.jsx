@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { hands as handsApi, screenshots, ggHealth } from '../api/client'
 import TagEditor from '../components/TagEditor'
+import DiscordTagSeal from '../components/DiscordTagSeal'
 import HandHistoryViewer from '../components/HandHistoryViewer'
 import HandTimeline from '../components/HandTimeline'
 import AttachedImagesSection from '../components/AttachedImagesSection'
@@ -101,8 +102,9 @@ export default function HandDetailPage() {
       {/* ── HEADER ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12 }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 16, fontWeight: 600, flexShrink: 0 }}>&larr; Voltar</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <TagEditor hand={hand} onUpdate={(patch) => setHand(h => ({ ...h, ...patch }))} />
+          <DiscordTagSeal hand={hand} onUpdate={(patch) => setHand(h => ({ ...h, ...patch }))} />
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           {hand.raw && hand.all_players_actions && (
@@ -165,8 +167,9 @@ function PlaceholderView({ hand, navigate, onUpdate }) {
       {/* Header — só voltar + tags (editáveis) */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12 }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 16, fontWeight: 600, flexShrink: 0 }}>&larr; Voltar</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <TagEditor hand={hand} onUpdate={onUpdate} />
+          <DiscordTagSeal hand={hand} onUpdate={onUpdate} />
         </div>
       </div>
 

@@ -27,18 +27,25 @@ def test_tag_needs_confirm_on_format_conflict_no_write():
 def test_tag_idempotent_when_already_present():
     rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["icm-pko"], "tournament_format": "PKO"}]
     with patch.object(gg_health, "query", return_value=rows), \
-         patch.object(gg_health, "get_conn", return_value=MagicMock()):
+         patch.object(gg_health, "get_conn", return_value=MagicMock()), \
+         patch.object(gg_health, "seal_and_recompute") as seal:
         res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"})
     assert res["applied"] == 0                 # já tem → no-op
+    seal.assert_not_called()                   # nada a selar
 
 
-def test_tag_applies_new_tag():
+def test_tag_applies_new_tag_seals_add():
+    # SELO DA TAG: o array final é computado na BD por apply_tag_decisions — o teste
+    # verifica que se SELOU a decisão (add) da tag certa, não o array (que a BD calcula).
     rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": [], "tournament_format": "PKO"}]
     with patch.object(gg_health, "query", return_value=rows), \
          patch.object(gg_health, "get_conn", return_value=MagicMock()), \
+         patch.object(gg_health, "seal_and_recompute", return_value=[1]) as seal, \
          patch("app.services.villain_rules.apply_villain_rules"):
         res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"})
     assert res["applied"] == 1 and res["tags"] == ["icm-pko"]
+    args, kwargs = seal.call_args
+    assert args[1:] == ("GG-1", "icm-pko", "add")   # (cur, hand_id, tag, action)
 
 
 def test_tag_invalid_rejected():
@@ -47,29 +54,31 @@ def test_tag_invalid_rejected():
 
 
 def test_tag_multi_appends_all_selected():
-    # `tags` (lista): aplica AS DUAS de uma vez, ACRESCENTANDO à existente (não substitui).
-    captured = {}
+    # `tags` (lista): SELA as DUAS que faltam (a 'nota' que já lá está não é re-selada).
     conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.execute.side_effect = lambda sql, params: captured.setdefault("tags", params[0])
     rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["nota"], "tournament_format": "PKO"}]
     with patch.object(gg_health, "query", return_value=rows), \
          patch.object(gg_health, "get_conn", return_value=conn), \
+         patch.object(gg_health, "seal_and_recompute", return_value=[1]) as seal, \
          patch("app.services.villain_rules.apply_villain_rules"):
         res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tags": ["icm", "pos-pko"], "confirm": True})
     assert res["applied"] == 2 and res["hands"] == 1 and res["tags"] == ["icm", "pos-pko"]
-    assert captured["tags"] == ["nota", "icm", "pos-pko"]        # ACRESCENTOU, 'nota' sobreviveu
+    sealed = [(c.args[1], c.args[2], c.args[3]) for c in seal.call_args_list]
+    assert sealed == [("GG-1", "icm", "add"), ("GG-1", "pos-pko", "add")]  # só as novas
 
 
 def test_tag_multi_idempotent_skips_existing():
-    # uma das duas já lá está → só acrescenta a que falta.
+    # uma das duas já lá está → só sela a que falta.
     conn = MagicMock()
     rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["icm"], "tournament_format": "PKO"}]
     with patch.object(gg_health, "query", return_value=rows), \
          patch.object(gg_health, "get_conn", return_value=conn), \
+         patch.object(gg_health, "seal_and_recompute", return_value=[1]) as seal, \
          patch("app.services.villain_rules.apply_villain_rules"):
         res = gg_health.gg_health_tag({"hand_ids": ["GG-1"], "tags": ["icm", "nota"], "confirm": True})
     assert res["applied"] == 1 and res["hands"] == 1               # só 'nota' era nova
+    sealed = [(c.args[1], c.args[2], c.args[3]) for c in seal.call_args_list]
+    assert sealed == [("GG-1", "nota", "add")]
 
 
 # ── detetor de rotação: truncação ≠ troca ────────────────────────────────────
@@ -91,26 +100,28 @@ def test_same_name_trunc_tolera_truncacao():
 
 # ── untag — remover tag espúria (oposto de tagar) ────────────────────────────
 def test_untag_removes_selected_tag():
-    captured = {}
+    # SELO DA TAG: sela um 'remove' da forma EXACTA gravada — a BD recompõe o array.
     conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.execute.side_effect = lambda sql, params: captured.setdefault("tags", params[0])
     rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["nota", "pos-pko"]}]
     with patch.object(gg_health, "query", return_value=rows), \
          patch.object(gg_health, "get_conn", return_value=conn), \
+         patch.object(gg_health, "seal_and_recompute", return_value=[1]) as seal, \
          patch("app.services.villain_rules.apply_villain_rules"):
         res = gg_health.gg_health_untag({"hand_ids": ["GG-1"], "tag": "pos-pko"})
     assert res["removed"] == 1 and res["hands"] == 1
-    assert captured["tags"] == ["nota"]                 # só 'pos-pko' saiu, 'nota' fica
+    args = seal.call_args.args
+    assert args[1:] == ("GG-1", "pos-pko", "remove")    # só 'pos-pko' selada p/ remoção
 
 
 def test_untag_idempotent_when_absent():
     conn = MagicMock()
     rows = [{"id": 1, "hand_id": "GG-1", "discord_tags": ["nota"]}]
     with patch.object(gg_health, "query", return_value=rows), \
-         patch.object(gg_health, "get_conn", return_value=conn):
+         patch.object(gg_health, "get_conn", return_value=conn), \
+         patch.object(gg_health, "seal_and_recompute") as seal:
         res = gg_health.gg_health_untag({"hand_ids": ["GG-1"], "tag": "pos-pko"})
     assert res["removed"] == 0 and res["hands"] == 0    # não tinha → no-op
+    seal.assert_not_called()
     conn.cursor.assert_not_called()
 
 

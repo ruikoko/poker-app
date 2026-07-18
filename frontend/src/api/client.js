@@ -451,6 +451,17 @@ export const ggHealth = {
   }),
 }
 
+// ── SELO DA TAG (tag_decisions) — a decisão do Rui manda sobre o automático ──
+// Tirar/pôr uma tag fica SELADA e sobrevive ao reprocessamento. Só toca discord_tags.
+export const tagDecisions = {
+  remove: (handId, tag) => req('POST', '/tag-decisions/remove', { hand_id: handId, tag }),
+  add: (handId, tag) => req('POST', '/tag-decisions/add', { hand_id: handId, tag }),
+  // Lote: items = [{hand_id, tag, action:'remove'|'add'}]. Falha honesta por-item.
+  batch: (items) => req('POST', '/tag-decisions/batch', { items }),
+  // Custo antes de correr (read-only): n_hands, n_ops, e por-item will_change.
+  preview: (items) => req('POST', '/tag-decisions/preview', { items }),
+}
+
 // ── HRC Sessions (Complete Export import) ───────────────────────────────────
 export const hrc = {
   upload: (file, opts = {}) => {

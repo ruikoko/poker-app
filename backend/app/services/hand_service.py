@@ -408,7 +408,8 @@ def _insert_hand(conn, h: dict, entry_id: int | None, tournament_pk: int | None 
                     -- (empty, não NULL). COALESCE nu preserva o array vazio do INSERT e
                     -- descarta o valor do placeholder. Com NULLIF, empty-array → NULL →
                     -- COALESCE cai no placeholder_metadata.
-                    discord_tags   = COALESCE(NULLIF(discord_tags, ARRAY[]::text[]), %(discord_tags)s),
+                    -- SELO DA TAG: recompute via apply_tag_decisions (tag tirada pelo Rui não volta).
+                    discord_tags   = apply_tag_decisions(hand_id, COALESCE(NULLIF(discord_tags, ARRAY[]::text[]), %(discord_tags)s)),
                     -- hm3_tags: preservar + strip 'GGDiscord' (marker interno de placeholder
                     -- Discord, não deve persistir no row final). Se hm3_tags real for None,
                     -- array_remove aplica-se a '{}' que é no-op.
@@ -531,9 +532,10 @@ def append_discord_channel_to_hand(hand_db_id: int, entry_id: int) -> dict:
             if channel:
                 cur.execute(
                     """UPDATE hands SET
-                         discord_tags = ARRAY(SELECT DISTINCT unnest(
+                         -- SELO DA TAG: append via apply_tag_decisions (tag tirada pelo Rui não volta).
+                         discord_tags = apply_tag_decisions(hand_id, ARRAY(SELECT DISTINCT unnest(
                            COALESCE(discord_tags, '{}'::text[]) || %s::text[]
-                         ))
+                         )))
                        WHERE id = %s
                        RETURNING discord_tags""",
                     ([channel], hand_db_id),

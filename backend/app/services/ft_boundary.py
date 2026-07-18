@@ -482,8 +482,11 @@ def _persist_ft_correction(hand_db_id: int, discord_tags, hm3_tags, source: str)
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            # SELO DA TAG: a escrita das variantes -ft passa por apply_tag_decisions — uma
+            # tag que o Rui tirou (decisão selada) não é reposta pela propagação FT. hm3_tags
+            # intacta (o selo só toca discord_tags).
             cur.execute(
-                "UPDATE hands SET discord_tags=%s, hm3_tags=%s, "
+                "UPDATE hands SET discord_tags=apply_tag_decisions(hand_id, %s), hm3_tags=%s, "
                 "folder_ft_source = CASE WHEN folder_ft_source='manual' "
                 "THEN 'manual' ELSE 'auto' END "
                 "WHERE id=%s",

@@ -26,6 +26,8 @@ from app.services.ft_boundary import (
     candidate_tns, via_b_diagnostics, review_status,
 )
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
+from app.services.tag_decisions import (ORIGIN_GG_HEALTH_TAG, ORIGIN_GG_HEALTH_UNTAG,
+                                        actor_of as _tag_actor_of, seal_and_recompute)
 from app.services.eliminated_bounty import (
     busted_real_names, BOUNTY_REVIEW_KEY, BOUNTY_SOURCE_KEY, SOURCE_GREEN_KO,
 )
@@ -732,28 +734,34 @@ def gg_health_tag(payload: dict = Body(...),
                                  "tournament_format": r["tournament_format"]})
     if warnings and not confirm:
         return {"applied": 0, "needs_confirm": True, "warnings": warnings, "tags": canons}
+    # SELO DA TAG: cada add é uma DECISÃO selada (append-only) + recompute — sobrevive ao
+    # reprocessamento (o writer automático não a apaga). apply_villain_rules pós-commit.
+    actor = _tag_actor_of(current_user)
     applied = hands_touched = 0
     conn = get_conn()
+    refresh = []
     try:
         for r in rows:
             existing = {canonicalize_tag(t) for t in (r["discord_tags"] or [])}
             to_add = [ct for ct in canons if ct not in existing]  # ACRESCENTA só o que falta
             if not to_add:
                 continue                       # idempotente: já tem todas
-            new_tags = list(r["discord_tags"] or []) + to_add
             with conn.cursor() as cur:
-                cur.execute("UPDATE hands SET discord_tags=%s WHERE id=%s",
-                            (new_tags, r["id"]))
+                for ct in to_add:
+                    seal_and_recompute(cur, r["hand_id"], ct, "add",
+                                       actor=actor, origin=ORIGIN_GG_HEALTH_TAG)
             conn.commit()
-            try:
-                from app.services.villain_rules import apply_villain_rules
-                apply_villain_rules(r["id"])
-            except Exception:
-                pass
+            refresh.append(r["id"])
             applied += len(to_add)
             hands_touched += 1
     finally:
         conn.close()
+    try:
+        from app.services.villain_rules import apply_villain_rules
+        for hid in refresh:
+            apply_villain_rules(hid)
+    except Exception:
+        pass
     return {"applied": applied, "hands": hands_touched, "tags": canons,
             "warnings": warnings, "needs_confirm": False}
 
@@ -788,28 +796,35 @@ def gg_health_untag(payload: dict = Body(...),
     rows = query("SELECT id, hand_id, discord_tags FROM hands WHERE hand_id = ANY(%s)",
                  (hand_ids,))
     remove_set = set(canons)
+    # SELO DA TAG: cada remoção é uma DECISÃO selada (append-only) + recompute — a tag NÃO
+    # volta no reprocessamento. Sela-se a forma EXACTA gravada na mão (a que o writer voltaria
+    # a pôr), não só a canónica. apply_villain_rules pós-commit (tirar 'nota' pode desfazer villain).
+    actor = _tag_actor_of(current_user)
     removed = hands_touched = 0
     conn = get_conn()
+    refresh = []
     try:
         for r in rows:
             cur_tags = list(r["discord_tags"] or [])
-            # mantém a etiqueta se a sua forma canónica NÃO está no conjunto a remover.
-            keep = [t for t in cur_tags if canonicalize_tag(t) not in remove_set]
-            if len(keep) == len(cur_tags):
+            to_remove = [t for t in cur_tags if canonicalize_tag(t) in remove_set]
+            if not to_remove:
                 continue                       # nada a remover nesta mão
             with conn.cursor() as cur:
-                cur.execute("UPDATE hands SET discord_tags=%s WHERE id=%s",
-                            (keep, r["id"]))
+                for t in to_remove:
+                    seal_and_recompute(cur, r["hand_id"], t, "remove",
+                                       actor=actor, origin=ORIGIN_GG_HEALTH_UNTAG)
             conn.commit()
-            try:
-                from app.services.villain_rules import apply_villain_rules
-                apply_villain_rules(r["id"])
-            except Exception:
-                pass
-            removed += len(cur_tags) - len(keep)
+            refresh.append(r["id"])
+            removed += len(to_remove)
             hands_touched += 1
     finally:
         conn.close()
+    try:
+        from app.services.villain_rules import apply_villain_rules
+        for hid in refresh:
+            apply_villain_rules(hid)
+    except Exception:
+        pass
     return {"removed": removed, "hands": hands_touched, "tags": canons}
 
 
