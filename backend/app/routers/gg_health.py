@@ -436,8 +436,11 @@ def _prev_hand_same_table(tn, played_at_str, table):
 
 def _late_prints() -> list:
     """Capturas GG com folder_tag casadas a mãos que TIVERAM flop (HH: `*** FLOP ***`,
-    determinístico) e tiradas < 20 s do início da mão (captured_at − played_at). FT
-    incluído (a mão demora o que demora). Ordenado por intervalo crescente."""
+    determinístico) e tiradas < 9 s do início da mão (captured_at − played_at). Régua FÍSICA:
+    abaixo dos ~10 s a mão nem chegou ao flop → um print de spot pós-flop é impossível; corte
+    conservador a 9 s (as 8 verificadas pelo Rui têm ≤8 s; 0 em [9,10)). FT incluído (a mão
+    demora o que demora). A faixa 10-20 s foi verificada uma-a-uma pelo Rui: 27 capturas, 0
+    erros = comportamento NORMAL dele, não suspeita → removida. Ordenado por intervalo."""
     rows = query(
         "SELECT l.id AS ssid, l.folder_tag, l.captured_at::text AS cap, l.reason_detail, "
         "       h.id AS db_id, h.hand_id, h.played_at::text AS pa, h.tournament_number AS tn, "
@@ -453,7 +456,7 @@ def _late_prints() -> list:
             iv = (datetime.fromisoformat(r["cap"]) - datetime.fromisoformat(r["pa"])).total_seconds()
         except (ValueError, TypeError):
             continue
-        if iv < 0 or iv >= 20:
+        if iv < 0 or iv >= 9:
             continue
         out.append({
             "ssid": r["ssid"], "hand_id": r["hand_id"], "hand_db_id": r["db_id"],
@@ -471,18 +474,14 @@ def _late_prints() -> list:
 
 @router.get("/late-prints")
 def late_prints(current_user=Depends(require_auth)):
-    """Painel 'Prints fora de tempo — a mão não deu tempo' (read-only). Capturas em mãos
-    que TIVERAM flop, tiradas < 20 s do início. DUAS secções por certeza:
-    - `impossible` (< 10 s): a mão nem chegou ao flop → print de spot pós-flop é FÍSICO
-      impossível nesse intervalo;
-    - `suspect` (10-20 s): teve flop mas cedo demais para ver o spot → provável, não certo.
-    A `prev` (mão anterior na mesma mesa) é **HEURÍSTICA de dona — candidata, não provada**
-    (a dona pode estar várias mãos atrás; o Rui re-taga tarde). NADA escreve."""
+    """Painel 'Prints fora de tempo — a mão não deu tempo' (read-only). Capturas em mãos que
+    TIVERAM flop, tiradas < 9 s do início — régua FÍSICA: a mão nem chegou ao flop, logo um
+    print de spot pós-flop é IMPOSSÍVEL. Verificado pelo Rui à imagem: 8/8 erros (mãos
+    anteriores). A faixa 10-20 s ('suspeitos') foi verificada uma-a-uma: 27 capturas, 0 erros
+    → comportamento normal, removida. A `prev` (mão anterior na mesma mesa) é HEURÍSTICA de
+    dona — candidata, não provada (a dona pode estar várias mãos atrás). NADA escreve."""
     rows = _late_prints()
-    impossible = [r for r in rows if r["interval_s"] < 10]
-    suspect = [r for r in rows if r["interval_s"] >= 10]
-    return {"counts": {"impossible": len(impossible), "suspect": len(suspect)},
-            "impossible": impossible, "suspect": suspect}
+    return {"count": len(rows), "hands": rows}
 
 
 @router.get("/crowns")

@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import { ggHealth, absImageUrl } from '../api/client'
 
 // Painel "Prints fora de tempo — a mão não deu tempo" (read-only). Capturas em mãos que
-// TIVERAM flop, tiradas <20s do início. Duas secções: Impossíveis (<10s, física) e
-// Suspeitos (10-20s, provável). A "mão anterior na mesma mesa" é HEURÍSTICA de dona —
-// candidata, não dona provada. Ordenado por intervalo. Não escreve nada.
+// TIVERAM flop, tiradas <9s do início — régua FÍSICA (a mão nem chegou ao flop → print de
+// spot pós-flop impossível). Verificado pelo Rui: 8/8 erros. A faixa 10-20s foi verificada
+// uma-a-uma (27 capturas, 0 erros) = comportamento normal → removida. A "mão anterior na
+// mesma mesa" é HEURÍSTICA de dona — candidata, não provada. Ordenado por intervalo.
 
 const mono = "'Fira Code',monospace"
 const fmt = (iso) => iso ? String(iso).replace('T', ' ').slice(0, 16) : '—'
@@ -72,9 +73,9 @@ export default function LatePrintsPage() {
     <div style={{ padding: 4 }}>
       <h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Prints fora de tempo — a mão não deu tempo</h2>
       <p style={{ fontSize: 12, color: '#8b9691', marginTop: 0, maxWidth: 900 }}>
-        Capturas casadas a mãos que <b>tiveram flop</b>, mas tiradas <b>&lt; 20 s</b> do início da mão —
-        cedo demais para ver o spot pós-flop, decidir e tirar o print. Provável print da mão <b>anterior</b>,
-        casado à mão errada. Ordenado por intervalo. Só para ver.
+        Capturas casadas a mãos que <b>tiveram flop</b>, mas tiradas <b>&lt; 9 s</b> do início da mão.
+        Régua <b>física</b>: nos primeiros ~10 s a mão nem chegou ao flop — um print de spot pós-flop é
+        <b> impossível</b>. Provável print da mão <b>anterior</b>, casado à mão errada. Ordenado por intervalo. Só para ver.
       </p>
       <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, padding: '8px 12px', margin: '8px 0 16px', maxWidth: 900 }}>
         ⚠️ A <b>mão anterior na mesma mesa</b> é uma <b>heurística de dona — candidata, não dona provada</b>.
@@ -83,14 +84,11 @@ export default function LatePrintsPage() {
       </div>
       {err && <div style={{ color: '#ef4444', fontSize: 13 }}>Erro: {err}</div>}
       {!data && !err && <div style={{ color: '#64748b', fontSize: 13 }}>A carregar…</div>}
-      {data && (<>
-        <Section title="Impossíveis (< 10 s)" accent="#ef4444"
-          note="Nos primeiros 10 segundos a mão nem chegou ao flop — mal se distribuíram as cartas e correu o pré-flop. Um print de spot pós-flop neste intervalo é fisicamente impossível. Sem dúvida."
-          items={data.impossible || []} onZoom={setZoom} />
-        <Section title="Suspeitos (10-20 s)" accent="#eab308"
-          note="A mão teve flop, mas o print saiu cedo demais para ter visto o spot. Provável, não certo — pode ser reação rápida."
-          items={data.suspect || []} onZoom={setZoom} />
-      </>)}
+      {data && (
+        <Section title="Impossíveis (< 9 s)" accent="#ef4444"
+          note="Nos primeiros ~10 segundos a mão nem chegou ao flop — mal se distribuíram as cartas e correu o pré-flop. Um print de spot pós-flop neste intervalo é fisicamente impossível. Verificado à imagem pelo Rui: 8/8 de mãos anteriores."
+          items={data.hands || []} onZoom={setZoom} />
+      )}
       {zoom && (
         <div onClick={() => setZoom(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, cursor: 'zoom-out' }}>
           <img src={zoom} alt="" style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 8 }} />
