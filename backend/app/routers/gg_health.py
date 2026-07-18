@@ -409,6 +409,82 @@ def untagged_images(current_user=Depends(require_auth)):
             "gold": gold, "captures": captures}
 
 
+# ── Painel "Prints fora de tempo — a mão não deu tempo" (read-only) ───────────
+_HH_TABLE_RE = re.compile(r"Table '([^']+)'")
+
+
+def _hh_table(raw):
+    m = _HH_TABLE_RE.search(raw or "")
+    return m.group(1) if m else None
+
+
+def _prev_hand_same_table(tn, played_at_str, table):
+    """A mão IMEDIATAMENTE anterior na MESMA mesa do torneio (candidata a dona da tag).
+    HEURÍSTICA — pode não ser a dona real (a dona pode estar várias mãos atrás). None se
+    não há anterior na mesma mesa em BD."""
+    if not tn or not played_at_str:
+        return None
+    for x in query(
+            "SELECT id, hand_id, played_at::text AS pa, raw FROM hands "
+            " WHERE site='GGPoker' AND tournament_number=%s AND played_at < %s "
+            " ORDER BY played_at DESC LIMIT 20", (tn, played_at_str)):
+        if _hh_table(x["raw"]) == table:
+            return {"hand_id": x["hand_id"], "hand_db_id": x["id"], "played_at": x["pa"],
+                    "had_flop": "*** FLOP ***" in (x["raw"] or "")}
+    return None
+
+
+def _late_prints() -> list:
+    """Capturas GG com folder_tag casadas a mãos que TIVERAM flop (HH: `*** FLOP ***`,
+    determinístico) e tiradas < 20 s do início da mão (captured_at − played_at). FT
+    incluído (a mão demora o que demora). Ordenado por intervalo crescente."""
+    rows = query(
+        "SELECT l.id AS ssid, l.folder_tag, l.captured_at::text AS cap, l.reason_detail, "
+        "       h.id AS db_id, h.hand_id, h.played_at::text AS pa, h.tournament_number AS tn, "
+        "       h.discord_tags, h.hm3_tags, h.raw "
+        "  FROM table_ss_processing_log l "
+        "  JOIN hands h ON h.hand_id = l.matched_hand_id "
+        " WHERE l.folder_tag IS NOT NULL AND l.result='success' AND l.captured_at IS NOT NULL "
+        "   AND h.played_at IS NOT NULL AND h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND position('*** FLOP ***' in COALESCE(h.raw,'')) > 0")
+    out = []
+    for r in rows:
+        try:
+            iv = (datetime.fromisoformat(r["cap"]) - datetime.fromisoformat(r["pa"])).total_seconds()
+        except (ValueError, TypeError):
+            continue
+        if iv < 0 or iv >= 20:
+            continue
+        out.append({
+            "ssid": r["ssid"], "hand_id": r["hand_id"], "hand_db_id": r["db_id"],
+            "tags": list(r["discord_tags"] or []) + list(r["hm3_tags"] or []),
+            "folder_tag": r["folder_tag"], "interval_s": int(iv), "interval_raw": iv,
+            "match_method": r["reason_detail"],
+            "image_url": f"/api/table-ss/image/{r['ssid']}",
+            "prev": _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"])),
+        })
+    out.sort(key=lambda x: x["interval_raw"])
+    for r in out:
+        r.pop("interval_raw", None)
+    return out
+
+
+@router.get("/late-prints")
+def late_prints(current_user=Depends(require_auth)):
+    """Painel 'Prints fora de tempo — a mão não deu tempo' (read-only). Capturas em mãos
+    que TIVERAM flop, tiradas < 20 s do início. DUAS secções por certeza:
+    - `impossible` (< 10 s): a mão nem chegou ao flop → print de spot pós-flop é FÍSICO
+      impossível nesse intervalo;
+    - `suspect` (10-20 s): teve flop mas cedo demais para ver o spot → provável, não certo.
+    A `prev` (mão anterior na mesma mesa) é **HEURÍSTICA de dona — candidata, não provada**
+    (a dona pode estar várias mãos atrás; o Rui re-taga tarde). NADA escreve."""
+    rows = _late_prints()
+    impossible = [r for r in rows if r["interval_s"] < 10]
+    suspect = [r for r in rows if r["interval_s"] >= 10]
+    return {"counts": {"impossible": len(impossible), "suspect": len(suspect)},
+            "impossible": impossible, "suspect": suspect}
+
+
 @router.get("/crowns")
 def crowns_to_verify(current_user=Depends(require_auth)):
     """Painel COROAS da Saúde Import (consolidação 11 Jul) — mãos GG PKO/KO cuja

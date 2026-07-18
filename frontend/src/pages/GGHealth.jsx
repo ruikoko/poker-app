@@ -8,6 +8,7 @@ import LiveZeroCrownsPage from './LiveZeroCrowns'
 import CrossingSamplePage from './CrossingSample'
 import ConflictsEyePage from './ConflictsEye'
 import UntaggedImagesPage from './UntaggedImages'
+import LatePrintsPage from './LatePrints'
 import HandImage from '../components/HandImage'
 
 // "Saúde Import" (casa única consolidada 11 Jul — desenho da antiga Saúde GG).
@@ -32,6 +33,7 @@ const NEEDS = [
   { key: 'crossing_sample', label: 'Cruzamento — amostra', color: '#38bdf8' },
   { key: 'crossing_conflicts', label: 'Conflitos de coroa', color: '#ef4444' },
   { key: 'untagged_images', label: 'Imagens sem tag — Gold e capturas', color: '#38bdf8' },
+  { key: 'late_prints', label: 'Prints fora de tempo — a mão não deu tempo', color: '#f59e0b' },
 ]
 const HEALTHY = [
   { key: 'gold_matched', label: 'Gold que casou', color: '#22c55e' },
@@ -42,7 +44,7 @@ const IMPORTP = [
   { key: 'import', label: 'Saúde do Import', color: '#38bdf8' },
 ]
 // Grupos migrados que renderizam uma página inteira (não a lista de imagens).
-const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread', 'live_zero', 'crossing_sample', 'crossing_conflicts', 'untagged_images'])
+const MIGRATED = new Set(['import', 'marcadas', 'suspeitas', 'coroas', 'golds_unread', 'live_zero', 'crossing_sample', 'crossing_conflicts', 'untagged_images', 'late_prints'])
 const LABELS = Object.fromEntries([...NEEDS, ...HEALTHY, ...IMPORTP].map(g => [g.key, g.label]))
 // As 11 tags canónicas (Ação 1) — espelho de _TAG_BUTTONS no backend.
 const CANONICAL_TAGS = ['icm', 'icm-pko', 'pos-pko', 'pos-nko', 'speed-racer',
@@ -1161,8 +1163,9 @@ export default function GGHealth() {
     suspicious.count().then(r => r.total).catch(() => null),
     importHealth.get().then(sumImportIssues).catch(() => null),
     ggHealth.liveZeroList().then(r => r.count).catch(() => null),
-  ]).then(([coroas, marcadas, suspeitas, imp, live_zero]) =>
-    setExtra({ coroas, marcadas, suspeitas, import: imp, live_zero }))
+    ggHealth.latePrints().then(r => (r.counts.impossible + r.counts.suspect)).catch(() => null),
+  ]).then(([coroas, marcadas, suspeitas, imp, live_zero, late_prints]) =>
+    setExtra({ coroas, marcadas, suspeitas, import: imp, live_zero, late_prints }))
   // CONTADORES AO VIVO (LEI 1 vale para contadores, não só listas): re-lê no mount,
   // no FOCO da aba, e sempre que se volta ao Dashboard (group→null) — um caso resolvido
   // num painel filho (carimbo do cruzamento, selo de coroa) baixa o número na hora.
@@ -1334,6 +1337,7 @@ export default function GGHealth() {
            group === 'crossing_sample' ? <CrossingSamplePage /> :
            group === 'crossing_conflicts' ? <ConflictsEyePage /> :
            group === 'untagged_images' ? <UntaggedImagesPage /> :
+           group === 'late_prints' ? <LatePrintsPage /> :
            group === 'coroas' ? <CoroasPanel /> : (<>
           {/* Ação 1 — barra de tags (só no grupo "Gold sem tag"). */}
           {group === 'gold_no_tag' && (
