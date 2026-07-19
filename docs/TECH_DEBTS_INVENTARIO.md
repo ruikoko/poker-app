@@ -6,6 +6,52 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 19 Jul 2026 — voto fantasma do botão na desanonimização (descoberto, NÃO corrigido)
+
+Sessão sem commits de código. Detalhe completo: `journal/2026-07-19.md`.
+
+**Aberto (decisão do Rui pendente):**
+
+- 🔴 **`#DESANON-BUTTON-PHANTOM-VOTE-WHEN-HERO-IS-BUTTON`** — em
+  `services/table_ss_deanon.py:293-299` (`build_anon_map_by_hero_button`), o sentido da roda
+  decide-se cruzando **botão** vs **stacks**. **Quando o Hero É o botão** os dois índices são
+  ambos `0`, o primeiro ramo casa sempre e `btn_dir` sai `"fwd"` — um **voto sem informação**.
+  O ramo alternativo `(len(img) - btn_idx_hh) % len(img)` com `btn_idx_hh=0` aponta para o
+  **mesmo índice 0**, logo nunca dá `"rev"`. Se os stacks dizem `rev`, nasce um **desacordo
+  falso** → alarme `button_stack_direction_disagree` → a mão fica **anónima em branco**.
+  **Não é falha de leitura** (o `vision_json` tem nomes e coroas) nem de Gold/HH/casamento —
+  falha só a colagem nome→lugar.
+  **Tamanho medido** (199 pares GG anónimos com captura): `button_stack_direction_disagree` =
+  **56 pares → 54 mãos**, o maior balde; destes **42 são o caso degenerado** (Hero no botão) e
+  **14 são Hero noutra posição** (desacordo possivelmente genuíno — **fora deste saco**).
+  Caso âncora: **`GG-6183902336`** (3 capturas, `file_hash` distintos → sem dedup, as 3 deram
+  o mesmo alarme).
+  **Correcção candidata (B), NÃO aplicada:** quando o botão coincide com a âncora, `btn_dir`
+  passa a `None` em vez de votar `fwd` — deixa os stacks decidir sozinhos, como já fazem quando
+  não há botão. Destranca as 42. **É mudança a uma guarda do core da desanon → NÃO tocar sem
+  ordem do Rui** (`FLUXO §12`). Plano do Rui: confirmar **(A)** à imagem primeiro
+  (`/set-anon-map`, `verified_by_user`); se o mapa dos stacks acertar, avançar para **(B)**.
+  Cross-ref: `#DESANON-HERO-BUTTON-ANCHOR` (1 Jul, a guarda que este defeito habita).
+
+- 🟡 **`#REPROCESS-FAILED-EXCLUI-JSON-INVALID`** — a elegibilidade de
+  `POST /api/table-ss/reprocess-failed` é `result = 'vision_failed'` apenas
+  (`routers/table_ss.py:2595`), mas o comentário do `app_import.py` (~L276) anuncia o endpoint
+  como via de recuperação também para `json_invalid`/`site_undetected`. Existe
+  `retry_failed_table_ss_vision` (cobre as 3 famílias) mas **não está exposta como endpoint** —
+  só corre em varredura de fundo a partir do `lobby_sync`, em lotes de 5. Impacto actual baixo:
+  as 5 `json_invalid` em BD são **todas Winamax** (não alimentam painéis GG), 4 são a **mesma**
+  captura reenviada e uma leva `attempt_count=10` (retry cego provado inútil). Doc↔código
+  desalinhados.
+
+**Fechados nesta sessão:**
+
+- ✅ **5 capturas `vision_failed` recuperadas** — `POST /reprocess-failed` (5/5 success,
+  `remaining=0`); balde `vision_failed` **5 → 0**. A falha era `credit balance too low` da
+  Anthropic, momento pontual de 19 Jul 01:26; saldo **confirmado OK ao vivo**. Sem alteração de
+  código.
+
+---
+
 ## 7–8 Jul 2026 — frente FT (F1–F5) + core aprovado (apa-por-hash) + Fase 1 leitores
 
 Sessão longa. Frente FT construída por inteiro e LIVE; decisão do core APROVADA + Fase 1

@@ -1,5 +1,43 @@
 # Pendentes — backlog vivo
 
+## 🔴 DECISÃO DO RUI — voto fantasma do botão (54 mãos anónimas em branco)
+
+*(19 Jul 2026. Só escrita em docs; código e dados intocados. Detalhe:
+`journal/2026-07-19.md`; debt: `#DESANON-BUTTON-PHANTOM-VOTE-WHEN-HERO-IS-BUTTON`.)*
+
+**O problema, em claro.** Ao colar os nomes lidos da captura aos lugares da mão, a app tem de
+escolher **um de dois sentidos** à volta da mesa. Pergunta a duas testemunhas — o **botão** e
+os **stacks**. Se discordarem, desiste e deixa a mão **em branco** (de propósito: em branco é
+honesto, com nomes trocados não). **Quando o Rui está no botão, a testemunha "botão" não tem
+nada para dizer — mas responde na mesma, e responde sempre a mesma coisa.** Quando os stacks
+dizem o contrário, a app julga que há discórdia e desiste sem motivo.
+
+**Escala medida:** 54 mãos travadas por este alarme; **42** são o caso degenerado (Rui no
+botão). Caso âncora: **`GG-6183902336`**.
+
+**Plano acordado, por esta ordem:**
+
+1. **(A) — carimbar 1 mão à imagem.** Ver a captura da `GG-6183902336` ao lado da mão e
+   confirmar (ou desmentir) o mapa que os stacks propõem:
+   `Hero→Lauro Dermio · a8fa35df→FlightRisk · 3010956→R Romanovskyi · 9c404eef→mak10`.
+   Escrita por `/set-anon-map` (`verified_by_user`). **A imagem é que arbitra** — os stacks são
+   indício forte, não prova.
+2. **(B) — só se (A) acertar.** Quando o botão coincide com a âncora, deixar de o contar como
+   voto (`btn_dir = None`) e deixar os stacks decidir sozinhos, como já fazem quando não há
+   botão. Destranca as 42. **É mudança a uma guarda do core da desanon → não se toca sem ordem
+   explícita do Rui.**
+
+**FORA deste saco (não mexer):** as **14** mãos de Hero-noutra-posição (desacordo possivelmente
+genuíno) e os **85** `seat_count_mismatch`.
+
+## 👀 Para olho do Rui — saldo do import de 19 Jul
+
+- **3 "Vivo com coroa $0"** — `GG-6180152095` (WillyBlaze) · `GG-6182097413` (Lauro Dermio +
+  OneLastRun!). Novas: mãos de 13–14 Jul, os dias que este import trouxe.
+- **4 "Nomes em conflito"** novos (1 → 5): 3 `strong_weak_mismatch`, 1 `same_hash` (4 variantes
+  de OCR do `fungus_among_us`), 1 `name_2_hash` (`AmigoCrypto` em 2 hashes).
+- **2 "Prints fora de tempo"** novos (10 → 12).
+
 ## 📌 PROVENIÊNCIA DA LEITURA (Vision) — não medido / a decidir
 
 *(Registado nesta sessão; relógio do sistema reportou 17 Jul 2026. Ordem do Rui: só escrita em docs.)*
