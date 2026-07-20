@@ -2861,9 +2861,15 @@ async def _backfill_worker(entry_ids: list, force: bool = False):
 @router.post("/vision/backfill")
 async def vision_backfill(
     limit: int = 50,
-    current_user=Depends(require_auth),
+    current_user=Depends(require_auth_or_api_key),
 ):
-    """Reprocessa screenshots com vision_done=false em background."""
+    """Reprocessa screenshots com vision_done=false em background.
+
+    Auth: dual-path (cookie OU Bearer HRC_WATCHER_API_KEY). Alinhado com os
+    irmãos de recuperação de Vision no mesmo domínio (`gold-vision-run`,
+    `golds-unread`, `reprocess-failed`). Antes era cookie-only (`require_auth`),
+    herança de ter nascido (26 Mar 2026) antes do padrão dual-path (12 Mai 2026);
+    a máquina de recuperação (Bearer) não lhe chegava."""
     def _fetch_pending_ids(lim):
         return query(
             """SELECT id
