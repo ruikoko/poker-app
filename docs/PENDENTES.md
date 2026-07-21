@@ -1,5 +1,21 @@
 # Pendentes — backlog vivo
 
+## ★ PRÓXIMA SESSÃO — ordem do Rui (21 Jul 2026): consolidar o Tier 1 da auditoria `#LEI-FIX-NA-CAUSA`
+
+Auditoria transversal fechada (família "regra num sítio, ausente noutro"; detalhe em
+`TECH_DEBTS_INVENTARIO.md`, secção 21 Jul noite). **Ordem acordada:**
+
+1. **`#BUST-NO-COVERAGE-GUARD`** (o que contamina dados a sério) — **consolidar a régua de eliminação numa
+   fonte única**, a que já vive em `crown_recovery.classify_hand:184-193` (all-in que cobre e recebe ≥1 BB de
+   volta = VIVO). O detetor `eliminated_bounty.busted_keys_from_hh:134` passa a chamá-la. Impacto medido:
+   812 mãos / 931 jogadores marcados mortos indevidamente em 2026.
+2. **Resto do Tier 1** (coroas sem guarda): `#CROWN-FALLBACK-NO-ELIM-GUARD`, `#GOLD-BACKFILL-NO-SEAL`,
+   `#REENRICH-SEAL-LOST`, `#SET-ANON-MAP-BOUNTY-UNSEALED`.
+3. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
+   diff à vista (remoção em produção merece o Rui fresco, não o fim de um dia longo).
+
+Cada fix declara-se causa-vs-remendo antes (pela `#LEI-FIX-NA-CAUSA`).
+
 ## 🔴 DECISÃO DO RUI — voto fantasma do botão (54 mãos anónimas em branco)
 
 *(19 Jul 2026. Só escrita em docs; código e dados intocados. Detalhe:

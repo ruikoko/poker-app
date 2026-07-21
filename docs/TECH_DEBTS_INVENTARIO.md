@@ -6,6 +6,51 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 21 Jul 2026 (noite) — auditoria `#LEI-FIX-NA-CAUSA`: família "regra num sítio, ausente noutro"
+
+4 varreduras paralelas + verificação própria. **Raiz comum:** cinco conceitos — *o que é uma
+eliminação · o que é uma coroa válida · quem senta onde · o floor base÷2 · o selo* — estão
+implementados 3-5× cada, e as guardas migraram para umas cópias e não para outras. Pela
+`#LEI-FIX-NA-CAUSA`, o fix é **colapsar cada conceito numa fonte de verdade única**. Inventário
+completo (Tier 1-4, 19 achados) no chat da sessão; aqui ficam os accionáveis.
+
+**🔴 Tier 1 — CONTAMINA DADOS (escreve/apaga valor errado automaticamente):**
+
+- 🔴🔴 **`#BUST-NO-COVERAGE-GUARD`** (Tier1 #1) — o detetor de bust `eliminated_bounty.busted_keys_from_hh:134`
+  decide morte por "all-in + não coletou", **sem comparar stacks**: quem cobre e perde (stack > vencedor)
+  fica marcado morto. Alimenta a anulação AUTOMÁTICA de coroas (`scrub_and_persist`, 6+ call-sites:
+  screenshot.py 2324/2467/2801, table_ss.py 1113/2734, gg_health.py 1590). **Medido: 812 mãos / 931
+  jogadores** em GG 2026 (56/88 de 13-14 já provados vivos por reaparecerem). **A régua correta JÁ EXISTE**
+  em `crown_recovery.classify_hand:184-193` (uncalled-bet ≥1 BB → vivo). **Fix = consolidar**: o detetor
+  passa a chamar essa régua única. **CÓDIGO. ★ PRÓXIMA SESSÃO (1º).**
+- 🔴 **`#CROWN-FALLBACK-NO-ELIM-GUARD`** (Tier1 #3) — `gg_health.crowns_fallback_fill:2861` enche coroas
+  sem `scrub_and_persist` → um seat bustado pode receber a coroa do vizinho (o "veneno verde-KO"). Irmãos
+  A3/A4/A5/A6 chamam o scrub. **CÓDIGO.**
+- 🔴 **`#GOLD-BACKFILL-NO-SEAL`** (Tier1 #4) — `screenshot.backfill_gold_bounties:2299-2303` sobrescreve
+  coroa positiva prévia **sem `is_bounty_sealed`** → pode pisar uma coroa manual selada do Rui. **CÓDIGO.**
+- 🔴 **`#REENRICH-SEAL-LOST`** (Tier1 #5) — `screenshot._reenrich_scrambled_gold:2764-2768` reconstrói o apa
+  do RAW → a coroa manual/cross cai (falta o `_merge_sealed_crowns` que o `table_ss_deanon:570` tem). **CÓDIGO.**
+- 🔴 **`#SET-ANON-MAP-BOUNTY-UNSEALED`** (Tier1 #6) — `table_ss.py:1976-1977` escreve `bounty_value_usd`
+  sem `bounty_source=manual`, sem floor, sem scrub (o irmão `/set-bounties` sela tudo). **CÓDIGO** (confirmar
+  se é fluxo intencional sempre seguido de `/set-bounties`).
+- ✅ **`#MTT-DESANON-MORTO`** (Tier1 #2) — **código órfão a remover.** O 3º detetor de desanon (`mtt._build_seat_to_name_map:437`,
+  algoritmo pré-fix que o próprio código diz falhar ~70%) **está MORTO**, provado: (a) o endpoint `/api/mtt/import`
+  está registado (`main.py:346`) mas o **único** que o chama na UI é o componente `ImportPanel` (`Tournaments.jsx:139`),
+  que **não é renderizado em lado nenhum** (`<ImportPanel` = 0 na frontend) → inalcançável pela app; (b) a tabela
+  `mtt_hands` está **VAZIA (0 rows)**; (c) **0 mãos** em toda a BD têm `match_method` `mtt_promote_v2`/`mtt_import_v3`;
+  (d) a via real de import é appimport → `/api/import` (`import_.py`, `origin=hh_import`), que não passa por aqui.
+  **Fila de REMOÇÃO cirúrgica** (`_build_seat_to_name_map` + `_promote_to_study` + ramo desanon do `import_mtt` +
+  ramo mtt-auto-match morto `screenshot.py:1302-1351` + `ImportPanel` não-montado + `client.mtt.import`; **preservar**
+  os endpoints mtt vivos `/hands`,`/dates`,`/stats`,`/orphan-screenshots`). **NÃO agora** — remoção em produção com o
+  Rui fresco e o diff à vista. **CÓDIGO.**
+
+**Tier 2-4** (lógica duplicada divergente · regras siladas · menores) — resumo no chat da sessão: floor base÷2 com
+3 tolerâncias (0/0.01/0.5), stack-elimination em 3 cópias, `match_method` "forte" definido 4×, verde×2 só na cura +
+nunca extraído do `raw_vision`, não-desce só no `_cross_sieve`, forma-completa/selo-de-nome só no Cruzamento,
+`assert_deanon_consistency` ausente em 4 caminhos, tag case-sensitive (`hand_service:75` vs `:94`). A expandir em sessão dedicada.
+
+---
+
 ## 21 Jul 2026 — backfill Vision das 92 Gold órfãs + 2 buracos do funil de ingest
 
 O casamento PRINCIPAL da GG é **Gold (replayer) ↔ HH** (por `hand_id = GG-{tm}` do nome do
