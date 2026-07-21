@@ -1952,10 +1952,17 @@ def set_anon_map_override(payload: dict = Body(...),
         raise HTTPException(400, "hand_id + anon_map (dict não-vazio) obrigatórios")
     vals = list(anon_map.values())
     _assert_no_duplicate_real_names(anon_map)   # guarda (b) mínima (APA §B.6.3)
-    hrows = query("SELECT id FROM hands WHERE hand_id = %s", (hand_id,))
+    # apa ANTERIOR lido ANTES do re-parse: é dele que se transportam as coroas
+    # SELADAS para o apa fresco (o raw não traz selos → sem isto o enrich via
+    # "não selado" e reescrevia/zerava a coroa validada — achado 21 Jul).
+    hrows = query("SELECT id, all_players_actions prev_apa FROM hands WHERE hand_id = %s",
+                  (hand_id,))
     if not hrows:
         raise HTTPException(404, "mão não encontrada")
     hand_db_id = hrows[0]["id"]
+    prev_apa = hrows[0].get("prev_apa")
+    if isinstance(prev_apa, str):
+        prev_apa = _json.loads(prev_apa or "{}")
     if not _reparse_apa_hash_keyed(hand_db_id):
         raise HTTPException(422, "re-parse do raw falhou (sem HH?)")
     rows = query("SELECT all_players_actions apa, player_names pn, raw FROM hands WHERE id = %s",
@@ -1966,16 +1973,13 @@ def set_anon_map_override(payload: dict = Body(...),
     if isinstance(pn, str):
         pn = _json.loads(pn)
     pn = pn or {}
-    # pt95: override dos bounties pela COROA $ da gold (a coroa DOURADA = bounty em $;
-    # corrige leitura errada do table-SS Vision, que pôs valores que não batem com a
-    # coroa). ⚠️ NÃO é a chama LARANJA = VPIP (CLAUDE.md). Body: {nick: coroa_usd}.
+    from app.services.eliminated_bounty import merge_sealed_crowns_apa
+    _sealed_kept = merge_sealed_crowns_apa(prev_apa or {}, apa)
+    # pt95 → 21 Jul: bounties da COROA $ da gold deixam de ser escritos à mão aqui
+    # (ficavam SEM selo, 1 gaveta só, sem rasto — Tier1 #SET-ANON-MAP-BOUNTY-UNSEALED).
+    # Agora DELEGAM no carimbador único `/set-bounties` DEPOIS do write do mapa
+    # (2 gavetas + bounty_source=manual + crown_seal_log). ⚠️ chama ≠ coroa (CLAUDE.md).
     bounties = payload.get("bounties") or {}
-    if bounties:
-        pl = pn.get("players_list") or []
-        for _e in pl:
-            if _e.get("name") in bounties:
-                _e["bounty_value_usd"] = bounties[_e["name"]]
-        pn["players_list"] = pl
     hashes = [k for k in apa if k != "_meta"]
     missing = [h for h in hashes if h not in anon_map]
     vision_data = {"players_list": (pn or {}).get("players_list") or []}
@@ -2016,11 +2020,22 @@ def set_anon_map_override(payload: dict = Body(...),
         apply_villain_rules(hand_db_id)
     except Exception as e:  # pragma: no cover - defensivo
         logger.error("apply_villain_rules falhou hand %s: %s", hand_db_id, e)
-    logger.info("table-ss set-anon-map: %s mapped=%d distinct=%d partial=%s",
-                hand_id, len(anon_map), len(set(vals)), bool(missing))
+    # Canal do lote SELA (21 Jul): as coroas entram pelo carimbador único, que
+    # escreve nas 2 gavetas + bounty_source=manual + rasto. Sem stamp = fica
+    # intocável como os carimbos antigos (decisão do Rui, pergunta 2).
+    bounties_result = None
+    if bounties:
+        bounties_result = set_bounties_override(
+            {"hand_id": hand_id, "bounties": bounties,
+             "origin": "table_ss.set_anon_map.bounties"},
+            current_user=current_user)
+    logger.info("table-ss set-anon-map: %s mapped=%d distinct=%d partial=%s sealed_kept=%d",
+                hand_id, len(anon_map), len(set(vals)), bool(missing), _sealed_kept)
     return {"status": "set", "hand_id": hand_id, "mapped": len(anon_map),
             "hashes": len(hashes), "missing": missing,
-            "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing)}
+            "distinct_nicks": len(set(vals)), "deanon_partial": bool(missing),
+            "sealed_crowns_kept": _sealed_kept,
+            "bounties_result": bounties_result}
 
 
 @router.post("/set-seat-name")
@@ -2213,12 +2228,21 @@ def set_bounties_override(payload: dict = Body(...),
     Nicks ausentes do players_list ficam intactos + devolvidos em `not_found` (não se
     inventa). Body: {hand_id, bounties?:{nick:coroa}, sources?:{nick:src}, confirm?:[], unconfirm?:[], dry_run?}."""
     import json as _json
-    from app.services.eliminated_bounty import SEALED_BOUNTY_SOURCES, SOURCE_MANUAL
+    from app.services.eliminated_bounty import (
+        BOUNTY_STAMP_KEY, SEALED_BOUNTY_SOURCES, SOURCE_MANUAL, VALID_STAMPS)
     hand_id = payload.get("hand_id")
     bounties = payload.get("bounties") or {}
     sources = payload.get("sources") or {}
     if not isinstance(sources, dict):
         sources = {}
+    # Regra dos DOIS CARIMBOS (Rui 21 Jul): stamps{nick:'placa'|'aceitacao'} regista
+    # COMO o carimbo nasceu (placa = leu a imagem/digitou; aceitacao = aceitou a
+    # sugestão da máquina). Valor fora do vocabulário → IGNORADO (não se inventa).
+    # Ausente = carimbo sem testemunho (legado/API) → tratado como intocável.
+    stamps = payload.get("stamps") or {}
+    if not isinstance(stamps, dict):
+        stamps = {}
+    stamps = {k: v for k, v in stamps.items() if v in VALID_STAMPS}
     confirm = [n for n in (payload.get("confirm") or [])]
     unconfirm = [n for n in (payload.get("unconfirm") or [])]
     dry = bool(payload.get("dry_run"))
@@ -2273,10 +2297,14 @@ def set_bounties_override(payload: dict = Body(...),
                     for s in stores:
                         s["bounty_value_usd"] = val
                         s["bounty_source"] = src
+                        if nm in stamps:
+                            s[BOUNTY_STAMP_KEY] = stamps[nm]
                         s.pop("crown_review", None)
                         s.pop("bounty_review", None)
                 entry["new"] = val
                 entry["source"] = src
+                if nm in stamps:
+                    entry["stamp"] = stamps[nm]
                 updated.append(nm)
                 if e is None or aseat is None:
                     partial.append(nm)              # só existe num store → escrita PARCIAL (honesto)
@@ -2286,7 +2314,11 @@ def set_bounties_override(payload: dict = Body(...),
             if not dry:
                 for s in stores:
                     s["bounty_confirmed"] = True
+                    if nm in stamps:
+                        s[BOUNTY_STAMP_KEY] = stamps[nm]
             entry["confirm"] = True
+            if nm in stamps:
+                entry["stamp"] = stamps[nm]
             confirmed.append(nm)
             if e is None or aseat is None:
                 partial.append(nm)
@@ -2322,11 +2354,13 @@ def set_bounties_override(payload: dict = Body(...),
         if _nm in updated:
             _pending.append(seal_row(hand_id, _nm, _e.get("old"), _e.get("new"),
                                      old_source=_e.get("old_source"), new_source=_e.get("source"),
-                                     confirmed=_nm in confirmed or _e.get("was_confirmed")))
+                                     confirmed=_nm in confirmed or _e.get("was_confirmed"),
+                                     stamp=_e.get("stamp")))
         elif _nm in confirmed:
             _pending.append(seal_row(hand_id, _nm, _e.get("old"), _e.get("old"),
                                      old_source=_e.get("old_source"),
-                                     new_source=_e.get("old_source"), confirmed=True))
+                                     new_source=_e.get("old_source"), confirmed=True,
+                                     stamp=_e.get("stamp")))
         elif _nm in unconfirmed:
             _pending.append(seal_row(hand_id, _nm, _e.get("old"), _e.get("old"),
                                      old_source=_e.get("old_source"),

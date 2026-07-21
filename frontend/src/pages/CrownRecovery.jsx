@@ -261,7 +261,8 @@ function DropCard({ C, kind, player, handId, handDb, lowVal, refVal, ratio, refH
     try {
       const probs = []
       for (const j of jobs) {
-        const r = await tableSs.setBounties(j.hand, { bounties: { [player]: j.val }, sources: { [player]: 'manual' } })
+        const r = await tableSs.setBounties(j.hand, { bounties: { [player]: j.val }, sources: { [player]: 'manual' },
+          stamps: { [player]: 'placa' }, origin: 'crown_recovery.drops' })
         if ((r?.partial || []).length) probs.push(`${j.tag}: parcial (avisa o Code)`)
         else if (!(r?.updated || []).length) probs.push(`${j.tag}: não encontrado`)
       }
@@ -392,17 +393,24 @@ function Group1Card({ h, C, onDone, suggestion }) {
 
   const stamp = async () => {
     // constrói o carimbo: eliminado(verde)→derived_green_ko ; matador(dourada)→manual
-    const bounties = {}, sources = {}
+    // DOIS CARIMBOS: valor igual à sugestão pré-preenchida = aceitacao; editado = placa.
+    const bounties = {}, sources = {}, stamps = {}
+    const stampOf = (name, v) => {
+      const s = parseFloat(sugg?.[name])
+      return (!isNaN(s) && s === v) ? 'aceitacao' : 'placa'
+    }
     busted.forEach(b => {
-      const v = parseFloat(vals[b.name]); if (!isNaN(v)) { bounties[b.name] = v; sources[b.name] = 'derived_green_ko' }
+      const v = parseFloat(vals[b.name])
+      if (!isNaN(v)) { bounties[b.name] = v; sources[b.name] = 'derived_green_ko'; stamps[b.name] = stampOf(b.name, v) }
     })
     matadores.forEach(m => {
-      const v = parseFloat(vals[m.name]); if (!isNaN(v)) { bounties[m.name] = v; sources[m.name] = 'manual' }
+      const v = parseFloat(vals[m.name])
+      if (!isNaN(v)) { bounties[m.name] = v; sources[m.name] = 'manual'; stamps[m.name] = stampOf(m.name, v) }
     })
     if (!Object.keys(bounties).length) { setMsg({ ok: false, t: 'Nada para carimbar — preenche pelo menos 1 valor.' }); return }
     setStamping(true); setMsg(null)
     try {
-      const r = await tableSs.setBounties(h.hand_id, { bounties, sources })
+      const r = await tableSs.setBounties(h.hand_id, { bounties, sources, stamps, origin: 'crown_recovery.suggest' })
       const nf = (r?.not_found || []), part = (r?.partial || [])
       if (nf.length || part.length) {   // NUNCA "feito" calado se algo não gravou nos 2 stores
         setMsg({ ok: false, t: `⚠ ${part.length ? 'parcial (só 1 store): ' + part.join(', ') : ''}${nf.length ? ' não encontrados: ' + nf.join(', ') : ''} — avisa o Code` })

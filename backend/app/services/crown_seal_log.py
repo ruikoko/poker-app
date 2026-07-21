@@ -69,6 +69,10 @@ def ensure_crown_seal_log_schema():
                         "ON crown_seal_log (created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crown_seal_log_player "
                         "ON crown_seal_log (player)")
+            # Regra dos DOIS CARIMBOS (21 Jul): 'placa' | 'aceitacao' | NULL (legado/
+            # automático). Coluna aditiva — o só-acrescento mantém-se intacto.
+            cur.execute("ALTER TABLE crown_seal_log "
+                        "ADD COLUMN IF NOT EXISTS stamp TEXT")
             # SÓ-ACRESCENTO na própria BD: nem a app nem uma query ad-hoc editam/apagam.
             cur.execute("CREATE OR REPLACE RULE crown_seal_log_no_update "
                         "AS ON UPDATE TO crown_seal_log DO INSTEAD NOTHING")
@@ -100,12 +104,13 @@ def _num(v):
 
 
 def seal_row(hand_id, player, old_value, new_value, *, old_source=None,
-             new_source=None, confirmed=False) -> dict:
-    """Constrói UMA linha do rasto (não grava — o call site junta e grava pós-commit)."""
+             new_source=None, confirmed=False, stamp=None) -> dict:
+    """Constrói UMA linha do rasto (não grava — o call site junta e grava pós-commit).
+    `stamp`: 'placa' | 'aceitacao' | None (regra dos DOIS CARIMBOS, 21 Jul)."""
     return {"hand_id": hand_id, "player": player,
             "old_value": _num(old_value), "new_value": _num(new_value),
             "old_source": old_source, "new_source": new_source,
-            "confirmed": bool(confirmed)}
+            "confirmed": bool(confirmed), "stamp": stamp}
 
 
 def log_seals(rows, *, origin: str, actor: str = "?") -> int:
@@ -122,10 +127,11 @@ def log_seals(rows, *, origin: str, actor: str = "?") -> int:
         with conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO crown_seal_log (hand_id, player, old_value, new_value, "
-                "  old_source, new_source, confirmed, origin, actor) "
+                "  old_source, new_source, confirmed, origin, actor, stamp) "
                 "VALUES (%(hand_id)s, %(player)s, %(old_value)s, %(new_value)s, "
-                "        %(old_source)s, %(new_source)s, %(confirmed)s, %(origin)s, %(actor)s)",
-                [dict(r, origin=origin, actor=actor) for r in rows])
+                "        %(old_source)s, %(new_source)s, %(confirmed)s, %(origin)s, "
+                "        %(actor)s, %(stamp)s)",
+                [dict({"stamp": None}, **r, origin=origin, actor=actor) for r in rows])
         conn.commit()
         return len(rows)
     except Exception:  # pragma: no cover - defensivo

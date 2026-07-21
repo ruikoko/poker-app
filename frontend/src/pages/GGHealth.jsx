@@ -869,7 +869,9 @@ function CrownHand({ h, onDone }) {
   const confirmReal = async () => {
     setBusy(true); setMsg(null)
     try {
-      await tableSs.setBounties(h.hand_id, { confirm: h.seats.map(s => s.name) })
+      await tableSs.setBounties(h.hand_id, { confirm: h.seats.map(s => s.name),
+        stamps: Object.fromEntries(h.seats.map(s => [s.name, 'aceitacao'])),
+        origin: 'gg_health.crowns_panel' })
       setMsg('Coroa(s) confirmada(s) como reais.'); onDone && onDone()
     } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
   }
@@ -879,7 +881,9 @@ function CrownHand({ h, onDone }) {
     if (!Object.keys(bounties).length) { setMsg('Escreve pelo menos um valor.'); return }
     setBusy(true); setMsg(null)
     try {
-      await tableSs.setBounties(h.hand_id, { bounties })
+      await tableSs.setBounties(h.hand_id, { bounties,
+        stamps: Object.fromEntries(Object.keys(bounties).map(k => [k, 'placa'])),
+        origin: 'gg_health.crowns_panel' })
       setMsg('Coroa(s) corrigida(s).'); onDone && onDone()
     } catch (e) { setMsg('Erro: ' + e.message) } finally { setBusy(false) }
   }

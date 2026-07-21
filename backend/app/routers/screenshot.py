@@ -1100,8 +1100,14 @@ def _enrich_all_players_actions(all_players: dict, anon_map: dict, vision_data: 
             logger.info("[crown-seal] apa %s (%s) selado (%s) — coroa preservada, "
                         "leitura Vision saltada", player_key, real_name or "?",
                         info.get("bounty_source") or "confirmed")
-        else:
-            new_info["bounty_value_usd"] = vision_info.get("bounty_value_usd", 0)
+        elif "bounty_value_usd" in vision_info:
+            new_info["bounty_value_usd"] = vision_info.get("bounty_value_usd")
+        elif "bounty_value_usd" not in new_info:
+            # ingest fresco sem leitura p/ este seat → $0 = "por ler" (como sempre)
+            new_info["bounty_value_usd"] = 0
+        # senão: RECONSTRUÇÃO sem leitura p/ este seat (ex. grafia editada que não
+        # bate no players_list) → PRESERVA o valor que o dict(info) já traz. Nunca
+        # inventar $0 num seat que tinha coroa (achado do lápis do nome, 21 Jul).
         new_info["country"] = vision_info.get("country")
         # Campo `played` RESERVADO p/ sitting-outs futuros (§B.3) — não populado aqui.
 
@@ -2259,8 +2265,10 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
                       FROM hands h JOIN entries e ON e.id = h.entry_id
                      WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01'
                        AND h.player_names->>'match_method' = 'position_v3'""")
+    from app.services.eliminated_bounty import is_bounty_sealed
     hands_filled = players_filled = players_rejected = no_base = 0
     players_via_trunc = players_ambiguous_trunc = players_overwritten = 0
+    players_sealed_skipped = 0
     for r in rows:
         apa = r["all_players_actions"]
         if not isinstance(apa, dict):
@@ -2276,6 +2284,11 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
         changed = False
         for key, pdata in apa.items():
             if key == "_meta" or not isinstance(pdata, dict):
+                continue
+            # SELO (21 Jul, #GOLD-BACKFILL-NO-SEAL): coroa validada pelo Rui é
+            # intocável — o backfill não a sobrescreve (nem a $0 selada).
+            if is_bounty_sealed(pdata):
+                players_sealed_skipped += 1
                 continue
             name = (pdata.get("real_name") or key).lower()
             crown = crowns.get(name) or crowns.get(key.lower())
@@ -2331,6 +2344,7 @@ def backfill_gold_bounties(dry_run: bool = False) -> dict:
             "players_ambiguous_truncation": players_ambiguous_trunc,
             "players_overwritten_already_filled": players_overwritten,
             "players_rejected_below_half": players_rejected,
+            "players_sealed_skipped": players_sealed_skipped,
             "hands_without_ts_base": no_base}
 
 
@@ -2419,11 +2433,13 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
         changed = False
         recov = 0
         recov_detail = []  # #CROWN-VISIBLE-READ-ZERO: auditoria — o que a Vision leu.
+        from app.services.eliminated_bounty import is_bounty_sealed as _is_sealed
         if isinstance(apa, dict):
             for key, pdata in apa.items():
                 if key == "_meta" or not isinstance(pdata, dict):
                     continue
-                if (pdata.get("bounty_value_usd") or 0) > 0:
+                # SELO (21 Jul): um seat selado a $0 (zerado à mão) é intocável.
+                if _is_sealed(pdata) or (pdata.get("bounty_value_usd") or 0) > 0:
                     continue
                 nm = pdata.get("real_name") or key
                 cr = _crown_from_fresh(nm, fresh)
@@ -2436,7 +2452,8 @@ async def reread_gold_crowns(hand_ids=None, dry_run: bool = True, limit: int = 3
                                      "floor": floor, "base": base})
         if isinstance(pn, dict):
             for p in (pn.get("players_list") or []):
-                if not isinstance(p, dict) or (p.get("bounty_value_usd") or 0) > 0:
+                if not isinstance(p, dict) or _is_sealed(p) \
+                        or (p.get("bounty_value_usd") or 0) > 0:
                     continue
                 cr = _crown_from_fresh(p.get("name"), fresh)
                 if cr is None or (floor is not None and cr < floor):
@@ -2762,17 +2779,25 @@ def reenrich_scrambled_gold(dry_run: bool = False) -> dict:
             fails.append((r["hand_id"], "re-parse falhou"))
             continue
         hash_apa = parsed[0]["all_players_actions"]
+        # SELO (21 Jul, #REENRICH-SEAL-LOST): o apa re-parseado do raw vem sem
+        # selos → transportá-los do apa anterior ANTES do enrich, para o guard
+        # único (`is_bounty_sealed` no enrich) preservar as coroas validadas.
+        from app.services.eliminated_bounty import is_bounty_sealed as _sealed
+        from app.services.eliminated_bounty import merge_sealed_crowns_apa
+        merge_sealed_crowns_apa(apa if isinstance(apa, dict) else {}, hash_apa)
         old_players = sum(1 for k, v in apa.items()
                           if k != "_meta" and isinstance(v, dict))
         new_apa = _enrich_all_players_actions(
             hash_apa, anon_map, {"players_list": r["entry_players"] or []})
 
-        # guarda ½-base nas coroas re-carregadas
+        # guarda ½-base nas coroas re-carregadas (selados são intocáveis)
         base = base_by_tn.get(r["tournament_number"])
         floor = base / 2 if base else None
         for k, v in new_apa.items():
             if k == "_meta" or not isinstance(v, dict):
                 continue
+            if _sealed(v):
+                continue                             # selo do Rui → nunca clampar
             crown = v.get("bounty_value_usd") or 0
             if crown > 0 and floor is not None and crown < floor:
                 v["bounty_value_usd"] = 0            # < ½-base → provável má leitura

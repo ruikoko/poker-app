@@ -70,6 +70,17 @@ SEALED_BOUNTY_SOURCES = frozenset(
      SOURCE_CROSS_CAPTURE, SOURCE_CROSS_CONFLICT, SOURCE_CROSS_EXCLUSION})
 BOUNTY_CONFIRMED_KEY = "bounty_confirmed"
 
+# ── CARIMBO com testemunho (regra dos DOIS CARIMBOS, Rui 21 Jul) ──────────────
+# `bounty_stamp` regista COMO o Rui carimbou: 'placa' (leu a imagem/digitou) vs
+# 'aceitacao' (aceitou a sugestão da máquina). SÓ para carimbos NOVOS — um seat
+# selado SEM stamp é legado e trata-se como intocável (a regra PARA TRÁS sai de
+# graça: ausência = protegido). Por agora o stamp é só REGISTO; a regra
+# "aceitação cede a leitura corrigida" é um passo futuro, não construído.
+BOUNTY_STAMP_KEY = "bounty_stamp"
+STAMP_PLACA = "placa"
+STAMP_ACEITACAO = "aceitacao"
+VALID_STAMPS = frozenset({STAMP_PLACA, STAMP_ACEITACAO})
+
 
 def is_bounty_sealed(seat) -> bool:
     """True se a coroa deste seat foi VALIDADA (carimbo do Rui / cura curada /
@@ -80,6 +91,47 @@ def is_bounty_sealed(seat) -> bool:
         return False
     return (seat.get(BOUNTY_SOURCE_KEY) in SEALED_BOUNTY_SOURCES
             or bool(seat.get(BOUNTY_CONFIRMED_KEY)))
+
+
+def merge_sealed_crowns_apa(prev_apa, fresh_apa) -> int:
+    """Transportador de coroas do apa (irmão por-hash do `_merge_sealed_crowns`
+    do players_list) — corre nas RECONSTRUÇÕES do apa (`/set-anon-map` — o lápis
+    do nome — e `reenrich_scrambled_gold`) entre o re-parse do raw e o enrich.
+
+    CAUSA que fecha (conceito SELO, 21 Jul): o raw não traz campos de coroa; o
+    apa re-parseado nascia "amnésico" → (a) o guard único do enrich
+    (`is_bounty_sealed`) via os SELADOS como não-selados e deixava a Vision
+    reescrevê-los; (b) os NÃO-selados de um seat cuja grafia não casa no
+    players_list caíam no default $0 do ingest. Uma reconstrução NÃO é uma
+    leitura nova — não pode esquecer valores ("editar um nome não apaga a coroa
+    de ninguém", regra do Rui).
+
+    Transporta os campos de coroa (valor + source + confirmed + stamp) de TODOS
+    os seats, por CHAVE (hash GG / "Hero") — imune a grafia. Nos selados limpa
+    também os reviews herdados (o selo fecha o "por rever"). Muta `fresh_apa`;
+    devolve o nº de seats SELADOS transportados (os que o guard vai defender)."""
+    if not isinstance(prev_apa, dict) or not isinstance(fresh_apa, dict):
+        return 0
+    n_sealed = 0
+    for key, prev in prev_apa.items():
+        if key == "_meta" or not isinstance(prev, dict):
+            continue
+        tgt = fresh_apa.get(key)
+        if not isinstance(tgt, dict):
+            continue
+        if "bounty_value_usd" in prev:
+            tgt["bounty_value_usd"] = prev.get("bounty_value_usd")
+        if prev.get(BOUNTY_SOURCE_KEY) is not None:
+            tgt[BOUNTY_SOURCE_KEY] = prev.get(BOUNTY_SOURCE_KEY)
+        if prev.get(BOUNTY_CONFIRMED_KEY):
+            tgt[BOUNTY_CONFIRMED_KEY] = True
+        if prev.get(BOUNTY_STAMP_KEY) is not None:
+            tgt[BOUNTY_STAMP_KEY] = prev.get(BOUNTY_STAMP_KEY)
+        if is_bounty_sealed(prev):
+            tgt.pop("crown_review", None)
+            tgt.pop(BOUNTY_REVIEW_KEY, None)
+            n_sealed += 1
+    return n_sealed
 
 # ── Sinal de ELIMINADO (autoritativo — HH) ───────────────────────────────────
 # Linha de acção: "<key>: bets 47,944 and is all-in" (key = hash GG ou "Hero").

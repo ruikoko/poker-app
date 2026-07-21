@@ -188,9 +188,11 @@ export function CrownCell({ crown, ire, isHero, handId, nameKey, onEdited }) {
     try {
       const num = val.trim() === '' ? null : Number(val)
       if (num != null && (isNaN(num) || num < 0)) { alert('Valor inválido'); setBusy(false); return }
-      const body = {}
+      const body = { origin: 'hand_page.crown_pencil' }
       if (num != null && num !== crown) body.bounties = { [nameKey]: num }
       if (accept) body.confirm = [nameKey]
+      // DOIS CARIMBOS: valor digitado = placa; "aceitar <½-base" sem valor = aceitacao.
+      body.stamps = { [nameKey]: body.bounties ? 'placa' : 'aceitacao' }
       if (!body.bounties && !body.confirm) { setEditing(false); setBusy(false); return }
       const dry = await tableSs.setBounties(handId, { ...body, dryRun: true })
       const pl = (dry.plan || [])[0] || {}

@@ -2834,10 +2834,14 @@ def crowns_high_reread_confirm(payload: dict = Body(...),
             tol = max(1.0, (stored or 0) * 0.005)
             if reread is not None and stored is not None and abs(stored - reread) <= tol:
                 if not dry_run:
+                    # DOIS CARIMBOS (21 Jul): confirmação por releitura da máquina
+                    # = 'aceitacao' (não foi o olho do Rui na placa).
                     seal_log.append(seal_row(hid, e.get("name"), stored, stored,
                                              old_source=e.get("bounty_source"),
-                                             new_source=e.get("bounty_source"), confirmed=True))
+                                             new_source=e.get("bounty_source"), confirmed=True,
+                                             stamp="aceitacao"))
                     e["bounty_confirmed"] = True
+                    e["bounty_stamp"] = "aceitacao"
                     e.pop("crown_reread", None)          # limpa divergência antiga
                 confirmed.append({"name": e.get("name"), "value": stored})
             else:
@@ -2866,6 +2870,7 @@ def crowns_fallback_fill(payload: dict = Body(...),
     na Gold usa a table-SS; grava `bounty_source` por seat. Guarda base÷2 aplica-se.
     'por rever' (`crown_review='no_witness_has_plate'`) só quando NENHUMA testemunha tem
     a placa. NÃO toca seats que já têm coroa >0. body: {"hand_ids":[...], "dry_run":bool}."""
+    from app.services.eliminated_bounty import is_bounty_sealed
     from app.services.table_ss_deanon import _guard_suspect_crowns
     hand_ids = payload.get("hand_ids") or []
     dry_run = bool(payload.get("dry_run", False))
@@ -2888,6 +2893,11 @@ def crowns_fallback_fill(payload: dict = Body(...),
         for e in pl:
             nm = str(e.get("name") or "").strip().lower()
             cur = _to_float(e.get("bounty_value_usd"))
+            # SELO (21 Jul): selado é intocável — incluindo selado a $0 (o gate
+            # "só toco ≤0" não chegava para esse caso).
+            if is_bounty_sealed(e):
+                final_by_name[nm] = cur
+                continue
             if cur is not None and cur > 0:
                 final_by_name[nm] = cur
                 continue                                   # já tem coroa — não tocar
@@ -2912,6 +2922,7 @@ def crowns_fallback_fill(payload: dict = Body(...),
         if isinstance(apa, dict):                           # espelhar no apa
             for k, v in apa.items():
                 if k == "_meta" or not isinstance(v, dict): continue
+                if is_bounty_sealed(v): continue            # selo na gaveta apa idem
                 rn = str(v.get("real_name") or "").strip().lower()
                 if rn in final_by_name:
                     v["bounty_value_usd"] = final_by_name[rn]

@@ -39,7 +39,8 @@ function EyeCard({ c, onResolved }) {
     if (!window.confirm(`Selar ${c.seat} = $${val} (manual)?`)) return
     setBusy(true); setMsg(null)
     try {
-      const r = await tableSs.setBounties(c.hand_id, { bounties: { [c.seat]: Number(val) } })
+      const r = await tableSs.setBounties(c.hand_id, { bounties: { [c.seat]: Number(val) },
+        stamps: { [c.seat]: 'placa' }, origin: 'conflicts_eye' })
       if (r?.not_found?.length || r?.partial?.length) {
         setBusy(false); setMsg('nome não casou — verifica'); return
       }

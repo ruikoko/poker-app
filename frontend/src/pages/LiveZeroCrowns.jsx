@@ -25,7 +25,8 @@ function LiveZeroCard({ h, onResolved }) {
     }
     setBusy(true); setMsg(null)
     try {
-      const r = await tableSs.setBounties(h.hand_id, { bounties: { [h.name]: v } })
+      const r = await tableSs.setBounties(h.hand_id, { bounties: { [h.name]: v },
+        stamps: { [h.name]: 'placa' }, origin: 'live_zero_crowns' })
       // escrita ALINHADA: se o nome não casou em nenhuma gaveta, NÃO sai da lista (LEI 1).
       // not_found/partial são ARRAYS — testar .length (um [] é truthy em JS). Distingue
       // partial (gravou numa gaveta) de not_found (não gravou nada) — Peça 1.
@@ -96,7 +97,10 @@ function WholeTableConfirmCard({ r, onStamped }) {
     setBusy(true); setMsg(null)
     try {
       const bounties = Object.fromEntries(readable.map(s => [s.name, Number(s.read)]))
-      const res = await tableSs.setBounties(r.hand_id, { bounties })
+      // valores RELIDOS pela máquina, aprovados em lote → aceitacao (DOIS CARIMBOS)
+      const res = await tableSs.setBounties(r.hand_id, { bounties,
+        stamps: Object.fromEntries(readable.map(s => [s.name, 'aceitacao'])),
+        origin: 'live_zero_crowns.whole_table_reread' })
       const nf = res?.not_found || [], part = res?.partial || []
       if (nf.length || part.length) {        // Peça 1: partial ≠ not_found
         setBusy(false)

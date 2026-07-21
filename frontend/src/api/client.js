@@ -585,9 +585,13 @@ export const tableSs = {
   // uma coroa <½-base como legítima. dryRun → só o plano (pré-visualização).
   // sources{nick:'manual'|'derived_green_ko'} → proveniência do SELO (Etapa 2: o verde
   // do eliminado grava-se 'derived_green_ko'; a dourada corrigida à mão 'manual').
-  setBounties: (handId, { bounties, sources, confirm, unconfirm, dryRun } = {}) =>
+  // origin = fluxo/painel (vai para o rasto crown_seal_log). stamps{nick:'placa'|
+  // 'aceitacao'} = regra dos DOIS CARIMBOS (21 Jul): placa = o Rui leu a imagem/
+  // digitou; aceitacao = aceitou a sugestão da máquina. Só REGISTO por agora.
+  setBounties: (handId, { bounties, sources, confirm, unconfirm, dryRun, origin, stamps } = {}) =>
     req('POST', '/table-ss/set-bounties', {
       hand_id: handId, bounties, sources, confirm, unconfirm, dry_run: dryRun,
+      origin, stamps,
     }),
   // Fixa o NOME real de UM lugar (por posição), carimbando verified_by_user (selo).
   setSeatName: (handId, position, realName) =>
