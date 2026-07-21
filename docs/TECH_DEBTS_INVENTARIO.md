@@ -36,14 +36,31 @@ completo (Tier 1-4, 19 achados) no chat da sessão; aqui ficam os accionáveis.
   Idem: rever se algum dos 42 `derived_green_ko` já **selados** nasceu de um vivo dado por morto.
 - 🔴 **`#CROWN-FALLBACK-NO-ELIM-GUARD`** (Tier1 #3) — `gg_health.crowns_fallback_fill:2861` enche coroas
   sem `scrub_and_persist` → um seat bustado pode receber a coroa do vizinho (o "veneno verde-KO"). Irmãos
-  A3/A4/A5/A6 chamam o scrub. **CÓDIGO.**
-- 🔴 **`#GOLD-BACKFILL-NO-SEAL`** (Tier1 #4) — `screenshot.backfill_gold_bounties:2299-2303` sobrescreve
-  coroa positiva prévia **sem `is_bounty_sealed`** → pode pisar uma coroa manual selada do Rui. **CÓDIGO.**
-- 🔴 **`#REENRICH-SEAL-LOST`** (Tier1 #5) — `screenshot._reenrich_scrambled_gold:2764-2768` reconstrói o apa
-  do RAW → a coroa manual/cross cai (falta o `_merge_sealed_crowns` que o `table_ss_deanon:570` tem). **CÓDIGO.**
-- 🔴 **`#SET-ANON-MAP-BOUNTY-UNSEALED`** (Tier1 #6) — `table_ss.py:1976-1977` escreve `bounty_value_usd`
-  sem `bounty_source=manual`, sem floor, sem scrub (o irmão `/set-bounties` sela tudo). **CÓDIGO** (confirmar
-  se é fluxo intencional sempre seguido de `/set-bounties`).
+  A3/A4/A5/A6 chamam o scrub. **CÓDIGO.** *(21 Jul noite 2: ganhou o check de SELO explícito — um selado,
+  mesmo a $0, é intocável — mas a guarda de ELIMINADO continua em falta: pertence ao conceito COROA VÁLIDA.)*
+- ✅ **`#GOLD-BACKFILL-NO-SEAL`** (Tier1 #4) — **FECHADO 21 Jul (noite 2, conceito SELO).**
+  `backfill_gold_bounties` salta seats `is_bounty_sealed` (contador `players_sealed_skipped`); provado em
+  teste: Gold com $500 não pisa selada $125. Idem classe (LEI 2): `reread_gold_crowns` e
+  `crowns_fallback_fill` ganham o check explícito (o gate "só toco ≤0" falhava num selado a $0).
+- ✅ **`#REENRICH-SEAL-LOST`** (Tier1 #5) — **FECHADO 21 Jul (noite 2, conceito SELO).** Fonte única nova
+  `eliminated_bounty.merge_sealed_crowns_apa(prev, fresh)` (irmão por-hash do `_merge_sealed_crowns` do
+  players_list): transporta os campos de coroa de TODOS os seats do apa anterior para o re-parseado —
+  selados ficam defendidos pelo guard do enrich, não-selados deixam de cair no default $0. Aplicado no
+  reenrich E no `/set-anon-map`; o clamp do floor no reenrich salta selados. Provado em teste: selada
+  $20 < floor $25 sobrevive ao reenrich sem clamp.
+- ✅ **`#SET-ANON-MAP-BOUNTY-UNSEALED`** (Tier1 #6) — **FECHADO 21 Jul (noite 2, conceito SELO).** O ramo
+  `bounties` delega no carimbador único `/set-bounties` (2 gavetas + `bounty_source=manual` + rasto
+  `origin='table_ss.set_anon_map.bounties'`); sem stamp → intocável (decisão Rui). **+ ACHADO maior no
+  mesmo endpoint (o lápis do nome):** a reconstrução do apa (re-parse do raw) perdia selos E zerava coroas
+  de seats com grafia que não bate no players_list (`_enrich` default $0) — fechado pela mesma fonte única
+  (`merge_sealed_crowns_apa` antes do enrich + enrich só escreve coroa quando a Vision TEM leitura;
+  ingest fresco mantém o $0="por ler"). Prova: 14 testes `test_seal_two_stamps.py` (5 cenários de
+  sobrevivência + grafia-miss + stamps + regressão ingest).
+- 🟠 **`#CROSS-WRITERS-PL-ONLY`** (novo 21 Jul noite 2 → conceito COROA VÁLIDA) — os escritores do
+  cruzamento (`crossing_apply:2310-2319` e família) escrevem coroas **só no players_list**, nunca no apa →
+  é o mecanismo (a) da assimetria das gavetas medida em prod: apa tem 0 `cross_*` (pl: 89 cross_capture +
+  71 cross_exclusion) e 0 `bounty_confirmed` (pl: 58; mecanismo (b), reconstruções-que-apagavam, fechado
+  pelo transportador). Resolver quando os escritores colapsarem no funil único do conceito COROA VÁLIDA.
 - ✅ **`#MTT-DESANON-MORTO`** (Tier1 #2) — **código órfão a remover.** O 3º detetor de desanon (`mtt._build_seat_to_name_map:437`,
   algoritmo pré-fix que o próprio código diz falhar ~70%) **está MORTO**, provado: (a) o endpoint `/api/mtt/import`
   está registado (`main.py:346`) mas o **único** que o chama na UI é o componente `ImportPanel` (`Tournaments.jsx:139`),

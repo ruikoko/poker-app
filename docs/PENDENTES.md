@@ -10,8 +10,14 @@ Auditoria transversal fechada (família "regra num sítio, ausente noutro"; deta
    mortos, 0 busts reais perdidos, os dois lados do ecrã concordam em 29 007/29 007. Detalhe e provas no
    `TECH_DEBTS_INVENTARIO.md`. **Fica por tratar, declarado à parte: as 43 coroas já anuladas** (sintoma —
    reparação é trabalho separado) e a revisão dos `derived_green_ko` selados que possam ter nascido daí.
-2. **Resto do Tier 1** (coroas sem guarda): `#CROWN-FALLBACK-NO-ELIM-GUARD`, `#GOLD-BACKFILL-NO-SEAL`,
-   `#REENRICH-SEAL-LOST`, `#SET-ANON-MAP-BOUNTY-UNSEALED`.
+2. ✅ **CONCEITO SELO FECHADO — 21 Jul (noite 2)**, com a REGRA DOS DOIS CARIMBOS do Rui (para trás
+   tudo intocável; para a frente `bounty_stamp` placa/aceitacao + `origin` por painel — só REGISTO, o
+   "aceitação cede" NÃO foi construído). Fechados: `#GOLD-BACKFILL-NO-SEAL`, `#REENRICH-SEAL-LOST`,
+   `#SET-ANON-MAP-BOUNTY-UNSEALED` (+ achado do lápis do nome: a reconstrução do apa zerava/des-selava
+   coroas — transportador único `merge_sealed_crowns_apa`). Detalhe/provas: `TECH_DEBTS_INVENTARIO.md`
+   secção 21 Jul noite. **`#CROWN-FALLBACK-NO-ELIM-GUARD` continua ABERTO** (a guarda de eliminado é do
+   conceito COROA VÁLIDA; o fallback-fill ganhou só o check de selo). Novo p/ o conceito COROA VÁLIDA:
+   `#CROSS-WRITERS-PL-ONLY` (assimetria das gavetas — cross_* escrevem só no players_list).
 3. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
    diff à vista (remoção em produção merece o Rui fresco, não o fim de um dia longo).
 
