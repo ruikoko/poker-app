@@ -1097,27 +1097,29 @@ def _apply_folder_tag_to_hand(
     *, conn=None,
 ) -> None:
     """Aplica a tag da PASTA do IT à mão casada: escreve em `discord_tags` (union
-    distinct) + dispara `apply_villain_rules` — a MESMA porta da triagem manual
-    (`capture_triage.tag`). A tag final ganha '-ft' se a Vision indicar mesa final.
-    No-op se faltar mão/tag. Defensivo — falha aqui nunca rebenta o upload/reconcile.
+    distinct, pelo selo) e corre o PIPELINE DE ESTUDO único (`on_hand_tagged` —
+    vilões + funil das coroas + propagação + FT), a mesma fonte dos outros
+    caminhos de re-tag. A tag final ganha '-ft' se a Vision indicar mesa final.
+    No-op se faltar mão. Defensivo — falha aqui nunca rebenta o upload/reconcile.
 
     `conn` dado (reconcile) → escreve na transacção do caller (não faz commit);
-    None → conn própria + commit."""
-    # ★ Cura verde-KO (família A) — ANTES do early-return, para que uma mão JÁ-tagada
-    # re-desanonimizada por captura SEM folder-tag (web-first) também seja scrubada. O
-    # `incoming_folder_tag=base_tag` força tagged na captura que traz a tag ('tagada-depois');
-    # sem base_tag, o wrapper usa is_tagged(mão). table-SS = captura cedo → sem verde →
-    # MUST-only. O GUARD não pode ser saltado por early-return. Corre após o `_deanon_after_match`.
-    if matched_hand_db_id:
+    None → conn própria + commit.
+
+    21 Jul: a versão INLINE (scrub antes do early-return + villains no tail) foi
+    substituída pela fonte única — mesma cobertura, mais os disparos que faltavam
+    (propagação/FT). Sem base_tag o pipeline corre na mesma (captura web-first
+    numa mão já-tagada → scrub como dantes; vilões idempotentes)."""
+    if not matched_hand_db_id:
+        return
+    if not base_tag:
+        # captura sem folder-tag: sem escrita de tag; pipeline cobre o scrub
+        # 'tagada-antes' (is_tagged da mão) + vilões — nada do que disparava se perde.
         try:
-            from app.services.eliminated_bounty import scrub_and_persist
-            scrub_and_persist(matched_hand_db_id, vision_data=vision_json,
-                              incoming_folder_tag=base_tag)
+            from app.services.study_pipeline import on_hand_tagged
+            on_hand_tagged(matched_hand_db_id, vision_data=vision_json, conn=conn)
         except Exception as e:  # pragma: no cover - defensivo
-            logger.error("[crown-cure] ⚠️ GUARD FALHOU (table-ss) hand %s — coroa de bustado "
-                         "pode SOBREVIVER (o crivo eliminated-crown-scan apanha): %s",
+            logger.error("[table_ss_folder_tag] pipeline (sem tag) hand %s falhou: %s",
                          matched_hand_db_id, e)
-    if not matched_hand_db_id or not base_tag:
         return
     # Fonte única — canonicaliza o folder_tag que chega do IT (o appimport pode
     # mandar o nome da pasta, ex. "NKO Pos"→pos-nko). Passthrough para o que não
@@ -1143,8 +1145,12 @@ def _apply_folder_tag_to_hand(
             )
         if own:
             conn.commit()
-        from app.services.villain_rules import apply_villain_rules
-        apply_villain_rules(matched_hand_db_id, conn=conn)
+        # PIPELINE DE ESTUDO único (fonte única; era inline aqui): vilões + funil
+        # (vision fresca + incoming_folder_tag p/ o caso tag-ainda-não-commitada
+        # na transacção do reconcile) + propagação + FT.
+        from app.services.study_pipeline import on_hand_tagged
+        on_hand_tagged(matched_hand_db_id, vision_data=vision_json,
+                       incoming_folder_tag=base_tag, conn=conn)
         logger.info(
             "[table_ss_folder_tag] hand %s -> tag %r (ft_source=%s)",
             matched_hand_db_id, final_tag, ft_source,

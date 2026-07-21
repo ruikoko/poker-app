@@ -1517,6 +1517,13 @@ def update_hand(hand_pk: int, body: HandUpdate, current_user=Depends(require_aut
     if updates.get("study_state") == "resolved":
         updates["studied_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    # NOTA (21 Jul, verificação da Fase 1): o PATCH NÃO aceita `discord_tags`
+    # (campo ausente do HandUpdate — o TagEditor da página edita `hm3_tags`).
+    # A hipótese "o editor luta contra o selo de tags" era FALSA: o selo é
+    # discord-only e este caminho nunca lá toca. `hm3_tags` não tem selo →
+    # escrita directa mantém-se.
+    tags_changed = "hm3_tags" in updates
+
     set_clause = ", ".join(f"{k} = %({k})s" for k in updates)
     updates["hand_pk"] = hand_pk
 
@@ -1524,6 +1531,17 @@ def update_hand(hand_pk: int, body: HandUpdate, current_user=Depends(require_aut
         f"UPDATE hands SET {set_clause} WHERE id = %(hand_pk)s",
         updates
     )
+
+    # PIPELINE DE ESTUDO único (fonte única, 21 Jul): mão que (re)ganhou/perdeu tag
+    # corre vilões + funil das coroas + propagação + FT — como se a tag tivesse
+    # chegado com ela. Antes o PATCH não disparava NADA (mão re-tagada entrava no
+    # Estudo com coroas por curar — caso GG-6090481360).
+    if tags_changed:
+        try:
+            from app.services.study_pipeline import on_hand_tagged
+            on_hand_tagged(hand_pk)
+        except Exception as e:  # pragma: no cover - defensivo
+            logger.error("[update_hand] pipeline hand %s: %s", hand_pk, e)
     return {"ok": True}
 
 

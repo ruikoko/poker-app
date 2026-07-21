@@ -61,6 +61,23 @@ completo (Tier 1-4, 19 achados) no chat da sessão; aqui ficam os accionáveis.
   é o mecanismo (a) da assimetria das gavetas medida em prod: apa tem 0 `cross_*` (pl: 89 cross_capture +
   71 cross_exclusion) e 0 `bounty_confirmed` (pl: 58; mecanismo (b), reconstruções-que-apagavam, fechado
   pelo transportador). Resolver quando os escritores colapsarem no funil único do conceito COROA VÁLIDA.
+- ✅ **`#RETAG-NO-PIPELINE`** (aberto e FECHADO 22 Jul — Fase 1 do plano das órfãs, fix-na-causa) — uma mão
+  RE-tagada não corria o que uma mão nascida-com-tag corre: dos 3 caminhos de re-tag, o editor da página
+  (PATCH) não disparava NADA, o selo de tags só vilões, e só a folder-tag da captura corria o funil. O
+  efeito-da-tag estava espalhado, sem orquestrador (não existia «on_hand_tagged»). **Fix:** fonte única
+  nova **`services/study_pipeline.on_hand_tagged`** (vilões → funil das coroas com a base do TS AO VIVO
+  [cobre o comboio pós-TS perdido] → propagação de nomes do tn → FT refresh; passos defensivos; seguro
+  no untag) — os 3 caminhos viram camadas finas (`hands.update_hand`, `tag_decisions._refresh_villains`,
+  `table_ss._apply_folder_tag_to_hand`, que perdeu a versão inline). **Correção factual apanhada na
+  implementação:** a «armadilha do PATCH lutar contra o selo» NÃO existia — o editor só escreve `hm3_tags`
+  (`TagEditor.jsx:99`) e o `HandUpdate` nem aceita `discord_tags`; provado por teste. Prova: 11 testes
+  `test_on_hand_tagged.py` (caso real em forma GG-6090481360: re-tag → coroa fantasma do bustado
+  NULL+`eliminated_no_green`, vivo-$0 marcado, 2 gavetas coerentes; 3 caminhos → mesma fonte; não-estreitar).
+  **Contexto (medido 21-22 Jul):** 327 mãos «Gold sem tag» no painel = 110 sem table-SS (34%, estrutural
+  Gold-only — a lane Gold é pasta plana, nunca fala tags) + 217 com captura SEM folder-tag (66%, TODAS
+  do reimport-achatado de 10-11 Jul) + 0 falhas de matcher. 6 pares provados de print-atrasado pela HH
+  crua (tag `pos-*` na seguinte onde o Hero foldou pré-flop; Hero no flop na órfã, 6/6). **Fase 2**
+  (tratamento das 110 + mover as 6 tags) = sintoma declarado à parte, por autorizar (PENDENTES).
 - ✅ **`#MTT-DESANON-MORTO`** (Tier1 #2) — **código órfão a remover.** O 3º detetor de desanon (`mtt._build_seat_to_name_map:437`,
   algoritmo pré-fix que o próprio código diz falhar ~70%) **está MORTO**, provado: (a) o endpoint `/api/mtt/import`
   está registado (`main.py:346`) mas o **único** que o chama na UI é o componente `ImportPanel` (`Tournaments.jsx:139`),

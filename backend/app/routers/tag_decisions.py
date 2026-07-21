@@ -58,14 +58,17 @@ def _apply_one(cur, hand_id, tag, action, *, actor, origin):
 
 
 def _refresh_villains(hand_db_ids):
-    """Pós-commit: tirar 'nota' pode desfazer um villain; pôr uma tag pode criar. Defensivo."""
+    """Pós-commit: corre o PIPELINE DE ESTUDO único (`on_hand_tagged`) em cada mão
+    afectada — vilões (tirar 'nota' desfaz; pôr cria) + funil das coroas + propagação
+    + FT. 21 Jul: antes só re-avaliava vilões; uma mão re-tagada por aqui entrava no
+    Estudo sem o funil nunca ter corrido. Defensivo."""
     try:
-        from app.services.villain_rules import apply_villain_rules
-        for hid in hand_db_ids:
+        from app.services.study_pipeline import on_hand_tagged
+        for hid in dict.fromkeys(hand_db_ids):        # dedupe, preserva ordem
             try:
-                apply_villain_rules(hid)
+                on_hand_tagged(hid)
             except Exception as e:  # pragma: no cover - defensivo
-                logger.error("[tag-seal] villain_rules hand %s: %s", hid, e)
+                logger.error("[tag-seal] pipeline hand %s: %s", hid, e)
     except Exception:  # pragma: no cover - defensivo
         pass
 
