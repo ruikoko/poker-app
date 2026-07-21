@@ -63,8 +63,8 @@ Seat 6: c94c6e7b (small blind) showed [2h Ks] and lost with a pair of Jacks
 # ── Teste 1 — o caso real: vGVSv detetado pelos DOIS detetores ────────────────
 def test_real_vgvsv_forced_allin_detected_both():
     assert "c94c6e7b" in busted_keys_from_hh(_HH_REAL)          # Detetor 1 (vivo-$0)
-    _s, _b, _n, busted = _parse_busts(_HH_REAL)
-    assert "c94c6e7b" in busted                                 # Detetor 2 (recuperáveis)
+    _s, _b, _n, mortos, _vivos = _parse_busts(_HH_REAL)
+    assert "c94c6e7b" in mortos                                 # mesma régua, via crown_recovery
     assert "c94c6e7b" in forced_allin_keys(_HH_REAL)            # o sinal aritmético
 
 
@@ -74,8 +74,8 @@ def test_lost_pot_but_kept_chips_is_not_bust():
     # (posts << stack) e chamou 64.780 (sobrou-lhe stack) → NÃO é bust.
     assert "1c062e4f" not in forced_allin_keys(_HH_REAL)        # a conta não o marca
     assert "1c062e4f" not in busted_keys_from_hh(_HH_REAL)      # Detetor 1
-    _s, _b, _n, busted = _parse_busts(_HH_REAL)
-    assert "1c062e4f" not in busted                             # Detetor 2 (apesar do 'lost')
+    _s, _b, _n, mortos, _vivos = _parse_busts(_HH_REAL)
+    assert "1c062e4f" not in mortos                             # idem (apesar do 'lost')
 
 
 # ── Teste 3 — postou a cega mas sobrou-lhe stack → NÃO é all-in ────────────────
@@ -107,6 +107,6 @@ def test_phrase_allin_still_detected():
     # (posts << stack) → NÃO é forçado, mas a frase apanha-o. Regra nova não estraga a antiga.
     assert "cccc" not in forced_allin_keys(_HH_PHRASE)          # não é forçado
     assert "cccc" in busted_keys_from_hh(_HH_PHRASE)            # Detetor 1 (frase)
-    _s, _b, _n, busted = _parse_busts(_HH_PHRASE)
-    assert "cccc" in busted                                     # Detetor 2 (frase & lost)
-    assert "winner" not in busted                              # o vencedor nunca busta
+    _s, _b, _n, mortos, _vivos = _parse_busts(_HH_PHRASE)
+    assert "cccc" in mortos                                     # mesma régua (frase)
+    assert "winner" not in mortos                              # o vencedor nunca busta

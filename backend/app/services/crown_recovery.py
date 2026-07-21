@@ -24,7 +24,11 @@ import re
 
 from app.parsers.gg_hands import _get_position
 from app.hero_names import HERO_NAMES_ALL
-from app.services.eliminated_bounty import forced_allin_keys
+# FONTE ÚNICA do "quem morreu nesta mão?" (#BUST-NO-COVERAGE-GUARD, #LEI-FIX-NA-CAUSA).
+# Este módulo TINHA cópia própria da régua (all-in / perdeu / resto-em-BB) e era a única
+# que aplicava a guarda da sobra — o detetor que ESCREVE as coroas não a tinha. As duas
+# cópias colapsaram em `eliminated_bounty.allin_outcomes`; aqui já não se decide morte.
+from app.services.eliminated_bounty import allin_outcomes
 
 # Só as linhas de SENTAR (topo da HH): "Seat N: <hash> (X in chips)". Exigir
 # "in chips" é crucial — senão as linhas do SUMMARY "Seat N: <hash> (button)
@@ -32,43 +36,15 @@ from app.services.eliminated_bounty import forced_allin_keys
 # (o eliminado com posição rotulada — SB/BB/BTN — nunca entrava em `lost`).
 _SEAT_RE = re.compile(r"^Seat (\d+): (\S+) \([\d,]+ in chips\)")
 _BUTTON_RE = re.compile(r"Seat #(\d+) is the button")
-# ação all-in: "<hash>: ... and is all-in" / "is all in"
-_ALLIN_RE = re.compile(r"^(\S+): .*\ball[- ]in\b")
-# SUMMARY perdedor de showdown: "Seat N: <hash> (...) showed [..] and lost ..."
-_LOST_RE = re.compile(r"^Seat \d+: (\S+)\b.*\band lost\b")
 # vencedor do pote (o matador — onde está o verde do KO)
 _WON_COLLECTED_RE = re.compile(r"^(\S+) collected\b")
 _WON_SUMMARY_RE = re.compile(r"^Seat \d+: (\S+)\b.*\band won\b")
-# big blind do header ("Level1(500/1,000(150))" → 1000) e devolução de aposta
-# não-igualada ("Uncalled bet (25,500) returned to <hash>" → o all-in COBRIU o
-# adversário e ficou com este resto). Mesa (gate do tournament na contraprova).
-_BB_RE = re.compile(r"Level\d+\((?:[\d,]+)/([\d,]+)")
-_UNCALLED_RE = re.compile(r"Uncalled bet \(([\d,]+)\) returned to (\S+)")
 _TABLE_RE = re.compile(r"^Table '([^']+)'")
 
-# Régua do resto-em-BB (validada pelo Rui 3/3 na imagem): um all-in que PERDE
-# mas fica com >= 1 BB NÃO foi eliminado — a coroa NULL é leitura falhada de um
-# jogador VIVO (re-ler a placa), NUNCA um caso verde-KO. Resto ~0 (coberto) ou
-# < 1 BB = bust real (recuperável por verde × 2).
-_ALIVE_MIN_BB = 1.0
-
-
-def _num(s) -> int:
-    try:
-        return int(str(s).replace(",", "").strip())
-    except (ValueError, AttributeError):
-        return 0
-
-
-def _parse_bb(raw: str):
-    m = _BB_RE.search(raw or "")
-    return _num(m.group(1)) if m else None
-
-
-def _returned_by_hash(raw: str) -> dict:
-    """{hash: fichas devolvidas} — quem recebeu 'Uncalled bet returned' cobriu o
-    adversário e ficou com esse resto (não pode ter bustado se o resto for grande)."""
-    return {m.group(2): _num(m.group(1)) for m in _UNCALLED_RE.finditer(raw or "")}
+# NOTA (#BUST-NO-COVERAGE-GUARD): as réguas do all-in, do "perdeu" e do resto-em-BB
+# viviam AQUI (`_ALLIN_RE`/`_LOST_RE`/`_BB_RE`/`_UNCALLED_RE`/`_ALIVE_MIN_BB`/
+# `_parse_bb`/`_returned_by_hash`) e mudaram-se para `eliminated_bounty` — a casa do
+# detetor que ESCREVE. Quem precisar delas importa de lá; não se re-cria cópia aqui.
 
 
 def _parse_table(raw: str):
@@ -106,11 +82,13 @@ def _is_hero_name(name) -> bool:
 
 
 def _parse_busts(raw: str):
-    """(seats{seat:hash}, button_seat, num_players, busted_hashes) da HH GG.
-    busted = esteve all-in E perdeu no showdown (SUMMARY 'and lost')."""
+    """(seats{seat:hash}, button_seat, num_players, mortos, vivos_que_perderam) da HH GG.
+
+    A MESA (seats/botão) lê-se aqui; a MORTE **não** — os dois conjuntos vêm da fonte
+    única `eliminated_bounty.allin_outcomes` (all-in por frase ou post forçado, sem
+    coletar pote, separados pela régua do resto-em-BB). Este módulo já não tem régua
+    própria: era a divergência que produziu o `#BUST-NO-COVERAGE-GUARD`."""
     seats: dict[int, str] = {}
-    allin: set[str] = set()
-    lost: set[str] = set()
     button_seat = None
     for ln in (raw or "").splitlines():
         s = ln.strip()
@@ -121,18 +99,8 @@ def _parse_busts(raw: str):
         b = _BUTTON_RE.search(s)
         if b:
             button_seat = int(b.group(1))
-        a = _ALLIN_RE.match(s)
-        if a:
-            allin.add(a.group(1))
-        lo = _LOST_RE.match(s)
-        if lo:
-            lost.add(lo.group(1))
-    # + ALL-IN por POST FORÇADO (ante+cega >= stack; a frase 'all-in' falha-os no GG).
-    # Some-se ao all-in por frase; o cruzamento com `lost` (perdeu) fica igual — a
-    # guarda contra falso-positivo é a conta do stack em forced_allin_keys.
-    allin |= forced_allin_keys(raw)
-    busted = {h for h in (allin & lost)}
-    return seats, button_seat, len(seats), busted
+    mortos, vivos = allin_outcomes(raw)
+    return seats, button_seat, len(seats), mortos, vivos
 
 
 def _winners_with_hash(raw: str, seats: dict, button_seat, num_players) -> list:
@@ -176,21 +144,12 @@ def classify_hand(raw: str, pn) -> dict:
       leitura falhada da placa própria (re-ler), NUNCA verde × 2.
     - group2 = coroa NULL num não-bustado não-Hero (folded/etc) → balde das coroas.
     `bust_hashes`/`table` servem a contraprova da mão-seguinte no router. Puro."""
-    seats, button_seat, num_hh, busted = _parse_busts(raw)
+    # Os dois baldes vêm JÁ separados da fonte única (régua do resto-em-BB lá dentro):
+    # `busted_real` = morreu mesmo · `alive_lost` = perdeu o all-in mas cobria e sobreviveu.
+    seats, button_seat, num_hh, busted_real, alive_lost = _parse_busts(raw)
     plist = _players_list(pn)
     num_extracted = len(plist)
     over_read = (num_hh > 0 and num_extracted != num_hh)
-
-    # RÉGUA DO RESTO-EM-BB: separar quem bustou mesmo (resto ~0) de quem perdeu o
-    # all-in mas SOBREVIVEU (cobriu o adversário, ficou com o resto devolvido).
-    bb = _parse_bb(raw)
-    returned = _returned_by_hash(raw)
-    busted_real: set[str] = set()
-    alive_lost: set[str] = set()
-    for h in busted:
-        remain = returned.get(h, 0)                # coberto → 0 devolvido → bust
-        resto_bb = (remain / bb) if bb else 0.0    # sem BB conhecido → trata como bust
-        (alive_lost if resto_bb >= _ALIVE_MIN_BB else busted_real).add(h)
 
     # posição de cada hash (via a função do parser) — separada por balde
     all_seat_nums = list(seats.keys())

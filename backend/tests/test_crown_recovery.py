@@ -1,10 +1,14 @@
 """Detetor de bounties recuperáveis (#CROWN-RECOVERY) — classify_hand puro.
-Cobre a armadilha-raiz: linhas do SUMMARY "Seat N: hash (small blind) ... and lost"
-NÃO podem ser comidas pelo _SEAT_RE (senão o eliminado com posição rotulada nunca
-entra em `lost`)."""
+Cobre a armadilha-raiz: linhas do SUMMARY "Seat N: hash (small blind) ..." NÃO podem
+ser comidas pelo _SEAT_RE (senão o eliminado com posição rotulada nunca é lido).
+A régua de quem morreu vive em `eliminated_bounty.allin_outcomes` (fonte única,
+#BUST-NO-COVERAGE-GUARD) — este módulo só lê a mesa e distribui pelos baldes."""
 from app.services import crown_recovery as cr
+from app.services import eliminated_bounty as eb
 
-# HH sintética 6-max: button=Seat1; bbbb (SB) all-in + lost = bustou.
+# HH sintética 6-max: button=Seat1; bbbb (SB) all-in e perdeu o pote = bustou.
+# A linha "<vencedor> collected" é OBRIGATÓRIA (toda a HH real do GG a tem) — é ela
+# que distingue quem ganhou o pote de quem o perdeu na fonte única.
 _RAW = """Poker Hand #TM1: Tournament #999, Test KO Hold'em No Limit - Level1
 Table '1' 6-max Seat #1 is the button
 Seat 1: aaaa (1000 in chips)
@@ -15,6 +19,7 @@ Seat 5: eeee (1000 in chips)
 Seat 6: Hero (1000 in chips)
 bbbb: raises 900 to 1000 and is all-in
 Hero: calls 1000 and is all-in
+Hero collected 2,000 from pot
 *** SUMMARY ***
 Seat 2: bbbb (small blind) showed [Ah Kh] and lost with Ace high
 Seat 6: Hero showed [As Ks] and won (2000) with a pair of Aces
@@ -43,10 +48,11 @@ def test_classify_splits_group1_and_group2():
     assert "HasCrown" not in names
 
 
-def test_summary_lost_line_not_eaten_by_seat_re():
-    # a linha do SUMMARY com "(small blind)" tem de chegar ao _LOST_RE
-    _, _, _, busted = cr._parse_busts(_RAW)
-    assert "bbbb" in busted
+def test_seat_line_with_position_label_still_parsed():
+    # a linha do SUMMARY com "(small blind)" não pode ser comida pelo _SEAT_RE;
+    # bbbb (all-in, não coletou, sem devolução) sai MORTO da fonte única.
+    _, _, _, mortos, vivos = cr._parse_busts(_RAW)
+    assert "bbbb" in mortos and vivos == set()
 
 
 def test_over_read_flagged_when_counts_differ():
@@ -85,6 +91,7 @@ Seat 6: Hero (20,000 in chips)
 bbbb: raises 49,000 to 50,000 and is all-in
 Hero: calls 20,000 and is all-in
 Uncalled bet (30,000) returned to bbbb
+Hero collected 40,000 from pot
 *** SUMMARY ***
 Seat 2: bbbb (small blind) showed [Ah Kh] and lost with Ace high
 Seat 6: Hero showed [As Ks] and won (40,000) with a pair of Aces
@@ -114,14 +121,16 @@ def test_covered_allin_loss_is_real_bust():
 
 
 def test_bb_and_returned_and_table_helpers():
-    assert cr._parse_bb(_RAW_SURVIVOR) == 1000
-    assert cr._returned_by_hash(_RAW_SURVIVOR) == {"bbbb": 30000}
+    # a cega grande e a devolução vivem na FONTE ÚNICA (eliminated_bounty); o
+    # crown_recovery já não tem cópia própria — só a leitura da mesa fica cá.
+    assert eb.bb_from_hh(_RAW_SURVIVOR) == 1000
+    assert eb.returned_by_key(_RAW_SURVIVOR) == {"bbbb": 30000}
     assert cr._parse_table(_RAW_SURVIVOR) == "7"
     assert cr.seated_hashes(_RAW_SURVIVOR) == {"aaaa", "bbbb", "cccc", "dddd", "eeee", "Hero"}
 
 
 def test_no_bb_defaults_to_bust():
-    # _RAW não tem blinds no header ("Level1") → bb None → trata all-in+lost como
+    # _RAW não tem blinds no header ("Level1") → bb None → trata all-in+perdeu como
     # bust (comportamento seguro pré-régua; a contraprova do router é o backup).
     res = cr.classify_hand(_RAW, _PN)
     assert [g["name"] for g in res["group1"]] == ["BustedGuy"]

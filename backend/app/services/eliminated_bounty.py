@@ -97,6 +97,19 @@ _COLLECT_RE = re.compile(r"^([^\n:]+?) collected [\d,]+", re.M)
 _SEAT_STACK_RE = re.compile(r"^Seat \d+: (\S+) \(([\d,]+) in chips\)", re.M)
 _POST_RE = re.compile(r"^(\S+): posts (?:the ante|small blind|big blind) ([\d,]+)", re.M)
 
+# ── SOBREVIVEU POR COBRIR (régua do resto-em-BB) ─────────────────────────────
+# FONTE ÚNICA do conceito "este jogador morreu?" (#BUST-NO-COVERAGE-GUARD,
+# #LEI-FIX-NA-CAUSA). Quem vai all-in com MAIS fichas do que o adversário perde o
+# pote mas recebe o excedente de volta ("Uncalled bet (X) returned to <key>") e
+# CONTINUA NA MESA. Sem esta régua, "all-in + não coletou" declara-o morto — 1227
+# lugares em 1227 mãos GG 2026 (23% dos vereditos), 43 coroas já anuladas sem motivo.
+# A régua estava provada e validada pelo Rui na imagem (3/3), mas vivia SÓ no detetor
+# do painel (`crown_recovery`), não no que escreve na base. Aqui é que manda.
+_BB_RE = re.compile(r"Level\d+\((?:[\d,]+)/([\d,]+)")
+_UNCALLED_RE = re.compile(r"Uncalled bet \(([\d,]+)\) returned to (\S+)")
+# Resto >= 1 BB = VIVO. Abaixo disso (ou coberto, resto 0) = bust real.
+ALIVE_MIN_BB = 1.0
+
 
 def _hh_int(s) -> int:
     try:
@@ -122,16 +135,56 @@ def forced_allin_keys(raw: Optional[str]) -> set:
     return {h for h, st in stacks.items() if st > 0 and posts.get(h, 0) >= st}
 
 
-def busted_keys_from_hh(raw: Optional[str]) -> set:
-    """Chaves-da-HH (hash GG / 'Hero') ELIMINADAS nesta mão: foram all-in E NÃO
-    coletaram nenhum pote (perderam o all-in). Autoritativo (HH), independente da Vision.
-    All-in = frase "and is all-in" OU post forçado (ante+cega >= stack, `forced_allin_keys`)."""
+def bb_from_hh(raw: Optional[str]):
+    """Big blind do header da mão ("Level1(500/1,000(150))" → 1000). None se ilegível."""
+    m = _BB_RE.search(raw or "")
+    return _hh_int(m.group(1)) if m else None
+
+
+def returned_by_key(raw: Optional[str]) -> dict:
+    """{chave-HH: fichas devolvidas} — quem recebeu 'Uncalled bet returned' cobriu o
+    adversário e ficou com esse resto na mesa."""
+    return {m.group(2): _hh_int(m.group(1)) for m in _UNCALLED_RE.finditer(raw or "")}
+
+
+def allin_outcomes(raw: Optional[str]) -> tuple:
+    """FONTE ÚNICA de "quem morreu nesta mão?". Devolve `(mortos, vivos_que_perderam)`,
+    chaves-da-HH (hash GG / 'Hero'). Autoritativo (HH), independente da Vision.
+
+    Um jogador entra na conta se esteve ALL-IN — frase "and is all-in" OU post forçado
+    (ante+cega >= stack, `forced_allin_keys`) — E NÃO coletou nenhum pote.
+
+    Desses, separa-os pela RÉGUA DO RESTO-EM-BB:
+    - resto devolvido >= 1 BB (`ALIVE_MIN_BB`) → **VIVO**: cobria o adversário, perdeu o
+      pote mas ficou com o excedente. Coroa NULL aqui é leitura falhada (re-ler a placa),
+      NUNCA um caso verde-KO.
+    - resto < 1 BB (ou 0, coberto) → **MORTO** de verdade.
+    - BB ilegível no header → trata-se como MORTO (conservador; comportamento histórico).
+
+    Todos os caminhos — escrita automática de coroas e painéis — usam esta função.
+    Ter a régua em duas cópias foi o que produziu o `#BUST-NO-COVERAGE-GUARD`."""
     if not raw:
-        return set()
+        return set(), set()
     allin = {m.group(1).strip() for m in _ALLIN_RE.finditer(raw)}
     allin |= forced_allin_keys(raw)                # + all-in por post forçado (conta)
     collected = {m.group(1).strip() for m in _COLLECT_RE.finditer(raw)}
-    return {k for k in allin if k not in collected}
+    perdeu = {k for k in allin if k not in collected}
+    bb = bb_from_hh(raw)
+    if not bb:
+        return perdeu, set()                       # sem BB → não se afere sobra; tudo morto
+    returned = returned_by_key(raw)
+    mortos, vivos = set(), set()
+    for k in perdeu:
+        resto_bb = returned.get(k, 0) / bb
+        (vivos if resto_bb >= ALIVE_MIN_BB else mortos).add(k)
+    return mortos, vivos
+
+
+def busted_keys_from_hh(raw: Optional[str]) -> set:
+    """Chaves-da-HH ELIMINADAS nesta mão (só os MORTOS de verdade). Fina camada sobre
+    `allin_outcomes` — quem cobriu e sobreviveu fica de fora, como manda a régua do
+    resto-em-BB. Todos os call-sites herdam a guarda por aqui, sem alterações."""
+    return allin_outcomes(raw)[0]
 
 
 def busted_real_names(raw: Optional[str], apa: Optional[dict]) -> set:
