@@ -2,6 +2,20 @@
 
 Leitura obrigatória no início de CADA sessão, por TODOS os operadores (Web e Code), independentemente de há quanto tempo trabalham no projeto. Nasceu da frustração real do pt61-pt64: meses de projeto, dois operadores, e o Rui à 01:30 a lutar com um zip. Quem violar uma regra, corrige e regista.
 
+---
+
+## ⚖️ LEI PERMANENTE — `#LEI-FIX-NA-CAUSA` (os fixes são profundos, não cosméticos)
+
+**Rege TODA proposta de correção daqui para a frente.** Está no topo deste doc de propósito: é lei, não nota. O Rui invoca-a pelo nome (`#LEI-FIX-NA-CAUSA`) quando um fix cheirar a remendo. Nasceu de **20 Jul 2026**, da família de defeitos "regra implementada num sítio mas em falta noutro, que não dispara onde é precisa" (bust sem guarda de stack · verde×2 só num painel · selo só nas coroas · prefixo só nos nomes).
+
+1. **Fix na CAUSA, não no caso.** Quando um erro aparece numa mão/num registo, o trabalho **NÃO é endireitar esse registo** — é encontrar a **regra que o produziu** e corrigi-la na origem. O caso é sintoma; a correção é da causa. *(Ex.: o bust do FlightRisk não se "corrige" na mão — corrige-se o detetor que decide morte sem olhar ao stack.)*
+2. **Uma regra vive num SÍTIO SÓ.** Se a mesma regra de negócio está duplicada em vários caminhos (o que é uma eliminação, o que é uma coroa válida, como casa uma captura, o sentido da desanon), o fix correto é **CONSOLIDAR** — fazer todos os caminhos chamarem uma **única fonte de verdade** — não remendar cada cópia. Remendar cópias garante que o próximo buraco nasce igual.
+3. **PROIBIDO o cosmético.** Um fix que faz o sintoma desaparecer do ecrã **sem tratar a causa** é proibido. Esconder o problema é **pior** que não lhe tocar.
+4. **Remendo só DECLARADO.** Se a causa não puder ser tratada agora, um remendo provisório é aceitável **apenas se**: (a) for **explicitamente declarado** como remendo temporário; (b) **registado em `TECH_DEBTS_INVENTARIO.md`** com a causa real apontada; (c) **nunca apresentado ao Rui como solução definitiva**.
+5. **Declaração obrigatória antes de propor.** Antes de propor um fix, o Code **declara ao Rui**: *isto é fix-na-causa ou remendo?* Se remendo, **porquê** e **qual a causa que fica por tratar**.
+
+---
+
 ## 1. Nunca esperar parado (regra do paralelo)
 Sempre que um operador entrega trabalho a outro (Web→Code, Code→Rui, Rui→Beelink), o entregador COMEÇA IMEDIATAMENTE uma tarefa paralela útil e declara-a ("enquanto esperas/executas, eu faço X"). Espera ociosa é defeito de processo. Exemplos válidos: pré-validar dados, rever runbooks, preparar o passo seguinte, escrever o journal em rascunho, priorizar dívidas.
 

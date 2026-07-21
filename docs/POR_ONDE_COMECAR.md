@@ -19,7 +19,7 @@ pipeline que manda mãos a um solver (**HRC**) num mini-PC (Beelink) via um robo
 | # | Documento | O que cobre |
 |---|---|---|
 | 1 | **`CLAUDE.md`** (raiz) | **O ponto de entrada.** Instruções do projecto, stack, modelo de domínio, **armadilhas** (chama vs coroa vs verde de KO, âmbito de disco, regra de ouro anti-cheat), e o **histórico de sessões** (o que ficou live em cada uma). Lê primeiro e sempre. |
-| 2 | **`docs/FLUXO_DE_TRABALHO.md`** | Regras de eficiência entre operadores (paralelo, recados completos, operador certo, fonte, logging, fecho de sessão, **âmbito de disco §11**). **Obrigatório no início de CADA sessão.** |
+| 2 | **`docs/FLUXO_DE_TRABALHO.md`** | Regras de eficiência entre operadores (paralelo, recados completos, operador certo, fonte, logging, fecho de sessão, **âmbito de disco §11**). **No topo: ⚖️ `#LEI-FIX-NA-CAUSA`** — todo o fix trata a causa, nunca o sintoma; regra duplicada consolida-se numa fonte de verdade; cosmético proibido; remendo só declarado + registado. **Obrigatório no início de CADA sessão.** |
 | 3 | **`docs/PAPEIS_E_RESPONSABILIDADES.md`** | Quem é o Rui, o Claude Web e o Claude Code — quem decide o quê. |
 | 4 | **`docs/VISAO_PRODUTO.md`** | Visão alta (propósito, vectores, secções do sidebar). |
 | 5 | **`docs/REGRAS_NEGOCIO.md`** | Regras operacionais (entrada, processamento, distribuição, casos canónicos, **regras duras** — ex.: mão sem HH nunca entra em Estudo; GG sem SS não entra). |
