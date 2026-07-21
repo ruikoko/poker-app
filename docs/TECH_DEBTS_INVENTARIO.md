@@ -16,13 +16,24 @@ completo (Tier 1-4, 19 achados) no chat da sessão; aqui ficam os accionáveis.
 
 **🔴 Tier 1 — CONTAMINA DADOS (escreve/apaga valor errado automaticamente):**
 
-- 🔴🔴 **`#BUST-NO-COVERAGE-GUARD`** (Tier1 #1) — o detetor de bust `eliminated_bounty.busted_keys_from_hh:134`
-  decide morte por "all-in + não coletou", **sem comparar stacks**: quem cobre e perde (stack > vencedor)
-  fica marcado morto. Alimenta a anulação AUTOMÁTICA de coroas (`scrub_and_persist`, 6+ call-sites:
-  screenshot.py 2324/2467/2801, table_ss.py 1113/2734, gg_health.py 1590). **Medido: 812 mãos / 931
-  jogadores** em GG 2026 (56/88 de 13-14 já provados vivos por reaparecerem). **A régua correta JÁ EXISTE**
-  em `crown_recovery.classify_hand:184-193` (uncalled-bet ≥1 BB → vivo). **Fix = consolidar**: o detetor
-  passa a chamar essa régua única. **CÓDIGO. ★ PRÓXIMA SESSÃO (1º).**
+- ✅ **`#BUST-NO-COVERAGE-GUARD`** (Tier1 #1) — **FECHADO 21 Jul 2026** (fix-na-causa, régua única).
+  O detetor `eliminated_bounty.busted_keys_from_hh` decidia morte por "all-in + não coletou" **sem olhar
+  à sobra**: quem cobre e perde (recebe `Uncalled bet returned`) ficava marcado morto. A régua correta
+  existia **só** no detetor do painel (`crown_recovery`), que não escreve nada.
+  **Fix:** as duas cópias colapsaram em **`eliminated_bounty.allin_outcomes(raw) → (mortos, vivos)`** —
+  all-in (frase ou post forçado) + não-coletou, separados pela régua do resto-em-BB (`ALIVE_MIN_BB=1.0`).
+  O `busted_keys_from_hh` passou a fina camada sobre ela (mesma assinatura → os **12 call-sites** herdaram
+  a guarda sem alteração); o `crown_recovery` deixou de ter régua própria (`_parse_busts` devolve os dois
+  conjuntos da fonte única). **Medido no código final (GG 2026, 29 007 mãos):** 5 325 → **4 098 mortos +
+  1 227 passados a vivos**; **0** dos 17 lugares que só o critério "não-coletou" via se perderam (todos
+  busts reais que o critério `and lost` falhava); `/suggest` e `classify_hand` passam a concordar em
+  **29 007/29 007** mãos (antes eram lados opostos do mesmo ecrã). Âncora: `GG-6183902397` (a8fa35df,
+  FlightRisk — 251 602 devolvidos = 6,3 BB) sai **VIVO**. Suite 1551 passed.
+  **⚠️ SINTOMA POR TRATAR (declarado à parte, LEI ponto 4):** as **43 coroas já anuladas** por este
+  defeito (de 130 seats `eliminated_no_green` em 119 mãos) **continuam anuladas** — o fix impede novas,
+  não desfaz as feitas. Reparar é trabalho separado; o valor antigo **não está** no `crown_seal_log`
+  (só regista escritas seladas), logo terá de vir da leitura guardada da captura/Gold — **não medido**.
+  Idem: rever se algum dos 42 `derived_green_ko` já **selados** nasceu de um vivo dado por morto.
 - 🔴 **`#CROWN-FALLBACK-NO-ELIM-GUARD`** (Tier1 #3) — `gg_health.crowns_fallback_fill:2861` enche coroas
   sem `scrub_and_persist` → um seat bustado pode receber a coroa do vizinho (o "veneno verde-KO"). Irmãos
   A3/A4/A5/A6 chamam o scrub. **CÓDIGO.**

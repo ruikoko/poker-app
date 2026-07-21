@@ -5,10 +5,11 @@
 Auditoria transversal fechada (família "regra num sítio, ausente noutro"; detalhe em
 `TECH_DEBTS_INVENTARIO.md`, secção 21 Jul noite). **Ordem acordada:**
 
-1. **`#BUST-NO-COVERAGE-GUARD`** (o que contamina dados a sério) — **consolidar a régua de eliminação numa
-   fonte única**, a que já vive em `crown_recovery.classify_hand:184-193` (all-in que cobre e recebe ≥1 BB de
-   volta = VIVO). O detetor `eliminated_bounty.busted_keys_from_hh:134` passa a chamá-la. Impacto medido:
-   812 mãos / 931 jogadores marcados mortos indevidamente em 2026.
+1. ✅ **`#BUST-NO-COVERAGE-GUARD`** — **FEITO 21 Jul** (`eliminated_bounty.allin_outcomes` = fonte única;
+   12 call-sites herdaram a guarda; `crown_recovery` sem régua própria). 1 227 lugares deixam de sair
+   mortos, 0 busts reais perdidos, os dois lados do ecrã concordam em 29 007/29 007. Detalhe e provas no
+   `TECH_DEBTS_INVENTARIO.md`. **Fica por tratar, declarado à parte: as 43 coroas já anuladas** (sintoma —
+   reparação é trabalho separado) e a revisão dos `derived_green_ko` selados que possam ter nascido daí.
 2. **Resto do Tier 1** (coroas sem guarda): `#CROWN-FALLBACK-NO-ELIM-GUARD`, `#GOLD-BACKFILL-NO-SEAL`,
    `#REENRICH-SEAL-LOST`, `#SET-ANON-MAP-BOUNTY-UNSEALED`.
 3. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
