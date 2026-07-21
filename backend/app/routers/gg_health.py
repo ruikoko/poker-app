@@ -756,10 +756,13 @@ def gg_health_tag(payload: dict = Body(...),
             hands_touched += 1
     finally:
         conn.close()
+    # PIPELINE DE ESTUDO único (22 Jul, LEI 2 — 4º caminho de re-tag que escapou à
+    # Fase 1): antes só re-avaliava vilões; agora corre a MESMA fonte dos outros
+    # caminhos (vilões + funil das coroas + propagação + FT).
     try:
-        from app.services.villain_rules import apply_villain_rules
+        from app.services.study_pipeline import on_hand_tagged
         for hid in refresh:
-            apply_villain_rules(hid)
+            on_hand_tagged(hid)
     except Exception:
         pass
     return {"applied": applied, "hands": hands_touched, "tags": canons,
@@ -819,10 +822,12 @@ def gg_health_untag(payload: dict = Body(...),
             hands_touched += 1
     finally:
         conn.close()
+    # PIPELINE DE ESTUDO único (22 Jul, LEI 2) — mesma fonte dos outros caminhos;
+    # seguro no untag (vilões limpam, funil não escreve em destagada).
     try:
-        from app.services.villain_rules import apply_villain_rules
+        from app.services.study_pipeline import on_hand_tagged
         for hid in refresh:
-            apply_villain_rules(hid)
+            on_hand_tagged(hid)
     except Exception:
         pass
     return {"removed": removed, "hands": hands_touched, "tags": canons}

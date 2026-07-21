@@ -231,6 +231,30 @@ def test_caminho_c_sem_folder_tag_pipeline_corre_na_mesma(monkeypatch):
     assert got == [(7, None)]
 
 
+def test_caminho_d_gg_health_tag_untag_chamam_pipeline(monkeypatch):
+    # LEI 2 (22 Jul): as ferramentas /tag e /untag da Saúde GG eram o 4º caminho
+    # de re-tag (selam, mas só re-avaliavam vilões) — agora chamam a mesma fonte.
+    import app.services.study_pipeline as sp
+    import app.services.tag_decisions as td
+    from app.routers import gg_health as G
+    got, store = [], []
+    monkeypatch.setattr(sp, "on_hand_tagged", lambda hid, **kw: got.append(hid))
+    monkeypatch.setattr(td, "seal_and_recompute",
+                        lambda cur, hid, tag, action, actor=None, origin=None: [1])
+    monkeypatch.setattr(G, "seal_and_recompute", td.seal_and_recompute, raising=False)
+    monkeypatch.setattr(G, "query", lambda sql, params=None:
+                        [{"id": 9, "hand_id": "GG-1", "discord_tags": ["pos-pko"],
+                          "tournament_format": "PKO"}])
+    monkeypatch.setattr(G, "get_conn", lambda: FakeConn(store))
+    G.gg_health_untag({"hand_ids": ["GG-1"], "tag": "pos-pko"},
+                      current_user={"email": "r"})
+    assert got == [9]
+    got.clear()
+    G.gg_health_tag({"hand_ids": ["GG-1"], "tag": "icm-pko"},
+                    current_user={"email": "r"})
+    assert got == [9]
+
+
 def test_caminho_a_patch_nao_toca_discord_tags_logo_nao_luta_com_o_selo():
     # verificação da premissa: o editor da página (PATCH) NÃO aceita discord_tags
     # (o TagEditor edita hm3_tags) → não há luta com o selo (que é discord-only).
