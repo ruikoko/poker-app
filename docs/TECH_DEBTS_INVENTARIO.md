@@ -6,6 +6,48 @@ Substitui os fragmentos espalhados pelos vários docs como **single source of tr
 
 ---
 
+## 21 Jul 2026 — backfill Vision das 92 Gold órfãs + 2 buracos do funil de ingest
+
+O casamento PRINCIPAL da GG é **Gold (replayer) ↔ HH** (por `hand_id = GG-{tm}` do nome do
+ficheiro; `screenshot.py:1283-1290`) → desanon por `position_v3` (nomes+posições explícitos,
+sem inferir sentido). Investigou-se porque **92 Gold do último import** (todas de 13-14 Jul,
+`entries` screenshot `status='new'`, `vision_done=false`, `img_b64` presente) **nunca casaram**.
+Causa: a **Vision nunca completou** nelas → o match só é tentado com jogadores lidos
+(`screenshot.py:1281`). **Resolvido:** auth do `POST /api/screenshots/vision/backfill` alinhada
+a `require_auth_or_api_key` (commit `c51c01c`; era cookie-only por ter nascido antes do padrão
+dual-path) + corrido o backfill (Bearer HRC). **92/92 leram (0 falhas, 0 leituras vazias — saldo
+Anthropic OK), 92/92 casaram e desanonimizaram por `position_v3`.** A âncora `GG-6183902336`
+ficou com o mapa **exato** que os stacks previam (Hero→Lauro Dermio · a8fa35df→FlightRisk ·
+3010956→R Romanovskyi · 9c404eef→mak10). As **5** mãos travadas pelo voto fantasma que TINHAM
+Gold saíram todas do balde por via da Gold (balde `button_stack_direction_disagree` **40→35**;
+as 35 restantes **não têm Gold** — dependem mesmo da foto crua / da guarda `#DESANON-BUTTON-
+PHANTOM-VOTE`). Bónus: 55 mãos que estavam em `table_ss` (foto crua) foram **re-desanonimizadas
+pela Gold** (premium manda, `#IT-MATCHER-GOLD-MANDA`).
+
+**2 buracos expostos (REGISTADOS, não corrigidos — decisão do Rui):**
+
+- 🟠 **`#SS-DEDUP-FILEHASH-SKIPS-VISION`** — o dedup por `file_hash` no upload
+  (`screenshot.py:1564-1583`) devolve `"duplicate"` e sai **antes** de disparar a Vision, olhando
+  **só para o hash do conteúdo, cego ao `vision_done`**. Consequência provada: re-correr o
+  appimport sobre uma Gold já em BD com Vision falhada **NÃO a recupera** (foi o que manteve as
+  92 presas mesmo depois de o Rui recarregar saldo e re-importar). Fix candidato (não aplicado):
+  no ramo do dedup, se a entry existente tem `vision_done=false` + `img_b64`, re-disparar a Vision
+  em vez de sair; ou expor o `vision/backfill` na UI (ver `#GOLD-BACKFILL-NO-BUTTON`).
+
+- 🟠 **`#GOLD-VISION-FAILURE-NO-TRACE`** — quando a Vision de uma entry screenshot/Gold falha
+  (`_extract_hand_data_from_image_claude` devolve None: 429/timeout/excepção), o
+  `_run_vision_for_entry` **só faz WARNING de consola e `return`** (`screenshot.py:1223-1228`):
+  **não escreve `vision_done`, `status='failed'`, erro nem `attempt_count`**. A entry fica
+  idêntica a "nunca chamada" → uma leitura falhada é **indistinguível** de uma por-fazer, e o
+  erro real **não é auditável** (o `import-health` já o declara buraco conhecido,
+  `import_health.py:38`: "Vision do replayer GG: falhas só em log de consola, não em tabela").
+  Fix candidato (não aplicado): gravar `{vision_attempts, last_error, last_attempt_at}` no
+  `raw_json` no caminho de falha. Cross-ref `#GOLD-BACKFILL-NO-BUTTON` (o `vision/backfill` não
+  tem botão na app; o painel "Golds por ler" usa `gold-vision-run`, que só apanha Gold **já
+  ligada**, não órfãs — `gg_health.py:263-271`).
+
+---
+
 ## 19 Jul 2026 — voto fantasma do botão na desanonimização (descoberto, NÃO corrigido)
 
 Sessão sem commits de código. Detalhe completo: `journal/2026-07-19.md`.
