@@ -13,7 +13,8 @@ const srcLabel = (s) => s === 'gold' ? 'Gold' : 'SS de mesa'
 const reasonLabel = (r) => r === 'below_floor' ? 'abaixo da base — impossível'
   : r === 'descends_vs_earlier' ? 'desce vs leitura anterior (a coroa só sobe)'
     : r === 'exceeds_later' ? 'excede leitura posterior'
-      : r || '—'
+      : r === 'no_distinct_source' ? 'sem 2ª imagem distinta — a mesma foto não é prova'
+        : r || '—'
 
 function Cap({ cap, tag, tagColor }) {
   if (!cap) return (

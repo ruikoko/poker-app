@@ -2103,6 +2103,21 @@ def _cross_gold_crowns(grj):
     return gc
 
 
+def _distinct_failed_sibling(caps, read, key):
+    """A 'fonte irmã' que justifica o preenchimento tem de ser uma IMAGEM DIFERENTE do
+    `read` (comparação por `file_hash` do CONTEÚDO, não por id de linha) que leu VAZIO para
+    este seat. Duas linhas da MESMA imagem — ou a própria captura reusada — NÃO são
+    corroboração (uma cópia não é prova nova). Sem imagem distinta que leu vazio → None
+    (não há irmã real → a proposta não entra no balde 'passou'). Ver
+    `#CROSSING-SIBLING-BY-ROWID-NOT-CONTENT`."""
+    rfh = read.get("file_hash")
+    if not rfh:                      # sem hash do read não se prova distinção → sem irmã
+        return None
+    return next((c for c in caps
+                 if c.get("file_hash") and c["file_hash"] != rfh
+                 and c["crowns"].get(key) in (None, 0)), None)
+
+
 def _crossing_all_fills():
     """Núcleo da LEI DO CRUZAMENTO (coroas). Devolve (survivors, suspects). survivor =
     seat com coroa VAZIA no gravado + valor da fonte irmã (Gold principal, senão a MAIOR
@@ -2115,12 +2130,12 @@ def _crossing_all_fills():
     traj = _cross_trajectory()
     ss_by_hand: dict = {}
     for r in query(
-            "SELECT matched_hand_id AS mh, id, vision_json AS vj, captured_at::text AS cap "
+            "SELECT matched_hand_id AS mh, id, file_hash, vision_json AS vj, captured_at::text AS cap "
             "  FROM table_ss_processing_log "
             " WHERE matched_hand_id IS NOT NULL AND result='success' AND img_b64 IS NOT NULL"):
         vj = r["vj"] if isinstance(r["vj"], dict) else json.loads(r["vj"] or "{}")
         ss_by_hand.setdefault(r["mh"], []).append(
-            {"kind": "ss", "id": r["id"], "cap": r["cap"],
+            {"kind": "ss", "id": r["id"], "cap": r["cap"], "file_hash": r["file_hash"],
              "url": f"/api/table-ss/image/{r['id']}",
              "crowns": {_cross_norm(s.get("nick")): _cross_num(s.get("bounty_usd"))
                         for s in (vj.get("seats") or []) if s.get("nick")}})
@@ -2141,6 +2156,7 @@ def _crossing_all_fills():
         grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
         gc = _cross_gold_crowns(grj)
         gold = ({"kind": "gold", "id": r["entry_id"], "cap": _gold_photo_time(grj, r.get("gold_at")),
+                 "file_hash": grj.get("file_hash"),
                  "url": f"/api/screenshots/image/{r['entry_id']}", "crowns": gc}
                 if gc is not None else None)
         caps = ([gold] if gold else []) + ss_by_hand.get(r["hand_id"], [])
@@ -2159,12 +2175,16 @@ def _crossing_all_fills():
                 read = max(ssv, key=lambda c: c["crowns"][key]) if ssv else None
             if not read:
                 continue
-            failed = next((c for c in caps if c["id"] != read["id"]
-                           and c["crowns"].get(key) in (None, 0)), None)
-            if not failed and r["ssid"]:
-                failed = next((c for c in caps if c["kind"] == "ss" and c["id"] == r["ssid"]), None)
+            # A irmã tem de ser IMAGEM DIFERENTE (file_hash) que leu vazio — não a mesma
+            # captura por id, nem o fallback do context_table_ss_id (que reusava a própria
+            # captura do read). Sem irmã distinta → sem corroboração. #CROSSING-SIBLING-...
+            failed = _distinct_failed_sibling(caps, read, key)
             prop = read["crowns"][key]
             ok, reason = _cross_sieve(prop, base, r["tn"], key, r["pa"], traj)
+            # CORROBORAÇÃO obrigatória: além da física, exige-se uma 2ª IMAGEM distinta que
+            # leu vazio. Sem ela, "outra leitura" é a mesma imagem (ou nenhuma) → não propõe.
+            if ok and failed is None:
+                ok, reason = False, "no_distinct_source"
             case = {
                 "hand_id": r["hand_id"], "hand_db_id": r["id"], "seat": p.get("name"),
                 "tournament": r.get("tname"), "base_source": "ts",
