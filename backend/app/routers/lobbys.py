@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
 from pydantic import BaseModel, Field, field_validator
 
-from app.auth import require_auth
+from app.auth import require_auth, require_auth_or_api_key
 from app.db import query
 from app.services.image_utils import detect_image_mime
 from app.services.lobby_sync import run_sync, process_lobby_message, reconcile_lobby_logs
@@ -165,7 +165,9 @@ def reconcile_lobbys(
         description="Limitar a estes discord_message_id (lote específico). "
                     "None/omisso = GLOBAL (todos os pendentes), como antes.",
     ),
-    current_user=Depends(require_auth),
+    # dual-path (22 Jul): endpoint OPERACIONAL — aceita Bearer como os congéneres
+    # de gg-health/table-ss (ops de correção correm por endpoint, não script local).
+    current_user=Depends(require_auth_or_api_key),
 ):
     """Re-corre o resolver sobre os lobbys pendentes (tm_not_found/tm_ambiguous)
     contra o estado ACTUAL da BD, usando o vision_json já guardado (sem Vision).
