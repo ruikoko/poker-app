@@ -604,6 +604,9 @@ export const tableSs = {
   // cruzamento disparado (propostas nos painéis). tag = p/ capturas sem folder-tag.
   moveToPrev: (ssid, prevHandId, tag) =>
     req('POST', `/table-ss/${ssid}/move-to-prev`, { prev_hand_id: prevHandId, tag }),
+  // Corre o varrimento da régua dos 6s JÁ (o mesmo dos gatilhos de import).
+  regra6sApply: (dryRun = false) =>
+    req('POST', '/table-ss/regra6s/apply', { dry_run: dryRun }),
 }
 
 // ── FONTE ÚNICA dos src de imagem (lei do lightbox p/ imagens) ───────────────

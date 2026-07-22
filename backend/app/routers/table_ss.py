@@ -1832,8 +1832,19 @@ def apply_regra_6s(dry_run: bool = False, reason: str = "sweep") -> dict:
 def regra6s_apply(payload: dict = Body(default={}),
                   current_user=Depends(require_auth_or_api_key)):
     """Corre a régua dos 6s já (o mesmo varrimento dos gatilhos). {dry_run:true} →
-    ensaio (plano, 0 escritas)."""
-    return apply_regra_6s(dry_run=bool((payload or {}).get("dry_run")), reason="manual")
+    ensaio (plano, 0 escritas). Corrida real dispara o CRUZAMENTO a seguir (as imagens
+    movidas são testemunhas), como nos gatilhos e no mover manual."""
+    dry = bool((payload or {}).get("dry_run"))
+    out = apply_regra_6s(dry_run=dry, reason="manual")
+    if not dry:
+        try:
+            import threading
+            from app.routers.gg_health import run_crossing_auto
+            threading.Thread(target=run_crossing_auto,
+                             kwargs={"reason": "regra6s_apply"}, daemon=True).start()
+        except Exception as e:  # pragma: no cover - defensivo
+            logger.error("[regra6s] crossing não disparou: %s", e)
+    return out
 
 
 # ── Fase 1 do editor Saúde GG (A: suspeitas 2-candidatas + revert; E: verificada) ──

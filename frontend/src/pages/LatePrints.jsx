@@ -336,6 +336,19 @@ export default function LatePrintsPage() {
     } catch (e) { setMsg('Erro: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Forçar a régua dos 6s JÁ (sem esperar pelo próximo import) — o mesmo varrimento.
+  const runRegra6s = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const r = await tableSs.regra6sApply()
+      const moved = (r.moved_tagged || 0) + (r.moved_untagged || 0)
+      setMsg(`✓ régua corrida: ${moved} movida(s) (${r.moved_tagged || 0} tag+imagem, ` +
+        `${r.moved_untagged || 0} só imagem); ${r.undecided || 0} ficaram por decidir ` +
+        `(sem anterior na base / anterior de mesa final). O cruzamento corre a seguir.`)
+      load()
+    } catch (e) { setMsg('Erro: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
   const dismissRow = async (r) => {
     if (!window.confirm(`Dispensar (legítimo)?\n\nA tag '${r.folder_tag}' fica em ${r.hand_id}; esta captura sai do painel (persistido).`)) return
     setBusy(true); setMsg('')
@@ -407,7 +420,13 @@ export default function LatePrintsPage() {
               busy={busy} setBusy={setBusy} setMsg={setMsg} tagOptions={tagOptions} />)}
           </Section>
           <Section title="RÉGUA DOS 6s — o que a régua não decidiu" accent="#38bdf8" items={regra6s}
-            note="A régua corre SOZINHA no processamento (≤6s pertence à anterior; FT fora; rasto no selo). Aqui fica só o que ela não decide: sem mão anterior na base, anterior de mesa final, ou ainda não varrido. Mover manual usa a mesma mecânica (imagem sem re-desanon + tag pelo selo + cruzamento).">
+            note="A régua corre SOZINHA no processamento (≤6s pertence à anterior; FT fora; rasto no selo). Aqui fica só o que ela não decide: sem mão anterior na base, anterior de mesa final, ou ainda não varrido. Mover manual usa a mesma mecânica (imagem sem re-desanon + tag pelo selo + cruzamento)."
+            header={
+              <button onClick={runRegra6s} disabled={busy}
+                style={{ fontSize: 12, fontWeight: 800, padding: '4px 12px', borderRadius: 5, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#38bdf8', color: '#082f49' }}>
+                ▶ Correr a régua agora
+              </button>
+            }>
             {regra6s.map((r, i) => <R6Row key={`${r.ssid}-${i}`} r={r} onZoom={setZoom}
               onMoved={(row) => dropRows([rowKey(row)])} onDismiss={dismissRow}
               busy={busy} setBusy={setBusy} setMsg={setMsg} tagOptions={tagOptions} />)}
