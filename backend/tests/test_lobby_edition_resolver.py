@@ -193,7 +193,7 @@ def test_resolve_returns_edition_quarantine_tier():
         tn, cands, tier = resolve_tournament_number(
             "GGPoker", "Daily Hyper $80", None,
             posted_at_hint=datetime(2026, 7, 9, 18, 25),  # UTC-naive (janela)
-            buy_in=80.0, anchor_mode="prestart", return_tier=True,
+            buy_in=80.0, return_tier=True,
             disambiguate_editions=True, disambig_anchor_lisbon=anchor,
             disambig_entrants=121, disambig_players_left=5,
         )
@@ -210,7 +210,7 @@ def test_resolve_single_edition_glues_without_disambiguation():
         tn, cands, tier = resolve_tournament_number(
             "GGPoker", "Bounty Hunters Daily Main", None,
             posted_at_hint=datetime(2026, 7, 9, 19, 0),
-            buy_in=54.0, anchor_mode="prestart", return_tier=True,
+            buy_in=54.0, return_tier=True,
             disambiguate_editions=True,
             disambig_anchor_lisbon=datetime(2026, 7, 9, 20, 0),
             disambig_entrants=1877, disambig_players_left=1877,

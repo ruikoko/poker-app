@@ -1,5 +1,20 @@
 # Pendentes — backlog vivo
 
+## ★ EM CURSO (22 Jul, sessão 2b) — guarda de causalidade no resolver de lobbys
+
+Régua do Rui (carimbada): **print de lobby anterior ao arranque = IMPOSSÍVEL** (ele só tira
+prints DURANTE o jogo, mãos HRC/ICM). Código feito em local (diff ao Rui antes do push):
+resolver com janela **só-para-trás** para todos (`anchor_mode`/`prestart` REMOVIDOS — a
+premissa pt40 «lobby=inscrição» era da era Discord e está morta); `reconcile` com
+`message_ids` re-resolve **qualquer** estado (via de correção). **Após OK+deploy, operações:**
+`POST /api/lobbys/reconcile` (1º `dry_run=true`, depois real) com os **7 mids**: os 5 roubados
+(614cb1d6…, a40e3f80…, 74cc1185…, 1300715a…, 9ae3a475…) + os 2 cruzados do Deepstack $88
+30 Jun (98721a9b… entrants=217→dono 294738291; e4807c9d… entrants=305→dono 294711510).
+**Prova de aceitação:** 297003773 e 297008916 ganham payouts; 294711510 perde os ERRADOS
+(eram do gémeo — hoje source `file_lobby_vision:98721a9b…`) e ganha os dele; 294738291 ganha
+os dele (a guarda de coerência tinha, e bem, recusado os do gémeo — era esse o «sem payouts»).
+Alguns dos 7 podem cair em `edition_quarantine` (honesto — Rui decide no painel de edições).
+
 ## ★ EM CURSO (22 Jul, sessão 2) — fronteira FT pela TRANSIÇÃO DA HH + régua dos 6s consulta-a
 
 Decisão do Rui (22 Jul): fonte (T) transição do -max é a primária da fronteira; recuar as

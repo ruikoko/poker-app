@@ -440,7 +440,8 @@ async def process_lobby_message(
             site, name, vj.get("start_time_iso"),
             posted_at_hint=posted_at,
             buy_in=vj.get("buy_in"),
-            anchor_mode="prestart",  # pt41 Track A — lobby SS é pré-start
+            # 22 Jul: guarda de causalidade — lobby é SEMPRE durante o jogo
+            # (janela só-para-trás no resolver; o modo prestart morreu).
             return_tier=True,
             # RAIZ 2 — desambiguação de edições GG do mesmo torneio/dia. Âncora
             # em Lisboa naive (posted_at vem em UTC; o resto é Lisboa naive).
@@ -837,6 +838,11 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
     `POST /api/lobbys/reconcile`. `dry_run=True` → calcula e devolve o preview
     por torneio, sem escrever. `message_ids=[]` → curto-circuita.
 
+    `message_ids` NÃO-vazio = lote explícito do operador → re-resolve essas rows
+    **qualquer que seja o result** (incl. `success`): é a via de correção de
+    atribuições erradas (22 Jul: 5 prints roubados por gémeos por-arrancar + 2
+    cruzados). O varrimento global (sem `message_ids`) mantém o filtro de estado.
+
     Devolve {scanned, resolved, written, skipped_precedence, still_unresolved,
     dry_run, items:[...]}.
     """
@@ -844,20 +850,21 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
         return {"scanned": 0, "resolved": 0, "written": 0, "skipped_precedence": 0,
                 "still_unresolved": 0, "dry_run": dry_run, "items": []}
 
-    sql = (
+    base_sql = (
         "SELECT discord_message_id, site, tournament_name, posted_at, "
         "       vision_json, result "
         "FROM lobby_processing_log "
+        "WHERE vision_json IS NOT NULL"
+    )
+    if message_ids is not None:
+        # lote explícito: sem filtro de estado (re-resolução forçada, deliberada)
+        rows = query(base_sql + " AND discord_message_id = ANY(%s)", (list(message_ids),))
+    else:
         # RAIZ 2 — 'edition_quarantine' entra no retry: se chegarem mãos/TS que
         # passem a dar prova dura, auto-resolve; senão fica em quarentena (o
         # Rui decide no painel). Idempotente.
-        "WHERE result IN ('tm_not_found', 'tm_ambiguous', 'edition_quarantine') "
-        "  AND vision_json IS NOT NULL"
-    )
-    if message_ids is not None:
-        rows = query(sql + " AND discord_message_id = ANY(%s)", (list(message_ids),))
-    else:
-        rows = query(sql)
+        rows = query(base_sql +
+                     " AND result IN ('tm_not_found', 'tm_ambiguous', 'edition_quarantine')")
 
     scanned = resolved = written = skipped_prec = still = incoherent = 0
     items: list[dict] = []
@@ -868,7 +875,7 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
         site = r.get("site") or vj.get("site")
         name = r.get("tournament_name") or vj.get("tournament_name")
         posted_at = r.get("posted_at")
-        # anchor prestart, convenção pt51 (Lisboa naive) — descarta tz se vier
+        # âncora do print (convenção pt51, Lisboa naive) — descarta tz se vier
         anchor = posted_at
         if anchor is not None and getattr(anchor, "tzinfo", None) is not None:
             anchor = anchor.replace(tzinfo=None)
@@ -876,7 +883,7 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
         tn, candidates, tier = tournament_resolver.resolve_tournament_number(
             site, name, vj.get("start_time_iso"),
             posted_at_hint=anchor, buy_in=vj.get("buy_in"),
-            anchor_mode="prestart", return_tier=True,
+            return_tier=True,
             # RAIZ 2 — mesma desambiguação de edições do live path.
             disambiguate_editions=True,
             disambig_anchor_lisbon=(utc_to_lisbon_naive(posted_at)

@@ -87,7 +87,7 @@ async def upload_lobby_ss(
     name_hint = (name_hint or "").strip() or None
 
     # posted_at = captured_at (mtime do ficheiro = hora local de Lisboa, naive),
-    # usado como âncora prestart do resolver. Fallback: agora (Lisboa naive).
+    # usado como âncora do resolver (janela só-para-trás). Fallback: agora (Lisboa naive).
     posted_at: Optional[datetime] = None
     if captured_at:
         try:

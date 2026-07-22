@@ -38,23 +38,15 @@ logger = logging.getLogger("tournament_resolver")
 # atravessa a meia-noite. Ver #RESOLVER-TIER0-STRICT-EQUALITY.
 _TIER0_WINDOW_HOURS = 24
 
-# pt41 Track A (#LOBBY-ANCHOR-PRESTART-REGRESSION) — janelas source-aware.
-# 'during_play' (table-ss, default): SS tirada durante o jogo → start é PASSADO
-#   → janela [anchor−24h, anchor] + "closest" (≡ DESC LIMIT 1 anterior).
-# 'prestart' (lobby): SS tirada na inscrição → start é FUTURO próximo (~+30min)
-#   → janela [anchor−12h, anchor+2h] + "closest" (mata o mis-resolve do dia
-#   anterior, em que um instance já-começado dentro das 24h era apanhado).
-_PRESTART_BACK_HOURS = 12
-_PRESTART_FWD_HOURS = 2
-# #META-START-TIME (item 9) — tolerância late-reg SÓ para GG, no INTERVALO SEM TS.
-# tournaments_meta.start_time (TIER 1) e MIN(played_at) (TIER 2) são a 1ª MÃO, não o
-# arranque agendado; num lobby GG (prestart) a 1ª mão entra depois do post por
-# (agendado−post)+late-reg — pode passar de 2h em campos fundos. As não-GG não sofrem
-# (o lobby traz start_time_iso da Vision → ramo-1, ancora no arranque real). +6h cobre
-# o late-reg profundo e fica muito aquém do 2×/dia GG (~12h): um irmão só-por-nome cai
-# fora, ou (se <6h) gera AMBIG→None honesto (nunca mis-resolve). TIER 0/TS intocado
-# (usa `anchor` próprio); só toca o window dos TIER 1/2, i.e. o intervalo sem TS.
-_GG_PRESTART_FWD_HOURS = 6
+# ⚖️ GUARDA DE CAUSALIDADE (régua do Rui, 22 Jul): TODA a SS/print é tirada
+# DURANTE O JOGO → o arranque do torneio é SEMPRE PASSADO → janela SÓ-PARA-TRÁS
+# [anchor−24h, anchor] + "closest". Um print anterior ao arranque é IMPOSSÍVEL.
+# O modo 'prestart' do pt41 (lobby na inscrição, start futuro ~+30min) MORREU com
+# a premissa que o criou: era do canal Discord #lobbys (JOURNAL pt40, 24 Mai —
+# histórico); no fluxo atual o Rui só tira prints de lobby ENQUANTO joga (mãos
+# HRC/ICM), nunca pré-arranque. A janela futura permitia roubar prints a gémeos
+# (5 casos medidos 22 Jul; 2 torneios ficaram sem payouts). REGISTO_CONCEITO
+# 2026-07-22 (c).
 # Ramo-1 do _decide_window (start-centered, TIER 1/2): forward alargado de 2h
 # para 4h — a 1ª hand importada entra ~1-2h depois do start (late-reg/deep MTT;
 # empírico pt41), e ±2h era marginal.
@@ -367,7 +359,6 @@ def _decide_window(
     start_time_iso: Optional[str],
     posted_at_hint: Optional[datetime],
     window_hours: float,
-    anchor_mode: str = "during_play",
     site: Optional[str] = None,
 ) -> Optional[tuple[datetime, datetime]]:
     """Aplica a precedencia de janela temporal (TIER 1/2).
@@ -376,12 +367,12 @@ def _decide_window(
       1. start_time_iso valido (ramo-1) -> [start - window_hours, start + 4h].
          pt41: forward alargado de 2h para 4h — a 1ª hand importada entra
          ~1-2h depois do start (late-reg/deep MTT); ±2h era marginal.
-      2. posted_at_hint presente (ramo-2), source-aware (pt41):
-         - prestart (lobby): [posted - 12h, posted + 2h]. A SS é tirada na
-           inscricao → o torneio comeca DEPOIS do post.
-         - during_play (table-ss, default): [posted - 12h, posted - 30min].
-           SS tirada durante o jogo → torneio comecou antes do post; -30min
-           evita falsos positivos com torneios que mal arrancaram.
+      2. posted_at_hint presente (ramo-2) -> [posted - 12h, posted - 30min].
+         GUARDA DE CAUSALIDADE (22 Jul): TODA a SS/print (lobby incluído) é
+         tirada durante o jogo -> o torneio comecou ANTES do post; -30min
+         evita falsos positivos com torneios que mal arrancaram. O ramo
+         'prestart' (lobby na inscricao, +2h/+6h de futuro) morreu com a
+         premissa pt40 que o criou.
       3. nem start_time_iso nem posted_at_hint -> None (sem janela).
     """
     st = _parse_iso_naive(start_time_iso)
@@ -393,14 +384,6 @@ def _decide_window(
         # wall-clock de Lisboa) p/ comparar naive↔naive com as colunas.
         if posted_at_hint.tzinfo is not None:
             posted_at_hint = posted_at_hint.replace(tzinfo=None)
-        if anchor_mode == "prestart":
-            # #META-START-TIME (item 9): GG usa forward alargado (late-reg) porque
-            # a coluna start_time dos TIER 1/2 é a 1ª mão, não o arranque agendado.
-            fwd = _GG_PRESTART_FWD_HOURS if site == "GGPoker" else _PRESTART_FWD_HOURS
-            return (
-                posted_at_hint - timedelta(hours=_PRESTART_BACK_HOURS),
-                posted_at_hint + timedelta(hours=fwd),
-            )
         return (
             posted_at_hint - timedelta(hours=12),
             posted_at_hint - timedelta(minutes=30),
@@ -411,7 +394,7 @@ def _decide_window(
 def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
                      prize_pool=None, total_players=None,
                      anchor=None, window_hours=_TIER0_WINDOW_HOURS,
-                     anchor_mode="during_play", return_all=False):
+                     return_all=False):
     """TIER 0 — tournament_summaries (autoritativo).
 
     pt39 (#RESOLVER-TIER0-STRICT-EQUALITY): TIER 0 suporta DOIS conjuntos de
@@ -435,13 +418,11 @@ def _query_summaries(site, patterns, buy_in=None, buy_in_currency=None,
     NULL no parametro = sem filtro. Valor = filtro estricto (=).
     """
     if anchor is not None:
-        # pt41 Track A: janela source-aware + selecção "closest" (ORDER BY abs)
-        # em vez de "start<=anchor DESC". during_play: [anchor−24h, anchor]
-        # (fwd=0 ≡ comportamento anterior). prestart: [anchor−12h, anchor+2h].
-        if anchor_mode == "prestart":
-            back_h, fwd_h = _PRESTART_BACK_HOURS, _PRESTART_FWD_HOURS
-        else:
-            back_h, fwd_h = window_hours, 0
+        # GUARDA DE CAUSALIDADE (22 Jul): janela SÓ-PARA-TRÁS [anchor−24h, anchor]
+        # + selecção "closest" (ORDER BY abs). fwd=0 SEMPRE — um torneio que
+        # arranca DEPOIS do print nunca é candidato (matava: 5 prints roubados
+        # por gémeos por-arrancar; o modo prestart do pt41 morreu).
+        back_h, fwd_h = window_hours, 0
         # return_all (RAIZ 2): devolve TODAS as edições da janela (não LIMIT 1
         # "closest às cegas") para o resolver as desambiguar por prova. total_players
         # vai no SELECT p/ a régua da impossibilidade (H2).
@@ -552,7 +533,6 @@ def resolve_tournament_number(
     buy_in_currency: Optional[str] = None,
     prize_pool: Optional[float] = None,
     total_players: Optional[int] = None,
-    anchor_mode: str = "during_play",
     return_tier: bool = False,
     disambiguate_editions: bool = False,
     disambig_anchor_lisbon: Optional[datetime] = None,
@@ -597,7 +577,7 @@ def resolve_tournament_number(
         return _ret(None, [], None)
 
     patterns = [f"%{t}%" for t in tokens]
-    window = _decide_window(start_time_iso, posted_at_hint, window_hours, anchor_mode, site)
+    window = _decide_window(start_time_iso, posted_at_hint, window_hours, site)
 
     # TIER 0 — tournament_summaries (autoritativo). pt39: nome + buy_in +
     # janela start_time ancorada no posted_at_hint (instância em curso).
@@ -609,7 +589,7 @@ def resolve_tournament_number(
     ts_currency = (
         (buy_in_currency or _currency_for_site(site)) if buy_in is not None else None
     )
-    # RAIZ 2 (11 Jul) — só GG, só quando o caller pede (lobby prestart). Traz
+    # RAIZ 2 (11 Jul) — só GG, só quando o caller pede (pipeline de lobbys). Traz
     # TODAS as edições da janela (não LIMIT 1 às cegas) para desambiguar por prova.
     disambig_on = (
         disambiguate_editions and site == "GGPoker" and anchor is not None
@@ -617,7 +597,7 @@ def resolve_tournament_number(
     candidates_summaries = [dict(r) for r in _query_summaries(
         site, patterns, buy_in=buy_in, buy_in_currency=ts_currency,
         prize_pool=prize_pool, total_players=total_players, anchor=anchor,
-        anchor_mode=anchor_mode, return_all=disambig_on,
+        return_all=disambig_on,
     )]
     if candidates_summaries:
         if len(candidates_summaries) == 1:

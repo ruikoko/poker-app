@@ -1,7 +1,7 @@
 """Unit tests para services/tournament_resolver.resolve_tournament_number (FASE A C2).
 Mocked DB via patch a app.services.tournament_resolver.query."""
 from unittest.mock import patch
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.services.tournament_resolver import (
     resolve_tournament_number, _tokenize_name, clean_tournament_name,
@@ -568,34 +568,50 @@ def test_pt39_tier0_backoffice_pool_players_no_anchor():
 # #TABLE-SS-RESOLVER-COLLISION — o sufixo #NNN (nº de mesa Winamax lido na SS de
 # mesa) envenenava o ILIKE ALL. clean_tournament_name apara só o trailing #\d+.
 
-# ── pt41 Track A: anchor_mode source-aware (#LOBBY-ANCHOR-PRESTART-REGRESSION) ──
+# ── GUARDA DE CAUSALIDADE (22 Jul, régua do Rui) — janela SÓ-PARA-TRÁS ─────────
+# «Print de lobby anterior ao arranque = IMPOSSÍVEL» (o Rui só tira prints
+# durante o jogo). O modo 'prestart' do pt41 morreu com a premissa pt40 (era do
+# canal Discord #lobbys). fwd=0 SEMPRE no TIER 0; ramo-2 do _decide_window igual
+# para todos ([posted−12h, posted−30min]).
 
-def test_trackA_tier0_prestart_window_and_closest_order():
-    """Lobby (anchor_mode='prestart'): TIER 0 usa [anchor−12h, anchor+2h] +
-    ORDER BY abs (closest) → resolve para o start futuro próximo."""
-    posted = datetime(2026, 5, 19, 16, 17)
-    ts_rows = [_row("284939948", "Daily Hyper $80",
-                    datetime(2026, 5, 19, 16, 45))]  # +28min
+def test_causalidade_tier0_janela_so_para_tras():
+    """TIER 0: back=24h, fwd=0 para TODOS os consumidores (lobby incluído)."""
+    posted = datetime(2026, 7, 2, 19, 19)
+    ts_rows = [_row("295219051", "Daily Hyper $60", datetime(2026, 7, 2, 17, 45))]
     with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
         tn, candidates = resolve_tournament_number(
-            "GGPoker", "Daily Hyper $80", None,
-            posted_at_hint=posted, buy_in=80.0, anchor_mode="prestart",
-        )
-    assert tn == "284939948" and candidates == []
+            "GGPoker", "Daily Hyper $60", None,
+            posted_at_hint=posted, buy_in=60.0)
+    assert tn == "295219051" and candidates == []
     sql, sql_args = m.call_args_list[0][0]
     assert "ORDER BY abs(" in sql and "LIMIT 1" in sql
-    assert sql_args[11] == 12 and sql_args[13] == 2   # prestart: back=12h, fwd=2h
+    assert sql_args[11] == 24 and sql_args[13] == 0   # só-para-trás, sempre
 
 
-def test_trackA_tier0_during_play_is_default():
-    """Default (sem anchor_mode) = during_play: back=24h, fwd=0 (table-ss inalterado)."""
-    posted = datetime(2026, 5, 19, 18, 0)
-    ts_rows = [_row("Z", "x", datetime(2026, 5, 19, 16, 0))]
-    with patch("app.services.tournament_resolver.query", side_effect=[ts_rows]) as m:
-        resolve_tournament_number(
-            "GGPoker", "x", None, posted_at_hint=posted, buy_in=50.0)
-    sql_args = m.call_args_list[0][0][1]
-    assert sql_args[11] == 24 and sql_args[13] == 0
+def test_causalidade_os_5_casos_reais_22jul():
+    """Os 5 prints roubados por gémeos por-arrancar (medidos 22 Jul): a janela
+    [print−24h, print] INCLUI o dono real (arrancado) e EXCLUI o ladrão (futuro)."""
+    casos = [  # (print, arrancado=dono real, futuro=ladrão)
+        (datetime(2026, 7, 2, 19, 19, 25), datetime(2026, 7, 2, 17, 45), datetime(2026, 7, 2, 20, 45)),
+        (datetime(2026, 7, 2, 19, 19, 27), datetime(2026, 7, 2, 17, 45), datetime(2026, 7, 2, 20, 45)),
+        (datetime(2026, 7, 9, 18, 25, 10), datetime(2026, 7, 9, 16, 45), datetime(2026, 7, 9, 18, 45)),
+        (datetime(2026, 7, 9, 18, 25, 22), datetime(2026, 7, 9, 17, 10), datetime(2026, 7, 9, 19, 10)),
+        (datetime(2026, 6, 30, 20, 5, 10), datetime(2026, 6, 30, 18, 15), datetime(2026, 6, 30, 20, 15)),
+    ]
+    for print_at, dono, ladrao in casos:
+        lo, hi = print_at - timedelta(hours=24), print_at   # a janela do TIER 0
+        assert lo <= dono <= hi, f"dono real fora da janela: {dono}"
+        assert ladrao > hi, f"ladrão (por arrancar) DENTRO da janela: {ladrao}"
+
+
+def test_causalidade_resolver_nao_aceita_anchor_mode():
+    """O parâmetro anchor_mode morreu — passar 'prestart' é erro (regressão
+    impossível por chamador esquecido)."""
+    import pytest
+    with pytest.raises(TypeError):
+        resolve_tournament_number("GGPoker", "x", None,
+                                  posted_at_hint=datetime(2026, 7, 2, 19, 0),
+                                  anchor_mode="prestart")
 
 
 def test_trackA_decide_window_ramo1_forward_4h():
@@ -606,49 +622,14 @@ def test_trackA_decide_window_ramo1_forward_4h():
     assert lo <= datetime(2026, 5, 19, 19, 45) <= hi
 
 
-def test_trackA_decide_window_ramo2_prestart_forward():
-    """Ramo-2 sem start_time + prestart: [posted−12h, posted+2h]."""
+def test_causalidade_decide_window_ramo2_unico_para_todos():
+    """Ramo-2 sem start_time: [posted−12h, posted−30min] para TODOS (o forward
+    +2h/+6h do prestart morreu; GG não tem tolerância de futuro)."""
     posted = datetime(2026, 5, 19, 16, 0)
-    lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart")
-    assert lo == datetime(2026, 5, 19, 4, 0)
-    assert hi == datetime(2026, 5, 19, 18, 0)
-
-
-def test_trackA_decide_window_ramo2_during_play_unchanged():
-    """Ramo-2 sem start_time + during_play (default): [posted−12h, posted−30min]."""
-    posted = datetime(2026, 5, 19, 16, 0)
-    lo, hi = _decide_window(None, posted, 2.0)
-    assert lo == datetime(2026, 5, 19, 4, 0)
-    assert hi == datetime(2026, 5, 19, 15, 30)
-
-
-# ── #META-START-TIME (item 9): late-reg forward SÓ GG, no intervalo sem TS ─────
-
-def test_meta_gg_prestart_forward_widened_to_6h():
-    """GG lobby (prestart): forward alargado p/ +6h (a 1ª mão = start_time dos
-    TIER 1/2 entra depois do post por agendado+late-reg). Non-GG fica em +2h."""
-    posted = datetime(2026, 5, 19, 16, 0)
-    lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart", site="GGPoker")
-    assert lo == datetime(2026, 5, 19, 4, 0)
-    assert hi == datetime(2026, 5, 19, 22, 0)          # +6h (era +2h)
-    # 1ª mão a +4h (late-reg fundo) agora DENTRO; antes (+2h) ficava fora
-    assert lo <= datetime(2026, 5, 19, 20, 0) <= hi
-
-
-def test_meta_nongg_prestart_forward_unchanged_2h():
-    """Winamax/PS (prestart): forward INALTERADO em +2h — não sofrem do defeito
-    (o lobby traz start_time_iso da Vision → ramo-1)."""
-    posted = datetime(2026, 5, 19, 16, 0)
-    lo, hi = _decide_window(None, posted, 2.0, anchor_mode="prestart", site="Winamax")
-    assert hi == datetime(2026, 5, 19, 18, 0)          # +2h, como antes
-
-
-def test_meta_gg_during_play_not_widened():
-    """GG during_play (table-ss): NÃO alargado — a tolerância é só p/ o lobby
-    (prestart). Mantém [posted−12h, posted−30min]."""
-    posted = datetime(2026, 5, 19, 16, 0)
-    lo, hi = _decide_window(None, posted, 2.0, site="GGPoker")   # default during_play
-    assert hi == datetime(2026, 5, 19, 15, 30)
+    for site in (None, "GGPoker", "Winamax"):
+        lo, hi = _decide_window(None, posted, 2.0, site=site)
+        assert lo == datetime(2026, 5, 19, 4, 0)
+        assert hi == datetime(2026, 5, 19, 15, 30)
 
 
 def test_clean_drops_trailing_table_suffix():

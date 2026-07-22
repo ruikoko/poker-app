@@ -499,3 +499,9 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
 
 - 2026-07-18 — **Problema:** prints atrasados casam à mão ERRADA — o nome do ficheiro leva o nº da mesa que estava no ecrã no instante do print, não a mão que o Rui queria estudar (o print pode ser de uma mão anterior). → **Solução:** crivo "Prints fora de tempo — a mão não deu tempo" (painel read-only na Saúde GG): capturas com folder_tag casadas a mãos que **TIVERAM flop** (HH `*** FLOP ***`, determinístico, independente da Vision/-ft) e tiradas **< 9 s** do `played_at`. Régua **FÍSICA**: nos primeiros ~10 s a mão nem chegou ao flop → um print de spot pós-flop é impossível.
 - 2026-07-18 — **MEDIÇÃO (fronteira MEDIDA do comportamento do Rui, não estimativa):** a faixa **10-20 s** ("suspeitos") foi verificada **uma-a-uma pelo Rui à imagem — 27 capturas, 0 erros** → é comportamento **NORMAL** dele (multi-tabling), **não suspeita** → **removida** do painel. As **< 10 s** foram verificadas — **8/8 erros confirmados** (todas prints de mãos anteriores). Régua fixada em **< 9 s** (as 8 têm intervalo ≤ 8 s; **0 em [9,10)** → nenhuma cai de fora). **Se alguém voltar a propor uma régua acima dos 9 s, esta medição responde: a faixa 10-20 s tem 0 erros medidos.** O Rui propôs os 20 s e foi ele que os retirou, com prova.
+- **Doc datado NÃO é estado atual** → o Code assentou o desenho do resolver (pt41 prestart) e a
+  sua própria análise (22 Jul) na premissa do JOURNAL pt40 («lobby SS = inscrição») sem a
+  re-validar com o Rui; o fluxo tinha mudado (Discord→Capturas, prints só durante o jogo) e a
+  premissa morta custou 5 prints roubados + 2 torneios sem prémios → **antes de assentar desenho
+  em premissa de journal antigo, confirmar com o Rui se ainda é verdade** (journals lêem-se «à
+  data»; o estado vivo confirma-se na fonte). [journal 2026-07-22 sessão 2]

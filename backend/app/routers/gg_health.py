@@ -3418,7 +3418,7 @@ def _reresolve_lobby_row(row: dict):
     res = TR.resolve_tournament_number(
         site, name, vj.get("start_time_iso"),
         posted_at_hint=posted, buy_in=vj.get("buy_in"),
-        anchor_mode="prestart", return_tier=True,
+        return_tier=True,
         disambiguate_editions=True,
         disambig_anchor_lisbon=(utc_to_lisbon_naive(posted) if posted else None),
         disambig_entrants=vj.get("entrants"), disambig_players_left=pl,

@@ -526,3 +526,21 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
 - Motivo: FT furada na régua dos 6s (1 movida indevida GG-6083363849→843) + 5 fronteiras
   registadas atrasadas + dispensa errada do 289176860 + 3 FTs sem registo (incl. a vitória
   289883772). Referência: journal 2026-07-22 (sessão 2), `FT_BOUNDARY_ANATOMIA §2/§11`.
+
+## 2026-07-22 (c) — Régua do lobby: «print de lobby = SEMPRE durante o jogo» + guarda de causalidade no resolver
+
+- **Régua de produto (ditada pelo Rui, 22 Jul):** o Rui **só tira prints de lobby enquanto joga**
+  (quando há mãos de HRC/tag ICM) — **nunca na inscrição/pré-arranque**. Logo, **um print de
+  lobby anterior ao arranque do torneio é IMPOSSÍVEL**.
+- **Consequência no resolver (`tournament_resolver`):** janela **SÓ-PARA-TRÁS**
+  `[print−24h, print]` para TODOS os consumidores (lobby, table-ss, backoffice) + closest.
+  O modo **`prestart` do pt41 morreu** (janela com futuro +2h/+6h) — assentava na premissa do
+  `JOURNAL pt40` (24 Mai, era do canal Discord `#lobbys`: «lobby SS tirados na inscrição»),
+  que **não vale** no fluxo atual (Capturas/IT). O parâmetro `anchor_mode` foi removido.
+- **Porquê (medido 22 Jul):** a janela com futuro deixava um gémeo por-arrancar (2×/dia GG)
+  roubar prints de jogo-a-decorrer — **5 prints roubados** + **1 par cruzado** (Deepstack $88
+  30 Jun: os prints dos 2 gémeos trocados um pelo outro); **2 torneios ficaram sem estrutura de
+  prémios** (297003773, 297008916) e **1 com prémios errados** (294711510). A guarda de coerência
+  (`entrants > campo`) salvou o 294738291 de prémios errados — foi por isso que ficou «sem prémios».
+- Correção dos dados: re-resolução por lote explícito (`POST /api/lobbys/reconcile` com
+  `message_ids` passa a re-resolver **qualquer** estado, incl. `success`).
