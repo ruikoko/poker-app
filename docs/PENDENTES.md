@@ -1,6 +1,30 @@
 # Pendentes — backlog vivo
 
-## ★ EM CURSO (22 Jul, sessão 2b) — guarda de causalidade no resolver de lobbys
+## ★ PRÓXIMA SESSÃO — ordem do Rui (22 Jul 2026, fecho da sessão 2)
+
+1. **Implementar a AUTO-CONFIRMAÇÃO das fronteiras FT** (aprovada 22 Jul; desenho:
+   `REGISTO_CONCEITO 2026-07-22 (d)` + journal `2026-07-22b §4`). Testemunha independente
+   obrigatória; match trivial não confirma; promoção fica com o Rui.
+2. **A FAMÍLIA GRANDE «este artefacto pertence a este torneio/mão?»** — consolidar as 4+
+   réguas (prints fora de tempo <9s · régua dos 6s · suspeitas de troca [22 imagens, TODAS
+   ecos `auto_moved` da régua dos 6s] · casador de capturas · resolver de lobbys) numa fonte
+   única `capture_ownership` (PERTENCE/DA_ANTERIOR/NÃO-SEI) + painéis-montra + 1 rasto de
+   decisão. Inventário e desenho: journal `2026-07-22b §3`. ⚠️ **Até lá, NÃO usar o
+   «Aceitar» das 22 suspeitas** (desfaria decisões da régua dos 6s + reverteria desanon).
+3. **Conceito 3 — MÍNIMO DA COROA** (3 decisões já tomadas pelo Rui).
+4. **Conceito 4 — COROA VÁLIDA** (+ `#REGUA-COROAS`; precisa de 2 palavras do Rui: «âncora
+   fiável» e se o fill da testemunha sela).
+5. **Conceito 5 — QUEM SENTA ONDE** + remoção do `#MTT-DESANON-MORTO`.
+6. **Pendentes do Rui:** Toruk na quarentena de nomes · 21 «à espera de tag» · 660 mãos do
+   acidente do disco · 43 coroas anuladas · **rotação dos segredos** (a password só-leitura
+   da BD ficou ecoada em logs locais várias vezes — rodar).
+
+*(Fechados nesta sessão: fonte (T) da fronteira FT + `hand_ft_state` + recuos/recuperações +
+undo 991 [`c0e2b71`]; guarda de causalidade no resolver + morte do prestart [`d9b0995`] +
+re-resolução dos 7 prints com 297003773/297008916 recuperados e mãos destravadas no HRC —
+prova por export 200. Journal `2026-07-22b`.)*
+
+## ~~★ EM CURSO (22 Jul, sessão 2b) — guarda de causalidade no resolver de lobbys~~ ✅ FECHADO (ver acima)
 
 Régua do Rui (carimbada): **print de lobby anterior ao arranque = IMPOSSÍVEL** (ele só tira
 prints DURANTE o jogo, mãos HRC/ICM). Código feito em local (diff ao Rui antes do push):
@@ -15,7 +39,7 @@ premissa pt40 «lobby=inscrição» era da era Discord e está morta); `reconcil
 os dele (a guarda de coerência tinha, e bem, recusado os do gémeo — era esse o «sem payouts»).
 Alguns dos 7 podem cair em `edition_quarantine` (honesto — Rui decide no painel de edições).
 
-## ★ EM CURSO (22 Jul, sessão 2) — fronteira FT pela TRANSIÇÃO DA HH + régua dos 6s consulta-a
+## ~~★ EM CURSO (22 Jul, sessão 2) — fronteira FT pela TRANSIÇÃO DA HH~~ ✅ FECHADO (executado por inteiro; journal 2026-07-22b §1)
 
 Decisão do Rui (22 Jul): fonte (T) transição do -max é a primária da fronteira; recuar as
 5 fronteiras atrasadas; recuperar o dispensado 289176860; depois desfazer a captura 991

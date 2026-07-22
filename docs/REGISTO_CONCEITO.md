@@ -544,3 +544,17 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   (`entrants > campo`) salvou o 294738291 de prémios errados — foi por isso que ficou «sem prémios».
 - Correção dos dados: re-resolução por lote explícito (`POST /api/lobbys/reconcile` com
   `message_ids` passa a re-resolver **qualquer** estado, incl. `success`).
+
+## 2026-07-22 (d) — Auto-confirmação das fronteiras FT (aprovada; promoção fica com o Rui)
+
+- **Decisão do Rui (22 Jul):** fronteiras FT com **cross-check limpo E testemunha
+  independente** (TS `hero_position` dentro da FT, ou N do lobby a bater com os sentados)
+  passam a ser **confirmadas automaticamente** pela app (`decision='confirmed'`,
+  `decided_by='auto:cross_check'`, rasto visível). Match trivial (fronteira da transição sem
+  TS nem lobby — a HH a confirmar-se a si própria) NÃO auto-confirma → fica «Prontas a
+  aprovar». Discordância/sinal em falta/fonte cega → «Precisam de ti», como sempre. Decisões
+  do Rui nunca são pisadas pelo automático.
+- **A PROMOÇÃO (escrita das tags `-ft` nas mãos) FICA COM O RUI** — princípio de 7 Jul
+  mantido; revisita-se depois do wipe+reimport (o teste de aceitação da máquina).
+- Estado: aprovado, por implementar (1º item do backlog). Motivo/desenho: journal
+  2026-07-22b §4.
