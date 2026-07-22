@@ -94,6 +94,65 @@ completo (Tier 1-4, 19 achados) no chat da sessão; aqui ficam os accionáveis.
 nunca extraído do `raw_vision`, não-desce só no `_cross_sieve`, forma-completa/selo-de-nome só no Cruzamento,
 `assert_deanon_consistency` ausente em 4 caminhos, tag case-sensitive (`hand_service:75` vs `:94`). A expandir em sessão dedicada.
 
+### ★ `#REGUA-COROAS` — a régua completa das coroas (DITADA PELO RUI, 22 Jul 2026) → conceito COROA VÁLIDA
+
+**Validação AUTOMÁTICA no processamento** — a app aplica sozinha e deteta erros; o Rui só recebe
+o que ela marcou (NÃO é uma vista para comparar mãos à mão). Quatro regras:
+
+1. **CASCATA** — para a coroa de um eliminado, tentar TODAS as fontes antes de dar por perdida:
+   verde da Gold (verde×2, CANON regra 4) → coroa direta da SS (tirada durante a mão, jogador
+   vivo) → histórico. Nunca desistir com fontes por tentar. *Estado hoje: as 3 fontes existem
+   mas repartidas e quase todas manuais (`/suggest` Vision paga; `crowns/fallback-fill`;
+   `last_crowns`); os greens GUARDADOS (`raw_vision`) não são usados — 121 entries têm GREEN_KO
+   no texto, 37 seats `eliminated_no_green` recuperáveis SEM re-Vision (medido 22 Jul); a
+   persistência dropa `green_kos` (`screenshot.py:1254-1273`) e 6 dos 7 call-sites do funil não
+   passam vision. Fix-na-causa declarado: persistir + o funil ir buscar por omissão os greens do
+   entry (os 7 call-sites herdam).*
+2. **TRAVÃO MÍNIMO** — nunca abaixo de base÷2, folga ZERO; ao falhar → coroa a 0 + «por rever».
+   (= conceito MÍNIMO DA COROA, decisões já tomadas: tolerância zero · ação única 0+rever ·
+   sem-TS escreve e o funil re-verifica quando o TS chega — o mínimo ENTRA no funil.)
+3. **TRAVÃO PROGRESSIVE** — lógica PKO: as coroas NUNCA descem num torneio (ou sobem, ou
+   desaparecem no bust). A app cruza as mãos que TEM do torneio; as bem extraídas são ÂNCORAS
+   que estabelecem um piso por jogador; leitura abaixo do que uma âncora fiável estabeleceu =
+   IMPOSSÍVEL → a app marca erro SOZINHA no processamento. **RESSALVA (Code, para a palavra do
+   Rui na construção): «âncora fiável» tem de ser definida — selada/fonte-forte primeiro, senão
+   uma leitura ALTA errada envenena o piso** (caso real: Azat Movlyamov tn 293343694 — âncora
+   $100 vs $20 manual SELADO do Rui: a âncora é que era o misread). *Estado hoje: a régua existe
+   COMPLETA mas presa ao crivo do cruzamento (`_cross_sieve` `gg_health.py:2062-2075`, FLOOR +
+   não-desce nas 2 direções, trajetória `_cross_trajectory:2047` por NOME) + o painel de QUEDAS
+   (read-time). A escrita geral trata cada mão isolada. **MEDIÇÃO (22 Jul, por torneio+hash,
+   imune a re-entry): 11 violações em 8 jogador-torneio, de 2 027 trajetórias** — 7 quedas
+   grandes >25% (misreads reais: Lauro $111.72→$25 tn 298477782; Azat $100→$20 ×4) + 4 de
+   cêntimos (incl. $421.87→$421.00 da GG-6090481360).*
+4. **FALLBACK HONESTO** — nenhuma fonte lê, nenhuma validação resolve → NÃO fica em branco nem
+   se inventa: marca **«Coroa eliminada»** (houve um eliminado; a coroa não foi lida). *Estado
+   hoje: as marcas JÁ existem nos dados (`eliminated_no_green`/`eliminated_ambiguous`/
+   `live_crown_read_zero`/`flame_below_half`/`no_witness_has_plate`) — o frontend não lê NENHUMA
+   (0 usos de `bounty_review`/`crown_review` em `frontend/src`); a página da mão mostra vazio
+   mudo. Falta só a exibição.*
+
+**INTEGRAÇÃO (não é frente nova):** mínimo = conceito 3 (10 cópias do floor a consolidar);
+cascata + progressive + aviso = conceito 4 (COROA VÁLIDA / o funil `eliminated_bounty`);
+**duplicações a matar:** 10 floors · 2 trajetórias (`_cross_trajectory` por nome vs
+`last_crowns` do /suggest por hash) · 2 painéis do $0 · o não-desce a subir do crivo para o
+funil (o crivo vira camada fina, padrão do bust).
+
+**MAPA DOS PAINÉIS (a CARA da régua — LEI 3, componentes únicos; reorganizam-se como
+LEITORES da fonte única):**
+
+| Painel (nome no ecrã) | Hoje | Com a régua única |
+|---|---|---|
+| «Coroas (verificar)» (tile `coroas`) | <½-base + $0 + alto>3× | montra dos vereditos floor/alto |
+| «Vivo com coroa $0» (`live_zero`) | vivos $0 (calado/por ler) | **funde-se** no `unread` de «Coroas (verificar)» |
+| «Conflitos de coroa» (Olho) | 2 leituras discordantes | montra do que a régua não decide sozinha |
+| «Coroas — revisão de quedas» (CrownRecovery) | queda vs vizinha + fora-de-grelha | montra das violações do PROGRESSIVE |
+| Recuperáveis Etapa 2 (CrownRecovery) | sugerir verde×2/douradas/histórico | montra da CASCATA |
+| «Mãos suspeitas» | bounty<½ + hero-em-vilão | mantém (já lê o detetor único) |
+| «Cruzamento — amostra» | auditoria read-only | mantém (isenta, decisão Rui 15 Jul) |
+| *(vista por torneio)* | NÃO existe (5-6 painéis soltos) | consequência natural (1 veredito/seat → agrupar por tn) |
+
+Saúde do Import: zero coroas (confirmado). **Não construir nada disto fora da ordem do plano.**
+
 ---
 
 ## 21 Jul 2026 — backfill Vision das 92 Gold órfãs + 2 buracos do funil de ingest

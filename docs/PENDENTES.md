@@ -29,7 +29,16 @@ Auditoria transversal fechada (família "regra num sítio, ausente noutro"; deta
    GG-6179890563 ← GG-6179890664 · GG-6184091080 ← GG-6184091134. A GG-6090481360 (Lauro, coroa
    fantasma $421) é o ensaio do funil à parte. As 217 «Gold sem tag COM captura» (achatamento 10-11
    Jul, folder-tag perdida no disco) = re-tag manual, fila no painel «Gold sem tag» da Saúde GG.
-5. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
+5. **★ `#REGUA-COROAS` (DITADA PELO RUI, 22 Jul)** — a régua completa das coroas: CASCATA
+   (verde×2 → SS direta → histórico, nunca desistir) + TRAVÃO MÍNIMO (base÷2 folga zero, 0+rever)
+   + TRAVÃO PROGRESSIVE (coroas nunca descem no torneio; âncoras fiáveis estabelecem o piso; a app
+   marca erro SOZINHA — ressalva: definir «âncora fiável»=selada/forte com o Rui) + FALLBACK
+   HONESTO (marca «Coroa eliminada» visível; as marcas já existem nos dados, falta o frontend).
+   **Ataca-se DENTRO dos conceitos 3 (mínimo) e 4 (coroa válida) — não é frente nova.** Detalhe
+   completo + mapa dos 8 painéis (leitores da régua única, LEI 3) + medição do progressive
+   (11 violações / 8 jogador-torneio / 2 027 trajetórias) em `TECH_DEBTS_INVENTARIO.md`
+   §`#REGUA-COROAS` (secção 21 Jul noite).
+6. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
    diff à vista (remoção em produção merece o Rui fresco, não o fim de um dia longo).
 
 Cada fix declara-se causa-vs-remendo antes (pela `#LEI-FIX-NA-CAUSA`).
