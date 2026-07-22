@@ -504,3 +504,25 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   Toruk pendente na quarentena. Fora por decisão: Footloose da GG-6117923338 (desempate por stack
   não aprovado). Anatomia: `name_merge.elimination_completion`, `gg_health._crossing_name_fixes`,
   `name_propagation.upsert_capture_variant_quarantine`, testes `test_elimination_complete.py`.
+
+## 2026-07-22 (b) — Fronteira da FT: fonte (T) TRANSIÇÃO DO -max NA HH + régua única «esta mão é FT?»
+
+- **Conceito novo (régua do Rui + achado da investigação, carimbado pelo Rui):** na GG a mesa
+  final forma numa mesa **MAIOR** que as do torneio (6-max → FT `7-max`; 8-max → FT `9-max`) —
+  a **1ª mão na mesa maior é a 1ª mão da FT**, ao segundo, lida da própria HH. Entra na cascata
+  da fronteira **à cabeça**: `(T) → (0) tag manual → (a) lobby Info → (b) capturas → none`.
+  Prova (read-only, 22 Jul): **490/490** torneios GG 2026 com TS concordam HH↔TS; 15 transições;
+  interleaving 0. Confirmações: TS (`hero_position ≤ moda+1`) e lobby N; transição suja ou
+  contradita → quarentena. Onde a (T) é **cega** (mesa-9/7, sem mesa maior) vale a cascata antiga
+  + guarda conservadora. Se a (T) é aplicável e prova que **não houve FT**, as vias (a)/(b) com
+  fronteira caem em quarentena (`hh_transition_absent`) — era assim que nasciam fronteiras
+  atrasadas (2-33 min) e falsos positivos.
+- **Régua única «esta mão é FT?» (`ft_boundary.hand_ft_state`, #LEI-FIX-NA-CAUSA):** as réguas
+  de reconciliação (régua dos 6s; «Prints fora de tempo») deixaram de decidir FT olhando só às
+  tags `-ft` (o buraco que moveu indevidamente a captura 991). Ordem: tag `-ft` na mão → FT;
+  fronteira REGISTADA (override>boundary, mesmo pendente) → compara; transição da HH; TS;
+  `'unknown'` = guarda conservadora → **nunca move automaticamente**. Undo com rasto:
+  `POST /table-ss/regra6s/undo` (`decision='reverted'`).
+- Motivo: FT furada na régua dos 6s (1 movida indevida GG-6083363849→843) + 5 fronteiras
+  registadas atrasadas + dispensa errada do 289176860 + 3 FTs sem registo (incl. a vitória
+  289883772). Referência: journal 2026-07-22 (sessão 2), `FT_BOUNDARY_ANATOMIA §2/§11`.

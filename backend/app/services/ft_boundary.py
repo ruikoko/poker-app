@@ -84,6 +84,79 @@ def _ft_applies(vision_json) -> bool:
             and pl > 0 and len(occupied) == pl)
 
 
+# ── Fonte (T): TRANSIÇÃO DO -max NA HH (régua do Rui + achado, 22 Jul) ────────
+# Na GG a mesa final forma numa mesa MAIOR que as normais do torneio: 6-max →
+# FT 7-max; 8-max → FT 9-max. A 1ª mão nessa mesa é a 1ª mão da FT — fronteira
+# AO SEGUNDO, sem depender de print/lobby/TS. Validação (22 Jul, read-only):
+# 490/490 torneios GG 2026 com TS concordam HH↔TS; 15 transições; interleaving 0.
+_TABLE_MAX_RE = re.compile(r"Table '[^']*' (\d+)-max")
+# Modas com mesa maior disponível. Mesa-9 (e 7) não tem FT maior → fonte CEGA
+# nesses torneios (cai na cascata (0)/(a)/(b) + guarda conservadora).
+TRANSITION_MODAS = frozenset({6, 8})
+
+
+def table_max_size(raw) -> Optional[int]:
+    """Tamanho da mesa declarado na HH GG (`Table 'X' N-max`). None se ilegível."""
+    m = _TABLE_MAX_RE.search(raw or "")
+    return int(m.group(1)) if m else None
+
+
+def _hh_transition_info(tn: str) -> dict:
+    """Fonte (T). Devolve {applicable, moda, boundary, n_big, clean}:
+      • applicable=False → moda fora de TRANSITION_MODAS (sem mesa maior possível);
+      • boundary=None (aplicável) → SEM transição = o Hero não chegou à FT;
+      • clean=False → mãos da mesa pequena DEPOIS da 1ª grande (nunca observado em
+        prod; sinal sujo → quem chama manda p/ quarentena, nunca fronteira às cegas)."""
+    rows = query(
+        """SELECT played_at,
+                  (regexp_match(raw, 'Table ''[^'']*'' (\\d+)-max'))[1]::int AS tsize
+             FROM hands
+            WHERE site='GGPoker' AND tournament_number = %s
+            ORDER BY played_at ASC""",
+        (tn,),
+    )
+    vals = [(r["played_at"], r["tsize"]) for r in rows if isinstance(r["tsize"], int)]
+    out = {"applicable": False, "moda": None, "boundary": None, "n_big": 0, "clean": True}
+    if not vals:
+        return out
+    sizes = [s for _, s in vals]
+    moda = max(set(sizes), key=sizes.count)
+    out["moda"] = moda
+    if moda not in TRANSITION_MODAS:
+        return out
+    out["applicable"] = True
+    bigs = [(pa, s) for pa, s in vals if s == moda + 1]
+    out["n_big"] = len(bigs)
+    if not bigs:
+        return out
+    first_big = bigs[0][0]
+    out["clean"] = not any(s == moda and pa > first_big for pa, s in vals)
+    out["boundary"] = first_big
+    return out
+
+
+def _ts_hero_position(tn: str) -> Optional[int]:
+    """Posição final do Hero no TS (confirmação da fonte T). None se sem TS."""
+    rows = query(
+        "SELECT hero_position FROM tournament_summaries "
+        "WHERE site='GGPoker' AND tournament_number = %s", (tn,))
+    v = rows[0]["hero_position"] if rows else None
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _contradicted_by_hh(t: dict, res: dict) -> dict:
+    """Salvaguarda das vias (a)/(b): se a transição era APLICÁVEL e NÃO existe (a HH
+    prova que o Hero não chegou à FT), um sinal externo com fronteira contradiz a HH
+    → quarentena, nunca fronteira às cegas. (Não se aplica à via (0): a tag manual
+    do Rui manda — fica só o aviso no cross_check.)"""
+    if t["applicable"] and t["boundary"] is None and t["clean"] and res.get("boundary"):
+        cc = dict(res.get("cross_check") or {})
+        cc["hh_transition_absent"] = True
+        cc["match"] = False
+        return {**res, "status": "quarantine_disagreement", "cross_check": cc}
+    return res
+
+
 # ── Fronteira ────────────────────────────────────────────────────────────────
 def _manual_ft_boundary(tn: str):
     """Fonte (0) PRIMÁRIA (arquitetura 7 Jul) — 1ª mão GG do torneio com tag `-ft`
@@ -284,17 +357,38 @@ def _snap_to_n(tn: str, boundary, n):
 
 
 def compute_ft_boundary(tn: str) -> dict:
-    """Fronteira do torneio, fonte (a) MANDA sobre (b). Devolve
-    {boundary, source, status, n, cross_check}.
+    """Fronteira do torneio. Devolve {boundary, source, status, n, cross_check}.
 
-    CASCATA (arquitetura 7 Jul): **(0) tag manual → (a) lobby Info → (b) coerente →
-    none**. A fonte (0) VAZIA não mata o torneio (cai na salvaguarda). Toda a
-    fronteira passa pelo **SNAP-TO-N** (recua à 1ª mão real da FT, `sentados==N`); o
-    `cross_check` cruza N com os sentados da 1ª mão GG >= fronteira JÁ SNAPPED. `n` =
-    via (a) `final_table_size`; via (b) `players_left`; via (0) o do lobby se existir,
-    senão inferido (máx. de sentados na janela). NÃO bloqueia (quarentena é F3).
-    status ∈ {'manual','lobby','coherent','quarantine_disagreement','incoherent_signal','none'}."""
+    CASCATA (22 Jul — a fonte (T) entra à cabeça; resto = arquitetura 7 Jul):
+    **(T) transição do -max na HH → (0) tag manual → (a) lobby Info → (b) coerente →
+    none**. A (T) dá a fronteira AO SEGUNDO (1ª mão na mesa maior) — não precisa de
+    snap (É a 1ª mão real da FT); confirmação = TS (`hero_position <= moda+1`) +
+    lobby N quando existem; suja/contradita → quarentena, nunca às cegas. Onde a (T)
+    é cega (moda fora de 6/8) ou sem transição, a cascata antiga segue — mas se a
+    (T) era aplicável e PROVA que não houve FT, as vias (a)/(b) com fronteira caem
+    em quarentena (`_contradicted_by_hh`). As vias (0)/(a)/(b) mantêm o SNAP-TO-N.
+    NÃO bloqueia (quarentena é F3). status ∈ {'transition','manual','lobby',
+    'coherent','quarantine_disagreement','incoherent_signal','none'}."""
+    t = _hh_transition_info(tn)
     lb, lb_n = _lobby_ft_boundary(tn)          # salvaguarda: dá N + é a via (a)
+
+    # (T) PRIMÁRIA — transição do -max na HH (fronteira exata, testemunha interna).
+    if t["applicable"] and t["boundary"] is not None:
+        if not t["clean"]:
+            return {"boundary": None, "source": None,
+                    "status": "quarantine_disagreement", "n": None,
+                    "cross_check": {"transition": str(t["boundary"]),
+                                    "dirty_interleaving": True, "match": False}}
+        n = lb_n if lb_n is not None else _first_hand_seats_after(tn, t["boundary"])
+        cc = _cross_check(tn, t["boundary"], n)
+        ts_pos = _ts_hero_position(tn)
+        cc["ts_hero_position"] = ts_pos
+        cc["ts_agrees"] = (ts_pos <= t["moda"] + 1) if ts_pos is not None else None
+        if cc["ts_agrees"] is False:
+            return {"boundary": None, "source": None,
+                    "status": "quarantine_disagreement", "n": n, "cross_check": cc}
+        return {"boundary": t["boundary"], "source": "hh_table_transition",
+                "status": "transition", "n": n, "cross_check": cc}
 
     # (0) PRIMÁRIA — tag -ft MANUAL do Rui.
     m = _manual_ft_boundary(tn)
@@ -309,15 +403,19 @@ def compute_ft_boundary(tn: str) -> dict:
                         "status": "quarantine_disagreement", "n": lb_n,
                         "cross_check": {"manual": str(m_snap), "lobby": str(lb_snap),
                                         "match": False}}
+        cc0 = _cross_check(tn, m_snap, lb_n)
+        if t["applicable"] and t["boundary"] is None:
+            cc0["hh_transition_absent"] = True     # aviso: a HH não mostra FT (tag manda)
         return {"boundary": m_snap, "source": "manual_ft_tag", "status": "manual",
                 "n": lb_n if lb_n is not None else n,
-                "cross_check": _cross_check(tn, m_snap, lb_n)}
+                "cross_check": cc0}
 
     # (a) SALVAGUARDA — lobby Info (histórico sem tag manual).
     if lb is not None:
         snapped = _snap_to_n(tn, lb, lb_n)
-        return {"boundary": snapped, "source": "propagated_lobby", "status": "lobby",
-                "n": lb_n, "cross_check": _cross_check(tn, snapped, lb_n)}
+        return _contradicted_by_hh(t, {
+            "boundary": snapped, "source": "propagated_lobby", "status": "lobby",
+            "n": lb_n, "cross_check": _cross_check(tn, snapped, lb_n)})
 
     # (b) SALVAGUARDA — capturas coerentes (último degrau).
     it_b, coherent, it_n = _it_ft_boundary(tn)
@@ -326,8 +424,9 @@ def compute_ft_boundary(tn: str) -> dict:
                 "n": None, "cross_check": None}
     if it_b is not None:
         snapped = _snap_to_n(tn, it_b, it_n)
-        return {"boundary": snapped, "source": "propagated_coherent", "status": "coherent",
-                "n": it_n, "cross_check": _cross_check(tn, snapped, it_n)}
+        return _contradicted_by_hh(t, {
+            "boundary": snapped, "source": "propagated_coherent", "status": "coherent",
+            "n": it_n, "cross_check": _cross_check(tn, snapped, it_n)})
     return {"boundary": None, "source": None, "status": "none",
             "n": None, "cross_check": None}
 
@@ -362,10 +461,12 @@ def ft_correct_array(tags) -> tuple[list, bool]:
 # ── Propagação ───────────────────────────────────────────────────────────────
 def _candidate_tns() -> list[str]:
     """Torneios GG com sinal FORTE de FT: tag manual (fonte 0), print do Info (via a),
-    lobby players_left<=cap, ou captura IT com **players_left <= FT_CAP** (perto da FT,
-    via b). O ramo IT exige <=cap (não `IS NOT NULL`) — uma captura a MEIO do torneio
-    (players_left>9) NÃO é sinal de FT (era a causa do ruído 99→6). O ramo Info cobre
-    o torneio cujo único sinal é o print do Info (players_left ilegível, N legível)."""
+    lobby players_left<=cap, captura IT com **players_left <= FT_CAP** (perto da FT,
+    via b), ou **transição do -max na HH** (fonte T, 22 Jul — apanha FTs sem print
+    nenhum, ex. a vitória sem capturas). O ramo IT exige <=cap (não `IS NOT NULL`) —
+    uma captura a MEIO do torneio (players_left>9) NÃO é sinal de FT (era a causa do
+    ruído 99→6). O ramo Info cobre o torneio cujo único sinal é o print do Info
+    (players_left ilegível, N legível)."""
     rows = query(
         """SELECT DISTINCT tournament_number AS tn FROM lobby_processing_log
             WHERE tournament_number IS NOT NULL
@@ -382,7 +483,17 @@ def _candidate_tns() -> list[str]:
            SELECT DISTINCT h.tournament_number
              FROM hands h
             WHERE h.site='GGPoker' AND h.folder_ft_source='manual'
-              AND h.tournament_number IS NOT NULL""",
+              AND h.tournament_number IS NOT NULL
+           UNION
+           SELECT tn FROM (
+             SELECT h2.tournament_number AS tn,
+                    (regexp_match(h2.raw, 'Table ''[^'']*'' (\\d+)-max'))[1]::int AS tsize
+               FROM hands h2
+              WHERE h2.site='GGPoker' AND h2.tournament_number IS NOT NULL
+                AND h2.played_at >= '2026-01-01') sizes
+            GROUP BY tn
+           HAVING mode() WITHIN GROUP (ORDER BY tsize) IN (6, 8)
+              AND max(tsize) = mode() WITHIN GROUP (ORDER BY tsize) + 1""",
         (FT_CAP, FT_CAP),
     )
     return [r["tn"] for r in rows if r["tn"]]
@@ -504,6 +615,73 @@ def _persist_ft_correction(hand_db_id: int, discord_tags, hm3_tags, source: str)
         conn.close()
 
 
+# ── Fonte única «esta mão é FT?» (22 Jul — consumida pelas réguas de reconciliação) ─
+def _tn_ft_verdict(tn: str) -> tuple:
+    """(kind, boundary) do torneio: 'boundary' (há fronteira — a REGISTADA na review
+    [override>boundary, decisão ou snapshot pendente] ou, na falta, a da transição da
+    HH) · 'no_ft' (prova de que não houve FT do Hero: transição aplicável ausente,
+    dispensa do Rui sem transição a contradizer, ou TS com bust pré-FT) · 'unknown'
+    (fonte cega sem prova → guarda conservadora, quem chama NÃO decide sozinho)."""
+    rows = query(
+        "SELECT boundary, override_boundary, decision FROM ft_boundary_review "
+        "WHERE tournament_number = %s", (tn,))
+    reg_b, dismissed = None, False
+    if rows:
+        reg_b = rows[0]["override_boundary"] or rows[0]["boundary"]
+        dismissed = rows[0]["decision"] == "dismissed"
+    if reg_b is not None and not dismissed:
+        return "boundary", reg_b
+    t = _hh_transition_info(tn)
+    if t["applicable"] and t["boundary"] is not None and t["clean"]:
+        return "boundary", t["boundary"]          # a HH manda (mesmo sobre dispensa)
+    if dismissed:
+        return "no_ft", None
+    if t["applicable"] and t["boundary"] is None:
+        return "no_ft", None                      # transição possível e ausente = sem FT
+    if t["applicable"]:
+        return "unknown", None                    # transição suja → não decidir
+    ts_pos = _ts_hero_position(tn)
+    if ts_pos is not None and isinstance(t["moda"], int) and ts_pos > t["moda"] + 1:
+        return "no_ft", None                      # TS prova bust antes da FT
+    return "unknown", None                        # cega (mesa-9/7) sem prova → painel
+
+
+def hand_ft_state(tn, played_at, tags=None, cache=None) -> str:
+    """RÉGUA ÚNICA «esta mão é de mesa final?» → 'ft' | 'not_ft' | 'unknown'.
+    Consumida pelas réguas de reconciliação (régua dos 6s, prints fora de tempo) —
+    substitui as cópias «olhar só às tags -ft» (`#LEI-FIX-NA-CAUSA`, 22 Jul). A tag
+    `-ft` na mão continua a mandar ('ft' imediato — marca do Rui); sem tag, decide a
+    fronteira do torneio (`_tn_ft_verdict`). `cache` opcional {tn: (kind, b)} para
+    varrimentos. 'unknown' = não mover/decidir automaticamente."""
+    if any(str(t).endswith("-ft") for t in (tags or [])):
+        return "ft"
+    if not tn:
+        return "unknown"
+    if cache is not None and tn in cache:
+        kind, b = cache[tn]
+    else:
+        kind, b = _tn_ft_verdict(tn)
+        if cache is not None:
+            cache[tn] = (kind, b)
+    if kind == "no_ft":
+        return "not_ft"
+    if kind != "boundary":
+        return "unknown"
+    pa = played_at
+    if isinstance(pa, str):
+        try:
+            from datetime import datetime as _dt
+            pa = _dt.fromisoformat(pa)
+        except (ValueError, TypeError):
+            return "unknown"
+    try:
+        b = b.replace(tzinfo=None) if getattr(b, "tzinfo", None) else b
+        pa = pa.replace(tzinfo=None) if getattr(pa, "tzinfo", None) else pa
+        return "ft" if pa >= b else "not_ft"
+    except TypeError:
+        return "unknown"
+
+
 def trigger_ft_propagation(tournament_number: Optional[str] = None) -> None:
     """Wrapper fire-and-forget (defensivo) para os triggers de import/lobby."""
     try:
@@ -520,7 +698,7 @@ def review_status(engine_status, cross_check) -> str:
     """Estado do motor (+cross-check) → enum da review (fonte única, usada pelo painel
     e pelo refresh): match/mismatch/n_unavailable/incoherent/none."""
     cc = cross_check or {}
-    if engine_status in ("manual", "lobby", "coherent"):
+    if engine_status in ("transition", "manual", "lobby", "coherent"):
         m = cc.get("match")
         return "match" if m is True else "mismatch" if m is False else "n_unavailable"
     if engine_status == "quarantine_disagreement":

@@ -23,7 +23,7 @@ from app.auth import require_auth, require_auth_or_api_key
 from app.db import query, get_conn
 from app.services.ft_boundary import (
     FT_CAP, count_hh_seats, compute_ft_boundary, propagate_ft,
-    candidate_tns, via_b_diagnostics, review_status,
+    candidate_tns, via_b_diagnostics, review_status, hand_ft_state,
 )
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 from app.services.tag_decisions import (ORIGIN_GG_HEALTH_TAG, ORIGIN_GG_HEALTH_UNTAG,
@@ -503,6 +503,7 @@ def _late_prints() -> list:
         " WHERE l.result='success' AND l.captured_at IS NOT NULL "
         "   AND h.played_at IS NOT NULL AND h.site='GGPoker' AND h.played_at >= '2026-01-01'")
     out = []
+    _ft_cache: dict = {}
     for r in rows:
         if r["ssid"] in dismissed:
             continue
@@ -518,7 +519,10 @@ def _late_prints() -> list:
         if not regra6 and not r["folder_tag"]:
             continue                      # sem tag só entra pela régua dos 6s
         tags = list(r["discord_tags"] or []) + list(r["hm3_tags"] or [])
-        if any(str(t).endswith("-ft") for t in tags):     # MESA FINAL fora de tudo (Rui)
+        # MESA FINAL fora de tudo (Rui) — fonte ÚNICA hand_ft_state (22 Jul): apanha
+        # também FT SEM tag (fronteira registada/transição da HH). 'unknown' fica na
+        # lista (isto é o painel manual — mostrar é honesto, mover é decisão).
+        if hand_ft_state(r["tn"], r["pa"], tags, cache=_ft_cache) == "ft":
             continue
         # LEI 1 (22 Jul, apanhado pelo Rui): a captura guarda a folder_tag PARA SEMPRE,
         # mas o par com TAG só é caso ENQUANTO a tag estiver na mão. Movida/tirada →
@@ -965,7 +969,14 @@ def _ft_warnings(d, diag) -> list:
     st = d.get("status")
     cc = d.get("cross_check") or {}
     if st == "quarantine_disagreement":
-        w.append("tag manual e lobby discordam (p/ la da janela do snap) -> quarentena")
+        if cc.get("dirty_interleaving"):
+            w.append("transicao -max SUJA (maos da mesa pequena depois da 1a grande) -> quarentena")
+        elif cc.get("ts_agrees") is False:
+            w.append("TS contradiz a transicao (hero acabou fora da FT) -> quarentena")
+        elif cc.get("hh_transition_absent"):
+            w.append("HH prova que NAO houve FT (sem transicao -max) mas o sinal externo tem fronteira -> quarentena")
+        else:
+            w.append("tag manual e lobby discordam (p/ la da janela do snap) -> quarentena")
     if st == "incoherent_signal":
         w.append("capturas incoerentes (cauda pos-pico com 2+ saltos) -> sem fronteira")
     if cc.get("match") is False and st != "quarantine_disagreement":

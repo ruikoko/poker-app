@@ -33,10 +33,16 @@ def _prev(hid="GG-PREV", hero_postflop=True, shows=False, tags=None, has_img=Tru
              "hm3_tags": None, "entry_id": 7, "has_img": has_img}]
 
 
-def _run(main, prevs, dismissed=None, awaiting=None):
-    # ordem: dispensadas → main → prevs… → query da secção "à espera de tag"
+def _run(main, prevs, dismissed=None, awaiting=None, ft_states=None):
+    # ordem: dispensadas → main → prevs… → query da secção "à espera de tag".
+    # hand_ft_state (fonte única 22 Jul) simulado só-tags por defeito (comporta-
+    # mento antigo); ft_states: tn→estado forçado p/ testar a fronteira sem tag.
     side = [dismissed or [], main] + prevs + [awaiting or []]
-    with patch.object(gg_health, "query", side_effect=side):
+    fake_ft = (lambda tn, pa, tags=None, cache=None:
+               "ft" if any(str(t).endswith("-ft") for t in (tags or []))
+               else (ft_states or {}).get(tn, "not_ft"))
+    with patch.object(gg_health, "query", side_effect=side), \
+         patch.object(gg_health, "hand_ft_state", fake_ft):
         return gg_health.late_prints(current_user={})
 
 
@@ -94,6 +100,19 @@ def test_ft_fora_de_tudo_e_9s_fora():
     res = _run(main, [_prev()])
     assert res["counts"]["regra6s"] == 1
     assert res["regra6s"][0]["hand_id"] == "GG-OK"
+
+
+def test_ft_por_fronteira_sem_tag_fora_e_unknown_fica():
+    """22 Jul: a exclusão de FT deixou de ser só-tags — FT pela FRONTEIRA (mão sem
+    tag nenhuma) sai da lista; 'unknown' (fonte cega) FICA (painel manual)."""
+    main = [
+        _row(1, 3, "GG-FTSEM", 30, folder=None, hand_tags=[]),
+        _row(2, 3, "GG-CEGO", 31, folder=None, hand_tags=[]),
+    ]
+    main[0]["tn"] = "FT_SEM_TAG"
+    main[1]["tn"] = "CEGO"
+    res = _run(main, [_prev()], ft_states={"FT_SEM_TAG": "ft", "CEGO": "unknown"})
+    assert [h["hand_id"] for h in res["regra6s"]] == ["GG-CEGO"]
 
 
 def test_par_resolvido_sai_da_lista():

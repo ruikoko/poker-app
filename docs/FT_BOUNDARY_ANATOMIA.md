@@ -28,14 +28,15 @@ Ver §7–§8.
 
 ---
 
-## 2. A cascata de fontes — `(0) → (a) → (b) → none`
+## 2. A cascata de fontes — `(T) → (0) → (a) → (b) → none` *(T adicionada 22 Jul)*
 
 A fronteira computa-se por uma cascata de fontes, da mais fiável para a salvaguarda
 (`compute_ft_boundary` em `services/ft_boundary.py`):
 
 | Fonte | O que é | Fiabilidade |
 |---|---|---|
-| **(0) tag `-ft` MANUAL** | 1ª mão (por `played_at`) com `folder_ft_source='manual'` — o Rui marcou a mesa final à mão (pasta `-ft` do IT na GG → `discord_tags`; tags HM3 nas outras salas). Definição **ESTRITA** (só `'manual'`, nunca `'auto'` — o `'auto'` é adivinhado pela Vision e seria circular). | **PRIMÁRIA** |
+| **(T) TRANSIÇÃO DO -max NA HH** *(22 Jul)* | Na GG a mesa final forma numa mesa **MAIOR** que as normais do torneio: 6-max → FT `7-max`; 8-max → FT `9-max`. A **1ª mão na mesa maior É a 1ª mão da FT** — fronteira **ao segundo**, sem print/lobby/TS. Validação (22 Jul, read-only): **490/490** torneios GG 2026 com TS concordam HH↔TS; 15 transições; interleaving 0 (depois da 1ª mão grande nunca volta uma pequena). **Cega** onde a moda é 9 (ou 7): não há mesa maior — cai na cascata abaixo + guarda conservadora. Confirmações: TS (`hero_position ≤ moda+1`; contradição → quarentena) e lobby N. Transição **suja** (interleaving) → quarentena, nunca às cegas. Extra: se a (T) é aplicável e **prova que NÃO houve FT** (sem transição), as vias (a)/(b) com fronteira caem em **quarentena** (`hh_transition_absent`) — foi assim que nasceram 5 fronteiras atrasadas 2-33 min (a fonte externa só «via» a FT quando os prints recomeçavam). | **PRIMÁRIA** |
+| **(0) tag `-ft` MANUAL** | 1ª mão (por `played_at`) com `folder_ft_source='manual'` — o Rui marcou a mesa final à mão (pasta `-ft` do IT na GG → `discord_tags`; tags HM3 nas outras salas). Definição **ESTRITA** (só `'manual'`, nunca `'auto'` — o `'auto'` é adivinhado pela Vision e seria circular). | primária (quando a T é cega/ausente) |
 | **(a) lobby aba Info** | print de lobby com a aba **Info** aberta → `vision_json.open_tab='Info'` + `final_table_size` (o **N**). Ancora quando não há tag manual (histórico). | salvaguarda |
 | **(b) capturas coerentes** | `_it_ft_boundary`: a 1ª captura IT que apanha **1 mesa** (`sentados==players_left`), com snap + coerência pós-pico. Ancora quando não há tag manual nem lobby Info. | salvaguarda |
 | **(none)** | nenhuma das 3 dá sinal → o torneio **não precisa de fronteira** (sem FT do Rui, ou capturas nunca apanharam 1 mesa). `none` é **desfecho correcto, não falha**. | — |
@@ -168,6 +169,24 @@ na lab data estão sem tag base ou já `-ft`). Acende quando aparecer a 1ª mão
 | Guarda de coerência dos payouts | `backend/app/services/payout_coherence.py` |
 | F3/F4/F5 endpoints + painel | `backend/app/routers/gg_health.py`; `frontend/src/pages/GGHealth.jsx` |
 | Gatilhos F&F | `routers/import_.py`, `routers/hm3.py`, `routers/tournament_summaries.py`, `routers/lobbys.py` |
+
+## 11. Fonte única «esta mão é FT?» — `hand_ft_state` (22 Jul)
+
+As **réguas de reconciliação** (régua dos 6s em `table_ss.apply_regra_6s`; listagem
+«Prints fora de tempo» em `gg_health.late_prints`) deixaram de decidir «é FT?» olhando
+**só às tags `-ft`** (era o buraco: mão de FT sem tag era invisível → 1 captura movida
+indevidamente). Passaram a consumir **`ft_boundary.hand_ft_state(tn, played_at, tags)`**
+→ `'ft' | 'not_ft' | 'unknown'`:
+- tag `-ft` na mão → `'ft'` imediato (a marca do Rui manda);
+- senão, a **fronteira REGISTADA** na review (override > boundary; **mesmo pendente**
+  não se move contra ela) → compara `played_at`;
+- sem registo, a **transição da HH** (fonte T); transição aplicável e **ausente** →
+  `'not_ft'` (prova de que não houve FT); dispensa do Rui (sem transição a contradizer)
+  → `'not_ft'`;
+- fonte **cega** (moda 9/7) sem registo: TS com bust pré-FT → `'not_ft'`; sem prova →
+  **`'unknown'`** (guarda conservadora) — os automatismos **não movem**, fica no painel.
+`'unknown'` nunca dispara ação automática. Undo de um movimento errado da régua dos 6s:
+`POST /api/table-ss/regra6s/undo {ssid, back_to}` (rasto `decision='reverted'`).
 
 **Antes de mexer no motor:** ler `services/ft_boundary.py` + `REGISTO_CONCEITO 2026-07-07/07-08`.
 Escrita das tags `-ft` **só por aprovação manual**. O **wipe+reimport** é o teste de aceitação

@@ -1,5 +1,21 @@
 # Pendentes — backlog vivo
 
+## ★ EM CURSO (22 Jul, sessão 2) — fronteira FT pela TRANSIÇÃO DA HH + régua dos 6s consulta-a
+
+Decisão do Rui (22 Jul): fonte (T) transição do -max é a primária da fronteira; recuar as
+5 fronteiras atrasadas; recuperar o dispensado 289176860; depois desfazer a captura 991
+(GG-6083363843 → religar à GG-6083363849). **Código feito em local (3 peças a/b/c +
+`hand_ft_state` + `/regra6s/undo`), diff apresentado ao Rui — falta: OK do Rui → push/deploy
+→ operações por endpoint (o `/ft/confirm`/`/ft/correct` recomputam na hora, não é preciso
+gatilho):** (1) 4 promovidas: `POST /ft/correct {override_boundary}` → `/ft/promote
+{confirm:true}` — 289898535→`2026-06-12 23:39:05` · 290349007→`2026-06-15 02:23:32` ·
+293321688→`2026-06-25 18:05:40` · 295219051→`2026-07-02 19:18:36`; (2) pendente 298159649:
+`/ft/confirm` (a fonte T dá `2026-07-14 20:52:54`); (3) dispensada 289176860: `/ft/confirm`
+(fronteira `2026-06-09 19:07:18`); (4) por fim `POST /table-ss/regra6s/undo {ssid:991,
+back_to:'GG-6083363849'}`. Os 3 FTs sem registo (287863839 · vitória 289883772 · 293657420)
+aparecem no painel «Prontas a aprovar» no próximo refresh (import) — carimbo do Rui lá.
+Detalhe: `FT_BOUNDARY_ANATOMIA §2/§11`, `REGISTO_CONCEITO 2026-07-22 (b)`.
+
 ## ★ PRÓXIMA SESSÃO — ordem do Rui (21 Jul 2026): consolidar o Tier 1 da auditoria `#LEI-FIX-NA-CAUSA`
 
 Auditoria transversal fechada (família "regra num sítio, ausente noutro"; detalhe em

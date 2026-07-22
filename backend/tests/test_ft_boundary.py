@@ -7,6 +7,14 @@ from app.routers.gg_health import _tag_conflicts
 
 T0 = datetime(2026, 6, 20, 21, 0, 0)
 
+# Fonte (T) neutra p/ os testes da cascata antiga (22 Jul): moda fora de 6/8 →
+# transição CEGA → o compute cai nas vias (0)/(a)/(b) como dantes.
+_T_BLIND = {"applicable": False, "moda": None, "boundary": None, "n_big": 0, "clean": True}
+
+
+def _blind_t():
+    return patch.object(fb, "_hh_transition_info", return_value=_T_BLIND)
+
 
 # ── _ft_applies (detetor FT) ─────────────────────────────────────────────────
 def test_ft_applies_occupied_equals_players_left():
@@ -123,7 +131,8 @@ def test_lobby_boundary_none_without_info_print():
 
 # ── has_new_ft_signal: SÓ a tag manual -ft reactiva um dispensado (não o lobby) ──
 def test_has_new_ft_signal_manual_reactivates():
-    with patch.object(fb, "_manual_ft_boundary", return_value=T0):
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=T0):
         assert fb.has_new_ft_signal("T1") is True
 
 
@@ -131,7 +140,8 @@ def test_has_new_ft_signal_lobby_alone_does_not_reactivate():
     # o print do Info (lobby) é o MESMO sinal que tornou o torneio candidato — não é
     # 'novo' face a uma dispensa → NÃO reactiva (senão a dispensa nunca pegava; era o
     # bug do cartão FT que voltava a pending a cada refresh).
-    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=None), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)):
         assert fb.has_new_ft_signal("T1") is False
 
@@ -149,7 +159,8 @@ def test_cross_check_match_mismatch_and_illegible():
 
 # ── compute_ft_boundary: prioridade lobby > IT-coerente; incoerente sinaliza ──
 def test_boundary_lobby_wins_carries_n_and_cross_check():
-    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=None), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=7):
@@ -159,7 +170,8 @@ def test_boundary_lobby_wins_carries_n_and_cross_check():
 
 
 def test_boundary_incoherent_signals():
-    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=None), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(None, False, None)):
         d = fb.compute_ft_boundary("T1")
@@ -169,7 +181,8 @@ def test_boundary_incoherent_signals():
 
 def test_boundary_coherent_it_uses_players_left_as_n():
     # via (b): N = players_left da fronteira (D2); cross-check com os sentados da HH
-    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=None), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(T0, True, 8)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
@@ -180,7 +193,8 @@ def test_boundary_coherent_it_uses_players_left_as_n():
 
 
 def test_boundary_none_when_no_signal():
-    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=None), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_it_ft_boundary", return_value=(None, True, None)):
         d = fb.compute_ft_boundary("T1")
@@ -190,7 +204,8 @@ def test_boundary_none_when_no_signal():
 # ── Fonte (0) — tag -ft MANUAL do Rui (arquitetura 7 Jul) ────────────────────
 def test_manual_source_wins_over_lobby_and_captures():
     # tag manual presente → source=manual_ft_tag, mesmo com lobby/captures disponíveis
-    with patch.object(fb, "_manual_ft_boundary", return_value=T0), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=T0), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(None, None)), \
          patch.object(fb, "_infer_ft_size", return_value=7), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
@@ -204,7 +219,8 @@ def test_manual_source_wins_over_lobby_and_captures():
 
 def test_manual_uses_lobby_n_when_present():
     # N vem do lobby Info quando existe (não do inferido) + cross-check independente
-    with patch.object(fb, "_manual_ft_boundary", return_value=T0), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=T0), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=7):
@@ -216,7 +232,8 @@ def test_manual_uses_lobby_n_when_present():
 def test_manual_vs_lobby_disagreement_quarantines():
     # tag manual e lobby apontam momentos incompatíveis (> janela) → quarentena
     late = T0 + timedelta(minutes=30)
-    with patch.object(fb, "_manual_ft_boundary", return_value=T0), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=T0), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(late, 7)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b):
         d = fb.compute_ft_boundary("T1")
@@ -226,7 +243,8 @@ def test_manual_vs_lobby_disagreement_quarantines():
 
 def test_manual_empty_falls_through_to_lobby():
     # fonte (0) vazia NÃO mata o torneio → cai na salvaguarda (a)
-    with patch.object(fb, "_manual_ft_boundary", return_value=None), \
+    with _blind_t(), \
+         patch.object(fb, "_manual_ft_boundary", return_value=None), \
          patch.object(fb, "_lobby_ft_boundary", return_value=(T0, 7)), \
          patch.object(fb, "_snap_to_n", side_effect=lambda tn, b, n: b), \
          patch.object(fb, "_first_hand_seats_after", return_value=7):

@@ -111,8 +111,10 @@ def test_move_sem_tag_com_tag_escolhida(monkeypatch):
     assert res["tag_applied_to_prev"] == "nota"
 
 
-def _wire_sweep(monkeypatch, caps, prevs_by_tn, reviewed=None):
-    """caps: rows do scan; prevs_by_tn: tn→prev dict|None."""
+def _wire_sweep(monkeypatch, caps, prevs_by_tn, reviewed=None, ft_states=None):
+    """caps: rows do scan; prevs_by_tn: tn→prev dict|None; ft_states: tn→estado
+    forçado do `hand_ft_state` (default 'not_ft'; a tag -ft continua a mandar,
+    como na fonte única real)."""
     import app.routers.gg_health as gh
     moved = []
 
@@ -123,6 +125,10 @@ def _wire_sweep(monkeypatch, caps, prevs_by_tn, reviewed=None):
             return caps
         raise AssertionError(sql)
     monkeypatch.setattr(table_ss, "query", q)
+    monkeypatch.setattr(table_ss, "hand_ft_state",
+                        lambda tn, pa, tags=None, cache=None:
+                        "ft" if any(str(t).endswith("-ft") for t in (tags or []))
+                        else (ft_states or {}).get(tn, "not_ft"))
     monkeypatch.setattr(gh, "_hh_table", lambda raw: "5")
     monkeypatch.setattr(gh, "_prev_hand_same_table",
                         lambda tn, pa, t: prevs_by_tn.get(tn))
@@ -157,6 +163,25 @@ def test_sweep_move_com_e_sem_tag_e_deixa_indecisos(monkeypatch):
     assert (2, None, "GG-PREV", "auto_moved", "regra6s.auto") in moved
     # tag já fora da mão → o core recebe folder None (não re-sela remove), imagem move
     assert (5, None, "GG-PREV", "auto_moved", "regra6s.auto") in moved
+
+
+def test_sweep_consulta_fronteira_ft_e_guarda_conservadora(monkeypatch):
+    """22 Jul: a régua consulta a fonte única «é FT?» — FT por FRONTEIRA (sem tag
+    nenhuma) → fora; 'unknown' (fonte cega sem prova) → indeciso, nunca move."""
+    caps = [
+        _cap(1, None, [], tn="FT_SEM_TAG"),     # FT pela fronteira, SEM tag → fora
+        _cap(2, None, [], tn="CEGO"),           # fonte cega sem prova → indeciso
+        _cap(3, None, [], tn="T1"),             # normal → move
+    ]
+    prev = {"hand_id": "GG-PREV", "played_at": "2026-07-12 09:58:00", "tags": []}
+    moved = _wire_sweep(monkeypatch, caps,
+                        {"FT_SEM_TAG": prev, "CEGO": prev, "T1": prev},
+                        ft_states={"FT_SEM_TAG": "ft", "CEGO": "unknown"})
+    res = table_ss.apply_regra_6s()
+    assert res["skipped_reviewed_or_ft"] == 1        # FT sem tag agora é vista
+    assert res["undecided"] == 1                     # unknown nunca move sozinho
+    assert res["moved_untagged"] == 1
+    assert [m[0] for m in moved] == [3]
 
 
 def test_sweep_idempotente_e_dry_run(monkeypatch):

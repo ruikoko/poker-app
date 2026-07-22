@@ -29,6 +29,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, 
 
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import get_conn, query
+from app.services.ft_boundary import hand_ft_state
 from app.services.image_utils import detect_image_mime, compress_image
 from app.services import table_ss_vision as tv
 from app.services.tournament_resolver import (
@@ -1783,16 +1784,25 @@ def apply_regra_6s(dry_run: bool = False, reason: str = "sweep") -> dict:
     from app.routers.gg_health import _hh_table, _prev_hand_same_table
     moved_tagged = moved_untagged = undecided = skipped = 0
     plan = []
+    ft_cache: dict = {}
     for r in rows:
         if r["id"] in reviewed:
             skipped += 1
             continue
         tags = list(r["dt"] or []) + list(r["ht"] or [])
-        if any(str(t).endswith("-ft") for t in tags):
-            skipped += 1                       # MESA FINAL fora de tudo
+        # MESA FINAL fora de tudo — fonte ÚNICA `hand_ft_state` (22 Jul): fronteira
+        # registada (mesmo pendente) > transição da HH > tags; 'unknown' = guarda
+        # conservadora (fonte cega sem prova) → fica no painel, nunca move às cegas.
+        st_cur = hand_ft_state(r["tn"], r["pa"], tags, cache=ft_cache)
+        if st_cur == "ft":
+            skipped += 1
+            continue
+        if st_cur == "unknown":
+            undecided += 1
             continue
         prev = _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"]))
-        if prev is None or any(str(t).endswith("-ft") for t in (prev.get("tags") or [])):
+        if prev is None or hand_ft_state(r["tn"], prev.get("played_at"),
+                                         prev.get("tags"), cache=ft_cache) != "not_ft":
             undecided += 1                     # fica no painel «não decidiu»
             continue
         # tag ainda na mão? (se já saiu — ex. par movido à mão — move só a imagem)
@@ -1845,6 +1855,38 @@ def regra6s_apply(payload: dict = Body(default={}),
         except Exception as e:  # pragma: no cover - defensivo
             logger.error("[regra6s] crossing não disparou: %s", e)
     return out
+
+
+@router.post("/regra6s/undo")
+def regra6s_undo(payload: dict = Body(default={}),
+                 current_user=Depends(require_auth_or_api_key)):
+    """DESFAZ um movimento da régua dos 6s (a imagem foi movida para a mão errada —
+    ex. FT invisível à régua antiga): religa a captura à mão indicada em `back_to`
+    (âncora manual_link, SEM re-desanon — mesma mecânica do mover) e marca o rasto
+    (`decision='reverted'`), que também a mantém fora de varrimentos futuros.
+    SÓ para movimentos só-imagem: captura com `folder_tag` exige `allow_tag=true`
+    (o link re-aplicaria a tag à mão de volta — tem de ser deliberado)."""
+    from app.services.tag_decisions import actor_of
+    ss_id = payload.get("ssid")
+    back_to = (payload.get("back_to") or "").strip()
+    if not ss_id or not back_to:
+        raise HTTPException(400, "ssid e back_to obrigatórios")
+    rows = query("SELECT id, folder_tag, matched_hand_id FROM table_ss_processing_log "
+                 "WHERE id=%s", (ss_id,))
+    if not rows:
+        raise HTTPException(404, "captura não existe")
+    if rows[0]["folder_tag"] and not payload.get("allow_tag"):
+        raise HTTPException(422, "captura tem folder_tag — o undo re-aplicá-la-ia à mão "
+                                 "de volta; confirma com allow_tag=true")
+    try:
+        res = _manual_link_ss(int(ss_id), back_to, deanon=False)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    _mark_regra6s(int(ss_id), "reverted", actor_of(current_user))
+    logger.info("[regra6s/undo] captura %s: %s → %s (reverted)",
+                ss_id, rows[0]["matched_hand_id"], back_to)
+    return {"status": "reverted", "ssid": int(ss_id),
+            "from": rows[0]["matched_hand_id"], "to": back_to, "link": res}
 
 
 # ── Fase 1 do editor Saúde GG (A: suspeitas 2-candidatas + revert; E: verificada) ──
