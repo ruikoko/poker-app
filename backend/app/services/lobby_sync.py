@@ -1043,6 +1043,17 @@ def trigger_import_reconciles(reason: str = "import") -> None:
         except Exception:
             logger.exception("[reconciles/%s] lobby reconcile falhou", reason)
         try:
+            # RÉGUA DOS 6s AUTOMÁTICA (lei do Rui, 22 Jul): capturas ≤6s pertencem à mão
+            # ANTERIOR — a app move sozinha (com rasto) ANTES do crossing, para as
+            # imagens movidas contarem como testemunhas no cruzamento logo a seguir.
+            from app.routers.table_ss import apply_regra_6s
+            r = apply_regra_6s(reason=reason)
+            logger.info("[reconciles/%s] regra6s: tagged=%s untagged=%s undecided=%s",
+                        reason, r.get("moved_tagged"), r.get("moved_untagged"),
+                        r.get("undecided"))
+        except Exception:
+            logger.exception("[reconciles/%s] regra6s falhou", reason)
+        try:
             # LEI DO CRUZAMENTO no merge (ordem do Rui): o reimport nasce cruzado — nomes
             # completos + coroas crivadas + conflitos de crescimento óbvio, tudo SELADO.
             from app.routers.gg_health import run_crossing_auto

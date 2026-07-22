@@ -491,6 +491,7 @@ def _late_prints() -> list:
     (anterior na mesma mesa — HEURÍSTICA de dona) com os mesmos factos, e o VEREDITO do par
     (provado/suspeita, régua do Rui 22 Jul). Ordenado por intervalo."""
     from app.services.hh_facts import hero_postflop_betting, real_showdown
+    from app.services.tags_canonical import canonicalize_tag
     dismissed = {r["ssid"] for r in query(
         "SELECT ssid FROM late_print_review WHERE decision='dismissed'")}
     rows = query(
@@ -499,7 +500,7 @@ def _late_prints() -> list:
         "       h.discord_tags, h.hm3_tags, h.raw "
         "  FROM table_ss_processing_log l "
         "  JOIN hands h ON h.hand_id = l.matched_hand_id "
-        " WHERE l.folder_tag IS NOT NULL AND l.result='success' AND l.captured_at IS NOT NULL "
+        " WHERE l.result='success' AND l.captured_at IS NOT NULL "
         "   AND h.played_at IS NOT NULL AND h.site='GGPoker' AND h.played_at >= '2026-01-01'")
     out = []
     for r in rows:
@@ -509,27 +510,36 @@ def _late_prints() -> list:
             iv = (datetime.fromisoformat(r["cap"]) - datetime.fromisoformat(r["pa"])).total_seconds()
         except (ValueError, TypeError):
             continue
+        # duas janelas: ≤6s = RÉGUA DOS 6s (qualquer tag e SEM tag — lei do Rui,
+        # 22 Jul: pertence à mão anterior); (6,9)s = régua original na TAG pos/nota.
         if iv < 0 or iv >= 9:
             continue
+        regra6 = iv <= 6.0
+        if not regra6 and not r["folder_tag"]:
+            continue                      # sem tag só entra pela régua dos 6s
         tags = list(r["discord_tags"] or []) + list(r["hm3_tags"] or [])
         if any(str(t).endswith("-ft") for t in tags):     # MESA FINAL fora de tudo (Rui)
             continue
         # LEI 1 (22 Jul, apanhado pelo Rui): a captura guarda a folder_tag PARA SEMPRE,
-        # mas o par só é caso ENQUANTO a tag estiver na mão. Movida/tirada → resolvido →
-        # SAI da lista (senão os pares aceites voltavam a cada reload).
-        from app.services.tags_canonical import canonicalize_tag
-        _ftc = canonicalize_tag(r["folder_tag"]) or r["folder_tag"]
-        if _ftc not in {canonicalize_tag(t) or t for t in tags}:
-            continue
+        # mas o par com TAG só é caso ENQUANTO a tag estiver na mão. Movida/tirada →
+        # resolvido → SAI. (Sem-tag: sai quando a imagem é movida — o intervalo contra
+        # a nova dona deixa de ser ≤6s — ou quando é dispensada.)
+        if r["folder_tag"]:
+            _ftc = canonicalize_tag(r["folder_tag"]) or r["folder_tag"]
+            if _ftc not in {canonicalize_tag(t) or t for t in tags}:
+                continue
         cur_postflop = hero_postflop_betting(r["raw"])
         cur_shows = real_showdown(r["raw"])
         prev = _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"]))
-        cur_fact = (cur_postflop if str(r["folder_tag"] or "").startswith("pos")
-                    else cur_shows)
-        verdict, reason = _late_print_verdict(r["folder_tag"], cur_fact, prev)
+        if str(r["folder_tag"] or "").startswith("pos") or r["folder_tag"] == "nota":
+            cur_fact = (cur_postflop if str(r["folder_tag"]).startswith("pos")
+                        else cur_shows)
+            verdict, reason = _late_print_verdict(r["folder_tag"], cur_fact, prev)
+        else:
+            verdict, reason = None, None          # sem tag / outra tag: a régua é o relógio
         out.append({
             "ssid": r["ssid"], "hand_id": r["hand_id"], "hand_db_id": r["db_id"],
-            "folder_tag": r["folder_tag"], "tags": tags,
+            "folder_tag": r["folder_tag"], "tags": tags, "regra6s": regra6,
             "interval_s": int(iv), "interval_raw": iv,
             "hero_postflop": cur_postflop, "real_showdown": cur_shows,
             "verdict": verdict, "verdict_reason": reason,
@@ -554,12 +564,36 @@ def late_prints(current_user=Depends(require_auth)):
     - SÓ-SUSPEITA = a régua não decide (razão explícita).
     A `prev` continua HEURÍSTICA de dona. NADA escreve — mover é sempre clique do Rui."""
     rows = _late_prints()
-    pos = [r for r in rows if str(r["folder_tag"] or "").startswith("pos")]
-    nota = [r for r in rows if str(r["folder_tag"] or "") == "nota"]
+    # RÉGUA DOS 6s (lei do Rui, AUTOMÁTICA): ≤6s → pertence à anterior. O varrimento
+    # (`table_ss.apply_regra_6s`, nos gatilhos de import/reconcile) move sozinho o que
+    # tem anterior identificada; o que fica AQUI é o que a régua NÃO decidiu (sem
+    # anterior na base / anterior FT) ou o que ainda não foi varrido.
+    regra6s = [r for r in rows if r["regra6s"]]
+    pos = [r for r in rows if not r["regra6s"] and str(r["folder_tag"] or "").startswith("pos")]
+    nota = [r for r in rows if not r["regra6s"] and str(r["folder_tag"] or "") == "nota"]
     prov = sum(1 for r in pos + nota if r["verdict"] == "provado")
+    # (a) À ESPERA DE TAG: imagens movidas pela régua cuja DONA atual (a anterior)
+    # continua sem tag — o Rui taga quando quiser; sai da lista ao tagar (LEI 1).
+    awaiting = []
+    for r in query(
+            "SELECT rev.ssid, l.matched_hand_id AS hand_id, l.folder_tag, rev.decision, "
+            "       h.id AS hand_db_id, h.played_at::text AS pa, h.tournament_name, "
+            "       COALESCE(h.discord_tags,'{}') AS dt, COALESCE(h.hm3_tags,'{}') AS ht "
+            "  FROM late_print_review rev "
+            "  JOIN table_ss_processing_log l ON l.id = rev.ssid "
+            "  JOIN hands h ON h.hand_id = l.matched_hand_id "
+            " WHERE rev.decision IN ('auto_moved','moved_manual')"):
+        if list(r["dt"] or []) or list(r["ht"] or []):
+            continue                            # a dona já tem tag → resolvido, sai
+        awaiting.append({"ssid": r["ssid"], "hand_id": r["hand_id"],
+                         "hand_db_id": r["hand_db_id"], "played_at": r["pa"],
+                         "tournament_name": r["tournament_name"],
+                         "moved_by": r["decision"],
+                         "image_url": f"/api/table-ss/image/{r['ssid']}"})
     return {"counts": {"pos": len(pos), "nota": len(nota),
-                       "provados": prov, "suspeitas": len(pos) + len(nota) - prov},
-            "pos": pos, "nota": nota}
+                       "provados": prov, "suspeitas": len(pos) + len(nota) - prov,
+                       "regra6s": len(regra6s), "awaiting_tag": len(awaiting)},
+            "regra6s": regra6s, "pos": pos, "nota": nota, "awaiting_tag": awaiting}
 
 
 @router.post("/late-prints/dismiss")

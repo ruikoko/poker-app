@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ggHealth, tagDecisions, absImageUrl } from '../api/client'
+import { ggHealth, tableSs, tagDecisions, absImageUrl } from '../api/client'
 
 // Painel "Prints fora de tempo" + RECONCILIAÇÃO (régua do Rui, 22 Jul).
 // Gatilho: captura com tag pos/nota tirada <9s da mão → candidata a pertencer à ANTERIOR.
@@ -105,6 +105,143 @@ function PairRow({ r, onZoom, checked, onToggle, onMovePair, onDismiss, busy }) 
   )
 }
 
+// (a) À ESPERA DE TAG — imagens que a régua dos 6s moveu SOZINHA para a anterior;
+// a dona ainda não tem tag: o Rui escolhe-a aqui (selo + pipeline). Sai ao tagar.
+function AwaitingRow({ r, onZoom, onDone, busy, setBusy, setMsg, tagOptions }) {
+  const [tag, setTag] = useState('')
+  const [open, setOpen] = useState(false)
+  const src = absImageUrl(r.image_url)
+  const aplicar = async () => {
+    if (!tag) { setMsg('Escolhe a tag.'); return }
+    if (!window.confirm(`Tagar ${r.hand_id} com '${tag}'?\n\nFica SELADO e o pipeline corre (funil, vilões, propagação).`)) return
+    setBusy(true); setMsg('')
+    try {
+      await tagDecisions.add(r.hand_id, tag)
+      onDone(r)
+      setMsg(`✓ '${tag}' em ${r.hand_id} (selado).`)
+    } catch (e) { setMsg('Erro: ' + (e?.message || e)) } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', flexWrap: 'wrap' }}>
+        <span onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexWrap: 'wrap', flex: 1 }}>
+          <span style={{ color: '#8b9691', width: 12 }}>{open ? '▾' : '▸'}</span>
+          <Link to={`/hand/${r.hand_db_id}`} onClick={e => e.stopPropagation()} style={{ color: '#60a5fa', fontFamily: mono, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>{r.hand_id}</Link>
+          <span style={{ fontSize: 11, color: '#8b9691' }}>{r.tournament_name} · {fmt(r.played_at)}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}
+            title="a imagem foi movida para esta mão pela régua dos 6s">{r.moved_by === 'auto_moved' ? 'movida pela régua' : 'movida à mão'}</span>
+        </span>
+        <select value={tag} onChange={e => setTag(e.target.value)} disabled={busy}
+          style={{ fontSize: 11, background: '#0b0d13', color: '#e2e8f0', border: '1px solid #2a3550', borderRadius: 5, padding: '3px 6px' }}>
+          <option value="">tag…</option>
+          {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button onClick={aplicar} disabled={busy || !tag}
+          style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 5, cursor: busy ? 'wait' : 'pointer',
+            border: '1px solid #22c55e66', background: 'transparent', color: '#86efac' }}>
+          Tagar
+        </button>
+        <button onClick={() => onDone(r, true)} disabled={busy}
+          title="Dispensar: fica sem tag de propósito; sai da lista (persistido)"
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, cursor: busy ? 'wait' : 'pointer',
+            border: '1px solid #47556966', background: 'transparent', color: '#cbd5e1' }}>
+          Dispensar
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: '0 10px 12px 34px' }}>
+          <img src={src} alt="" loading="lazy" onClick={() => onZoom(src)}
+            style={{ maxWidth: 320, width: '100%', borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'zoom-in', background: '#0b0d13', display: 'block' }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// (b) RÉGUA DOS 6s — o que a régua NÃO decidiu sozinha (sem anterior na base /
+// anterior FT). Mover manual (mesma mecânica do automático) ou Dispensar.
+function R6Row({ r, onZoom, onMoved, onDismiss, busy, setBusy, setMsg, tagOptions }) {
+  const [open, setOpen] = useState(false)
+  const [tag, setTag] = useState('')
+  const src = absImageUrl(r.image_url)
+  const p = r.prev
+  const accent = '#38bdf8'
+  const move = async () => {
+    if (!p) { setMsg('Sem mão anterior na base — usa Dispensar ou trata à mão.'); return }
+    const t = r.folder_tag || tag
+    if (!r.folder_tag && !tag) { setMsg('Escolhe a tag para a anterior (a app não adivinha).'); return }
+    const det = [`Imagem → ${p.hand_id} (casada como testemunha; SEM re-desanon).`,
+      r.folder_tag ? `Tag '${r.folder_tag}' sai de ${r.hand_id} e aplica-se a ${p.hand_id} (selado).`
+                   : `Tag '${tag}' entra em ${p.hand_id} (selado).`,
+      `Cruzamento disparado: coroas em falta/contraditórias da anterior viram propostas (Cruzamento/Olho).`].join('\n')
+    if (!window.confirm(`RÉGUA DOS 6s — mover para a anterior?\n\n${det}\n\nConfirmar?`)) return
+    setBusy(true); setMsg('')
+    try {
+      const res = await tableSs.moveToPrev(r.ssid, p.hand_id, r.folder_tag ? undefined : tag)
+      onMoved(r)
+      setMsg(`✓ imagem movida ${res.from} → ${res.to}; tag '${res.tag_applied_to_prev || t}' na anterior (selada).`)
+    } catch (e) { setMsg('Erro: ' + (e?.message || e)) } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', flexWrap: 'wrap' }}>
+        <span onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexWrap: 'wrap', flex: 1 }}>
+          <span style={{ color: '#8b9691', width: 12 }}>{open ? '▾' : '▸'}</span>
+          <span style={{ fontWeight: 800, color: accent, fontFamily: mono, minWidth: 34, textAlign: 'right' }}>{r.interval_s}s</span>
+          <Link to={`/hand/${r.hand_db_id}`} onClick={e => e.stopPropagation()} style={{ color: '#60a5fa', fontFamily: mono, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>{r.hand_id}</Link>
+          {r.folder_tag
+            ? <span style={{ fontSize: 10, fontWeight: 800, color: '#000', background: '#38bdf8', padding: '1px 6px', borderRadius: 5 }}>{r.folder_tag}</span>
+            : <span style={{ fontSize: 10, fontWeight: 800, color: '#f59e0b', border: '1px solid #f59e0b66', padding: '1px 6px', borderRadius: 5 }}>SEM TAG</span>}
+          {p
+            ? <><span style={{ color: '#8b9691', fontSize: 11 }}>→ anterior</span>
+                <Link to={`/hand/${p.hand_db_id}`} onClick={e => e.stopPropagation()} style={{ color: '#60a5fa', fontFamily: mono, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>{p.hand_id}</Link></>
+            : <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>sem anterior na base</span>}
+          {r.verdict && <span style={{ fontSize: 10.5, fontWeight: 800, color: r.verdict === 'provado' ? '#86efac' : '#f59e0b' }}>({r.verdict})</span>}
+        </span>
+        {!r.folder_tag && (
+          <select value={tag} onChange={e => setTag(e.target.value)} disabled={busy}
+            style={{ fontSize: 11, background: '#0b0d13', color: '#e2e8f0', border: '1px solid #2a3550', borderRadius: 5, padding: '3px 6px' }}>
+            <option value="">tag p/ a anterior…</option>
+            {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+        <button onClick={move} disabled={busy || !p}
+          style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 5, cursor: busy ? 'wait' : 'pointer',
+            border: `1px solid ${accent}66`, background: 'transparent', color: accent }}>
+          Mover → anterior
+        </button>
+        <button onClick={() => onDismiss(r)} disabled={busy}
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, cursor: busy ? 'wait' : 'pointer',
+            border: '1px solid #47556966', background: 'transparent', color: '#cbd5e1' }}>
+          Dispensar
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: '0 10px 12px 34px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 3 }}>captura (hoje casada à {r.hand_id})</div>
+            <img src={src} alt="" loading="lazy" onClick={() => onZoom(src)}
+              style={{ maxWidth: 300, width: '100%', borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'zoom-in', background: '#0b0d13', display: 'block' }} />
+          </div>
+          {p?.image_url && (
+            <div>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 3 }}>Gold da anterior ({p.hand_id})</div>
+              <img src={absImageUrl(p.image_url)} alt="" loading="lazy" onClick={() => onZoom(absImageUrl(p.image_url))}
+                style={{ maxWidth: 300, width: '100%', borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'zoom-in', background: '#0b0d13', display: 'block' }} />
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: '#8b9691', minWidth: 240, maxWidth: 380 }}>
+            aos {r.interval_s}s a mão {r.hand_id} mal começou — o print retrata o FIM da anterior.
+            Mover: a imagem vira <b>testemunha</b> da {p ? p.hand_id : 'anterior'} (o cruzamento
+            propõe coroas em falta e leva contradições ao Olho — nada se escreve em silêncio),
+            e a tag viaja pelo selo.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Section({ title, note, accent, items, header, children }) {
   return (
     <div style={{ marginBottom: 22, background: '#0f1117', borderRadius: 8, border: '1px solid #21262d' }}>
@@ -130,15 +267,21 @@ export default function LatePrintsPage() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [dest, setDest] = useState('')
+  const [tagOptions, setTagOptions] = useState([])
 
   const load = () => ggHealth.latePrints().then(d => { setData(d); setSel(new Set()) }).catch(e => setErr(e.message))
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    ggHealth.tagButtons().then(r => setTagOptions(r.tags || [])).catch(() => setTagOptions([]))
+  }, [])
   useEffect(() => {   // re-confere a BD ao vivo no foco (LEI 1)
     const onFocus = () => load()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
 
+  const regra6s = data ? (data.regra6s || []) : []
+  const awaiting = data ? (data.awaiting_tag || []) : []
   const allRows = data ? [...(data.pos || []), ...(data.nota || [])] : []
   const provados = allRows.filter(r => r.verdict === 'provado')
   const suspeitas = allRows.filter(r => r.verdict !== 'provado')
@@ -152,8 +295,11 @@ export default function LatePrintsPage() {
     setData(d => {
       const pos = (d.pos || []).filter(r => !gone.has(rowKey(r)))
       const nota = (d.nota || []).filter(r => !gone.has(rowKey(r)))
+      const r6 = (d.regra6s || []).filter(r => !gone.has(rowKey(r)))
       const prov = [...pos, ...nota].filter(r => r.verdict === 'provado').length
-      return { counts: { pos: pos.length, nota: nota.length, provados: prov, suspeitas: pos.length + nota.length - prov }, pos, nota }
+      return { counts: { pos: pos.length, nota: nota.length, provados: prov,
+                         suspeitas: pos.length + nota.length - prov, regra6s: r6.length },
+               regra6s: r6, pos, nota }
     })
     setSel(new Set())
     load()
@@ -249,6 +395,23 @@ export default function LatePrintsPage() {
       {msg && <div style={{ fontSize: 12, color: msg.startsWith('⚠️') ? '#f59e0b' : msg.startsWith('Erro') ? '#ef4444' : '#22c55e', margin: '0 0 12px', maxWidth: 900, whiteSpace: 'pre-wrap' }}>{msg}</div>}
       {data && (
         <>
+          <Section title="À ESPERA DE TAG — a régua moveu, falta a tua tag" accent="#22c55e" items={awaiting}
+            note="A régua dos 6s moveu estas imagens SOZINHA para a mão anterior (com rasto no selo). A dona ainda não tem tag de estudo — escolhe-a quando quiseres (selo + pipeline). Sai da lista ao tagar.">
+            {awaiting.map((r, i) => <AwaitingRow key={`aw-${r.ssid}-${i}`} r={r} onZoom={setZoom}
+              onDone={async (row, dismiss) => {
+                if (dismiss) { await ggHealth.latePrintsDismiss(row.ssid).catch(() => null) }
+                setData(d => ({ ...d, awaiting_tag: (d.awaiting_tag || []).filter(x => x.ssid !== row.ssid),
+                  counts: { ...d.counts, awaiting_tag: Math.max(0, (d.counts.awaiting_tag || 1) - 1) } }))
+                load()
+              }}
+              busy={busy} setBusy={setBusy} setMsg={setMsg} tagOptions={tagOptions} />)}
+          </Section>
+          <Section title="RÉGUA DOS 6s — o que a régua não decidiu" accent="#38bdf8" items={regra6s}
+            note="A régua corre SOZINHA no processamento (≤6s pertence à anterior; FT fora; rasto no selo). Aqui fica só o que ela não decide: sem mão anterior na base, anterior de mesa final, ou ainda não varrido. Mover manual usa a mesma mecânica (imagem sem re-desanon + tag pelo selo + cruzamento).">
+            {regra6s.map((r, i) => <R6Row key={`${r.ssid}-${i}`} r={r} onZoom={setZoom}
+              onMoved={(row) => dropRows([rowKey(row)])} onDismiss={dismissRow}
+              busy={busy} setBusy={setBusy} setMsg={setMsg} tagOptions={tagOptions} />)}
+          </Section>
           <Section title="PROVADOS — a HH confirma dos dois lados" accent="#22c55e" items={provados}
             note="Na mão atual o facto da tag NÃO existe; na anterior existe. É o retrato do print atrasado. «Aceitar todos» move pelo selo (preview antes; rasto por linha; pipeline nas mãos tocadas)."
             header={provados.filter(r => r.prev).length > 0 && (

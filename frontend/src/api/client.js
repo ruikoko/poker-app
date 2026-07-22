@@ -411,6 +411,7 @@ export const ggHealth = {
   // Painel "Prints fora de tempo" (read-only): capturas em mãos com flop tiradas <20s.
   latePrints: () => req('GET', '/gg-health/late-prints'),
   latePrintsDismiss: (ssid) => req('POST', '/gg-health/late-prints/dismiss', { ssid }),
+  tagButtons: () => req('GET', '/gg-health/tag-buttons'),
   // Ação 1 — taga N mãos com UMA tag (string) ou VÁRIAS (array) de uma vez. ACRESCENTA.
   // confirm=true força apesar do aviso de conflito de formato.
   tag: (handIds, tagOrTags, confirm = false) => req('POST', '/gg-health/tag', {
@@ -599,6 +600,10 @@ export const tableSs = {
     req('POST', '/table-ss/set-seat-name', {
       hand_id: handId, position, real_name: realName,
     }),
+  // RÉGUA DOS 6s: move a IMAGEM (sem re-desanon) + a TAG para a mão ANTERIOR;
+  // cruzamento disparado (propostas nos painéis). tag = p/ capturas sem folder-tag.
+  moveToPrev: (ssid, prevHandId, tag) =>
+    req('POST', `/table-ss/${ssid}/move-to-prev`, { prev_hand_id: prevHandId, tag }),
 }
 
 // ── FONTE ÚNICA dos src de imagem (lei do lightbox p/ imagens) ───────────────

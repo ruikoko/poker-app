@@ -44,7 +44,21 @@ Auditoria transversal fechada (família "regra num sítio, ausente noutro"; deta
    fora). PROVADO vs SÓ-SUSPEITA com razão; «Aceitar todos» move pelo selo (preview+batch) + pipeline
    Fase 1; Dispensar persistido (`late_print_review`). Helpers ÚNICOS `services/hh_facts.py`
    (`hero_postflop_betting`/`real_showdown` — o `had_flop` morreu). Checklist LEI 1 ✓.
-7. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
+7. ✅ **RÉGUA DOS 6s AUTOMÁTICA — SHIPPED 22 Jul** (lei do Rui): captura table-SS tirada **≤6s**
+   do início pertence à **MÃO ANTERIOR** — qualquer tag e SEM tag (FT fora, como sempre). **A app
+   move SOZINHA no processamento** (`table_ss.apply_regra_6s`, no gatilho dos imports/reconcile —
+   `trigger_import_reconciles`, antes do crossing): com tag move tag+imagem; sem tag move só a
+   imagem e a dona entra em **«À ESPERA DE TAG»** no painel (o Rui taga quando quiser). A IMAGEM
+   liga-se **SEM re-desanon** (`_manual_link_ss(deanon=False)`, âncora manual_link — a foto tem
+   os stacks FINAIS da anterior e o botão avançado) e vira **testemunha** → o cruzamento corre a
+   seguir no mesmo gatilho (coroas em falta = propostas crivadas; contradições → Olho) — **nada
+   escreve em silêncio**. Rasto TOTAL: selo origem `regra6s.auto` (manual = `regra6s.move`) +
+   marca `auto_moved` por captura. O painel fica: (a) À espera de tag · (b) o que a régua não
+   decidiu (sem anterior/anterior-FT) · (6,9)s = listas de veredito intactas. Ensaio pré-ligação
+   (dry-run nas 33): 32 moveriam (1 tag+imagem — a icm da GG-6179315485→451 — + 31 só-imagem),
+   1 dispensada, 0 indecisas. Endpoints: `POST /table-ss/regra6s/apply` {dry_run} +
+   `/{ss}/move-to-prev` (manual).
+8. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
    diff à vista (remoção em produção merece o Rui fresco, não o fim de um dia longo).
 
 Cada fix declara-se causa-vs-remendo antes (pela `#LEI-FIX-NA-CAUSA`).

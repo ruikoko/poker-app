@@ -38,6 +38,8 @@ ORIGIN_HAND_PAGE = "tag_decisions.hand_page"        # botão "tirar tag" na pág
 ORIGIN_BATCH = "tag_decisions.batch"                # selecção em lote no painel
 ORIGIN_GG_HEALTH_TAG = "gg_health.tag"              # ferramenta manual "Aplicar" (add)
 ORIGIN_GG_HEALTH_UNTAG = "gg_health.untag"          # ferramenta manual "Remover" (remove)
+ORIGIN_REGRA_6S = "regra6s.move"                    # régua dos 6s: mover MANUAL (painel)
+ORIGIN_REGRA_6S_AUTO = "regra6s.auto"               # régua dos 6s: a app moveu SOZINHA (rasto)
 
 VALID_ACTIONS = ("add", "remove")
 

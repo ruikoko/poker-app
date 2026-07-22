@@ -1554,11 +1554,17 @@ def trigger_reconcile_table_ss(current_user=Depends(require_auth_or_api_key)):
 
 # ── #GG-HEALTH-ACTIONS — Ações 2/3: linkar captura à mão + decisão de troca ───
 
-def _manual_link_ss(ss_id: int, hand_id: Optional[str]) -> dict:
+def _manual_link_ss(ss_id: int, hand_id: Optional[str], *, deanon: bool = True) -> dict:
     """Liga (ou desliga, hand_id=None) uma captura table-SS a uma mão ESCOLHIDA
     manualmente, reusando O MATCHER (persist + link + deanon com Gold-manda + tag).
     NÃO adivinha (a mão vem do Rui). Reversível: re-chamar com outra mão / None.
-    Levanta ValueError('ss_not_found'|'hand_not_found')."""
+    Levanta ValueError('ss_not_found'|'hand_not_found').
+
+    `deanon=False` (régua dos 6s, 22 Jul): persiste o casamento (âncora manual_link,
+    a mais forte — o reconcile respeita) SEM correr a desanon — separa «está casada»
+    de «re-desanonimiza». Necessário quando a captura vai para a mão ANTERIOR: a foto
+    tem os stacks FINAIS dela e o botão já avançado → os matchers mapear-iam nomes
+    errados. A folder-tag continua a aplicar-se (selo + pipeline)."""
     rows = query(
         "SELECT id, site, vision_json, folder_tag, result, matched_hand_id "
         "FROM table_ss_processing_log WHERE id=%s", (ss_id,))
@@ -1581,8 +1587,9 @@ def _manual_link_ss(ss_id: int, hand_id: Optional[str]) -> dict:
     _persist_table_ss_match(ss_id, desired, prev_result=r["result"],
                             prev_matched_hand_id=r["matched_hand_id"])
     if desired["result"] == "success":
-        # Gold manda: _deanon_after_match salta se a mão já tem position_v3.
-        _deanon_after_match(desired["matched_hand_db_id"], r["vision_json"])
+        if deanon:
+            # Gold manda: _deanon_after_match salta se a mão já tem position_v3.
+            _deanon_after_match(desired["matched_hand_db_id"], r["vision_json"])
         _apply_folder_tag_to_hand(desired["matched_hand_db_id"], r["folder_tag"],
                                   r["vision_json"])
     return {"result": desired["result"], "matched_hand_id": desired["matched_hand_id"]}
@@ -1640,6 +1647,193 @@ def swap_review_table_ss(ss_id: int, payload: dict = Body(...),
         _set_swap_review(ss_id, None)
         return {"decision": "review"}
     raise HTTPException(400, "decision inválida (accept|reject|review)")
+
+
+def _mark_regra6s(ss_id: int, decision: str, actor: str) -> None:
+    """Rasto por-captura da régua dos 6s em `late_print_review` (upsert)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO late_print_review (ssid, decision, actor) "
+                "VALUES (%s, %s, %s) "
+                "ON CONFLICT (ssid) DO UPDATE SET decision=EXCLUDED.decision, "
+                "actor=EXCLUDED.actor",
+                (ss_id, decision, actor))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _move_capture_to_prev_core(cap: dict, prev_hand_id: str, chosen_tag, actor: str,
+                               origin: str, decision: str) -> dict:
+    """NÚCLEO ÚNICO do mover-para-a-anterior (régua dos 6s) — usado pelo endpoint
+    manual E pelo varrimento automático. Passos: (1) selo REMOVE a folder-tag da mão
+    atual + pipeline nela; (2) a IMAGEM liga-se à anterior SEM re-desanon (âncora
+    manual_link — a foto tem os stacks FINAIS da anterior e o botão avançado; a
+    folder-tag aplica-se à anterior pelo selo + pipeline dentro do link); (3) tag
+    escolhida (capturas sem folder-tag) entra na anterior pelo selo + pipeline;
+    (4) marca o rasto por-captura. O CRUZAMENTO é disparado pelo caller (o
+    varrimento/gatilho corre-o uma vez no fim; o endpoint manual dispara o seu)."""
+    from app.services.study_pipeline import on_hand_tagged
+    from app.services.tag_decisions import seal_and_recompute
+    ss_id, cur_hand_id = cap["id"], cap["matched_hand_id"]
+    removed_from_current = False
+    if cap.get("folder_tag") and cur_hand_id:
+        try:
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    seal_and_recompute(cur, cur_hand_id, cap["folder_tag"], "remove",
+                                       actor=actor, origin=origin)
+                conn.commit()
+                removed_from_current = True
+            finally:
+                conn.close()
+            crow = query("SELECT id FROM hands WHERE hand_id=%s", (cur_hand_id,))
+            if crow:
+                on_hand_tagged(crow[0]["id"])
+        except Exception as e:  # pragma: no cover - defensivo
+            logger.error("[regra6s] remove na atual %s falhou: %s", cur_hand_id, e)
+    res = _manual_link_ss(ss_id, prev_hand_id, deanon=False)
+    tagged_prev = None
+    if chosen_tag:
+        prow = query("SELECT id FROM hands WHERE hand_id=%s", (prev_hand_id,))
+        if prow:
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    seal_and_recompute(cur, prev_hand_id, chosen_tag, "add",
+                                       actor=actor, origin=origin)
+                conn.commit()
+            finally:
+                conn.close()
+            on_hand_tagged(prow[0]["id"])
+            tagged_prev = chosen_tag
+    _mark_regra6s(ss_id, decision, actor)
+    logger.info("[regra6s] captura %s: %s → %s (tag_removida=%s, tag_prev=%s, %s)",
+                ss_id, cur_hand_id, prev_hand_id, removed_from_current,
+                tagged_prev or cap.get("folder_tag"), decision)
+    return {"status": "moved", "ssid": ss_id, "from": cur_hand_id, "to": prev_hand_id,
+            "tag_removed_from_current": removed_from_current,
+            "tag_applied_to_prev": tagged_prev or cap.get("folder_tag"),
+            "link": res}
+
+
+@router.post("/{ss_id}/move-to-prev")
+def move_table_ss_to_prev(ss_id: int, payload: dict = Body(...),
+                          current_user=Depends(require_auth_or_api_key)):
+    """RÉGUA DOS 6s — mover MANUAL (painel, casos que a régua não decidiu sozinha).
+    Body: {prev_hand_id, tag?}. Mesma mecânica do automático (núcleo único)."""
+    from app.services.tag_decisions import ORIGIN_REGRA_6S, actor_of
+    from app.services.tags_canonical import canonicalize_tag
+    prev_hand_id = (payload.get("prev_hand_id") or "").strip()
+    chosen_tag = (payload.get("tag") or "").strip() or None
+    if not prev_hand_id:
+        raise HTTPException(400, "prev_hand_id obrigatório")
+    rows = query("SELECT id, folder_tag, matched_hand_id FROM table_ss_processing_log "
+                 "WHERE id=%s", (ss_id,))
+    if not rows:
+        raise HTTPException(404, "captura não existe")
+    cap = rows[0]
+    if prev_hand_id == cap["matched_hand_id"]:
+        raise HTTPException(400, "a anterior é a própria mão atual")
+    if chosen_tag:
+        ct = canonicalize_tag(chosen_tag, only_known=True)
+        if not ct:
+            raise HTTPException(400, f"tag inválida: {chosen_tag!r} (usar as canónicas)")
+        chosen_tag = ct
+    try:
+        res = _move_capture_to_prev_core(cap, prev_hand_id, chosen_tag,
+                                         actor_of(current_user), ORIGIN_REGRA_6S,
+                                         "moved_manual")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    try:
+        import threading
+        from app.routers.gg_health import run_crossing_auto
+        threading.Thread(target=run_crossing_auto,
+                         kwargs={"reason": "regra6s_move"}, daemon=True).start()
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.error("[regra6s] crossing não disparou: %s", e)
+    return res
+
+
+def apply_regra_6s(dry_run: bool = False, reason: str = "sweep") -> dict:
+    """RÉGUA DOS 6s AUTOMÁTICA (lei do Rui, 22 Jul): varrimento idempotente que corre
+    no processamento (fim dos imports/reconcile). Captura GG casada, tirada ≤6s do
+    início da mão, FT fora, não-dispensada e ainda não-movida, COM anterior na mesma
+    mesa → move SOZINHA: com folder-tag move tag+imagem; sem tag move só a imagem
+    (a mão anterior fica «à espera de tag» no painel). Tudo com rasto (selo origem
+    `regra6s.auto` + marca `auto_moved` na captura). Sem anterior/anterior-FT → fica
+    para o painel («a régua não decidiu»). `dry_run=True` devolve o PLANO, 0 escritas.
+    O cruzamento é corrido pelo gatilho a seguir (trigger_import_reconciles)."""
+    from app.services.tags_canonical import canonicalize_tag
+    reviewed = {r["ssid"] for r in query("SELECT ssid FROM late_print_review")}
+    rows = query(
+        "SELECT l.id, l.folder_tag, l.matched_hand_id, "
+        "       h.id AS hand_db_id, h.played_at::text AS pa, h.tournament_number AS tn, "
+        "       h.raw, COALESCE(h.discord_tags,'{}') AS dt, COALESCE(h.hm3_tags,'{}') AS ht "
+        "  FROM table_ss_processing_log l "
+        "  JOIN hands h ON h.hand_id = l.matched_hand_id "
+        " WHERE l.result='success' AND l.captured_at IS NOT NULL AND l.site='GGPoker' "
+        "   AND h.site='GGPoker' AND h.played_at >= '2026-01-01' "
+        "   AND l.captured_at >= h.played_at "
+        "   AND l.captured_at <= h.played_at + interval '6 seconds'")
+    from app.routers.gg_health import _hh_table, _prev_hand_same_table
+    moved_tagged = moved_untagged = undecided = skipped = 0
+    plan = []
+    for r in rows:
+        if r["id"] in reviewed:
+            skipped += 1
+            continue
+        tags = list(r["dt"] or []) + list(r["ht"] or [])
+        if any(str(t).endswith("-ft") for t in tags):
+            skipped += 1                       # MESA FINAL fora de tudo
+            continue
+        prev = _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"]))
+        if prev is None or any(str(t).endswith("-ft") for t in (prev.get("tags") or [])):
+            undecided += 1                     # fica no painel «não decidiu»
+            continue
+        # tag ainda na mão? (se já saiu — ex. par movido à mão — move só a imagem)
+        has_tag_on_hand = False
+        if r["folder_tag"]:
+            ftc = canonicalize_tag(r["folder_tag"]) or r["folder_tag"]
+            has_tag_on_hand = ftc in {canonicalize_tag(t) or t for t in tags}
+        item = {"ssid": r["id"], "from": r["matched_hand_id"], "to": prev["hand_id"],
+                "folder_tag": r["folder_tag"], "tag_move": bool(has_tag_on_hand)}
+        plan.append(item)
+        if dry_run:
+            if has_tag_on_hand:
+                moved_tagged += 1
+            else:
+                moved_untagged += 1
+            continue
+        try:
+            from app.services.tag_decisions import ORIGIN_REGRA_6S_AUTO
+            cap = {"id": r["id"], "folder_tag": r["folder_tag"] if has_tag_on_hand else None,
+                   "matched_hand_id": r["matched_hand_id"]}
+            _move_capture_to_prev_core(cap, prev["hand_id"], None, "regra6s.auto",
+                                       ORIGIN_REGRA_6S_AUTO, "auto_moved")
+            if has_tag_on_hand:
+                moved_tagged += 1          # moveu tag+imagem
+            else:
+                moved_untagged += 1        # moveu só a imagem (sem tag na mão)
+        except Exception as e:  # pragma: no cover - defensivo
+            logger.error("[regra6s/auto] captura %s falhou: %s", r["id"], e)
+    out = {"scanned": len(rows), "moved_tagged": moved_tagged,
+           "moved_untagged": moved_untagged, "undecided": undecided,
+           "skipped_reviewed_or_ft": skipped, "dry_run": dry_run, "plan": plan}
+    logger.info("[regra6s/%s] %s", reason, {k: v for k, v in out.items() if k != "plan"})
+    return out
+
+
+@router.post("/regra6s/apply")
+def regra6s_apply(payload: dict = Body(default={}),
+                  current_user=Depends(require_auth_or_api_key)):
+    """Corre a régua dos 6s já (o mesmo varrimento dos gatilhos). {dry_run:true} →
+    ensaio (plano, 0 escritas)."""
+    return apply_regra_6s(dry_run=bool((payload or {}).get("dry_run")), reason="manual")
 
 
 # ── Fase 1 do editor Saúde GG (A: suspeitas 2-candidatas + revert; E: verificada) ──
