@@ -514,6 +514,13 @@ def _late_prints() -> list:
         tags = list(r["discord_tags"] or []) + list(r["hm3_tags"] or [])
         if any(str(t).endswith("-ft") for t in tags):     # MESA FINAL fora de tudo (Rui)
             continue
+        # LEI 1 (22 Jul, apanhado pelo Rui): a captura guarda a folder_tag PARA SEMPRE,
+        # mas o par só é caso ENQUANTO a tag estiver na mão. Movida/tirada → resolvido →
+        # SAI da lista (senão os pares aceites voltavam a cada reload).
+        from app.services.tags_canonical import canonicalize_tag
+        _ftc = canonicalize_tag(r["folder_tag"]) or r["folder_tag"]
+        if _ftc not in {canonicalize_tag(t) or t for t in tags}:
+            continue
         cur_postflop = hero_postflop_betting(r["raw"])
         cur_shows = real_showdown(r["raw"])
         prev = _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"]))

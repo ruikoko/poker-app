@@ -87,6 +87,18 @@ def test_final_table_e_9s_e_icm_continuam_fora():
     assert res["pos"][0]["hand_id"] == "GG-OK"
 
 
+def test_par_resolvido_sai_da_lista():
+    # LEI 1 (apanhado pelo Rui, 22 Jul): tag movida/tirada da mão → a captura ainda
+    # tem folder_tag, mas o par está RESOLVIDO → não volta à lista.
+    main = [
+        _row(1, 5, "GG-MOVIDA", 11, folder="pos-pko", hand_tags=[]),        # tag já saiu
+        _row(2, 5, "GG-AINDA", 12, folder="pos-pko", hand_tags=["pos-pko"]),
+    ]
+    res = _run(main, [_prev()])
+    assert [h["hand_id"] for h in res["pos"]] == ["GG-AINDA"]
+    assert res["counts"]["pos"] == 1
+
+
 def test_dispensadas_ficam_fora():
     res = _run([_row(1, 5, "GG-A", 11), _row(2, 5, "GG-B", 12)],
                [_prev()], dismissed=[{"ssid": 1}])
