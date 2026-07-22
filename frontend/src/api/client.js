@@ -410,6 +410,7 @@ export const ggHealth = {
   untaggedImages: () => req('GET', '/gg-health/untagged-images'),
   // Painel "Prints fora de tempo" (read-only): capturas em mãos com flop tiradas <20s.
   latePrints: () => req('GET', '/gg-health/late-prints'),
+  latePrintsDismiss: (ssid) => req('POST', '/gg-health/late-prints/dismiss', { ssid }),
   // Ação 1 — taga N mãos com UMA tag (string) ou VÁRIAS (array) de uma vez. ACRESCENTA.
   // confirm=true força apesar do aviso de conflito de formato.
   tag: (handIds, tagOrTags, confirm = false) => req('POST', '/gg-health/tag', {

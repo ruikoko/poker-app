@@ -423,28 +423,76 @@ def _hh_table(raw):
 def _prev_hand_same_table(tn, played_at_str, table):
     """A mão IMEDIATAMENTE anterior na MESMA mesa do torneio (candidata a dona da tag).
     HEURÍSTICA — pode não ser a dona real (a dona pode estar várias mãos atrás). None se
-    não há anterior na mesma mesa em BD."""
+    não há anterior na mesma mesa em BD. Traz os FACTOS da HH (helpers únicos de
+    `hh_facts`) + tags + imagem (Gold do entry, se houver) p/ o painel de reconciliação."""
+    from app.services.hh_facts import hero_postflop_betting, real_showdown
     if not tn or not played_at_str:
         return None
     for x in query(
-            "SELECT id, hand_id, played_at::text AS pa, raw FROM hands "
-            " WHERE site='GGPoker' AND tournament_number=%s AND played_at < %s "
-            " ORDER BY played_at DESC LIMIT 20", (tn, played_at_str)):
+            "SELECT h.id, h.hand_id, h.played_at::text AS pa, h.raw, "
+            "       h.discord_tags, h.hm3_tags, h.entry_id, "
+            "       ((e.raw_json->>'img_b64') IS NOT NULL) AS has_img "
+            "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
+            " WHERE h.site='GGPoker' AND h.tournament_number=%s AND h.played_at < %s "
+            " ORDER BY h.played_at DESC LIMIT 20", (tn, played_at_str)):
         if _hh_table(x["raw"]) == table:
             return {"hand_id": x["hand_id"], "hand_db_id": x["id"], "played_at": x["pa"],
-                    "had_flop": "*** FLOP ***" in (x["raw"] or "")}
+                    "hero_postflop": hero_postflop_betting(x["raw"]),
+                    "real_showdown": real_showdown(x["raw"]),
+                    "tags": list(x.get("discord_tags") or []) + list(x.get("hm3_tags") or []),
+                    "image_url": (f"/api/screenshots/image/{x['entry_id']}"
+                                  if x.get("has_img") and x.get("entry_id") else None)}
     return None
+
+
+def ensure_late_print_review_schema():
+    """Dispensas do painel de reconciliação (LEI 1: 'Dispensar (legítimo)' persiste).
+    1 linha por captura (ssid); upsert. Idempotente (corre no lifespan)."""
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS late_print_review ("
+                "  ssid BIGINT PRIMARY KEY,"          # table_ss_processing_log.id
+                "  decision TEXT NOT NULL,"           # 'dismissed'
+                "  actor TEXT,"
+                "  created_at TIMESTAMPTZ NOT NULL DEFAULT now())")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _late_print_verdict(folder_tag, cur_fact, prev):
+    """Classificação do PAR (régua do Rui, 22 Jul): PROVADO = a HH confirma dos DOIS
+    lados (atual SEM o facto + anterior COM); senão SÓ-SUSPEITA com a razão.
+    pos → facto = ronda de apostas pós-flop do Hero; nota → facto = showdown REAL
+    (⚠️ nota=showdown vale SÓ neste exercício de reconciliação — não generalizar)."""
+    facto = "ronda pós-flop do Hero" if str(folder_tag or "").startswith("pos") else "showdown real"
+    if prev is None:
+        return "suspeita", "sem mão anterior na base"
+    prev_fact = (prev["hero_postflop"] if str(folder_tag or "").startswith("pos")
+                 else prev["real_showdown"])
+    if not prev_fact:
+        return "suspeita", f"a anterior não tem {facto}"
+    if cur_fact:
+        return "suspeita", f"{facto} nas DUAS mãos — a régua não decide"
+    return "provado", f"atual sem {facto}; anterior com"
 
 
 def _late_prints() -> list:
     """Capturas GG (folder_tag) tiradas < 9 s do início da mão (captured_at − played_at),
-    EXCLUINDO mãos de MESA FINAL (qualquer tag '-ft' — decisão do Rui: FT fora de tudo).
+    EXCLUINDO mãos de MESA FINAL (qualquer tag '-ft' — decisão do Rui: FT fora de tudo)
+    e as DISPENSADAS pelo Rui (`late_print_review`).
 
-    Régua na TAG, NÃO na mão: aos 9 s a mão não chegou ao flop → um print de spot pós-flop é
-    IMPOSSÍVEL, tenha a mão ido ao flop ou não (a impossibilidade está na tag 'pos', não no
-    flop). Por isso NÃO se filtra por flop; `had_flop` guarda-se só para MOSTRAR. Cada linha
-    traz o `folder_tag` (tag da captura) para o caller dividir em pos/nota. Ordenado por
-    intervalo. `prev` (anterior na mesma mesa) = HEURÍSTICA de dona, candidata não provada."""
+    Régua na TAG, NÃO na mão (a impossibilidade está na tag 'pos', não no flop). Cada linha
+    traz os FACTOS da HH pelos helpers ÚNICOS (`hh_facts` — hero_postflop/real_showdown;
+    substituem o antigo `had_flop`, que era o critério fraco «a mão teve flop»), a `prev`
+    (anterior na mesma mesa — HEURÍSTICA de dona) com os mesmos factos, e o VEREDITO do par
+    (provado/suspeita, régua do Rui 22 Jul). Ordenado por intervalo."""
+    from app.services.hh_facts import hero_postflop_betting, real_showdown
+    dismissed = {r["ssid"] for r in query(
+        "SELECT ssid FROM late_print_review WHERE decision='dismissed'")}
     rows = query(
         "SELECT l.id AS ssid, l.folder_tag, l.captured_at::text AS cap, l.reason_detail, "
         "       h.id AS db_id, h.hand_id, h.played_at::text AS pa, h.tournament_number AS tn, "
@@ -455,6 +503,8 @@ def _late_prints() -> list:
         "   AND h.played_at IS NOT NULL AND h.site='GGPoker' AND h.played_at >= '2026-01-01'")
     out = []
     for r in rows:
+        if r["ssid"] in dismissed:
+            continue
         try:
             iv = (datetime.fromisoformat(r["cap"]) - datetime.fromisoformat(r["pa"])).total_seconds()
         except (ValueError, TypeError):
@@ -464,14 +514,21 @@ def _late_prints() -> list:
         tags = list(r["discord_tags"] or []) + list(r["hm3_tags"] or [])
         if any(str(t).endswith("-ft") for t in tags):     # MESA FINAL fora de tudo (Rui)
             continue
+        cur_postflop = hero_postflop_betting(r["raw"])
+        cur_shows = real_showdown(r["raw"])
+        prev = _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"]))
+        cur_fact = (cur_postflop if str(r["folder_tag"] or "").startswith("pos")
+                    else cur_shows)
+        verdict, reason = _late_print_verdict(r["folder_tag"], cur_fact, prev)
         out.append({
             "ssid": r["ssid"], "hand_id": r["hand_id"], "hand_db_id": r["db_id"],
             "folder_tag": r["folder_tag"], "tags": tags,
             "interval_s": int(iv), "interval_raw": iv,
-            "had_flop": "*** FLOP ***" in (r["raw"] or ""),
+            "hero_postflop": cur_postflop, "real_showdown": cur_shows,
+            "verdict": verdict, "verdict_reason": reason,
             "match_method": r["reason_detail"],
             "image_url": f"/api/table-ss/image/{r['ssid']}",
-            "prev": _prev_hand_same_table(r["tn"], r["pa"], _hh_table(r["raw"])),
+            "prev": prev,
         })
     out.sort(key=lambda x: x["interval_raw"])
     for r in out:
@@ -481,18 +538,43 @@ def _late_prints() -> list:
 
 @router.get("/late-prints")
 def late_prints(current_user=Depends(require_auth)):
-    """Painel 'Prints fora de tempo — a mão não deu tempo' (read-only). Régua na TAG + < 9 s,
-    MESA FINAL fora de tudo. DUAS listas:
-    - `pos` (tag pos-pko/pos-nko): aos 9 s a mão não chegou ao flop → print de spot pós-flop
-      é IMPOSSÍVEL, com ou sem flop na mão (apanha a GG-6132923055, pos sem flop).
-    - `nota` (tag nota): SEM impossibilidade — uma nota pode ser sobre o pré-flop. É lista para
-      OLHAR (as 3 verificadas pelo Rui estavam erradas; 3 casos não fazem regra), não veredito.
-    Outras tags (icm, speed-racer) ficam de fora (sem impossibilidade). A `prev` é HEURÍSTICA
-    de dona — candidata, não provada. NADA escreve."""
+    """Painel 'Prints fora de tempo' + RECONCILIAÇÃO (read-only). Régua na TAG + < 9 s,
+    MESA FINAL fora de tudo, dispensadas fora. Listas `pos`/`nota` como sempre; cada
+    linha traz o VEREDITO do par (régua do Rui, 22 Jul):
+    - PROVADO = a HH confirma dos DOIS lados (pos: atual sem ronda pós-flop do Hero +
+      anterior com; nota: atual sem showdown real + anterior com — ⚠️ nota=showdown é
+      regra SÓ deste exercício);
+    - SÓ-SUSPEITA = a régua não decide (razão explícita).
+    A `prev` continua HEURÍSTICA de dona. NADA escreve — mover é sempre clique do Rui."""
     rows = _late_prints()
     pos = [r for r in rows if str(r["folder_tag"] or "").startswith("pos")]
     nota = [r for r in rows if str(r["folder_tag"] or "") == "nota"]
-    return {"counts": {"pos": len(pos), "nota": len(nota)}, "pos": pos, "nota": nota}
+    prov = sum(1 for r in pos + nota if r["verdict"] == "provado")
+    return {"counts": {"pos": len(pos), "nota": len(nota),
+                       "provados": prov, "suspeitas": len(pos) + len(nota) - prov},
+            "pos": pos, "nota": nota}
+
+
+@router.post("/late-prints/dismiss")
+def late_prints_dismiss(payload: dict = Body(...), current_user=Depends(require_auth)):
+    """Dispensar (legítimo) uma captura do painel de reconciliação — persiste (LEI 1).
+    Body: {ssid}."""
+    ssid = payload.get("ssid")
+    if not isinstance(ssid, int):
+        raise HTTPException(400, "ssid (int) obrigatório")
+    from app.services.crown_seal_log import actor_of
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO late_print_review (ssid, decision, actor) "
+                "VALUES (%s, 'dismissed', %s) "
+                "ON CONFLICT (ssid) DO UPDATE SET decision='dismissed', actor=EXCLUDED.actor",
+                (ssid, actor_of(current_user)))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "dismissed", "ssid": ssid}
 
 
 @router.get("/crowns")

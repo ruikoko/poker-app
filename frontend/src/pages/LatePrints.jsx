@@ -2,63 +2,101 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ggHealth, tagDecisions, absImageUrl } from '../api/client'
 
-// Painel "Prints fora de tempo — a mão não deu tempo". Régua na TAG (não na mão), print <9s,
-// MESA FINAL fora de tudo. DUAS listas:
-//  A (tag pos): aos 9s a mão não chegou ao flop → um print de spot pós-flop é IMPOSSÍVEL, com
-//    ou sem flop na mão (a impossibilidade está na tag, não no flop).
-//  B (tag nota): SEM impossibilidade — uma nota pode ser sobre o pré-flop. Lista para OLHAR.
-// SELO DA TAG: seleção em lote → tirar a tag (da captura) de várias mãos de uma vez. A remoção
-// fica SELADA e não volta no reprocessamento. A "mão anterior na mesma mesa" é HEURÍSTICA de
-// dona — candidata, não provada.
+// Painel "Prints fora de tempo" + RECONCILIAÇÃO (régua do Rui, 22 Jul).
+// Gatilho: captura com tag pos/nota tirada <9s da mão → candidata a pertencer à ANTERIOR.
+// Confirmação pela HH (helpers únicos hh_facts): pos → ronda de apostas pós-flop do Hero
+// na anterior ("chegou ao flop" NÃO chega — all-in pré com board a correr é SEM pós-flop);
+// nota → showdown REAL (linhas "shows", não o marcador). FT fora de tudo.
+// PROVADO = a HH confirma dos DOIS lados; SUSPEITA = a régua não decide (razão à vista).
+// MOVER = selo (remove na atual + add na anterior, preview+batch) → pipeline (Fase 1).
+// NUNCA move sozinho — toda a escrita é clique+confirmação do Rui.
 
 const mono = "'Fira Code',monospace"
 const fmt = (iso) => iso ? String(iso).replace('T', ' ').slice(0, 16) : '—'
-const rowKey = (r) => `${r.hand_id}|${r.folder_tag}`   // uma mão pode estar em A (pos) e B (nota)
+const rowKey = (r) => `${r.hand_id}|${r.folder_tag}`
+const isPos = (r) => String(r.folder_tag || '').startsWith('pos')
+const factName = (r) => isPos(r) ? 'pós-flop do Hero' : 'showdown real'
+const curFact = (r) => isPos(r) ? r.hero_postflop : r.real_showdown
+const prevFact = (r) => r.prev ? (isPos(r) ? r.prev.hero_postflop : r.prev.real_showdown) : null
 
-function Row({ r, onZoom, accent, checked, onToggle, onUseAsDest }) {
+function FactChip({ label, val }) {
+  return (
+    <span style={{ fontSize: 10.5, fontWeight: 800, padding: '1px 7px', borderRadius: 5,
+      color: val ? '#86efac' : '#f87171',
+      background: val ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+      border: `1px solid ${val ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}` }}>
+      {label}: {val ? 'sim ✓' : 'não ✗'}
+    </span>
+  )
+}
+
+function PairRow({ r, onZoom, checked, onToggle, onMovePair, onDismiss, busy }) {
   const [open, setOpen] = useState(false)
   const src = absImageUrl(r.image_url)
   const p = r.prev
+  const provado = r.verdict === 'provado'
+  const accent = provado ? '#22c55e' : '#f59e0b'
   return (
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', flexWrap: 'wrap' }}>
         <input type="checkbox" checked={checked} onChange={onToggle}
-          title="Marcar para tirar a tag em lote"
+          title="Marcar para ações em lote (barra em baixo)"
           style={{ width: 15, height: 15, cursor: 'pointer', accentColor: accent }} />
         <span onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexWrap: 'wrap', flex: 1 }}>
           <span style={{ color: '#8b9691', width: 12 }}>{open ? '▾' : '▸'}</span>
-          <span style={{ fontWeight: 800, color: accent, fontFamily: mono, minWidth: 40, textAlign: 'right' }}>{r.interval_s}s</span>
+          <span style={{ fontWeight: 800, color: accent, fontFamily: mono, minWidth: 34, textAlign: 'right' }}>{r.interval_s}s</span>
           <Link to={`/hand/${r.hand_db_id}`} onClick={e => e.stopPropagation()} style={{ color: '#60a5fa', fontFamily: mono, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>{r.hand_id}</Link>
           <span style={{ fontSize: 10, fontWeight: 800, color: '#000', background: '#38bdf8', padding: '1px 6px', borderRadius: 5 }} title="tag da captura (pasta)">{r.folder_tag}</span>
-          <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {(r.tags || []).map((t, i) => <span key={i} style={{ fontSize: 10, fontWeight: 700, color: '#000', background: '#a78bfa', padding: '1px 6px', borderRadius: 5 }} title="tags da mão">{t}</span>)}
-          </span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: r.had_flop ? '#86efac' : '#f87171' }}>{r.had_flop ? 'mão teve flop' : 'mão sem flop'}</span>
-          <span style={{ fontSize: 11, color: '#64748b', fontFamily: mono }}>{r.match_method}</span>
+          <FactChip label={`atual · ${factName(r)}`} val={curFact(r)} />
+          {p
+            ? <>
+                <span style={{ color: '#8b9691', fontSize: 11 }}>→ anterior</span>
+                <Link to={`/hand/${p.hand_db_id}`} onClick={e => e.stopPropagation()} style={{ color: '#60a5fa', fontFamily: mono, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>{p.hand_id}</Link>
+                <FactChip label={factName(r)} val={prevFact(r)} />
+              </>
+            : <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>sem anterior na base</span>}
+          {!provado && <span style={{ fontSize: 10.5, color: '#f59e0b' }} title="razão">({r.verdict_reason})</span>}
         </span>
+        {p && (
+          <button onClick={() => onMovePair(r)} disabled={busy}
+            title={`Mover '${r.folder_tag}' desta mão para a anterior (${p.hand_id}) — selado + pipeline`}
+            style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 5, cursor: busy ? 'wait' : 'pointer',
+              border: `1px solid ${accent}66`, background: 'transparent', color: accent }}>
+            Mover → anterior
+          </button>
+        )}
+        <button onClick={() => onDismiss(r)} disabled={busy}
+          title="Dispensar (legítimo): a tag fica onde está; a captura sai deste painel (persistido)"
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, cursor: busy ? 'wait' : 'pointer',
+            border: '1px solid #47556966', background: 'transparent', color: '#cbd5e1' }}>
+          Dispensar
+        </button>
       </div>
       {open && (
         <div style={{ padding: '0 10px 12px 34px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          <img src={src} alt="" loading="lazy" onClick={() => onZoom(src)}
-            style={{ maxWidth: 320, width: '100%', borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'zoom-in', background: '#0b0d13', display: 'block' }} />
-          <div style={{ fontSize: 12, color: '#8b9691', minWidth: 240 }}>
-            <div style={{ color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>
-              mão anterior na mesma mesa <span style={{ color: '#f59e0b' }}>(candidata — NÃO dona provada)</span>
+          <div>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 3 }}>captura (casada à mão atual)</div>
+            <img src={src} alt="" loading="lazy" onClick={() => onZoom(src)}
+              style={{ maxWidth: 300, width: '100%', borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'zoom-in', background: '#0b0d13', display: 'block' }} />
+          </div>
+          {p?.image_url && (
+            <div>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 3 }}>Gold da anterior ({p.hand_id})</div>
+              <img src={absImageUrl(p.image_url)} alt="" loading="lazy" onClick={() => onZoom(absImageUrl(p.image_url))}
+                style={{ maxWidth: 300, width: '100%', borderRadius: 6, border: '1px solid #2a2d3a', cursor: 'zoom-in', background: '#0b0d13', display: 'block' }} />
             </div>
-            {p ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <Link to={`/hand/${p.hand_db_id}`} style={{ color: '#60a5fa', fontFamily: mono, fontWeight: 700 }}>{p.hand_id}</Link>
-                <span> · {fmt(p.played_at)}</span> · <b style={{ color: p.had_flop ? '#86efac' : '#f87171' }}>{p.had_flop ? 'teve flop' : 'sem flop'}</b>
-                <button onClick={() => onUseAsDest?.(p.hand_id)}
-                  title="Usar esta como destino do MOVER (só atalho — confirma tu)"
-                  style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, border: '1px solid #f59e0b66', background: 'transparent', color: '#f59e0b', cursor: 'pointer', fontWeight: 700 }}>
-                  usar como destino →
-                </button>
-              </div>
-            ) : <div>— nenhuma anterior na mesma mesa em BD</div>}
+          )}
+          <div style={{ fontSize: 12, color: '#8b9691', minWidth: 240, maxWidth: 380 }}>
+            <div style={{ color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>o par, lado a lado</div>
+            <div>· <b>{r.hand_id}</b> (onde a tag está): {factName(r)} <b style={{ color: curFact(r) ? '#86efac' : '#f87171' }}>{curFact(r) ? 'SIM' : 'NÃO'}</b>
+              {' '}· mão às {fmt(null) && ''}{r.interval_s}s do print</div>
+            {p
+              ? <div>· <b>{p.hand_id}</b> (anterior, {fmt(p.played_at)}): {factName(r)} <b style={{ color: prevFact(r) ? '#86efac' : '#f87171' }}>{prevFact(r) ? 'SIM' : 'NÃO'}</b>
+                  {p.tags?.length ? <span> · tags: {p.tags.join(', ')}</span> : <span> · sem tags</span>}</div>
+              : <div>· anterior: — não existe na base</div>}
             <div style={{ marginTop: 6, fontStyle: 'italic', color: '#64748b' }}>
-              a dona pode estar várias mãos atrás; o Rui re-taga tarde. É pista, não resposta — só a imagem arbitra.
-              O "usar como destino" é <b>atalho</b>, não resposta — escreve o nº GG que quiseres.
+              a "anterior" é heurística — a dona pode estar várias mãos atrás. Só a imagem arbitra;
+              o Mover é sempre teu (selado, com rasto; o pipeline corre no re-tag).
             </div>
           </div>
         </div>
@@ -67,26 +105,19 @@ function Row({ r, onZoom, accent, checked, onToggle, onUseAsDest }) {
   )
 }
 
-function Section({ title, note, accent, items, onZoom, sel, toggle, selectAll, clearSection, emptyOk, onUseAsDest }) {
-  const allSel = items.length > 0 && items.every(r => sel.has(rowKey(r)))
+function Section({ title, note, accent, items, header, children }) {
   return (
     <div style={{ marginBottom: 22, background: '#0f1117', borderRadius: 8, border: '1px solid #21262d' }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid #21262d' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 15, fontWeight: 800, color: accent }}>{title} <span style={{ color: '#8b9691' }}>({items.length})</span></div>
-          {items.length > 0 && (
-            <button onClick={() => allSel ? clearSection(items) : selectAll(items)}
-              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'transparent', border: `1px solid ${accent}55`, color: accent, cursor: 'pointer', fontWeight: 600 }}>
-              {allSel ? 'Limpar esta lista' : 'Selecionar tudo'}
-            </button>
-          )}
+          {header}
         </div>
-        <div style={{ fontSize: 12, color: '#8b9691', marginTop: 4, maxWidth: 820 }}>{note}</div>
+        <div style={{ fontSize: 12, color: '#8b9691', marginTop: 4, maxWidth: 860 }}>{note}</div>
       </div>
       {items.length === 0
-        ? <div style={{ padding: 16, fontSize: 12, color: emptyOk ? '#22c55e' : '#8b9691' }}>{emptyOk ? '✓ vazio' : '— nada'}</div>
-        : items.map((r, i) => <Row key={`${r.ssid}-${i}`} r={r} onZoom={onZoom} accent={accent}
-            checked={sel.has(rowKey(r))} onToggle={() => toggle(r)} onUseAsDest={onUseAsDest} />)}
+        ? <div style={{ padding: 16, fontSize: 12, color: '#22c55e' }}>✓ vazio</div>
+        : children}
     </div>
   )
 }
@@ -95,30 +126,81 @@ export default function LatePrintsPage() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [zoom, setZoom] = useState(null)
-  const [sel, setSel] = useState(new Set())        // rowKey selecionadas
+  const [sel, setSel] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  const [dest, setDest] = useState('')             // mão de destino (nº GG) — ESCOLHIDA por ele
+  const [dest, setDest] = useState('')
 
   const load = () => ggHealth.latePrints().then(d => { setData(d); setSel(new Set()) }).catch(e => setErr(e.message))
   useEffect(() => { load() }, [])
-  // Re-confere a BD ao vivo quando o separador volta ao foco (LEI 1).
-  useEffect(() => {
+  useEffect(() => {   // re-confere a BD ao vivo no foco (LEI 1)
     const onFocus = () => load()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
 
   const allRows = data ? [...(data.pos || []), ...(data.nota || [])] : []
+  const provados = allRows.filter(r => r.verdict === 'provado')
+  const suspeitas = allRows.filter(r => r.verdict !== 'provado')
   const byKey = Object.fromEntries(allRows.map(r => [rowKey(r), r]))
 
   const toggle = (r) => setSel(s => { const n = new Set(s); const k = rowKey(r); n.has(k) ? n.delete(k) : n.add(k); return n })
-  const selectAll = (items) => setSel(s => { const n = new Set(s); items.forEach(r => n.add(rowKey(r))); return n })
-  const clearSection = (items) => setSel(s => { const n = new Set(s); items.forEach(r => n.delete(rowKey(r))); return n })
   const clearAll = () => setSel(new Set())
 
-  // Tirar a tag (da captura) das mãos selecionadas, em lote. Mostra o CUSTO antes (preview) +
-  // Cancelar; nada se escreve sem carimbar. Falha honesta: reporta quais não deram.
+  const dropRows = (keys) => {   // remoção otimista (LEI 1) + re-load
+    const gone = new Set(keys)
+    setData(d => {
+      const pos = (d.pos || []).filter(r => !gone.has(rowKey(r)))
+      const nota = (d.nota || []).filter(r => !gone.has(rowKey(r)))
+      const prov = [...pos, ...nota].filter(r => r.verdict === 'provado').length
+      return { counts: { pos: pos.length, nota: nota.length, provados: prov, suspeitas: pos.length + nota.length - prov }, pos, nota }
+    })
+    setSel(new Set())
+    load()
+  }
+
+  // MOVER um PAR (a régua): remove na atual + add na anterior, pelo selo (preview→batch).
+  const movePairs = async (rows, titulo) => {
+    const pairs = rows.filter(r => r.prev)
+    if (!pairs.length) { setMsg('Nenhum par com mão anterior.'); return }
+    const items = pairs.flatMap(r => [
+      { hand_id: r.hand_id, tag: r.folder_tag, action: 'remove' },
+      { hand_id: r.prev.hand_id, tag: r.folder_tag, action: 'add' },
+    ])
+    setBusy(true); setMsg('')
+    try {
+      const pv = await tagDecisions.preview(items)
+      const nRem = pv.items.filter(i => i.action === 'remove' && i.will_change).length
+      const nAdd = pv.items.filter(i => i.action === 'add' && i.will_change).length
+      const dup = pv.items.filter(i => i.action === 'add' && i.exists && !i.will_change).length
+      const detail = [`${titulo}: ${pairs.length} par(es).`,
+        `Saem ${nRem} tag(s) das mãos atuais; entram ${nAdd} nas anteriores.`,
+        dup ? `${dup} anterior(es) já tinham a tag (não escrevo em duplicado).` : null,
+        `Fica SELADO (rasto por linha) e o pipeline corre nas mãos tocadas.`].filter(Boolean).join('\n')
+      if (!window.confirm(`Mover tags para as mãos anteriores — CUSTO:\n\n${detail}\n\nConfirmar?`)) { setBusy(false); return }
+      const res = await tagDecisions.batch(items)
+      const okKeys = pairs
+        .filter(r => res.results.some(x => x.ok && x.action === 'remove' && x.hand_id === r.hand_id && x.tag === r.folder_tag))
+        .map(rowKey)
+      dropRows(okKeys)
+      const fails = res.results.filter(x => !x.ok)
+      setMsg(fails.length
+        ? `⚠️ ${res.n_ok} operação(ões) ok, ${fails.length} FALHOU: ${fails.map(x => `${x.hand_id} (${x.tag}): ${x.error}`).join('; ')}`
+        : `✓ ${pairs.length} par(es) movido(s) e selado(s).`)
+    } catch (e) { setMsg('Erro: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  const dismissRow = async (r) => {
+    if (!window.confirm(`Dispensar (legítimo)?\n\nA tag '${r.folder_tag}' fica em ${r.hand_id}; esta captura sai do painel (persistido).`)) return
+    setBusy(true); setMsg('')
+    try {
+      await ggHealth.latePrintsDismiss(r.ssid)
+      dropRows([rowKey(r)])
+      setMsg(`✓ dispensada (${r.hand_id}).`)
+    } catch (e) { setMsg('Erro: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  // lote antigo (mantido): só tirar a tag das marcadas / mover para um destino manual
   const removeSelected = async () => {
     const keys = [...sel]
     if (!keys.length) { setMsg('Marca pelo menos uma mão.'); return }
@@ -127,134 +209,83 @@ export default function LatePrintsPage() {
     try {
       const pv = await tagDecisions.preview(items)
       const willChange = pv.items.filter(i => i.will_change)
-      const tagsOut = [...new Set(willChange.map(i => i.tag))].join(', ') || '—'
-      const missing = pv.items.filter(i => !i.exists).length
-      const noChange = pv.items.length - willChange.length - missing
-      const detail = [`${pv.n_ops} tag(s) saem de ${pv.n_hands} mão(s): ${tagsOut}`,
-        missing ? `${missing} mão(s) não encontrada(s)` : null,
-        noChange ? `${noChange} sem alteração (já não têm a tag)` : null].filter(Boolean).join('\n')
-      if (!window.confirm(`Tirar tags em lote — CUSTO:\n\n${detail}\n\nFica SELADO (não volta no reprocessamento). Confirmar?`)) {
-        setBusy(false); return
-      }
+      if (!window.confirm(`Tirar ${pv.n_ops} tag(s) de ${pv.n_hands} mão(s): ${[...new Set(willChange.map(i => i.tag))].join(', ') || '—'}\n\nFica SELADO. Confirmar?`)) { setBusy(false); return }
       const res = await tagDecisions.batch(items)
-      // remoção otimista (LEI 1): tira da lista as que saíram; a lista re-confere no reload.
-      const okKeys = new Set(res.results.filter(r => r.ok).map(r => `${r.hand_id}|${r.tag}`))
-      setData(d => ({
-        counts: { pos: (d.pos || []).filter(r => !okKeys.has(rowKey(r))).length,
-                  nota: (d.nota || []).filter(r => !okKeys.has(rowKey(r))).length },
-        pos: (d.pos || []).filter(r => !okKeys.has(rowKey(r))),
-        nota: (d.nota || []).filter(r => !okKeys.has(rowKey(r))),
-      }))
-      setSel(new Set())
-      if (res.n_failed) {
-        const fails = res.results.filter(r => !r.ok).map(r => `${r.hand_id} (${r.tag}): ${r.error}`).join('; ')
-        setMsg(`⚠️ ${res.n_ok} tirada(s), ${res.n_failed} FALHOU: ${fails}`)
-      } else {
-        setMsg(`✓ ${res.n_ok} tag(s) tirada(s) e seladas.`)
-      }
-      load()   // re-confere a BD ao vivo
-    } catch (e) {
-      setMsg('Erro: ' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
+      dropRows(res.results.filter(x => x.ok).map(x => `${x.hand_id}|${x.tag}`))
+      setMsg(res.n_failed ? `⚠️ ${res.n_ok} ok, ${res.n_failed} falhou.` : `✓ ${res.n_ok} tag(s) tirada(s).`)
+    } catch (e) { setMsg('Erro: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  // MOVER: tira a(s) tag(s) das mãos marcadas E põe-nas na mão de DESTINO (escolhida por ele —
-  // pode ser qualquer uma; a "anterior" é só atalho). Ensaio (custo) + Cancelar antes de escrever.
-  const moveSelected = async () => {
+  const moveSelectedToDest = async () => {
     const keys = [...sel]
-    if (!keys.length) { setMsg('Marca pelo menos uma mão.'); return }
     const d = dest.trim()
-    if (!d) { setMsg('Escreve o nº GG da mão de destino (ou usa o atalho "anterior").'); return }
+    if (!keys.length || !d) { setMsg('Marca mão(s) e escreve o nº GG de destino.'); return }
     const rows = keys.map(k => byKey[k])
-    const removeItems = rows.map(r => ({ hand_id: r.hand_id, tag: r.folder_tag, action: 'remove' }))
-    const distinctTags = [...new Set(rows.map(r => r.folder_tag))]
-    const addItems = distinctTags.map(tag => ({ hand_id: d, tag, action: 'add' }))
-    const items = [...removeItems, ...addItems]
+    const items = [...rows.map(r => ({ hand_id: r.hand_id, tag: r.folder_tag, action: 'remove' })),
+      ...[...new Set(rows.map(r => r.folder_tag))].map(tag => ({ hand_id: d, tag, action: 'add' }))]
     setBusy(true); setMsg('')
     try {
       const pv = await tagDecisions.preview(items)
-      const destItems = pv.items.filter(i => i.action === 'add')
-      const missing = destItems.find(i => !i.exists)
-      if (missing) { setMsg(`A mão de destino ${d} não existe na base. Verifica o nº GG.`); setBusy(false); return }
-      const outN = pv.items.filter(i => i.action === 'remove' && i.will_change).length
-      const goes = destItems.filter(i => i.will_change).map(i => i.tag)
-      const already = destItems.filter(i => !i.will_change).map(i => i.tag)
-      const detail = [
-        `Tirar ${outN} tag(s) de ${rows.length} mão(s).`,
-        goes.length ? `Pôr em ${d}: ${goes.join(', ')}.` : null,
-        already.length ? `${d} já tem: ${already.join(', ')} (não escrevo em duplicado).` : null,
-      ].filter(Boolean).join('\n')
-      if (!window.confirm(`Mover tags — CUSTO:\n\n${detail}\n\nFica SELADO. Confirmar?`)) { setBusy(false); return }
+      if (pv.items.some(i => i.action === 'add' && !i.exists)) { setMsg(`A mão de destino ${d} não existe.`); setBusy(false); return }
+      if (!window.confirm(`Mover ${rows.length} tag(s) para ${d}?\n\nFica SELADO. Confirmar?`)) { setBusy(false); return }
       const res = await tagDecisions.batch(items)
-      const okKeys = new Set(res.results.filter(r => r.ok && r.action === 'remove' && r.changed).map(r => `${r.hand_id}|${r.tag}`))
-      setData(dd => ({
-        counts: { pos: (dd.pos || []).filter(r => !okKeys.has(rowKey(r))).length,
-                  nota: (dd.nota || []).filter(r => !okKeys.has(rowKey(r))).length },
-        pos: (dd.pos || []).filter(r => !okKeys.has(rowKey(r))),
-        nota: (dd.nota || []).filter(r => !okKeys.has(rowKey(r))),
-      }))
-      setSel(new Set())
-      const fails = res.results.filter(r => !r.ok)
-      const addRes = res.results.filter(r => r.action === 'add')
-      const addedOk = addRes.filter(r => r.ok && r.changed).map(r => r.tag)
-      const addDup = addRes.filter(r => r.ok && r.already_present).map(r => r.tag)
-      const parts = [`✓ ${res.results.filter(r => r.action === 'remove' && r.ok).length} tirada(s).`]
-      if (addedOk.length) parts.push(`Posta(s) em ${d}: ${addedOk.join(', ')}.`)
-      if (addDup.length) parts.push(`${d} já tinha: ${addDup.join(', ')}.`)
-      if (fails.length) parts.push(`⚠️ ${fails.length} FALHOU: ${fails.map(r => `${r.hand_id} (${r.tag}): ${r.error}`).join('; ')}`)
-      setMsg(parts.join(' '))
-      load()
-    } catch (e) {
-      setMsg('Erro: ' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
+      dropRows(res.results.filter(x => x.ok && x.action === 'remove').map(x => `${x.hand_id}|${x.tag}`))
+      setMsg(res.n_failed ? `⚠️ ${res.n_failed} falhou.` : `✓ movido para ${d}.`)
+    } catch (e) { setMsg('Erro: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
   return (
     <div style={{ padding: 4 }}>
-      <h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Prints fora de tempo — a mão não deu tempo</h2>
+      <h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Prints fora de tempo — reconciliação</h2>
       <p style={{ fontSize: 12, color: '#8b9691', marginTop: 0, maxWidth: 900 }}>
-        Capturas GG tiradas <b>&lt; 9 s</b> do início da mão (hora do print − hora do início). Régua na
-        <b> tag da captura</b>, não na mão. <b>Mesa final (qualquer tag <code>-ft</code>) fica de fora de tudo.</b> Marca
-        as mãos e tira a tag em lote — fica <b>selado</b> (não volta no reprocessamento).
+        Capturas com tag <b>pos/nota</b> tiradas <b>&lt; 9 s</b> do início da mão → candidatas a pertencer à
+        <b> mão anterior</b>. A app confirma pela HH: <b>pos</b> → ronda de apostas pós-flop do Hero
+        (all-in pré com board a correr <b>não conta</b>); <b>nota</b> → showdown <b>real</b> (linhas
+        "shows", não o marcador — regra só deste exercício). <b>Mesa final fora de tudo.</b> Mover =
+        selo (remove+add) + pipeline. Nada se move sem o teu clique.
       </p>
-      <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, padding: '8px 12px', margin: '8px 0 16px', maxWidth: 900 }}>
-        ⚠️ A <b>mão anterior na mesma mesa</b> é uma <b>heurística de dona — candidata, não dona provada</b>.
-        A dona real pode estar <b>várias mãos atrás</b> (o Rui re-taga tarde). Não é resposta; é pista. Só a imagem arbitra.
-      </div>
       {err && <div style={{ color: '#ef4444', fontSize: 13 }}>Erro: {err}</div>}
       {!data && !err && <div style={{ color: '#64748b', fontSize: 13 }}>A carregar…</div>}
       {msg && <div style={{ fontSize: 12, color: msg.startsWith('⚠️') ? '#f59e0b' : msg.startsWith('Erro') ? '#ef4444' : '#22c55e', margin: '0 0 12px', maxWidth: 900, whiteSpace: 'pre-wrap' }}>{msg}</div>}
       {data && (
         <>
-          <Section title="A · Impossíveis — tag pos (< 9 s)" accent="#ef4444" emptyOk
-            note="Tag pos-pko/pos-nko = spot pós-flop. Aos 9 s a mão nem chegou ao flop → um print de spot pós-flop é IMPOSSÍVEL, tenha a mão ido ao flop ou não. A impossibilidade está na TAG. Provável print da mão anterior, casado à mão errada."
-            items={data.pos || []} onZoom={setZoom} sel={sel} toggle={toggle} selectAll={selectAll} clearSection={clearSection} onUseAsDest={setDest} />
-          <Section title="B · tag nota (< 9 s) — só para olhar" accent="#38bdf8"
-            note="Tag nota = pode ser sobre o PRÉ-FLOP → aqui NÃO há impossibilidade nenhuma. As 3 verificadas pelo Rui estavam erradas, mas 3 casos não fazem regra: é lista para olhar, não veredito."
-            items={data.nota || []} onZoom={setZoom} sel={sel} toggle={toggle} selectAll={selectAll} clearSection={clearSection} onUseAsDest={setDest} />
+          <Section title="PROVADOS — a HH confirma dos dois lados" accent="#22c55e" items={provados}
+            note="Na mão atual o facto da tag NÃO existe; na anterior existe. É o retrato do print atrasado. «Aceitar todos» move pelo selo (preview antes; rasto por linha; pipeline nas mãos tocadas)."
+            header={provados.filter(r => r.prev).length > 0 && (
+              <button onClick={() => movePairs(provados, 'Aceitar todos os PROVADOS')} disabled={busy}
+                style={{ fontSize: 12, fontWeight: 800, padding: '4px 12px', borderRadius: 5, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#22c55e', color: '#052e16' }}>
+                Aceitar todos ({provados.filter(r => r.prev).length})
+              </button>
+            )}>
+            {provados.map((r, i) => <PairRow key={`${r.ssid}-${i}`} r={r} onZoom={setZoom}
+              checked={sel.has(rowKey(r))} onToggle={() => toggle(r)}
+              onMovePair={(row) => movePairs([row], 'Mover 1 par')} onDismiss={dismissRow} busy={busy} />)}
+          </Section>
+          <Section title="SÓ-SUSPEITAS — a régua não decide" accent="#f59e0b" items={suspeitas}
+            note="O gatilho (<9s) disparou mas a HH não confirma dos dois lados (razão em cada linha: pós-flop nas duas, anterior sem o facto, anterior inexistente). Uma a uma: só a imagem arbitra.">
+            {suspeitas.map((r, i) => <PairRow key={`${r.ssid}-${i}`} r={r} onZoom={setZoom}
+              checked={sel.has(rowKey(r))} onToggle={() => toggle(r)}
+              onMovePair={(row) => movePairs([row], 'Mover 1 par (SUSPEITA)')} onDismiss={dismissRow} busy={busy} />)}
+          </Section>
         </>
       )}
       {sel.size > 0 && (
         <div style={{ position: 'fixed', bottom: 18, left: '50%', transform: 'translateX(-50%)', zIndex: 1500,
           background: '#0f172a', border: '1px solid #334155', borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
           padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', maxWidth: '94vw' }}>
-          <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700 }}>{sel.size} mão(s) marcada(s)</span>
+          <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700 }}>{sel.size} marcada(s)</span>
           <button onClick={removeSelected} disabled={busy}
-            style={{ fontSize: 13, fontWeight: 800, padding: '7px 16px', borderRadius: 6, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#ef4444', color: '#fff', opacity: busy ? 0.6 : 1 }}>
-            {busy ? '…' : 'Só tirar'}
+            style={{ fontSize: 13, fontWeight: 800, padding: '7px 16px', borderRadius: 6, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#ef4444', color: '#fff' }}>
+            Só tirar
           </button>
           <span style={{ width: 1, height: 24, background: '#334155' }} />
           <span style={{ fontSize: 12, color: '#94a3b8' }}>ou mover para</span>
           <input value={dest} onChange={e => setDest(e.target.value)} placeholder="GG-…"
             style={{ fontSize: 12, fontFamily: mono, padding: '6px 8px', borderRadius: 5, width: 140,
               background: '#0b0d13', border: '1px solid #2a3550', color: '#e2e8f0', outline: 'none' }} />
-          <button onClick={moveSelected} disabled={busy || !dest.trim()}
-            style={{ fontSize: 13, fontWeight: 800, padding: '7px 16px', borderRadius: 6, border: 'none', cursor: (busy || !dest.trim()) ? 'not-allowed' : 'pointer', background: '#22c55e', color: '#052e16', opacity: (busy || !dest.trim()) ? 0.5 : 1 }}>
-            {busy ? '…' : 'Tirar e pôr aqui'}
+          <button onClick={moveSelectedToDest} disabled={busy || !dest.trim()}
+            style={{ fontSize: 13, fontWeight: 800, padding: '7px 16px', borderRadius: 6, border: 'none', cursor: (busy || !dest.trim()) ? 'not-allowed' : 'pointer', background: '#22c55e', color: '#052e16' }}>
+            Tirar e pôr aqui
           </button>
           <button onClick={clearAll} disabled={busy}
             style={{ fontSize: 12, padding: '7px 12px', borderRadius: 6, border: '1px solid #475569', cursor: 'pointer', background: 'transparent', color: '#cbd5e1' }}>

@@ -294,6 +294,8 @@ async def lifespan(app: FastAPI):
     ensure_crown_seal_log_schema()
     from app.services.tag_decisions import ensure_tag_decisions_schema
     ensure_tag_decisions_schema()
+    from app.routers.gg_health import ensure_late_print_review_schema
+    ensure_late_print_review_schema()
     ensure_hrc_schema()
     from app.routers.queue import ensure_hrc_queue_release_schema
     ensure_hrc_queue_release_schema()

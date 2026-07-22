@@ -38,7 +38,13 @@ Auditoria transversal fechada (família "regra num sítio, ausente noutro"; deta
    completo + mapa dos 8 painéis (leitores da régua única, LEI 3) + medição do progressive
    (11 violações / 8 jogador-torneio / 2 027 trajetórias) em `TECH_DEBTS_INVENTARIO.md`
    §`#REGUA-COROAS` (secção 21 Jul noite).
-6. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
+6. ✅ **PAINEL DE RECONCILIAÇÃO — SHIPPED 22 Jul** (extensão do «Prints fora de tempo», régua do Rui:
+   gatilho <9s pos/nota → confirmação na anterior pela HH — pos=ronda de apostas pós-flop do Hero
+   [all-in pré NÃO conta, caso GG-6180819531] · nota=showdown REAL [regra só-deste-exercício] · FT
+   fora). PROVADO vs SÓ-SUSPEITA com razão; «Aceitar todos» move pelo selo (preview+batch) + pipeline
+   Fase 1; Dispensar persistido (`late_print_review`). Helpers ÚNICOS `services/hh_facts.py`
+   (`hero_postflop_betting`/`real_showdown` — o `had_flop` morreu). Checklist LEI 1 ✓.
+7. **`#MTT-DESANON-MORTO`** — remoção do código órfão (provado morto), **quando houver espaço** e com o
    diff à vista (remoção em produção merece o Rui fresco, não o fim de um dia longo).
 
 Cada fix declara-se causa-vs-remendo antes (pela `#LEI-FIX-NA-CAUSA`).
