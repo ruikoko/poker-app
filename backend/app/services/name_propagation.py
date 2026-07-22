@@ -33,6 +33,12 @@ from app.services.deanon_status import deanon_status
 _SEAT_RE = re.compile(r'^Seat \d+: ([0-9a-f]{4,8}) \(', re.M)   # hashes anón (Hero/nomes reais excluídos)
 PROPAGATION_MATCH_METHOD = "hash_propagation_v1"
 
+# Quarentena do CRUZAMENTO (eliminação divergente entre capturas — caso TorukMaktus):
+# o mesmo hash do torneio com completações diferentes. Cartão/fluxo do same_hash
+# (o painel e o np_merge tratam-no igual); kind próprio para a poda de cada motor
+# só varrer as suas linhas.
+KIND_CAPTURE_VARIANT = "same_hash_capture"
+
 
 # ── coerção ──────────────────────────────────────────────────────────────────
 
@@ -276,7 +282,7 @@ def conflict_sides(hands: list, item: dict) -> list:
             sides.append({"kind": "hash", "hash": hc, "name": name,
                           "db_ids": [a["db_id"] for a in appear if a.get("db_id")],
                           "appearances": appear})
-    elif kind in ("same_hash", "strong_weak_mismatch"):
+    elif kind in ("same_hash", "strong_weak_mismatch", KIND_CAPTURE_VARIANT):
         for nv in cands:
             nnorm = _norm(nv)
             def _m(h, nnorm=nnorm):
@@ -714,14 +720,57 @@ def _upsert_quarantine(conn, tn: str, quarantine: list) -> None:
             """, (tn, q["kind"], _quar_key(q),
                   json.dumps(q["candidates"]), json.dumps(q.get("hands", []))))
         # PODA: pending que já não estão no conjunto fresco (conflito dissolvido).
+        # As linhas do CRUZAMENTO (KIND_CAPTURE_VARIANT) não são deste motor —
+        # a poda delas é do próprio Cruzamento (upsert_capture_variant_quarantine).
         cur.execute("SELECT kind, conflict_key FROM name_quarantine_review "
-                    "WHERE tournament_number=%s AND decision='pending'", (tn,))
+                    "WHERE tournament_number=%s AND decision='pending' AND kind<>%s",
+                    (tn, KIND_CAPTURE_VARIANT))
         for r in cur.fetchall():
             if (r["kind"], r["conflict_key"]) not in fresh:
                 cur.execute("DELETE FROM name_quarantine_review WHERE tournament_number=%s "
                             "AND kind=%s AND conflict_key=%s AND decision='pending'",
                             (tn, r["kind"], r["conflict_key"]))
     conn.commit()
+
+
+def upsert_capture_variant_quarantine(groups: list, *, conn=None) -> int:
+    """Quarentena do CRUZAMENTO — eliminação DIVERGENTE entre capturas (o mesmo
+    tn+hash com completações diferentes, ex. TorukMaktus): vai ao painel de nomes
+    (kind `same_hash_capture`, cartão/merge do same_hash), NUNCA a escrita
+    automática. Upsert dos pendentes (não pisa decisões) + PODA dos pendentes
+    deste kind que já não conflituam. Devolve nº de grupos pendentes registados."""
+    from app.db import get_conn
+    own = conn is None
+    if own:
+        conn = get_conn()
+    try:
+        fresh = set()
+        with conn.cursor() as cur:
+            for g in groups:
+                fresh.add((g["tournament_number"], g["hash"]))
+                cur.execute("""
+                    INSERT INTO name_quarantine_review
+                        (tournament_number, kind, conflict_key, candidates, hands)
+                    VALUES (%s,%s,%s,%s,%s)
+                    ON CONFLICT (tournament_number, kind, conflict_key) DO UPDATE
+                        SET candidates=EXCLUDED.candidates, hands=EXCLUDED.hands,
+                            updated_at=(now() at time zone 'utc')
+                        WHERE name_quarantine_review.decision='pending'
+                """, (g["tournament_number"], KIND_CAPTURE_VARIANT, g["hash"],
+                      json.dumps(g["candidates"]), json.dumps(g.get("hands", []))))
+            cur.execute("SELECT tournament_number, conflict_key FROM name_quarantine_review "
+                        "WHERE kind=%s AND decision='pending'", (KIND_CAPTURE_VARIANT,))
+            for r in cur.fetchall():
+                if (r["tournament_number"], r["conflict_key"]) not in fresh:
+                    cur.execute("DELETE FROM name_quarantine_review "
+                                "WHERE tournament_number=%s AND kind=%s AND conflict_key=%s "
+                                "AND decision='pending'",
+                                (r["tournament_number"], KIND_CAPTURE_VARIANT, r["conflict_key"]))
+        conn.commit()
+        return len(groups)
+    finally:
+        if own:
+            conn.close()
 
 
 def refresh_name_propagation(tn: str, *, conn=None, auto_write: bool = True) -> dict:

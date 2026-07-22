@@ -1447,9 +1447,11 @@ def np_choose(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key
 
 @router.post("/names/merge")
 def np_merge(body: NpDecisionBody, current_user=Depends(require_auth_or_api_key)):
-    """MERGE de variantes OCR (same_hash) -> escolhe o canonico e propaga."""
-    if body.kind != "same_hash" or not body.chosen_name:
-        raise HTTPException(400, "merge so em same_hash + chosen_name")
+    """MERGE de variantes OCR (same_hash; same_hash_capture = eliminação divergente
+    do Cruzamento) -> escolhe o canonico. O Cruzamento aplica o escolhido na
+    proxima passagem (selo elimination_complete)."""
+    if body.kind not in ("same_hash", "same_hash_capture") or not body.chosen_name:
+        raise HTTPException(400, "merge so em same_hash/same_hash_capture + chosen_name")
     return _np_decide(body, "merged", _ft_who(current_user))
 
 
@@ -2348,10 +2350,22 @@ def crossing_fill_sample(n: int = Query(4, ge=1, le=12),
 
 
 def _crossing_name_fixes():
-    """Núcleo da LEI DO CRUZAMENTO (nomes). Lista de {hand_id, hand_db_id, hash, from, to}
-    — nomes truncados no apa que ganham a forma mais completa de qualquer fonte irmã
-    (regra `name_merge.best_completion`; selo `verified_by_user` intocável). NADA escreve."""
-    from app.services.name_merge import best_completion, names_pool, is_truncated
+    """Núcleo da LEI DO CRUZAMENTO (nomes) — DUAS réguas irmãs (`name_merge`):
+    (1) PREFIXO (`best_completion`) — o coto casa letra a letra com um nome mais
+        completo de qualquer fonte irmã da mão;
+    (2) ELIMINAÇÃO (`elimination_completion`, lei do Rui 22 Jul) — quando o OCR
+        soletrou mal o coto e o prefixo nunca casa: se todos os nomes da mesa casam
+        menos um de cada lado, o par sobrante é a mesma pessoa. 3 guardas não
+        negociáveis (Hero-fora-primeiro / contagens / um-e-um).
+    Devolve (fixes, capture_quars): fixes = [{hand_id, hand_db_id, hash, from, to,
+    origin: 'prefix'|'elimination_complete'}]; capture_quars = grupos DIVERGENTES
+    (o mesmo tn+hash com completações diferentes entre capturas — caso TorukMaktus)
+    → vão à quarentena de nomes, NUNCA a escrita automática. Decisões já tomadas
+    lá mandam: merged/chosen → vira fix com o nome escolhido; dismissed → nada.
+    Selo `verified_by_user` intocável. NADA escreve."""
+    from app.services.name_merge import (best_completion, elimination_completion,
+                                         is_truncated, names_pool)
+    from app.services.name_propagation import KIND_CAPTURE_VARIANT
     ss_by_hand: dict = {}
     for r in query(
             "SELECT matched_hand_id AS mh, vision_json AS vj FROM table_ss_processing_log "
@@ -2359,17 +2373,20 @@ def _crossing_name_fixes():
         vj = r["vj"] if isinstance(r["vj"], dict) else json.loads(r["vj"] or "{}")
         ss_by_hand.setdefault(r["mh"], []).append(vj)
     rows = query(
-        "SELECT h.id, h.hand_id, h.player_names AS pn, h.all_players_actions AS apa, "
+        "SELECT h.id, h.hand_id, h.tournament_number AS tn, "
+        "       h.player_names AS pn, h.all_players_actions AS apa, "
         "       e.raw_json AS grj "
         "  FROM hands h LEFT JOIN entries e ON e.id = h.entry_id "
         " WHERE h.site='GGPoker' AND h.played_at >= '2026-01-01' "
         "   AND h.player_names IS NOT NULL")
     fixes = []
+    elim_groups: dict = {}          # (tn, hash) -> {"tos": set, "items": {hand_id: fix}}
     for r in rows:
         apa = r["apa"] if isinstance(r["apa"], dict) else json.loads(r["apa"] or "{}")
         pn = r["pn"] if isinstance(r["pn"], dict) else json.loads(r["pn"] or "{}")
         grj = r["grj"] if isinstance(r["grj"], dict) else json.loads(r["grj"] or "{}") if r["grj"] else {}
         pool = names_pool(apa, pn.get("players_list"), grj, ss_by_hand.get(r["hand_id"], []))
+        prefix_hashes = set()
         for k, v in (apa or {}).items():
             if k == "_meta" or not isinstance(v, dict) or v.get("verified_by_user"):
                 continue
@@ -2378,9 +2395,55 @@ def _crossing_name_fixes():
                 continue
             best = best_completion(nm, pool)
             if best:
+                prefix_hashes.add(k)
                 fixes.append({"hand_id": r["hand_id"], "hand_db_id": r["id"],
-                              "hash": k, "from": nm, "to": best})
-    return fixes
+                              "hash": k, "from": nm, "to": best, "origin": "prefix"})
+        # ELIMINAÇÃO — só nos cotos que o prefixo não resolveu, e só com capturas
+        vjs = ss_by_hand.get(r["hand_id"]) or []
+        if not vjs:
+            continue
+        named = {k: v.get("real_name") for k, v in (apa or {}).items()
+                 if k != "_meta" and isinstance(v, dict) and v.get("real_name")}
+        if not any(is_truncated(n) for n in named.values()):
+            continue
+        # raw só aqui (poucas mãos chegam cá) — na query global pesava megabytes
+        rr = query("SELECT raw FROM hands WHERE id=%s", (r["id"],))
+        hh_seats = count_hh_seats(rr[0]["raw"]) if rr else None
+        for vj in vjs:
+            p = elimination_completion(named, hh_seats, vj)
+            if not p or p["hash"] in prefix_hashes:
+                continue
+            entry = apa.get(p["hash"])
+            if isinstance(entry, dict) and entry.get("verified_by_user"):
+                continue
+            g = elim_groups.setdefault((r["tn"], p["hash"]), {"tos": set(), "items": {}})
+            g["tos"].add(p["to"])
+            g["items"][r["hand_id"]] = {"hand_id": r["hand_id"], "hand_db_id": r["id"],
+                                        "hash": p["hash"], "from": p["from"]}
+    decided = {(q["tournament_number"], q["conflict_key"]): q for q in query(
+        "SELECT tournament_number, conflict_key, decision, chosen_name "
+        "  FROM name_quarantine_review WHERE kind=%s AND decision <> 'pending'",
+        (KIND_CAPTURE_VARIANT,))}
+    capture_quars = []
+    for (tn, hsh), g in elim_groups.items():
+        d = decided.get((tn, hsh))
+        if d is not None:
+            # decisão do Rui manda: merged/chosen escreve o escolhido; resto → nada
+            if d["decision"] in ("merged", "chosen") and d["chosen_name"]:
+                for it in g["items"].values():
+                    fixes.append({**it, "to": d["chosen_name"],
+                                  "origin": "elimination_complete"})
+            continue
+        if len(g["tos"]) == 1:
+            to = next(iter(g["tos"]))
+            for it in g["items"].values():
+                fixes.append({**it, "to": to, "origin": "elimination_complete"})
+        else:
+            froms = sorted({it["from"] for it in g["items"].values()})
+            capture_quars.append({"tournament_number": tn, "hash": hsh,
+                                  "candidates": froms + sorted(g["tos"]),
+                                  "hands": sorted(g["items"])})
+    return fixes, capture_quars
 
 
 @router.get("/crossing/plan")
@@ -2389,7 +2452,7 @@ def crossing_plan(current_user=Depends(require_auth)):
     carimbo ÚNICO em lote: coroas a PREENCHER (as 88 crivadas) + nomes completos>truncados.
     READ-ONLY — só escreve no /crossing/apply."""
     fills, suspects = _crossing_all_fills()
-    names = _crossing_name_fixes()
+    names, capture_quars = _crossing_name_fixes()
     return {
         "crowns": {"seats": len(fills),
                    "hands": len({f["hand_id"] for f in fills}),
@@ -2399,7 +2462,11 @@ def crossing_plan(current_user=Depends(require_auth)):
                                 for f in fills[:8]]},
         "names": {"seats": len(names),
                   "hands": len({f["hand_id"] for f in names}),
-                  "examples": [{"hand_id": f["hand_id"], "from": f["from"], "to": f["to"]}
+                  "prefix": sum(1 for f in names if f.get("origin") != "elimination_complete"),
+                  "elimination": sum(1 for f in names if f.get("origin") == "elimination_complete"),
+                  "capture_divergent_quarantine": len(capture_quars),
+                  "examples": [{"hand_id": f["hand_id"], "from": f["from"], "to": f["to"],
+                                "origin": f.get("origin", "prefix")}
                                for f in names[:8]]},
     }
 
@@ -2411,7 +2478,7 @@ def _do_crossing_apply():
     from app.services.eliminated_bounty import (
         BOUNTY_SOURCE_KEY, SOURCE_CROSS_CAPTURE, is_bounty_sealed)
     fills, _ = _crossing_all_fills()
-    names = _crossing_name_fixes()
+    names, capture_quars = _crossing_name_fixes()
     # agrupa por mão
     by_hand: dict = {}
     for f in fills:
@@ -2445,14 +2512,20 @@ def _do_crossing_apply():
                                                  cw[p["name"]], new_source=SOURCE_CROSS_CAPTURE))
                         crowns_written += 1
                         changed = True
-            # nomes: completa apa.real_name + players_list.name (selo intocável)
-            nmap = {f["hash"]: f["to"] for f in work["names"]}
-            for k, to in nmap.items():
+            # nomes: completa apa.real_name + players_list.name (selo intocável).
+            # Eliminação (lei do Rui 22 Jul) escreve com ORIGEM PRÓPRIA + nome anterior
+            # guardado — reversível pelo rasto se uma grafia vier torta.
+            nmap = {f["hash"]: f for f in work["names"]}
+            for k, f in nmap.items():
                 v = apa.get(k)
                 if isinstance(v, dict) and not v.get("verified_by_user"):
                     old = v.get("real_name")
+                    to = f["to"]
                     if old and old != to:
                         v["real_name"] = to
+                        if f.get("origin") == "elimination_complete":
+                            v["name_source"] = "elimination_complete"
+                            v["name_prev"] = old
                         names_written += 1
                         changed = True
                         for p in pl:
@@ -2467,8 +2540,16 @@ def _do_crossing_apply():
     finally:
         conn.close()
     log_seals(seal_log, origin=ORIGIN_CROSSING_APPLY, actor="crossing_apply")
+    # eliminação DIVERGENTE (caso TorukMaktus) → quarentena de nomes, não escrita
+    try:
+        from app.services.name_propagation import upsert_capture_variant_quarantine
+        quarantined = upsert_capture_variant_quarantine(capture_quars)
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("[crossing] quarentena de eliminação divergente falhou")
+        quarantined = 0
     return {"status": "applied", "crowns_written": crowns_written,
-            "names_written": names_written, "hands_touched": hands_touched}
+            "names_written": names_written, "hands_touched": hands_touched,
+            "names_capture_quarantined": quarantined}
 
 
 @router.post("/crossing/apply")

@@ -59,6 +59,84 @@ def best_completion(stored, pool):
     return None
 
 
+# ── Régua da ELIMINAÇÃO (irmã da best_completion — lei do Rui, 22 Jul) ────────
+# Numa mesa, se TODOS os nomes casam entre a HH e a captura menos UM de cada
+# lado, esse par é a mesma pessoa (não há outro para ser) — mesmo com o coto
+# mal soletrado pelo OCR (onde o prefixo falha). Fica o nome MAIS COMPLETO.
+
+# Lixo de UI que a Vision às vezes devolve como "nick" — NÃO conta como nome (G2).
+GARBAGE_NICKS = {"post blind(s)", "post", "fold", "call", "check", "raise",
+                 "all-in", "allin", "sitting out", "sit out", "sitout", ""}
+
+
+def clean_capture_nicks(vision_json):
+    """Nicks LEGÍVEIS de uma captura (lixo de UI fora)."""
+    out = []
+    for s in (vision_json or {}).get("seats") or []:
+        n = (s.get("nick") or "").strip()
+        if n and n.lower() not in GARBAGE_NICKS:
+            out.append(n)
+    return out
+
+
+def _same_player_name(a, b) -> bool:
+    """O MESMO nome nas duas fontes: igual (norm) ou truncatura-prefixo de um lado."""
+    if _norm(a) == _norm(b):
+        return True
+    if is_truncated(a) and _prefix(a) and _norm(b).startswith(_norm(_prefix(a))):
+        return True
+    if is_truncated(b) and _prefix(b) and _norm(a).startswith(_norm(_prefix(b))):
+        return True
+    return False
+
+
+def elimination_completion(named, hh_seats, vision_json):
+    """Aplica a régua da eliminação a UMA captura. `named` = {chave_apa: real_name}
+    (inclui "Hero"); `hh_seats` = sentados na HH. Devolve {"hash","from","to"} — o
+    único par sobrante, com o nome completo da captura — ou None (recusa honesta).
+
+    AS 3 GUARDAS (não negociáveis, ditadas pelo Rui):
+      G1 — HERO FORA PRIMEIRO, dos dois lados. Se o Hero não se encontra na
+           captura (a Vision falha muitas vezes UM jogador, e muitas vezes é o
+           Hero) → NÃO elimina nada nesta captura.
+      G2 — CONTAGENS RECONCILIADAS: nicks legíveis == sentados na HH.
+      G3 — UM-E-UM: só casa quando sobra exatamente 1 de cada lado.
+    Só completa truncados (o sobrante da HH truncado + o da captura completo e
+    mais longo); vilões sem nome na HH nunca casam por aqui (o sobrante da
+    captura passa a 2 → G3 recusa sozinha)."""
+    nicks = clean_capture_nicks(vision_json)
+    if not hh_seats or not nicks or len(nicks) != hh_seats:      # G2
+        return None
+    hero = named.get("Hero")
+    if not hero:
+        return None
+    seats = (vision_json or {}).get("seats") or []
+    hero_nick = next(((s.get("nick") or "").strip() for s in seats
+                      if s.get("is_hero") and (s.get("nick") or "").strip()
+                      and (s.get("nick") or "").strip().lower() not in GARBAGE_NICKS),
+                     None)
+    if hero_nick is None or hero_nick not in nicks:
+        hero_nick = next((n for n in nicks if _same_player_name(hero, n)), None)
+    if hero_nick is None:                                        # G1 — recusa total
+        return None
+    pool = list(nicks)
+    pool.remove(hero_nick)
+    rest = {k: n for k, n in named.items() if k != "Hero" and n}
+    for k, nm in list(rest.items()):
+        m = next((c for c in pool if _same_player_name(nm, c)), None)
+        if m is not None:
+            pool.remove(m)
+            rest.pop(k)
+    if len(rest) != 1 or len(pool) != 1:                         # G3
+        return None
+    (hsh, nm), cand = next(iter(rest.items())), pool[0]
+    if not is_truncated(nm) or not is_complete(cand):
+        return None
+    if len(cand) <= len(_prefix(nm)):
+        return None                     # não é mais completo → nada a ganhar
+    return {"hash": hsh, "from": nm, "to": cand}
+
+
 def names_pool(apa, players_list, gold_raw_json, ss_vision_jsons):
     """Todos os nomes lidos numa mão: apa + players_list + Gold (players_list + raw_vision)
     + TODAS as SS. `ss_vision_jsons` = lista de vision_json (uma por captura)."""
