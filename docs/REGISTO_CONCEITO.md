@@ -487,3 +487,20 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   auto + 74 ao olho). **Reimport nasce cruzado:** `run_crossing_auto` no `trigger_import_reconciles`
   (path-agnóstico, corre com a trajetória completa pós-import). Anatomia: `gg_health.py`
   (`_crossing_all_fills`/`_cross_sieve`/`_crossing_conflicts`), `name_merge.py`, `LICOES 2026-07-16`.
+
+- 2026-07-22 — **RÉGUA DA ELIMINAÇÃO (nomes; lei do Rui).** Irmã da `best_completion` no
+  CRUZAMENTO, para os cotos que o OCR da Gold soletrou MAL (o prefixo nunca casa:
+  `Footlose`/`Footloose`, `Cheet`/`Cheat`, `0`/`O`): numa mesa, se todos os nomes casam entre a
+  HH e a captura menos **um de cada lado**, o par sobrante é a mesma pessoa — fica o nome **mais
+  completo**. **3 guardas não negociáveis:** (G1) **HERO FORA PRIMEIRO** dos dois lados; Hero por
+  ler na captura → não elimina nada (a Vision falha muitas vezes UM jogador, e muitas vezes é o
+  Hero); (G2) **contagens reconciliadas** (nicks legíveis == sentados na HH; lixo de UI tipo
+  «Post Blind(s)» não conta); (G3) **um-e-um** (2-e-2 → não toca). Escrita **selada e
+  reversível**: `name_source='elimination_complete'` + `name_prev` no apa. **Divergência entre
+  capturas** (mesmo tn+hash com completações diferentes — caso TorukMaktus, cirílico) → quarentena
+  de nomes `kind='same_hash_capture'` (cartão/merge do same_hash; a decisão do Rui é aplicada
+  pelo Cruzamento na passagem seguinte); a poda de cada motor só varre as suas linhas. **Estreia
+  em prod (22 Jul): 17 nomes completados** (13 jogadores; = lista aprovada pelo Rui, 0 fora) +
+  Toruk pendente na quarentena. Fora por decisão: Footloose da GG-6117923338 (desempate por stack
+  não aprovado). Anatomia: `name_merge.elimination_completion`, `gg_health._crossing_name_fixes`,
+  `name_propagation.upsert_capture_variant_quarantine`, testes `test_elimination_complete.py`.
