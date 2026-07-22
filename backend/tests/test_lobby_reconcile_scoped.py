@@ -13,10 +13,12 @@ from fastapi.testclient import TestClient
 
 def _client():
     from app.routers.lobbys import router
-    from app.auth import require_auth
+    from app.auth import require_auth, require_auth_or_api_key
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_auth] = lambda: {"id": 1, "email": "t@t"}
+    # 22 Jul: /reconcile passou a dual-path (Bearer) — override do dep novo também
+    app.dependency_overrides[require_auth_or_api_key] = lambda: {"id": 1, "email": "t@t"}
     return TestClient(app)
 
 
