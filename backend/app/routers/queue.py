@@ -313,6 +313,7 @@ def queue_sent(current_user=Depends(require_auth_or_api_key)):
     rows = query(
         "SELECT h.id, h.hand_id, h.site, h.tournament_name, h.hero_cards, h.played_at, "
         "       h.tournament_number, h.tournament_format, h.position, h.raw, "
+        "       h.context_table_ss_id, "
         "       r.released_at, r.batch_id, r.requeue_epoch, r.sizing_rules_version, "
         "       j.status AS job_status, j.error, j.result_zip_size, j.completed_at "
         "FROM hrc_queue_release r "

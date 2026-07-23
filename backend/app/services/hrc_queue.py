@@ -421,49 +421,13 @@ def lookup_icm_chips(rows: list[dict]) -> dict:
 
 
 def lookup_players_left(rows: list[dict]) -> dict:
-    """Resolve `players_left` por mão (id → (valor, fonte)) em LOTE — sem query
-    por mão. Precedência espelha `queue_export._resolve_players_left`:
-    `table_ss_processing_log` (per-mão, via `context_table_ss_id`) >
-    `lobby_processing_log` (por torneio). Defensivo: tudo (None, None) em falha."""
-    ctx_ids = list({
-        r["context_table_ss_id"] for r in rows
-        if isinstance(r.get("context_table_ss_id"), int)
-    })
-    tnums = list({r["tournament_number"] for r in rows if r.get("tournament_number")})
-    ts_map: dict = {}
-    lobby_map: dict = {}
-    try:
-        if ctx_ids:
-            for pr in query(
-                "SELECT id, players_left FROM table_ss_processing_log "
-                "WHERE id = ANY(%s) AND players_left IS NOT NULL",
-                (ctx_ids,),
-            ):
-                ts_map[pr["id"]] = pr["players_left"]
-        if tnums:
-            for pr in query(
-                """SELECT DISTINCT ON (tournament_number)
-                          tournament_number, players_left
-                     FROM lobby_processing_log
-                    WHERE tournament_number = ANY(%s)
-                      AND result = 'success' AND players_left IS NOT NULL
-                    ORDER BY tournament_number, posted_at DESC NULLS LAST""",
-                (tnums,),
-            ):
-                lobby_map[pr["tournament_number"]] = pr["players_left"]
-    except Exception:
-        logger.exception("lookup_players_left falhou")
-    out: dict = {}
-    for r in rows:
-        ctx = r.get("context_table_ss_id")
-        tn = r.get("tournament_number")
-        if isinstance(ctx, int) and ctx in ts_map:
-            out[r["id"]] = (ts_map[ctx], "table_ss")
-        elif tn and tn in lobby_map:
-            out[r["id"]] = (lobby_map[tn], "lobby")
-        else:
-            out[r["id"]] = (None, None)
-    return out
+    """Camada FINA sobre a RÉGUA ÚNICA `services/players_left` (23 Jul,
+    #LEI-FIX-NA-CAUSA): {id → (valor, fonte)} em LOTE. A cópia antiga escolhia
+    o print de lobby MAIS RECENTE **por torneio** (todas as mãos do torneio
+    mostravam o mesmo número no painel); a régua única dá o valor da PRÓPRIA
+    mão (captura → print mais próximo no tempo → None honesto)."""
+    from app.services.players_left import resolve_players_left_batch
+    return resolve_players_left_batch(rows)
 
 
 def pending_ts_hands(

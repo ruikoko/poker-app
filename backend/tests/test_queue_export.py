@@ -3628,24 +3628,30 @@ def test_resolve_players_left_inline_hand_wins():
 
 
 def test_resolve_players_left_via_lobby_lookup(monkeypatch):
-    """Branch 2: hand sem players_left inline → query lobby_processing_log
-    por tournament_number; mock devolve row com players_left."""
+    """Branch 2 (RÉGUA ÚNICA, 23 Jul): sem captura própria → print de lobby MAIS
+    PRÓXIMO NO TEMPO da mão — NÃO o mais recente (a régua antiga exportou 22 em
+    vez de ~34 na GG-6139792066; forma real desse caso aqui)."""
+    import datetime as dt
     calls: list = []
+    prints = [
+        {"tournament_number": "281416137", "posted_at": dt.datetime(2026, 7, 2, 21, 15), "players_left": 167},
+        {"tournament_number": "281416137", "posted_at": dt.datetime(2026, 7, 2, 23, 6), "players_left": 34},
+        {"tournament_number": "281416137", "posted_at": dt.datetime(2026, 7, 2, 23, 15), "players_left": 22},
+    ]
 
     def fake_query(sql, params=None):
         calls.append((sql, params))
-        return [{"players_left": 42}]
+        return prints if "lobby_processing_log" in sql else []
 
     monkeypatch.setattr("app.db.query", fake_query)
 
-    out = _resolve_players_left({"tournament_number": "281416137"}, None)
-    assert out == 42
-    # Confirma que query foi disparada com o tn correcto.
-    assert len(calls) == 1
-    assert calls[0][1] == ("281416137",)
-    assert "lobby_processing_log" in calls[0][0]
-    assert "result = 'success'" in calls[0][0]
-    assert "players_left IS NOT NULL" in calls[0][0]
+    out = _resolve_players_left(
+        {"tournament_number": "281416137",
+         "played_at": dt.datetime(2026, 7, 2, 23, 2)}, None)
+    assert out == 34   # o das 23:06 (mais próximo) — nunca o das 23:15 (mais recente)
+    lob = [c for c in calls if "lobby_processing_log" in c[0]]
+    assert lob and "result = 'success'" in lob[0][0]
+    assert "players_left > 0" in lob[0][0]   # zero-lido = desconhecido, filtrado na query
 
 
 def test_resolve_players_left_no_lobby_row(monkeypatch):
@@ -3653,6 +3659,13 @@ def test_resolve_players_left_no_lobby_row(monkeypatch):
     monkeypatch.setattr("app.db.query", lambda *a, **kw: [])
     out = _resolve_players_left({"tournament_number": "281416137"}, None)
     assert out is None
+
+
+def test_resolve_players_left_inline_zero_is_unknown(monkeypatch):
+    """Zero-lido = DESCONHECIDO (régua 23 Jul): inline 0 não é valor válido —
+    cai à régua única (que sem fontes devolve None honesto)."""
+    monkeypatch.setattr("app.db.query", lambda *a, **kw: [])
+    assert _resolve_players_left({"players_left": 0, "tournament_number": "X"}, None) is None
 
 
 def test_resolve_players_left_no_tournament_number():

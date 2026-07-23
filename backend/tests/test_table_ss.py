@@ -604,24 +604,33 @@ def test_endpoint_success_returns_process_dict(mock_proc):
 # ── Integração _resolve_players_left (queue_export) ──────────────────────────
 
 def test_resolve_players_left_prefers_context_table_ss():
+    # régua única 23 Jul: a query da captura devolve (id, players_left)
     from app.services import queue_export
-    with patch("app.db.query", return_value=[{"players_left": 71}]) as mq:
+    with patch("app.db.query", return_value=[{"id": 5, "players_left": 71}]) as mq:
         v = queue_export._resolve_players_left(
             {"context_table_ss_id": 5, "tournament_number": "T1"}, None,
         )
     assert v == 71
     # query foi à table_ss_processing_log
-    assert "table_ss_processing_log" in mq.call_args[0][0]
+    assert "table_ss_processing_log" in mq.call_args_list[0][0][0]
 
 
 def test_resolve_players_left_falls_back_to_lobby_when_no_context():
+    # régua única 23 Jul: o fallback do lobby é o print MAIS PRÓXIMO do
+    # played_at da mão (sem played_at não há «mais próximo» → precisa da hora).
+    from datetime import datetime as _dt
     from app.services import queue_export
-    with patch("app.db.query", return_value=[{"players_left": 99}]) as mq:
+    prints = [{"tournament_number": "T1",
+               "posted_at": _dt(2026, 7, 2, 18, 0), "players_left": 99}]
+
+    def fake_q(sql, params=None):
+        return prints if "lobby_processing_log" in sql else []
+
+    with patch("app.db.query", side_effect=fake_q):
         v = queue_export._resolve_players_left(
-            {"tournament_number": "T1"}, None,
+            {"tournament_number": "T1", "played_at": _dt(2026, 7, 2, 18, 5)}, None,
         )
     assert v == 99
-    assert "lobby_processing_log" in mq.call_args[0][0]
 
 
 def test_resolve_players_left_none_when_nothing():

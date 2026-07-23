@@ -1537,83 +1537,26 @@ def _build_watcher_hints(hand: dict, hh_text: str) -> dict:
 
 
 def _resolve_players_left(hand: dict, payout_blob) -> Optional[int]:
-    """pt25-revisado — resolve `players_left` para o trigger da prune.
+    """Camada FINA sobre a RÉGUA ÚNICA `services/players_left` (23 Jul,
+    #LEI-FIX-NA-CAUSA — as 2 cópias colapsaram; ver o módulo para a régua):
+    captura da PRÓPRIA mão → senão print de lobby MAIS PRÓXIMO NO TEMPO da mão
+    (o «mais recente» morreu: exportava 22 em vez de ~34 na GG-6139792066) →
+    senão None honesto. Zero-lido = desconhecido.
 
-    Ordem de prioridade:
-    1. `hand["players_left"]` quando o router/SELECT vier a popular.
-       Hoje não é (column inexistente em `hands`), mas mantemos para tests
-       in-memory e futura wiring caso seja necessário.
-    2. Lookup em `lobby_processing_log`: pega o `players_left` mais recente
-       associado ao `tournament_number` da mão, restringido a `result='success'`
-       e `players_left IS NOT NULL`. Valor extraído pelo Vision pt25 sobre
-       SSs de lobby mid-tournament postadas em `#lobbys`.
-
-    Devolve None quando nenhuma fonte fornece valor — caller deve tratar
-    como "informação ausente" (graceful).
+    Branch 0 legacy mantido: `hand["players_left"]` inline (tests in-memory /
+    futura wiring), agora também com a regra do zero (>0).
 
     NOTA: `payout_blob` mantém-se na assinatura por compatibilidade com o
-    caller; não é mais consultado (pt25 diagnóstico confirmou que
-    `tournament_payouts.payouts_json.CompletedTournament.PlayersLeft` nunca
-    existe em prod).
+    caller; não é consultado (pt25: `PlayersLeft` nunca existe em prod).
     """
-    if isinstance(hand, dict) and isinstance(hand.get("players_left"), int):
-        return hand["players_left"]
+    if isinstance(hand, dict):
+        inline = hand.get("players_left")
+        if isinstance(inline, int) and not isinstance(inline, bool) and inline > 0:
+            return inline
 
-    # pt38 — prioridade 2: SS de mesa alinhada a ESTA mão (granular).
-    # hands.context_table_ss_id → table_ss_processing_log.players_left.
-    # Preferida ao lookup por tournament_number (lobby) por ser per-mão.
-    ctx_id = hand.get("context_table_ss_id") if isinstance(hand, dict) else None
-    if isinstance(ctx_id, int):
-        try:
-            from app.db import query
-            rows = query(
-                "SELECT players_left FROM table_ss_processing_log "
-                "WHERE id = %s AND players_left IS NOT NULL",
-                (ctx_id,),
-            )
-            if rows:
-                val = rows[0].get("players_left") if isinstance(rows[0], dict) else None
-                if isinstance(val, int):
-                    return val
-        except Exception:
-            logger.exception(
-                "_resolve_players_left table_ss lookup failed ctx_id=%s", ctx_id,
-            )
-
-    tn = hand.get("tournament_number") if isinstance(hand, dict) else None
-    if not tn:
-        return None
-
-    try:
-        # Lazy import: evita acoplamento ao app.db em tests que mockam query.
-        from app.db import query
-    except Exception:
-        return None
-
-    try:
-        rows = query(
-            """
-            SELECT players_left
-              FROM lobby_processing_log
-             WHERE tournament_number = %s
-               AND result = 'success'
-               AND players_left IS NOT NULL
-             ORDER BY posted_at DESC NULLS LAST
-             LIMIT 1
-            """,
-            (str(tn),),
-        )
-    except Exception:
-        logger.exception(
-            "_resolve_players_left lookup failed tn=%s hand_id=%s",
-            tn, hand.get("hand_id") if isinstance(hand, dict) else None,
-        )
-        return None
-
-    if not rows:
-        return None
-    val = rows[0].get("players_left") if isinstance(rows[0], dict) else None
-    return val if isinstance(val, int) else None
+    from app.services.players_left import resolve_players_left_for_hand
+    val, _src = resolve_players_left_for_hand(hand)
+    return val
 
 
 def _build_hrc_script_for_hand(
