@@ -709,8 +709,9 @@ def review_status(engine_status, cross_check) -> str:
 
 
 def _review_row(tn):
-    rows = query("SELECT decision, decided_at FROM ft_boundary_review WHERE tournament_number=%s",
-                 (tn,))
+    rows = query(
+        "SELECT decision, decided_at, decided_by, status, boundary, n_lobby, "
+        "seats_first_hand FROM ft_boundary_review WHERE tournament_number=%s", (tn,))
     return rows[0] if rows else None
 
 
@@ -730,6 +731,76 @@ def has_new_ft_signal(tn, decided_at=None) -> bool:
         return False
     lb, _n = _lobby_ft_boundary(tn)
     return lb is not None and lb > decided_at
+
+
+# ── Auto-confirmação de fronteiras (decisão do Rui, 22 Jul — REGISTO_CONCEITO (d)) ─
+AUTO_DECIDED_BY = "auto:cross_check"
+
+
+def auto_confirm_witness(tn: str, d: dict, status: str) -> Optional[str]:
+    """FONTE ÚNICA da régua de auto-confirmação (Rui, 22 Jul): a app só confirma
+    sozinha com fronteira computada + cross-check MATCH + testemunha INDEPENDENTE
+    da HH a concordar. Devolve a testemunha ou None (None = não confirmar):
+      • 'lobby_n' — o N do print Info do lobby bate com os sentados da 1ª mão
+        pós-fronteira;
+      • 'ts'      — o TS existe e a posição final do Hero cai DENTRO da FT (<= N;
+        na fonte T o cálculo já traz `ts_agrees`);
+      • None      — sem testemunha. Cobre o match TRIVIAL (fonte T sem lobby: o N
+        vem da própria HH → a HH a confirmar-se a si própria) e a via-b sem
+        TS/lobby (o N da captura NÃO é testemunha da lista carimbada).
+        Fica «Prontas a aprovar» — decide o Rui."""
+    if d.get("boundary") is None or status != "match":
+        return None
+    cc = d.get("cross_check") or {}
+    hh_seats = cc.get("hh_seats")
+    _lb, lb_n = _lobby_ft_boundary(tn)
+    if (isinstance(lb_n, int) and not isinstance(lb_n, bool)
+            and hh_seats is not None and lb_n == hh_seats):
+        return "lobby_n"
+    if cc.get("ts_agrees") is True:
+        return "ts"
+    n = d.get("n")
+    ts_pos = _ts_hero_position(tn)
+    if (ts_pos is not None and isinstance(n, int) and not isinstance(n, bool)
+            and ts_pos <= n):
+        return "ts"
+    return None
+
+
+def _snapshot_changed(row, d, status) -> bool:
+    """O estado computado difere do guardado na review? (evita re-assinar a
+    auto-confirmação a cada import sem nada de novo — zero churn no decided_at)."""
+    cc = d.get("cross_check") or {}
+    return (row.get("status") != status
+            or row.get("boundary") != d.get("boundary")
+            or row.get("n_lobby") != d.get("n")
+            or row.get("seats_first_hand") != cc.get("hh_seats"))
+
+
+def _upsert_review_decision(tn, d, status, decision, decided_by):
+    """Escrita da decisão da APP (e do seu desfazer): como o snapshot, mas assina
+    decided_by/decided_at. `decided_by=None` LIMPA a assinatura (voltou a pending).
+    NUNCA usada para decisões humanas — essas entram pelo router F3."""
+    cc = d.get("cross_check") or {}
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ft_boundary_review (tournament_number, status, boundary, "
+                "source, n_lobby, seats_first_hand, decision, decided_by, decided_at, "
+                "updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s, "
+                "CASE WHEN %s::text IS NULL THEN NULL ELSE NOW() END, NOW()) "
+                "ON CONFLICT (tournament_number) DO UPDATE SET status=EXCLUDED.status, "
+                "boundary=EXCLUDED.boundary, source=EXCLUDED.source, "
+                "n_lobby=EXCLUDED.n_lobby, seats_first_hand=EXCLUDED.seats_first_hand, "
+                "decision=EXCLUDED.decision, decided_by=EXCLUDED.decided_by, "
+                "decided_at=EXCLUDED.decided_at, updated_at=NOW()",
+                (tn, status, d.get("boundary"), d.get("source"), d.get("n"),
+                 cc.get("hh_seats"), decision, decided_by, decided_by))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _upsert_review_snapshot(tn, d, status, decision):
@@ -759,19 +830,29 @@ def refresh_ft_boundaries(tournament_number: Optional[str] = None) -> dict:
     o estado FT por torneio candidato e sincroniza a `ft_boundary_review`, RESPEITANDO
     decisões já tomadas:
       • `promoted` → NÃO recalcula (intocado);
-      • `confirmed`/`corrected` → mantêm a fronteira FIXADA (intocados);
-      • `dismissed` → só RENASCE (→ pending) se entrar sinal novo FORTE (tag manual -ft
-        OU print do Info); senão fica dispensado;
-      • pending/novo → snapshot do estado computado.
-    Idempotente: sem dados novos, recomputar dá o mesmo → mesma review, zero mudança
-    de decisão. Corre sobre os candidate_tns APERTADOS (gate FT_CAP) → leve."""
+      • `confirmed`/`corrected` do RUI (decided_by ≠ auto) → fronteira FIXADA (intocados);
+      • `confirmed` da APP (decided_by='auto:cross_check') → a app pode rever a SUA
+        decisão: régua ainda passa → mantém (re-assina só se a base mudou); deixou de
+        passar (dados novos contradizem) → volta a pending (regressa ao painel).
+        Decisões humanas NUNCA são revistas;
+      • `dismissed` → só RENASCE (→ pending) com sinal novo FORTE, e renasce PENDENTE
+        — nunca auto-confirma por cima de uma dispensa do Rui (ele re-decide);
+      • pending/novo → se a régua da AUTO-CONFIRMAÇÃO passar (`auto_confirm_witness`:
+        fronteira + cross-check match + testemunha INDEPENDENTE — Rui, 22 Jul), a app
+        confirma sozinha (decision='confirmed', decided_by='auto:cross_check'); match
+        trivial (HH juiz de si própria) NÃO confirma → snapshot pending.
+    A PROMOÇÃO (escrita das tags -ft) continua 100% manual — isto só fixa a fronteira.
+    Idempotente: sem dados novos, recomputar dá o mesmo → zero mudança/escrita.
+    Corre sobre os candidate_tns APERTADOS (gate FT_CAP) → leve."""
     tns = [tournament_number] if tournament_number else _candidate_tns()
-    refreshed = reactivated = 0
+    refreshed = reactivated = auto_confirmed = auto_reverted = 0
     for tn in tns:
         row = _review_row(tn)
         dec = row["decision"] if row else None
-        if dec in ("promoted", "confirmed", "corrected"):
-            continue                                  # respeita a decisão — intocado
+        auto_own = (dec == "confirmed"
+                    and (row.get("decided_by") if row else None) == AUTO_DECIDED_BY)
+        if dec in ("promoted", "confirmed", "corrected") and not auto_own:
+            continue                                  # decisão do Rui — intocada
         d = compute_ft_boundary(tn)
         status = review_status(d.get("status"), d.get("cross_check"))
         if dec == "dismissed":
@@ -779,18 +860,32 @@ def refresh_ft_boundaries(tournament_number: Optional[str] = None) -> dict:
                 _upsert_review_snapshot(tn, d, status, decision="pending")
                 reactivated += 1
             continue                                  # sem sinal POSTERIOR → fica dispensado
+        witness = auto_confirm_witness(tn, d, status)
+        if auto_own:
+            if witness is None:                       # deixou de ser confirmável → painel
+                _upsert_review_decision(tn, d, status, "pending", None)
+                auto_reverted += 1
+            elif _snapshot_changed(row, d, status):   # base nova → re-assina
+                _upsert_review_decision(tn, d, status, "confirmed", AUTO_DECIDED_BY)
+            continue                                  # base igual → zero escrita
+        if witness is not None:
+            _upsert_review_decision(tn, d, status, "confirmed", AUTO_DECIDED_BY)
+            auto_confirmed += 1
+            continue
         _upsert_review_snapshot(tn, d, status, decision="pending")
         refreshed += 1
-    return {"refreshed": refreshed, "reactivated": reactivated}
+    return {"refreshed": refreshed, "reactivated": reactivated,
+            "auto_confirmed": auto_confirmed, "auto_reverted": auto_reverted}
 
 
 def trigger_ft_refresh(tournament_number: Optional[str] = None) -> None:
     """Wrapper fire-and-forget (defensivo) p/ os hooks de import/reconcile."""
     try:
         res = refresh_ft_boundaries(tournament_number)
-        if res["refreshed"] or res["reactivated"]:
-            logger.info("[ft_refresh] refreshed=%d reactivated=%d",
-                        res["refreshed"], res["reactivated"])
+        if any(res.values()):
+            logger.info("[ft_refresh] refreshed=%d reactivated=%d auto_confirmed=%d "
+                        "auto_reverted=%d", res["refreshed"], res["reactivated"],
+                        res["auto_confirmed"], res["auto_reverted"])
     except Exception as e:
         logger.error("[ft_refresh] falhou: %s", e)
 

@@ -34,18 +34,20 @@ def test_map_status():
 
 
 # ── GET /ft/preview ──────────────────────────────────────────────────────────
+@patch("app.routers.gg_health.auto_confirm_witness", return_value=None)
 @patch("app.routers.gg_health.via_b_diagnostics", return_value=None)
 @patch("app.routers.gg_health.propagate_ft",
        return_value={"changed": [{"hand_id": "GG-1", "from": ["icm"], "to": ["icm-ft"]}]})
 @patch("app.routers.gg_health.query", return_value=[])
 @patch("app.routers.gg_health.compute_ft_boundary", return_value=_D)
-def test_preview_single_tn(mc, mq, mp, mv):
+def test_preview_single_tn(mc, mq, mp, mv, mw):
     r = TestClient(_app()).get("/api/gg-health/ft/preview?tn=T1")
     assert r.status_code == 200, r.text
     t = r.json()["tournaments"][0]
     assert t["status"] == "match" and t["source"] == "manual_ft_tag"
     assert t["boundary"] == T0.isoformat() and t["n_lobby"] == 7 and t["seats_first_hand"] == 7
     assert t["n_changes"] == 1 and t["decision"] == "pending"
+    assert t["decided_by"] is None and t["auto_witness"] is None   # rasto da auto-confirmação
     assert "images" in t   # regra 8 Jul: as imagens do torneio vêm no ensaio FULL
     # preview é SÓ LEITURA: só corre propagate em dry_run
     assert mp.call_args.kwargs.get("dry_run") is True
@@ -83,12 +85,13 @@ def test_preview_all_returns_light_candidates(mlist):
 
 
 # ── POST /ft/confirm — fixa, NÃO promove ─────────────────────────────────────
+@patch("app.routers.gg_health.auto_confirm_witness", return_value=None)
 @patch("app.routers.gg_health.via_b_diagnostics", return_value=None)
 @patch("app.routers.gg_health.propagate_ft", return_value={"changed": []})
 @patch("app.routers.gg_health.query", return_value=[])
 @patch("app.routers.gg_health.get_conn")
 @patch("app.routers.gg_health.compute_ft_boundary", return_value=_D)
-def test_confirm_persists_confirmed_no_write(mc, mconn, mq, mp, mv):
+def test_confirm_persists_confirmed_no_write(mc, mconn, mq, mp, mv, mw):
     mcur = MagicMock()
     mconn.return_value.cursor.return_value.__enter__.return_value = mcur
     r = TestClient(_app()).post("/api/gg-health/ft/confirm", json={"tournament_number": "T1"})
@@ -100,12 +103,13 @@ def test_confirm_persists_confirmed_no_write(mc, mconn, mq, mp, mv):
 
 
 # ── POST /ft/correct — override, decision='corrected' ────────────────────────
+@patch("app.routers.gg_health.auto_confirm_witness", return_value=None)
 @patch("app.routers.gg_health.via_b_diagnostics", return_value=None)
 @patch("app.routers.gg_health.propagate_ft", return_value={"changed": []})
 @patch("app.routers.gg_health.query", return_value=[])
 @patch("app.routers.gg_health.get_conn")
 @patch("app.routers.gg_health.compute_ft_boundary", return_value=_D)
-def test_correct_persists_override(mc, mconn, mq, mp, mv):
+def test_correct_persists_override(mc, mconn, mq, mp, mv, mw):
     mcur = MagicMock()
     mconn.return_value.cursor.return_value.__enter__.return_value = mcur
     r = TestClient(_app()).post("/api/gg-health/ft/correct", json={

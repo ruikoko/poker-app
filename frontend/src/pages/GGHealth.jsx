@@ -302,6 +302,14 @@ function FtCard({ t, busy, onConfirm, onCorrect, onPromote, onApprove = () => {}
           {cc.match === true ? '✓ N = sentados' : cc.match === false ? `✗ N=${cc.n} ≠ ${cc.hh_seats}` : '— (sem N independente)'}
         </Cell>
       </div>
+      {t.decision === 'confirmed' && t.decided_by === 'auto:cross_check' && (
+        <div style={{ fontSize: 12, color: '#22c55e', margin: '2px 0' }}>
+          ✓ confirmada pela app — testemunha independente: {t.auto_witness === 'ts'
+            ? 'TS (o Hero acabou dentro da FT)'
+            : t.auto_witness === 'lobby_n' ? 'N do lobby bate com os sentados' : 'cross-check'}.
+          A promoção (escrita das tags) continua contigo.
+        </div>
+      )}
       {(t.warnings || []).map((w, i) => <div key={i} style={{ fontSize: 12, color: '#fbbf24', margin: '2px 0' }}>⚠ {w}</div>)}
       {t.via_b_diag && (
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontFamily: mono }}>
@@ -412,7 +420,11 @@ function FtRow({ c, expanded, onToggle, full, busy, onConfirm, onCorrect, onProm
         {c.status && <Pill map={FT_STATUS} k={c.status} />}
         {c.section === 'ready' && c.n != null && <span style={{ fontSize: 11, color: 'var(--muted)' }}>N={c.n}</span>}
         {c.partial_coverage && <span style={{ fontSize: 11, fontWeight: 700, color: '#000', background: '#fbbf24', padding: '1px 7px', borderRadius: 5 }}>⚠ cobertura parcial (N={c.n})</span>}
-        <span style={{ marginLeft: 'auto' }}><Pill map={FT_DECISION} k={c.decision} /></span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Pill map={FT_DECISION} k={c.decision} />
+          {c.decision === 'confirmed' && c.decided_by === 'auto:cross_check' &&
+            <span title="decided_by: auto:cross_check" style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, color: '#22c55e', border: '1px solid #22c55e55' }}>pela app</span>}
+        </span>
       </div>
       {expanded && (
         <div style={{ padding: '0 12px 10px', borderTop: '1px solid var(--border,#30363d)' }}>

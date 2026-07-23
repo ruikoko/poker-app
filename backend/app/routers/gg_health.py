@@ -24,6 +24,7 @@ from app.db import query, get_conn
 from app.services.ft_boundary import (
     FT_CAP, count_hh_seats, compute_ft_boundary, propagate_ft,
     candidate_tns, via_b_diagnostics, review_status, hand_ft_state,
+    auto_confirm_witness, AUTO_DECIDED_BY,
 )
 from app.services.tags_canonical import canonicalize_tag, normalize_tag_key
 from app.services.tag_decisions import (ORIGIN_GG_HEALTH_TAG, ORIGIN_GG_HEALTH_UNTAG,
@@ -1115,9 +1116,13 @@ def _ft_preview_for_tn(tn, full=False) -> dict:
         "n_lobby": d.get("n"), "seats_first_hand": cc.get("hh_seats"),
         "cross_check": cc or None, "warnings": _ft_warnings(d, None),
         "decision": rev["decision"] if rev else "pending",
+        "decided_by": rev.get("decided_by") if rev else None,
         "override_boundary": rev["override_boundary"].isoformat()
             if rev and rev.get("override_boundary") else None,
         "override_n": rev.get("override_n") if rev else None,
+        # testemunha da auto-confirmação (régua 22 Jul), computada ao vivo — explica
+        # o "confirmada pela app" e antecipa se o refresh confirmaria este tn.
+        "auto_witness": auto_confirm_witness(tn, d, _ft_map_status(d.get("status"), cc)),
     }
     if boundary is None:
         out.update({"n_changes": 0, "hrc_stale_count": 0})
@@ -1168,8 +1173,8 @@ def _ft_candidate_list() -> list:
         "FROM hands WHERE site='GGPoker' AND tournament_number = ANY(%s) "
         "GROUP BY tournament_number", (tns,))}
     dec = {r["tournament_number"]: r for r in query(
-        "SELECT tournament_number, decision, decided_at FROM ft_boundary_review "
-        "WHERE tournament_number = ANY(%s)", (tns,))}
+        "SELECT tournament_number, decision, decided_at, decided_by "
+        "FROM ft_boundary_review WHERE tournament_number = ANY(%s)", (tns,))}
     out = []
     for tn in tns:
         d = compute_ft_boundary(tn)
@@ -1204,6 +1209,7 @@ def _ft_candidate_list() -> list:
             "n": d.get("n"), "seats_first_hand": cc.get("hh_seats"), "match": cc.get("match"),
             "partial_coverage": _ft_partial_coverage(tn, boundary, d.get("n")) if (section == "ready") else False,
             "decision": decision, "reactivated": reactivated,
+            "decided_by": drow.get("decided_by") if drow else None,
         })
     order = {"needs": 0, "ready": 1, "done": 2, "dismissed": 3}
     out.sort(key=lambda r: (order.get(r["section"], 4), r["day"] or ""))

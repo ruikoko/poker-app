@@ -456,7 +456,8 @@ def test_refresh_respects_decisions_and_reactivates():
     assert "dis1" not in up and ("dis2", "pending") in upserts
     # pending/novo → snapshot pending
     assert ("pend", "pending") in upserts
-    assert res == {"refreshed": 1, "reactivated": 1}   # pend / dis2
+    assert res == {"refreshed": 1, "reactivated": 1,
+                   "auto_confirmed": 0, "auto_reverted": 0}   # pend / dis2
 
 
 def test_refresh_idempotent_no_decision_flip():
