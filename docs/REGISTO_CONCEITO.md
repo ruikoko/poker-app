@@ -590,3 +590,25 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   24 fichas de arredondamento da visão). O único desvio estrutural conhecido é o print
   pré-fecho (late reg) — aceite. A tabela-por-preço nunca decide fichas (o MONSTER STACK
   é um 100k que ela daria como 20k). Journal `2026-07-22c §3`.
+
+## 2026-07-23 — guarda `#LOBBY-INFO-NO-PAYOUT` passa a POR SALA (só a GG bloqueia)
+
+- **Regra do Rui (23 Jul):** «print da aba Info nunca escreve prémios» é **lei DA GG**
+  (na GG a aba Info não tem a escada; o print Info, sendo o último do torneio,
+  esmagaria por last-write-wins os payouts das abas de prémios). Nas **outras salas
+  (Winamax, …) o lobby é vista única** — info e escada de prémios juntas, a Vision
+  marca 'Info' na mesma — e o print **É a fonte legítima de prémios**. A versão
+  global da guarda (7 Jul) matava a única fonte da WN: 5 torneios com escada
+  COMPLETA lida ficaram sem payouts → 21 mãos ICM travadas na fila HRC.
+- **Fix-na-causa (`6326a8d`):** a regra por-sala vive num sítio só —
+  `lobby_sync._is_info_tab(vision_json, site)`, bloqueio apenas com `site='GGPoker'`;
+  os 3 call-sites (live, reconcile, lobby_edition_resolve) passam a sala. GG
+  byte-a-byte igual; D11 e coerência inalteradas. **Operado no próprio dia:**
+  reconcile dos 5 prints (dry-run = ensaio, depois real) → 5 payouts escritos
+  (`reconcile_lobby_vision:`, escadas 26/19/20/9/5 lugares) → **21/21 exports HTTP
+  200**. Física validada: na WN a soma da escada < pool anunciado (o pool inclui as
+  coroas; ex. ZENITH 8 120€ = 203×40€ exato) — a coerência (b) não dispara.
+- **Auditoria da classe (LEI 2):** única outra regra GG-global encontrada =
+  regra C dos vilões exige `match_method` em todas as salas (latente, 0 mãos WN
+  atingidas hoje; fica para decisão). Prompt do lobby é GG-cêntrico nas abas
+  (leitura 'Info' na WN) — inócuo com a guarda por-sala.
