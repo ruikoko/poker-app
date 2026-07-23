@@ -18,6 +18,18 @@ print mais tardio sobrepõe-se (last-write-wins da mesma fonte). Verificado tamb
 íntegro (966 mãos, 22c) e **as coroas WN aparecem no estudo** (estão no apa/`bounty` € e
 no replayer — não estavam em falta).
 
+**LIVE 24 Jul (journal `journal/2026-07-24.md`) — ★ TOTAL DE FICHAS WN PELO LOBBY
+(`#WN-TOTAL-CHIPS-FROM-LOBBY`, plano de 5 fases aprovado e construído):** regra única em
+`services/lobby_chips_rule.py` (RUNNING preferido > mais tardio; total = entradas×stack;
+guarda não-desce; avg = sinalizador; «provisórias» sem print RUNNING; histórico = opção A
+«estado desconhecido», SEM inferência de fecho) · Vision ensina estado WN + `re_entries`
+(INFO-ONLY: vision_json + coluna no torneio, sem consumidores) · live+reconcile passam
+pela regra (F5 automático) · GG byte-a-byte (caminho legado preservado). **⏳ F4 À ESPERA
+DO RUI:** tabela dos 96 torneios entregue (85 inalterados, 11 corrigem, pior +140%
+INTERSTELLAR 13/07; 0 solves feitos afetados → sem re-solves) — aprovar → `POST
+/api/lobbys/wn-chips/apply {confirm:true}` (ensaio: `GET /api/lobbys/wn-chips/preview`).
+Decisão 22 Jul «TS Winamax não se importa» MANTÉM-SE (esta via é do lobby, não do TS).
+
 **PENDENTES (por ordem, foco Winamax):**
 1. **Destravar as restantes ~167 mãos ICM WN sem prémios (~55 torneios)** — o Rui importa
    os PRINTS DE LOBBY que tem no PC (página Lobbys ou pasta `lobby` do Batmen; escrevem

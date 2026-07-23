@@ -612,3 +612,38 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   regra C dos vilões exige `match_method` em todas as salas (latente, 0 mãos WN
   atingidas hoje; fica para decisão). Prompt do lobby é GG-cêntrico nas abas
   (leitura 'Info' na WN) — inócuo com a guarda por-sala.
+
+## 2026-07-24 — total de fichas Winamax vem do PRINT DE LOBBY (regra única; TS WN continua fora)
+
+- **Regra do Rui (24 Jul, com prova visual de 2 prints reais):** o lobby WN traz
+  tudo — `Starting stack`, «Players X / Y» (o **2º número já inclui re-entradas**;
+  o `Registered players` do TS não as conta e por isso subcontava — 22c),
+  `Re-Entries`, `Average Stack` e a **palavra de estado** por baixo do nome
+  (RUNNING / LATE REGISTRATION). Auto-validação: HIGHROLLER 56×20 000=1 120 000
+  vs Average 48 695×23=1 119 985 (≈, arredondamento). Em 205 prints reais: ~95%
+  batem a <0,01%; os ~10 que desviam, desviam TODOS no sentido impossível
+  (avg×restantes > entradas×stack) = misread do average → a conta é o detetor.
+- **Regra (`#WN-TOTAL-CHIPS-FROM-LOBBY`, vive em `services/lobby_chips_rule.py`,
+  um sítio só — LEI 3):** print RUNNING mais tardio preferido; senão o mais
+  tardio; **total = entradas totais × starting stack**; guarda **«não-desce»**
+  (entradas nunca descem — se descerem = misread → usa o máximo + por-rever);
+  a incoerência do average é **SINALIZADOR** (`avg_incoherent`), nunca veto às
+  entradas; **«fichas provisórias»** quando o escolhido não é RUNNING.
+  **Histórico (opção A do Rui):** estado irrecuperável (imagens não guardadas) →
+  mais tardio + «estado desconhecido»; **SEM inferência** de fecho por entradas
+  estáticas. **Re-Entries = INFO-ONLY** (vision_json + coluna `re_entries` no
+  torneio; sem consumidores, não entra em contas, não dispara nada).
+- **Dois números distintos, sem conflito:** «quantos restam NESTA mão» é por-mão
+  (régua única 22 Jul, intocada); o «total de fichas do torneio»
+  (`structures.chips`) é por-torneio — e era definido por ACIDENTE (último print
+  *processado* ganhava, não o melhor: HIGHROLLER 02/07 ficou com 819 984 do
+  print das 21:33 quando o das 22:28 dá 1 120 000). A regra substitui o acidente
+  por escolha determinística. Late-reg carrega o total do torneio (desvio p/
+  cima, aceite e provado inócuo — 966 mãos, 22c).
+- **Aplicação:** live + reconcile passam pela regra (F5 automático); retroativo
+  só via ensaio `GET /api/lobbys/wn-chips/preview` → aprovação do Rui →
+  `POST /api/lobbys/wn-chips/apply {confirm:true}` (preserva `source`; D11:
+  manual/backoffice intactos). Ensaio 24 Jul: 96 torneios, 85 inalterados
+  (<0,5%), 11 corrigem (pior: INTERSTELLAR 13/07 +140%), **0 solves feitos
+  afetados** (os 22 solves WN vivem todos em torneios com desvio +0,0%) → sem
+  re-solves. GG byte-a-byte intocada (caminho legado preservado no upsert).
