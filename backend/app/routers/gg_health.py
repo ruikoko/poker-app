@@ -3577,7 +3577,7 @@ def lobby_edition_resolve(body: _EditionResolveBody = Body(...),
                "WHERE site='GGPoker' AND tournament_number=%s", (tn,))
     if not ts:
         raise HTTPException(422, f"tn {tn} nao existe em tournament_summaries")
-    if _is_info_tab(vj):
+    if _is_info_tab(vj, site):
         raise HTTPException(422, "print da aba Info nao escreve payout (so marca FT)")
     existing = query("SELECT source FROM tournament_payouts WHERE site='GGPoker' "
                      "AND tournament_number=%s", (tn,))

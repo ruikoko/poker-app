@@ -170,12 +170,18 @@ def _upsert_lobby_log(
             pass
 
 
-def _is_info_tab(vision_json) -> bool:
-    """#LOBBY-INFO-NO-PAYOUT (regra 7 Jul) — o print com a aba **Info** aberta marca
-    só o ARRANQUE da FT (fronteira + final_table_size) e NÃO é fonte de prémios (na
-    aba Info os prémios saem a zeros/fichas). Onde isto for True, o pipeline resolve
-    o tn e grava vision_json/players_left mas NUNCA escreve tournament_payouts."""
-    return (isinstance(vision_json, dict)
+def _is_info_tab(vision_json, site) -> bool:
+    """#LOBBY-INFO-NO-PAYOUT (regra 7 Jul; POR SALA desde 23 Jul, regra do Rui) —
+    na **GG** o print com a aba Info aberta marca só o ARRANQUE da FT (fronteira +
+    final_table_size) e NÃO é fonte de prémios (na aba Info da GG os prémios saem
+    a zeros/fichas). É lei DA GG: nas outras salas (Winamax, …) o lobby é vista
+    única — info e escada de prémios juntas, a Vision marca 'Info' na mesma — e o
+    print É a fonte legítima de prémios (a versão global desta guarda matava a
+    ÚNICA fonte da WN; 5 torneios/21 mãos ICM travadas, 23 Jul). Onde isto for
+    True, o pipeline resolve o tn e grava vision_json/players_left mas NUNCA
+    escreve tournament_payouts. A regra por-sala vive AQUI e só aqui (LEI 2)."""
+    return (site == "GGPoker"
+            and isinstance(vision_json, dict)
             and (vision_json.get("open_tab") or "").strip() == "Info")
 
 
@@ -490,13 +496,15 @@ async def process_lobby_message(
         base["candidates"] = candidates
         return base
 
-    # #LOBBY-INFO-NO-PAYOUT (regra 7 Jul) — o print da aba Info marca só o ARRANQUE
-    # da FT; NÃO é fonte de prémios. Resolve o tn e grava vision_json/players_left
-    # (o motor FT lê daí), mas NUNCA escreve tournament_payouts: sendo sempre o
-    # ÚLTIMO print do torneio, esmagaria por last-write-wins os payouts bons das
-    # abas de prémios (a D11 só protege manual/backoffice). Mesma família do
+    # #LOBBY-INFO-NO-PAYOUT (regra 7 Jul; SÓ GG desde 23 Jul) — na GG o print da
+    # aba Info marca só o ARRANQUE da FT; NÃO é fonte de prémios. Resolve o tn e
+    # grava vision_json/players_left (o motor FT lê daí), mas NUNCA escreve
+    # tournament_payouts: sendo sempre o ÚLTIMO print do torneio, esmagaria por
+    # last-write-wins os payouts bons das abas de prémios (a D11 só protege
+    # manual/backoffice). Nas outras salas o print segue para o caminho normal de
+    # payout (na WN o lobby é a fonte legítima). Mesma família do
     # refresh_vision_only, que também retorna antes do upsert_payout.
-    if _is_info_tab(vj):
+    if _is_info_tab(vj, site):
         _upsert_lobby_log(
             message_id=message_id, channel_id=channel_id,
             result="success",
@@ -936,10 +944,11 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
             continue
 
         resolved += 1
-        # #LOBBY-INFO-NO-PAYOUT (regra 7 Jul) — print da aba Info nunca escreve
-        # payout (só marca a FT). Resolve o tn e passa a success, sem tocar
-        # tournament_payouts. Espelha o gate de process_lobby_message.
-        if _is_info_tab(vj):
+        # #LOBBY-INFO-NO-PAYOUT (regra 7 Jul; SÓ GG desde 23 Jul) — na GG o print
+        # da aba Info nunca escreve payout (só marca a FT). Resolve o tn e passa a
+        # success, sem tocar tournament_payouts. Espelha o gate de
+        # process_lobby_message; nas outras salas segue para o payout.
+        if _is_info_tab(vj, site):
             item["action"] = "info_ft_marker"
             if not dry_run:
                 _upsert_lobby_log(
