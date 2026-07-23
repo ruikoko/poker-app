@@ -19,6 +19,7 @@ export const HERO_NAMES = new Set([
 
   // Lobbarize account list (April 2026)
   'thinvalium',
+  'kostadin0v',          // nick novo Winamax (Jul 2026; thinvalium fica p/ mãos antigas)
   'lauro dermio',
   'lauro derm',          // truncated form seen in some screenshots
   'schadenfreud',

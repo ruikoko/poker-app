@@ -28,6 +28,7 @@ HERO_NAMES: set[str] = {
 
     # Lobbarize account list (April 2026)
     "thinvalium",
+    "kostadin0v",          # nick novo Winamax (Jul 2026; thinvalium fica p/ mãos antigas)
     "lauro dermio",
     "lauro derm",          # truncated form seen in some screenshots
     "schadenfreud",
@@ -122,7 +123,7 @@ FRIEND_NICKS: set[str] = HERO_NAMES_ALL | _FRIEND_ONLY_NICKS
 
 HERO_NICKS_BY_SITE: dict[str, list[str]] = {
     "PokerStars": ["kokonakueka", "misterpoker1973"],
-    "Winamax":    ["thinvalium"],
+    "Winamax":    ["thinvalium", "kostadin0v"],
     "WPN":        ["cringemeariver"],
     "GGPoker":    ["lauro dermio", "koumpounophobia"],
 }
