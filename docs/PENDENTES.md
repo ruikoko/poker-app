@@ -2,9 +2,12 @@
 
 ## ★ PRÓXIMA SESSÃO — ordem do Rui (22 Jul 2026, fecho da sessão 2)
 
-1. **Implementar a AUTO-CONFIRMAÇÃO das fronteiras FT** (aprovada 22 Jul; desenho:
-   `REGISTO_CONCEITO 2026-07-22 (d)` + journal `2026-07-22b §4`). Testemunha independente
-   obrigatória; match trivial não confirma; promoção fica com o Rui.
+1. ✅ **AUTO-CONFIRMAÇÃO das fronteiras FT — SHIPPED 23 Jul** (`a8f21aa`; desenho:
+   `REGISTO_CONCEITO 2026-07-22 (d)`). Fonte única `auto_confirm_witness` (fronteira +
+   cross-check match + testemunha independente TS/lobby-N); match trivial não confirma;
+   a app revê a própria decisão com dados novos; decisões do Rui intocáveis; dispensa
+   reativada renasce pendente; promoção continua manual. Painel: crachá «pela app».
+   Detalhe: `FT_BOUNDARY_ANATOMIA §8`.
 2. **A FAMÍLIA GRANDE «este artefacto pertence a este torneio/mão?»** — consolidar as 4+
    réguas (prints fora de tempo <9s · régua dos 6s · suspeitas de troca [22 imagens, TODAS
    ecos `auto_moved` da régua dos 6s] · casador de capturas · resolver de lobbys) numa fonte

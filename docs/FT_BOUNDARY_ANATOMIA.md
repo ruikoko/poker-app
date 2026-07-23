@@ -142,9 +142,19 @@ Semântica das decisões (**fixar a fronteira ≠ promover** — 2 passos):
 - **Cálculo automático (nunca escreve tags):** `refresh_ft_boundaries` corre **fire-and-forget**
   após cada import (`import_`, `import_hm3`, `tournament_summaries`) e reconcile — recomputa a
   fronteira e sincroniza a review **respeitando decisões**: `promoted` não recalcula;
-  `confirmed`/`corrected` ficam fixados; `dismissed` só renasce com **sinal novo forte**
-  (`has_new_ft_signal` = tag manual OU print Info); `pending` → snapshot. Idempotente; o gate
-  apertado (≤ FT_CAP) evita peso nos imports.
+  `confirmed`/`corrected` do RUI ficam fixados; `dismissed` só renasce com **sinal novo forte**
+  (`has_new_ft_signal` = tag manual OU print Info) e renasce **pendente**; `pending` → snapshot.
+  Idempotente; o gate apertado (≤ FT_CAP) evita peso nos imports.
+- **AUTO-CONFIRMAÇÃO (23 Jul, regra do Rui 22 Jul — `REGISTO_CONCEITO (d)`):** no mesmo
+  refresh, um `pending` com **fronteira + cross-check MATCH + testemunha INDEPENDENTE**
+  (`auto_confirm_witness`, fonte única: TS com `hero_position` dentro da FT, ou N do print
+  Info a bater com os sentados) é confirmado pela app — `decision='confirmed'`,
+  `decided_by='auto:cross_check'` (crachá «pela app» no painel + testemunha no cartão).
+  **Match trivial** (fonte T sem lobby: a HH a confirmar-se a si própria) e **via-b sem
+  TS/lobby NÃO confirmam** — ficam «Prontas a aprovar». A app pode **rever a própria**
+  auto-confirmação (dados novos invalidam a régua → volta a pending); decisões humanas
+  (qualquer `decided_by ≠ 'auto:cross_check'`, incl. `api`) **nunca** são revistas.
+  A **PROMOÇÃO (tags `-ft`) continua 100% do Rui** — a auto-confirmação só fixa a fronteira.
 - **Escrita (tags `-ft`):** **SÓ** pelo fluxo **Aprovar → dry-run → Escrever** (§7). Nenhum
   gatilho automático escreve tags. `refresh_ft_boundaries` foi validado read-only (8 Jul): não
   ressuscita dispensados sem sinal, não mexe em promovidos.
