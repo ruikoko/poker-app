@@ -1,5 +1,24 @@
 # Pendentes — backlog vivo
 
+## ★ FECHO DO BLOCO 22.1 (madrugada 22→23 Jul) — o que ficou LIVE e o que espera o Rui
+
+**LIVE:** ① **auto-confirmação FT** (`a8f21aa`; testemunha independente obrigatória; app revê
+a própria decisão; nunca pisa o Rui; 1ª corrida: 0 auto — 21 já decididas, 1 sem sinal) ·
+② **régua única «quantos restam nesta mão»** (`00f2d84`; `services/players_left.py`:
+captura→lobby-mais-próximo-no-tempo→vazio honesto; zero-lido=desconhecido; o «mais recente»
+morreu; painel Enviadas corrigido; prova LIVE 22→34 + 5 casos inalterados). **VERIFICADO
+sem mexer:** HRC Winamax íntegro (966 mãos, desvio máx 24 fichas = arredondamento).
+Journal: `journal/2026-07-22c.md`.
+
+**Pendentes de DECISÃO do Rui (novos):**
+- **Re-solve da GG-6139792066** (solve feito com 22 restantes; eram ~34; export futuro já certo).
+- **TS Winamax: NÃO avança** (decisão do Rui, risco>ganho). Defeito do parser (ficheiro de
+  2 blocos lê o 1º; `hero_re_entries`=0) fica anotado, sem urgência.
+- **Família grande «isto pertence aqui?» — inventário COMPLETO** (14 réguas→3 fontes;
+  journal 22c §4). Ordem: casador (A1-A6→1) → re-entrada HH-first (bust manda; régua já
+  ditada no jiwalegenda) → nomes → 22 suspeitas. **É maquinaria GG — fica para o regresso
+  à GG.** ⚠️ «Aceitar» das 22 continua PROIBIDO até a fonte única existir.
+
 ## ★ PRÓXIMA SESSÃO — ordem do Rui (22 Jul 2026, fecho da sessão 2)
 
 1. ✅ **AUTO-CONFIRMAÇÃO das fronteiras FT — SHIPPED 23 Jul** (`a8f21aa`; desenho:

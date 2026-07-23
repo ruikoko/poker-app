@@ -558,3 +558,35 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   mantido; revisita-se depois do wipe+reimport (o teste de aceitação da máquina).
 - Estado: aprovado, por implementar (1º item do backlog). Motivo/desenho: journal
   2026-07-22b §4.
+
+## 2026-07-22 (e) — Auto-confirmação FT IMPLEMENTADA e LIVE (bloco 22.1)
+
+- Implementação da (d), com elaboração aprovada pelo Rui no OK: **a app pode rever a
+  PRÓPRIA auto-confirmação** (dados novos invalidam a régua → volta a pendente e regressa
+  ao painel); decisões humanas (qualquer `decided_by ≠ 'auto:cross_check'`, incl. `api`)
+  nunca são revistas; dispensa reativada renasce pendente. Fonte única
+  `ft_boundary.auto_confirm_witness` (testemunha: TS `hero_position ≤ N`, ou N do print
+  Info == sentados); via-b sem TS/lobby não confirma. Painel: crachá «pela app».
+  Commits `a8f21aa`/`509609d`. Journal `2026-07-22c §1`; `FT_BOUNDARY_ANATOMIA §8`.
+
+## 2026-07-22 (f) — RÉGUA ÚNICA «quantos restam nesta mão» (LEI, bloco 22.1)
+
+- **Régua do Rui, LIVE (`00f2d84`):** os restantes de uma mão vêm da **captura da própria
+  mão** → senão do **print de lobby MAIS PRÓXIMO NO TEMPO** do `played_at` → senão **vazio
+  honesto** (sem hora da mão idem). **Zero-lido = DESCONHECIDO**, nunca valor válido.
+  **O «print mais recente» morreu** como critério (exportou 22 em vez de ~34 na
+  GG-6139792066). Fonte única `services/players_left.py`; as 2 cópias
+  (`queue_export._resolve_players_left`, `hrc_queue.lookup_players_left`) são camadas
+  finas; a listagem das Enviadas traz `context_table_ss_id` (o painel deixou de mostrar
+  o lobby-mais-recente achatado por torneio). Journal `2026-07-22c §2`.
+
+## 2026-07-22 (g) — Decisão: TS Winamax NÃO se importa; fichas WN ficam do print
+
+- **Decisão do Rui (bloco 22.1):** o import de TS Winamax **não avança** (risco > ganho).
+  Fundamentos medidos: o TS WN não traz stack inicial nem estrutura de prémios; o
+  `Registered players` **não conta re-entradas** (prova aritmética BATTLE ROYALE 14 Jul:
+  estimativa do print = 230×20k exatos vs TS 190); e os totais de fichas WN em produção
+  **provaram-se exatos** (966 mãos: soma dos stacks da HH = total gravado, desvio máx
+  24 fichas de arredondamento da visão). O único desvio estrutural conhecido é o print
+  pré-fecho (late reg) — aceite. A tabela-por-preço nunca decide fichas (o MONSTER STACK
+  é um 100k que ela daria como 20k). Journal `2026-07-22c §3`.

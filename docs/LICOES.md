@@ -505,3 +505,10 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   premissa morta custou 5 prints roubados + 2 torneios sem prémios → **antes de assentar desenho
   em premissa de journal antigo, confirmar com o Rui se ainda é verdade** (journals lêem-se «à
   data»; o estado vivo confirma-se na fonte). [journal 2026-07-22 sessão 2]
+- **Número re-narrado NÃO é número da origem** → na sessão 22.1 chegaram na narração quatro
+  «factos» que não existiam nos dados (o «908» dos inscritos, mãos INTERSTELLAR 21:38/23:39,
+  um «parser partido só no ensaio», «2 mãos com total impossível»); o Code verificou cada um
+  até ao fim (regex à vista, varrimento das 966 mãos, query fresca) e os quatro dissolveram-se
+  — os dados estavam sãos → **confirmar o número na ORIGEM (relatório/ecrã concreto) antes de
+  o propagar; não reconstruir valores de memória; e quem recebe verifica sempre em vez de
+  aceitar ou de corrigir um bug que não existe**. [journal 2026-07-22c §6]
