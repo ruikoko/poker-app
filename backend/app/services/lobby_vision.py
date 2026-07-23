@@ -71,6 +71,7 @@ _LOBBY_PROMPT = (
     '  "entrants": <int total registered> | null,\n'
     '  "players_left": <int players still alive mid-tournament> | null,\n'
     '  "reg_open": <true if Late Registration still open, else false> | null,\n'
+    '  "re_entries": <int re-entries count, Winamax header> | null,\n'
     '  "average_stack": <int average chip stack mid-tournament> | null,\n'
     '  "places_paid": <int total positions that get paid> | null,\n'
     '  "prize_pool": <float USD/EUR total prize pool> | null,\n'
@@ -116,6 +117,11 @@ _LOBBY_PROMPT = (
     "  'Players <LEFT> / <entrants>' (WN), or a 'Players Left: X' / 'Remaining: X'.\n"
     "- reg_open: true if the lobby shows 'Late Reg'/'Late Registration' (entrants\n"
     "  not yet final); false if registration is closed; null if you cannot tell.\n"
+    "  Winamax shows the tournament STATE WORD right under the tournament name:\n"
+    "  'LATE REGISTRATION' -> reg_open=true; 'RUNNING' -> reg_open=false.\n"
+    "- re_entries: the number labelled 'Re-Entries' in the Winamax lobby header\n"
+    "  (e.g. 'Re-Entries: 16' -> 16). Winamax only; null if not shown. It is\n"
+    "  NEITHER entrants NOR players_left.\n"
     "!! CRITICAL — do NOT confuse with the HERO's RANK/POSITION. GG shows the\n"
     "   hero's seat highlighted in the Players list with a 'Rank' number, and WN\n"
     "   shows 'RANK: Nth' in the left panel. That RANK is the hero's standing —\n"

@@ -21,9 +21,9 @@ import threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from app.db import get_conn, query
+from app.db import execute, get_conn, query
 from app.ingest_filters import is_pre_2026
-from app.services import lobby_vision, tournament_resolver, payouts_service
+from app.services import lobby_chips_rule, lobby_vision, tournament_resolver, payouts_service
 from app.services.payout_coherence import check_vj_payout_coherent
 from app.utils.timezones import utc_to_lisbon_naive
 
@@ -183,6 +183,154 @@ def _is_info_tab(vision_json, site) -> bool:
     return (site == "GGPoker"
             and isinstance(vision_json, dict)
             and (vision_json.get("open_tab") or "").strip() == "Info")
+
+
+def _wn_chips_meta_for(tn, message_id, posted_at, vision_json) -> Optional[dict]:
+    """#WN-TOTAL-CHIPS-FROM-LOBBY — junta TODOS os prints `success` já registados
+    deste torneio WN + o print corrente e aplica a regra única
+    (`lobby_chips_rule.compute_wn_total_chips`). Sync — no live path chamar via
+    `asyncio.to_thread`. Defensivo: falha de BD → regra só com o print corrente
+    (nunca parte a escrita do payout)."""
+    prints: list[dict] = []
+    try:
+        rows = query(
+            "SELECT discord_message_id, posted_at, vision_json "
+            "FROM lobby_processing_log "
+            "WHERE site = 'Winamax' AND tournament_number = %s "
+            "AND result = 'success'",
+            (tn,),
+        )
+        prints = [
+            {"posted_at": r.get("posted_at"),
+             "vision_json": r.get("vision_json") or {}}
+            for r in (rows or [])
+            if r.get("discord_message_id") != message_id
+        ]
+    except Exception:
+        logger.exception("[wn_chips] leitura de prints falhou tn=%s", tn)
+    prints.append({"posted_at": posted_at, "vision_json": vision_json or {}})
+    return lobby_chips_rule.compute_wn_total_chips(prints)
+
+
+def _apply_wn_chips_to_blob(blob, wn_meta) -> None:
+    """Sobrescreve `structures[0].chips` do blob com o total da regra WN.
+    In-place; no-op se meta/blob incompletos (blob mantém o chips do builder)."""
+    if not wn_meta or not wn_meta.get("chips"):
+        return
+    try:
+        st = blob.get("structures")
+        s0 = st[0] if isinstance(st, list) else st
+        if isinstance(s0, dict):
+            s0["chips"] = wn_meta["chips"]
+    except (AttributeError, IndexError, KeyError, TypeError):
+        pass
+
+
+def wn_chips_recalc(dry_run: bool = True) -> dict:
+    """#WN-TOTAL-CHIPS-FROM-LOBBY F4 — recálculo retroativo com ENSAIO.
+
+    dry_run=True (defeito): devolve a tabela antes/depois por torneio WN —
+    ZERO escrita. dry_run=False: reaplica a regra a todos os torneios WN com
+    payout de fonte lobby (manual:/backoffice_vision: ficam intactos — D11),
+    PRESERVANDO o source; escreve chips + 4 colunas da regra.
+
+    Síncrono e rápido (~100 torneios, 2 queries + 1 UPDATE cada) — sem job de
+    background, sem estado a meio: cancelar = não chamar."""
+    rows = query(
+        "SELECT tournament_number, payouts_json, source "
+        "FROM tournament_payouts WHERE site = 'Winamax' "
+        "ORDER BY tournament_number",
+    ) or []
+    tns = [r["tournament_number"] for r in rows]
+    counts = {}
+    if tns:
+        for c in query(
+            "SELECT h.tournament_number, COUNT(DISTINCT h.id) AS hands, "
+            "COUNT(DISTINCT j.id) FILTER (WHERE j.status = 'done') AS solves_done "
+            "FROM hands h LEFT JOIN hrc_jobs j ON j.hand_db_id = h.id "
+            "WHERE h.site = 'Winamax' AND h.tournament_number = ANY(%s) "
+            "GROUP BY 1",
+            (tns,),
+        ) or []:
+            counts[c["tournament_number"]] = c
+
+    items = []
+    updated = skipped_prec = no_prints = 0
+    for r in rows:
+        tn = r["tournament_number"]
+        src = r.get("source") or ""
+        blob = r.get("payouts_json") or {}
+        st = blob.get("structures")
+        s0 = (st[0] if isinstance(st, list) and st else
+              st if isinstance(st, dict) else {})
+        item = {
+            "tournament_number": tn,
+            "name": s0.get("name"),
+            "old_chips": s0.get("chips"),
+            "source": src,
+            "hands": (counts.get(tn) or {}).get("hands", 0),
+            "solves_done": (counts.get(tn) or {}).get("solves_done", 0),
+        }
+        if src.startswith("manual:") or src.startswith("backoffice_vision:"):
+            skipped_prec += 1
+            item["action"] = "skipped_precedence"
+            items.append(item)
+            continue
+        prints = [
+            {"posted_at": p.get("posted_at"),
+             "vision_json": p.get("vision_json") or {}}
+            for p in query(
+                "SELECT posted_at, vision_json FROM lobby_processing_log "
+                "WHERE site = 'Winamax' AND tournament_number = %s "
+                "AND result = 'success'",
+                (tn,),
+            ) or []
+        ]
+        meta = lobby_chips_rule.compute_wn_total_chips(prints)
+        if meta is None:
+            no_prints += 1
+            item["action"] = "no_usable_prints"
+            items.append(item)
+            continue
+        old = item["old_chips"]
+        item.update({
+            "new_chips": meta["chips"],
+            "delta_pct": (round(100.0 * (meta["chips"] - old) / old, 2)
+                          if old else None),
+            "entrants": meta["entrants"],
+            "starting_stack": meta["starting_stack"],
+            "state": meta["state"],
+            "provisional": meta["provisional"],
+            "review": meta["review"],
+            "chosen_print": (meta["chosen_posted_at"].isoformat()
+                             if meta["chosen_posted_at"] else None),
+            "re_entries": meta["re_entries"],
+            "action": "would_update" if dry_run else "updated",
+        })
+        if not dry_run:
+            _apply_wn_chips_to_blob(blob, meta)
+            execute(
+                "UPDATE tournament_payouts SET payouts_json = %s, "
+                "chips_rule_state = %s, chips_provisional = %s, "
+                "chips_review = %s, re_entries = %s, uploaded_at = NOW() "
+                "WHERE site = 'Winamax' AND tournament_number = %s",
+                (blob, meta["state"], meta["provisional"],
+                 ",".join(meta["review"]) or None, meta["re_entries"], tn),
+            )
+            updated += 1
+        items.append(item)
+
+    items.sort(key=lambda i: abs(i.get("delta_pct") or 0.0), reverse=True)
+    return {
+        "dry_run": dry_run,
+        "tournaments": len(rows),
+        "updated": updated,
+        "skipped_precedence": skipped_prec,
+        "no_usable_prints": no_prints,
+        "changed_over_half_pct": sum(
+            1 for i in items if abs(i.get("delta_pct") or 0.0) >= 0.5),
+        "items": items,
+    }
 
 
 def _refresh_lobby_vision_json(
@@ -564,12 +712,25 @@ async def process_lobby_message(
         return base
 
     blob = lobby_vision.build_hrc_payouts_blob(vj)
+    # #WN-TOTAL-CHIPS-FROM-LOBBY (24 Jul 2026) — na WN o total de fichas do
+    # torneio vem da regra única (print RUNNING preferido; entradas×stack;
+    # guarda não-desce). GG e restantes salas: caminho intocado.
+    wn_meta = None
+    if site == "Winamax":
+        wn_meta = await asyncio.to_thread(
+            _wn_chips_meta_for, tn, message_id, posted_at, vj)
+        _apply_wn_chips_to_blob(blob, wn_meta)
+        if wn_meta:
+            base["wn_chips"] = {"chips": wn_meta["chips"],
+                                "state": wn_meta["state"],
+                                "provisional": wn_meta["provisional"]}
     try:
         upsert_res = await asyncio.to_thread(
             payouts_service.upsert_payout,
             site=site, tournament_number=tn,
             payouts_json=blob,
             source=f"{source_prefix}:{message_id}",
+            wn_chips_meta=wn_meta,
         )
         action = (upsert_res or {}).get("action")
     except Exception as e:
@@ -1007,9 +1168,20 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
         item["existing_source"] = cur_src or None
         if not dry_run:
             blob = lobby_vision.build_hrc_payouts_blob(vj)
+            # #WN-TOTAL-CHIPS-FROM-LOBBY — mesma regra única do live path.
+            wn_meta = None
+            if site == "Winamax":
+                wn_meta = _wn_chips_meta_for(
+                    tn, r["discord_message_id"], posted_at, vj)
+                _apply_wn_chips_to_blob(blob, wn_meta)
+                if wn_meta:
+                    item["wn_chips"] = {"chips": wn_meta["chips"],
+                                        "state": wn_meta["state"],
+                                        "provisional": wn_meta["provisional"]}
             upsert_res = payouts_service.upsert_payout(
                 site=site, tournament_number=tn, payouts_json=blob,
                 source=f"reconcile_lobby_vision:{r['discord_message_id']}",
+                wn_chips_meta=wn_meta,
             )
             item["payout_action"] = (upsert_res or {}).get("action")
             _upsert_lobby_log(

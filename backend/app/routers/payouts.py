@@ -38,11 +38,22 @@ def ensure_tournament_payouts_schema():
         "CREATE INDEX IF NOT EXISTS idx_tournament_payouts_site "
         "ON tournament_payouts(site);"
     )
+    # #WN-TOTAL-CHIPS-FROM-LOBBY (24 Jul 2026) — metadados da regra do total de
+    # fichas WN (estado do print escolhido / provisórias / por-rever) +
+    # `re_entries` INFO-ONLY (sem consumidores; não entra em contas).
+    alter_sqls = [
+        "ALTER TABLE tournament_payouts ADD COLUMN IF NOT EXISTS chips_rule_state TEXT;",
+        "ALTER TABLE tournament_payouts ADD COLUMN IF NOT EXISTS chips_provisional BOOLEAN;",
+        "ALTER TABLE tournament_payouts ADD COLUMN IF NOT EXISTS chips_review TEXT;",
+        "ALTER TABLE tournament_payouts ADD COLUMN IF NOT EXISTS re_entries INTEGER;",
+    ]
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
             cur.execute(idx_sql)
+            for a in alter_sqls:
+                cur.execute(a)
         conn.commit()
     finally:
         conn.close()

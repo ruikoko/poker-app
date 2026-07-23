@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field, field_validator
 from app.auth import require_auth, require_auth_or_api_key
 from app.db import query
 from app.services.image_utils import detect_image_mime
-from app.services.lobby_sync import run_sync, process_lobby_message, reconcile_lobby_logs
+from app.services.lobby_sync import (
+    run_sync, process_lobby_message, reconcile_lobby_logs, wn_chips_recalc,
+)
 
 router = APIRouter(prefix="/api/lobbys", tags=["lobbys"])
 logger = logging.getLogger("lobbys")
@@ -187,6 +189,35 @@ def reconcile_lobbys(
         from app.services.ft_boundary import trigger_ft_refresh
         threading.Thread(target=trigger_ft_refresh, daemon=True).start()
     return res
+
+
+@router.get("/wn-chips/preview")
+def wn_chips_preview(
+    current_user=Depends(require_auth_or_api_key),
+):
+    """#WN-TOTAL-CHIPS-FROM-LOBBY F4 — ENSAIO do recálculo do total de fichas
+    Winamax: tabela antes/depois por torneio (chips actuais no blob vs regra
+    nova), estado do print escolhido, provisórias, por-rever, mãos/solves.
+    Read-only — nunca escreve."""
+    return wn_chips_recalc(dry_run=True)
+
+
+@router.post("/wn-chips/apply")
+def wn_chips_apply(
+    confirm: bool = Body(False, embed=True),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """#WN-TOTAL-CHIPS-FROM-LOBBY F4 — aplica o recálculo (aprovação do Rui
+    obrigatória sobre a tabela do /preview). Reescreve chips + colunas da regra
+    nos torneios WN de fonte lobby (manual/backoffice intactos — D11),
+    preservando o source. Exige `confirm=true` explícito."""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="confirm=true obrigatório — corre primeiro o ensaio "
+                   "(GET /api/lobbys/wn-chips/preview) e aprova a tabela.",
+        )
+    return wn_chips_recalc(dry_run=False)
 
 
 @router.post("/sync-recent")
