@@ -647,3 +647,16 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   (<0,5%), 11 corrigem (pior: INTERSTELLAR 13/07 +140%), **0 solves feitos
   afetados** (os 22 solves WN vivem todos em torneios com desvio +0,0%) → sem
   re-solves. GG byte-a-byte intocada (caminho legado preservado no upsert).
+
+## 2026-07-24 (b) — decisão de 22 Jul sobre o TS Winamax ENCERRADA (assinada pelo Rui)
+
+- **Assinado pelo Rui (24 Jul 2026):** a decisão de 22 Jul («TS Winamax não se
+  importa — risco > ganho») fica **encerrada e substituída** no que toca ao total
+  de fichas: **a fonte do total de fichas WN é o PRINT DE LOBBY pela régua
+  `#WN-TOTAL-CHIPS-FROM-LOBBY`** (entrada acima), provada nos 2 prints do Rui e
+  aplicada aos 96 torneios em 24 Jul (apply aprovado sobre a tabela completa).
+  O **TS Winamax continua sem se importar** (o parser existe desde 29 Mai,
+  `7ecf092`, e fica dormante) — a pergunta que o faria importar (fichas reais)
+  está respondida pelo lobby. Registado para a contradição de datas
+  (22 vs 23 Jul) não se repetir: qualquer premissa futura sobre TS WN
+  confirma-se AQUI, não em journals datados.

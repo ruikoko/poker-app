@@ -24,11 +24,14 @@ no replayer — não estavam em falta).
 guarda não-desce; avg = sinalizador; «provisórias» sem print RUNNING; histórico = opção A
 «estado desconhecido», SEM inferência de fecho) · Vision ensina estado WN + `re_entries`
 (INFO-ONLY: vision_json + coluna no torneio, sem consumidores) · live+reconcile passam
-pela regra (F5 automático) · GG byte-a-byte (caminho legado preservado). **⏳ F4 À ESPERA
-DO RUI:** tabela dos 96 torneios entregue (85 inalterados, 11 corrigem, pior +140%
-INTERSTELLAR 13/07; 0 solves feitos afetados → sem re-solves) — aprovar → `POST
-/api/lobbys/wn-chips/apply {confirm:true}` (ensaio: `GET /api/lobbys/wn-chips/preview`).
-Decisão 22 Jul «TS Winamax não se importa» MANTÉM-SE (esta via é do lobby, não do TS).
+pela regra (F5 automático) · GG byte-a-byte (caminho legado preservado). **✅ F4 APLICADO
+24 Jul (tabela dos 96 aprovada pelo Rui):** 96 atualizados via `POST /wn-chips/apply
+{confirm:true}` — 11 corrigidos (pior +140% INTERSTELLAR 13/07), 4 «finais» (RUNNING),
+92 «provisórias» (29 late-reg + 63 estado desconhecido), 4 por-rever `avg_incoherent`;
+sources preservados; 22 solves WN intactos (último carimbo 13 Jul); 0 linhas não-WN
+tocadas. `re_entries`: coluna assente mas VAZIA no histórico (prints antigos não tinham o
+campo lido; imagens não guardadas → irrecuperável) — preenche daqui em diante. Decisão
+22 Jul do TS encerrada e assinada (`REGISTO_CONCEITO 2026-07-24 (b)`).
 
 **PENDENTES (por ordem, foco Winamax):**
 1. **Destravar as restantes ~167 mãos ICM WN sem prémios (~55 torneios)** — o Rui importa
@@ -67,8 +70,11 @@ Journal: `journal/2026-07-22c.md`.
 
 **Pendentes de DECISÃO do Rui (novos):**
 - **Re-solve da GG-6139792066** (solve feito com 22 restantes; eram ~34; export futuro já certo).
-- **TS Winamax: NÃO avança** (decisão do Rui, risco>ganho). Defeito do parser (ficheiro de
-  2 blocos lê o 1º; `hero_re_entries`=0) fica anotado, sem urgência.
+- ~~**TS Winamax: NÃO avança** (decisão do Rui, risco>ganho)~~ **ENCERRADA 24 Jul,
+  assinada pelo Rui** (`REGISTO_CONCEITO 2026-07-24 (b)`): a fonte do total de fichas WN
+  passa a ser o **print de lobby** pela régua `#WN-TOTAL-CHIPS-FROM-LOBBY`; o TS WN
+  continua sem se importar (parser dormante). Defeito do parser (2 blocos lê o 1º;
+  `hero_re_entries`=0) fica anotado, sem urgência.
 - **Família grande «isto pertence aqui?» — inventário COMPLETO** (14 réguas→3 fontes;
   journal 22c §4). Ordem: casador (A1-A6→1) → re-entrada HH-first (bust manda; régua já
   ditada no jiwalegenda) → nomes → 22 suspeitas. **É maquinaria GG — fica para o regresso
