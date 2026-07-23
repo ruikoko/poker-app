@@ -512,3 +512,11 @@ Formato: `- AAAA-MM-DD — **Problema:** … → **Solução:** … (→ journal
   — os dados estavam sãos → **confirmar o número na ORIGEM (relatório/ecrã concreto) antes de
   o propagar; não reconstruir valores de memória; e quem recebe verifica sempre em vez de
   aceitar ou de corrigir um bug que não existe**. [journal 2026-07-22c §6]
+
+- **23 Jul 2026 — «feito» só com query fresca, nunca a partir do plano/ensaio.** O operador
+  (Claude Web) voltou a afirmar como FEITO o que era só ensaio («as 21 mãos destravaram»
+  antes de existir commit, deploy ou escrita); o Code provou o estado real com query fresca
+  (0 commits novos, 0 payouts, 0 exports) e só então executou a sequência com prova em cada
+  passo (dry-run=ensaio → real → query → 21/21 HTTP 200) → **regra reforçada: nenhum
+  operador declara «feito/destravado/escrito» sem uma query/verificação fresca ao estado
+  real a prová-lo; o plano aprovado não é o estado.** [journal 2026-07-23 §6]

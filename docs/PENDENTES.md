@@ -1,5 +1,48 @@
 # Pendentes — backlog vivo
 
+## ★★ FOCO ATUAL (23 Jul, ordem do Rui): SÓ WINAMAX — a GG está EM ESPERA
+
+**Tudo o que diga respeito à GG fica PARQUEADO** até o Rui voltar à GG (ver secção
+«parqueado» abaixo). Stars/WPN também de lado (poucas mãos).
+
+**LIVE 23 Jul (journal `journal/2026-07-23.md`):** ① alias `kostadin0v` (nick novo WN;
+`thinvalium` fica p/ mãos antigas; confirmado sem colisão) · ② **guarda do Info POR SALA**
+(`6326a8d`, fix-na-causa): «print Info nunca escreve prémios» era lei da GG mas estava
+GLOBAL e matava a única fonte de prémios da WN (na WN Info+Payout vêm no mesmo ecrã) —
+agora GG→não escreve, WN→escreve; GG byte-a-byte igual; **automático daqui p/ a frente**
+(qualquer print de lobby WN importado escreve prémios) · ③ **5 torneios WN destravados**
+(ZENITH 21 Jun · INTERSTELLAR 11+14 Jul · GRAVITY 13 Jul · HIGHROLLER 16 Jun): payouts
+escritos (`reconcile_lobby_vision:`) + **21/21 mãos ICM exportadas HTTP 200**, provado com
+query fresca. Nota: 3 dos 5 prints com reg ainda aberta — escada é a melhor disponível;
+print mais tardio sobrepõe-se (last-write-wins da mesma fonte). Verificado também: HRC WN
+íntegro (966 mãos, 22c) e **as coroas WN aparecem no estudo** (estão no apa/`bounty` € e
+no replayer — não estavam em falta).
+
+**PENDENTES (por ordem, foco Winamax):**
+1. **Destravar as restantes ~167 mãos ICM WN sem prémios (~55 torneios)** — o Rui importa
+   os PRINTS DE LOBBY que tem no PC (página Lobbys ou pasta `lobby` do Batmen; escrevem
+   prémios automaticamente desde o `6326a8d`). Começar pelo **ZENITH FUNDAY 70K 12 Jul**
+   (print já enviado, +19 mãos) e pelas noites que mais rendem: **9 Jun (35 mãos) · 11 Jun
+   (25) · 12 Jun (HIGHROLLER 250€ = 20) · 14 Jun Space Sunday (17)**. Lista completa dos
+   61 torneios: journal `2026-07-23 §5`.
+2. **MAPA das regras GG que contaminam a Winamax** — a guarda do Info era a pior mas NÃO a
+   única. Mapear todas as regras GG que disparam fora da GG e isolá-las por sala (é a raiz
+   do «a Winamax parece mais complicada do que devia»). Já identificada: regra C dos
+   vilões exige `match_method` (GG) em todas as salas (latente na WN, 0 mãos hoje).
+3. **Régua dos 6s na Winamax** — a proteção «print ≤6s → mão anterior» é só-GG
+   (`table_ss.py:1780`); as tags WN não a têm. Medido 23 Jul: **97 capturas WN com atraso
+   NEGATIVO** (tiradas ANTES da mão casada começar; pior −54 min; 37 com tag) + 10 com
+   ≤6s (5 com tag) — nunca auditadas (~45 das 227 pasta-tags WN em risco). Estender a
+   proteção à WN (guarda de direção + regra dos 6s por sala).
+
+**PARQUEADO (GG — só quando o Rui voltar à GG):** família grande (casador de capturas
+5→1 · re-entrada por bust-HH · nomes/cadeiras · **22 suspeitas — «Aceitar» continua
+PROIBIDO**) · conceitos das coroas 3/4/5 (+`#REGUA-COROAS`) · re-solve GG-6139792066 ·
+Fase 2 das órfãs · `#MTT-DESANON-MORTO`.
+
+**AÇÃO DO RUI (fora do código, pendente há dias): rotação dos segredos** — a password
+só-leitura da BD foi exposta em logs locais (ecoada de novo em 22c §6).
+
 ## ★ FECHO DO BLOCO 22.1 (madrugada 22→23 Jul) — o que ficou LIVE e o que espera o Rui
 
 **LIVE:** ① **auto-confirmação FT** (`a8f21aa`; testemunha independente obrigatória; app revê
