@@ -38,9 +38,13 @@ cura-na-própria-row do re-Vision (fim das gémeas por hash-da-cópia — a caus
 «morto desde 14/07» era o dedup a engolir releituras) · rasto persistente `sweep_runs`
 (arranque/tick/gatilho, contagens+erros) · tecto 5 releituras → `revision_exhausted`
 («precisa do original») · proteção por-linha no reconcile completo · endpoint de limpeza
-das gémeas (`/api/table-ss/revision-twins/cleanup`, dry_run por defeito). **⏳ À ESPERA
-DO RUI: aprovação do ensaio da limpeza das gémeas** (nada apagado sem ordem explícita).
-Via GG intocada.
+das gémeas (`/api/table-ss/revision-twins/cleanup`, dry_run por defeito). **✅ LIMPEZA
+APLICADA 25 Jul (aprovada pelo Rui sobre o ensaio das 7 famílias):** 19 rows apagadas
+(1966→1947), 7 keepers `success` com a mão a apontar-lhes (7/7 verificado), 0 apontadores
+órfãos, 0 falhadas restantes (as últimas presas eram gémeas da família GRAVITY). Provas
+ao vivo dos fixes: 2 curas na própria row + tecto no 2492 + rasto `sweep_runs` a
+registar. Via GG: só higiene de registos duplicados (mesma mão provada membro a membro);
+matcher intocado.
 
 **LIVE 24 Jul (tarde) — ★ RÉGUA DO «INÍCIO DE DIA» 15h→12h + `--day` no .bat do HM3**
 (`REGISTO_CONCEITO 2026-07-24 (c)`): `GAME_DAY_START_HOUR=12` nos 2 pontos de código
