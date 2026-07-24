@@ -19,8 +19,7 @@ if "%ESCOLHA%"=="" (
     goto fim
 )
 
-echo %ESCOLHA% | findstr "/" >nul
-if %errorlevel%==0 (
+if not "%ESCOLHA:/=%"=="%ESCOLHA%" (
     echo A importar o dia de jogo %ESCOLHA%...
     python "%~dp0hm3_export.py" --day %ESCOLHA%
 ) else (
