@@ -1070,8 +1070,11 @@ def revision_twins_cleanup(dry_run: bool = True) -> dict:
             "donor_hand": donor.get("matched_hand_id") if donor else None,
             "delete_ids": twin_ids,
             "hands_to_repoint": n_linked,
-            "action": ("cure_keeper_and_delete_twins" if donor
-                       else "delete_twins_only" if keeper["result"] == "success"
+            # rótulo fiel ao apply: o match de um keeper JÁ success nunca é tocado
+            "action": ("cure_keeper_and_delete_twins"
+                       if donor and keeper["result"] != "success"
+                       else "delete_twins_only"
+                       if (donor or keeper["result"] == "success")
                        else "skip_no_donor"),
         }
         families.append(fam)
