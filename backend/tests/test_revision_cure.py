@@ -188,7 +188,7 @@ def test_cleanup_dry_run_plan_and_no_writes():
     b = _member(2, b"copia", datetime(2026, 7, 14), "success", hand="WN-9")
 
     def _q(sql, params=None):
-        if "DISTINCT original_filename" in sql:
+        if "HAVING COUNT" in sql:
             return [{"original_filename": "f.png"}]
         if "WHERE original_filename" in sql:
             return [a, b]
@@ -214,7 +214,7 @@ def test_cleanup_untouched_without_twin_proof():
     b = _member(2, b"v2", datetime(2026, 7, 14), "success", hand="WN-9")
 
     def _q(sql, params=None):
-        if "DISTINCT original_filename" in sql:
+        if "HAVING COUNT" in sql:
             return [{"original_filename": "f.png"}]
         if "WHERE original_filename" in sql:
             return [a, b]

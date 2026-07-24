@@ -1036,10 +1036,13 @@ def revision_twins_cleanup(dry_run: bool = True) -> dict:
     `hands.context_table_ss_id` das gémeas para o keeper (dados casados NUNCA
     se perdem) e apagar as gémeas. `dry_run=True` (defeito) devolve só o plano.
     Cirúrgico: famílias sem membro falhado ou sem prova ficam intactas."""
+    # Semente: qualquer filename com >1 row — inclui famílias cujo keeper já
+    # CUROU in-place (a gémea sobra na mesma); a prova `_twin_family_linked`
+    # é que protege uploads legítimos repetidos (sem relação de hash → intactos).
     src = query(
-        "SELECT DISTINCT original_filename FROM table_ss_processing_log "
-        "WHERE result = ANY(%s) AND original_filename IS NOT NULL",
-        (list(_VISION_RETRY_RESULTS) + ["revision_exhausted"],))
+        "SELECT original_filename FROM table_ss_processing_log "
+        "WHERE original_filename IS NOT NULL "
+        "GROUP BY original_filename HAVING COUNT(*) > 1")
     families = []
     for row in (src or []):
         fname = row["original_filename"]
