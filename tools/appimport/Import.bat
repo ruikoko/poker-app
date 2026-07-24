@@ -11,7 +11,7 @@ echo   Correr SO depois da sessao de poker
 echo   (salas fechadas). E um envio unico,
 echo   nao corre em background.
 echo.
-echo   Janela de IMAGENS (it/manual/lobby) - dia-de-jogo 15:00-15:00.
+echo   Janela de IMAGENS (it/manual/lobby) - dia-de-jogo 12:00-12:00.
 echo   Enter nos dois = tudo. HH/TS entram sempre por inteiro.
 echo.
 set "DESDE="

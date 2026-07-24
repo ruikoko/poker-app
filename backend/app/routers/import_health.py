@@ -7,8 +7,9 @@ v1 read-only sobre as tabelas existentes:
   • hh_ts  → import_logs             (status/records_*/log/imported_at)  [só /api/import]
   • inbox  → entries                 (source/entry_type/status/created_at)
 
-Janela: conceito "dia-de-jogo" 15:00→15:00 (Lisboa naive). `?day=YYYY-MM-DD` →
-[day 15:00, (day+1) 15:00]. Sem `day` → tudo.
+Janela: conceito "dia-de-jogo" 12:00→12:00 (Lisboa naive; GAME_DAY_START_HOUR —
+régua do Rui 24 Jul, era 15:00). `?day=YYYY-MM-DD` → [day 12:00, (day+1) 12:00].
+Sem `day` → tudo.
 
 Buracos conhecidos (logging a acrescentar em v2, devolvidos em `holes`):
   • HM3 import (.bat) não persiste log (só devolve o resumo na resposta).
@@ -30,6 +31,11 @@ logger = logging.getLogger("import_health")
 
 _FAIL_LIMIT = 300
 
+# Régua GLOBAL do «início de dia» (24 Jul 2026, regra do Rui): o dia de jogo
+# começa às 12h00 (era 15h00; contagem de mãos 12h–15h em 2026 = 0 → indolor).
+# Espelho local em tools/appimport/app_import.py (mesma constante, mesmo valor).
+GAME_DAY_START_HOUR = 12
+
 # Resultados "sucesso" por pipeline (tudo o resto é falha/sem-match).
 _OK_RESULTS = {"success"}
 
@@ -42,15 +48,15 @@ _HOLES = [
 
 
 def _window(day: Optional[str]) -> Optional[tuple]:
-    """`day` YYYY-MM-DD → (from, to) = [day 15:00, (day+1) 15:00] Lisboa naive.
-    None → sem janela."""
+    """`day` YYYY-MM-DD → (from, to) = [day 12:00, (day+1) 12:00] Lisboa naive
+    (GAME_DAY_START_HOUR). None → sem janela."""
     if not day:
         return None
     try:
         d = datetime.strptime(day.strip(), "%Y-%m-%d")
     except (ValueError, AttributeError):
         raise HTTPException(400, "day deve ser YYYY-MM-DD")
-    lo = d.replace(hour=15, minute=0, second=0, microsecond=0)
+    lo = d.replace(hour=GAME_DAY_START_HOUR, minute=0, second=0, microsecond=0)
     return (lo, lo + timedelta(days=1))
 
 
@@ -83,7 +89,7 @@ def _result_block(table: str, time_expr: str, win: Optional[tuple],
 
 @router.get("")
 def import_health(
-    day: Optional[str] = Query(None, description="dia-de-jogo YYYY-MM-DD (15:00→15:00)"),
+    day: Optional[str] = Query(None, description="dia-de-jogo YYYY-MM-DD (12:00→12:00)"),
     current_user=Depends(require_auth),
 ):
     win = _window(day)

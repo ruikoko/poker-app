@@ -351,10 +351,18 @@ def _mtime_iso(path):
     return datetime.fromtimestamp(os.path.getmtime(path)).isoformat()  # Lisboa naive
 
 
-# ── Janela de datas das IMAGENS (it / manual / lobby) — dia-de-jogo 15:00→15:00 ─
+# ── Janela de datas das IMAGENS (it / manual / lobby) — dia-de-jogo 12:00→12:00 ─
 # Só filtra IMAGENS. gg_hh/gg_ts (HH/TS) NÃO são filtrados: entram sempre por
 # inteiro (duplicados impossíveis; o despejo não incomoda). Tudo Lisboa-naive
 # (pt51): mtime = hora local do PC do Rui (= Lisboa); timestamp do nome do IT idem.
+
+# Régua GLOBAL do «início de dia» (24 Jul 2026, regra do Rui): o dia de jogo
+# começa às 12h00 e vai até às 11h59 do dia seguinte. Razão: o Rui nunca joga
+# entre as 12h e as ~17h (vazio real medido: madrugada mais tardia 09:45, tarde
+# mais cedo 16:24) → o corte nunca atravessa uma sessão. Era 15h00 até 24 Jul
+# (contagem de mãos 12h–15h em 2026: 0 → mudança indolor). O espelho no backend
+# vive em routers/import_health.py (mesma constante, mesmo valor).
+GAME_DAY_START_HOUR = 12
 
 def _parse_day(s):
     """'YYYY-MM-DD' → datetime à meia-noite (Lisboa naive). None se vazio/inválido."""
@@ -368,14 +376,15 @@ def _parse_day(s):
 
 
 def window_bounds(desde, ate):
-    """(desde, ate) 'YYYY-MM-DD' → (lo, hi) do conceito DIA-DE-JOGO (15:00→15:00):
-      lo = desde às 15:00 (inclusive); hi = (ate+1) às 15:00 (EXCLUSIVO) → cobre o
+    """(desde, ate) 'YYYY-MM-DD' → (lo, hi) do conceito DIA-DE-JOGO
+    (GAME_DAY_START_HOUR→GAME_DAY_START_HOUR, hoje 12:00→12:00):
+      lo = desde às 12:00 (inclusive); hi = (ate+1) às 12:00 (EXCLUSIVO) → cobre o
       dia-de-jogo `ate` inteiro. Cada lado pode ser None (sem limite desse lado).
       (None, None) = sem janela."""
     d = _parse_day(desde)
     a = _parse_day(ate)
-    lo = d.replace(hour=15) if d else None
-    hi = (a + timedelta(days=1)).replace(hour=15) if a else None
+    lo = d.replace(hour=GAME_DAY_START_HOUR) if d else None
+    hi = (a + timedelta(days=1)).replace(hour=GAME_DAY_START_HOUR) if a else None
     return (lo, hi)
 
 
@@ -933,7 +942,8 @@ def main(argv=None, overrides=None):
         ini = f"desde {lo:%Y-%m-%d %H:%M}" if lo else "sem início"
         fim = f"até {hi:%Y-%m-%d %H:%M} (excl.)" if hi else "sem fim"
         print(f"JANELA de IMAGENS (it/manual/lobby): {ini} · {fim}")
-        print("       (dia-de-jogo 15:00→15:00; gg_hh/gg_ts entram SEMPRE por inteiro)")
+        print(f"       (dia-de-jogo {GAME_DAY_START_HOUR}:00→{GAME_DAY_START_HOUR}:00; "
+              "gg_hh/gg_ts entram SEMPRE por inteiro)")
     else:
         print("JANELA de IMAGENS: nenhuma — entra tudo (it/manual/lobby).")
     print("─" * 56)

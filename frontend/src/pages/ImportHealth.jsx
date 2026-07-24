@@ -3,7 +3,7 @@ import { importHealth } from '../api/client'
 
 // Saúde do Import (pt68 v1) — instrumento de validação da Etapa 1.
 // Mostra, por pipeline, contagens + falhas/sem-match com motivo + timestamp.
-// Janela "dia-de-jogo" 15:00→15:00 (só faz sentido em campos de HORA-DE-JOGO:
+// Janela "dia-de-jogo" 12:00→12:00 (só faz sentido em campos de HORA-DE-JOGO:
 // mesa.captured_at e hands.played_at; inbox/imports são por hora-de-import).
 
 const RESULT_COLOR = (r) => {
@@ -151,7 +151,7 @@ export default function ImportHealth() {
       </p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
-        <label style={{ fontSize: 13 }}>Dia-de-jogo (15:00→15:00):</label>
+        <label style={{ fontSize: 13 }}>Dia-de-jogo (12:00→12:00):</label>
         <input type="date" value={day} onChange={(e) => setDay(e.target.value)}
           style={{ background: 'var(--card,#161b22)', color: 'inherit', border: '1px solid var(--border,#30363d)', borderRadius: 6, padding: '4px 8px' }} />
         <button onClick={() => load(day)} disabled={loading}>{loading ? '…' : 'Aplicar'}</button>

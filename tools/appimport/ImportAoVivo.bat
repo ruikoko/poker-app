@@ -14,7 +14,7 @@ echo.
 echo   Isto ENVIA a serio e MOVE os ficheiros
 echo   enviados para a pasta done\.
 echo.
-echo   Janela de IMAGENS (it/manual/lobby/gold) - dia-de-jogo 15:00-15:00.
+echo   Janela de IMAGENS (it/manual/lobby/gold) - dia-de-jogo 12:00-12:00.
 echo   Enter nos dois = TUDO (cuidado: envia tambem imagens antigas).
 echo   HH/TS entram sempre por inteiro.
 echo.

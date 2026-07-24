@@ -152,24 +152,24 @@ def test_lobby_name_hint_legacy_none():
     assert ai.lobby_name_hint("Shot21-GGPoker-20260604205243.png") is None
 
 
-# ── Janela de datas das IMAGENS (dia-de-jogo 15:00→15:00) ─────────────────────
+# ── Janela de datas das IMAGENS (dia-de-jogo 12:00→12:00) ─────────────────────
 
 def test_window_bounds_both():
     lo, hi = ai.window_bounds("2026-06-08", "2026-06-11")
-    assert lo == datetime(2026, 6, 8, 15, 0)      # desde 15:00 inclusive
-    assert hi == datetime(2026, 6, 12, 15, 0)     # (ate+1) 15:00 exclusivo → cobre dia 11
+    assert lo == datetime(2026, 6, 8, 12, 0)      # desde 12:00 inclusive
+    assert hi == datetime(2026, 6, 12, 12, 0)     # (ate+1) 12:00 exclusivo → cobre dia 11
 
 
 def test_window_bounds_desde_only():
     lo, hi = ai.window_bounds("2026-06-08", None)
-    assert lo == datetime(2026, 6, 8, 15, 0)
+    assert lo == datetime(2026, 6, 8, 12, 0)
     assert hi is None
 
 
 def test_window_bounds_ate_only():
     lo, hi = ai.window_bounds("", "2026-06-11")
     assert lo is None
-    assert hi == datetime(2026, 6, 12, 15, 0)
+    assert hi == datetime(2026, 6, 12, 12, 0)
 
 
 def test_window_bounds_none():
@@ -181,7 +181,7 @@ def test_window_bounds_invalid_is_none():
     # data inválida → None desse lado (não rebenta)
     lo, hi = ai.window_bounds("2026-13-99", "2026-06-11")
     assert lo is None
-    assert hi == datetime(2026, 6, 12, 15, 0)
+    assert hi == datetime(2026, 6, 12, 12, 0)
 
 
 def test_date_in_window_inside():
@@ -192,14 +192,14 @@ def test_date_in_window_inside():
 
 def test_date_in_window_lo_boundary_inclusive():
     w = ai.window_bounds("2026-06-08", "2026-06-11")
-    assert ai.date_in_window(datetime(2026, 6, 8, 15, 0), w)[0] is True       # 15:00 entra
-    assert ai.date_in_window(datetime(2026, 6, 8, 14, 59), w)[0] is False     # 14:59 fora (dia anterior)
+    assert ai.date_in_window(datetime(2026, 6, 8, 12, 0), w)[0] is True       # 12:00 entra
+    assert ai.date_in_window(datetime(2026, 6, 8, 11, 59), w)[0] is False     # 11:59 fora (dia anterior)
 
 
 def test_date_in_window_hi_boundary_exclusive():
     w = ai.window_bounds("2026-06-08", "2026-06-11")
-    assert ai.date_in_window(datetime(2026, 6, 12, 14, 59), w)[0] is True     # ainda dia-de-jogo 11
-    assert ai.date_in_window(datetime(2026, 6, 12, 15, 0), w)[0] is False     # já dia-de-jogo 12
+    assert ai.date_in_window(datetime(2026, 6, 12, 11, 59), w)[0] is True     # ainda dia-de-jogo 11
+    assert ai.date_in_window(datetime(2026, 6, 12, 12, 0), w)[0] is False     # já dia-de-jogo 12
 
 
 def test_date_in_window_before_reason():

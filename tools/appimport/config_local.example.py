@@ -35,7 +35,7 @@ GOLD_DIR = r"C:\Users\User\Documents\Gold"
 
 # (OPCIONAL) JANELA DE DATAS das IMAGENS — aplica-se a it / manual / lobby /
 # LOBBY_DIR (NÃO a gg_hh/gg_ts, que entram sempre por inteiro). Conceito
-# DIA-DE-JOGO 15:00→15:00 Lisboa: IMPORT_DESDE="2026-06-08" + IMPORT_ATE="2026-06-11"
+# DIA-DE-JOGO 12:00→12:00 Lisboa: IMPORT_DESDE="2026-06-08" + IMPORT_ATE="2026-06-11"
 # cobre os dias-de-jogo de 8 a 11 inclusive. Deixa None (ou comenta) p/ não filtrar.
 # A "data" de cada imagem: it = timestamp do NOME; manual/lobby/LOBBY_DIR = mtime.
 # Na LOBBY_DIR o piso efectivo é o mais restritivo de LOBBY_SINCE e IMPORT_DESDE.

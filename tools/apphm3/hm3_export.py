@@ -4,6 +4,7 @@ HM3 → Poker App — Exporta mãos tagadas do HM3 e envia para a API.
 Uso:
   python hm3_export.py                    # todas as mãos tagadas
   python hm3_export.py --days 7           # últimos 7 dias
+  python hm3_export.py --day 12/07        # SÓ o dia de jogo 12/07 (12h00→11h59 seg.)
   python hm3_export.py --tag "nota++"     # só mãos com tag "nota++"
   python hm3_export.py --tag "nota++" --days 3
   python hm3_export.py --dry-run          # só mostra o que faria, não envia
@@ -42,7 +43,43 @@ except ImportError:
 
 POKER_APP_URL = "https://poker-app-production-34a7.up.railway.app"
 
+# Régua GLOBAL do «início de dia» (24 Jul 2026, regra do Rui): o dia de jogo vai
+# das 12h00 de Lisboa às 11h59 do dia seguinte. Mesma constante em
+# tools/appimport/app_import.py e backend/app/routers/import_health.py.
+GAME_DAY_START_HOUR = 12
+
 # ── Funções ───────────────────────────────────────────────────────────────────
+
+
+def parse_day_arg(s):
+    """'DD/MM', 'DD/MM/AAAA' ou 'AAAA-MM-DD' → date. Ano omisso = ano corrente.
+    Levanta ValueError com mensagem clara se inparseável."""
+    s = (s or "").strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    try:
+        d = datetime.strptime(s, "%d/%m")
+        return d.replace(year=datetime.now().year).date()
+    except ValueError:
+        raise ValueError(
+            f"dia {s!r} inválido — usa DD/MM, DD/MM/AAAA ou AAAA-MM-DD")
+
+
+def day_window_utc(day):
+    """Dia de jogo `day` (date, régua 12h00 Lisboa) → (lo, hi) strings UTC
+    'YYYY-MM-DD HH:MM:SS' para filtrar `handtimestamp` (o HM3 guarda UTC —
+    verificado 24 Jul contra o played_at Lisboa da app). DST-aware via
+    ZoneInfo: 12h00 de Lisboa = 11:00 UTC no Verão, 12:00 UTC no Inverno."""
+    from zoneinfo import ZoneInfo
+    lx = ZoneInfo("Europe/Lisbon")
+    lo_l = datetime(day.year, day.month, day.day, GAME_DAY_START_HOUR, tzinfo=lx)
+    hi_l = lo_l + timedelta(days=1)
+    fmt = "%Y-%m-%d %H:%M:%S"
+    return (lo_l.astimezone(timezone.utc).strftime(fmt),
+            hi_l.astimezone(timezone.utc).strftime(fmt))
 
 def login(session):
     """Autentica na poker app e guarda o cookie de sessão."""
@@ -56,7 +93,7 @@ def login(session):
     print(f"Login OK: {LOGIN_EMAIL}")
 
 
-def fetch_tagged_hands(db_path, tag_filter=None, days_back=None):
+def fetch_tagged_hands(db_path, tag_filter=None, days_back=None, day_window=None):
     """Lê mãos tagadas da BD SQLite do HM3.
 
     Returns list of dicts com colunas:
@@ -112,6 +149,13 @@ def fetch_tagged_hands(db_path, tag_filter=None, days_back=None):
         query += " AND hh.handtimestamp >= ?"
         params.append(cutoff)
         print(f"Filtro data: últimos {days_back} dias (desde {cutoff})")
+
+    if day_window:
+        lo, hi = day_window
+        query += " AND hh.handtimestamp >= ? AND hh.handtimestamp < ?"
+        params.extend([lo, hi])
+        print(f"Filtro dia de jogo: [{lo} UTC, {hi} UTC[  "
+              f"(= {GAME_DAY_START_HOUR}h00 Lisboa -> {GAME_DAY_START_HOUR}h00 seguinte)")
 
     query += " ORDER BY hh.handtimestamp DESC"
 
@@ -191,12 +235,29 @@ def main():
         description="Exporta mãos tagadas do HM3 e envia para a Poker App"
     )
     parser.add_argument("--days", type=int, help="Últimos N dias (default: tudo)")
+    parser.add_argument("--day", type=str,
+                        help="SÓ um dia de jogo (DD/MM, DD/MM/AAAA ou AAAA-MM-DD): "
+                             "das 12h00 de Lisboa desse dia às 11h59 do seguinte")
     parser.add_argument("--tag", type=str, help="Filtrar por tag específica")
     parser.add_argument("--dry-run", action="store_true",
                         help="Só mostra o que faria, não envia")
     parser.add_argument("--save-csv", type=str,
                         help="Guarda o CSV num ficheiro (ex: export.csv)")
     args = parser.parse_args()
+
+    if args.day and args.days:
+        print("ERRO: --day e --days são mutuamente exclusivos.")
+        sys.exit(1)
+    day_window = None
+    if args.day:
+        try:
+            d = parse_day_arg(args.day)
+        except ValueError as e:
+            print(f"ERRO: {e}")
+            sys.exit(1)
+        day_window = day_window_utc(d)
+        print(f"Dia de jogo: {d:%d/%m/%Y} "
+              f"({GAME_DAY_START_HOUR}h00 -> {GAME_DAY_START_HOUR}h00 do dia seguinte)")
 
     # Verificar BD
     if not os.path.exists(HM3_DB):
@@ -208,7 +269,8 @@ def main():
     print("─" * 50)
 
     # Extrair mãos
-    rows = fetch_tagged_hands(HM3_DB, tag_filter=args.tag, days_back=args.days)
+    rows = fetch_tagged_hands(HM3_DB, tag_filter=args.tag, days_back=args.days,
+                              day_window=day_window)
     if not rows:
         print("Nenhuma mão para exportar.")
         return

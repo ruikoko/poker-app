@@ -660,3 +660,28 @@ batem. `bounty_value_usd` guarda **sempre o instantâneo** (a coroa visível / o
   está respondida pelo lobby. Registado para a contradição de datas
   (22 vs 23 Jul) não se repetir: qualquer premissa futura sobre TS WN
   confirma-se AQUI, não em journals datados.
+
+## 2026-07-24 (c) — régua GLOBAL do «início de dia»: 15h00 → 12h00 (`GAME_DAY_START_HOUR`)
+
+- **Regra do Rui (24 Jul):** o dia de jogo passa a ir das **12h00 às 11h59 do dia
+  seguinte** (era 15h00→14h59). Razão: o Rui nunca joga entre as 12h e as ~17h —
+  vazio real medido na base: madrugada mais tardia às **09:45**, tarde mais cedo
+  às **16:24** (corte cai num vazio de 6h39). **Nota para memória futura: houve
+  UMA mão a acabar às 09h45** — desmente o «nunca depois das 5h» à letra, mas o
+  corte às 12h continua folgado (09:45 pertence à véspera nas duas réguas).
+- **Verificação prévia obrigatória (contagem 0):** mãos 2026 entre as 12h00 e as
+  14h59 = **0** → nenhum número histórico se move; mudança indolor.
+- **Onde vive:** a régua tem DOIS pontos de código (programas separados, não
+  partilham código) — `tools/appimport/app_import.py` (janela de imagens) e
+  `backend/app/routers/import_health.py` (Saúde do Import) — ambos agora com a
+  constante nomeada **`GAME_DAY_START_HOUR = 12`** (mudar outra vez = 1 linha por
+  programa). `tools/apphm3/hm3_export.py` ganhou a mesma constante (o `--day`
+  novo usa a régua). Dashboards/listagens diárias usam data de calendário
+  simples, não a régua — não mexem.
+- **`--day` no .bat do HM3 (novo):** menu com dia específico (`DD/MM`); janela
+  `[dia 12h00 Lisboa, dia+1 12h00[` convertida **Lisboa→UTC DST-aware**
+  (ZoneInfo) porque **o HM3 guarda `handtimestamp` em UTC — PROVADO 24 Jul**:
+  42/42 mãos do ZENITH FUNDAY casadas com a app com diferença exacta de +1h00.
+  Prova da sessão inteira com o dia 12/06: 77 mãos apanhadas, **52 antes da
+  meia-noite + 25 na madrugada de 13/06** (última 01:01) — o `--day 12/06` traz
+  a sessão completa, madrugada incluída.

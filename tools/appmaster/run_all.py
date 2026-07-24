@@ -64,7 +64,7 @@ def menu():
     hm3_days = ask("HM3 — últimos N dias (ou 'all')", DEFAULT_HM3_DAYS)
     hm3_tag = ask("HM3 — tag (Enter = todas)", DEFAULT_HM3_TAG, empty_label="todas")
     lobby_since = ask("Lobbys — desde (YYYY-MM-DD)", app_import.LOBBY_SINCE)
-    # Janela das IMAGENS (it/manual/lobby) — dia-de-jogo 15:00→15:00. HH/TS entram
+    # Janela das IMAGENS (it/manual/lobby) — dia-de-jogo 12:00→12:00. HH/TS entram
     # sempre por inteiro (sem janela). Enter = config IMPORT_DESDE/ATE (ou tudo).
     img_desde = ask("Imagens — desde (YYYY-MM-DD)", getattr(app_import, "IMPORT_DESDE", None))
     img_ate = ask("Imagens — até   (YYYY-MM-DD)", getattr(app_import, "IMPORT_ATE", None))

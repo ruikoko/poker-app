@@ -33,6 +33,12 @@ tocadas. `re_entries`: coluna assente mas VAZIA no histórico (prints antigos n�
 campo lido; imagens não guardadas → irrecuperável) — preenche daqui em diante. Decisão
 22 Jul do TS encerrada e assinada (`REGISTO_CONCEITO 2026-07-24 (b)`).
 
+**LIVE 24 Jul (tarde) — ★ RÉGUA DO «INÍCIO DE DIA» 15h→12h + `--day` no .bat do HM3**
+(`REGISTO_CONCEITO 2026-07-24 (c)`): `GAME_DAY_START_HOUR=12` nos 2 pontos de código
+(appimport + import_health) + textos + testes; contagem prévia 12h–15h = 0 (indolor).
+`.bat` do HM3 com dia específico (`DD/MM` → sessão inteira 12h→11h59, madrugada
+incluída); HM3 guarda UTC (provado 42/42 a +1h) → conversão Lisboa→UTC DST-aware.
+
 **PENDENTES (por ordem, foco Winamax):**
 1. **Destravar as restantes ~167 mãos ICM WN sem prémios (~55 torneios)** — o Rui importa
    os PRINTS DE LOBBY que tem no PC (página Lobbys ou pasta `lobby` do Batmen; escrevem
