@@ -1206,6 +1206,51 @@ def reconcile_lobby_logs(message_ids: Optional[list] = None, dry_run: bool = Fal
     }
 
 
+# ── #SWEEP-TRACE (24 Jul) — rasto persistente das passagens de re-scan ────────
+# A morte silenciosa era invisível (daemons, log só na consola do Railway):
+# duas conclusões erradas na investigação de 24 Jul nasceram daí. Cada passagem
+# (arranque/tick do varredor, gatilho pós-import) deixa UMA row com as contagens
+# por passo. Leve (1 INSERT/passagem), defensivo (nunca parte a passagem).
+
+def ensure_sweep_runs_schema():
+    """Idempotente. Chamada no lifespan."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sweep_runs (
+                    id      BIGSERIAL PRIMARY KEY,
+                    ran_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    kind    TEXT NOT NULL,
+                    stats   JSONB,
+                    errors  TEXT
+                );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sweep_runs_ran_at "
+                        "ON sweep_runs (ran_at DESC);")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _record_sweep_run(kind: str, stats: dict, errors: Optional[list] = None) -> None:
+    """Grava o rasto de UMA passagem. Defensivo — falha de BD não parte nada."""
+    try:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO sweep_runs (kind, stats, errors) VALUES (%s, %s, %s)",
+                    (kind, json.dumps(stats, default=str),
+                     "; ".join(errors) if errors else None),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("[sweep_trace] gravação do rasto falhou (kind=%s)", kind)
+
+
 def trigger_import_reconciles(reason: str = "import") -> None:
     """Cura no core (#HM3-IMPORT-NO-RECONCILE-REDISPATCH) — ao assentar mãos novas, re-corre
     OS DOIS reconciles (table-SS relink + lobbys pendentes) num DAEMON THREAD robusto. O
@@ -1217,18 +1262,25 @@ def trigger_import_reconciles(reason: str = "import") -> None:
     import threading
 
     def _run():
+        stats: dict = {}
+        errs: list = []
         try:
             from app.routers.table_ss import relink_orphan_table_ss
             r = relink_orphan_table_ss()
+            stats["table_ss"] = r
             logger.info("[reconciles/%s] table-SS relink: success=%s changed=%s orphan=%s (checked=%s)",
                         reason, r.get("success"), r.get("changed"), r.get("orphan"), r.get("checked"))
-        except Exception:
+        except Exception as e:
+            errs.append(f"table_ss: {type(e).__name__}: {e}")
             logger.exception("[reconciles/%s] table-SS relink falhou", reason)
         try:
             r = reconcile_lobby_logs()
+            stats["lobby"] = {k: r.get(k) for k in
+                              ("scanned", "resolved", "written", "still_unresolved")}
             logger.info("[reconciles/%s] lobby reconcile: resolved=%s written=%s still=%s (scanned=%s)",
                         reason, r.get("resolved"), r.get("written"), r.get("still_unresolved"), r.get("scanned"))
-        except Exception:
+        except Exception as e:
+            errs.append(f"lobby: {type(e).__name__}: {e}")
             logger.exception("[reconciles/%s] lobby reconcile falhou", reason)
         try:
             # RÉGUA DOS 6s AUTOMÁTICA (lei do Rui, 22 Jul): capturas ≤6s pertencem à mão
@@ -1236,18 +1288,24 @@ def trigger_import_reconciles(reason: str = "import") -> None:
             # imagens movidas contarem como testemunhas no cruzamento logo a seguir.
             from app.routers.table_ss import apply_regra_6s
             r = apply_regra_6s(reason=reason)
+            stats["regra6s"] = r
             logger.info("[reconciles/%s] regra6s: tagged=%s untagged=%s undecided=%s",
                         reason, r.get("moved_tagged"), r.get("moved_untagged"),
                         r.get("undecided"))
-        except Exception:
+        except Exception as e:
+            errs.append(f"regra6s: {type(e).__name__}: {e}")
             logger.exception("[reconciles/%s] regra6s falhou", reason)
         try:
             # LEI DO CRUZAMENTO no merge (ordem do Rui): o reimport nasce cruzado — nomes
             # completos + coroas crivadas + conflitos de crescimento óbvio, tudo SELADO.
             from app.routers.gg_health import run_crossing_auto
             run_crossing_auto(reason=reason)
-        except Exception:
+            stats["crossing"] = "ok"
+        except Exception as e:
+            errs.append(f"crossing: {type(e).__name__}: {e}")
             logger.exception("[reconciles/%s] crossing auto falhou", reason)
+        # #SWEEP-TRACE — rasto persistente da passagem (fim da morte silenciosa).
+        _record_sweep_run(f"import:{reason}", stats, errs)
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -1262,21 +1320,29 @@ def sweep_pending(reason: str = "sweep") -> dict:
     `pending_only` no table-SS (não re-desanoniza as success a cada tick).
     Idempotente + defensivo (cada passo isolado; nunca lança)."""
     result: dict = {}
+    errs: list = []
     try:
         from app.routers.table_ss import reconcile_table_ss
         result["table_ss"] = reconcile_table_ss(pending_only=True)
-    except Exception:
+    except Exception as e:
+        errs.append(f"table_ss: {type(e).__name__}: {e}")
         logger.exception("[sweep/%s] table-SS reconcile falhou", reason)
     try:
-        result["lobby"] = reconcile_lobby_logs()
-    except Exception:
+        r = reconcile_lobby_logs()
+        result["lobby"] = {k: r.get(k) for k in
+                           ("scanned", "resolved", "written", "still_unresolved")}
+    except Exception as e:
+        errs.append(f"lobby: {type(e).__name__}: {e}")
         logger.exception("[sweep/%s] lobby reconcile falhou", reason)
     try:
         from app.routers.table_ss import retry_failed_table_ss_vision
         limit = int(os.getenv("PENDING_SWEEP_REVISION_LIMIT", "5"))
         result["revision"] = retry_failed_table_ss_vision(limit=limit)
-    except Exception:
+    except Exception as e:
+        errs.append(f"revision: {type(e).__name__}: {e}")
         logger.exception("[sweep/%s] re-Vision das SS falhadas falhou", reason)
+    # #SWEEP-TRACE — rasto persistente (arranque/tick), fim da morte silenciosa.
+    _record_sweep_run(reason, result, errs)
     logger.info("[sweep/%s] %s", reason, result)
     return result
 

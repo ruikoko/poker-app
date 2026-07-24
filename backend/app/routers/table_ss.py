@@ -49,6 +49,9 @@ ALLOWED_SITES = {"GGPoker", "PokerStars", "Winamax", "WPN"}
 _VALID_RESULTS = frozenset({
     "success", "vision_failed", "json_invalid", "site_undetected",
     "tm_not_found", "tm_ambiguous", "no_match_to_hand", "upsert_error",
+    # #REVISION-CURE-IN-PLACE (24 Jul) — releituras esgotadas: a cópia guardada
+    # não dá leitura válida após o tecto de tentativas → «precisa do original».
+    "revision_exhausted",
 })
 
 # pt56 (#TABLE-SS-SITE-FROM-FILENAME) — o SITE vem do NOME do ficheiro
@@ -878,41 +881,50 @@ def reconcile_table_ss(hand_ids=None, pending_only: bool = False) -> dict:
               AND vision_json IS NOT NULL""",
         (_results,)
     )
-    checked = changed = n_success = n_orphan = n_amb = 0
+    checked = changed = n_success = n_orphan = n_amb = n_err = 0
     for r in rows:
         checked += 1
-        vj = r.get("vision_json") or {}
-        # #TABLE-SS-FILENAME-TN: re-parseia o tn do nome guardado (autoritário).
-        _ftn = parse_table_ss_filename(r.get("original_filename"))["tournament_number"]
-        desired = compute_table_ss_match(
-            r.get("captured_at"), r.get("site"), vj, filename_tn=_ftn,
-            filename=r.get("original_filename"))
-        if _persist_table_ss_match(
-            r["id"], desired,
-            prev_result=r.get("result"),
-            prev_matched_hand_id=r.get("matched_hand_id"),
-        ):
-            changed += 1
-        # Estágio 3-b: re-desanon + re-tag SEMPRE que o match é success — NÃO só quando
-        # `changed`. #HRC-REIMPORT-REDEANON-CASADAS: no reimport o hand_id (GG-{tm}) é o
-        # MESMO mas a mão em BD é NOVA e anónima → `changed=False`; sem isto as mãos com
-        # captura casada voltavam ANÓNIMAS + sem tag no reimport. Idempotente: o
-        # `_deanon_after_match` salta Discord/position_v3 e re-mapeia determinístico dos
-        # `seats`; a folder-tag é upsert. Rows sem `seats` → no-op.
-        if desired["result"] == "success":
-            _deanon_after_match(desired["matched_hand_db_id"], vj)
-            _apply_folder_tag_to_hand(desired["matched_hand_db_id"], r.get("folder_tag"), vj)
-            n_success += 1
-        elif desired["result"] == "tm_ambiguous":
-            n_amb += 1
-        else:
-            n_orphan += 1
+        # #SWEEP-ROW-ISOLATION (24 Jul, buraco 1): UMA row que rebente NÃO pode
+        # derrubar a passagem inteira (era o modo de morte silenciosa do gatilho
+        # pós-import — daemon, log só na consola). Isola-se, conta-se, segue-se.
+        try:
+            vj = r.get("vision_json") or {}
+            # #TABLE-SS-FILENAME-TN: re-parseia o tn do nome guardado (autoritário).
+            _ftn = parse_table_ss_filename(r.get("original_filename"))["tournament_number"]
+            desired = compute_table_ss_match(
+                r.get("captured_at"), r.get("site"), vj, filename_tn=_ftn,
+                filename=r.get("original_filename"))
+            if _persist_table_ss_match(
+                r["id"], desired,
+                prev_result=r.get("result"),
+                prev_matched_hand_id=r.get("matched_hand_id"),
+            ):
+                changed += 1
+            # Estágio 3-b: re-desanon + re-tag SEMPRE que o match é success — NÃO só quando
+            # `changed`. #HRC-REIMPORT-REDEANON-CASADAS: no reimport o hand_id (GG-{tm}) é o
+            # MESMO mas a mão em BD é NOVA e anónima → `changed=False`; sem isto as mãos com
+            # captura casada voltavam ANÓNIMAS + sem tag no reimport. Idempotente: o
+            # `_deanon_after_match` salta Discord/position_v3 e re-mapeia determinístico dos
+            # `seats`; a folder-tag é upsert. Rows sem `seats` → no-op.
+            if desired["result"] == "success":
+                _deanon_after_match(desired["matched_hand_db_id"], vj)
+                _apply_folder_tag_to_hand(desired["matched_hand_db_id"], r.get("folder_tag"), vj)
+                n_success += 1
+            elif desired["result"] == "tm_ambiguous":
+                n_amb += 1
+            else:
+                n_orphan += 1
+        except Exception:
+            n_err += 1
+            logger.exception("[table_ss_reconcile] row id=%s rebentou — isolada, "
+                             "passagem continua", r.get("id"))
     logger.info(
-        "[table_ss_reconcile] checked=%d changed=%d success=%d orphan=%d ambiguous=%d",
-        checked, changed, n_success, n_orphan, n_amb,
+        "[table_ss_reconcile] checked=%d changed=%d success=%d orphan=%d "
+        "ambiguous=%d errors=%d",
+        checked, changed, n_success, n_orphan, n_amb, n_err,
     )
     return {"checked": checked, "changed": changed, "success": n_success,
-            "orphan": n_orphan, "ambiguous": n_amb}
+            "orphan": n_orphan, "ambiguous": n_amb, "errors": n_err}
 
 
 def relink_orphan_table_ss(hand_ids=None) -> dict:
@@ -925,6 +937,12 @@ def relink_orphan_table_ss(hand_ids=None) -> dict:
 # ── Re-Vision das SS falhadas (varredor independente) ────────────────────────
 _VISION_RETRY_RESULTS = ("vision_failed", "json_invalid", "site_undetected")
 
+# #REVISION-CURE-IN-PLACE tecto (regra do Rui, 24 Jul): a releitura corre sobre a
+# cópia comprimida — uma falha de QUALIDADE repete-se sempre; ao fim de N
+# tentativas a captura sai do lote (revision_exhausted, «precisa do original»)
+# em vez de moer Vision para sempre.
+_REVISION_MAX_ATTEMPTS = 5
+
 
 def retry_failed_table_ss_vision(limit: int = 5) -> dict:
     """Re-corre a IA de leitura (Vision) nas SS onde ela FALHOU
@@ -932,47 +950,172 @@ def retry_failed_table_ss_vision(limit: int = 5) -> dict:
     em LOTE PEQUENO (anti-massivo). O reconcile normal ignora estas (exige
     `vision_json`) → sem isto, uma leitura falhada nunca ressuscita.
 
-    Reutiliza `_process_table_ss` (re-lê + re-parseia + re-persiste por
-    file_hash + auto-casa). A imagem guardada é a COMPRIMIDA (1280/JPEG85 — a
-    original não é retida), logo é retry best-effort: uma falha por qualidade
-    pode repetir-se, mas uma falha TRANSITÓRIA (crédito/timeout da API) sara.
+    #REVISION-CURE-IN-PLACE (24 Jul, fix-na-causa): usa `_reprocess_failed_row`
+    — a cura acontece NA PRÓPRIA row (result/attempt/match in-place). O caminho
+    antigo (`_process_table_ss` sobre os bytes da cópia) criava rows NOVAS (o
+    hash da cópia ≠ original): gémeas de sucesso órfãs + a original presa para
+    sempre + dedup «sucesso prévio» a engolir todas as releituras seguintes em
+    silêncio (a causa real do «morto desde 14/07»).
+
+    Tecto: `attempt_count >= _REVISION_MAX_ATTEMPTS` → `revision_exhausted`
+    (sai do lote; visível como por-rever; cura = re-enviar o ficheiro original).
     Determinístico, defensivo (nunca lança). `limit<=0` → no-op. Corre em daemon
     thread (sem event loop) → usa `asyncio.run`. Devolve
-    {retried, now_success, still_failed}."""
+    {retried, now_success, still_failed, exhausted}."""
     if not limit or limit <= 0:
-        return {"retried": 0, "now_success": 0, "still_failed": 0}
-    import base64
+        return {"retried": 0, "now_success": 0, "still_failed": 0, "exhausted": 0}
     import asyncio
     rows = query(
-        "SELECT file_hash, original_filename, img_b64, folder_tag, source "
+        "SELECT id, original_filename, img_b64, folder_tag, captured_at, "
+        "       attempt_count "
         "FROM table_ss_processing_log "
         "WHERE result = ANY(%s) AND img_b64 IS NOT NULL "
         "ORDER BY uploaded_at DESC LIMIT %s",
         (list(_VISION_RETRY_RESULTS), int(limit)))
-    retried = now_success = still_failed = 0
+    retried = now_success = still_failed = exhausted = 0
     for r in rows:
-        retried += 1
         try:
-            b64 = r["img_b64"] or ""
-            if "base64," in b64:                       # tolera data-URI
-                b64 = b64.split("base64,", 1)[1]
-            content = base64.b64decode(b64)
-            out = asyncio.run(_process_table_ss(
-                content, r.get("original_filename") or "retry.jpg",
-                source=r.get("source") or "vision_retry",
-                folder_tag=r.get("folder_tag")))
+            if (r.get("attempt_count") or 0) >= _REVISION_MAX_ATTEMPTS:
+                _update_failed_reason(
+                    r["id"],
+                    f"releituras esgotadas ({r['attempt_count']}) — "
+                    "precisa do ficheiro original",
+                    result="revision_exhausted")
+                exhausted += 1
+                continue
+            retried += 1
+            out = asyncio.run(_reprocess_failed_row(dict(r)))
             if out.get("result") == "success":
                 now_success += 1
             else:
                 still_failed += 1
         except Exception:  # pragma: no cover - defensivo
-            logger.exception("[table_ss_revision] retry falhou (hash %s)",
-                             r.get("file_hash"))
+            logger.exception("[table_ss_revision] retry falhou (id %s)",
+                             r.get("id"))
             still_failed += 1
-    logger.info("[table_ss_revision] retried=%d now_success=%d still_failed=%d",
-                retried, now_success, still_failed)
+    logger.info("[table_ss_revision] retried=%d now_success=%d still_failed=%d "
+                "exhausted=%d", retried, now_success, still_failed, exhausted)
     return {"retried": retried, "now_success": now_success,
-            "still_failed": still_failed}
+            "still_failed": still_failed, "exhausted": exhausted}
+
+
+# ── #REVISION-TWIN-CLEANUP (24 Jul) — limpeza única das rows-gémeas do retry antigo ──
+
+def _twin_family_linked(members: list) -> bool:
+    """Prova da relação gémea DENTRO da família: o sha256 do img descodificado de
+    um membro bate no file_hash de OUTRO membro (a assinatura do retry antigo, que
+    re-processava a cópia comprimida com hash próprio). Sem esta prova a família
+    não se toca (uploads legítimos com o mesmo nome ficam de fora)."""
+    import base64
+    hashes = {m["file_hash"]: m["id"] for m in members if m.get("file_hash")}
+    for m in members:
+        b64 = m.get("img_b64") or ""
+        if not b64:
+            continue
+        if "base64," in b64:
+            b64 = b64.split("base64,", 1)[1]
+        try:
+            h = hashlib.sha256(base64.b64decode(b64)).hexdigest()
+        except Exception:
+            continue
+        if h in hashes and hashes[h] != m["id"]:
+            return True
+    return False
+
+
+def revision_twins_cleanup(dry_run: bool = True) -> dict:
+    """Limpeza ÚNICA das famílias de rows-gémeas criadas pelo retry antigo
+    (#REVISION-CURE-IN-PLACE): o retry re-processava a CÓPIA comprimida → hash
+    novo → rows novas (falhadas e/ou de sucesso), deixando a row ORIGINAL presa.
+
+    Família = rows com o MESMO original_filename em que pelo menos uma está
+    falhada/esgotada E existe a prova da relação gémea (`_twin_family_linked`).
+    Plano por família: keeper = a row MAIS ANTIGA (o upload original do Rui,
+    com a melhor imagem guardada); dador = a gémea `success` com mão casada;
+    ações = curar o keeper com os campos do dador (match incluído), reapontar
+    `hands.context_table_ss_id` das gémeas para o keeper (dados casados NUNCA
+    se perdem) e apagar as gémeas. `dry_run=True` (defeito) devolve só o plano.
+    Cirúrgico: famílias sem membro falhado ou sem prova ficam intactas."""
+    src = query(
+        "SELECT DISTINCT original_filename FROM table_ss_processing_log "
+        "WHERE result = ANY(%s) AND original_filename IS NOT NULL",
+        (list(_VISION_RETRY_RESULTS) + ["revision_exhausted"],))
+    families = []
+    for row in (src or []):
+        fname = row["original_filename"]
+        members = query(
+            "SELECT id, file_hash, uploaded_at, result, reason_detail, "
+            "       matched_hand_id, site, tournament_name, tournament_number, "
+            "       players_left, total_entries, vision_json, img_b64 "
+            "FROM table_ss_processing_log WHERE original_filename = %s "
+            "ORDER BY uploaded_at, id", (fname,))
+        if len(members) < 2 or not _twin_family_linked(members):
+            continue
+        keeper = members[0]
+        twins = members[1:]
+        donors = [m for m in twins
+                  if m["result"] == "success" and m.get("matched_hand_id")]
+        donor = donors[-1] if donors else None
+        twin_ids = [m["id"] for m in twins]
+        n_linked = query(
+            "SELECT COUNT(*) AS n FROM hands WHERE context_table_ss_id = ANY(%s)",
+            (twin_ids,))[0]["n"]
+        fam = {
+            "filename": fname,
+            "keeper_id": keeper["id"], "keeper_result": keeper["result"],
+            "donor_id": donor["id"] if donor else None,
+            "donor_hand": donor.get("matched_hand_id") if donor else None,
+            "delete_ids": twin_ids,
+            "hands_to_repoint": n_linked,
+            "action": ("cure_keeper_and_delete_twins" if donor
+                       else "delete_twins_only" if keeper["result"] == "success"
+                       else "skip_no_donor"),
+        }
+        families.append(fam)
+        if dry_run or fam["action"] == "skip_no_donor":
+            continue
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                if donor and keeper["result"] != "success":
+                    cur.execute(
+                        "UPDATE table_ss_processing_log SET result='success', "
+                        "reason_detail=%s, site=%s, tournament_name=%s, "
+                        "tournament_number=%s, players_left=%s, total_entries=%s, "
+                        "vision_json=%s, matched_hand_id=%s WHERE id=%s",
+                        (f"revision_twin_cleanup (dador id={donor['id']})",
+                         donor.get("site"), donor.get("tournament_name"),
+                         donor.get("tournament_number"), donor.get("players_left"),
+                         donor.get("total_entries"), donor.get("vision_json"),
+                         donor.get("matched_hand_id"), keeper["id"]),
+                    )
+                # dados casados nunca se perdem: mãos ligadas a gémeas → keeper
+                cur.execute(
+                    "UPDATE hands SET context_table_ss_id = %s "
+                    "WHERE context_table_ss_id = ANY(%s)",
+                    (keeper["id"], twin_ids),
+                )
+                cur.execute(
+                    "DELETE FROM table_ss_processing_log WHERE id = ANY(%s)",
+                    (twin_ids,),
+                )
+            conn.commit()
+            fam["applied"] = True
+        finally:
+            conn.close()
+    return {"dry_run": dry_run, "families": families,
+            "deleted": sum(len(f["delete_ids"]) for f in families
+                           if f.get("applied"))}
+
+
+@router.post("/revision-twins/cleanup")
+def revision_twins_cleanup_ep(
+    dry_run: bool = Query(True, description="True (defeito) = só o plano"),
+    current_user=Depends(require_auth_or_api_key),
+):
+    """#REVISION-TWIN-CLEANUP — ensaio/aplicação da limpeza das gémeas.
+    Aplicar exige dry_run=false EXPLÍCITO (aprovação do Rui sobre o plano)."""
+    return revision_twins_cleanup(dry_run=dry_run)
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:

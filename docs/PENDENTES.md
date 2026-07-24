@@ -33,6 +33,15 @@ tocadas. `re_entries`: coluna assente mas VAZIA no histórico (prints antigos n�
 campo lido; imagens não guardadas → irrecuperável) — preenche daqui em diante. Decisão
 22 Jul do TS encerrada e assinada (`REGISTO_CONCEITO 2026-07-24 (b)`).
 
+**LIVE 25 Jul (madrugada) — ★ RE-SCAN CURADO (5 fixes, journal `2026-07-24 §6b/6c`):**
+cura-na-própria-row do re-Vision (fim das gémeas por hash-da-cópia — a causa real do
+«morto desde 14/07» era o dedup a engolir releituras) · rasto persistente `sweep_runs`
+(arranque/tick/gatilho, contagens+erros) · tecto 5 releituras → `revision_exhausted`
+(«precisa do original») · proteção por-linha no reconcile completo · endpoint de limpeza
+das gémeas (`/api/table-ss/revision-twins/cleanup`, dry_run por defeito). **⏳ À ESPERA
+DO RUI: aprovação do ensaio da limpeza das gémeas** (nada apagado sem ordem explícita).
+Via GG intocada.
+
 **LIVE 24 Jul (tarde) — ★ RÉGUA DO «INÍCIO DE DIA» 15h→12h + `--day` no .bat do HM3**
 (`REGISTO_CONCEITO 2026-07-24 (c)`): `GAME_DAY_START_HOUR=12` nos 2 pontos de código
 (appimport + import_health) + textos + testes; contagem prévia 12h–15h = 0 (indolor).

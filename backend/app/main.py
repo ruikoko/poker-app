@@ -304,7 +304,8 @@ async def lifespan(app: FastAPI):
     # Varredor independente de pendentes (#PENDING-SWEEP-GUARANTEED) — re-casa SS/
     # lobbys pendentes + re-Vision das SS falhadas, no arranque + tick periódico,
     # desacoplado do request de import (que pode dar timeout antes do seu trigger).
-    from app.services.lobby_sync import start_pending_sweeper
+    from app.services.lobby_sync import ensure_sweep_runs_schema, start_pending_sweeper
+    ensure_sweep_runs_schema()   # #SWEEP-TRACE — rasto persistente das passagens
     start_pending_sweeper()
 
     # Arrancar bot Discord em background
